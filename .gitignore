@@ -181,3 +181,4 @@ INSTALLER_CONFIG.md
 reports/
 # Inno Setup中文語言檔案
 scripts/ChineseTraditional.isl
+scripts/cleanup.bat

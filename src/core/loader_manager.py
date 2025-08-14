@@ -125,7 +125,6 @@ class LoaderManager:
                 download_path=download_path,
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
-                post_msg="Fabric 伺服器安裝完成",
                 need_vanilla=True,
                 parent_window=parent_window
             )
@@ -149,7 +148,6 @@ class LoaderManager:
                 download_path=download_path,
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
-                post_msg="Forge 伺服器安裝完成",
                 need_vanilla=False,
                 parent_window=parent_window
             )
@@ -353,7 +351,6 @@ class LoaderManager:
         download_path: str,
         progress_callback,
         cancel_flag,
-        post_msg: str,
         need_vanilla: bool = False,
         parent_window=None
     ) -> Union[bool, str]:
@@ -369,7 +366,6 @@ class LoaderManager:
                 download_path (str): 下載路徑。
                 progress_callback: 進度回調函數。
                 cancel_flag: 取消標誌。
-                post_msg (str): 完成後的訊息。
                 need_vanilla (bool): 是否需要下載 vanilla 伺服器。
 
         """
