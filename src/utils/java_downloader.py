@@ -23,10 +23,10 @@ def get_latest_ms_jdk_url(major: int) -> str:
     """
     取得 Microsoft JDK 最新 LTS 主要版本的 Windows x64 zip 下載連結
     Get Microsoft JDK latest LTS major version Windows x64 zip download URL
-    
+
     Args:
         major (int): Java 主要版本號
-        
+
     Returns:
         str: 下載連結 URL
     """
@@ -38,11 +38,11 @@ def download_and_extract_jdk(major: int, target_dir: str) -> str:
     """
     下載並解壓 Microsoft JDK 到指定目錄
     Download and extract Microsoft JDK to target directory
-    
+
     Args:
         major (int): Java 主要版本號
         target_dir (str): 目標目錄路徑
-        
+
     Returns:
         str: javaw.exe 的完整路徑
     """
@@ -56,7 +56,7 @@ def download_and_extract_jdk(major: int, target_dir: str) -> str:
         raise Exception(f"下載 JDK 失敗: {url}")
 
     # 解壓
-    with zipfile.ZipFile(local_zip, 'r') as zip_ref:
+    with zipfile.ZipFile(local_zip, "r") as zip_ref:
         zip_ref.extractall(target_dir)
     os.remove(local_zip)
     # 尋找 javaw.exe
@@ -70,11 +70,11 @@ def ensure_java_installed(major: int, base_dir: str = r"C:\\Program Files\\Micro
     """
     確保指定版本的 Java 已安裝，若無則自動下載安裝
     Ensure specified Java version is installed, auto-download if not found
-    
+
     Args:
         major (int): Java 主要版本號
         base_dir (str): 基礎安裝目錄
-        
+
     Returns:
         str: javaw.exe 的完整路徑
     """

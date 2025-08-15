@@ -12,9 +12,11 @@ from typing import List, Optional
 import json
 import os
 import re
+import traceback
 # ====== 專案內部模組 ======
 from ..models import ServerConfig
 from ..utils.log_utils import LogUtils
+from ..utils.ui_utils import UIUtils
 from ..utils.memory_utils import MemoryUtils
 
 class ServerDetectionUtils:
@@ -22,19 +24,17 @@ class ServerDetectionUtils:
     伺服器檢測工具類別，提供各種伺服器相關的檢測和驗證功能
     Server detection utility class providing various server-related detection and validation functions
     """
-
-# ====== 檔案與設定檢測 ======
-
+    # ====== 檔案與設定檢測 ======
     # 取得缺少的伺服器檔案清單
     @staticmethod
     def get_missing_server_files(folder_path: Path) -> list:
         """
         檢查伺服器資料夾中缺少的關鍵檔案清單
         Check list of missing critical files in server folder
-        
+
         Args:
             folder_path (Path): 伺服器資料夾路徑
-            
+
         Returns:
             list: 缺少的檔案名稱清單
         """
@@ -59,10 +59,10 @@ class ServerDetectionUtils:
         """
         檢測 eula.txt 檔案中是否已設定 eula=true
         Detect if eula=true is set in eula.txt file
-        
+
         Args:
             server_path (Path): 伺服器根目錄路徑
-            
+
         Returns:
             bool: 已接受 EULA 返回 True，否則返回 False
         """
@@ -75,32 +75,31 @@ class ServerDetectionUtils:
                 content = f.read()
 
             # 查找 eula=true 設定（忽略大小寫和空白）
-            for line in content.split('\n'):
+            for line in content.split("\n"):
                 line = line.strip()
-                if line.startswith('#'):
+                if line.startswith("#"):
                     continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    if key.strip().lower() == 'eula':
-                        return value.strip().lower() == 'true'
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    if key.strip().lower() == "eula":
+                        return value.strip().lower() == "true"
             return False
         except Exception as e:
             LogUtils.error(f"讀取 eula.txt 失敗: {e}", "detect_eula_acceptance")
             return False
 
-# ====== 記憶體設定管理 ======
-
+    # ====== 記憶體設定管理 ======
     # 更新 Forge JVM 參數檔案
     @staticmethod
-    def update_forge_user_jvm_args(server_path: Path, config: ServerConfig):
+    def update_forge_user_jvm_args(server_path: Path, config: ServerConfig) -> None:
         """
         更新新版 Forge 的 user_jvm_args.txt 檔案，設定記憶體參數
         Update user_jvm_args.txt file for newer Forge versions with memory parameters
-        
+
         Args:
             server_path (Path): 伺服器根目錄路徑
             config (ServerConfig): 伺服器配置物件
-            
+
         Returns:
             None
         """
@@ -115,13 +114,18 @@ class ServerDetectionUtils:
                 f.writelines(lines)
         except Exception as e:
             LogUtils.error(f"寫入失敗: {e}", "update_forge_user_jvm_args")
+            UIUtils.show_error("寫入失敗", f"無法更新 {user_jvm_args_path} 檔案。請檢查權限或磁碟空間。錯誤: {e}")
 
-    # 從啟動腳本檢測記憶體設定
+    # 從多個來源檢測記憶體設定
     @staticmethod
-    def detect_memory_from_scripts(server_path: Path, config: ServerConfig):
+    def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:
         """
-        從啟動腳本(bat/sh)或 JVM 參數檔案解析最大/最小記憶體設定，並寫入 config.memory_max_mb, config.memory_min_mb
-        支援 start_server.bat, start.bat, user_jvm_args.txt, jvm.args, 以及常見 JVM 啟動參數
+        檢測記憶體大小
+        detect memory size
+
+        Args:
+            server_path (Path): 伺服器根目錄路徑
+            config (ServerConfig): 伺服器配置物件
         """
         max_mem = None
         min_mem = None
@@ -154,7 +158,7 @@ class ServerDetectionUtils:
                         for line in f:
                             # 移除 pause 命令
                             line_stripped = line.strip().lower()
-                            if line_stripped in ['pause', '@pause', 'pause.', '@pause.']:
+                            if line_stripped in ["pause", "@pause", "pause.", "@pause."]:
                                 script_modified = True
                                 LogUtils.info(f"發現並移除 pause 命令: {line.strip()}", "ServerDetection")
                                 continue  # 跳過這行
@@ -164,7 +168,7 @@ class ServerDetectionUtils:
                                 # 確保有 nogui 參數
                                 if "nogui" not in line.lower():
                                     # 在行尾添加 nogui (移除換行符再加回)
-                                    line = line.rstrip('\r\n') + " nogui\n"
+                                    line = line.rstrip("\r\n") + " nogui\n"
                                     script_modified = True
                                     LogUtils.info("在 Java 命令行添加 nogui 參數", "ServerDetection")
 
@@ -205,7 +209,7 @@ class ServerDetectionUtils:
                             for line in f:
                                 # 移除 pause 命令
                                 line_stripped = line.strip().lower()
-                                if line_stripped in ['pause', '@pause', 'pause.', '@pause.']:
+                                if line_stripped in ["pause", "@pause", "pause.", "@pause."]:
                                     script_modified = True
                                     LogUtils.info(f"發現並移除 pause 命令: {line.strip()}", "ServerDetection")
                                     continue  # 跳過這行
@@ -215,7 +219,7 @@ class ServerDetectionUtils:
                                     # 確保有 nogui 參數
                                     if "nogui" not in line.lower():
                                         # 在行尾添加 nogui (移除換行符再加回)
-                                        line = line.rstrip('\r\n') + " nogui\n"
+                                        line = line.rstrip("\r\n") + " nogui\n"
                                         script_modified = True
                                         LogUtils.info("在 Java 命令行添加 nogui 參數", "ServerDetection")
 
@@ -256,10 +260,14 @@ class ServerDetectionUtils:
             ServerDetectionUtils.update_forge_user_jvm_args(server_path, config)
 
     @staticmethod
-    def detect_server_type(server_path: Path, config: 'ServerConfig', print_result: bool = True):
+    def detect_server_type(server_path: Path, config: "ServerConfig", print_result: bool = True) -> None:
         """
         檢測伺服器類型和版本 - 統一的偵測邏輯
         Detect server type and version - Unified detection logic.
+
+        Args:
+            server_path (Path): 伺服器路徑
+            config (ServerConfig): 伺服器配置
         """
         try:
             jar_files = list(server_path.glob("*.jar"))
@@ -282,7 +290,7 @@ class ServerDetectionUtils:
             ServerDetectionUtils.detect_loader_and_version_from_sources(server_path, config, config.loader_type)
 
             # 偵測記憶體設定
-            ServerDetectionUtils.detect_memory_from_scripts(server_path, config)
+            ServerDetectionUtils.detect_memory_from_sources(server_path, config)
 
             # 偵測 EULA 狀態
             config.eula_accepted = ServerDetectionUtils.detect_eula_acceptance(server_path)
@@ -294,8 +302,8 @@ class ServerDetectionUtils:
                 LogUtils.info(f"  MC版本: {config.minecraft_version}", "ServerDetection")
                 LogUtils.info(f"  EULA狀態: {'已接受' if config.eula_accepted else '未接受'}", "ServerDetection")
                 # 記憶體顯示邏輯
-                if hasattr(config, 'memory_max_mb') and config.memory_max_mb:
-                    if hasattr(config, 'memory_min_mb') and config.memory_min_mb:
+                if hasattr(config, "memory_max_mb") and config.memory_max_mb:
+                    if hasattr(config, "memory_min_mb") and config.memory_min_mb:
                         LogUtils.info(
                             f"  記憶體: 最小 {config.memory_min_mb}MB, 最大 {config.memory_max_mb}MB", "ServerDetection"
                         )
@@ -305,13 +313,19 @@ class ServerDetectionUtils:
                     LogUtils.info("  記憶體: 未設定", "ServerDetection")
 
         except Exception as e:
-            LogUtils.error(f"檢測伺服器類型失敗: {e}", "ServerDetection")
+            LogUtils.error(f"檢測伺服器類型失敗: {e}\n{traceback.format_exc()}", "ServerDetection")
 
     @staticmethod
     def is_valid_server_folder(folder_path: Path) -> bool:
         """
         檢查是否為有效的 Minecraft 伺服器資料夾
         Check if the folder is a valid Minecraft server directory.
+
+        Args:
+            folder_path (Path): 伺服器資料夾路徑
+
+        Returns:
+            bool: 是否為有效的伺服器資料夾
         """
         if not folder_path.is_dir():
             return False
@@ -337,17 +351,19 @@ class ServerDetectionUtils:
         return False
 
     @staticmethod
-    def detect_loader_and_version_from_sources(server_path: Path, config, loader: str):
+    def detect_loader_and_version_from_sources(server_path: Path, config, loader: str) -> None:
         """
         從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版本：
         - logs()
         - libraries/net/minecraftforge/forge
         - JAR 檔名
         - version.json
-        ------------------------------------------------------------
-        內部輔助函式區
-        """
 
+        Args:
+            server_path (Path): 伺服器路徑
+            config: 伺服器配置物件
+            loader (str): 載入器類型
+        """
         # ---------- 共用小工具 ----------
         def is_unknown(value: Optional[str]) -> bool:
             return value in (None, "", "unknown", "Unknown", "無")
@@ -368,23 +384,23 @@ class ServerDetectionUtils:
             log_files = ["latest.log", "server.log", "debug.log"]
             loader_patterns = {
                 "fabric": [
-                    r'Fabric Loader (\d+\.\d+\.\d+)',
-                    r'FabricLoader/(\d+\.\d+\.\d+)',
-                    r'fabric-loader (\d+\.\d+\.\d+)',
-                    r'Loading Fabric (\d+\.\d+\.\d+)',
+                    r"Fabric Loader (\d+\.\d+\.\d+)",
+                    r"FabricLoader/(\d+\.\d+\.\d+)",
+                    r"fabric-loader (\d+\.\d+\.\d+)",
+                    r"Loading Fabric (\d+\.\d+\.\d+)",
                 ],
                 "forge": [
-                    r'fml.forgeVersion, (\d+\.\d+\.\d+)',
-                    r'Forge Mod Loader version (\d+\.\d+\.\d+)',  # 1.12.2 以下
+                    r"fml.forgeVersion, (\d+\.\d+\.\d+)",
+                    r"Forge Mod Loader version (\d+\.\d+\.\d+)",  # 1.12.2 以下
                     r"MinecraftForge v(\d+\.\d+\.\d+)",  # 1.12.2 以下
-                    r'Forge (\d+\.\d+\.\d+)',
-                    r'forge-(\d+\.\d+\.\d+)',
+                    r"Forge (\d+\.\d+\.\d+)",
+                    r"forge-(\d+\.\d+\.\d+)",
                 ],
             }
             mc_patterns = [
-                r'Starting minecraft server version (\d+\.\d+(?:\.\d+)?)',
-                r'Minecraft (\d+\.\d+(?:\.\d+)?)',
-                r'Server version: (\d+\.\d+(?:\.\d+)?)',
+                r"Starting minecraft server version (\d+\.\d+(?:\.\d+)?)",
+                r"Minecraft (\d+\.\d+(?:\.\d+)?)",
+                r"Server version: (\d+\.\d+(?:\.\d+)?)",
             ]
 
             for name in log_files:
@@ -415,7 +431,7 @@ class ServerDetectionUtils:
                 return
 
             folder = subdirs[0].name
-            m = re.match(r'(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)', folder)
+            m = re.match(r"(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)", folder)
             if m:
                 mc, forge_ver = m.groups()
                 set_if_unknown("minecraft_version", mc)
@@ -423,7 +439,7 @@ class ServerDetectionUtils:
 
             # 再從同層 JAR 補值
             for jar in subdirs[0].glob("*.jar"):
-                m2 = re.match(r'forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)-.*\.jar', jar.name)
+                m2 = re.match(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)-.*\.jar", jar.name)
                 if m2:
                     mc2, _ = m2.groups()
                     set_if_unknown("minecraft_version", mc2)
@@ -443,7 +459,7 @@ class ServerDetectionUtils:
                         config.loader_type = "vanilla"
 
                 # Forge 版本(1.12.2 以下)
-                m = re.search(r'forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\.jar', jar.name)
+                m = re.search(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\.jar", jar.name)
                 if m:
                     mc, forge_ver = m.groups()
                     set_if_unknown("minecraft_version", mc)
@@ -495,6 +511,17 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_main_jar_file(server_path: Path, loader_type: str) -> str:
+        """
+        偵測主伺服器 JAR 檔案名稱，根據載入器類型（Forge/Fabric/Vanilla）返回適當的 JAR 名稱
+        Detects the main server JAR file name based on the loader type (Forge/Fabric/Vanilla) and returns the appropriate JAR name.
+
+        Args:
+            server_path (Path): 伺服器路徑
+            loader_type (str): 載入器類型
+
+        Returns:
+            str: 主伺服器 JAR 檔案名稱
+        """
         LogUtils.debug(f"server_path={server_path}", "detect_main_jar_file")
         LogUtils.debug(f"loader_type={loader_type}", "detect_main_jar_file")
 
@@ -520,7 +547,7 @@ class ServerDetectionUtils:
             mc_ver = None
             forge_ver = None
             for fname in jar_files:
-                m = re.match(r'forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\\.jar', fname)
+                m = re.match(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\\.jar", fname)
                 if m:
                     mc_ver, forge_ver = m.group(1), m.group(2)
                     break

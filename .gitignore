@@ -182,3 +182,4 @@ reports/
 # Inno Setup中文語言檔案
 scripts/ChineseTraditional.isl
 scripts/cleanup.bat
+scripts/black.bat

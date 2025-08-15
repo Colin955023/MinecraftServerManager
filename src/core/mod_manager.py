@@ -18,10 +18,10 @@ import zipfile
 # ====== 專案內部模組 ======
 from ..utils.http_utils import HTTPUtils
 from ..utils.log_utils import LogUtils
+from ..utils.ui_utils import UIUtils
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 # ====== 模組狀態與平台定義 ======
-
 class ModStatus(Enum):
     """
     模組狀態列舉，定義模組的各種狀態
@@ -39,7 +39,6 @@ class ModPlatform(Enum):
 
     MODRINTH = "modrinth"
     LOCAL = "local"
-
 
 @dataclass
 class LocalModInfo:
@@ -70,25 +69,22 @@ class LocalModInfo:
             self.dependencies = []
 
 # ====== 模組管理器主類別 ======
-
 class ModManager:
     """
     模組管理器類別，負責伺服器模組的掃描、啟用/停用、下載、更新和依賴管理
     Mod manager class responsible for scanning, enabling/disabling, downloading, updating and dependency management of server mods
     """
-
     # ====== 初始化與設定 ======
-
     # 初始化模組管理器
     def __init__(self, server_path: str, server_config=None):
         """
         初始化模組管理器
         Initialize mod manager
-        
+
         Args:
             server_path (str): 伺服器路徑
             server_config: 伺服器配置物件
-            
+
         Returns:
             None
         """
@@ -102,16 +98,15 @@ class ModManager:
         self.on_mod_list_changed: Optional[Callable] = None
 
     # ====== 模組掃描與檔案管理 ======
-
     # 掃描 mods 目錄中的模組檔案
     def scan_mods(self) -> List[LocalModInfo]:
         """
         掃描 mods 目錄中的模組檔案並建立模組資訊列表
         Scan mod files in the mods directory and create mod information list
-        
+
         Args:
             None
-            
+
         Returns:
             List[LocalModInfo]: 模組資訊列表
         """
@@ -129,43 +124,48 @@ class ModManager:
     def create_mod_info_from_file(self, file_path: Path) -> Optional[LocalModInfo]:
         """
         依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式
+        Create mod information from a file, extracting metadata and applying fallback logic
+
+        Args:
+            file_path (Path): 檔案路徑
+
+        Returns:
+            Optional[LocalModInfo]: 本地模組資訊物件
         """
         try:
-            # Parse basic file information
+            # 解析基本檔案資訊
             filename, enabled, base_name = self._parse_file_info(file_path)
 
-            # Initialize default values
+            # 初始化模組資料字典
             mod_data = {
-                'name': base_name,
-                'version': "未知",
-                'author': "",
-                'description': "",
-                'loader_type': "未知",
-                'mc_version': "未知",
+                "name": base_name,
+                "version": "未知",
+                "author": "",
+                "description": "",
+                "loader_type": "未知",
+                "mc_version": "未知",
             }
 
-            # Extract metadata from jar file
+            # 從 jar 檔案提取元資料
             self._extract_metadata_from_jar(file_path, mod_data)
 
-            # Apply fallback logic and cleanup
+            # 套用後備邏輯與清理
             self._apply_fallback_logic(base_name, mod_data)
 
-            # Apply server config overrides
+            # 套用伺服器設定覆寫
             self._apply_server_config_overrides(mod_data)
 
-            # Detect platform information
-            platform, platform_id = self._detect_platform_info(file_path, mod_data['name'], base_name, filename)
-
-            # Create and return mod info object
+            # 偵測平台資訊
+            platform, platform_id = self._detect_platform_info(file_path, mod_data["name"], base_name, filename)
             return LocalModInfo(
                 id=base_name,
-                name=mod_data['name'],
+                name=mod_data["name"],
                 filename=filename,
-                version=mod_data['version'],
-                minecraft_version=mod_data['mc_version'],
-                loader_type=mod_data['loader_type'],
-                description=mod_data['description'],
-                author=mod_data['author'],
+                version=mod_data["version"],
+                minecraft_version=mod_data["mc_version"],
+                loader_type=mod_data["loader_type"],
+                description=mod_data["description"],
+                author=mod_data["author"],
                 platform=platform,
                 platform_id=platform_id,
                 status=ModStatus.ENABLED if enabled else ModStatus.DISABLED,
@@ -177,7 +177,16 @@ class ModManager:
             return None
 
     def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
-        """Parse basic file information and enabled/disabled status"""
+        """
+        解析基本檔案資訊與啟用/停用狀態
+        Extract basic file information and enabled/disabled status
+
+        Args:
+            file_path (Path): 檔案路徑
+
+        Returns:
+            tuple[str, bool, str]: 檔案名稱、啟用狀態、基本名稱
+        """
         filename = file_path.name
         if filename.endswith(".jar.disabled"):
             enabled = False
@@ -188,155 +197,162 @@ class ModManager:
         return filename, enabled, base_name
 
     def _get_manifest_version(self, jar) -> Optional[str]:
-        """Extract version from MANIFEST.MF file"""
+        """
+        從 MANIFEST.MF 檔案中提取版本資訊
+        get the version information from the MANIFEST.MF file
+
+        Args:
+            jar: zipfile.ZipFile 物件
+
+        Returns:
+            Optional[str]: 版本資訊字串
+        """
         try:
-            if 'META-INF/MANIFEST.MF' in jar.namelist():
-                with jar.open('META-INF/MANIFEST.MF') as mf:
-                    for line in mf.read().decode(errors='ignore').splitlines():
-                        if line.startswith('Implementation-Version:'):
-                            v = line.split(':', 1)[1].strip()
-                            if v and v != '${projectversion}':
+            if "META-INF/MANIFEST.MF" in jar.namelist():
+                with jar.open("META-INF/MANIFEST.MF") as mf:
+                    for line in mf.read().decode(errors="ignore").splitlines():
+                        if line.startswith("Implementation-Version:"):
+                            v = line.split(":", 1)[1].strip()
+                            if v and v != "${projectversion}":
                                 return v
         except Exception:
             pass
         return None
 
     def _extract_metadata_from_jar(self, file_path: Path, mod_data: dict) -> None:
-        """Extract metadata from jar file based on mod loader type"""
+        """
+        根據模組載入器類型從 jar 檔案中提取元資料
+        according to the mod loader type, extract metadata from the jar file
+
+        Args:
+            file_path (Path): 檔案路徑
+            mod_data (dict): 模組元資料字典
+        """
         try:
-            with zipfile.ZipFile(file_path, 'r') as jar:
-                if 'fabric.mod.json' in jar.namelist():
+            with zipfile.ZipFile(file_path, "r") as jar:
+                if "fabric.mod.json" in jar.namelist():
                     self._extract_fabric_metadata(jar, mod_data)
-                elif 'META-INF/mods.toml' in jar.namelist():
+                elif "META-INF/mods.toml" in jar.namelist():
                     self._extract_forge_metadata(jar, mod_data)
-                elif 'quilt.mod.json' in jar.namelist():
-                    self._extract_quilt_metadata(jar, mod_data)
-                elif 'litemod.json' in jar.namelist():
-                    self._extract_litemod_metadata(jar, mod_data)
-                elif 'mcmod.info' in jar.namelist():
+                elif "mcmod.info" in jar.namelist():
                     self._extract_legacy_forge_metadata(jar, mod_data)
         except Exception:
             pass
 
     def _extract_fabric_metadata(self, jar, mod_data: dict) -> None:
-        """Extract metadata from Fabric mod"""
+        """
+        從 Fabric 模組中提取元資料
+        extract metadata from Fabric mod
+
+        Args:
+            jar: zipfile.ZipFile 物件
+        """
         try:
-            with jar.open('fabric.mod.json') as f:
+            with jar.open("fabric.mod.json") as f:
                 meta = json.load(f)
 
-            mod_data['name'] = meta.get('name', mod_data['name'])
-            mod_data['version'] = meta.get('version', mod_data['version'])
+            mod_data["name"] = meta.get("name", mod_data["name"])
+            mod_data["version"] = meta.get("version", mod_data["version"])
 
-            if mod_data['version'] == "${file.jarVersion}":
+            if mod_data["version"] == "${file.jarVersion}":
                 manifest_version = self._get_manifest_version(jar)
                 if manifest_version:
-                    mod_data['version'] = manifest_version
+                    mod_data["version"] = manifest_version
 
-            mod_data['description'] = meta.get('description', mod_data['description'])
-            mod_data['author'] = self._process_authors(meta.get('authors', []))
-            mod_data['loader_type'] = 'Fabric'
+            mod_data["description"] = meta.get("description", mod_data["description"])
+            mod_data["author"] = self._process_authors(meta.get("authors", []))
+            mod_data["loader_type"] = "Fabric"
 
-            depends = meta.get('depends', {})
+            depends = meta.get("depends", {})
             if isinstance(depends, dict):
-                mc_version = depends.get('minecraft', mod_data['mc_version'])
-                mod_data['mc_version'] = self._normalize_mc_version(mc_version)
+                mc_version = depends.get("minecraft", mod_data["mc_version"])
+                mod_data["mc_version"] = self._normalize_mc_version(mc_version)
         except TypeError as e:
             LogUtils.error(f"無法從 JAR 檔案提取元資料: {e}", "ModManager")
         except Exception as e:
             LogUtils.error(f"無法從 JAR 檔案提取元資料: {e}", "ModManager")
 
     def _extract_forge_metadata(self, jar, mod_data: dict) -> None:
-        """Extract metadata from Forge mod"""
+        """
+        從 Forge 模組中提取元資料
+        extract metadata from Forge mod
+
+        Args:
+            jar: zipfile.ZipFile 物件
+            mod_data (dict): 模組元資料字典
+        """
         try:
-            with jar.open('META-INF/mods.toml') as f:
-                toml_txt = f.read().decode(errors='ignore')
+            with jar.open("META-INF/mods.toml") as f:
+                toml_txt = f.read().decode(errors="ignore")
                 meta = toml.loads(toml_txt)
 
-            modlist = meta.get('mods', [])
+            modlist = meta.get("mods", [])
             if modlist and isinstance(modlist, list):
                 modmeta = modlist[0]
-                mod_data['name'] = modmeta.get('displayName', mod_data['name'])
-                mod_data['version'] = modmeta.get('version', mod_data['version'])
+                mod_data["name"] = modmeta.get("displayName", mod_data["name"])
+                mod_data["version"] = modmeta.get("version", mod_data["version"])
 
-                if mod_data['version'] == "${file.jarVersion}":
+                if mod_data["version"] == "${file.jarVersion}":
                     manifest_version = self._get_manifest_version(jar)
                     if manifest_version:
-                        mod_data['version'] = manifest_version
+                        mod_data["version"] = manifest_version
 
-                mod_data['description'] = modmeta.get('description', mod_data['description'])
-                mod_data['author'] = self._process_authors(modmeta.get('authors', mod_data['author']))
+                mod_data["description"] = modmeta.get("description", mod_data["description"])
+                mod_data["author"] = self._process_authors(modmeta.get("authors", mod_data["author"]))
 
-            mod_data['loader_type'] = 'Forge'
+            mod_data["loader_type"] = "Forge"
 
             # Extract Minecraft version from dependencies
-            if 'dependencies' in meta:
-                for dep in meta['dependencies'].values():
+            if "dependencies" in meta:
+                for dep in meta["dependencies"].values():
                     if isinstance(dep, list):
                         for d in dep:
-                            if d.get('modId') == 'minecraft':
-                                mc_version = d.get('versionRange', mod_data['mc_version'])
-                                mod_data['mc_version'] = self._normalize_mc_version(mc_version)
-        except Exception:
-            pass
-
-    def _extract_quilt_metadata(self, jar, mod_data: dict) -> None:
-        """Extract metadata from Quilt mod"""
-        try:
-            with jar.open('quilt.mod.json') as f:
-                meta = json.load(f)
-
-            ql = meta.get('quilt_loader', {})
-            mod_data['name'] = ql.get('name', mod_data['name'])
-            mod_data['version'] = ql.get('version', mod_data['version'])
-            mod_data['description'] = ql.get('description', mod_data['description'])
-            mod_data['author'] = self._process_authors(ql.get('authors', []))
-            mod_data['loader_type'] = 'Quilt'
-
-            depends = ql.get('depends', {})
-            if isinstance(depends, dict):
-                mod_data['mc_version'] = depends.get('minecraft', mod_data['mc_version'])
-        except Exception:
-            pass
-
-    def _extract_litemod_metadata(self, jar, mod_data: dict) -> None:
-        """Extract metadata from LiteLoader mod"""
-        try:
-            with jar.open('litemod.json') as f:
-                meta = json.load(f)
-
-            mod_data['name'] = meta.get('name', mod_data['name'])
-            mod_data['version'] = meta.get('version', meta.get('revision', mod_data['version']))
-            mod_data['description'] = meta.get('description', mod_data['description'])
-            mod_data['author'] = meta.get('author', mod_data['author'])
-            mod_data['loader_type'] = 'LiteLoader'
-            mod_data['mc_version'] = meta.get('mcversion', mod_data['mc_version'])
+                            if d.get("modId") == "minecraft":
+                                mc_version = d.get("versionRange", mod_data["mc_version"])
+                                mod_data["mc_version"] = self._normalize_mc_version(mc_version)
         except Exception:
             pass
 
     def _extract_legacy_forge_metadata(self, jar, mod_data: dict) -> None:
-        """Extract metadata from legacy Forge mod (mcmod.info)"""
+        """
+        從舊版 Forge 模組（mcmod.info）提取元資料
+        extract metadata from legacy Forge mod (mcmod.info)
+
+        Args:
+            jar: zipfile.ZipFile 物件
+            mod_data (dict): 模組元資料字典
+        """
         try:
-            with jar.open('mcmod.info') as f:
-                info_txt = f.read().decode(errors='ignore')
+            with jar.open("mcmod.info") as f:
+                info_txt = f.read().decode(errors="ignore")
                 info = json.loads(info_txt)
 
                 if isinstance(info, list):
                     info = info[0]
 
-                mod_data['name'] = info.get('name', mod_data['name'])
-                mod_data['version'] = info.get('version', mod_data['version'])
-                mod_data['description'] = info.get('description', mod_data['description'])
+                mod_data["name"] = info.get("name", mod_data["name"])
+                mod_data["version"] = info.get("version", mod_data["version"])
+                mod_data["description"] = info.get("description", mod_data["description"])
 
                 # Handle authorList or author field
-                authors = info.get('authorList') or info.get('author', mod_data['author'])
-                mod_data['author'] = self._process_authors(authors)
-                mod_data['mc_version'] = info.get('mcversion', mod_data['mc_version'])
-                mod_data['loader_type'] = 'Forge'
+                authors = info.get("authorList") or info.get("author", mod_data["author"])
+                mod_data["author"] = self._process_authors(authors)
+                mod_data["mc_version"] = info.get("mcversion", mod_data["mc_version"])
+                mod_data["loader_type"] = "Forge"
         except Exception:
             pass
 
     def _process_authors(self, authors) -> str:
-        """Process and clean author information"""
+        """
+        處理並清理作者資訊
+        process and clean author information
+
+        Args:
+            authors: 可能是字串或字串列表的作者資訊
+
+        Returns:
+            處理後的作者資訊字串
+        """
         if isinstance(authors, list) and authors:
             return ", ".join(
                 [
@@ -350,46 +366,71 @@ class ModManager:
         return ""
 
     def _normalize_mc_version(self, mc_version) -> str:
-        """Normalize Minecraft version string"""
+        """
+        標準化 Minecraft 版本字串
+        normalize Minecraft version string
+
+        Args:
+            mc_version: 要標準化的 Minecraft 版本字串
+
+        Returns:
+            標準化後的 Minecraft 版本字串
+        """
         if isinstance(mc_version, list) and mc_version:
             mc_version = str(mc_version[0])
         if isinstance(mc_version, str) and (mc_version.startswith("[") or mc_version.startswith("(")):
-            m = re.search(r'(\d+\.\d+)', mc_version)
+            m = re.search(r"(\d+\.\d+)", mc_version)
             if m:
                 mc_version = m.group(1)
         return mc_version
 
     def _apply_fallback_logic(self, base_name: str, mod_data: dict) -> None:
-        """Apply fallback logic for missing mod information"""
-        # Clean author
-        mod_data['author'] = self._clean_author(mod_data['author'])
+        """
+        套用後備邏輯來填充模組資料
+        Apply fallback logic for missing mod information
 
-        # Fallback name extraction from filename
-        if not mod_data['name'] or mod_data['name'] == "未知":
-            mod_data['name'] = self._extract_name_from_filename(base_name)
+        Args:
+            base_name: 基礎檔案名稱
+            mod_data: 模組資料字典
+        """
+        # 清理作者資訊
+        mod_data["author"] = self._clean_author(mod_data["author"])
 
-        # Fallback version extraction from filename
-        if not mod_data['version'] or mod_data['version'] == "未知":
-            mod_data['version'] = self._extract_version_from_filename(base_name)
+        # 從檔名回退提取名稱
+        if not mod_data["name"] or mod_data["name"] == "未知":
+            mod_data["name"] = self._extract_name_from_filename(base_name)
 
-        # Fallback Minecraft version extraction from filename
-        if not mod_data['mc_version'] or str(mod_data['mc_version']).strip() in ["", "未知"]:
-            mod_data['mc_version'] = self._extract_mc_version_from_filename(base_name)
+        # 從檔名回退提取版本
+        if not mod_data["version"] or mod_data["version"] == "未知":
+            mod_data["version"] = self._extract_version_from_filename(base_name)
 
-        # Fallback loader type detection from filename
-        if mod_data['loader_type'] == "未知":
-            mod_data['loader_type'] = self._detect_loader_from_filename(base_name)
+        # 從檔名回退提取 Minecraft 版本
+        if not mod_data["mc_version"] or str(mod_data["mc_version"]).strip() in ["", "未知"]:
+            mod_data["mc_version"] = self._extract_mc_version_from_filename(base_name)
+
+        # 從檔名回退偵測載入器類型
+        if mod_data["loader_type"] == "未知":
+            mod_data["loader_type"] = self._detect_loader_from_filename(base_name)
 
     def _extract_name_from_filename(self, base_name: str) -> str:
-        """Extract mod name from filename"""
+        """
+        解析檔名以提取模組名稱
+        Extract mod name from filename
+
+        Args:
+            base_name: 基礎檔案名稱
+
+        Returns:
+            提取的模組名稱
+        """
         clean_base = base_name
-        clean_base = re.sub(r'(?i)[-_]?(forge|fabric|quilt|litemod|mc\d+\.\d+\.\d+|mc\d+\.\d+)', '', clean_base)
+        clean_base = re.sub(r"(?i)[-_]?(forge|fabric|litemod|mc\d+\.\d+\.\d+|mc\d+\.\d+)", "", clean_base)
         clean_base = re.sub(
-            r'(?i)[-_]?(api|mod|core|library|lib|addon|additions|compat|integration|essentials|tools|generators|reforged|restored|beta|alpha|snapshot|universal|common|b\d*)$',
-            '',
+            r"(?i)[-_]?(api|mod|core|library|lib|addon|additions|compat|integration|essentials|tools|generators|reforged|restored|beta|alpha|snapshot|universal|common|b\d*)$",
+            "",
             clean_base,
         )
-        clean_base = clean_base.strip('-_')
+        clean_base = clean_base.strip("-_")
 
         parts = clean_base.split("-")
         if len(parts) > 1:
@@ -400,7 +441,16 @@ class ModManager:
         return clean_base
 
     def _extract_version_from_filename(self, base_name: str) -> str:
-        """Extract version from filename"""
+        """
+        解析檔名以提取版本
+        Extract version from filename
+
+        Args:
+            base_name: 基礎檔案名稱
+
+        Returns:
+            提取的版本
+        """
         parts = base_name.split("-")
         if len(parts) > 1:
             for i, p in enumerate(parts):
@@ -410,7 +460,16 @@ class ModManager:
         return "未知"
 
     def _extract_mc_version_from_filename(self, base_name: str) -> str:
-        """Extract Minecraft version from filename"""
+        """
+        解析檔名以提取 Minecraft 版本
+        Extract Minecraft version from filename
+
+        Args:
+            base_name: 基礎檔案名稱
+
+        Returns:
+            提取的 Minecraft 版本
+        """
         # Try to find mc1.20.1 or 1.20.1 or 1.20
         patterns = [r"mc(\d+\.\d+\.\d+)", r"(\d+\.\d+\.\d+)", r"mc(\d+\.\d+)", r"(\d+\.\d+)"]
 
@@ -422,50 +481,73 @@ class ModManager:
         return "未知"
 
     def _detect_loader_from_filename(self, base_name: str) -> str:
-        """Detect loader type from filename"""
+        """
+        從檔名偵測載入器類型
+        Detect loader type from filename
+
+        Args:
+            base_name: 基礎檔案名稱
+
+        Returns:
+            偵測到的載入器類型
+        """
         if re.search(r"forge", base_name, re.IGNORECASE):
             return "Forge"
         elif re.search(r"fabric", base_name, re.IGNORECASE):
             return "Fabric"
-        elif re.search(r"quilt", base_name, re.IGNORECASE):
-            return "Quilt"
         return "未知"
 
     def _apply_server_config_overrides(self, mod_data: dict) -> None:
-        """Apply server configuration overrides"""
+        """
+        套用伺服器配置覆寫
+        Apply server configuration overrides
+
+        Args:
+            mod_data: 模組資料字典
+        """
         if not self.server_config:
             return
 
-        loader_type = getattr(self.server_config, 'loader_type', mod_data['loader_type'])
-        mc_version_fallback = getattr(self.server_config, 'minecraft_version', mod_data['mc_version'])
+        loader_type = getattr(self.server_config, "loader_type", mod_data["loader_type"])
+        mc_version_fallback = getattr(self.server_config, "minecraft_version", mod_data["mc_version"])
 
         # Override mc_version if empty or invalid
         if (
-            not mod_data['mc_version']
-            or str(mod_data['mc_version']).strip() in ["", "未知"]
-            or not re.match(r"^\d+\.\d+", str(mod_data['mc_version']))
+            not mod_data["mc_version"]
+            or str(mod_data["mc_version"]).strip() in ["", "未知"]
+            or not re.match(r"^\d+\.\d+", str(mod_data["mc_version"]))
         ):
-            mod_data['mc_version'] = mc_version_fallback
+            mod_data["mc_version"] = mc_version_fallback
 
         # Normalize loader type
         loader_mapping = {"unknown": "未知", "fabric": "Fabric", "forge": "Forge", "vanilla": "原版"}
-        mod_data['loader_type'] = loader_mapping.get(loader_type.lower(), loader_type)
+        mod_data["loader_type"] = loader_mapping.get(loader_type.lower(), loader_type)
 
     def _detect_platform_info(
         self, file_path: Path, name: str, base_name: str, filename: str
     ) -> tuple[ModPlatform, str]:
-        """Detect platform and platform ID for the mod"""
+        """
+        從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID
+        Detect platform and platform ID for the mod
+
+        Args:
+            file_path: 檔案路徑
+            name: 模組名稱
+            base_name: 基礎名稱
+            filename: 檔案名稱
+
+        Returns:
+            模組平台和平台 ID 的元組
+        """
         platform = ModPlatform.LOCAL
         platform_id = ""
 
         # Try to extract platform ID from metadata
         try:
-            with zipfile.ZipFile(file_path, 'r') as jar:
-                if 'fabric.mod.json' in jar.namelist():
+            with zipfile.ZipFile(file_path, "r") as jar:
+                if "fabric.mod.json" in jar.namelist():
                     platform_id = self._extract_platform_id_from_fabric(jar)
-                elif 'quilt.mod.json' in jar.namelist():
-                    platform_id = self._extract_platform_id_from_quilt(jar)
-                elif 'META-INF/mods.toml' in jar.namelist():
+                elif "META-INF/mods.toml" in jar.namelist():
                     platform_id = self._extract_platform_id_from_forge(jar)
 
                 if platform_id:
@@ -480,39 +562,57 @@ class ModManager:
         return platform, platform_id
 
     def _extract_platform_id_from_fabric(self, jar) -> str:
-        """Extract platform ID from Fabric mod metadata"""
-        try:
-            with jar.open('fabric.mod.json') as f:
-                meta = json.load(f)
-            return meta.get('id', '')
-        except Exception:
-            return ''
+        """
+        解析 Fabric 模組元資料以提取平台 ID
+        Extract platform ID from Fabric mod metadata
 
-    def _extract_platform_id_from_quilt(self, jar) -> str:
-        """Extract platform ID from Quilt mod metadata"""
+        Args:
+            jar: zipfile.ZipFile 物件
+        Returns:
+            模組平台 ID
+        """
         try:
-            with jar.open('quilt.mod.json') as f:
+            with jar.open("fabric.mod.json") as f:
                 meta = json.load(f)
-            ql = meta.get('quilt_loader', {})
-            return ql.get('id', '')
+            return meta.get("id", "")
         except Exception:
-            return ''
+            return ""
 
     def _extract_platform_id_from_forge(self, jar) -> str:
-        """Extract platform ID from Forge mod metadata"""
+        """
+        解析 Forge 模組元資料以提取平台 ID
+        Extract platform ID from Forge mod metadata
+
+        Args:
+            jar: zipfile.ZipFile 物件
+
+        Returns:
+            模組平台 ID
+        """
         try:
-            with jar.open('META-INF/mods.toml') as f:
-                toml_txt = f.read().decode(errors='ignore')
-                if 'modrinth' in toml_txt.lower():
+            with jar.open("META-INF/mods.toml") as f:
+                toml_txt = f.read().decode(errors="ignore")
+                if "modrinth" in toml_txt.lower():
                     m = re.search(r'(modrinth|project_id)\s*=\s*"([^"]+)"', toml_txt, re.IGNORECASE)
                     if m:
                         return m.group(2)
         except Exception:
             pass
-        return ''
+        return ""
 
     def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str]:
-        """Search for mod on Modrinth API"""
+        """
+        在 Modrinth API 上搜索模組
+        Search for mod on Modrinth API
+
+        Args:
+            name: 模組名稱
+            base_name: 基礎名稱
+            filename: 檔案名稱
+
+        Returns:
+            模組平台和平台 ID 的元組
+        """
         try:
             search_keywords = []
             if name and name != "未知":
@@ -538,21 +638,39 @@ class ModManager:
         return ModPlatform.LOCAL, ""
 
     def _clean_version(self, version: str) -> str:
-        """Clean version string"""
+        """
+        清理版本字串，移除後綴如 +, -mc, -fabric, -forge, -kotlin 等
+        Clean version string
+
+        Args:
+            version: 版本字串
+
+        Returns:
+            清理後的版本字串
+        """
         if not version or version == "未知":
             return version
-        # Remove suffixes like +, -mc, -fabric, -forge, -quilt, -kotlin, etc.
+        # 移除後綴如 +、-mc、-fabric、-forge、-kotlin 等
         v = re.split(
-            r'[+]|-mc|-fabric|-forge|-quilt|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot',
+            r"[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot",
             version,
             flags=re.IGNORECASE,
         )[0]
-        # Remove trailing non-alphanumeric characters
-        v = re.sub(r'[^\w\d.]+$', '', v)
+        # 移除結尾的非英數字元
+        v = re.sub(r"[^\w\d.]+$", "", v)
         return v.strip()
 
     def _clean_author(self, author: str) -> str:
-        """Clean author string"""
+        """
+        清理作者字串
+        Clean author string
+
+        Args:
+            author: 作者字串
+
+        Returns:
+            清理後的作者字串
+        """
         if not author:
             return ""
         author = str(author).strip()
@@ -564,6 +682,12 @@ class ModManager:
         """
         啟用模組 - 移除 .disabled 後綴
         Enable mod by removing the .disabled suffix.
+
+        Args:
+            mod_id: 模組 ID
+
+        Returns:
+            是否成功啟用模組
         """
         try:
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
@@ -577,12 +701,19 @@ class ModManager:
             return False
         except Exception as e:
             LogUtils.error(f"啟用模組失敗: {e}", "ModManager")
+            UIUtils.show_error("啟用失敗", f"啟用模組失敗: {e}")
             return False
 
     def disable_mod(self, mod_id: str) -> bool:
         """
         停用模組 - 添加 .disabled 後綴
         Disable mod by adding the .disabled suffix.
+
+        Args:
+            mod_id: 模組 ID
+
+        Returns:
+            是否成功停用模組
         """
         try:
             enabled_file = self.mods_path / f"{mod_id}.jar"
@@ -596,12 +727,20 @@ class ModManager:
             return False
         except Exception as e:
             LogUtils.error(f"停用模組失敗: {e}", "ModManager")
+            UIUtils.show_error("停用失敗", f"停用模組失敗: {e}")
             return False
 
     def get_mod_list(self, include_disabled: bool = True) -> List[LocalModInfo]:
         """
         獲取模組列表
-        Get mod list, optionally including disabled mods."""
+        Get mod list, optionally including disabled mods.
+
+        Args:
+            include_disabled: 是否包含已停用的模組
+
+        Returns:
+            模組列表
+        """
         mods = self.scan_mods()  # 即時掃描
 
         if include_disabled:
@@ -612,8 +751,15 @@ class ModManager:
     def export_mod_list(self, format_type: str = "text") -> str:
         """
         匯出模組列表
-        Export the mod list.
         支援 text/json/html
+        Export the mod list.
+        support text/json/html
+
+        Args:
+            format_type: 匯出格式類型
+
+        Returns:
+            匯出結果
         """
         mods = self.get_mod_list()
         if format_type == "text":
@@ -642,25 +788,25 @@ class ModManager:
             return json.dumps(export_data, ensure_ascii=False, indent=2)
         elif format_type == "html":
             html = [
-                '<!DOCTYPE html>',
+                "<!DOCTYPE html>",
                 '<html lang="zh-TW">',
                 '<head><meta charset="UTF-8"><title>模組列表</title>',
-                '<style>table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:6px;}th{background:#f1f5f9;}</style>',
-                '</head><body>',
-                '<h2>模組列表</h2>',
-                '<table>',
-                '<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>描述</th></tr>',
+                "<style>table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:6px;}th{background:#f1f5f9;}</style>",
+                "</head><body>",
+                "<h2>模組列表</h2>",
+                "<table>",
+                "<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>描述</th></tr>",
             ]
             for mod in mods:
                 html.append(
-                    '<tr>'
+                    "<tr>"
                     f'<td>{"✅" if mod.status == ModStatus.ENABLED else "❌"}</td>'
-                    f'<td>{mod.name}</td>'
-                    f'<td>{mod.version}</td>'
-                    f'<td>{mod.author}</td>'
-                    f'<td>{mod.description}</td>'
-                    '</tr>'
+                    f"<td>{mod.name}</td>"
+                    f"<td>{mod.version}</td>"
+                    f"<td>{mod.author}</td>"
+                    f"<td>{mod.description}</td>"
+                    "</tr>"
                 )
-            html.append('</table></body></html>')
-            return '\n'.join(html)
+            html.append("</table></body></html>")
+            return "\n".join(html)
         return ""

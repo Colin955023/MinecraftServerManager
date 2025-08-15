@@ -17,19 +17,17 @@ class ServerPropertiesHelper:
     server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。
     ServerPropertiesHelper: A helper class for server.properties, providing property descriptions, categories, loading/saving functions.
     """
-
-# ====== 屬性說明與描述 ======
-
+    # ====== 屬性說明與描述 ======
     # 取得所有屬性的詳細說明
     @staticmethod
     def get_property_descriptions() -> Dict[str, str]:
         """
         取得所有 server.properties 屬性的中文說明字典
         Get detailed Chinese descriptions for all server.properties attributes
-        
+
         Args:
             None
-            
+
         Returns:
             Dict[str, str]: 屬性名稱對應說明的字典
         """
@@ -103,28 +101,27 @@ class ServerPropertiesHelper:
         """
         取得指定屬性的詳細說明文字
         Get detailed description text for a specific property
-        
+
         Args:
             property_name (str): 屬性名稱
-            
+
         Returns:
             str: 該屬性的說明文字，若屬性不存在則返回未知屬性訊息
         """
         descriptions = ServerPropertiesHelper.get_property_descriptions()
         return descriptions.get(property_name, f"未知屬性: {property_name}")
 
-# ====== 屬性分類與組織 ======
-
+    # ====== 屬性分類與組織 ======
     # 取得屬性分類結構
     @staticmethod
     def get_property_categories() -> Dict[str, list]:
         """
         取得屬性按功能分類的組織結構，方便 UI 顯示分組
         Get property categories organized by functionality for convenient UI grouping display
-        
+
         Args:
             None
-            
+
         Returns:
             Dict[str, list]: 分類名稱對應屬性列表的字典
         """
@@ -225,18 +222,17 @@ class ServerPropertiesHelper:
             ],
         }
 
-# ====== 檔案操作與持久化 ======
-
+    # ====== 檔案操作與持久化 ======
     # 從檔案載入屬性配置
     @staticmethod
     def load_properties(file_path) -> Dict[str, str]:
         """
         從 server.properties 檔案讀取屬性配置並解析為字典
         Load property configuration from server.properties file and parse into dictionary
-        
+
         Args:
             file_path: server.properties 檔案的路徑
-            
+
         Returns:
             Dict[str, str]: 屬性名稱對應值的字典
         """
@@ -262,11 +258,11 @@ class ServerPropertiesHelper:
         """
         將屬性字典儲存為 server.properties 檔案格式
         Save properties dictionary as server.properties file format
-        
+
         Args:
             file_path: 要儲存的檔案路徑
             properties (Dict[str, str]): 屬性名稱對應值的字典
-            
+
         Returns:
             None
         """

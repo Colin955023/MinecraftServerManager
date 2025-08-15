@@ -14,7 +14,7 @@ class LoaderVersion:
     """
     模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器
     Data structure for mod loader version information supporting Forge and Fabric loaders
-    
+
     Attributes:
         version (str): 載入器版本號
         build (Optional[str]): 構建編號
@@ -29,14 +29,13 @@ class LoaderVersion:
     mc_version: Optional[str] = None
 
 # ====== 伺服器配置模型 ======
-
 # 伺服器完整配置資料類別
 @dataclass
 class ServerConfig:
     """
     伺服器完整配置資料類別，包含所有伺服器設定和屬性
     Complete server configuration data class containing all server settings and properties
-    
+
     Attributes:
         name (str): 伺服器顯示名稱
         minecraft_version (str): Minecraft 版本號
@@ -61,18 +60,17 @@ class ServerConfig:
     properties: Optional[Dict[str, str]] = None  # 伺服器屬性設定
     backup_path: Optional[str] = None  # 備份路徑
 
-# ====== 向後相容性屬性 ======
-
+    # ====== 向後相容性屬性 ======
     # 取得記憶體配置 (向後相容)
     @property
     def memory_mb(self) -> int:
         """
         取得伺服器最大記憶體配置，提供向後相容性
         Get server maximum memory configuration for backward compatibility
-        
+
         Args:
             None
-            
+
         Returns:
             int: 最大記憶體配置 (MB)
         """
@@ -84,10 +82,10 @@ class ServerConfig:
         """
         設定伺服器最大記憶體配置，提供向後相容性
         Set server maximum memory configuration for backward compatibility
-        
+
         Args:
             value (int): 要設定的記憶體大小 (MB)
-            
+
         Returns:
             None
         """

@@ -34,18 +34,16 @@ class ServerManager:
     伺服器管理器類別，負責建立、管理和配置 Minecraft 伺服器
     Server Manager class responsible for creating, managing, and configuring Minecraft servers
     """
-
     # ====== 初始化與配置管理 ======
-
     # 初始化伺服器管理器
     def __init__(self, servers_root: str = None):
         """
         初始化伺服器管理器
         Initialize server manager
-        
+
         Args:
             servers_root (str): 伺服器根目錄路徑
-            
+
         Returns:
             None
         """
@@ -62,17 +60,16 @@ class ServerManager:
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
-
     # 建立新伺服器
     def create_server(self, config: ServerConfig, properties: Optional[Dict[str, str]] = None) -> bool:
         """
         建立新伺服器並初始化設定
         Create new server and initialize configuration
-        
+
         Args:
             config (ServerConfig): 伺服器配置物件
             properties (Dict[str, str], optional): 伺服器屬性設定
-            
+
         Returns:
             bool: 建立成功返回 True，失敗返回 False
         """
@@ -98,13 +95,19 @@ class ServerManager:
                     ServerDetectionUtils.detect_server_type(server_path, config)
                     # 強制補齊欄位
                     if not config.loader_type or config.loader_type == "unknown":
-                        raise Exception(f"偵測失敗：loader_type 無法判斷，config={config}")
+                        raise Exception(
+                            f"偵測失敗：loader_type 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                        )
                     if not config.minecraft_version or config.minecraft_version == "unknown":
-                        raise Exception(f"偵測失敗：minecraft_version 無法判斷，config={config}")
+                        raise Exception(
+                            f"偵測失敗：minecraft_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                        )
                     if config.loader_type.lower() in ["forge", "fabric"] and (
                         not config.loader_version or config.loader_version == "unknown"
                     ):
-                        raise Exception(f"偵測失敗：loader_version 無法判斷，config={config}")
+                        raise Exception(
+                            f"偵測失敗：loader_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                        )
                 except Exception as e:
                     LogUtils.error(f"自動偵測伺服器類型失敗: {e}", "ServerManager")
                     raise
@@ -132,21 +135,27 @@ class ServerManager:
             LogUtils.error(f"建立伺服器失敗: {e}", "ServerManager")
             return False
 
-    def _create_eula_file(self, server_path: Path):
+    def _create_eula_file(self, server_path: Path) -> None:
         """
         建立並同意 EULA 檔案
         Create and accept EULA file.
+
+        Args:
+            server_path (Path): 伺服器根目錄路徑
         """
         eula_content = """eula=true"""
         with open(server_path / "eula.txt", "w", encoding="utf-8") as f:
             f.write(eula_content)
 
-    def _create_server_structure(self, path, loader_type: str):
+    def _create_server_structure(self, path: Path, loader_type: str) -> None:
         """
         建立伺服器檔案結構
         Create server file structure.
+
+        Args:
+            path (Path): 伺服器根目錄路徑
+            loader_type (str): 伺服器載入器類型
         """
-        path = Path(path)
         # 建立基本目錄
         if loader_type.lower() == "vanilla":
             directories = ["world", "logs"]
@@ -156,10 +165,13 @@ class ServerManager:
         for directory in directories:
             (path / directory).mkdir(exist_ok=True)
 
-    def create_launch_script(self, config: ServerConfig):
+    def create_launch_script(self, config: ServerConfig) -> None:
         """
         建立伺服器啟動腳本 (Windows)
         Create server launch script (Windows).
+
+        Args:
+            config (ServerConfig): 伺服器配置物件
         """
         server_path = Path(config.path)
 
@@ -171,7 +183,9 @@ class ServerManager:
         memory_args = f"-Xmx{max_memory}M"
         if min_memory:
             memory_args = f"-Xmx{max_memory}M -Xms{min_memory}M"
-            memory_display = f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
+            memory_display = (
+                f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
+            )
         else:
             memory_display = f"0-{MemoryUtils.format_memory_mb(max_memory)}"
 
@@ -209,6 +223,14 @@ class ServerManager:
     def update_server_properties(self, server_name: str, properties: Dict[str, str]) -> bool:
         """
         更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值
+        update server.properties, only overwrite changed fields, keep other fields unchanged
+
+        Args:
+            server_name (str): 伺服器名稱
+            properties (Dict[str, str]): 要更新的屬性字典
+
+        Returns:
+            bool: 更新成功返回 True，否則返回 False
         """
         try:
             config = self.servers.get(server_name)
@@ -253,6 +275,13 @@ class ServerManager:
         """
         啟動伺服器
         Start the server.
+
+        Args:
+            server_name (str): 伺服器名稱
+            parent: 父級視窗，通常是主視窗
+
+        Returns:
+            bool: 啟動成功返回 True，否則返回 False
         """
         try:
             if server_name not in self.servers:
@@ -287,7 +316,7 @@ class ServerManager:
                 UIUtils.show_error(
                     "啟動腳本未找到",
                     f"找不到啟動腳本，檢查的路徑: {[str(server_path / name) for name in script_candidates]}",
-                    parent=parent
+                    parent=parent,
                 )
                 return False
 
@@ -316,7 +345,7 @@ class ServerManager:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
-                    encoding='utf-8',
+                    encoding="utf-8",
                     bufsize=0,  # 無緩衝，立即輸出
                     universal_newlines=True,
                     # 移除 CREATE_NEW_CONSOLE，讓伺服器在背景執行
@@ -353,7 +382,7 @@ class ServerManager:
                                 # 嘗試以 bytes 讀取並忽略非法字元
                                 try:
                                     raw = proc.stdout.buffer.readline()
-                                    line = raw.decode('utf-8', errors='ignore')
+                                    line = raw.decode("utf-8", errors="ignore")
                                 except Exception as e2:
                                     LogUtils.error(f"{name} 嚴重編碼錯誤: {e2}", "output_reader")
                                     continue
@@ -379,12 +408,16 @@ class ServerManager:
         except Exception as e:
             LogUtils.error(f"啟動伺服器失敗: {e}", "ServerManager")
             traceback.print_exc()
+            UIUtils.show_error("啟動失敗", f"無法啟動伺服器 {server_name}。錯誤: {e}")
             return False
 
     def delete_server(self, server_name: str) -> bool:
         """
         刪除伺服器
         Delete the server.
+
+        Args:
+            server_name (str): 伺服器名稱
         """
         try:
             if server_name not in self.servers:
@@ -405,12 +438,16 @@ class ServerManager:
 
         except Exception as e:
             LogUtils.error(f"刪除伺服器失敗: {e}", "ServerManager")
+            UIUtils.show_error("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}")
             return False
 
-    def load_servers_config(self):
+    def load_servers_config(self) -> None:
         """
         載入伺服器配置
         Load server configuration.
+
+        Args:
+            config_file (Path): 伺服器配置檔案路徑
         """
         try:
             if self.config_file.exists():
@@ -422,10 +459,13 @@ class ServerManager:
         except Exception as e:
             LogUtils.error(f"載入配置失敗: {e}", "ServerManager")
 
-    def save_servers_config(self):
+    def save_servers_config(self) -> None:
         """
         儲存伺服器配置
         Save server configuration.
+
+        Args:
+            config_file (Path): 伺服器配置檔案路徑
         """
         try:
             data = {}
@@ -510,6 +550,9 @@ class ServerManager:
         """
         檢查伺服器是否已存在
         Check if the server exists.
+
+        Args:
+            name (str): 伺服器名稱
         """
         return name in self.servers
 
@@ -517,6 +560,9 @@ class ServerManager:
         """
         添加伺服器配置（用於匯入）
         Add server configuration (for import).
+
+        Args:
+            config (ServerConfig): 伺服器配置
         """
         try:
             self.servers[config.name] = config
@@ -530,6 +576,12 @@ class ServerManager:
         """
         載入伺服器的 server.properties 檔案內容
         Load the server.properties file content for the server.
+
+        Args:
+            server_name (str): 伺服器名稱
+
+        Returns:
+            Dict[str, str]: 伺服器屬性設定
         """
         try:
             if server_name not in self.servers:
@@ -556,6 +608,12 @@ class ServerManager:
         """
         檢查伺服器是否正在運行
         Check if the server is running.
+
+        Args:
+            server_name (str): 伺服器名稱
+
+        Returns:
+            bool: 如果伺服器正在運行，則為 True，否則為 False
         """
         if server_name not in self.running_servers:
             return False
@@ -572,6 +630,9 @@ class ServerManager:
         """
         停止伺服器
         Stop the server.
+
+        Args:
+            server_name (str): 伺服器名稱
         """
         try:
             if server_name not in self.running_servers:
@@ -602,9 +663,9 @@ class ServerManager:
             del self.running_servers[server_name]
 
             # 清理輸出佇列和執行緒
-            if hasattr(self, 'output_queues') and server_name in self.output_queues:
+            if hasattr(self, "output_queues") and server_name in self.output_queues:
                 del self.output_queues[server_name]
-            if hasattr(self, 'output_threads') and server_name in self.output_threads:
+            if hasattr(self, "output_threads") and server_name in self.output_threads:
                 del self.output_threads[server_name]
 
             return True
@@ -619,6 +680,13 @@ class ServerManager:
     def get_server_info(self, server_name: str) -> Optional[Dict]:
         """
         獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位
+        Get server information, including running status and resource usage, fill in the fields needed by the UI.
+
+        Args:
+            server_name (str): 伺服器名稱
+
+        Returns:
+            Optional[Dict]: 伺服器資訊字典，如果伺服器不存在則為 None
         """
         try:
             if server_name not in self.servers:
@@ -727,6 +795,13 @@ class ServerManager:
         """
         向運行中的伺服器發送命令
         Send a command to the running server.
+
+        Args:
+            server_name (str): 伺服器名稱
+            command (str): 要發送的命令
+
+        Returns:
+            bool: 如果命令發送成功則為 True，否則為 False
         """
         try:
             if server_name not in self.running_servers:
@@ -774,6 +849,14 @@ class ServerManager:
     def read_server_output(self, server_name: str, timeout: float = 0.1) -> List[str]:
         """
         讀取伺服器輸出（非阻塞，避免 readline 卡住）
+        Read server output (non-blocking, avoid readline blocking).
+
+        Args:
+            server_name (str): 伺服器名稱
+            timeout (float): 讀取超時時間
+
+        Returns:
+            List[str]: 伺服器輸出行列表
         """
         try:
             if server_name not in self.running_servers:
@@ -808,6 +891,12 @@ class ServerManager:
         """
         獲取伺服器日誌檔案路徑
         Get the server log file path.
+
+        Args:
+            server_name (str): 伺服器名稱
+
+        Returns:
+            Optional[Path]: 伺服器日誌檔案路徑，如果不存在則為 None
         """
         try:
             if server_name not in self.servers:

@@ -38,7 +38,7 @@ class MemoryUtils:
             val, unit = match.groups()
             try:
                 val = int(val)
-                if unit and unit.lower() == 'g':
+                if unit and unit.lower() == "g":
                     return val * 1024
                 else:
                     return val

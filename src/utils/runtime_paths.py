@@ -18,10 +18,10 @@ def _get_localappdata() -> Path:
     """
     取得 Windows 系統的本機應用程式資料目錄路徑
     Get Windows system's local application data directory path
-    
+
     Args:
         None
-        
+
     Returns:
         Path: 本機應用程式資料目錄路徑
     """
@@ -37,10 +37,10 @@ def get_user_data_dir() -> Path:
     """
     取得應用程式的使用者資料存放目錄
     Get application's user data storage directory (%LOCALAPPDATA%\\MinecraftServerManager)
-    
+
     Args:
         None
-        
+
     Returns:
         Path: 使用者資料目錄路徑
     """
@@ -51,10 +51,10 @@ def get_cache_dir() -> Path:
     """
     取得應用程式的快取檔案存放目錄
     Get application's cache file storage directory (%LOCALAPPDATA%\\MinecraftServerManager\\Cache)
-    
+
     Args:
         None
-        
+
     Returns:
         Path: 快取目錄路徑
     """
@@ -66,10 +66,10 @@ def ensure_dir(p: Path) -> Path:
     """
     確保指定路徑的目錄存在，如果不存在則建立
     Ensure the directory at specified path exists, create if it doesn't exist
-    
+
     Args:
         p (Path): 要確保存在的目錄路徑
-        
+
     Returns:
         Path: 已確保存在的目錄路徑
     """
