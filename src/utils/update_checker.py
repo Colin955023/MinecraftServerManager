@@ -24,10 +24,10 @@ def _normalize_version(v: str) -> tuple:
     """
     將版本字串標準化為可比較的數字元組
     Normalize version string to comparable number tuple
-    
+
     Args:
         v (str): 版本字串（如 "v1.2.3" 或 "1.2.3"）
-        
+
     Returns:
         tuple: 標準化的版本數字元組
     """
@@ -51,11 +51,11 @@ def _get_latest_release(owner: str, repo: str) -> dict:
     """
     從 GitHub API 取得指定倉庫的所有發布版本，並自動篩選最新正式版
     Get latest release information for specified repository from GitHub API (auto select latest stable)
-    
+
     Args:
         owner (str): GitHub 倉庫擁有者
         repo (str): GitHub 倉庫名稱
-        
+
     Returns:
         dict: 最新正式發布版本資訊字典，失敗時返回空字典
     """
@@ -78,10 +78,10 @@ def _choose_installer_asset(release: dict) -> dict:
     """
     從發布版本中選擇適當的 Windows 安裝檔案
     Choose appropriate Windows installer file from release assets
-    
+
     Args:
         release (dict): GitHub Release 資訊字典
-        
+
     Returns:
         dict: 選中的安裝檔案資產資訊，找不到時返回空字典
     """
@@ -97,15 +97,15 @@ def _choose_installer_asset(release: dict) -> dict:
     return {}
 
 # 下載檔案到指定位置
-def _download_file(url: str, dest: Path):
+def _download_file(url: str, dest: Path) -> None:
     """
     下載檔案到指定路徑，支援大檔案串流下載
     Download file to specified path with large file streaming support
-    
+
     Args:
         url (str): 檔案下載 URL
         dest (Path): 目標儲存路徑
-        
+
     Returns:
         None
     """
@@ -117,14 +117,14 @@ def _download_file(url: str, dest: Path):
                     f.write(chunk)
 
 # 啟動安裝程式
-def _launch_installer(installer_path: Path):
+def _launch_installer(installer_path: Path) -> None:
     """
     啟動 Windows 安裝程式
     Launch Windows installer
-    
+
     Args:
         installer_path (Path): 安裝程式檔案路徑
-        
+
     Returns:
         None
     """
@@ -132,31 +132,28 @@ def _launch_installer(installer_path: Path):
 
 # ====== 主要更新檢查功能 ======
 # 檢查並提示更新
-def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up_to_date_message: bool = True):
+def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up_to_date_message: bool = True) -> None:
     """
     檢查是否有新版本並提示使用者更新，支援自動下載安裝
     Check for new version and prompt user to update with automatic download installation support
-    
+
     Args:
         current_version (str): 當前應用程式版本號
         owner (str): GitHub 倉庫擁有者
         repo (str): GitHub 倉庫名稱
         show_up_to_date_message (bool): 是否在已是最新版本時顯示訊息
-        
+
     Returns:
         None
     """
 
     def _work():
-        from .log_utils import LogUtils
+
         try:
-            LogUtils.debug(f"開始檢查更新，current_version={current_version}, owner={owner}, repo={repo}", "UpdateChecker")
             latest = _get_latest_release(owner, repo)
-            LogUtils.debug(f"GitHub API 回傳: {latest}", "UpdateChecker")
 
             # 檢查是否有有效的最新版本（排除草稿和預發布版本）
             if not latest or latest.get("draft") or latest.get("prerelease"):
-                LogUtils.debug(f"未取得有效 release 或為草稿/預發布: {latest}", "UpdateChecker")
                 if show_up_to_date_message:
                     UIUtils.show_info("檢查更新", "無法取得最新版本資訊，或沒有可用的正式發布版本。", topmost=True)
                 return
@@ -164,11 +161,9 @@ def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up
             latest_tag = latest.get("tag_name") or ""
             current_normalized = _normalize_version(current_version)
             latest_normalized = _normalize_version(latest_tag)
-            LogUtils.debug(f"current_normalized={current_normalized}, latest_normalized={latest_normalized}", "UpdateChecker")
 
             # 檢查版本比較結果
             if latest_normalized <= current_normalized:
-                LogUtils.debug(f"已是最新版本或更高，current={current_normalized}, latest={latest_normalized}", "UpdateChecker")
                 if show_up_to_date_message:
                     UIUtils.show_info("檢查更新", f"目前版本 {current_version} 已是最新版本，無須更新。", topmost=True)
                 return
@@ -179,9 +174,7 @@ def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up
             html_url = latest.get("html_url")
 
             msg = f"發現新版本：{name}\n目前版本：{current_version}\n\n釋出說明：\n{body}\n\n是否下載並安裝？"
-            LogUtils.debug(f"新版本可用: {name}, tag={latest_tag}, url={html_url}", "UpdateChecker")
             if not UIUtils.ask_yes_no_cancel("更新可用", msg, show_cancel=False, topmost=True):
-                LogUtils.debug(f"使用者選擇不自動下載，詢問是否開啟發行頁面: {html_url}", "UpdateChecker")
                 if html_url and UIUtils.ask_yes_no_cancel(
                     "查看發行頁面", "是否前往 GitHub 發行頁面查看詳情？", show_cancel=False, topmost=True
                 ):
@@ -189,7 +182,6 @@ def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up
                 return
 
             asset = _choose_installer_asset(latest)
-            LogUtils.debug(f"選擇到的安裝檔 asset: {asset}", "UpdateChecker")
             if not asset:
                 UIUtils.show_info("無安裝檔", "找不到可用的安裝檔（.exe）。將開啟發行頁面，請手動下載。", topmost=True)
                 if html_url:
@@ -200,14 +192,11 @@ def check_and_prompt_update(current_version: str, owner: str, repo: str, show_up
             fd, temp_path = tempfile.mkstemp(prefix="msm_update_", suffix=".exe")
             os.close(fd)
             dest = Path(temp_path)
-            LogUtils.debug(f"開始下載: {download_url} -> {dest}", "UpdateChecker")
             UIUtils.show_info("下載中", "正在下載安裝檔，請稍候...", topmost=True)
             _download_file(download_url, dest)
-            LogUtils.debug(f"下載完成，啟動安裝程式: {dest}", "UpdateChecker")
             UIUtils.show_info("下載完成", "將啟動安裝程式進行更新，請依畫面指示操作。", topmost=True)
             _launch_installer(dest)
         except Exception as e:
-            LogUtils.debug(f"更新檢查流程發生例外: {e}", "UpdateChecker")
-            UIUtils.show_error("更新檢查失敗", f"無法完成更新檢查或下載：{e}",topmost=True)
+            UIUtils.show_error("更新檢查失敗", f"無法完成更新檢查或下載：{e}", topmost=True)
 
     threading.Thread(target=_work, daemon=True).start()

@@ -23,13 +23,12 @@ class ServerMonitorWindow:
     伺服器監控視窗
     Server Monitor Window
     """
-
-    def start_auto_refresh(self):
+    def start_auto_refresh(self) -> None:
         """
         啟動每秒自動刷新狀態
         Start automatic status refresh every second
         """
-        if hasattr(self, '_auto_refresh_id') and self._auto_refresh_id:
+        if hasattr(self, "_auto_refresh_id") and self._auto_refresh_id:
             return  # 已經有定時器
 
         def _refresh():
@@ -41,12 +40,12 @@ class ServerMonitorWindow:
 
         self._auto_refresh_id = self.window.after(1000, _refresh)
 
-    def stop_auto_refresh(self):
+    def stop_auto_refresh(self) -> None:
         """
         停止自動刷新狀態
         Stop automatic status refresh
         """
-        if hasattr(self, '_auto_refresh_id') and self._auto_refresh_id:
+        if hasattr(self, "_auto_refresh_id") and self._auto_refresh_id:
             try:
                 self.window.after_cancel(self._auto_refresh_id)
             except Exception:
@@ -69,7 +68,7 @@ class ServerMonitorWindow:
         self.create_window()
         self.start_monitoring()
 
-    def safe_update_widget(self, widget_name: str, update_func: Callable, *args, **kwargs):
+    def safe_update_widget(self, widget_name: str, update_func: Callable, *args, **kwargs) -> None:
         """
         安全地更新 widget，檢查 widget 是否存在
         Safely update widget, checking if widget exists
@@ -80,16 +79,16 @@ class ServerMonitorWindow:
                 if widget and widget.winfo_exists():
                     update_func(widget, *args, **kwargs)
         except Exception as e:
-            print(f"更新 {widget_name} 失敗: {e}")
+            LogUtils.error(f"更新 {widget_name} 失敗: {e}", "ServerMonitorWindow")
 
-    def safe_config_widget(self, widget_name: str, **config):
+    def safe_config_widget(self, widget_name: str, **config) -> None:
         """
         安全地配置 widget
         Safely configure widget
         """
         self.safe_update_widget(widget_name, lambda w, **cfg: w.configure(**cfg), **config)
 
-    def create_window(self):
+    def create_window(self) -> None:
         """
         創建監控視窗
         Create monitor window
@@ -97,22 +96,24 @@ class ServerMonitorWindow:
 
         self.window = tk.Toplevel(self.parent)
         self.window.title(f"伺服器監控 - {self.server_name}")
-        self.window.state('normal')
-
-        # 監控視窗為獨立視窗，僅需要綁定圖示和置中，不需要模態
-        UIUtils.setup_window_properties(
-            window=self.window,
-            parent=self.parent,
-            bind_icon=True,
-            center_on_parent=True,
-            make_modal=False,
-            delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
-        )
+        self.window.state("normal")
 
         min_width = int(1200 * font_manager.get_scale_factor())  # 1200 * DPI
         min_height = int(900 * font_manager.get_scale_factor())  # 900 * DPI
         self.window.minsize(min_width, min_height)
         self.window.resizable(True, True)
+
+        # 監控視窗為獨立視窗，僅需要綁定圖示和置中，不需要模態
+        UIUtils.setup_window_properties(
+            window=self.window,
+            parent=self.parent,
+            width=min_width,
+            height=min_height,
+            bind_icon=True,
+            center_on_parent=True,
+            make_modal=False,
+            delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
+        )
 
         # 當視窗關閉時停止監控
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -126,7 +127,7 @@ class ServerMonitorWindow:
         # 底部控制台輸出區
         self.create_console_panel(main_frame)
 
-    def create_control_panel(self, parent):
+    def create_control_panel(self, parent) -> None:
         """
         創建控制面板
         Create control panel
@@ -222,7 +223,7 @@ class ServerMonitorWindow:
         self.players_listbox = tk.Listbox(
             players_frame,
             height=5,
-            font=("Microsoft JhengHei", 11),
+            font=get_font("Microsoft JhengHei", 18),
             bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#f8fafc",
             fg="#ffffff" if ctk.get_appearance_mode() == "Dark" else "#000000",
             selectbackground="#1f538d",
@@ -235,7 +236,7 @@ class ServerMonitorWindow:
         # 添加一個空的佔位項目
         self.players_listbox.insert(tk.END, "無玩家在線")
 
-    def create_console_panel(self, parent):
+    def create_console_panel(self, parent) -> None:
         """
         創建控制台面板
         Create console panel with black background and green text
@@ -252,8 +253,8 @@ class ServerMonitorWindow:
         # 控制台文字區域
         self.console_text = ctk.CTkTextbox(
             console_frame,
-            height=270,
-            font=ctk.CTkFont(family="Consolas", size=int(15 * font_manager.get_scale_factor())),  # 15px
+            height=240,
+            font=get_font(family="Consolas", size=15),
             wrap="word",
             fg_color="#000000",  # 黑色背景
             text_color="#00ff00",  # 綠色文字
@@ -271,7 +272,7 @@ class ServerMonitorWindow:
 
         self.command_entry = ctk.CTkEntry(
             command_frame,
-            font=ctk.CTkFont(family="Consolas", size=int(10 * font_manager.get_scale_factor())),
+            font=get_font(family="Consolas", size=14),
             placeholder_text="輸入指令...",
         )
         self.command_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -282,7 +283,7 @@ class ServerMonitorWindow:
         )
         self.send_button.pack(side="right")
 
-    def start_monitoring(self):
+    def start_monitoring(self) -> None:
         """
         開始監控，啟動時自動讀取現有日誌內容，避免橫幅遺漏
         Start monitoring and automatically read existing log content to avoid banner omission
@@ -296,7 +297,7 @@ class ServerMonitorWindow:
             # 使用線程池執行監控任務
             self.monitor_future = self.executor.submit(self.monitor_loop)
 
-    def stop_monitoring(self):
+    def stop_monitoring(self) -> None:
         """
         停止監控
         Stop monitoring
@@ -304,10 +305,10 @@ class ServerMonitorWindow:
         self.is_monitoring = False
         self.stop_auto_refresh()
         # 關閉線程池
-        if hasattr(self, 'executor'):
+        if hasattr(self, "executor"):
             self.executor.shutdown(wait=False)
         # 等待監控線程結束
-        if hasattr(self, 'monitor_future'):
+        if hasattr(self, "monitor_future"):
             try:
                 self.monitor_future.result(timeout=1)
             except Exception:
@@ -315,7 +316,7 @@ class ServerMonitorWindow:
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=1)
 
-    def monitor_loop(self):
+    def monitor_loop(self) -> None:
         """
         改良的監控循環
         Improved monitoring loop
@@ -351,10 +352,10 @@ class ServerMonitorWindow:
                 # 適度休眠，減少 CPU 使用
                 time.sleep(0.1)
             except Exception as e:
-                print(f"監控更新錯誤: {e}")
+                LogUtils.error(f"監控更新錯誤: {e}", "ServerMonitorWindow")
                 time.sleep(0.5)
 
-    def read_server_output(self):
+    def read_server_output(self) -> None:
         """
         讀取伺服器輸出並顯示在控制台，並即時解析玩家數量/名單與啟動完成通知
         Read server output and display it in the console, and parse player count/list and startup completion notification in real-time
@@ -377,12 +378,15 @@ class ServerMonitorWindow:
                         player_line = line[idx:]
                         self.read_player_list(line=player_line)
         except Exception as e:
-            print(f"讀取伺服器輸出錯誤: {e}")
+            LogUtils.error(f"讀取伺服器輸出錯誤: {e}", "ServerMonitorWindow")
 
-    def _update_ui(self, info):
+    def _update_ui(self, info) -> None:
         """
         根據 info 更新 UI 狀態顯示
         Update UI status display based on info
+
+        Args:
+            info (dict): 伺服器狀態資訊
         """
         try:
             is_running = info.get("is_running", False)
@@ -394,54 +398,57 @@ class ServerMonitorWindow:
             version = info.get("version", "N/A")
 
             # 狀態標籤（統一 get_status_text）
-            if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 status_text, status_color = ServerOperations.get_status_text(is_running)
                 self.status_label.configure(text=status_text, text_color=status_color)
 
             # PID
-            self.safe_config_widget('pid_label', text=f"🆔 PID: {pid}")
+            self.safe_config_widget("pid_label", text=f"🆔 PID: {pid}")
 
             # 記憶體
             memory_bytes = memory * 1024 * 1024  # Convert MB to bytes
             mem_str = MemoryUtils.format_memory(memory_bytes)
-            self.safe_config_widget('memory_label', text=f"🧠 記憶體使用: {mem_str}")
+            self.safe_config_widget("memory_label", text=f"🧠 記憶體使用: {mem_str}")
 
             # 運行時間
-            self.safe_config_widget('uptime_label', text=f"⏱️ 運行時間: {uptime}")
+            self.safe_config_widget("uptime_label", text=f"⏱️ 運行時間: {uptime}")
 
             # 玩家數量與列表
             if not is_running:
                 # 伺服器已停止，清空玩家數量與列表
                 self._last_player_count = None
                 self._last_max_players = None
-                self.safe_config_widget('players_label', text="👥 玩家數量: 0/0")
+                self.safe_config_widget("players_label", text="👥 玩家數量: 0/0")
                 self.safe_update_widget(
-                    'players_listbox', lambda w: [w.delete(0, tk.END), w.insert(tk.END, "無玩家在線")]
+                    "players_listbox", lambda w: [w.delete(0, tk.END), w.insert(tk.END, "無玩家在線")]
                 )
             else:
                 # 玩家數量（永遠優先顯示即時解析快取值）
                 if self._last_player_count is not None and self._last_max_players is not None:
                     self.safe_config_widget(
-                        'players_label', text=f"👥 玩家數量: {self._last_player_count}/{self._last_max_players}"
+                        "players_label", text=f"👥 玩家數量: {self._last_player_count}/{self._last_max_players}"
                     )
                 else:
-                    self.safe_config_widget('players_label', text=f"👥 玩家數量: {players}/{max_players}")
+                    self.safe_config_widget("players_label", text=f"👥 玩家數量: {players}/{max_players}")
 
             # 版本
-            self.safe_config_widget('version_label', text=f"📦 版本: {version}")
+            self.safe_config_widget("version_label", text=f"📦 版本: {version}")
 
             # 按鈕狀態自動切換
-            self.safe_config_widget('start_button', state="disabled" if is_running else "normal")
-            self.safe_config_widget('stop_button', state="normal" if is_running else "disabled")
-            self.safe_config_widget('send_button', state="normal" if is_running else "disabled")
+            self.safe_config_widget("start_button", state="disabled" if is_running else "normal")
+            self.safe_config_widget("stop_button", state="normal" if is_running else "disabled")
+            self.safe_config_widget("send_button", state="normal" if is_running else "disabled")
 
         except Exception as e:
-            print(f"_update_ui 更新 UI 狀態失敗: {e}")
+            LogUtils.error(f"_update_ui 更新 UI 狀態失敗: {e}", "ServerMonitorWindow")
 
-    def check_player_events(self, line):
+    def check_player_events(self, line) -> None:
         """
         檢查玩家事件並更新玩家數量
         Check player events and update player count
+
+        Args:
+            line (str): 伺服器輸出行
         """
         try:
             # 檢查玩家加入訊息
@@ -450,9 +457,9 @@ class ServerMonitorWindow:
             elif "left the game" in line:
                 self.update_player_count()
         except Exception as e:
-            print(f"檢查玩家事件錯誤: {e}")
+            LogUtils.error(f"檢查玩家事件錯誤: {e}", "ServerMonitorWindow")
 
-    def update_player_count(self):
+    def update_player_count(self) -> None:
         """
         更新玩家數量
         Update player count
@@ -462,12 +469,15 @@ class ServerMonitorWindow:
             if success:
                 self.window.after(800, self.read_player_list)
         except Exception as e:
-            print(f"更新玩家數量錯誤: {e}")
+            LogUtils.error(f"更新玩家數量錯誤: {e}", "ServerMonitorWindow")
 
-    def read_player_list(self, line=None):
+    def read_player_list(self, line=None) -> None:
         """
         讀取玩家列表
         Read player list
+
+        Args:
+            line (str): 伺服器輸出行
         """
         try:
             if line is not None:
@@ -489,7 +499,7 @@ class ServerMonitorWindow:
                     self._last_max_players = int(max_players)
                     self.players_label.configure(text=f"👥 玩家數量: {current_players}/{max_players}")
                     if players_str:
-                        player_names = [name.strip() for name in players_str.split(',') if name.strip()]
+                        player_names = [name.strip() for name in players_str.split(",") if name.strip()]
                         self.update_player_list(player_names)
                     else:
                         self.update_player_list([])
@@ -499,13 +509,16 @@ class ServerMonitorWindow:
                 # 僅當真的沒抓到任何玩家列表才不動作
                 pass
         except Exception as e:
-            print(f"讀取玩家列表時發生錯誤: {e}")
+            LogUtils.error(f"讀取玩家列表時發生錯誤: {e}", "ServerMonitorWindow")
             # 不主動清空列表，避免閃爍
 
-    def update_player_list(self, players):
+    def update_player_list(self, players: list) -> None:
         """
         更新玩家列表顯示
         Update player list display
+
+        Args:
+            players (list): 玩家名稱列表
         """
         try:
             # 清空現有列表
@@ -517,9 +530,9 @@ class ServerMonitorWindow:
             else:
                 self.players_listbox.insert(tk.END, "無玩家在線")
         except Exception as e:
-            print(f"更新玩家列表錯誤: {e}")
+            LogUtils.error(f"更新玩家列表錯誤: {e}", "ServerMonitorWindow")
 
-    def update_status(self):
+    def update_status(self) -> None:
         """
         更新狀態顯示
         Update status display
@@ -534,9 +547,9 @@ class ServerMonitorWindow:
             # 在主線程中更新 UI
             self._update_ui(info)
         except Exception as e:
-            print(f"更新狀態失敗: {e}")
+            LogUtils.error(f"更新狀態失敗: {e}", "ServerMonitorWindow")
 
-    def start_server(self):
+    def start_server(self) -> None:
         """
         啟動伺服器
         Start the server
@@ -552,7 +565,7 @@ class ServerMonitorWindow:
         else:
             self.add_console_message(f"❌ 啟動伺服器 {self.server_name} 失敗")
 
-    def stop_server(self):
+    def stop_server(self) -> None:
         """
         停止伺服器
         Stop the server
@@ -572,9 +585,9 @@ class ServerMonitorWindow:
             if self.window and self.window.winfo_exists():
                 self.window.after(100, self.update_status)
         except Exception as e:
-            print(f"安全 after 調用錯誤: {e}")
+            LogUtils.error(f"安全 after 調用錯誤: {e}", "ServerMonitorWindow")
 
-    def refresh_after_stop(self):
+    def refresh_after_stop(self) -> None:
         """
         停止後刷新狀態，直到伺服器完全結束才停止輪詢
         Refresh status after stopping, polling until the server is completely stopped
@@ -586,9 +599,8 @@ class ServerMonitorWindow:
             self.update_status()  # 強制刷新按鈕與標籤
             self.add_console_message("✅ 伺服器已確認停止")
             self.update_player_list([])
-            # 狀態顯示統一交給 _update_ui 處理，移除重複按鈕狀態設定
 
-    def refresh_status(self):
+    def refresh_status(self) -> None:
         """
         手動刷新狀態和控制台輸出
         Manually refresh status and console output
@@ -603,7 +615,7 @@ class ServerMonitorWindow:
         try:
             log_file = self.server_manager.get_server_log_file(self.server_name)
             if log_file and log_file.exists():
-                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
                     for line in lines:
                         if line.strip():
@@ -630,7 +642,7 @@ class ServerMonitorWindow:
         self.update_status()
         self.add_console_message("🔄 狀態和控制台已刷新")
 
-    def send_command(self, event=None):
+    def send_command(self, event=None) -> None:
         """
         發送命令到伺服器
         Send command to the server
@@ -654,7 +666,7 @@ class ServerMonitorWindow:
         else:
             self.add_console_message(f"❌ 命令發送失敗: {command}")
 
-    def add_console_message(self, message: str):
+    def add_console_message(self, message: str) -> None:
         """
         添加控制台訊息，智能處理自動滾動
         Add console message with smart auto-scrolling
@@ -663,7 +675,7 @@ class ServerMonitorWindow:
             # 檢查視窗和控制台文字區域是否還存在
             if not self.window or not self.window.winfo_exists():
                 return
-            if not hasattr(self, 'console_text') or not self.console_text.winfo_exists():
+            if not hasattr(self, "console_text") or not self.console_text.winfo_exists():
                 return
 
             # 檢查使用者是否正在查看舊內容（不在底部）
@@ -677,7 +689,7 @@ class ServerMonitorWindow:
             # 對於重要的伺服器狀態變化（如啟動、停止），強制滾動到底部
             should_auto_scroll = (
                 # 伺服器正在運行時的新輸出
-                (hasattr(self, 'server_manager') and self.server_manager.is_server_running(self.server_name))
+                (hasattr(self, "server_manager") and self.server_manager.is_server_running(self.server_name))
                 or
                 # 重要訊息（包含特定關鍵字）
                 any(
@@ -694,21 +706,21 @@ class ServerMonitorWindow:
             # 視窗已被銷毀，忽略錯誤
             pass
         except Exception as e:
-            print(f"添加控制台訊息錯誤: {e}")
+            LogUtils.error(f"添加控制台訊息錯誤: {e}", "ServerMonitorWindow")
 
-    def _scroll_to_bottom(self):
+    def _scroll_to_bottom(self) -> None:
         """
         安全地滾動到底部
         Safely scroll to bottom
         """
         try:
-            if hasattr(self, 'console_text') and self.console_text.winfo_exists():
+            if hasattr(self, "console_text") and self.console_text.winfo_exists():
                 # 使用 see 方法滾動到最後一行
                 self.console_text.see("end")
         except Exception as e:
-            print(f"滾動到底部失敗: {e}")
+            LogUtils.error(f"滾動到底部失敗: {e}", "ServerMonitorWindow")
 
-    def on_closing(self):
+    def on_closing(self) -> None:
         """
         視窗關閉時的處理
         Handle window closing
@@ -718,7 +730,7 @@ class ServerMonitorWindow:
             self.window.destroy()
         self.window = None
 
-    def show(self):
+    def show(self) -> None:
         """
         顯示視窗
         Show window
@@ -735,19 +747,19 @@ class ServerMonitorWindow:
         # 只做狀態刷新或顯示一次啟動完成訊息
         try:
             # 只顯示一次啟動完成訊息
-            if hasattr(self, '_server_ready_notified') and self._server_ready_notified:
+            if hasattr(self, "_server_ready_notified") and self._server_ready_notified:
                 return
             self._server_ready_notified = True
             # 讀取 server.properties
             properties = (
                 self.server_manager.load_server_properties(self.server_name)
-                if hasattr(self.server_manager, 'load_server_properties')
+                if hasattr(self.server_manager, "load_server_properties")
                 else {}
             )
-            server_ip = properties.get('server-ip', '').strip()
-            server_port = properties.get('server-port', '').strip()
+            server_ip = properties.get("server-ip", "").strip()
+            server_port = properties.get("server-port", "").strip()
             if not server_port:
-                server_port = '25565'  # 預設值
+                server_port = "25565"  # 預設值
             if server_ip:
                 msg = f"伺服器啟動成功\n已在 {server_ip}:{server_port} 上開放"
             else:
@@ -756,4 +768,4 @@ class ServerMonitorWindow:
             UIUtils.show_info("伺服器啟動成功", msg, self.window)
             # 額外 debug log
         except Exception as e:
-            print(f"handle_server_ready 執行錯誤: {e}")
+            LogUtils.error(f"handle_server_ready 執行錯誤: {e}", "ServerMonitorWindow")

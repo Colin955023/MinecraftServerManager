@@ -38,7 +38,7 @@ class CreateServerFrame(ctk.CTkFrame):
     """
 
     @staticmethod
-    def get_system_memory_mb():
+    def get_system_memory_mb() -> int:
         """
         獲取系統記憶體容量 (MB)
         Get system memory capacity in MB
@@ -50,7 +50,7 @@ class CreateServerFrame(ctk.CTkFrame):
             UIUtils.show_error("錯誤", f"無法獲取系統記憶體資訊: {e}", topmost=True)
             return 0
 
-    def update_memory_warning(self):
+    def update_memory_warning(self) -> None:
         """
         更新記憶體使用警告標籤
         Update memory usage warning label
@@ -80,9 +80,14 @@ class CreateServerFrame(ctk.CTkFrame):
             LogUtils.debug(f"更新記憶體警告失敗: {e}", "CreateServerFrame")
             UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.winfo_toplevel())
 
-    def create_java_path_field(self, parent, row):
+    def create_java_path_field(self, parent, row) -> None:
         """
         建立 Java 路徑欄位（可手動輸入/瀏覽）
+        Create Java path field (manual input/browse)
+
+        Args:
+            parent (ctk.CTkFrame): 父容器
+            row (int): 行號
         """
         ctk.CTkLabel(parent, text="Java 執行檔路徑 (可選):", font=get_font(size=12, weight="bold")).grid(
             row=row, column=0, sticky="w", pady=5
@@ -105,13 +110,13 @@ class CreateServerFrame(ctk.CTkFrame):
         # 自動偵測按鈕
         def auto_detect():
             # 取得目前 UI 選擇的 mc_version、loader_type、loader_version
-            mc_version = self.mc_version_var.get() if hasattr(self, 'mc_version_var') else None
-            loader_type = self.loader_type_var.get() if hasattr(self, 'loader_type_var') else None
-            loader_version = self.loader_version_var.get() if hasattr(self, 'loader_version_var') else None
+            mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
+            loader_type = self.loader_type_var.get() if hasattr(self, "loader_type_var") else None
+            loader_version = self.loader_version_var.get() if hasattr(self, "loader_version_var") else None
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
                 return
-            java_path = java_utils.get_best_java_path(mc_version, loader_type, loader_version, parent=self)
+            java_path = java_utils.get_best_java_path(mc_version, parent=self)
             if java_path:
                 java_path_win = os.path.normpath(java_path)
                 self.java_path_var.set(java_path_win)
@@ -149,12 +154,18 @@ class CreateServerFrame(ctk.CTkFrame):
         # 建立元件後立即開始預載入版本資訊並顯示載入狀態
         self.preload_version_data()
 
-    def _start_ui_update_checker(self):
-        """啟動UI更新檢查器，定期檢查佇列中的更新任務"""
+    def _start_ui_update_checker(self) -> None:
+        """
+        啟動UI更新檢查器，定期檢查佇列中的更新任務
+        Start the UI update checker to periodically check for update tasks in the queue.
+        """
         self._check_ui_updates()
 
-    def _check_ui_updates(self):
-        """檢查UI更新佇列並執行更新任務"""
+    def _check_ui_updates(self) -> None:
+        """
+        檢查UI更新佇列並執行更新任務
+        Check the UI update queue and execute update tasks.
+        """
         try:
             while True:
                 try:
@@ -165,19 +176,24 @@ class CreateServerFrame(ctk.CTkFrame):
                 except queue.Empty:
                     break
         except Exception as e:
-            print(f"UI更新檢查器錯誤: {e}")
+            LogUtils.error(f"UI更新檢查器錯誤: {e}")
+            UIUtils.show_error("UI更新檢查器錯誤", f"無法檢查UI更新: {e}", self.winfo_toplevel())
 
         # 每100ms檢查一次佇列
         self.after(100, self._check_ui_updates)
 
-    def _schedule_ui_update(self, task):
-        """線程安全地排程UI更新任務"""
+    def _schedule_ui_update(self, task) -> None:
+        """
+        排程安全的UI更新
+        Schedule UI update tasks in a thread-safe manner.
+        """
         try:
             self.ui_update_queue.put(task)
         except Exception as e:
-            print(f"排程UI更新失敗: {e}")
+            LogUtils.error(f"排程UI更新失敗: {e}")
+            UIUtils.show_error("排程UI更新失敗", f"無法排程UI更新任務: {e}", self.winfo_toplevel())
 
-    def create_widgets(self):
+    def create_widgets(self) -> None:
         """
         建立介面元件
         Create the interface widgets.
@@ -221,7 +237,7 @@ class CreateServerFrame(ctk.CTkFrame):
         # 建立按鈕
         self.create_buttons(main_container)
 
-    def create_form(self, parent):
+    def create_form(self, parent) -> None:
         """
         建立表單
         Create the form.
@@ -337,7 +353,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.max_memory_entry.pack(fill="x", pady=(2, 0))
 
         # 綁定記憶體輸入變更事件
-        self.max_memory_var.trace_add('write', lambda *args: self.update_memory_warning())
+        self.max_memory_var.trace_add("write", lambda *args: self.update_memory_warning())
 
         # 記憶體提示
         memory_tip = ctk.CTkLabel(
@@ -356,32 +372,44 @@ class CreateServerFrame(ctk.CTkFrame):
         content_frame.columnconfigure(1, weight=1)
 
     # === 載入狀態管理 ===
-    def set_loading_state(self, combo, var=None, message="載入中..."):
-        """設定下拉選單的載入狀態"""
+    def set_loading_state(self, combo, var=None, message="載入中...") -> None:
+        """
+        設定下拉選單的載入狀態
+        Set the loading state for the dropdown menu.
+        """
         combo.configure(values=[message])
         combo.set(message)
         if var:
             var.set(message)
         combo.configure(state="disabled")
 
-    def set_error_state(self, combo, var=None, message="載入失敗"):
-        """設定下拉選單的錯誤狀態"""
+    def set_error_state(self, combo, var=None, message="載入失敗") -> None:
+        """
+        設定下拉選單的錯誤狀態
+        Set the error state for the dropdown menu.
+        """
         combo.configure(values=[message])
         combo.set(message)
         if var:
             var.set(message)
         combo.configure(state="disabled")
 
-    def set_no_versions_state(self, combo, var=None, message="無可用版本"):
-        """設定下拉選單的無版本狀態"""
+    def set_no_versions_state(self, combo, var=None, message="無可用版本") -> None:
+        """
+        設定下拉選單的無版本狀態
+        Set the no versions state for the dropdown menu.
+        """
         combo.configure(values=[message])
         combo.set(message)
         if var:
             var.set(message)
         combo.configure(state="disabled")
 
-    def preload_version_data(self):
-        """預載入版本資訊並管理載入狀態"""
+    def preload_version_data(self) -> None:
+        """
+        預載入版本資訊並管理載入狀態
+        preload version data and manage loading state
+        """
         # 立即設定載入狀態
         self.set_loading_state(self.mc_version_combo, self.mc_version_var, "正在載入 MC 版本...")
         self.set_loading_state(self.loader_version_combo, self.loader_version_var, "等待 MC 版本選擇...")
@@ -411,10 +439,10 @@ class CreateServerFrame(ctk.CTkFrame):
                     self.loader_manager.preload_fabric_versions(parent=self.master)
                     self.loader_manager.preload_forge_versions(parent=self.master)
                 except Exception as e:
-                    print(f"[INFO] 預載入載入器版本失敗: {e}")
+                    LogUtils.info(f"預載入載入器版本失敗: {e}", "CreateServerFrame")
 
             except Exception as e:
-                LogUtils.error(f"預載入版本資訊失敗: {e}")
+                LogUtils.error(f"預載入版本資訊失敗: {e}", "CreateServerFrame")
 
                 def show_error():
                     self.set_error_state(self.mc_version_combo, self.mc_version_var, "載入失敗")
@@ -426,9 +454,10 @@ class CreateServerFrame(ctk.CTkFrame):
         # 在背景執行緒中執行預載入
         threading.Thread(target=preload_all_versions, daemon=True).start()
 
-    def reload_mc_versions(self):
+    def reload_mc_versions(self) -> None:
         """
         重新載入 Minecraft 版本（清除快取並從 API 取得最新），狀態顯示在下拉選單中
+        reload Minecraft versions (clear cache and fetch latest from API), status displayed in dropdown
         """
 
         def do_reload():
@@ -451,10 +480,10 @@ class CreateServerFrame(ctk.CTkFrame):
 
         threading.Thread(target=do_reload, daemon=True).start()
 
-    def reload_loader_versions(self):
+    def reload_loader_versions(self) -> None:
         """
-        強制重新載入載入器版本：清空 cache，API 全量同步，UI 只從 cache 讀取。
-        狀態顯示在下拉選單中。
+        重新載入載入器版本（清除快取並從 API 取得最新），狀態顯示在下拉選單中
+        reload loader versions (clear cache and fetch latest from API), status displayed in dropdown
         """
         loader_type = self.loader_type_var.get()
         mc_version = self.mc_version_var.get()
@@ -466,7 +495,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 # 設定載入狀態
                 self.set_loading_state(self.loader_version_combo, self.loader_version_var)
 
-                # 先清空 cache
+                # 先清空 cache 再重新取得
                 if loader_type.lower() == "fabric":
                     self.loader_manager.clear_fabric_cache(parent=self.master)
                     self.loader_manager.preload_fabric_versions()
@@ -486,12 +515,12 @@ class CreateServerFrame(ctk.CTkFrame):
                 def update_ui():
                     try:
                         if (
-                            not hasattr(self.loader_version_combo, 'winfo_exists')
+                            not hasattr(self.loader_version_combo, "winfo_exists")
                             or not self.loader_version_combo.winfo_exists()
                         ):
                             return
                         if versions:
-                            version_names = [v.version if hasattr(v, 'version') else v for v in versions]
+                            version_names = [v.version if hasattr(v, "version") else v for v in versions]
                             self.loader_version_combo.configure(values=version_names)
                             # 預設選擇最新版本（第一個）
                             if version_names:
@@ -505,12 +534,6 @@ class CreateServerFrame(ctk.CTkFrame):
                         self.set_error_state(self.loader_version_combo, self.loader_version_var)
 
                 self._schedule_ui_update(update_ui)
-
-                # 更新狀態（可選）
-                if hasattr(self.master, 'update_status'):
-                    self.master.update_status(f"已載入 {loader_type} 載入器版本資訊")
-                if hasattr(self.master, 'set_status_indicator'):
-                    self.master.set_status_indicator("ready")
             except Exception:
                 self._schedule_ui_update(
                     lambda: self.set_error_state(self.loader_version_combo, self.loader_version_var)
@@ -518,10 +541,17 @@ class CreateServerFrame(ctk.CTkFrame):
 
         threading.Thread(target=do_reload, daemon=True).start()
 
-    def create_field(self, parent, row, label_text, default_value, var_name):
+    def create_field(self, parent, row, label_text, default_value, var_name) -> tuple:
         """
         建立文字輸入欄位
         Create a text input field.
+
+        Args:
+            parent: 父容器
+            row: 行號
+            label_text: 標籤文字
+            default_value: 預設值
+            var_name: 變數名稱
         """
         ctk.CTkLabel(parent, text=label_text, font=get_font(size=12, weight="bold")).grid(
             row=row, column=0, sticky="w", pady=5
@@ -535,10 +565,13 @@ class CreateServerFrame(ctk.CTkFrame):
         setattr(self, f"{var_name}_entry", entry)
         return var, entry
 
-    def create_buttons(self, parent):
+    def create_buttons(self, parent) -> None:
         """
         建立按鈕
         Create buttons.
+
+        Args:
+            parent: 父容器
         """
         # 按鈕容器
         button_container = ctk.CTkFrame(parent, fg_color="transparent")
@@ -565,8 +598,8 @@ class CreateServerFrame(ctk.CTkFrame):
         Reset the form to default values.
         """
         try:
-            if hasattr(self, 'release_versions') and self.release_versions:
-                latest_version = self.release_versions[0].get('id', '未知版本')
+            if hasattr(self, "release_versions") and self.release_versions:
+                latest_version = self.release_versions[0].get("id", "未知版本")
                 self.server_name_var.set(latest_version)
             else:
                 self.server_name_var.set("我的伺服器")
@@ -575,8 +608,8 @@ class CreateServerFrame(ctk.CTkFrame):
             self.loader_version_var.set("無")
             self.loader_version_combo.configure(values=["無"])
             # CustomDropdown 在設定 "無" 時會自動處理狀態
-            if hasattr(self, 'mc_version_combo') and self.mc_version_combo.cget('values'):
-                version_list = list(self.mc_version_combo.cget('values'))
+            if hasattr(self, "mc_version_combo") and self.mc_version_combo.cget("values"):
+                version_list = list(self.mc_version_combo.cget("values"))
                 if version_list:
                     self.mc_version_var.set(version_list[0])
             self.update_version_list()
@@ -587,10 +620,13 @@ class CreateServerFrame(ctk.CTkFrame):
             UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{str(e)}", self.winfo_toplevel())
 
     # === 2. 伺服器版本/載入器相關 ===
-    def update_versions(self, versions: list):
+    def update_versions(self, versions: list) -> None:
         """
         更新版本列表，並預設選擇最新版本
         Update the version list and default to the latest version.
+
+        Args:
+            versions: 版本列表
         """
         self.versions = versions
         self.release_versions = versions
@@ -599,43 +635,43 @@ class CreateServerFrame(ctk.CTkFrame):
         self.update_version_list()
         # 設定預設伺服器名稱為最新版本號
         if self.release_versions:
-            latest_version = self.release_versions[0].get('id')
+            latest_version = self.release_versions[0].get("id")
             # 只有在當前名稱是預設值時才更新
             if self.server_name_var.get() in ["我的伺服器", ""]:
                 self.server_name_var.set(latest_version)
 
-    def update_version_list(self):
+    def update_version_list(self) -> None:
         """
         更新版本列表顯示，並預設選擇最新版本
         只顯示穩定版且 server_url 不為 null 的版本
         Update the version list display and default to the latest version.
         Only show release versions with non-null server_url.
         """
-        if not hasattr(self, 'versions') or not self.versions:
+        if not hasattr(self, "versions") or not self.versions:
             self.mc_version_combo.configure(values=["載入中..."])
             self.mc_version_var.set("載入中...")
             return
 
         # 只顯示穩定版且 server_url 不為 null 的版本
-        display_versions = [v for v in self.release_versions if v.get('server_url') is not None]
+        display_versions = [v for v in self.release_versions if v.get("server_url") is not None]
 
         if not display_versions:
             self.mc_version_combo.configure(values=["無可用版本"], state="disabled")
             self.mc_version_var.set("無可用版本")
             return
 
-        version_names = [v.get('id') for v in display_versions]
+        version_names = [v.get("id") for v in display_versions]
 
         self.mc_version_combo.configure(values=version_names, state="readonly")  # 啟用下拉選單
 
         # 從第一項下拉選單開始，而非最新版本
         if display_versions:
-            first_version = display_versions[0].get('id')
+            first_version = display_versions[0].get("id")
             self.mc_version_var.set(first_version)
 
         self.update_server_config_ui()
 
-    def update_server_config_ui(self, event=None):
+    def update_server_config_ui(self, event=None) -> None:
         """
         根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單
         Update server name and loader version combo based on loader type and Minecraft version.
@@ -645,7 +681,7 @@ class CreateServerFrame(ctk.CTkFrame):
         name = self.server_name_var.get()
         auto_names = ["我的伺服器", "", f"Fabric {mc_version}", f"Forge {mc_version}", f"{mc_version}"]
         # 取得舊的 Minecraft 版本（用於自動更新伺服器名稱）
-        old_version = getattr(self, 'old_mc_version', None)
+        old_version = getattr(self, "old_mc_version", None)
         # 記錄目前選擇的版本，供下次變更時使用
         self.old_mc_version = mc_version
         # 自動命名伺服器名稱
@@ -672,17 +708,21 @@ class CreateServerFrame(ctk.CTkFrame):
             if not mc_version:
                 return
             current_key = f"{loader_type}_{mc_version}"
-            if hasattr(self, '_loading_key') and self._loading_key == current_key:
+            if hasattr(self, "_loading_key") and self._loading_key == current_key:
                 return
             self._loading_key = current_key
             # 在背景執行緒中載入載入器版本
             threading.Thread(target=self.load_loader_versions, args=(loader_type, mc_version), daemon=True).start()
 
-    def load_loader_versions(self, loader_type: str, mc_version: str):
+    def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
         """
         載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）
         Load loader versions based on the selected loader type and Minecraft version,
         defaulting to the latest version (using pre-loaded cached data).
+
+        Args:
+            loader_type: 載入器類型
+            mc_version: Minecraft 版本
         """
         try:
             # 先設定載入狀態
@@ -725,12 +765,12 @@ class CreateServerFrame(ctk.CTkFrame):
                         self.set_no_versions_state(self.loader_version_combo, self.loader_version_var)
 
                     # 清除載入標記
-                    if hasattr(self, '_loading_key'):
-                        delattr(self, '_loading_key')
+                    if hasattr(self, "_loading_key"):
+                        delattr(self, "_loading_key")
                 except Exception as e:
                     LogUtils.error(f"更新載入器版本 UI 失敗: {e}", "CreateServerFrame")
-                    if hasattr(self, '_loading_key'):
-                        delattr(self, '_loading_key')
+                    if hasattr(self, "_loading_key"):
+                        delattr(self, "_loading_key")
 
             self._schedule_ui_update(update_ui)
         except Exception as e:
@@ -742,8 +782,8 @@ class CreateServerFrame(ctk.CTkFrame):
                         self.set_error_state(self.loader_version_combo, self.loader_version_var)
                 except Exception:
                     pass
-                if hasattr(self, '_loading_key'):
-                    delattr(self, '_loading_key')
+                if hasattr(self, "_loading_key"):
+                    delattr(self, "_loading_key")
 
             self._schedule_ui_update(handle_error)
 
@@ -760,12 +800,17 @@ class CreateServerFrame(ctk.CTkFrame):
         # 驗證名稱不可重複（對比 servers 目錄下所有資料夾名稱）
         servers_root = self.server_manager.servers_root
         if (servers_root / server_name).exists():
-            UIUtils.show_error("名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.winfo_toplevel())
+            UIUtils.show_error(
+                "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.winfo_toplevel()
+            )
             return False
         # 檢查名稱是否已存在於 config
         if self.server_manager.server_exists(server_name):
             if not UIUtils.ask_yes_no_cancel(
-                "名稱衝突", f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?", self.winfo_toplevel(), show_cancel=False
+                "名稱衝突",
+                f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
+                self.winfo_toplevel(),
+                show_cancel=False,
             ):
                 return False
         # 檢查 Minecraft 版本
@@ -789,7 +834,7 @@ class CreateServerFrame(ctk.CTkFrame):
                     "記憶體超出限制",
                     f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n"
                     f"已自動調整為 {system_memory - 1}MB",
-                    self.winfo_toplevel()
+                    self.winfo_toplevel(),
                 )
                 # 自動調整記憶體設定到 system_memory-1
                 self.max_memory_var.set(str(system_memory - 1))
@@ -817,7 +862,7 @@ class CreateServerFrame(ctk.CTkFrame):
     def create_server(self):
         """
         建立伺服器
-        Create the server based on the form inputs.
+        Create the server.
         """
         if not self.validate_form():
             return
@@ -849,10 +894,13 @@ class CreateServerFrame(ctk.CTkFrame):
         # 在背景執行緒中建立伺服器
         threading.Thread(target=self.create_server_async, args=(config,), daemon=True).start()
 
-    def create_server_async(self, config: ServerConfig):
+    def create_server_async(self, config: ServerConfig) -> None:
         """
         非同步建立伺服器 - 只負責互動與下載，所有檔案/資料夾/屬性/啟動腳本交由 server_manager
         Asynchronous server creation - only responsible for UI interaction and download, all file/folder/properties/launch handled by server_manager.
+
+        Args:
+            config: 伺服器配置
         """
         parent_window = self.winfo_toplevel()  # 捕獲父視窗引用
         progress_dialog = None
@@ -919,10 +967,15 @@ class CreateServerFrame(ctk.CTkFrame):
 
             self._schedule_ui_update(on_error)
 
-    def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path):
+    def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
         """
         下載伺服器檔案（統一呼叫 loader_manager，支援進度回呼）
         Download server files (call loader_manager, support progress callback)
+
+        Args:
+            config: 伺服器配置
+            progress_dialog: 進度對話框
+            server_path: 伺服器路徑
         """
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
@@ -933,7 +986,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
         # 在背景執行緒呼叫 loader_manager 下載
         result = [None]
-        cancel_flag = {'cancelled': False}
+        cancel_flag = {"cancelled": False}
 
         def do_download():
             user_java_path = self.java_path_var.get().strip() or None
@@ -943,7 +996,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 UIUtils.show_error(
                     "下載流程參數異常",
                     f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
-                    parent_window
+                    parent_window,
                 )
                 result[0] = False
                 return
@@ -955,7 +1008,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_callback,
                 cancel_flag,
                 user_java_path,
-                parent_window
+                parent_window,
             )
             result[0] = ok
 
@@ -963,7 +1016,7 @@ class CreateServerFrame(ctk.CTkFrame):
         t.start()
         while t.is_alive():
             if progress_dialog.cancelled:
-                cancel_flag['cancelled'] = True
+                cancel_flag["cancelled"] = True
                 break
             time.sleep(0.1)
         if result[0] is False:
@@ -982,14 +1035,13 @@ class CreateServerFrame(ctk.CTkFrame):
     def _validate_download_parameters(self, loader_type: str, config) -> bool:
         """
         驗證下載參數是否有效
-        Validate download parameters for server creation.
 
-        Args:
-            loader_type: The loader type (forge, fabric, etc.)
-            config: Server configuration object
+        參數:
+            loader_type: 載入器類型（forge、fabric 等）
+            config: 伺服器設定物件
 
-        Returns:
-            bool: True if parameters are valid, False otherwise
+        回傳:
+            bool: 參數有效則回傳 True，否則回傳 False
         """
         # 基本參數驗證
         if not loader_type or loader_type == "unknown":

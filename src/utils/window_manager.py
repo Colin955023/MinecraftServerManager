@@ -19,19 +19,17 @@ class WindowManager:
     Windows 專用視窗管理器類別，處理動態大小調整、位置管理和 DPI 縮放
     Windows-specific window manager class for handling dynamic sizing, positioning, and DPI scaling
     """
-
     # ====== 螢幕資訊檢測 ======
-
     # 取得螢幕資訊
     @staticmethod
     def get_screen_info(window=None) -> Dict[str, Any]:
         """
         取得 Windows 系統的螢幕資訊，包含 DPI 縮放和工作區域
         Get Windows system screen information including DPI scaling and work area
-        
+
         Args:
             window: 可選的視窗物件，用於取得螢幕資訊
-            
+
         Returns:
             Dict[str, Any]: 包含螢幕寬高、DPI 縮放、可用區域等資訊的字典
         """
@@ -198,7 +196,7 @@ class WindowManager:
 
             # 如果記錄為最大化狀態
             if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
-                window.after(100, lambda: window.state('zoomed'))
+                window.after(100, lambda: window.state("zoomed"))
 
             LogUtils.debug_window_state(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
@@ -220,7 +218,7 @@ class WindowManager:
 
         try:
             # 檢查是否最大化
-            is_maximized = window.state() == 'zoomed'
+            is_maximized = window.state() == "zoomed"
 
             if not is_maximized:
                 # 取得當前視窗大小和位置
@@ -242,11 +240,12 @@ class WindowManager:
                     current_settings.get("y"),
                     True,
                 )
-            
+
             # 減少除錯訊息頻率：只有在沒有最近記錄時才顯示
             import time
+
             current_time = time.time()
-            if not hasattr(WindowManager, '_last_debug_time') or current_time - WindowManager._last_debug_time > 5:
+            if not hasattr(WindowManager, "_last_debug_time") or current_time - WindowManager._last_debug_time > 5:
                 LogUtils.debug_window_state("已儲存主視窗狀態")
                 WindowManager._last_debug_time = current_time
         except Exception as e:
@@ -321,7 +320,7 @@ class WindowManager:
             # 只處理主視窗的配置事件
             if event.widget == window:
                 # 延遲儲存狀態，避免頻繁寫入
-                if hasattr(window, '_save_timer'):
+                if hasattr(window, "_save_timer"):
                     window.after_cancel(window._save_timer)
                 window._save_timer = window.after(1000, lambda: WindowManager.save_main_window_state(window))
 
@@ -330,6 +329,6 @@ class WindowManager:
             WindowManager.save_main_window_state(window)
 
         # 綁定事件
-        window.bind('<Configure>', on_configure)
-        window.bind('<Map>', on_state_change)
-        window.bind('<Unmap>', on_state_change)
+        window.bind("<Configure>", on_configure)
+        window.bind("<Map>", on_state_change)
+        window.bind("<Unmap>", on_state_change)

@@ -36,7 +36,7 @@ pip install -r requirements.txt
 python minecraft_server_manager.py
 
 # 快速測試（可選）
-scripts/quick_test.bat
+quick_test.bat
 ```
 
 ### 🎯 快速建立伺服器

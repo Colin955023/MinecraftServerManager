@@ -25,21 +25,22 @@ class DialogUtils:
     對話框創建工具類別
     Dialog creation utility class for modal windows and common dialogs
     """
-
     # 創建模態對話框的通用函數
     @staticmethod
-    def create_modal_dialog(parent, title: str, size: tuple = None, resizable: bool = True, center: bool = True):
+    def create_modal_dialog(
+        parent, title: str, size: tuple = None, resizable: bool = True, center: bool = True
+    ) -> ctk.CTkToplevel:
         """
         創建標準模態對話框，統一視窗屬性設定
         Create standard modal dialog with unified window properties setup
-        
+
         Args:
             parent: 父視窗物件
             title (str): 對話框標題
             size (tuple): 視窗大小 (width, height)，None 表示自動計算
             resizable (bool): 是否可調整大小
             center (bool): 是否居中顯示
-            
+
         Returns:
             CTkToplevel: 設定完成的對話框物件
         """
@@ -72,18 +73,17 @@ class IconUtils:
     統一的圖示綁定工具類別
     Unified icon binding utility class for window icon management
     """
-
     # 設定視窗圖示（無置頂邏輯）
     @staticmethod
-    def set_window_icon(window, delay_ms=200):
+    def set_window_icon(window, delay_ms=200) -> None:
         """
         只設定視窗圖示，不執行任何置頂邏輯，適用於已手動設定 transient 的對話框
         Only set window icon without any positioning logic, suitable for dialogs with manual transient setup
-        
+
         Args:
             window: 要設定圖示的視窗物件
             delay_ms (int): 延遲毫秒數，確保視窗完全初始化
-            
+
         Returns:
             None
         """
@@ -96,7 +96,7 @@ class IconUtils:
                     return
 
                 # 使用統一的路徑工具
-                icon_path = PathUtils.get_assets_path() / 'icon.ico'
+                icon_path = PathUtils.get_assets_path() / "icon.ico"
                 if icon_path.exists():
                     window.iconbitmap(str(icon_path))
                     # 強制刷新視窗以確保圖示生效
@@ -113,7 +113,7 @@ class IconUtils:
 
         # 延遲綁定圖示，確保視窗完全初始化完成
         try:
-            if hasattr(window, 'after') and hasattr(window, 'winfo_exists'):
+            if hasattr(window, "after") and hasattr(window, "winfo_exists"):
                 # 使用更長的延遲確保視窗完全載入
                 window.after(delay_ms, _delayed_icon_bind)
                 # 額外的備用嘗試，以防第一次失敗
@@ -130,7 +130,6 @@ class UIUtils:
     UI 工具類別：常用視窗、訊息框、檔案/資料夾選擇等功能
     UI utility class for common windows, message boxes, file/folder selection and other UI functions
     """
-
     # 統一設定視窗屬性
     @staticmethod
     def setup_window_properties(
@@ -142,11 +141,11 @@ class UIUtils:
         center_on_parent=True,
         make_modal=True,
         delay_ms=200,
-    ):
+    ) -> None:
         """
         統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能
         Unified window properties setup function that integrates icon binding, window centering, and modal setup
-        
+
         Args:
             window: 要設定的視窗物件
             parent: 父視窗物件，若為 None 則使用螢幕置中
@@ -156,17 +155,13 @@ class UIUtils:
             center_on_parent (bool): 是否相對於父視窗置中，False 則螢幕置中
             make_modal (bool): 是否設為模態視窗（transient + grab_set）
             delay_ms (int): 圖示綁定延遲毫秒數，確保不被覆蓋
-            
+
         Returns:
             None
         """
         # 設定視窗大小與置中，統一呼叫 WindowManager 的 setup_dialog_window
         WindowManager.setup_dialog_window(
-            window,
-            parent=parent,
-            width=width,
-            height=height,
-            center_on_parent=center_on_parent
+            window, parent=parent, width=width, height=height, center_on_parent=center_on_parent
         )
         # 設定模態視窗屬性
         if make_modal and parent:
@@ -183,16 +178,16 @@ class UIUtils:
 
     # 顯示錯誤對話框
     @staticmethod
-    def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False):
+    def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
         """
         顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中
         Display error message dialog using tk with automatic icon and centering handling
-        
+
         Args:
             title (str): 對話框標題
             message (str): 錯誤訊息內容
             parent: 父視窗物件，None 則使用臨時根視窗
-            
+
         Returns:
             None
         """
@@ -204,7 +199,7 @@ class UIUtils:
 
                 if topmost:
                     root.attributes("-topmost", True)
-                
+
                 # 使用 setup_window_properties 統一處理視窗屬性
                 UIUtils.setup_window_properties(
                     root,
@@ -214,7 +209,7 @@ class UIUtils:
                     bind_icon=True,
                     center_on_parent=True,  # 螢幕置中
                     make_modal=True,
-                    delay_ms=50
+                    delay_ms=50,
                 )
 
                 tk.messagebox.showerror(title, message, parent=root)
@@ -227,16 +222,16 @@ class UIUtils:
 
     # 顯示警告對話框
     @staticmethod
-    def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False):
+    def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
         """
         顯示警告訊息對話框，使用 tk 並自動處理圖示和置中
         Display warning message dialog using tk with automatic icon and centering handling
-        
+
         Args:
             title (str): 對話框標題
             message (str): 警告訊息內容
             parent: 父視窗物件，None 則使用臨時根視窗
-            
+
         Returns:
             None
         """
@@ -258,7 +253,7 @@ class UIUtils:
                     bind_icon=True,
                     center_on_parent=True,  # 螢幕置中
                     make_modal=True,
-                    delay_ms=50
+                    delay_ms=50,
                 )
 
                 tk.messagebox.showwarning(title, message, parent=root)
@@ -271,16 +266,16 @@ class UIUtils:
 
     # 顯示資訊對話框
     @staticmethod
-    def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False):
+    def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
         """
         顯示資訊對話框，使用 tk 並自動處理圖示和置中
         Display information dialog using tk with automatic icon and centering handling
-        
+
         Args:
             title (str): 對話框標題
             message (str): 資訊訊息內容
             parent: 父視窗物件，None 則使用臨時根視窗
-            
+
         Returns:
             None
         """
@@ -302,7 +297,7 @@ class UIUtils:
                     bind_icon=True,
                     center_on_parent=True,  # 螢幕置中
                     make_modal=True,
-                    delay_ms=50
+                    delay_ms=50,
                 )
 
                 tk.messagebox.showinfo(title, message, parent=root)
@@ -321,14 +316,14 @@ class UIUtils:
         """
         顯示確認對話框，支援是/否/取消選項，使用 tk 並呼叫 setup_window_properties
         Display confirmation dialog with Yes/No/Cancel options using tk and setup_window_properties
-        
+
         Args:
             title (str): 對話框標題
             message (str): 顯示訊息
             parent: 父視窗物件
             show_cancel (bool): 是否顯示取消按鈕
             topmost (bool): 是否系統級置頂
-            
+
         Returns:
             bool or None: True=點擊是, False=點擊否, None=點擊取消 (僅當 show_cancel=True 時)
         """
@@ -350,7 +345,7 @@ class UIUtils:
                     bind_icon=True,
                     center_on_parent=True,  # 螢幕置中
                     make_modal=False,
-                    delay_ms=50
+                    delay_ms=50,
                 )
 
                 if show_cancel:
@@ -370,7 +365,7 @@ class UIUtils:
             return False if not show_cancel else None
 
     @staticmethod
-    def apply_unified_dropdown_styling(dropdown_widget):
+    def apply_unified_dropdown_styling(dropdown_widget) -> None:
         """
         統一下拉選單樣式
         Apply unified dropdown styling for light theme with mouse wheel support
@@ -414,7 +409,7 @@ class UIUtils:
                         dropdown_widget.set(values[new_index])
 
                         # 如果有 command 回調，執行它
-                        if hasattr(dropdown_widget, '_command') and dropdown_widget._command:
+                        if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
                             dropdown_widget._command(values[new_index])
 
                 except Exception as e:
@@ -427,7 +422,7 @@ class UIUtils:
             LogUtils.warning(f"應用下拉選單樣式失敗: {e}")
 
     @staticmethod
-    def add_mousewheel_support(widget):
+    def add_mousewheel_support(widget) -> None:
         """
         為下拉選單添加鼠標滾輪支援
         Add mouse wheel support to dropdown widgets
@@ -436,9 +431,9 @@ class UIUtils:
         def on_mousewheel(event):
             try:
                 # 嘗試獲取下拉清單的內部元件
-                if hasattr(widget, '_dropdown_menu') and widget._dropdown_menu.winfo_exists():
+                if hasattr(widget, "_dropdown_menu") and widget._dropdown_menu.winfo_exists():
                     # 如果下拉清單是開啟的，滾動選項
-                    if hasattr(widget, '_dropdown_frame') and widget._dropdown_frame.winfo_viewable():
+                    if hasattr(widget, "_dropdown_frame") and widget._dropdown_frame.winfo_viewable():
                         # CustomTkinter 內部處理滾輪事件
                         if event.delta > 0:
                             # 向上滾動
@@ -469,7 +464,7 @@ class UIUtils:
                             widget.set(values[current_index + 1])
 
                         # 觸發變更事件
-                        if hasattr(widget, '_variable') and widget._variable:
+                        if hasattr(widget, "_variable") and widget._variable:
                             widget._variable.set(widget.get())
 
             except Exception as e:
@@ -478,11 +473,11 @@ class UIUtils:
         # 綁定滾輪事件
         widget.bind("<MouseWheel>", on_mousewheel)
         # Linux 系統的滾輪事件
-        widget.bind("<Button-4>", lambda e: on_mousewheel(type('Event', (), {'delta': 120})()))
-        widget.bind("<Button-5>", lambda e: on_mousewheel(type('Event', (), {'delta': -120})()))
+        widget.bind("<Button-4>", lambda e: on_mousewheel(type("Event", (), {"delta": 120})()))
+        widget.bind("<Button-5>", lambda e: on_mousewheel(type("Event", (), {"delta": -120})()))
 
     @staticmethod
-    def create_styled_button(parent, text, command, button_type="secondary", **kwargs):
+    def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
         """
         建立統一樣式的按鈕
         建立具有統一樣式的按鈕，自動應用全域DPI縮放因子
@@ -500,37 +495,37 @@ class UIUtils:
         # 根據按鈕類型設定樣式
         if button_type == "primary":
             button_style = {
-                "fg_color": ('#1f4e79', '#0f2a44'),  # 更深的藍色，提高對比
-                "hover_color": ('#0f2a44', '#071925'),
-                "text_color": ('#ffffff', '#ffffff'),  # 確保文字為白色
-                "font": ctk.CTkFont(family="Microsoft JhengHei", size=int(18 * scale_factor), weight="bold"),
+                "fg_color": ("#1f4e79", "#0f2a44"),  # 更深的藍色，提高對比
+                "hover_color": ("#0f2a44", "#071925"),
+                "text_color": ("#ffffff", "#ffffff"),  # 確保文字為白色
+                "font": font_manager.get_font(family="Microsoft JhengHei", size=18, weight="bold"),
                 "width": int(180 * scale_factor),
                 "height": int(60 * scale_factor),
             }
         elif button_type == "secondary":
             button_style = {
-                "fg_color": ('#2d3748', '#1a202c'),  # 深灰色背景
-                "hover_color": ('#1a202c', '#0d1117'),
-                "text_color": ('#ffffff', '#ffffff'),  # 白色文字
-                "font": ctk.CTkFont(family="Microsoft JhengHei", size=int(18 * scale_factor)),
+                "fg_color": ("#2d3748", "#1a202c"),  # 深灰色背景
+                "hover_color": ("#1a202c", "#0d1117"),
+                "text_color": ("#ffffff", "#ffffff"),  # 白色文字
+                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(120 * scale_factor),
                 "height": int(42 * scale_factor),
             }
         elif button_type == "small":
             button_style = {
-                "fg_color": ('#4a5568', '#2d3748'),  # 灰色背景
-                "hover_color": ('#2d3748', '#1a202c'),
-                "text_color": ('#ffffff', '#ffffff'),  # 白色文字確保對比
-                "font": ctk.CTkFont(family="Microsoft JhengHei", size=int(18 * scale_factor)),
+                "fg_color": ("#4a5568", "#2d3748"),  # 灰色背景
+                "hover_color": ("#2d3748", "#1a202c"),
+                "text_color": ("#ffffff", "#ffffff"),  # 白色文字確保對比
+                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(80 * scale_factor),
                 "height": int(30 * scale_factor),
             }
         elif button_type == "cancel":
             button_style = {
-                "fg_color": ('#dc2626', '#991b1b'),  # 更深的紅色
-                "hover_color": ('#991b1b', '#7f1d1d'),
-                "text_color": ('#ffffff', '#ffffff'),  # 白色文字
-                "font": ctk.CTkFont(family="Microsoft JhengHei", size=int(18 * scale_factor)),
+                "fg_color": ("#dc2626", "#991b1b"),  # 更深的紅色
+                "hover_color": ("#991b1b", "#7f1d1d"),
+                "text_color": ("#ffffff", "#ffffff"),  # 白色文字
+                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(120 * scale_factor),
                 "height": int(48 * scale_factor),
             }
@@ -564,7 +559,7 @@ class ProgressDialog:
                 self.dialog.focus_set()
             except Exception as e:
                 LogUtils.warning(f"設定模態視窗失敗: {e}")
-        
+
         # 延遲綁定圖示
         IconUtils.set_window_icon(self.dialog, 250)
 
@@ -573,7 +568,7 @@ class ProgressDialog:
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 狀態標籤
-        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=ctk.CTkFont(size=12))
+        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=font_manager.get_font(size=12))
         self.status_label.pack(pady=(10, 15))
 
         # 進度條
@@ -582,7 +577,7 @@ class ProgressDialog:
         self.progress.set(0)
 
         # 百分比標籤
-        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=ctk.CTkFont(size=11))
+        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=font_manager.get_font(size=11))
         self.percent_label.pack()
 
         # 取消按鈕（可選）
@@ -593,7 +588,7 @@ class ProgressDialog:
                 command=self.cancel,
                 fg_color=("#ef4444", "#dc2626"),
                 hover_color=("#dc2626", "#b91c1c"),
-                font=ctk.CTkFont(size=12),
+                font=font_manager.get_font(size=12),
                 width=80,
                 height=38,
             )
@@ -601,7 +596,7 @@ class ProgressDialog:
 
         self.cancelled = False
 
-    def update_progress(self, percent, status_text):
+    def update_progress(self, percent, status_text) -> bool:
         """
         更新進度
         Update the progress.
@@ -615,7 +610,7 @@ class ProgressDialog:
         self.dialog.update()
         return True
 
-    def cancel(self):
+    def cancel(self) -> None:
         """
         取消操作
         Cancel the operation.
@@ -623,7 +618,7 @@ class ProgressDialog:
         self.cancelled = True
         self.dialog.destroy()
 
-    def close(self):
+    def close(self) -> None:
         """
         關閉對話框
         Close the dialog.

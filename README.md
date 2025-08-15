@@ -27,7 +27,7 @@ Minecraft 伺服器建立與管理工具，**參考 [PrismLauncher](https://gith
 
 ### 🚦 智慧 Java 管理
 - **自動偵測**：根據常見安裝路徑偵測本機所有 Java 版本
-- **智慧選擇**：自動選擇最適合的 Java 版本（依據 Minecraft 與載入器需求）
+- **智慧選擇**：自動選擇最適合的 Java 版本（根據Minecraft官方json選擇）
 - **自動下載**：若本機無合適版本，會自動下載 Microsoft JDK
 - **多來源支持**：同時支援 Microsoft、Adoptium、Azul、Oracle JDK
 
@@ -70,7 +70,7 @@ Minecraft 伺服器建立與管理工具，**參考 [PrismLauncher](https://gith
 
 ### 📦 安裝與啟動
 
-#### 方法一：直接執行（開發環境）
+#### 直接執行（開發環境）
 ```bash
 # 1. 複製或下載專案
 git clone https://github.com/Colin955023/MinecraftServerManager.git
@@ -81,12 +81,6 @@ pip install -r requirements.txt
 
 # 3. 啟動程式
 python minecraft_server_manager.py
-```
-
-#### 方法二：編譯成可執行檔
-```bash
-# 編譯成 .exe 檔案（含依賴資料夾）
-scripts/build.bat
 ```
 
 ## 🏗️ 建置說明
@@ -110,17 +104,12 @@ scripts/build.bat
 - **依賴檔案**：所有必要的函式庫和資源檔案
 - **可攜性**：整個資料夾可複製到其他 Windows 電腦使用
 
-### 建置選項說明
-- **onefile=False**：產生資料夾式分發包，便於除錯和維護
-- **console=False**：隱藏控制台視窗，提供更好的使用者體驗
-- **upx=True**：啟用檔案壓縮，減少檔案大小
-
 ## 🧪 測試
 
 ### 快速功能測試
 ```bash
 # 執行整合功能測試(需要有整個儲存庫src中的核心檔案)
-scripts/quick_test.py
+quick_test.py
 ```
 
 測試內容包括：

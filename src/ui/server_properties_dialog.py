@@ -14,6 +14,7 @@ from ..core.properties_helper import ServerPropertiesHelper
 from ..core.server_manager import ServerConfig, ServerManager
 from ..utils.font_manager import font_manager, get_dpi_scaled_size, get_font
 from ..utils.ui_utils import UIUtils
+from ..utils.log_utils import LogUtils
 
 class ServerPropertiesDialog:
     """
@@ -22,7 +23,6 @@ class ServerPropertiesDialog:
     提供視覺化的 server.properties 編輯介面
     (Provides a visual interface for editing server.properties)
     """
-
     def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
         self.parent = parent
         self.server_config = server_config
@@ -48,6 +48,8 @@ class ServerPropertiesDialog:
         UIUtils.setup_window_properties(
             window=self.dialog,
             parent=self.parent,
+            width=int(1200 * font_manager.get_scale_factor()),
+            height=int(900 * font_manager.get_scale_factor()),
             bind_icon=True,
             center_on_parent=True,  # 使用螢幕置中
             make_modal=True,
@@ -57,15 +59,15 @@ class ServerPropertiesDialog:
         # 顯示對話框
         self.show_dialog()
 
-    def setup_dialog(self):
+    def setup_dialog(self) -> None:
         """
         設定對話框
         """
         self.dialog.title(f"伺服器設定 - {self.server_config.name}")
         # 移除固定大小設定，讓視窗根據內容動態調整
-        # 只設定最小尺寸，縮放 1.5 倍
-        min_width = 1200  # 1200
-        min_height = 900  # 900
+        # 只設定最小尺寸
+        min_width = int(1200 * font_manager.get_scale_factor())  # 1200 * DPI
+        min_height = int(900 * font_manager.get_scale_factor())  # 900 * DPI
         self.dialog.minsize(min_width, min_height)
         self.dialog.resizable(True, True)
 
@@ -73,9 +75,9 @@ class ServerPropertiesDialog:
         try:
             self.dialog.configure(bg="#ffffff")  # 淺色背景
         except Exception as e:
-            print(f"應用對話框主題失敗: {e}")
+            LogUtils.error(f"應用對話框主題失敗: {e}", "ServerPropertiesDialog")
 
-    def create_widgets(self):
+    def create_widgets(self) -> None:
         """
         建立介面元件
         Create the interface widgets
@@ -89,7 +91,7 @@ class ServerPropertiesDialog:
         title_label = ttk.Label(
             main_frame,
             text=f"🛠️ {self.server_config.name} - server.properties",
-            font=("Microsoft JhengHei", int(21 * font_manager.get_scale_factor()), "bold"),  # 21px
+            font=get_font("Microsoft JhengHei", 21, "bold"),  # 21px
         )
         title_label.pack(pady=(0, get_dpi_scaled_size(15)))
 
@@ -146,12 +148,12 @@ class ServerPropertiesDialog:
         help_label = ctk.CTkLabel(
             button_frame,
             text="💡 將滑鼠移到設定項目上可查看詳細說明",
-            font=get_font(size=14),  # 13.5px -> 14px
+            font=get_font(size=14),
             text_color=("gray60", "gray50"),
         )
         help_label.pack(side="left")
 
-    def create_property_tabs(self):
+    def create_property_tabs(self) -> None:
         """
         建立屬性分頁，並自動補充未分類屬性到「其他」分頁
         Create the property tabs and automatically add uncategorized properties to the "Other" tab
@@ -166,7 +168,7 @@ class ServerPropertiesDialog:
         # 這裡直接用 server_config.properties，若要更完整可合併 default_properties
         all_properties = dict(self.server_config.properties or {})
         # 若 server_manager 有 default，合併進來
-        if hasattr(self.server_manager, 'get_default_server_properties'):
+        if hasattr(self.server_manager, "get_default_server_properties"):
             try:
                 defaults = self.server_manager.get_default_server_properties()
                 all_properties = {**defaults, **all_properties}
@@ -240,7 +242,7 @@ class ServerPropertiesDialog:
 
             canvas.bind("<MouseWheel>", _on_mousewheel)
 
-    def create_property_controls(self, parent, properties):
+    def create_property_controls(self, parent, properties) -> None:
         """
         建立屬性控制項
         Create the property controls for the given properties
@@ -255,7 +257,7 @@ class ServerPropertiesDialog:
             label = ttk.Label(
                 prop_frame,
                 text=f"{prop_name}:",
-                font=("Microsoft JhengHei", int(14 * font_manager.get_scale_factor()), "bold"),  # 14 * DPI
+                font=get_font("Microsoft JhengHei", 14, "bold"),  # 14 * DPI
             )
             label.pack(anchor="w")
 
@@ -356,9 +358,9 @@ class ServerPropertiesDialog:
                 parent,
                 variable=var,
                 values=choice_props[prop_name],
-                font=get_font(size=11),  # 16.5px -> 17px
+                font=get_font(size=11),
                 dropdown_font=get_font(size=11),
-                width=get_dpi_scaled_size(300),  # 放大寬度 300px
+                width=get_dpi_scaled_size(300),
             )
             widget.pack(fill="x", pady=get_dpi_scaled_size(3))
 
@@ -366,7 +368,7 @@ class ServerPropertiesDialog:
             try:
                 UIUtils.apply_unified_dropdown_styling(widget)
             except Exception as e:
-                print(f"套用下拉選單樣式失敗: {e}")
+                LogUtils.error(f"套用下拉選單樣式失敗: {e}", "ServerPropertiesDialog")
 
         elif prop_name in range_props:
             # 數字範圍
@@ -377,7 +379,7 @@ class ServerPropertiesDialog:
                 from_=min_val,
                 to=max_val,
                 width=get_dpi_scaled_size(30),  # 放大寬度
-                font=("Microsoft JhengHei", int(15 * font_manager.get_scale_factor())),  # 10 * 1.5 * DPI
+                font=get_font("Microsoft JhengHei", 15),
             )
             widget.pack(anchor="w")
 
@@ -386,13 +388,13 @@ class ServerPropertiesDialog:
             widget = ttk.Entry(
                 parent,
                 textvariable=var,
-                font=("Microsoft JhengHei", int(15 * font_manager.get_scale_factor())),  # 10 * 1.5 * DPI
+                font=get_font("Microsoft JhengHei", 15),
             )
             widget.pack(fill="x")
 
         return widget
 
-    def create_tooltip(self, widget, prop_name: str):
+    def create_tooltip(self, widget, prop_name: str) -> None:
         """
         建立工具提示
         Create a tooltip for the given widget
@@ -412,7 +414,7 @@ class ServerPropertiesDialog:
                 relief="solid",
                 wraplength=get_dpi_scaled_size(600),
                 justify="left",
-                font=("Microsoft JhengHei", int(14 * font_manager.get_scale_factor())),
+                font=get_font("Microsoft JhengHei", 14),
             )
             label.pack()
 
@@ -421,13 +423,13 @@ class ServerPropertiesDialog:
             tooltip.after(5000, tooltip.destroy)
 
         def hide_tooltip(event):
-            if hasattr(widget, 'tooltip'):
+            if hasattr(widget, "tooltip"):
                 widget.tooltip.destroy()
 
         widget.bind("<Enter>", show_tooltip)
         widget.bind("<Leave>", hide_tooltip)
 
-    def load_properties(self):
+    def load_properties(self) -> None:
         """
         載入屬性值
         Load the property values from the server configuration or file
@@ -446,7 +448,7 @@ class ServerPropertiesDialog:
             if prop_name in self.property_vars:
                 self.property_vars[prop_name].set(str(value))
 
-    def save_properties(self):
+    def save_properties(self) -> None:
         """
         儲存屬性
         Save the properties to the server configuration or file
@@ -473,14 +475,14 @@ class ServerPropertiesDialog:
         except Exception as e:
             UIUtils.show_error("錯誤", f"儲存時發生錯誤: {e}", self.dialog)
 
-    def show_dialog(self):
+    def show_dialog(self) -> None:
         """
         顯示對話框
         """
         self.dialog.focus_set()
         self.dialog.wait_window()
 
-    def reset_properties(self):
+    def reset_properties(self) -> None:
         """
         重設所有屬性為預設值
         Reset all properties to default values

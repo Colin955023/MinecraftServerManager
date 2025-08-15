@@ -4,8 +4,8 @@ chcp 65001 >nul
 title Minecraft 伺服器管理器 - 建置安裝包
 cd /d %~dp0..
 
-REM 允許從外部傳入版本號，未指定則預設 1.0.0
-if "%APP_VERSION%"=="" set APP_VERSION=1.0.0
+REM 允許從外部傳入版本號，未指定則預設 1.1
+if "%APP_VERSION%"=="" set APP_VERSION=1.1
 if "%APP_NAME%"=="" set APP_NAME=MinecraftServerManager
 
 echo [0/3] 清除舊的 build/ 與 dist/ ...

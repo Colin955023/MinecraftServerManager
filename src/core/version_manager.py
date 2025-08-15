@@ -15,46 +15,40 @@ import os
 from src.utils.http_utils import HTTPUtils
 from src.utils.runtime_paths import ensure_dir, get_cache_dir
 from src.utils.log_utils import LogUtils
+from src.utils.ui_utils import UIUtils
 
 class MinecraftVersionManager:
     """
     Minecraft 版本管理器類別，提供版本查詢和快取管理
     Minecraft version manager class with version querying and cache management capabilities
     """
-
     # ====== 初始化與快取管理 ======
     # 初始化版本管理器
     def __init__(self):
         """
         初始化 Minecraft 版本管理器
         Initialize Minecraft version manager
-        
-        Args:
-            None
-            
-        Returns:
-            None
         """
         self.version_manifest_url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
-        self.cache_file = str(ensure_dir(get_cache_dir()) / 'mc_versions_cache.json')
+        self.cache_file = str(ensure_dir(get_cache_dir()) / "mc_versions_cache.json")
 
     # 儲存本地快取
-    def _save_local_cache(self, versions: list):
+    def _save_local_cache(self, versions: list) -> None:
         """
         儲存版本列表到本地快取檔案
         Save version list to local cache file
-        
+
         Args:
             versions (list): 版本資料列表
-            
+
         Returns:
             None
         """
         try:
-            # Ensure cache directory exists before writing
+            # 在寫入前確保快取目錄存在
             cache_path = Path(self.cache_file)
             ensure_dir(cache_path.parent)
-            with open(self.cache_file, 'w', encoding='utf-8') as f:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(versions, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
@@ -65,10 +59,10 @@ class MinecraftVersionManager:
         """
         從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊
         Fetch all Minecraft version list from official API with multi-threaded detail querying
-        
+
         Args:
             max_workers (int): 最大執行緒數量
-            
+
         Returns:
             list: 版本資料列表
         """
@@ -82,7 +76,7 @@ class MinecraftVersionManager:
                 # 只處理正式發布版本，過濾掉快照版本和其他類型
                 if version_data["type"] != "release":
                     continue
-                    
+
                 vid = version_data["id"]
                 new_v = {
                     "id": vid,
@@ -111,13 +105,16 @@ class MinecraftVersionManager:
             return versions
         except Exception as e:
             LogUtils.error(f"無法取得版本資訊: {e}", "VersionManager")
+            UIUtils.show_error("取得版本失敗", f"無法從官方 API 獲取版本資訊: {e}")
             return []
 
     def get_versions(self) -> list:
         """
-        取得所有 Minecraft 版本列表，回傳正式發布版本。
-        如果快取檔案不存在，會自動獲取版本。
-        回傳 dict list，快取中已只包含 release 版本
+        取得 Minecraft 版本列表
+        Get Minecraft version list
+
+        Returns:
+            list: Minecraft 版本列表
         """
         try:
             if not os.path.exists(self.cache_file):
@@ -127,11 +124,12 @@ class MinecraftVersionManager:
                 if not os.path.exists(self.cache_file):
                     return []
 
-            with open(self.cache_file, 'r', encoding='utf-8') as f:
+            with open(self.cache_file, "r", encoding="utf-8") as f:
                 versions = json.load(f)
 
             # 直接回傳版本列表，快取中已只包含正式發布版本
             return versions
         except Exception as e:
             LogUtils.debug(f"獲取版本時發生錯誤: {e}", "VersionManager")
+            UIUtils.show_error("獲取版本失敗", f"無法從快取獲取版本資訊: {e}")
             return []
