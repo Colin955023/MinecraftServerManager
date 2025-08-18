@@ -348,7 +348,7 @@ class ServerManager:
                     encoding="utf-8",
                     bufsize=0,  # 無緩衝，立即輸出
                     universal_newlines=True,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)  # 隱藏 console 視窗
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # 隱藏 console 視窗
                 )
 
                 # 檢查進程是否立即失敗

@@ -561,7 +561,7 @@ class MinecraftServerManager:
         info_frame.pack(side="bottom", fill="x", padx=20, pady=20)
 
         version_label = ctk.CTkLabel(
-            info_frame, text="版本 1.1", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
+            info_frame, text="版本 1.2", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
         )
         version_label.pack(anchor="w")
 

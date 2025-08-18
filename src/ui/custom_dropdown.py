@@ -204,7 +204,7 @@ class CustomDropdown(ctk.CTkFrame):
         self.dropdown_window.focus_set()
 
         # 捕獲全域點擊事件來關閉下拉選單
-        self.dropdown_window.bind("<Button-1>", self._close_dropdown())
+        self.dropdown_window.bind("<Button-1>", self._close_dropdown)
 
         # 延遲綁定全域點擊和焦點事件，避免立即觸發關閉
         self.after(150, self._delayed_bind_events)
@@ -220,7 +220,7 @@ class CustomDropdown(ctk.CTkFrame):
             # 綁定全域點擊事件
             self._bind_global_click()
 
-    def _close_dropdown(self) -> None:
+    def _close_dropdown(self, event=None) -> None:
         """關閉下拉選單"""
         if not self.is_dropdown_open:
             return

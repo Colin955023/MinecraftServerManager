@@ -118,11 +118,22 @@ class LoaderManager:
         """
         lt = self._standardize_loader_type(loader_type, loader_version)
 
-        # 1. 取得 Java 執行檔路徑
+        # 1. 取得 Java 執行檔路徑（先找，找不到就自動安裝再找一次）
         if user_java_path and os.path.exists(user_java_path):
             java_path = user_java_path
         else:
-            java_path = java_utils.get_best_java_path(minecraft_version, parent=parent_window)
+            java_path = java_utils.get_best_java_path(minecraft_version)
+            if not java_path:
+                from src.utils.java_downloader import install_java_with_winget
+                required_major = java_utils.get_required_java_major(minecraft_version)
+                install_java_with_winget(required_major)
+                # 直接用 get_best_java_path 搜尋
+                candidates = java_utils.get_all_local_java_candidates()
+                java_path = None
+                for path, major in candidates:
+                    if major == required_major:
+                        java_path = path
+                        break
         if not java_path:
             return False
 

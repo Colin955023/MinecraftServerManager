@@ -116,12 +116,10 @@ class CreateServerFrame(ctk.CTkFrame):
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
                 return
-            java_path = java_utils.get_best_java_path(mc_version, parent=self)
+            java_path = java_utils.get_best_java_path(mc_version, ask_download=True)
             if java_path:
                 java_path_win = os.path.normpath(java_path)
                 self.java_path_var.set(java_path_win)
-            else:
-                java_utils.prompt_user_to_download_java()
 
         auto_btn = UIUtils.create_styled_button(parent, "自動偵測", auto_detect, "small")
         auto_btn.grid(row=row, column=3, padx=(8, 0), pady=5)

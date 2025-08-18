@@ -1,7 +1,7 @@
 ; Inno Setup 安裝腳本（繁體中文）
 ; 可由 build_installer.bat 傳入 /DAppVersion 與 /DAppName 覆蓋下述定義
 #define GetStringDef(param, def) (param == "" ? def : param)
-#define AppVersion GetStringDef(AppVersion, "1.1")
+#define AppVersion GetStringDef(AppVersion, "1.2")
 #define AppName GetStringDef(AppName, "MinecraftServerManager")
 
 [Setup]
@@ -32,10 +32,11 @@ LanguageDetectionMethod=locale
 [Languages]
 Name: "chinesetraditional"; MessagesFile: "compiler:Languages\\ChineseTraditional.isl"
 
+
 [Files]
-; 打包 PyInstaller one-folder 的輸出並排除常見開發檔案
+; 打包 PyInstaller one-folder 的輸出並排除常見開發檔案，並排除 user_settings.json（實際上不會有這個檔案）
 Source: "..\dist\MinecraftServerManager\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; \
-Excludes: "__pycache__\*;*.pyc;*.pyo;*.pdb;*.map;*.log;.DS_Store;Thumbs.db;*.tmp;*.temp;.git*;.vs*;node_modules\*"
+Excludes: "user_settings.json;__pycache__\*;*.pyc;*.pyo;*.pdb;*.map;*.log;.DS_Store;Thumbs.db;*.tmp;*.temp;.git*;.vs*;node_modules\*"
 
 [Icons]
 Name: "{group}\Minecraft 伺服器管理器"; Filename: "{app}\MinecraftServerManager.exe"; IconFilename: "{app}\assets\icon.ico"
@@ -50,7 +51,7 @@ Filename: "{app}\MinecraftServerManager.exe"; Description: "安裝後立即執�
 [Code]
 function GetDataRoot(): string;
 begin
-  Result := ExpandConstant('{localappdata}\MinecraftServerManager');
+  Result := ExpandConstant('{localappdata}\\Programs\\MinecraftServerManager');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
