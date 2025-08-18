@@ -44,7 +44,8 @@ def get_user_data_dir() -> Path:
     Returns:
         Path: 使用者資料目錄路徑
     """
-    return _get_localappdata() / APP_NAME
+    # 修改：將資料目錄移動到 %LOCALAPPDATA%\Programs\MinecraftServerManager
+    return _get_localappdata() / "Programs" / "MinecraftServerManager"
 
 # 取得快取目錄
 def get_cache_dir() -> Path:

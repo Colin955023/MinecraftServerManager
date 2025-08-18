@@ -13,19 +13,19 @@ import os
 import re
 import subprocess
 # ====== 專案內部模組 ======
-from . import java_downloader
 from .http_utils import HTTPUtils
 from .runtime_paths import get_cache_dir
 from .ui_utils import UIUtils
 from .log_utils import LogUtils
+from src.core.version_manager import MinecraftVersionManager
 
 COMMON_JAVA_PATHS = [
     r"C:\\Program Files\\Java",
     r"C:\\Program Files (x86)\\Java",
-    r"C:\\Program Files\\Microsoft",
-    r"C:\\Program Files\\Microsoft\\OpenJDK",
+    r"C:\\Program Files\\Microsoft"
 ]
-ENV_VARS = ["JAVA_HOME", "PRISMLAUNCHER_JAVA_PATHS"]
+# 只偵測 JAVA_HOME，Path 另外處理
+ENV_VARS = ["JAVA_HOME"]
 
 # ====== Java 版本檢測相關函數 ======
 # 獲取 Java 版本號
@@ -77,10 +77,22 @@ def get_required_java_major(mc_version: str) -> int:
     if not isinstance(mc_version, str) or not mc_version:
         raise ValueError("mc_version 必須為非空字串")
     cache_path = get_cache_dir() / "mc_versions_cache.json"
-    if not cache_path.exists():
-        raise FileNotFoundError(f"找不到 {cache_path}")
+    # 若快取不存在或內容為空，則自動建立快取
+    if not cache_path.exists() or cache_path.stat().st_size == 0:
+        try:
+            
+            vm = MinecraftVersionManager()
+            vm.fetch_versions()
+        except Exception as e:
+            raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}")
+    # 再次檢查
+    if not cache_path.exists() or cache_path.stat().st_size == 0:
+        raise FileNotFoundError(f"找不到 {cache_path} 或檔案為空")
     with open(cache_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except Exception as e:
+            raise ValueError(f"無法解析 {cache_path} 內容: {e}")
     if isinstance(data, dict):
         data = [data]
     for v in data:
@@ -120,28 +132,35 @@ def get_all_local_java_candidates() -> list:
         list: 格式為 (路徑, 主要版本) 的列表
     """
     candidates = []
+    # 統一搜尋所有來源
+    search_paths = set()
     # 常見路徑
     for base in COMMON_JAVA_PATHS:
         if os.path.exists(base):
             for d in os.listdir(base):
                 subdir = os.path.join(base, d)
                 if os.path.isdir(subdir):
-                    javaw = os.path.join(subdir, "bin", "javaw.exe")
-                    if os.path.exists(javaw):
-                        major = get_java_version(javaw)
-                        if major:
-                            candidates.append((os.path.normpath(javaw), major))
-    # 環境變數
+                    search_paths.add(os.path.join(subdir, "bin"))
+    # JAVA_HOME
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
             for p in val.split(";"):
-                javaw = os.path.join(p, "bin", "javaw.exe")
-                if os.path.exists(javaw):
-                    major = get_java_version(javaw)
-                    if major:
-                        candidates.append((os.path.normpath(javaw), major))
+                search_paths.add(os.path.join(p, "bin"))
+    # 系統 Path
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+            sys_path, _ = winreg.QueryValueEx(key, "Path")
+            for p in sys_path.split(";"):
+                search_paths.add(p)
+    except Exception:
+        pass
+    # 使用者 Path
     for p in os.environ.get("PATH", "").split(";"):
+        search_paths.add(p)
+    # 搜尋所有目錄下的 javaw.exe
+    for p in search_paths:
         javaw = os.path.join(p, "javaw.exe")
         if os.path.exists(javaw):
             major = get_java_version(javaw)
@@ -163,7 +182,7 @@ def get_all_local_java_candidates() -> list:
 
 # ====== Java 選擇和下載管理 ======
 # 為指定版本選擇最佳 Java 路徑
-def get_best_java_path(mc_version: str, ask_download: bool = True, parent=None) -> str:
+def get_best_java_path(mc_version: str, ask_download: bool = True) -> str:
     """
     為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑，找不到時詢問自動下載
     Select the best javaw.exe path for the given Minecraft version and loader info, ask to auto-download if not found
@@ -171,30 +190,38 @@ def get_best_java_path(mc_version: str, ask_download: bool = True, parent=None) 
     Args:
         mc_version (str): Minecraft 版本號
         ask_download (bool): 找不到時是否詢問下載
-        parent: 父視窗，用於顯示對話框（可選）
 
     Returns:
         str or None: 最佳 Java 路徑，找不到時返回 None
     """
     required_major = get_required_java_major(mc_version)
+    from .java_downloader import install_java_with_winget
+    # 直接用 get_all_local_java_candidates 搜尋
     candidates = get_all_local_java_candidates()
-    # 先找完全符合 major
     for path, major in candidates:
         if major == required_major:
             return path
-    # 沒有時詢問是否自動下載或手動下載
     if ask_download:
+        vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
         res = UIUtils.ask_yes_no_cancel(
             "Java 未找到",
-            f"未找到合適的 Java {required_major}，是否自動下載安裝？\n\n選擇 [是] 會自動下載安裝 Microsoft JDK，選擇 [否] 請手動下載並指定 Java 路徑。",
+            f"未找到合適的 Java {required_major}，是否自動下載安裝？\n\n選擇 [是] 會自動下載安裝 {vendor} ，選擇 [否] 請手動下載並指定 Java 路徑。",
             show_cancel=False,
             topmost=True,
         )
         if res:
             try:
-                java_path = java_downloader.ensure_java_installed(required_major)
-                if java_path:
-                    return java_path
+                install_java_with_winget(required_major)
+                # 重新搜尋
+                candidates = get_all_local_java_candidates()
+                for path, major in candidates:
+                    if major == required_major:
+                        UIUtils.show_info(
+                            title=f"Java {required_major} 安裝成功",
+                            message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe。",
+                            topmost=True
+                        )
+                        return path
             except Exception as e:
                 UIUtils.show_error(
                     "Java 下載失敗",

@@ -1,7 +1,7 @@
 ; Inno Setup 安裝腳本（繁體中文）
 ; 可由 build_installer.bat 傳入 /DAppVersion 與 /DAppName 覆蓋下述定義
 #define GetStringDef(param, def) (param == "" ? def : param)
-#define AppVersion GetStringDef(AppVersion, "1.1")
+#define AppVersion GetStringDef(AppVersion, "1.2")
 #define AppName GetStringDef(AppName, "MinecraftServerManager")
 
 [Setup]
@@ -50,7 +50,7 @@ Filename: "{app}\MinecraftServerManager.exe"; Description: "安裝後立即執�
 [Code]
 function GetDataRoot(): string;
 begin
-  Result := ExpandConstant('{localappdata}\MinecraftServerManager');
+  Result := ExpandConstant('{localappdata}\\Programs\\MinecraftServerManager');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

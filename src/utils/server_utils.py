@@ -99,7 +99,7 @@ class ServerCommands:
         # Java 執行檔自動偵測
         java_exe = (
             java_utils.get_best_java_path(
-                getattr(server_config, "minecraft_version", None), ask_download=True, parent=None
+                getattr(server_config, "minecraft_version", None), ask_download=True
             )
             or "java"
         )
