@@ -284,8 +284,6 @@ class ServerPropertiesDialog:
             "white-list",
             "generate-structures",
             "spawn-monsters",
-            "spawn-animals",
-            "spawn-npcs",
             "allow-flight",
             "allow-nether",
             "enable-command-block",

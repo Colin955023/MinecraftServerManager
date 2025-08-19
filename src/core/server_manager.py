@@ -118,7 +118,7 @@ class ServerManager:
             self._create_eula_file(server_path)
             config.eula_accepted = True
             # 建立基本檔案結構
-            self._create_server_structure(config.path, config.loader_type)
+            self._create_server_structure(Path(config.path), config.loader_type)
             # 初始化 server.properties
             properties_file = server_path / "server.properties"
             if properties is None:
@@ -159,7 +159,7 @@ class ServerManager:
         # 建立基本目錄
         if loader_type.lower() == "vanilla":
             directories = ["world", "logs"]
-        else:
+        elif loader_type.lower() in ["forge", "fabric"]:
             directories = ["world", "plugins", "mods", "config", "logs"]
 
         for directory in directories:
@@ -355,15 +355,15 @@ class ServerManager:
                 time.sleep(0.5)  # 等待一下讓進程有時間啟動
                 poll_result = process.poll()
                 if poll_result is not None:
-                    LogUtils.error(f"進程立即結束，返回碼: {poll_result}")
+                    LogUtils.error(f"進程立即結束，返回碼: {poll_result}", "ServerManager")
                     # 嘗試讀取錯誤信息
                     try:
                         stdout, stderr = process.communicate(timeout=1)
-                        LogUtils.error(f"標準輸出: {stdout}")
+                        LogUtils.error(f"標準輸出: {stdout}", "ServerManager")
                         if stderr:
-                            LogUtils.error(f"標準錯誤: {stderr}")
+                            LogUtils.error(f"標準錯誤: {stderr}", "ServerManager")
                     except Exception as e:
-                        LogUtils.error(f"無法讀取錯誤信息: {e}")
+                        LogUtils.error(f"無法讀取錯誤信息: {e}", "ServerManager")
                     UIUtils.show_error("啟動失敗", f"伺服器進程立即結束，返回碼: {poll_result}", parent=parent)
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process

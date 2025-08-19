@@ -4,8 +4,8 @@ chcp 65001 >nul
 title Minecraft 伺服器管理器 - 建置安裝包
 cd /d %~dp0..
 
-REM 允許從外部傳入版本號，未指定則預設 1.2
-if "%APP_VERSION%"=="" set APP_VERSION=1.2
+REM 允許從外部傳入版本號，未指定則預設 1.3
+if "%APP_VERSION%"=="" set APP_VERSION=1.3
 if "%APP_NAME%"=="" set APP_NAME=MinecraftServerManager
 
 echo [0/3] 清除舊的 build/ 與 dist/ ...
@@ -28,7 +28,7 @@ python -m pip install -r requirements.txt || exit /b 1
 python -m pip install pyinstaller || exit /b 1
 
 REM 以 build.spec 進行打包（輸出 dist\MinecraftServerManager\*）
-pyinstaller build.spec || exit /b 1
+pyinstaller build.spec --clean || exit /b 1
 
 echo [2/3] 編譯 Inno Setup 安裝檔 ...
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

@@ -160,8 +160,6 @@ class ServerPropertiesHelper:
             # 生物生成
             "生物設定": [
                 "spawn-monsters",
-                "spawn-animals",
-                "spawn-npcs"
             ],
             # 功能開關
             "功能設定": [

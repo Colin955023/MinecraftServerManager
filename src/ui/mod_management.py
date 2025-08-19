@@ -21,6 +21,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import customtkinter as ctk
 # ====== 專案內部模組 ======
+from .custom_dropdown import CustomDropdown
 from ..core.mod_manager import ModManager, ModStatus
 from ..core.version_manager import MinecraftVersionManager
 from ..utils.font_manager import font_manager, get_dpi_scaled_size, get_font
@@ -237,22 +238,14 @@ class ModManagementFrame:
         ).pack(side="left")
 
         self.server_var = tk.StringVar()
-        self.server_combo = ctk.CTkOptionMenu(
+        self.server_combo = CustomDropdown(
             inner_frame,
             variable=self.server_var,
             values=["載入中..."],
-            font=get_font(size=16),
-            dropdown_font=get_font(size=16),
             command=self.on_server_changed,
             width=get_dpi_scaled_size(200),
         )
         self.server_combo.pack(side="left", padx=(10, 0))
-
-        # 套用統一下拉選單樣式
-        try:
-            UIUtils.apply_unified_dropdown_styling(self.server_combo)
-        except Exception as e:
-            LogUtils.error(f"套用伺服器下拉選單樣式失敗: {e}", "ModManagementFrame")
 
         # 重新整理按鈕
         refresh_btn = ctk.CTkButton(
@@ -729,9 +722,17 @@ class ModManagementFrame:
             servers = list(self.server_manager.servers.values())
             server_names = [server.name for server in servers]
 
-            self.server_combo.configure(values=server_names)
-
-            if server_names and not self.server_var.get():
+            # 若列表為空，顯示一個空白選項
+            if not server_names:
+                self.server_combo.configure(values=[""])
+                self.server_var.set("")
+                self.current_server = None
+                if hasattr(self, "local_mods"):
+                    self.local_mods = []
+                if hasattr(self, "refresh_local_list"):
+                    self.refresh_local_list()
+            else:
+                self.server_combo.configure(values=server_names)
                 self.server_var.set(server_names[0])
                 self.on_server_changed()
 

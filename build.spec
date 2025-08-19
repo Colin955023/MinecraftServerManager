@@ -112,8 +112,6 @@ exe = EXE(
     debug=False,  # 設為 True 可啟用除錯模式
     bootloader_ignore_signals=False,
     strip=False,  # Windows 上通常設為 False
-    upx=True,  # 啟用 UPX 壓縮以減少檔案大小
-    upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # 隱藏控制台視窗，提供更好的使用者體驗
     disable_windowed_traceback=False,
@@ -132,7 +130,5 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
     name='MinecraftServerManager'  # 輸出資料夾名稱
 )

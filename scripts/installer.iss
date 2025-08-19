@@ -1,7 +1,7 @@
 ; Inno Setup 安裝腳本（繁體中文）
 ; 可由 build_installer.bat 傳入 /DAppVersion 與 /DAppName 覆蓋下述定義
 #define GetStringDef(param, def) (param == "" ? def : param)
-#define AppVersion GetStringDef(AppVersion, "1.2")
+#define AppVersion GetStringDef(AppVersion, "1.3")
 #define AppName GetStringDef(AppName, "MinecraftServerManager")
 
 [Setup]

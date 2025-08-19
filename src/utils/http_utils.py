@@ -46,7 +46,7 @@ class HTTPUtils:
             return response.json()
         except Exception as e:
             LogUtils.error(f"HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils")
-            UIUtils.show_error(f"HTTP GET JSON 請求失敗 ({url}): {e}")
+            UIUtils.show_error("請求失敗", f"HTTP GET JSON 請求失敗 ({url}): {e}")
             return None
 
     # ====== 內容資料請求 ======
@@ -80,13 +80,13 @@ class HTTPUtils:
             return response
         except Exception as e:
             LogUtils.error(f"HTTP GET 請求失敗 ({url}): {e}", "HTTPUtils")
-            UIUtils.show_error(f"HTTP GET 請求失敗 ({url}): {e}")
+            UIUtils.show_error("請求失敗", f"HTTP GET 請求失敗 ({url}): {e}")
             return None
 
     # ====== 檔案下載功能 ======
     # 下載檔案到本機
     @staticmethod
-    def download_file(url: str, local_path: str, timeout: int = 60, chunk_size: int = 8192) -> bool:
+    def download_file(url: str, local_path: str, timeout: int = 60, chunk_size: int = 65536) -> bool:
         """
         從指定 URL 下載檔案並儲存到本機路徑
         Download file from specified URL and save to local path
@@ -109,7 +109,7 @@ class HTTPUtils:
         if timeout <= 0:
             timeout = 60
         if chunk_size <= 0:
-            chunk_size = 8192
+            chunk_size = 65536
 
         try:
             response = HTTPUtils.get_content(url, timeout=timeout, stream=True)
@@ -122,7 +122,7 @@ class HTTPUtils:
             return True
         except Exception as e:
             LogUtils.error(f"檔案下載失敗 ({url} -> {local_path}): {e}", "HTTPUtils")
-            UIUtils.show_error(f"檔案下載失敗 ({url} -> {local_path}): {e}")
+            UIUtils.show_error("檔案下載失敗", f"檔案下載失敗 ({url} -> {local_path}): {e}")
             return False
 
 # ====== 向後相容性函數別名 ======

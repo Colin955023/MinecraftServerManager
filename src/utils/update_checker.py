@@ -112,7 +112,7 @@ def _download_file(url: str, dest: Path) -> None:
     with requests.get(url, stream=True, timeout=30) as r:
         r.raise_for_status()
         with open(dest, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
+            for chunk in r.iter_content(chunk_size=65536):
                 if chunk:
                     f.write(chunk)
 

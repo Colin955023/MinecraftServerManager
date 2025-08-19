@@ -29,9 +29,18 @@ def install_java_with_winget(major: int):
     else:
         UIUtils.show_error("不支援的 Java 主要版本", f"不支援的 Java 主要版本: {major}，請手動安裝。", topmost=True)
         raise Exception(f"不支援的 Java 主要版本: {major}，請手動安裝。")
-    winget_cmd = f'start /wait cmd /c "winget install --accept-package-agreements --accept-source-agreements {pkg}"'
+    winget_cmd = [
+        "winget", "install",
+        "--accept-package-agreements",
+        "--accept-source-agreements",
+        pkg
+    ]
     try:
+        # 直接在主程式同步執行 winget，安裝過程會在主程式 console 顯示
         subprocess.run(winget_cmd, shell=False, check=True)
+    except subprocess.CalledProcessError as e:
+        UIUtils.show_error("winget 安裝失敗", f"winget 執行失敗，請檢查錯誤訊息：\n{e}", topmost=True)
+        raise Exception(f"執行 winget 失敗: {e}")
     except Exception as e:
-        UIUtils.show_error("winget 安裝失敗", f"執行 winget 失敗: {e}", topmost=True)
+        UIUtils.show_error("winget 執行異常", f"執行 winget 發生例外：{e}", topmost=True)
         raise

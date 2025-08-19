@@ -77,7 +77,7 @@ class ServerCommands:
     """伺服器指令"""
 
     @staticmethod
-    def build_java_command(server_config, return_list=False) -> Union[list, str]:
+    def build_java_command(self, server_config, return_list=False) -> Union[list, str]:
         """
         構建 Java 啟動命令（統一邏輯）
         Build Java launch command (unified logic)
@@ -99,7 +99,7 @@ class ServerCommands:
         # Java 執行檔自動偵測
         java_exe = (
             java_utils.get_best_java_path(
-                getattr(server_config, "minecraft_version", None), ask_download=True
+                getattr(server_config, "minecraft_version", None)
             )
             or "java"
         )

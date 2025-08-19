@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+from typing import Optional
 # ====== 專案內部模組 ======
 from .http_utils import HTTPUtils
 from .runtime_paths import get_cache_dir
@@ -73,7 +74,6 @@ def get_required_java_major(mc_version: str) -> int:
     Returns:
         int: 所需的 Java 主要版本號
     """
-    # 僅從 mc_versions_cache.json 取得 majorVersion，無備選判斷
     if not isinstance(mc_version, str) or not mc_version:
         raise ValueError("mc_version 必須為非空字串")
     cache_path = get_cache_dir() / "mc_versions_cache.json"
@@ -147,17 +147,6 @@ def get_all_local_java_candidates() -> list:
         if val:
             for p in val.split(";"):
                 search_paths.add(os.path.join(p, "bin"))
-    # 系統 Path
-    import winreg
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
-        ) as key:
-            sys_path, _ = winreg.QueryValueEx(key, "Path")
-            for p in sys_path.split(";"):
-                search_paths.add(p)
-    except Exception:
-        pass
     # 使用者 Path
     for p in os.environ.get("PATH", "").split(";"):
         search_paths.add(p)
@@ -184,27 +173,27 @@ def get_all_local_java_candidates() -> list:
 
 # ====== Java 選擇和下載管理 ======
 # 為指定版本選擇最佳 Java 路徑
-def get_best_java_path(mc_version: str, ask_download: bool = True) -> str:
+def get_best_java_path(mc_version: str, required_major: Optional[int] = None, ask_download: bool = True) -> str:
     """
     為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑，找不到時詢問自動下載
     Select the best javaw.exe path for the given Minecraft version and loader info, ask to auto-download if not found
 
     Args:
         mc_version (str): Minecraft 版本號
-        ask_download (bool): 找不到時是否詢問下載
+        required_major (int, optional): 需要的 Java 主要版本，若未指定則自動判斷
+        ask_download (bool, optional): 是否詢問自動下載，預設為 True
 
     Returns:
         str or None: 最佳 Java 路徑，找不到時返回 None
     """
-    required_major = get_required_java_major(mc_version)
     from .java_downloader import install_java_with_winget
-
-    # 直接用 get_all_local_java_candidates 搜尋
+    required_major = required_major if required_major else get_required_java_major(mc_version)
     candidates = get_all_local_java_candidates()
     for path, major in candidates:
         if major == required_major:
             return path
     if ask_download:
+        # 找不到則詢問是否自動下載
         vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
         res = UIUtils.ask_yes_no_cancel(
             "Java 未找到",

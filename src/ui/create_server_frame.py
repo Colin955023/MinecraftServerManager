@@ -111,12 +111,10 @@ class CreateServerFrame(ctk.CTkFrame):
         def auto_detect():
             # 取得目前 UI 選擇的 mc_version、loader_type、loader_version
             mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
-            loader_type = self.loader_type_var.get() if hasattr(self, "loader_type_var") else None
-            loader_version = self.loader_version_var.get() if hasattr(self, "loader_version_var") else None
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
                 return
-            java_path = java_utils.get_best_java_path(mc_version, ask_download=True)
+            java_path = java_utils.get_best_java_path(mc_version)
             if java_path:
                 java_path_win = os.path.normpath(java_path)
                 self.java_path_var.set(java_path_win)
@@ -279,7 +277,11 @@ class CreateServerFrame(ctk.CTkFrame):
 
         self.loader_version_var = tk.StringVar(value="無")
         self.loader_version_combo = CustomDropdown(
-            loader_version_frame, variable=self.loader_version_var, values=["無"], width=280, state="disabled"
+            loader_version_frame,
+            variable=self.loader_version_var,
+            values=["無"],
+            width=280,
+            state="disabled"
         )
         self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
@@ -434,8 +436,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
                 # 預載入 Fabric 和 Forge 版本資訊（背景處理）
                 try:
-                    self.loader_manager.preload_fabric_versions(parent=self.master)
-                    self.loader_manager.preload_forge_versions(parent=self.master)
+                    self.loader_manager.preload_loader_versions()
                 except Exception as e:
                     LogUtils.info(f"預載入載入器版本失敗: {e}", "CreateServerFrame")
 
@@ -494,18 +495,12 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.set_loading_state(self.loader_version_combo, self.loader_version_var)
 
                 # 先清空 cache 再重新取得
-                if loader_type.lower() == "fabric":
-                    self.loader_manager.clear_fabric_cache(parent=self.master)
-                    self.loader_manager.preload_fabric_versions()
-                elif loader_type.lower() == "forge":
-                    self.loader_manager.clear_forge_cache(parent=self.master)
-                    self.loader_manager.preload_forge_versions()
+                self.loader_manager.clear_cache_file()
+                self.loader_manager.preload_loader_versions()
 
                 # 只從 cache 讀取
-                if loader_type.lower() == "fabric":
-                    versions = self.loader_manager.get_compatible_fabric_versions(mc_version)
-                elif loader_type.lower() == "forge":
-                    versions = self.loader_manager.get_compatible_forge_versions(mc_version)
+                if loader_type.lower():
+                    versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
                 else:
                     versions = []
 
@@ -733,12 +728,7 @@ class CreateServerFrame(ctk.CTkFrame):
             self._schedule_ui_update(set_loading)
 
             versions = []
-            if loader_type.lower() == "fabric":
-                # 直接從快取獲取版本，速度更快
-                versions = self.loader_manager.get_compatible_fabric_versions(mc_version)
-            elif loader_type.lower() == "forge":
-                # 直接從快取獲取版本，速度更快
-                versions = self.loader_manager.get_compatible_forge_versions(mc_version)
+            versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
 
             # 更新 UI
             def update_ui():
@@ -994,7 +984,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 UIUtils.show_error(
                     "下載流程參數異常",
                     f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
-                    parent_window,
+                    topmost=True,
                 )
                 result[0] = False
                 return
@@ -1026,7 +1016,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 f"download_path: {download_path}\n"
                 f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
             )
-            UIUtils.show_error("下載失敗", msg, parent_window)
+            UIUtils.show_error("下載失敗", msg, topmost=True)
             LogUtils.debug(f"server_path: {server_path}\nconfig: {config}", "CreateServerFrame")
             raise Exception(msg)
 

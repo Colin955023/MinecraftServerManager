@@ -18,6 +18,7 @@ import threading
 import tkinter as tk
 import zipfile
 import customtkinter as ctk
+import webbrowser
 # ====== 專案內部模組 ======
 from ..core.loader_manager import LoaderManager
 from ..core.properties_helper import ServerPropertiesHelper
@@ -216,12 +217,9 @@ class MinecraftServerManager:
             LogUtils.debug("預先抓取 Minecraft 所有版本...", "MainWindow")
             self.version_manager.fetch_versions()
             LogUtils.debug("Minecraft 所有版本載入完成", "MainWindow")
-            LogUtils.debug("預先抓取 Fabric 所有載入器版本...", "MainWindow")
-            self.loader_manager.preload_fabric_versions()
-            LogUtils.debug("Fabric 所有載入器版本載入完成", "MainWindow")
-            LogUtils.debug("預先抓取 Forge 所有載入器版本...", "MainWindow")
-            self.loader_manager.preload_forge_versions()
-            LogUtils.debug("Forge 所有載入器版本載入完成", "MainWindow")
+            LogUtils.debug("預先抓取所有載入器版本...", "MainWindow")
+            self.loader_manager.preload_loader_versions()
+            LogUtils.debug("所有載入器版本載入完成", "MainWindow")
 
         threading.Thread(target=fetch_all, daemon=True).start()
 
@@ -561,7 +559,7 @@ class MinecraftServerManager:
         info_frame.pack(side="bottom", fill="x", padx=20, pady=20)
 
         version_label = ctk.CTkLabel(
-            info_frame, text="版本 1.2", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
+            info_frame, text="版本 1.3", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
         )
         version_label.pack(anchor="w")
 
@@ -762,7 +760,7 @@ class MinecraftServerManager:
         if target_button:
             self.set_active_nav_button(target_button)
 
-    def show_manage_server(self, active_nav_button=None) -> None:
+    def show_manage_server(self, active_nav_button=None, auto_select=None) -> None:
         """
         顯示管理伺服器頁面
         每次都強制刷新伺服器列表
@@ -771,10 +769,25 @@ class MinecraftServerManager:
 
         Args:
             active_nav_button: 要設為活動的導航按鈕
+            auto_select: 跳轉後自動選擇的伺服器名稱（可選）
         """
         self.hide_all_frames()
         self.manage_server_frame.pack(fill="both", expand=True)
-        self.manage_server_frame.refresh_servers()
+
+        # 若有 auto_select，刷新時自動選擇該伺服器
+        if auto_select:
+            self.manage_server_frame.refresh_servers()
+            # 嘗試自動選擇伺服器
+            for item in self.manage_server_frame.server_tree.get_children():
+                values = self.manage_server_frame.server_tree.item(item)["values"]
+                if values and values[0] == auto_select:
+                    self.manage_server_frame.server_tree.selection_set(item)
+                    self.manage_server_frame.server_tree.see(item)
+                    self.manage_server_frame.selected_server = auto_select
+                    self.manage_server_frame.update_selection()
+                    break
+        else:
+            self.manage_server_frame.refresh_servers()
 
         target_button = active_nav_button or self.nav_buttons.get("管理伺服器")
         if target_button:
@@ -1045,7 +1058,8 @@ class MinecraftServerManager:
                 f"伺服器 '{server_name}' 匯入成功!\n\n類型: {server_config.loader_type}\n版本: {server_config.minecraft_version}",
                 self.root,
             )
-            self.show_manage_server()
+            # 跳轉到管理伺服器頁面並自動選擇剛匯入的伺服器
+            self.show_manage_server(auto_select=server_name)
 
         except Exception as e:
             # 失敗時恢復備份
@@ -1123,12 +1137,22 @@ class MinecraftServerManager:
 • 技術棧: Python 3.7+, tkinter, coustomtkinter, requests
 • Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化
 • 架構: 模組化設計, 事件驅動
-• 參考專案: PrismLauncher、MinecraftModChecker
-• GitHub: https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"""
+• 參考專案: PrismLauncher、MinecraftModChecker"""
 
         ctk.CTkLabel(scrollable_frame, text=dev_info, font=get_font(size=15), justify="left", wraplength=500).pack(
-            anchor="w", pady=(0, 20)
+            anchor="w", pady=(0, 5)
         )
+        github_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+        github_lbl = ctk.CTkLabel(
+            scrollable_frame,
+            text="GitHub-MinecraftServerManager",
+            font=("微軟正黑體", 14, "underline"),
+            text_color="black",
+            cursor="hand2",
+            anchor="w"
+        )
+        github_lbl.pack(anchor="w", pady=(0, 20))
+        github_lbl.bind("<Button-1>", lambda e, url=github_url: webbrowser.open_new(url))
 
         # 授權條款
         ctk.CTkLabel(scrollable_frame, text="📄 授權條款", font=get_font(size=24, weight="bold")).pack(
