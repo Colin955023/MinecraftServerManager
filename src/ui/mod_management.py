@@ -61,14 +61,11 @@ def search_mods_online(query, minecraft_version=None, loader=None, categories=No
     headers = {"User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"}
     # 構建完整 URL
     full_url = url + "?" + urllib.parse.urlencode(params)
-    response = HTTPUtils.get_content(full_url, headers=headers, timeout=10)
-    if not response or response.status_code != 200:
-        if response:
-            LogUtils.error(f"Modrinth API status: {response.status_code}")
-        else:
-            LogUtils.error("Modrinth API request failed")
+    response = HTTPUtils.get_json(url=full_url, headers=headers, timeout=10)
+    if not response:
+        LogUtils.error("Modrinth API request failed")
         return []
-    hits = response.json().get("hits", [])
+    hits = response.get("hits", [])
     mods = []
     for hit in hits:
         mod = type("OnlineModInfo", (), {})()

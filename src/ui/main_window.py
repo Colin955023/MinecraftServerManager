@@ -71,7 +71,7 @@ class MinecraftServerManager:
                 try:
                     path.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    _fail_exit(f"無法建立資料夾 / Cannot create directory: {e}")
+                    _fail_exit(f"無法建立資料夾: {e}")
 
         def _prompt_for_directory() -> str:
             """提示選擇目錄"""
@@ -96,7 +96,7 @@ class MinecraftServerManager:
             try:
                 settings.set_servers_root(norm_root)
             except Exception as e:
-                UIUtils.show_error("設定錯誤", f"無法寫入設定 / Cannot write settings: {e}", self.root)
+                UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
         else:
             servers_root = settings.get_servers_root()
             while not servers_root:
@@ -105,10 +105,10 @@ class MinecraftServerManager:
                     try:
                         settings.set_servers_root(servers_root)
                     except Exception as e:
-                        UIUtils.show_error("設定錯誤", f"無法寫入設定 / Cannot write settings: {e}", self.root)
+                        UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
             norm_root = servers_root
 
-        # 建立資料夾並更新屬性 / Create directory and update attributes
+        # 建立資料夾並更新屬性
         path_obj = Path(norm_root)
         _ensure_directory_exists(path_obj)
         self.servers_root = str(path_obj.resolve())
@@ -143,16 +143,16 @@ class MinecraftServerManager:
                     if hasattr(widget, "destroy"):
                         widget.destroy()
                 except Exception as e:
-                    print(f"清理子視窗時發生錯誤: {e}")
+                    LogUtils.error(f"清理子視窗時發生錯誤: {e}", "MainWindow")
 
         except Exception as e:
-            print(f"清理資源時發生錯誤: {e}")
+            LogUtils.error(f"清理資源時發生錯誤: {e}", "MainWindow")
         finally:
             # 最後銷毀主視窗
             try:
                 self.root.destroy()
             except Exception as e:
-                print(f"銷毀主視窗時發生錯誤: {e}")
+                LogUtils.error(f"銷毀主視窗時發生錯誤: {e}", "MainWindow")
                 # 強制退出
                 sys.exit(0)
 
@@ -241,8 +241,8 @@ class MinecraftServerManager:
                 versions = self.version_manager.get_versions()
                 self.root.after(0, lambda: self.create_server_frame.update_versions(versions))
             except Exception as e:
-                error_msg = f"載入版本資訊失敗 / Failed to load version info: {e}"
-                self.root.after(0, lambda: print(error_msg))
+                error_msg = f"載入版本資訊失敗: {e}"
+                self.root.after(0, lambda: LogUtils.error(error_msg, "MainWindow"))
 
         threading.Thread(target=load_versions, daemon=True).start()
 
@@ -559,27 +559,28 @@ class MinecraftServerManager:
         info_frame.pack(side="bottom", fill="x", padx=20, pady=20)
 
         version_label = ctk.CTkLabel(
-            info_frame, text="版本 1.3", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
+            info_frame, text="版本 1.3.1", font=get_font(size=14), text_color=("#a0aec0", "#a0aec0")
         )
         version_label.pack(anchor="w")
 
     def create_nav_button(self, parent, icon, title, description, command) -> ctk.CTkFrame:
         """
-        建立導航按鈕 / Create navigation button
+        建立導航按鈕
+        Create navigation button
 
         Args:
-            parent: 父元件 / Parent widget
-            icon: 圖示 / Icon
-            title: 標題 / Title
-            description: 描述 / Description
-            command: 命令回調 / Command callback
+            parent: 父元件
+            icon: 圖示
+            title: 標題
+            description: 描述
+            command: 命令回調
 
         Returns:
-            CTkFrame: 按鈕容器框架 / Button container frame
+            CTkFrame: 按鈕容器框架
         """
         btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
 
-        # 建立按鈕 / Create button
+        # 建立按鈕
         btn_text = f"{icon} {title}" if icon else title
         btn = ctk.CTkButton(
             btn_frame,
@@ -594,12 +595,12 @@ class MinecraftServerManager:
         )
         btn.pack(fill="x", padx=2, pady=2)
 
-        # 描述標籤 / Description label
+        # 描述標籤
         ctk.CTkLabel(
-            btn_frame, text=description, font=get_font(size=15), text_color=("#6b7280", "#6b7280"), anchor="w"
+            btn_frame, text=description, font=get_font(size=14), text_color=("#6b7280", "#6b7280"), anchor="w"
         ).pack(fill="x", padx=5, pady=(0, 5))
 
-        # 設定點擊事件 / Set click event
+        # 設定點擊事件
         main_nav_titles = {"建立伺服器", "管理伺服器", "模組管理"}
 
         def on_click():
@@ -613,12 +614,13 @@ class MinecraftServerManager:
 
     def set_active_nav_button(self, active_button) -> None:
         """
-        設定活動導航按鈕 / Set active navigation button
+        設定活動導航按鈕
+        Set active navigation button
 
         Args:
-            active_button: 要設為活動的按鈕框架 / Button frame to set as active
+            active_button: 要設為活動的按鈕框架
         """
-        # 顏色配置 / Color configuration
+        # 顏色配置
         default_colors = {"fg": ("#3b82f6", "#3b82f6"), "hover": ("#1d4ed8", "#1d4ed8")}
         active_colors = {"fg": ("#1d4ed8", "#1d4ed8"), "hover": ("#1e40af", "#1e40af")}
 
@@ -628,16 +630,16 @@ class MinecraftServerManager:
                 if hasattr(btn_widget, "configure") and isinstance(btn_widget, ctk.CTkButton):
                     btn_widget.configure(fg_color=colors["fg"], hover_color=colors["hover"])
             except Exception:
-                pass  # 忽略不支援的元件 / Ignore unsupported widgets
+                pass  # 忽略不支援的元件
 
-        # 重置所有按鈕到預設顏色 / Reset all buttons to default colors
+        # 重置所有按鈕到預設顏色
         for btn_frame in self.nav_buttons.values():
             for child in btn_frame.winfo_children():
                 if isinstance(child, ctk.CTkButton):
                     configure_button_colors(child, default_colors)
                     break
 
-        # 設定活動按鈕 / Set active button
+        # 設定活動按鈕
         if active_button and active_button.winfo_children():
             for child in active_button.winfo_children():
                 if isinstance(child, ctk.CTkButton):
@@ -648,31 +650,19 @@ class MinecraftServerManager:
 
     def toggle_sidebar(self) -> None:
         """
-        切換側邊欄顯示/隱藏，使用平滑動畫
-        Toggle the visibility of the sidebar with smooth animation.
+        乾淨利索地切換側邊欄顯示/隱藏，無動畫
         """
         if hasattr(self, "sidebar_visible") and self.sidebar_visible:
-            # 隱藏側邊欄，顯示簡化版本
-            self._animate_sidebar_collapse()
+            # 立即隱藏側邊欄，顯示迷你側邊欄
+            self.sidebar.pack_forget()
+            self.create_mini_sidebar()
+            self.sidebar_visible = False
         else:
-            # 顯示完整側邊欄
-            self._animate_sidebar_expand()
-
-    def _animate_sidebar_collapse(self) -> None:
-        """側邊欄收縮動畫"""
-        self.sidebar.pack_forget()
-        self.create_mini_sidebar()
-        self.sidebar_visible = False
-
-    def _animate_sidebar_expand(self) -> None:
-        """側邊欄展開動畫"""
-        # 先移除迷你側邊欄
-        if hasattr(self, "mini_sidebar"):
-            self.mini_sidebar.pack_forget()
-
-        # 顯示完整側邊欄
-        self.sidebar.pack(side="left", fill="y", padx=(20, 20), pady=20)
-        self.sidebar_visible = True
+            # 立即顯示完整側邊欄，隱藏迷你側邊欄
+            if hasattr(self, "mini_sidebar"):
+                self.mini_sidebar.pack_forget()
+            self.sidebar.pack(side="left", fill="y", padx=(20, 20), pady=20)
+            self.sidebar_visible = True
 
     def create_mini_sidebar(self) -> None:
         """
@@ -815,7 +805,7 @@ class MinecraftServerManager:
         Import server (folder or archive)
         Unified entry to import a server from folder or archive
         """
-        # 建立選擇對話框 / Create selection dialog
+        # 建立選擇對話框
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("匯入伺服器")
         dialog.resizable(False, False)
@@ -832,7 +822,7 @@ class MinecraftServerManager:
 
         choice = {"value": None}
 
-        # 對話框內容 / Dialog content
+        # 對話框內容
         content = ctk.CTkFrame(dialog)
         content.pack(fill="both", expand=True, padx=20, pady=20)
 
@@ -842,7 +832,7 @@ class MinecraftServerManager:
         button_frame = ctk.CTkFrame(content, fg_color="transparent")
         button_frame.pack(fill="x", padx=20)
 
-        # 建立按鈕 / Create buttons
+        # 建立按鈕
         options = [("📁 匯入資料夾", "folder"), ("📦 匯入壓縮檔", "archive"), ("❌ 取消", "cancel")]
         for label, key in options:
             font_weight = "bold" if key != "cancel" else "normal"
@@ -861,7 +851,7 @@ class MinecraftServerManager:
         if choice["value"] in [None, "cancel"]:
             return
 
-        # 處理選擇的匯入類型 / Handle selected import type
+        # 處理選擇的匯入類型
         self._handle_import_choice(choice["value"])
 
     def _set_choice(self, choice_dict, value, dialog) -> None:
@@ -905,7 +895,7 @@ class MinecraftServerManager:
         選擇伺服器資料夾
         Select server folder
         """
-        folder_path = filedialog.askdirectory(title="選擇伺服器資料夾", initialdir=str(Path.home()))
+        folder_path = filedialog.askdirectory(title="選擇伺服器資料夾")
         if not folder_path:
             return None
         path = Path(folder_path)
@@ -922,7 +912,6 @@ class MinecraftServerManager:
         file_path = filedialog.askopenfilename(
             title="選擇伺服器壓縮檔",
             filetypes=[("ZIP 壓縮檔", "*.zip"), ("所有檔案", "*.*")],
-            initialdir=str(Path.home()),
         )
         if not file_path:
             return None
@@ -938,10 +927,10 @@ class MinecraftServerManager:
         Prompt for server name input
 
         Args:
-            default_name: 預設名稱 / Default name
+            default_name: 預設名稱
 
         Returns:
-            str: 使用者輸入的名稱 / User input name
+            str: 使用者輸入的名稱
         """
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("輸入伺服器名稱")
@@ -1011,14 +1000,6 @@ class MinecraftServerManager:
             server_name: 伺服器名稱
         """
         target_path = self.server_manager.servers_root / server_name
-        backup_path = None
-
-        # 如果目標已存在，先備份
-        if target_path.exists():
-            backup_path = target_path.with_suffix(".backup_temp")
-            if backup_path.exists():
-                shutil.rmtree(backup_path)
-            shutil.move(str(target_path), str(backup_path))
 
         try:
             if source_path.is_file():
@@ -1048,10 +1029,6 @@ class MinecraftServerManager:
             ServerDetectionUtils.detect_server_type(target_path, server_config)
             self.server_manager.add_server(server_config)
 
-            # 成功後清理備份
-            if backup_path and backup_path.exists():
-                shutil.rmtree(backup_path)
-
             self.manage_server_frame.refresh_servers()
             UIUtils.show_info(
                 "匯入成功",
@@ -1062,11 +1039,7 @@ class MinecraftServerManager:
             self.show_manage_server(auto_select=server_name)
 
         except Exception as e:
-            # 失敗時恢復備份
-            if target_path.exists():
-                shutil.rmtree(target_path)
-            if backup_path and backup_path.exists():
-                shutil.move(str(backup_path), str(target_path))
+            UIUtils.show_error("匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {e}", self.root)
             raise e
 
     def hide_all_frames(self) -> None:
@@ -1266,7 +1239,7 @@ class MinecraftServerManager:
         # 顯示視窗偏好設定對話框
         WindowPreferencesDialog(self.root, on_settings_changed)
 
-    def on_server_created(self, server_config: ServerConfig, server_path: Path) -> None:
+    def on_server_created(self, server_config: ServerConfig) -> None:
         """
         伺服器建立完成的回調
         Callback for server creation completion.

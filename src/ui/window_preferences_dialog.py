@@ -7,6 +7,7 @@ Window preferences dialog for configuring window behavior and appearance.
 # ====== 標準函式庫 ======
 from typing import Callable, Optional
 import customtkinter as ctk
+import sys
 # ====== 專案內部模組 ======
 from ..utils.app_restart import can_restart, schedule_restart_and_exit
 from ..utils.settings_manager import get_settings_manager
@@ -116,8 +117,6 @@ class WindowPreferencesDialog:
 
         # 根據環境決定是否顯示調試選項
         # 開發環境顯示調試選項，打包環境隱藏
-        import sys
-
         should_show_debug = not hasattr(sys, "_MEIPASS")
 
         if should_show_debug:

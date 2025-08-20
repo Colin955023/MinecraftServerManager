@@ -474,7 +474,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.mc_version_combo.configure(state="readonly")
 
             except Exception as e:
-                print(f"載入 MC 版本失敗: {e}")
+                LogUtils.error(f"載入 MC 版本失敗: {e}", "CreateServerFrame")
                 self._schedule_ui_update(lambda: self.set_error_state(self.mc_version_combo))
 
         threading.Thread(target=do_reload, daemon=True).start()

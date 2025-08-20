@@ -22,7 +22,6 @@ from src.utils.http_utils import HTTPUtils
 from src.utils.runtime_paths import ensure_dir, get_cache_dir
 from src.utils.log_utils import LogUtils
 from src.utils.ui_utils import UIUtils
-from src.utils.java_downloader import install_java_with_winget
 
 class LoaderManager:
     """
@@ -204,7 +203,6 @@ class LoaderManager:
                         versions.append(version_text.strip())
 
                 # 處理版本號，移除非數字與點號的字元
-                import re
                 filtered_versions = []
                 for v in versions:
                     parts = v.split("-", 1)

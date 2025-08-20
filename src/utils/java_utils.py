@@ -10,6 +10,7 @@ common installation paths, and environment variables.
 # ====== 標準函式庫 ======
 import json
 import os
+import requests
 import re
 import subprocess
 from typing import Optional
@@ -19,6 +20,7 @@ from .runtime_paths import get_cache_dir
 from .ui_utils import UIUtils
 from .log_utils import LogUtils
 from src.core.version_manager import MinecraftVersionManager
+from .java_downloader import install_java_with_winget
 
 COMMON_JAVA_PATHS = [
     r"C:\\Program Files\\Java",
@@ -80,7 +82,6 @@ def get_required_java_major(mc_version: str) -> int:
     # 若快取不存在或內容為空，則自動建立快取
     if not cache_path.exists() or cache_path.stat().st_size == 0:
         try:
-
             vm = MinecraftVersionManager()
             vm.fetch_versions()
         except Exception as e:
@@ -107,9 +108,6 @@ def get_required_java_major(mc_version: str) -> int:
                 if java_info2 and "major" in java_info2:
                     return int(java_info2["major"])
                 # 萬一格式不同，正則搜尋 major
-                import re
-                import requests
-
                 resp = requests.get(url, timeout=8)
                 if resp.ok:
                     m = re.search(r'"major(?:Version)?"\s*:\s*(\d+)', resp.text)
@@ -186,7 +184,6 @@ def get_best_java_path(mc_version: str, required_major: Optional[int] = None, as
     Returns:
         str or None: 最佳 Java 路徑，找不到時返回 None
     """
-    from .java_downloader import install_java_with_winget
     required_major = required_major if required_major else get_required_java_major(mc_version)
     candidates = get_all_local_java_candidates()
     for path, major in candidates:

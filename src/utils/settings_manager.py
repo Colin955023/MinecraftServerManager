@@ -9,6 +9,7 @@ Provides unified user settings management including auto-update, window preferen
 # ====== 標準函式庫 ======
 from typing import Any, Dict
 import json
+import sys
 # ====== 專案內部模組 ======
 from src.utils.runtime_paths import ensure_dir, get_user_data_dir
 
@@ -48,8 +49,6 @@ class SettingsManager:
         if not self.settings_path.exists():
             # 建立預設設定
             # 透過檢查是否為打包環境來設定調試日誌預設值
-            import sys
-
             is_packaged = hasattr(sys, "_MEIPASS")
             # 開發環境預設啟用調試日誌，打包環境預設關閉
             default_debug_logging = not is_packaged

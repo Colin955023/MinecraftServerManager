@@ -8,7 +8,7 @@ Provides common operations for server management including path handling, server
 """
 # ====== 標準函式庫 ======
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 
 # ====== 路徑處理工具類別 ======
 class PathUtils:
@@ -61,6 +61,7 @@ class ServerOperations:
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
         """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）"""
+        from src.utils.log_utils import LogUtils
         try:
             # 先嘗試使用 stop 命令
             command_success = server_manager.send_command(server_name, "stop")
@@ -70,7 +71,7 @@ class ServerOperations:
                 # 如果命令失敗，使用強制停止
                 return server_manager.stop_server(server_name)
         except Exception as e:
-            print(f"停止伺服器失敗: {e}")
+            LogUtils.error(f"停止伺服器失敗: {e}", "ServerOperations")
             return False
 
 class ServerCommands:

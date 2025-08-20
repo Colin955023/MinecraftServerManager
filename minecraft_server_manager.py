@@ -17,6 +17,7 @@ from src.core.loader_manager import LoaderManager
 from src.core.version_manager import MinecraftVersionManager
 from src.ui.main_window import MinecraftServerManager
 from src.utils.font_manager import set_ui_scale_factor
+from src.utils.settings_manager import get_settings_manager
 
 # ====== 訊息顯示工具 ======
 
@@ -79,7 +80,6 @@ def _setup_ui_environment():
     ctk.set_appearance_mode("light")
     
     # 從設定中載入UI縮放並應用
-    from src.utils.settings_manager import get_settings_manager
     settings = get_settings_manager()
     dpi_scaling = settings.get_dpi_scaling()
     set_ui_scale_factor(dpi_scaling)

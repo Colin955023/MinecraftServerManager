@@ -14,6 +14,7 @@ import requests
 import webbrowser
 # ====== 專案內部模組 ======
 from .ui_utils import UIUtils
+from .http_utils import HTTPUtils
 
 # GitHub API 基礎 URL
 GITHUB_API = "https://api.github.com"
@@ -60,9 +61,9 @@ def _get_latest_release(owner: str, repo: str) -> dict:
         dict: 最新正式發布版本資訊字典，失敗時返回空字典
     """
     url = f"{GITHUB_API}/repos/{owner}/{repo}/releases"
-    r = requests.get(url, timeout=10, headers={"Accept": "application/vnd.github+json"})
-    if r.status_code == 200:
-        releases = r.json()
+    r = HTTPUtils.get_json(url, timeout=10, headers={"Accept": "application/vnd.github+json"})
+    if r:
+        releases = r
         # 篩選出所有正式版（非草稿、非預發布）
         stable_releases = [rel for rel in releases if not rel.get("draft") and not rel.get("prerelease")]
         if not stable_releases:

@@ -10,6 +10,7 @@ Provides window management functionality for dynamic sizing, positioning, and DP
 from typing import Any, Dict, Tuple
 import tkinter as tk
 import ctypes
+import time
 # ====== 專案內部模組 ======
 from .settings_manager import get_settings_manager
 from .log_utils import LogUtils
@@ -242,8 +243,6 @@ class WindowManager:
                 )
 
             # 減少除錯訊息頻率：只有在沒有最近記錄時才顯示
-            import time
-
             current_time = time.time()
             if not hasattr(WindowManager, "_last_debug_time") or current_time - WindowManager._last_debug_time > 5:
                 LogUtils.debug_window_state("已儲存主視窗狀態")
