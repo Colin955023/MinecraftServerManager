@@ -132,7 +132,7 @@ def get_all_local_java_candidates() -> list:
     candidates = []
     # 統一搜尋所有來源
     search_paths = set()
-    # 常見路徑
+    # 1.常見路徑
     for base in COMMON_JAVA_PATHS:
         if os.path.exists(base):
             for d in os.listdir(base):
@@ -140,18 +140,30 @@ def get_all_local_java_candidates() -> list:
                 if os.path.isdir(subdir):
                     search_paths.add(os.path.join(subdir, "bin"))
 
-    # JAVA_HOME
+    # 2.JAVA_HOME
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
             for p in val.split(";"):
                 search_paths.add(os.path.join(p, "bin"))
 
-    # 使用者 Path
-    for p in os.environ.get("PATH", "").split(";"):
-        search_paths.add(p)
+    # 3.環境變數中尋找
+    try:
+        for key, value in os.environ.items():
+            if not value:
+                continue
+            # 只處理路徑型變數
+            if isinstance(value, str) and 'java' in value.lower():
+                # 支援多個路徑(如PATH)
+                for path in value.split(os.pathsep):
+                    if 'java' in path.lower():
+                        javaw_path = os.path.join(path, "bin", "javaw.exe")
+                        if os.path.isfile(javaw_path):
+                            search_paths.add(javaw_path)
+    except Exception as e:
+        print(f"環境變數尋找 java 失敗：{e}")
 
-    # where java 檢查，只保留 javaw.exe
+    # 4.where java 檢查，只保留 javaw.exe
     try:
         result = subprocess.run(["where", "javaw"], capture_output=True, text=True, shell=False)
         if result.returncode == 0:
