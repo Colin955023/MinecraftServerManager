@@ -139,15 +139,33 @@ def get_all_local_java_candidates() -> list:
                 subdir = os.path.join(base, d)
                 if os.path.isdir(subdir):
                     search_paths.add(os.path.join(subdir, "bin"))
+
     # JAVA_HOME
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
             for p in val.split(";"):
                 search_paths.add(os.path.join(p, "bin"))
+
     # 使用者 Path
     for p in os.environ.get("PATH", "").split(";"):
         search_paths.add(p)
+
+    # where java 檢查，只保留 javaw.exe
+    try:
+        result = subprocess.run(["where", "javaw"], capture_output=True, text=True, shell=False)
+        if result.returncode == 0:
+            java_paths = result.stdout.strip().splitlines()
+            for java_path in java_paths:
+                if os.path.basename(java_path).lower() != "javaw.exe":
+                    continue
+                major = get_java_version(java_path)
+                if major:
+                    candidates.append((os.path.normpath(java_path), major))
+    except Exception as e:
+        LogUtils.error(f"搜尋 Java 安裝失敗: {e}", "JavaUtils")
+        UIUtils.show_error("搜尋 Java 安裝失敗", f"無法搜尋 Java 安裝: {e}", topmost=True)
+
     # 搜尋所有目錄下的 javaw.exe
     for p in search_paths:
         javaw = os.path.join(p, "javaw.exe")
@@ -155,13 +173,17 @@ def get_all_local_java_candidates() -> list:
             major = get_java_version(javaw)
             if major:
                 candidates.append((os.path.normpath(javaw), major))
-    # 去重
+
+    # 只保留 javaw.exe，並去除重複地
     seen = set()
     result = []
     for path, major in candidates:
+        if os.path.basename(path).lower() != "javaw.exe":
+            continue
         if (path, major) not in seen:
             seen.add((path, major))
             result.append((path, major))
+
     # 按照 major 版本排序
     result.sort(key=lambda x: x[1])
     LogUtils.info(f"找到 {len(result)} 個 Java 執行檔選擇：", "JavaUtils")

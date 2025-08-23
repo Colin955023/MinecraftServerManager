@@ -942,7 +942,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
             def on_success():
                 progress_dialog.close()
-                self.callback(config, server_path)
+                self.callback(config)
 
             self._schedule_ui_update(on_success)
         except Exception as error:
