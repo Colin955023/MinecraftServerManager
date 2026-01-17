@@ -9,6 +9,7 @@ Provides standardized HTTP request functionality including JSON retrieval, file 
 # ====== 標準函式庫 ======
 from typing import Any, Dict, List, Optional
 import asyncio
+import concurrent.futures
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -206,8 +207,8 @@ class HTTPUtils:
     @staticmethod
     def get_json_batch(urls: List[str], timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> List[Optional[Dict[str, Any]]]:
         """
-        批次發送 HTTP GET 請求並解析回傳的 JSON 資料（同步包裝）
-        Batch send HTTP GET requests and parse returned JSON data (synchronous wrapper)
+        批次發送 HTTP GET 請求並解析回傳的 JSON 資料（同步包裝，智慧處理事件迴圈）
+        Batch send HTTP GET requests and parse returned JSON data (synchronous wrapper with smart event loop handling)
 
         Args:
             urls (List[str]): 請求的目標 URL 列表
@@ -221,11 +222,13 @@ class HTTPUtils:
             # 檢查是否已有執行中的事件迴圈
             try:
                 loop = asyncio.get_running_loop()
-                # 如果已在事件迴圈中，不能使用 run()，需要創建任務
-                LogUtils.warning("已在事件迴圈中，退回使用同步請求", "HTTPUtils")
-                return [HTTPUtils.get_json(url, timeout, headers) for url in urls]
+                # 已在事件迴圈中，使用 ThreadPoolExecutor 在背景執行緒中執行同步請求
+                # 保持順序並行處理，避免阻塞事件迴圈
+                with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(urls))) as executor:
+                    futures = [executor.submit(HTTPUtils.get_json, url, timeout, headers) for url in urls]
+                    return [f.result() for f in futures]  # 按提交順序等待結果
             except RuntimeError:
-                # 沒有執行中的迴圈，可以創建新的
+                # 沒有執行中的迴圈，可以創建新的並使用真正的 async
                 return asyncio.run(HTTPUtils.get_json_batch_async(urls, timeout, headers))
         except Exception as e:
             LogUtils.error_exc(f"批次 HTTP 請求失敗: {e}", "HTTPUtils", e)

@@ -7,6 +7,7 @@ Server Manager
 Responsible for creating, managing, and configuring Minecraft servers.
 """
 # ====== 標準函式庫 ======
+from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -28,6 +29,15 @@ class ServerManager:
     伺服器管理器類別，負責建立、管理和配置 Minecraft 伺服器
     Server Manager class responsible for creating, managing, and configuring Minecraft servers
     """
+    # ====== 類別常數 ======
+    # 伺服器啟動檢查常數
+    STARTUP_CHECK_DELAY = 0.1  # 伺服器啟動檢查延遲（秒）
+    # 伺服器停止檢查常數
+    STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
+    MAX_STOP_CHECKS = 50  # 最大停止檢查次數（總計 5 秒）
+    # 輸出佇列大小限制
+    OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
+    
     # ====== 初始化與配置管理 ======
     # 初始化伺服器管理器
     def __init__(self, servers_root: str = None):
@@ -334,7 +344,7 @@ class ServerManager:
                 )
 
                 # 檢查進程是否立即失敗（減少等待時間提升響應）
-                time.sleep(0.1)  # 等待進程啟動（從 0.5s 優化至 0.1s）
+                time.sleep(self.STARTUP_CHECK_DELAY)  # 等待進程啟動
                 poll_result = process.poll()
                 if poll_result is not None:
                     LogUtils.error(f"進程立即結束，返回碼: {poll_result}", "ServerManager")
@@ -350,11 +360,14 @@ class ServerManager:
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process
 
-                # 建立有界 queue 與 output thread（防止記憶體洩漏）
-                q = queue.Queue(maxsize=1000)  # 限制最多保留 1000 行輸出
-                self.output_queues[server_name] = q
+                # 建立有界 deque 與 output thread（防止記憶體洩漏，原子操作）
+                # 使用 deque 替代 Queue 以獲得更好的記憶體管理與原子操作
+                output_deque = deque(maxlen=self.OUTPUT_QUEUE_MAX_SIZE)
+                output_lock = threading.Lock()
+                self.output_queues[server_name] = (output_deque, output_lock)
 
-                def _output_reader(proc, q, name):
+                def _output_reader(proc, output_data, name):
+                    output_deque, output_lock = output_data
                     try:
                         while True:
                             line = None
@@ -370,22 +383,15 @@ class ServerManager:
                                     continue
                             if not line:
                                 break
-                            # 使用非阻塞 put，若 queue 滿則丟棄舊資料
-                            try:
-                                q.put_nowait(line.rstrip("\r\n"))
-                            except queue.Full:
-                                # Queue 已滿，丟棄最舊的一條訊息
-                                try:
-                                    q.get_nowait()
-                                    q.put_nowait(line.rstrip("\r\n"))
-                                except queue.Empty:
-                                    pass
+                            # deque 的 append 在達到 maxlen 時會自動移除最舊項目（原子操作）
+                            with output_lock:
+                                output_deque.append(line.rstrip("\r\n"))
                             if proc.poll() is not None:
                                 break
                     except Exception as e:
                         LogUtils.error_exc(f"{name} 讀取錯誤: {e}", "output_reader", e)
 
-                t = threading.Thread(target=_output_reader, args=(process, q, server_name), daemon=True)
+                t = threading.Thread(target=_output_reader, args=(process, (output_deque, output_lock), server_name), daemon=True)
                 t.start()
                 self.output_threads[server_name] = t
 
@@ -814,9 +820,9 @@ class ServerManager:
                 if command.lower() == "stop":
 
                     def check_stop():
-                        # 使用輪詢檢查，最多檢查 10 次（5 秒）
-                        for i in range(50):  # 50 次 × 0.1s = 5s
-                            time.sleep(0.1)  # 減少睡眠時間提升響應（從 0.5s 優化至 0.1s）
+                        # 使用輪詢檢查，總時長約 5 秒
+                        for i in range(self.MAX_STOP_CHECKS):
+                            time.sleep(self.STOP_CHECK_INTERVAL)
                             if process.poll() is not None:
                                 # 程序已停止
                                 if server_name in self.running_servers:
@@ -860,18 +866,16 @@ class ServerManager:
 
             output_lines = []
 
-            q = self.output_queues.get(server_name)
-            if not q:
+            output_data = self.output_queues.get(server_name)
+            if not output_data:
                 return []
-            output_lines = []
-            start = time.time()
-            while time.time() - start < timeout:
-                try:
-                    line = q.get_nowait()
-                    if line:
-                        output_lines.append(line)
-                except queue.Empty:
-                    break
+            
+            output_deque, output_lock = output_data
+            # 從 deque 讀取所有可用輸出（原子操作）
+            with output_lock:
+                output_lines = list(output_deque)
+                output_deque.clear()
+            
             return output_lines
         except Exception as e:
             LogUtils.error_exc(f"讀取伺服器輸出失敗: {e}", "ServerManager", e)
