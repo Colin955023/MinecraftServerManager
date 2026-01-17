@@ -86,18 +86,17 @@ class MinecraftVersionManager:
                 }
                 versions.append(new_v)
 
-            # 多執行緒查詢 server_url
-            def fetch_detail(ver):
-                try:
-                    data = HTTPUtils.get_json(ver["url"], timeout=10)
-                    if data:
-                        server_info = data.get("downloads", {}).get("server", {})
-                        ver["server_url"] = server_info.get("url")
-                except Exception:
+            # 使用非同步批次查詢 server_url，提升效能
+            urls = [ver["url"] for ver in versions]
+            details = HTTPUtils.get_json_batch(urls, timeout=10)
+            
+            for ver, data in zip(versions, details):
+                if data:
+                    server_info = data.get("downloads", {}).get("server", {})
+                    ver["server_url"] = server_info.get("url")
+                else:
                     ver["server_url"] = None
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(executor.map(fetch_detail, versions))
+            
             self._save_local_cache(versions)
             return versions
         except Exception as e:

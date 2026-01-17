@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Callable, List, Optional
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import json
 import re
 import threading
@@ -102,8 +102,8 @@ class ModManager:
     # 掃描 mods 目錄中的模組檔案
     def scan_mods(self) -> List[LocalModInfo]:
         """
-        掃描 mods 目錄中的模組檔案並建立模組資訊列表 (多執行緒優化)
-        Scan mod files in the mods directory and create mod information list (multithreaded optimization)
+        掃描 mods 目錄中的模組檔案並建立模組資訊列表（多執行緒優化，I/O 密集型任務）
+        Scan mod files in the mods directory and create mod information list (multithreaded optimization for I/O-bound tasks)
 
         Args:
             None
@@ -119,8 +119,9 @@ class ModManager:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"):
                 files_to_scan.append(file_path)
 
-        # 使用 ThreadPoolExecutor 並行處理
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        # 使用 ThreadPoolExecutor 並行處理（JAR 檔案讀取主要是 I/O 操作）
+        # 每個 worker 獨立處理檔案，避免 GIL 影響
+        with ThreadPoolExecutor(max_workers=min(10, len(files_to_scan) or 1)) as executor:
             results = executor.map(self.create_mod_info_from_file, files_to_scan)
 
         for mod_info in results:
@@ -229,8 +230,8 @@ class ModManager:
 
     def _extract_metadata_from_jar(self, file_path: Path, mod_data: dict) -> None:
         """
-        根據模組載入器類型從 jar 檔案中提取元資料
-        according to the mod loader type, extract metadata from the jar file
+        根據模組載入器類型從 jar 檔案中提取元資料（統一處理邏輯）
+        Extract metadata from jar file according to mod loader type (unified processing logic)
 
         Args:
             file_path (Path): 檔案路徑
@@ -238,12 +239,18 @@ class ModManager:
         """
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
-                if "fabric.mod.json" in jar.namelist():
-                    self._extract_fabric_metadata(jar, mod_data)
-                elif "META-INF/mods.toml" in jar.namelist():
-                    self._extract_forge_metadata(jar, mod_data)
-                elif "mcmod.info" in jar.namelist():
-                    self._extract_legacy_forge_metadata(jar, mod_data)
+                # 根據檔案存在判斷模組類型並提取元資料
+                metadata_extractors = [
+                    ("fabric.mod.json", self._extract_fabric_metadata),
+                    ("META-INF/mods.toml", self._extract_forge_metadata),
+                    ("mcmod.info", self._extract_legacy_forge_metadata),
+                ]
+                
+                jar_files = jar.namelist()
+                for metadata_file, extractor in metadata_extractors:
+                    if metadata_file in jar_files:
+                        extractor(jar, mod_data)
+                        break  # 找到第一個匹配的元資料檔案即停止
         except Exception as e:
             LogUtils.error_exc(f"從 JAR 提取元資料失敗 {file_path}: {e}", "ModManager", e)
 
@@ -260,13 +267,7 @@ class ModManager:
                 meta = json.load(f)
 
             mod_data["name"] = meta.get("name", mod_data["name"])
-            mod_data["version"] = meta.get("version", mod_data["version"])
-
-            if mod_data["version"] == "${file.jarVersion}":
-                manifest_version = self._get_manifest_version(jar)
-                if manifest_version:
-                    mod_data["version"] = manifest_version
-
+            mod_data["version"] = self._resolve_version(jar, meta.get("version", mod_data["version"]))
             mod_data["description"] = meta.get("description", mod_data["description"])
             mod_data["author"] = self._process_authors(meta.get("authors", []))
             mod_data["loader_type"] = "Fabric"
@@ -275,10 +276,8 @@ class ModManager:
             if isinstance(depends, dict):
                 mc_version = depends.get("minecraft", mod_data["mc_version"])
                 mod_data["mc_version"] = self._normalize_mc_version(mc_version)
-        except TypeError as e:
-            LogUtils.error(f"無法從 JAR 檔案提取元資料: {e}", "ModManager")
-        except Exception as e:
-            LogUtils.error(f"無法從 JAR 檔案提取元資料: {e}", "ModManager")
+        except (TypeError, Exception) as e:
+            LogUtils.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
 
     def _extract_forge_metadata(self, jar, mod_data: dict) -> None:
         """
@@ -298,13 +297,7 @@ class ModManager:
             if modlist and isinstance(modlist, list):
                 modmeta = modlist[0]
                 mod_data["name"] = modmeta.get("displayName", mod_data["name"])
-                mod_data["version"] = modmeta.get("version", mod_data["version"])
-
-                if mod_data["version"] == "${file.jarVersion}":
-                    manifest_version = self._get_manifest_version(jar)
-                    if manifest_version:
-                        mod_data["version"] = manifest_version
-
+                mod_data["version"] = self._resolve_version(jar, modmeta.get("version", mod_data["version"]))
                 mod_data["description"] = modmeta.get("description", mod_data["description"])
                 mod_data["author"] = self._process_authors(modmeta.get("authors", mod_data["author"]))
 
@@ -318,6 +311,7 @@ class ModManager:
                             if d.get("modId") == "minecraft":
                                 mc_version = d.get("versionRange", mod_data["mc_version"])
                                 mod_data["mc_version"] = self._normalize_mc_version(mc_version)
+                                break
         except Exception as e:
             LogUtils.error_exc(f"解析 Forge 元資料失敗: {e}", "ModManager", e)
 
@@ -349,6 +343,23 @@ class ModManager:
                 mod_data["loader_type"] = "Forge"
         except Exception as e:
             LogUtils.error_exc(f"解析 legacy Forge mcmod.info 失敗: {e}", "ModManager", e)
+
+    def _resolve_version(self, jar, version: str) -> str:
+        """
+        解析版本號，處理佔位符 ${file.jarVersion}
+        Resolve version number, handling placeholder ${file.jarVersion}
+
+        Args:
+            jar: zipfile.ZipFile 物件
+            version (str): 原始版本字串
+
+        Returns:
+            str: 解析後的版本字串
+        """
+        if version == "${file.jarVersion}":
+            manifest_version = self._get_manifest_version(jar)
+            return manifest_version if manifest_version else version
+        return version
 
     def _process_authors(self, authors) -> str:
         """

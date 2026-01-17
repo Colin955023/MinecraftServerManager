@@ -333,8 +333,8 @@ class ServerManager:
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),  # 隱藏 console 視窗
                 )
 
-                # 檢查進程是否立即失敗
-                time.sleep(0.5)  # 等待一下讓進程有時間啟動
+                # 檢查進程是否立即失敗（減少等待時間提升響應）
+                time.sleep(0.1)  # 等待進程啟動（從 0.5s 優化至 0.1s）
                 poll_result = process.poll()
                 if poll_result is not None:
                     LogUtils.error(f"進程立即結束，返回碼: {poll_result}", "ServerManager")
@@ -810,13 +810,13 @@ class ServerManager:
                 process.stdin.flush()
                 LogUtils.debug(f"已向伺服器 {server_name} 發送命令: {command}", "ServerManager")
 
-                # 如果是停止命令，啟動更頻繁的檢查
+                # 如果是停止命令，啟動更頻繁的檢查（優化等待邏輯）
                 if command.lower() == "stop":
 
                     def check_stop():
-                        # 每 0.5 秒檢查一次，最多檢查 10 次（5 秒）
-                        for i in range(10):
-                            time.sleep(0.5)
+                        # 使用輪詢檢查，最多檢查 10 次（5 秒）
+                        for i in range(50):  # 50 次 × 0.1s = 5s
+                            time.sleep(0.1)  # 減少睡眠時間提升響應（從 0.5s 優化至 0.1s）
                             if process.poll() is not None:
                                 # 程序已停止
                                 if server_name in self.running_servers:

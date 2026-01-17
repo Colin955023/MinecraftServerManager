@@ -7,10 +7,12 @@ HTTP Network Request Utilities Module
 Provides standardized HTTP request functionality including JSON retrieval, file downloading and other common operations
 """
 # ====== 標準函式庫 ======
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+import asyncio
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import aiohttp
 # ====== 專案內部模組 ======
 from src.utils import LogUtils
 from src.version_info import APP_NAME, APP_VERSION
@@ -167,8 +169,72 @@ class HTTPUtils:
             LogUtils.error_exc(f"檔案下載失敗 ({url} -> {local_path}): {e}", "HTTPUtils", e)
             return False
 
+    # ====== 非同步批次請求 ======
+    # 非同步批次取得 JSON 資料
+    @staticmethod
+    async def get_json_batch_async(urls: List[str], timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> List[Optional[Dict[str, Any]]]:
+        """
+        非同步批次發送 HTTP GET 請求並解析回傳的 JSON 資料
+        Asynchronously batch send HTTP GET requests and parse returned JSON data
+
+        Args:
+            urls (List[str]): 請求的目標 URL 列表
+            timeout (int): 請求超時時間（秒）
+            headers (Optional[Dict[str, str]]): 可選的 HTTP 請求標頭
+
+        Returns:
+            List[Optional[Dict[str, Any]]]: JSON 字典列表，失敗的請求返回 None
+        """
+        timeout = max(10, timeout)
+        final_headers = HTTPUtils._get_default_headers(headers)
+        
+        async def fetch_one(session: aiohttp.ClientSession, url: str) -> Optional[Dict[str, Any]]:
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            except Exception as e:
+                LogUtils.error_exc(f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils", e)
+                return None
+        
+        # 配置連線器限制並行數量
+        connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
+        async with aiohttp.ClientSession(headers=final_headers, connector=connector) as session:
+            tasks = [fetch_one(session, url) for url in urls]
+            return await asyncio.gather(*tasks)
+
+    @staticmethod
+    def get_json_batch(urls: List[str], timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> List[Optional[Dict[str, Any]]]:
+        """
+        批次發送 HTTP GET 請求並解析回傳的 JSON 資料（同步包裝）
+        Batch send HTTP GET requests and parse returned JSON data (synchronous wrapper)
+
+        Args:
+            urls (List[str]): 請求的目標 URL 列表
+            timeout (int): 請求超時時間（秒）
+            headers (Optional[Dict[str, str]]): 可選的 HTTP 請求標頭
+
+        Returns:
+            List[Optional[Dict[str, Any]]]: JSON 字典列表，失敗的請求返回 None
+        """
+        try:
+            # 檢查是否已有執行中的事件迴圈
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果已在事件迴圈中，不能使用 run()，需要創建任務
+                LogUtils.warning("已在事件迴圈中，退回使用同步請求", "HTTPUtils")
+                return [HTTPUtils.get_json(url, timeout, headers) for url in urls]
+            except RuntimeError:
+                # 沒有執行中的迴圈，可以創建新的
+                return asyncio.run(HTTPUtils.get_json_batch_async(urls, timeout, headers))
+        except Exception as e:
+            LogUtils.error_exc(f"批次 HTTP 請求失敗: {e}", "HTTPUtils", e)
+            return [None] * len(urls)
+
 # ====== 向後相容性函數別名 ======
 # 提供向後相容的模組級別函數別名
 get_json = HTTPUtils.get_json
 get_content = HTTPUtils.get_content
 download_file = HTTPUtils.download_file
+get_json_batch = HTTPUtils.get_json_batch
+get_json_batch_async = HTTPUtils.get_json_batch_async
