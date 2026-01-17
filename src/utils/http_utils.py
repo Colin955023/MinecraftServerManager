@@ -9,6 +9,8 @@ Provides standardized HTTP request functionality including JSON retrieval, file 
 # ====== 標準函式庫 ======
 from typing import Any, Dict, Optional
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 # ====== 專案內部模組 ======
 from src.utils import LogUtils
 from src.version_info import APP_NAME, APP_VERSION
@@ -18,6 +20,33 @@ class HTTPUtils:
     HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面
     HTTP network request utility class providing unified interface for various HTTP operations
     """
+    
+    # 類別層級的共享 session，啟用連線池與自動重試
+    _session = None
+    
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        """
+        取得共享的 requests.Session 實例，配置連線池與重試策略
+        Get shared requests.Session instance with connection pooling and retry strategy
+        """
+        if cls._session is None:
+            cls._session = requests.Session()
+            # 配置重試策略：連線錯誤重試 3 次，指數退避
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=0.3,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS"]
+            )
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,  # 連線池大小
+                pool_maxsize=20       # 最大連線數
+            )
+            cls._session.mount("http://", adapter)
+            cls._session.mount("https://", adapter)
+        return cls._session
     
     @staticmethod
     def _get_default_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -34,11 +63,11 @@ class HTTPUtils:
 
     # ====== JSON 資料請求 ======
     # 發送 GET 請求取得 JSON 資料
-    @staticmethod
-    def get_json(url: str, timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+    @classmethod
+    def get_json(cls, url: str, timeout: int = 10, headers: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
         """
-        發送 HTTP GET 請求並解析回傳的 JSON 資料
-        Send HTTP GET request and parse returned JSON data
+        發送 HTTP GET 請求並解析回傳的 JSON 資料（使用連線池）
+        Send HTTP GET request and parse returned JSON data (with connection pooling)
 
         Args:
             url (str): 請求的目標 URL
@@ -51,11 +80,12 @@ class HTTPUtils:
         if not url or not isinstance(url, str):
             LogUtils.error("HTTP GET JSON 請求失敗: URL 參數無效", "HTTPUtils")
             return None
-        timeout = max(10, timeout)  # 精簡條件檢查
+        timeout = max(10, timeout)
 
         try:
-            final_headers = HTTPUtils._get_default_headers(headers)
-            response = requests.get(url, timeout=timeout, headers=final_headers)
+            session = cls._get_session()
+            final_headers = cls._get_default_headers(headers)
+            response = session.get(url, timeout=timeout, headers=final_headers)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -64,13 +94,13 @@ class HTTPUtils:
 
     # ====== 內容資料請求 ======
     # 發送 GET 請求取得 Response 物件
-    @staticmethod
+    @classmethod
     def get_content(
-        url: str, timeout: int = 30, stream: bool = False, headers: Optional[Dict[str, str]] = None
+        cls, url: str, timeout: int = 30, stream: bool = False, headers: Optional[Dict[str, str]] = None
     ) -> Optional[requests.Response]:
         """
-        發送 HTTP GET 請求並回傳完整的 Response 物件
-        Send HTTP GET request and return complete Response object
+        發送 HTTP GET 請求並回傳完整的 Response 物件（使用連線池）
+        Send HTTP GET request and return complete Response object (with connection pooling)
 
         Args:
             url (str): 請求的目標 URL
@@ -84,11 +114,12 @@ class HTTPUtils:
         if not url or not isinstance(url, str):
             LogUtils.error("HTTP GET 請求失敗: URL 參數無效", "HTTPUtils")
             return None
-        timeout = max(30, timeout)  # 精簡條件檢查
+        timeout = max(30, timeout)
 
         try:
-            final_headers = HTTPUtils._get_default_headers(headers)
-            response = requests.get(url, timeout=timeout, stream=stream, headers=final_headers)
+            session = cls._get_session()
+            final_headers = cls._get_default_headers(headers)
+            response = session.get(url, timeout=timeout, stream=stream, headers=final_headers)
             response.raise_for_status()
             return response
         except Exception as e:
@@ -97,11 +128,11 @@ class HTTPUtils:
 
     # ====== 檔案下載功能 ======
     # 下載檔案到本機
-    @staticmethod
-    def download_file(url: str, local_path: str, timeout: int = 60, chunk_size: int = 65536) -> bool:
+    @classmethod
+    def download_file(cls, url: str, local_path: str, timeout: int = 60, chunk_size: int = 65536) -> bool:
         """
-        從指定 URL 下載檔案並儲存到本機路徑
-        Download file from specified URL and save to local path
+        從指定 URL 下載檔案並儲存到本機路徑（使用連線池）
+        Download file from specified URL and save to local path (with connection pooling)
 
         Args:
             url (str): 檔案下載的來源 URL
@@ -123,8 +154,9 @@ class HTTPUtils:
         chunk_size = max(65536, chunk_size)
 
         try:
-            final_headers = HTTPUtils._get_default_headers()
-            with requests.get(url, stream=True, timeout=timeout, headers=final_headers) as r:
+            session = cls._get_session()
+            final_headers = cls._get_default_headers()
+            with session.get(url, stream=True, timeout=timeout, headers=final_headers) as r:
                 r.raise_for_status()
                 with open(local_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=chunk_size):

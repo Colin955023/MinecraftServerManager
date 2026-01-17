@@ -350,8 +350,8 @@ class ServerManager:
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process
 
-                # 建立 queue 與 output thread
-                q = queue.Queue()
+                # 建立有界 queue 與 output thread（防止記憶體洩漏）
+                q = queue.Queue(maxsize=1000)  # 限制最多保留 1000 行輸出
                 self.output_queues[server_name] = q
 
                 def _output_reader(proc, q, name):
@@ -370,7 +370,16 @@ class ServerManager:
                                     continue
                             if not line:
                                 break
-                            q.put(line.rstrip("\r\n"))
+                            # 使用非阻塞 put，若 queue 滿則丟棄舊資料
+                            try:
+                                q.put_nowait(line.rstrip("\r\n"))
+                            except queue.Full:
+                                # Queue 已滿，丟棄最舊的一條訊息
+                                try:
+                                    q.get_nowait()
+                                    q.put_nowait(line.rstrip("\r\n"))
+                                except queue.Empty:
+                                    pass
                             if proc.poll() is not None:
                                 break
                     except Exception as e:
