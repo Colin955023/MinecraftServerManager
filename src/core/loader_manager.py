@@ -8,6 +8,7 @@ Responsible for managing and downloading versions of Fabric and Forge loaders wi
 """
 # ====== 標準函式庫 ======
 from contextlib import suppress
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Union
 import json
@@ -35,10 +36,12 @@ class LoaderManager:
         cache_dir = ensure_dir(get_cache_dir())
         self.fabric_cache_file = str(cache_dir / "fabric_versions_cache.json")
         self.forge_cache_file = str(cache_dir / "forge_versions_cache.json")
+        # 添加記憶體快取以避免重複讀取檔案
+        self._version_cache = {}
 
     def clear_cache_file(self):
         """
-        通用快取檔案清除方法。
+        通用快取檔案清除方法（同時清除記憶體快取）。
         Generic cache file clearing method.
 
         Args:
@@ -52,6 +55,8 @@ class LoaderManager:
             os.remove(cache_file)
             cache_file = self.forge_cache_file
             os.remove(cache_file)
+            # 清除記憶體快取
+            self._version_cache.clear()
         except PermissionError as e:
             LogUtils.error_exc(f"清除快取檔案失敗: {e}", "LoaderManager", e)
             UIUtils.show_error("清除快取檔案失敗", f"無法刪除快取檔案: {cache_file}\n權限不足\n{e}", topmost=True)
@@ -246,8 +251,8 @@ class LoaderManager:
 
     def get_compatible_loader_versions(self, mc_version: str, loader_type: str) -> List[LoaderVersion]:
         """
-        只從 json 快取檔案取得相容的載入器版本列表。
-        get all compatible loader versions from cache.
+        只從 json 快取檔案取得相容的載入器版本列表（使用記憶體快取優化）。
+        get all compatible loader versions from cache (with memory caching optimization).
 
         Args:
             mc_version (str): 要檢查的 MC 版本字串
@@ -256,6 +261,13 @@ class LoaderManager:
         Returns:
             List[LoaderVersion]: 相容的 Fabric 載入器版本列表
         """
+        # 建立快取鍵
+        cache_key = f"{loader_type.lower()}_{mc_version}"
+        
+        # 檢查記憶體快取
+        if cache_key in self._version_cache:
+            return self._version_cache[cache_key]
+        
         # 檢查快取檔案是否存在
         if not os.path.exists(self.fabric_cache_file) and not os.path.exists(self.forge_cache_file):
             return []
@@ -265,7 +277,9 @@ class LoaderManager:
                 try:
                     # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
                     if not self._is_fabric_compatible_version(mc_version):
-                        return []
+                        result = []
+                        self._version_cache[cache_key] = result
+                        return result
 
                     with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
                         cache = json.load(f)
@@ -276,6 +290,9 @@ class LoaderManager:
                             ver = item["version"]
                             if ver:
                                 result.append(LoaderVersion(version=ver))
+                    
+                    # 儲存到記憶體快取
+                    self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
                     LogUtils.error_exc(f"獲取 Fabric 版本時發生錯誤: {e}", "LoaderManager", e)
@@ -295,7 +312,9 @@ class LoaderManager:
                             if "-" in version and version.startswith(mc_version):
                                 forge_version = version.split("-", 1)[1]
                                 result.append(LoaderVersion(version=forge_version))
-                        return result
+                    
+                    # 儲存到記憶體快取
+                    self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
                     LogUtils.error_exc(f"獲取 Forge 版本時發生錯誤: {e}", "LoaderManager", e)

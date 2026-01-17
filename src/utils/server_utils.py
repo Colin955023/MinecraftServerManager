@@ -538,19 +538,27 @@ class ServerDetectionUtils:
                     max_mem = parsed_max
                 if not min_mem and parsed_min:
                     min_mem = parsed_min
+                
+                # 提前結束：如果兩個值都找到了，不需要繼續
+                if max_mem and min_mem:
+                    break
         
-        # === 3. 備援：掃描所有 .bat 腳本 ===
+        # === 3. 備援：掃描所有 .bat 和 .sh 腳本（僅在需要時） ===
         if max_mem is None or min_mem is None:
-            for pattern in ["*.bat", "*.sh"]:
-                for script in server_path.glob(pattern):
-                    parsed_max, parsed_min = process_script_file(script)
-                    if not max_mem and parsed_max:
-                        max_mem = parsed_max
-                    if not min_mem and parsed_min:
-                        min_mem = parsed_min
-                    
-                    if max_mem and min_mem:  # 提前結束
-                        break
+            for script in server_path.glob("*.[bs][ah][tt]"):  # 匹配 *.bat 或 *.sh
+                # 跳過已處理的檔案
+                if script.name in ["start_server.bat", "start.bat"]:
+                    continue
+                
+                parsed_max, parsed_min = process_script_file(script)
+                if not max_mem and parsed_max:
+                    max_mem = parsed_max
+                if not min_mem and parsed_min:
+                    min_mem = parsed_min
+                
+                # 提前結束
+                if max_mem and min_mem:
+                    break
         
         # 寫入 config
         if max_mem:

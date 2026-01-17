@@ -149,19 +149,35 @@ class SettingsManager:
         return self._settings.get(key, default)
 
     # 設定值並儲存
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
         """
-        設定指定鍵值的資料並立即儲存到檔案
-        Set data for specified key and immediately save to file
+        設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）
+        Set data for specified key (optionally immediate or deferred save for batch updates)
 
         Args:
             key (str): 設定鍵值名稱
             value (Any): 要設定的值
+            immediate_save (bool): 是否立即儲存（預設 True）
 
         Returns:
             None
         """
         self._settings[key] = value
+        if immediate_save:
+            self._save_settings(self._settings)
+    
+    def update_batch(self, updates: dict) -> None:
+        """
+        批次更新多個設定值並一次性儲存（優化 I/O 效能）
+        Batch update multiple settings and save once (optimize I/O performance)
+
+        Args:
+            updates (dict): 要更新的鍵值對字典
+
+        Returns:
+            None
+        """
+        self._settings.update(updates)
         self._save_settings(self._settings)
 
     # ====== 伺服器根目錄管理 ======

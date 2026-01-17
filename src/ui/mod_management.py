@@ -12,6 +12,7 @@ from typing import Callable, Optional
 import json
 import os
 import re
+import shutil
 import subprocess
 import threading
 import traceback
@@ -1079,6 +1080,8 @@ class ModManagementFrame:
                 mods_dir.mkdir(exist_ok=True)
 
                 target_path = mods_dir / Path(filename).name
+                # 複製檔案（修正：之前缺少實際複製檔案的操作）
+                shutil.copy2(filename, str(target_path))
                 UIUtils.show_info("成功", f"模組已匯入: {Path(filename).name}", self.parent)
                 self.load_local_mods()
 

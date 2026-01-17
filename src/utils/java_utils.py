@@ -146,17 +146,17 @@ def get_all_local_java_candidates() -> list:
             for p in val.split(";"):
                 search_paths.add(os.path.join(p, "bin"))
 
-    # 3.環境變數中的 Java 路徑
+    # 3.PATH 環境變數中的 Java 路徑（優化：只掃描 PATH 而非所有環境變數）
     try:
-        for value in os.environ.values():
-            if isinstance(value, str) and 'java' in value.lower():
-                for path in value.split(os.pathsep):
-                    if 'java' in path.lower():
-                        javaw_path = os.path.join(path, "bin", "javaw.exe")
-                        if os.path.isfile(javaw_path):
-                            search_paths.add(os.path.dirname(javaw_path))
+        path_env = os.environ.get('PATH', '')
+        if path_env:
+            for path in path_env.split(os.pathsep):
+                if 'java' in path.lower():
+                    javaw_path = os.path.join(path, "bin", "javaw.exe") if not path.endswith("bin") else os.path.join(path, "javaw.exe")
+                    if os.path.isfile(javaw_path):
+                        search_paths.add(os.path.dirname(javaw_path))
     except Exception as e:
-        LogUtils.error_exc(f"環境變數尋找 java 失敗：{e}", "JavaUtils", e)
+        LogUtils.error_exc(f"PATH 環境變數尋找 java 失敗：{e}", "JavaUtils", e)
 
     # 4.where javaw 檢查
     candidates = []
