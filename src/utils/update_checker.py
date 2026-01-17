@@ -19,6 +19,9 @@ from .ui_utils import UIUtils
 
 GITHUB_API = "https://api.github.com"
 
+# 預編譯正則表達式以提升效能
+_VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
+
 
 def _normalize_version(v: str) -> tuple:
     """
@@ -32,8 +35,8 @@ def _normalize_version(v: str) -> tuple:
     if text.startswith(("v", "V")):
         text = text[1:]
 
-    # 擷取 x.x 或 x.x.x（只取第一段）
-    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
+    # 使用預編譯的正則表達式
+    m = _VERSION_PATTERN.search(text)
     if not m:
         return (0, 0, 0)
 

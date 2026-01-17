@@ -217,7 +217,7 @@ class CreateServerFrame(ctk.CTkFrame):
             content_frame,
             variable=self.loader_type_var,
             values=["Vanilla", "Fabric", "Forge"],
-            command=lambda value: self.update_server_config_ui(),
+            # 移除 command 參數，避免與 trace_add 重複觸發
             width=280,
             state="readonly",
         )

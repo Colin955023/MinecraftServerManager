@@ -9,14 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Callable, Optional
+import glob
 import os
+import queue
 import shutil
 import subprocess
+import threading
+import time
 import tkinter as tk
 import traceback
-import glob
-import queue
-import threading
 import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..core import ServerConfig, ServerManager
@@ -46,6 +47,10 @@ class ManageServerFrame(ctk.CTkFrame):
         self.on_navigate_callback = on_navigate_callback  # 添加導航回調
         self.set_servers_root = set_servers_root  # 明確傳入 main_window 的 set_servers_root
         self.selected_server: Optional[str] = None
+        
+        # JAR 檔案搜尋快取（避免重複 glob 操作）
+        self._jar_search_cache = {}
+        self._jar_cache_timeout = 60  # 快取 60 秒
         
         # 元件初始化旗標與關鍵屬性（避免在 UI 尚未建立時被 background refresh 觸發）
         self._widgets_created = False
@@ -598,17 +603,24 @@ class ManageServerFrame(ctk.CTkFrame):
         if is_running:
             return "🟢 運行中"
 
-        # 檢查伺服器檔案
-        server_jar_exists = False
-        jar_patterns = ["server.jar", "minecraft_server*.jar", "fabric-server*.jar", "forge-*.jar"]
-        for jar_pattern in jar_patterns:
-            if "*" in jar_pattern:
-                if glob.glob(os.path.join(config.path, jar_pattern)):
-                    server_jar_exists = True
-                    break
-            elif os.path.exists(os.path.join(config.path, jar_pattern)):
-                server_jar_exists = True
-                break
+        # 檢查伺服器檔案（使用快取避免重複 glob 操作）
+        current_time = time.time()
+        cache_key = config.path
+        
+        # 檢查快取是否有效
+        if cache_key in self._jar_search_cache:
+            cached_result, cache_time = self._jar_search_cache[cache_key]
+            if current_time - cache_time < self._jar_cache_timeout:
+                server_jar_exists = cached_result
+            else:
+                # 快取過期，重新搜尋
+                del self._jar_search_cache[cache_key]
+                server_jar_exists = self._check_server_jar_exists(config.path)
+                self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
+        else:
+            # 無快取，執行搜尋
+            server_jar_exists = self._check_server_jar_exists(config.path)
+            self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
 
         eula_exists = os.path.exists(os.path.join(config.path, "eula.txt"))
         eula_accepted = getattr(config, "eula_accepted", False)
@@ -624,6 +636,26 @@ class ManageServerFrame(ctk.CTkFrame):
             if missing:
                 return f"❌ 未就緒 (缺少: {', '.join(missing)})"
             return "❌ 未就緒"
+    
+    def _check_server_jar_exists(self, server_path: str) -> bool:
+        """
+        檢查伺服器 JAR 檔案是否存在（輔助方法）
+        Check if server JAR file exists (helper method)
+        
+        Args:
+            server_path (str): 伺服器路徑
+            
+        Returns:
+            bool: JAR 檔案是否存在
+        """
+        jar_patterns = ["server.jar", "minecraft_server*.jar", "fabric-server*.jar", "forge-*.jar"]
+        for jar_pattern in jar_patterns:
+            if "*" in jar_pattern:
+                if glob.glob(os.path.join(server_path, jar_pattern)):
+                    return True
+            elif os.path.exists(os.path.join(server_path, jar_pattern)):
+                return True
+        return False
 
     def refresh_servers(self) -> None:
         """
