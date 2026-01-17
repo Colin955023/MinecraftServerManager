@@ -613,8 +613,7 @@ class ManageServerFrame(ctk.CTkFrame):
             if current_time - cache_time < self._jar_cache_timeout:
                 server_jar_exists = cached_result
             else:
-                # 快取過期，重新搜尋
-                del self._jar_search_cache[cache_key]
+                # 快取過期，重新搜尋並直接覆寫（無需先刪除）
                 server_jar_exists = self._check_server_jar_exists(config.path)
                 self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
         else:

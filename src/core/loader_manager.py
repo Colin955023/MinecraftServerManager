@@ -277,9 +277,8 @@ class LoaderManager:
                 try:
                     # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
                     if not self._is_fabric_compatible_version(mc_version):
-                        result = []
-                        self._version_cache[cache_key] = result
-                        return result
+                        # 不快取空結果，因為相容性可能在未來改變
+                        return []
 
                     with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
                         cache = json.load(f)
@@ -291,8 +290,9 @@ class LoaderManager:
                             if ver:
                                 result.append(LoaderVersion(version=ver))
                     
-                    # 儲存到記憶體快取
-                    self._version_cache[cache_key] = result
+                    # 只快取非空結果
+                    if result:
+                        self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
                     LogUtils.error_exc(f"獲取 Fabric 版本時發生錯誤: {e}", "LoaderManager", e)
@@ -313,8 +313,9 @@ class LoaderManager:
                                 forge_version = version.split("-", 1)[1]
                                 result.append(LoaderVersion(version=forge_version))
                     
-                    # 儲存到記憶體快取
-                    self._version_cache[cache_key] = result
+                    # 只快取非空結果
+                    if result:
+                        self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
                     LogUtils.error_exc(f"獲取 Forge 版本時發生錯誤: {e}", "LoaderManager", e)

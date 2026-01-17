@@ -545,7 +545,10 @@ class ServerDetectionUtils:
         
         # === 3. 備援：掃描所有 .bat 和 .sh 腳本（僅在需要時） ===
         if max_mem is None or min_mem is None:
-            for script in server_path.glob("*.[bs][ah][tt]"):  # 匹配 *.bat 或 *.sh
+            # 正確的方式：分別 glob 兩種檔案類型並合併
+            import itertools
+            scripts = itertools.chain(server_path.glob("*.bat"), server_path.glob("*.sh"))
+            for script in scripts:
                 # 跳過已處理的檔案
                 if script.name in ["start_server.bat", "start.bat"]:
                     continue
