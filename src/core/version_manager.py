@@ -12,10 +12,7 @@ import json
 import concurrent.futures
 import os
 # ====== 專案內部模組 ======
-from src.utils.http_utils import HTTPUtils
-from src.utils.runtime_paths import ensure_dir, get_cache_dir
-from src.utils.log_utils import LogUtils
-from src.utils.ui_utils import UIUtils
+from src.utils import HTTPUtils, LogUtils, UIUtils, ensure_dir, get_cache_dir
 
 class MinecraftVersionManager:
     """
@@ -29,7 +26,9 @@ class MinecraftVersionManager:
         初始化 Minecraft 版本管理器
         Initialize Minecraft version manager
         """
-        self.version_manifest_url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        self.version_manifest_url = (
+            "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        )
         self.cache_file = str(ensure_dir(get_cache_dir()) / "mc_versions_cache.json")
 
     # 儲存本地快取
@@ -50,8 +49,8 @@ class MinecraftVersionManager:
             ensure_dir(cache_path.parent)
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(versions, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            LogUtils.error_exc(f"寫入版本快取失敗: {e}", "VersionManager", e)
 
     # ====== 版本資料獲取 ======
     # 從官方 API 獲取版本列表
@@ -89,22 +88,21 @@ class MinecraftVersionManager:
                 }
                 versions.append(new_v)
 
-            # 多執行緒查詢 server_url
-            def fetch_detail(ver):
-                try:
-                    data = HTTPUtils.get_json(ver["url"], timeout=10)
-                    if data:
-                        server_info = data.get("downloads", {}).get("server", {})
-                        ver["server_url"] = server_info.get("url")
-                except Exception:
+            # 使用非同步批次查詢 server_url，提升效能
+            urls = [ver["url"] for ver in versions]
+            details = HTTPUtils.get_json_batch(urls, timeout=10, max_workers=max_workers)
+
+            for ver, data in zip(versions, details):
+                if data:
+                    server_info = data.get("downloads", {}).get("server", {})
+                    ver["server_url"] = server_info.get("url")
+                else:
                     ver["server_url"] = None
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(executor.map(fetch_detail, versions))
             self._save_local_cache(versions)
             return versions
         except Exception as e:
-            LogUtils.error(f"無法取得版本資訊: {e}", "VersionManager")
+            LogUtils.error_exc(f"無法取得版本資訊: {e}", "VersionManager", e)
             UIUtils.show_error("取得版本失敗", f"無法從官方 API 獲取版本資訊: {e}")
             return []
 
@@ -130,6 +128,6 @@ class MinecraftVersionManager:
             # 直接回傳版本列表，快取中已只包含正式發布版本
             return versions
         except Exception as e:
-            LogUtils.debug(f"獲取版本時發生錯誤: {e}", "VersionManager")
+            LogUtils.error_exc(f"獲取版本時發生錯誤: {e}", "VersionManager", e)
             UIUtils.show_error("獲取版本失敗", f"無法從快取獲取版本資訊: {e}")
             return []

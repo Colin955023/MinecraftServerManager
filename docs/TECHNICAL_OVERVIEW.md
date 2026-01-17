@@ -1,131 +1,131 @@
+#  Minecraft 伺服器管理器 - 技術概覽 (Technical Overview)
 
-# 📊 Minecraft 伺服器管理器 - 技術概覽
+本文件詳細說明 **Minecraft 伺服器管理器** 的技術架構、設計模式與實作細節。本專案參考了 [PrismLauncher](https://github.com/PrismLauncher/PrismLauncher) 與 [MinecraftModChecker](https://github.com/MrPlayerYork/MinecraftModChecker) 的設計理念，並針對伺服器管理場景進行了最佳化。
 
-本專案參考 [Prism Launcher](https://github.com/PrismLauncher/PrismLauncher) 與 [MinecraftModChecker](https://github.com/MrPlayerYork/MinecraftModChecker)。
+##  系統架構
 
-## 🏗️ 技術架構 (最新版本)
+本專案採用模組化的三層式架構設計，確保程式碼的可維護性與擴充性。
 
-### 專案檔案結構
-```
-專案根目錄/
-├── minecraft_server_manager.py        # 🚀 主程式入口
-├── build.spec                         # 📦 PyInstaller 打包設定
-├── requirements.txt                   # 📋 依賴列表
-├── quick_test.py                      # 🧪 快速功能測試
-├── README.md                          # 📖 專案說明
-├── src/                               # 📁 核心原始碼
-│   ├── __init__.py                    # Python 套件初始化
-│   ├── models.py                      # 📊 資料模型定義
-│   ├── version_info.py                # ℹ️ 版本資訊
-│   ├── core/                          # 🧠 核心邏輯
-│   │   ├── __init__.py
-│   │   ├── loader_manager.py          # 🔧 載入器管理 (Fabric/Forge/Vanilla)
-│   │   ├── mod_manager.py             # 🧩 模組管理與狀態切換
-│   │   ├── properties_helper.py       # ⚙️ server.properties 處理
-│   │   ├── server_detection.py        # 🔍 伺服器自動偵測
-│   │   ├── server_manager.py          # 🖥️ 伺服器生命週期管理
-│   │   └── version_manager.py         # 📝 Minecraft 版本管理
-│   ├── ui/                            # 🎨 使用者介面
-│   │   ├── __init__.py
-│   │   ├── main_window.py               # 🏠 主視窗與導航
-│   │   ├── create_server_frame.py       # ➕ 伺服器建立介面
-│   │   ├── manage_server_frame.py       # 🛠️ 伺服器管理介面
-│   │   ├── mod_management.py            # 🧩 模組管理介面
-│   │   ├── custom_dropdown.py           # 📋 自訂下拉選單
-│   │   ├── server_monitor_window.py     # 📊 伺服器監控視窗
-│   │   ├── server_properties_dialog.py  # ⚙️ 屬性設定對話框
-│   │   └── window_preferences_dialog.py # 🎛️ 偏好設定對話框
-│   └── utils/                       # 🔧 工具函式庫
-│       ├── __init__.py
-│       ├── app_restart.py           # 🔄 應用程式重啟
-│       ├── font_manager.py          # 🔤 字體與DPI管理
-│       ├── http_utils.py            # 🌐 HTTP請求工具
-│       ├── java_downloader.py       # ☕ Java 自動下載
-│       ├── java_utils.py            # ☕ Java 環境管理
-│       ├── log_utils.py             # 📝 日誌處理工具
-│       ├── memory_utils.py          # 💾 記憶體計算工具
-│       ├── runtime_paths.py         # 📂 執行時路徑管理
-│       ├── server_utils.py          # 🖥️ 伺服器操作工具
-│       ├── settings_manager.py      # ⚙️ 設定檔管理
-│       ├── ui_utils.py              # 🎨 統一介面工具
-│       ├── update_checker.py        # 🔄 更新檢查
-│       └── window_manager.py        # 🪟 視窗管理工具
-├── docs/                            # 📚 說明文件
-│   ├── CODE_REVIEW_AND_COMPLIANCE.md  # 📋 程式碼審查報告
-│   ├── CODE_SECURITY_ANALYSIS.md      # 🔒 安全性分析報告
-│   ├── PLAGIARISM_DETECTION_TOOLS.md  # 🔍 抄襲檢測工具
-│   ├── TECHNICAL_OVERVIEW.md          # 📊 技術概覽
-│   └── USER_GUIDE.md                  # 👤 使用指南
-├── scripts/                         # 📜 建置腳本
-│   ├── build.bat                    # 🔨 建置可執行檔
-│   ├── build_installer.bat          # 📦 建置安裝包
-│   ├── cleanup.bat                  # 🧹 清理腳本
-│   └── installer.iss                # 🏗️ Inno Setup 安裝腳本
-└── assets/                          # 🎨 資源檔案
-    ├── icon.ico                     # 🖼️ 應用程式圖示
-    └── version_info.txt             # ℹ️ 版本資訊檔案
-```
+### 1. 核心層 (Core Layer) - src/core/
+負責處理所有的業務邏輯與資料操作，不依賴於任何 UI 元件。
+- **ServerManager**: 伺服器生命週期管理（建立、啟動、停止、監控）。
+- **MinecraftVersionManager**: 負責從 Mojang 與載入器官方 API 獲取版本資訊。
+- **LoaderManager**: 處理 Fabric、Forge 等模組載入器的安裝與配置。
+- **ModManager**: 負責模組檔案的掃描、啟用/停用狀態切換。
+- **ServerDetectionUtils**: 實作既有伺服器的自動偵測邏輯。
 
-## 🔧 技術棧與依賴
+### 2. 介面層 (UI Layer) - src/ui/
+基於 CustomTkinter 構建的現代化圖形介面，負責與使用者互動並展示資料。
+- **MinecraftServerManager**: 應用程式主視窗與導航邏輯。
+- **CreateServerFrame**: 伺服器建立精靈，引導使用者完成配置。
+- **ManageServerFrame**: 伺服器管理儀表板，提供啟動、停止與監控入口。
+- **ModManagementFrame**: 模組管理介面，提供直觀的模組列表與操作功能。
+- **ServerMonitorWindow**: 獨立的伺服器監控視窗，顯示即時日誌與資源使用率。
+- **CustomDropdown**: 自定義的下拉選單元件，解決原生元件樣式限制。
 
-### 核心技術
-- **Python 3.7+**: 主要開發語言
-- **CustomTkinter**: 現代化GUI框架
-- **PyInstaller**: 可執行檔打包工具
+### 3. 工具層 (Utils Layer) - src/utils/
+提供跨模組共用的通用功能與輔助函式。
+- **JavaUtils / JavaDownloader**: Java 環境的偵測、驗證與自動下載。
+- **LogUtils**: 統一的日誌記錄系統，支援多級別日誌輸出。
+- **SettingsManager**: 應用程式設定的持久化存儲與讀取。
+- **UIUtils**: 通用的 UI 輔助函式，如對話框顯示、字體管理等。
 
-### 第三方函式庫
-```python
-# 網路與HTTP處理
-requests >= 2.31.0          # HTTP請求處理
-urllib3 >= 2.0.0            # 底層HTTP工具
-aiohttp >= 3.9.0            # 異步HTTP支援
+##  專案檔案結構
 
-# 系統與處理
-psutil >= 5.9.0             # 系統資源監控
-packaging >= 23.2           # 版本號處理
-
-# 資料處理與解析
-lxml >= 6.0.0               # XML解析 (載入器元數據)
-toml >= 0.10.2              # TOML配置檔案
-
-# 使用者介面
-customtkinter >= 5.2.0      # 現代GUI框架
-rich >= 13.7.0              # 豐富的終端輸出
-
-# 開發與建置
-pyinstaller >= 6.0.0       # 可執行檔打包
+```text
+MinecraftServerManger/
+   .gitignore
+   COPYING.md
+   LICENSE
+   pyproject.toml
+   quick_test.py
+   README.md
+   uv.lock
+   assets/
+      icon.ico
+      version_info.txt
+   docs/
+      TECHNICAL_OVERVIEW.md
+      USER_GUIDE.md
+      CODE_REVIEW_AND_COMPLIANCE.md
+   scripts/                        # 依 .gitignore 忽略清單，結構表不列出被忽略的腳本
+      build_installer_nuitka.bat
+      build_nuitka.bat
+      installer.iss
+   src/
+      __init__.py
+      main.py
+      core/
+         __init__.py
+         loader_manager.py
+         mod_manager.py
+         server_manager.py
+         version_manager.py
+      models/
+         __init__.py
+         models.py
+      ui/
+         __init__.py
+         create_server_frame.py
+         custom_dropdown.py
+         main_window.py
+         manage_server_frame.py
+         mod_management.py
+         server_monitor_window.py
+         server_properties_dialog.py
+         window_preferences_dialog.py
+      utils/
+         __init__.py
+         app_restart.py
+         font_manager.py
+         http_utils.py
+         java_downloader.py
+         java_utils.py
+         log_utils.py
+         path_utils.py
+         runtime_paths.py
+         server_utils.py
+         settings_manager.py
+         ui_utils.py
+         update_checker.py
+         window_manager.py
+      version_info/
+         __init__.py
+         version_info.py
 ```
 
-### 系統需求
-- **作業系統**: Windows 10/11 (64位元)
-- **Python版本**: 3.7 - 3.13
-- **記憶體**: 最少 2GB RAM (建議 4GB+)
-- **磁碟空間**: 最少 1GB 可用空間
-- **網路**: 寬頻網際網路連線
+##  模組匯出策略（re-export）
 
-## 📋 主要功能
+為了讓 import 更一致、降低跨模組耦合，本專案在多個 package 使用「lazy re-export」：
 
-### 🧩 模組管理
-- 即時掃描 mods 資料夾
-- 雙擊啟用/停用（.jar ↔ .jar.disabled）
-- 多選、批量操作
+- `src/core/__init__.py`：集中匯出核心管理器（例如 `ServerManager`, `LoaderManager`, `MinecraftVersionManager`, `ModManager`）。
+- `src/utils/__init__.py`：集中匯出常用工具（例如 `UIUtils`, `LogUtils`, `HTTPUtils`, `font_manager`, `get_settings_manager` 等）。
+- `src/ui/__init__.py`：集中匯出 UI 主要入口（例如 `MinecraftServerManager` 與各 Frame/對話框）。
 
-### 🖥️ 伺服器管理
-- 支援 Vanilla、Fabric、Forge
-- 自動獲取版本資訊
-- 即時資源監控
-- 命令控制發送
-- 啟動/停止伺服器
-- 多伺服器同時運行
+匯出採用 lazy import，可降低啟動時載入成本並減少循環 import 的風險。
 
-## 🎨 設計理念
-- 參考 Prism Launcher，強調簡潔、即時、批量、智能
-- 參考 MinecraftModChecker：報告產生
-- 現代分頁介面、全繁體中文、狀態同步
+##  使用者資料與伺服器資料路徑
 
-## 🔗 API 整合
-- Modrinth API：取得模組資訊
-- Mojang/載入器 API：獲取官方/載入器版本、自動更新
+- 使用者設定檔固定存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- `user_settings.json` 會記錄「使用者選擇的伺服器主資料夾」(base dir)，實際伺服器資料會放在該資料夾內的 `servers` 子資料夾。
 
-## 📝 備註
-- 未來可擴充：模組下載、相容/依賴性檢查、模組更新、伺服器更新
+##  技術堆疊 (Tech Stack)
+
+### 核心語言與框架
+- **Python 3.9+**: 專案開發語言。
+- **CustomTkinter**: 基於 Tkinter 的現代化 UI 擴充庫，提供深色模式與圓角設計。
+- **Nuitka**: 將 Python 程式編譯為高效能的可執行檔與依賴資料夾（standalone/onedir）。
+
+### 關鍵第三方函式庫
+- **requests / aiohttp**: 處理 HTTP 請求，用於獲取版本資訊與下載檔案。
+- **psutil**: 跨平台系統監控，用於獲取 CPU 與記憶體使用率。
+- **lxml**: 高效能 XML 解析，用於處理 Maven Metadata。
+- **toml**: 解析 TOML 設定檔 (如 Fabric/Forge 配置)。
+
+##  安全性與合規性
+
+- **開源合規**: 本專案嚴格遵守開源授權規範，所有第三方依賴均符合授權要求。
+- **資料隱私**: 應用程式僅在本地運行，不會收集或上傳使用者的伺服器資料。
+- **網路安全**: 所有網路請求均透過 HTTPS 進行，確保資料傳輸安全。
+
+詳細資訊請參閱 [程式碼規範與審查報告](CODE_REVIEW_AND_COMPLIANCE.md)。

@@ -15,24 +15,23 @@ import re
 import shutil
 import subprocess
 import threading
-import time
+import traceback
 import tkinter as tk
 import urllib.parse
+import queue
 from concurrent.futures import ThreadPoolExecutor
 import customtkinter as ctk
 # ====== 專案內部模組 ======
-from .custom_dropdown import CustomDropdown
-from ..core.mod_manager import ModManager, ModStatus
-from ..core.version_manager import MinecraftVersionManager
-from ..utils.font_manager import font_manager, get_dpi_scaled_size, get_font
-from ..utils.http_utils import HTTPUtils
-from ..utils.settings_manager import get_settings_manager
-from ..utils.log_utils import LogUtils
-from ..utils.ui_utils import UIUtils
+from . import CustomDropdown
+from ..core import MinecraftVersionManager, ModManager, ModStatus
+from ..utils import HTTPUtils, LogUtils, UIUtils, get_settings_manager
+from ..utils import font_manager, get_dpi_scaled_size, get_font
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 # 提供同步查詢的 search_mods_online 及 enhance_local_mod 包裝
-def search_mods_online(query, minecraft_version=None, loader=None, categories=None, sort_by="relevance"):
+def search_mods_online(
+    query, minecraft_version=None, loader=None, categories=None, sort_by="relevance"
+):
     """
     線上搜尋模組
     Search for mods online
@@ -56,9 +55,13 @@ def search_mods_online(query, minecraft_version=None, loader=None, categories=No
         "query": query,
         "limit": 20,
         "facets": json.dumps(facets),
-        "index": sort_by if sort_by in ["relevance", "downloads", "newest"] else "relevance",
+        "index": (
+            sort_by if sort_by in ["relevance", "downloads", "newest"] else "relevance"
+        ),
     }
-    headers = {"User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"}
+    headers = {
+        "User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"
+    }
     # 構建完整 URL
     full_url = url + "?" + urllib.parse.urlencode(params)
     response = HTTPUtils.get_json(url=full_url, headers=headers, timeout=10)
@@ -71,7 +74,9 @@ def search_mods_online(query, minecraft_version=None, loader=None, categories=No
         mod = type("OnlineModInfo", (), {})()
         mod.name = hit.get("title", "Unknown")
         mod.slug = hit.get("project_id", "")
-        mod.url = f"https://modrinth.com/mod/{hit.get('slug', hit.get('project_id', ''))}"
+        mod.url = (
+            f"https://modrinth.com/mod/{hit.get('slug', hit.get('project_id', ''))}"
+        )
         mod.versions = hit.get("versions", [])
         mod.available = True
         mod.download_url = None
@@ -135,6 +140,9 @@ class ModManagementFrame:
         self.all_selected = False
         self.selected_mods = set()  # 儲存選中的模組 ID
 
+        # 預編譯正則表達式（效能優化：避免每次 refresh 都重新編譯）
+        self.VERSION_PATTERN = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
+
         # UI 元件
         self.main_frame = None
         self.notebook = None
@@ -148,7 +156,17 @@ class ModManagementFrame:
         self.local_mods = []
         self.enhanced_mods_cache = {}
 
+        # 初始化 UI 更新佇列 Initialize UI update queue
+        self.ui_queue = queue.Queue()
+
         self.create_widgets()
+        # 使用 main_frame 作為計時器宿主 Use main_frame as timer host
+        host = (
+            self.main_frame
+            if (self.main_frame and self.main_frame.winfo_exists())
+            else self.parent
+        )
+        UIUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
     def update_status(self, message: str) -> None:
@@ -160,47 +178,48 @@ class ModManagementFrame:
             message (str): 狀態訊息
         """
         try:
-            if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
-                if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, lambda: self.status_label.configure(text=message))
+            if (
+                hasattr(self, "status_label")
+                and self.status_label
+                and self.status_label.winfo_exists()
+            ):
+                if (
+                    hasattr(self, "parent")
+                    and self.parent
+                    and self.parent.winfo_exists()
+                ):
+                    self.parent.after(
+                        0, lambda: self.status_label.configure(text=message)
+                    )
                 else:
                     self.status_label.configure(text=message)
         except Exception as e:
-            LogUtils.error(f"更新狀態失敗: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"更新狀態失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
 
     def update_status_safe(self, message: str) -> None:
         """
-        更安全的狀態更新，使用 after 方法
-        More safe status update using after method
+        更安全的狀態更新，使用佇列
+        More safe status update using queue
 
         Args:
             message (str): 狀態訊息
         """
-        try:
-            if hasattr(self, "status_label") and self.status_label:
-                if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, lambda: self.update_status(message))
-                else:
-                    self.update_status(message)
-        except Exception as e:
-            LogUtils.error(f"安全更新狀態失敗: {e}", "ModManagementFrame")
+        self.ui_queue.put(lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
         """
-        更安全的進度更新，使用 after 方法
-        More safe progress update using after method
+        更安全的進度更新，使用佇列
+        More safe progress update using queue
 
         Args:
             value (float): 進度值
         """
-        try:
+        def _update():
             if hasattr(self, "progress_var") and self.progress_var:
-                if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, lambda: self.progress_var.set(value))
-                else:
-                    self.progress_var.set(value)
-        except Exception as e:
-            LogUtils.error(f"安全更新進度失敗: {e}", "ModManagementFrame")
+                self.progress_var.set(value)
+        self.ui_queue.put(_update)
 
     def create_widgets(self) -> None:
         """建立 UI 元件"""
@@ -261,7 +280,9 @@ class ModManagementFrame:
         header_frame.pack(fill="x", padx=20, pady=(20, 10))
 
         # 創建標題
-        title_label = ctk.CTkLabel(header_frame, text="🧩 模組管理", font=get_font(size=27, weight="bold"))
+        title_label = ctk.CTkLabel(
+            header_frame, text="🧩 模組管理", font=get_font(size=27, weight="bold")
+        )
         title_label.pack(side="left", padx=15, pady=15)
 
         desc_label = ctk.CTkLabel(
@@ -323,7 +344,10 @@ class ModManagementFrame:
             elif current_tab == 1:  # 線上瀏覽頁面
                 pass  # 線上頁面不需要自動重新整理
         except Exception as e:
-            LogUtils.error(f"處理頁籤切換事件失敗: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}",
+                "ModManagementFrame",
+            )
 
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列"""
@@ -369,7 +393,9 @@ class ModManagementFrame:
             left_frame,
             text="🔄 檢查更新",
             font=get_font(size=18, weight="bold"),
-            command=lambda: UIUtils.show_info("提示", "目前檢查更新功能暫停開發，請手動檢查模組更新。", self.parent),
+            command=lambda: UIUtils.show_info(
+                "提示", "目前檢查更新功能暫停開發，請手動檢查模組更新。", self.parent
+            ),
             fg_color="#2563eb",
             hover_color=self._get_hover_color("#2563eb"),
             text_color="white",
@@ -393,7 +419,7 @@ class ModManagementFrame:
         self.select_all_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
 
         # 批量啟用/停用
-        batch_toggle_btn = ctk.CTkButton(
+        self.batch_toggle_btn = ctk.CTkButton(
             left_frame,
             text="🔄 批量切換",
             font=get_font(size=18, weight="bold"),
@@ -404,7 +430,7 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        batch_toggle_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        self.batch_toggle_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
 
         # 開啟模組資料夾
         folder_btn = ctk.CTkButton(
@@ -434,27 +460,26 @@ class ModManagementFrame:
 
         self.local_search_var = tk.StringVar()
         search_entry = ctk.CTkEntry(
-            search_frame, textvariable=self.local_search_var, font=get_font(size=14), width=200, height=32
+            search_frame,
+            textvariable=self.local_search_var,
+            font=get_font(size=14),
+            width=200,
+            height=32,
         )
         search_entry.pack(side="left", padx=(get_dpi_scaled_size(8), 0))
         self.local_search_var.trace("w", self.filter_local_mods)
 
         # 狀態篩選
         self.local_filter_var = tk.StringVar(value="all")
-        filter_combo = ctk.CTkOptionMenu(
+        filter_combo = CustomDropdown(
             right_frame,
             variable=self.local_filter_var,
             values=["all", "enabled", "disabled"],
-            font=get_font(size=17),
-            dropdown_font=get_font(size=17),
             command=self.on_filter_changed,
             width=100,
             height=32,
         )
         filter_combo.pack(side="left")
-
-        # 添加滾輪支援
-        UIUtils.add_mousewheel_support(filter_combo)
 
     def _get_hover_color(self, base_color: str) -> str:
         """根據基礎顏色生成懸停顏色"""
@@ -485,6 +510,10 @@ class ModManagementFrame:
                     self.enhance_local_mods()
                     self.update_status_safe(f"找到 {len(mods)} 個本地模組 (已重新整理)")
                 except Exception as e:
+                    LogUtils.error(
+                        f"強制掃描失敗: {e}\n{traceback.format_exc()}",
+                        "ModManagementFrame",
+                    )
                     self.update_status_safe(f"強制掃描失敗: {e}")
 
             threading.Thread(target=load_thread, daemon=True).start()
@@ -513,9 +542,22 @@ class ModManagementFrame:
         tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         # 建立 Treeview
-        columns = ("status", "name", "version", "author", "loader", "size", "mtime", "description")
+        columns = (
+            "status",
+            "name",
+            "version",
+            "author",
+            "loader",
+            "size",
+            "mtime",
+            "description",
+        )
         self.local_tree = ttk.Treeview(
-            tree_container, columns=columns, show="headings", height=15, selectmode="extended"  # 支援多選
+            tree_container,
+            columns=columns,
+            show="headings",
+            height=15,
+            selectmode="extended",  # 支援多選
         )
 
         column_config = {
@@ -533,9 +575,15 @@ class ModManagementFrame:
             self.local_tree.column(col, width=width, minwidth=50)
 
         # 滾動條
-        v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
-        h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
-        self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        v_scrollbar = ttk.Scrollbar(
+            tree_container, orient="vertical", command=self.local_tree.yview
+        )
+        h_scrollbar = ttk.Scrollbar(
+            tree_container, orient="horizontal", command=self.local_tree.xview
+        )
+        self.local_tree.configure(
+            yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set
+        )
 
         # 使用 grid 佈局確保滾動條在正確位置
         self.local_tree.grid(row=0, column=0, sticky="nsew")
@@ -557,19 +605,11 @@ class ModManagementFrame:
             UIUtils.show_error("錯誤", "請先選擇伺服器以匯出模組列表。", self.parent)
             return
         try:
-            dialog = ctk.CTkToplevel(self.parent)
-            dialog.title("匯出模組列表")
-            dialog.resizable(True, True)
-
-            # 統一設定視窗屬性：綁定圖示、相對於父視窗置中、設為模態視窗
-            UIUtils.setup_window_properties(
-                window=dialog,
-                parent=self.parent,
+            dialog = UIUtils.create_toplevel_dialog(
+                self.parent,
+                "匯出模組列表",
                 width=800,
                 height=600,
-                bind_icon=True,
-                center_on_parent=True,
-                make_modal=True,
                 delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
             )
 
@@ -578,7 +618,9 @@ class ModManagementFrame:
             main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
             # 標題
-            title_label = ctk.CTkLabel(main_frame, text="匯出模組列表", font=get_font(size=27, weight="bold"))
+            title_label = ctk.CTkLabel(
+                main_frame, text="匯出模組列表", font=get_font(size=27, weight="bold")
+            )
             title_label.pack(pady=(10, 20))
 
             # 格式選擇區域
@@ -588,25 +630,37 @@ class ModManagementFrame:
             fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
             fmt_inner.pack(fill="x", padx=20, pady=15)
 
-            ctk.CTkLabel(fmt_inner, text="選擇匯出格式:", font=get_font(size=21, weight="bold")).pack(
-                side="left", padx=(0, 15)
-            )
+            ctk.CTkLabel(
+                fmt_inner, text="選擇匯出格式:", font=get_font(size=21, weight="bold")
+            ).pack(side="left", padx=(0, 15))
 
             fmt_var = tk.StringVar(value="text")
 
             # 使用 CTK 選項按鈕
             text_radio = ctk.CTkRadioButton(
-                fmt_inner, text="純文字", variable=fmt_var, value="text", font=get_font(size=18)
+                fmt_inner,
+                text="純文字",
+                variable=fmt_var,
+                value="text",
+                font=get_font(size=18),
             )
             text_radio.pack(side="left", padx=5)
 
             json_radio = ctk.CTkRadioButton(
-                fmt_inner, text="JSON", variable=fmt_var, value="json", font=get_font(size=18)
+                fmt_inner,
+                text="JSON",
+                variable=fmt_var,
+                value="json",
+                font=get_font(size=18),
             )
             json_radio.pack(side="left", padx=5)
 
             html_radio = ctk.CTkRadioButton(
-                fmt_inner, text="HTML", variable=fmt_var, value="html", font=get_font(size=18)
+                fmt_inner,
+                text="HTML",
+                variable=fmt_var,
+                value="html",
+                font=get_font(size=18),
             )
             html_radio.pack(side="left", padx=5)
 
@@ -614,10 +668,14 @@ class ModManagementFrame:
             preview_frame = ctk.CTkFrame(main_frame)
             preview_frame.pack(fill="both", expand=True, pady=(0, 15))
 
-            preview_label = ctk.CTkLabel(preview_frame, text="預覽:", font=get_font(size=21, weight="bold"))
+            preview_label = ctk.CTkLabel(
+                preview_frame, text="預覽:", font=get_font(size=21, weight="bold")
+            )
             preview_label.pack(anchor="w", padx=15, pady=(15, 5))
 
-            text_widget = ctk.CTkTextbox(preview_frame, font=get_font(size=18), height=300, wrap="word")
+            text_widget = ctk.CTkTextbox(
+                preview_frame, font=get_font(size=18), height=300, wrap="word"
+            )
             text_widget.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
             def update_preview(*_):
@@ -640,7 +698,12 @@ class ModManagementFrame:
                 file_path = filedialog.asksaveasfilename(
                     title="儲存模組列表",
                     defaultextension=f".{ext}",
-                    filetypes=[("所有檔案", "*.*"), ("純文字", "*.txt"), ("JSON", "*.json"), ("HTML", "*.html")],
+                    filetypes=[
+                        ("所有檔案", "*.*"),
+                        ("純文字", "*.txt"),
+                        ("JSON", "*.json"),
+                        ("HTML", "*.html"),
+                    ],
                     initialfile=default_name,
                 )
                 if file_path:
@@ -657,7 +720,13 @@ class ModManagementFrame:
                         if result:
                             os.startfile(file_path)
                     except Exception as e:
-                        UIUtils.show_error("開啟檔案失敗", f"無法開啟檔案: {e}", parent=dialog)
+                        LogUtils.error(
+                            f"開啟檔案失敗: {e}\n{traceback.format_exc()}",
+                            "ModManagementFrame",
+                        )
+                        UIUtils.show_error(
+                            "開啟檔案失敗", f"無法開啟檔案: {e}", parent=dialog
+                        )
 
             save_btn = ctk.CTkButton(
                 btn_frame,
@@ -682,24 +751,32 @@ class ModManagementFrame:
                 height=int(40 * font_manager.get_scale_factor()),
             )
             close_btn.pack(side="left")
-
-            # 綁定 Escape 鍵
             dialog.bind("<Escape>", lambda e: dialog.destroy())
 
         except Exception as e:
+            LogUtils.error(
+                f"匯出對話框錯誤: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             UIUtils.show_error("匯出對話框錯誤", str(e), self.parent)
 
     def create_status_bar(self) -> None:
         """建立狀態列"""
-        status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * font_manager.get_scale_factor()))
+        status_frame = ctk.CTkFrame(
+            self.main_frame, height=int(40 * font_manager.get_scale_factor())
+        )
         status_frame.pack(fill="x", padx=20, pady=0)
         status_frame.pack_propagate(False)
 
         # 狀態標籤
         self.status_label = ctk.CTkLabel(
-            status_frame, text="請選擇伺服器開始管理模組", font=get_font(size=21), text_color=("#64748b", "#64748b")
+            status_frame,
+            text="請選擇伺服器開始管理模組",
+            font=get_font(size=21),
+            text_color=("#64748b", "#64748b"),
         )
-        self.status_label.pack(side="left", padx=10, pady=int(6 * font_manager.get_scale_factor()))
+        self.status_label.pack(
+            side="left", padx=10, pady=int(6 * font_manager.get_scale_factor())
+        )
 
         # 進度條（亮綠色，使用 CTK）
         self.progress_var = tk.DoubleVar()
@@ -711,7 +788,9 @@ class ModManagementFrame:
             progress_color=("#22d3ee", "#4ade80"),
             fg_color=("#e5e7eb", "#374151"),
         )
-        self.progress_bar.pack(side="right", padx=10, pady=int(6 * font_manager.get_scale_factor()))
+        self.progress_bar.pack(
+            side="right", padx=10, pady=int(6 * font_manager.get_scale_factor())
+        )
 
     def load_servers(self) -> None:
         """載入伺服器列表"""
@@ -730,10 +809,15 @@ class ModManagementFrame:
                     self.refresh_local_list()
             else:
                 self.server_combo.configure(values=server_names)
-                self.server_var.set(server_names[0])
+                if not self.server_var.get() and server_names:
+                    self.server_var.set(server_names[0])
                 self.on_server_changed()
 
         except Exception as e:
+            LogUtils.error(
+                f"載入伺服器列表失敗: {e}\n{traceback.format_exc()}",
+                "ModManagementFrame",
+            )
             UIUtils.show_error("錯誤", f"載入伺服器列表失敗: {e}", self.parent)
 
     def on_server_changed(self, event=None) -> None:
@@ -764,12 +848,13 @@ class ModManagementFrame:
             self.load_local_mods()
 
             # 更新狀態
-            self.update_status(f"已選擇伺服器: {server_name}")
-
             if self.on_server_selected:
                 self.on_server_selected(server_name)
 
         except Exception as e:
+            LogUtils.error(
+                f"切換伺服器失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             UIUtils.show_error("錯誤", f"切換伺服器失敗: {e}", self.parent)
 
     def load_local_mods(self) -> None:
@@ -781,6 +866,18 @@ class ModManagementFrame:
             try:
                 self.update_status_safe("正在掃描本地模組...")
                 mods = list(self.mod_manager.scan_mods())
+
+                # 去重：同一個 base_name 同時存在 .jar 與 .jar.disabled 時，只保留一筆（優先 enabled）
+                dedup = {}
+                for mod in mods:
+                    base_name = mod.filename.replace(".jar.disabled", "").replace(
+                        ".jar", ""
+                    )
+                    existing = dedup.get(base_name)
+                    if existing is None or mod.status == ModStatus.ENABLED:
+                        dedup[base_name] = mod
+                mods = list(dedup.values())
+
                 total = len(mods)
                 self.local_mods = []
                 self.enhanced_mods_cache = {}
@@ -788,13 +885,12 @@ class ModManagementFrame:
                     self.local_mods.append(mod)
                     percent = (idx + 1) / total * 100 if total else 0
                     self.update_progress_safe(percent)
-                    if hasattr(self, "progress_bar"):
-                        self.progress_bar.update_idletasks()
-                self.update_progress_safe(0)
-                # 載入增強資訊，結束後自動刷新列表
                 self.enhance_local_mods()
                 self.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
+                LogUtils.error(
+                    f"掃描失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+                )
                 self.update_progress_safe(0)
                 self.update_status_safe(f"掃描失敗: {e}")
 
@@ -802,37 +898,72 @@ class ModManagementFrame:
 
     def enhance_local_mods(self) -> None:
         """本地模組資訊（同步查詢），查詢完自動刷新列表（可選）"""
+        def enhance_single(mod):
+            try:
+                enhanced = enhance_local_mod(mod.filename)
+                if enhanced:
+                    self.enhanced_mods_cache[mod.filename] = enhanced
+            except Exception as e:
+                LogUtils.error(
+                    f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}",
+                    "ModManagementFrame",
+                )
 
         def enhance_thread():
-            for mod in self.local_mods:
-                if mod.filename not in self.enhanced_mods_cache:
-                    try:
-                        enhanced = enhance_local_mod(mod.filename)
-                        if enhanced:
-                            self.enhanced_mods_cache[mod.filename] = enhanced
-                    except Exception as e:
-                        LogUtils.error(f"模組 {mod.filename} 資訊失敗: {e}", "ModManagementFrame")
-            # Safe after call
-            if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                self.parent.after(0, self.refresh_local_list)
-            else:
-                self.refresh_local_list()
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                executor.map(enhance_single, self.local_mods)
+
+            # 使用佇列更新 UI Use queue to update UI
+            self.ui_queue.put(self.refresh_local_list)
 
         threading.Thread(target=enhance_thread, daemon=True).start()
 
+    def _get_enhanced_attr(self, enhanced, attr: str, fallback):
+        """
+        從增強物件取得屬性的輔助方法（效能優化：減少重複的 hasattr 檢查）
+        Helper method to get attribute from enhanced object (performance optimization)
+
+        Args:
+            enhanced: 增強資訊物件
+            attr: 屬性名稱
+            fallback: 後備值
+
+        Returns:
+            屬性值或後備值
+        """
+        if enhanced:
+            value = getattr(enhanced, attr, None)
+            if value:
+                return value
+        return fallback
+
     def refresh_local_list(self) -> None:
-        """重新整理本地模組列表"""
+        """
+        重新整理本地模組列表 (使用分批載入優化)
+        Refresh local mod list (optimized with batch loading)
+        """
         if not hasattr(self, "local_tree") or not self.local_tree:
             return
-        # 清空列表
-        for item in self.local_tree.get_children():
-            self.local_tree.delete(item)
-        # 獲取篩選條件
-        search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
-        filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "all"
-        version_pattern = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
+
+        # 1. 清空列表 Clear list
+        self.local_tree.delete(*self.local_tree.get_children())
+
+        # 2. 準備資料 Prepare data
+        search_text = (
+            self.local_search_var.get().lower()
+            if hasattr(self, "local_search_var")
+            else ""
+        )
+        filter_status = (
+            self.local_filter_var.get() if hasattr(self, "local_filter_var") else "all"
+        )
+        # 使用預編譯的正則表達式（效能優化）
+        version_pattern = self.VERSION_PATTERN
+
+        items_to_insert = []
+
         for mod in self.local_mods:
-            # 應用篩選
+            # 應用篩選 Apply filters
             if search_text and search_text not in mod.name.lower():
                 continue
             if filter_status != "all":
@@ -840,42 +971,57 @@ class ModManagementFrame:
                     continue
                 elif filter_status == "disabled" and mod.status != ModStatus.DISABLED:
                     continue
-            # 獲取增強資訊
+
+            # 獲取增強資訊 Get enhanced info
             enhanced = self.enhanced_mods_cache.get(mod.filename)
-            # 解析檔名中的版本號
+
+            # 解析版本 Parse version
             parsed_version = "未知"
             m = version_pattern.search(mod.filename)
             if m:
                 parsed_version = m.group(1)
-            display_name = enhanced.name if enhanced and hasattr(enhanced, "name") and enhanced.name else mod.name
-            display_author = (
-                enhanced.author
-                if enhanced and hasattr(enhanced, "author") and enhanced.author
-                else (mod.author or "Unknown")
+
+            # 使用輔助方法取得增強屬性（效能優化：減少 hasattr 呼叫）
+            display_name = self._get_enhanced_attr(enhanced, "name", mod.name)
+            display_author = self._get_enhanced_attr(
+                enhanced, "author", mod.author or "Unknown"
             )
-            # 版本顯示優先順序：mod.version > enhanced.version > enhanced.versions[0] > parsed_version > "未知"
+
+            # 版本顯示優先順序 Version display priority
             if mod.version and mod.version not in ("", "未知"):
                 display_version = mod.version
-            elif enhanced and hasattr(enhanced, "version") and enhanced.version:
-                display_version = enhanced.version
-            elif enhanced and hasattr(enhanced, "versions") and enhanced.versions:
-                display_version = (
-                    enhanced.versions[0]
-                    if isinstance(enhanced.versions, list) and enhanced.versions
-                    else str(enhanced.versions)
-                )
+            elif enhanced:
+                enhanced_version = getattr(enhanced, "version", None)
+                enhanced_versions = getattr(enhanced, "versions", None)
+                if enhanced_version:
+                    display_version = enhanced_version
+                elif enhanced_versions:
+                    display_version = (
+                        enhanced_versions[0]
+                        if isinstance(enhanced_versions, list) and enhanced_versions
+                        else str(enhanced_versions)
+                    )
+                elif parsed_version and parsed_version not in ("", "未知"):
+                    display_version = parsed_version
+                else:
+                    display_version = "未知"
             elif parsed_version and parsed_version not in ("", "未知"):
                 display_version = parsed_version
             else:
                 display_version = "未知"
-            display_description = (
-                enhanced.description
-                if enhanced and hasattr(enhanced, "description") and enhanced.description
-                else (mod.description or "")
+
+            display_description = self._get_enhanced_attr(
+                enhanced, "description", mod.description or ""
             )
-            status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
-            mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
-            # 檔案大小顯示
+
+            status_text = (
+                "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
+            )
+            mod_base_name = mod.filename.replace(".jar.disabled", "").replace(
+                ".jar", ""
+            )
+
+            # 檔案大小顯示 File size display
             size_val = getattr(mod, "file_size", 0)
             if size_val >= 1024 * 1024:
                 display_size = f"{size_val / 1024 / 1024:.1f} MB"
@@ -883,31 +1029,62 @@ class ModManagementFrame:
                 display_size = f"{size_val / 1024:.1f} KB"
             else:
                 display_size = f"{size_val} B"
-            # 修改時間顯示
+
+            # 修改時間顯示 Modification time display
             mtime_val = None
             try:
                 mtime_val = os.path.getmtime(mod.file_path)
             except Exception:
                 mtime_val = None
-            if mtime_val:
-                display_mtime = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
-            else:
-                display_mtime = "未知"
-            self.local_tree.insert(
-                "",
-                "end",
-                values=(
-                    status_text,
-                    display_name,
-                    display_version,
-                    display_author,
-                    mod.loader_type,
-                    display_size,
-                    display_mtime,
-                    display_description[:50] + "..." if len(display_description) > 50 else display_description,
-                ),
-                tags=(mod_base_name,),
+
+            display_mtime = (
+                datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
+                if mtime_val
+                else "未知"
             )
+
+            items_to_insert.append(
+                {
+                    "values": (
+                        status_text,
+                        display_name,
+                        display_version,
+                        display_author,
+                        mod.loader_type,
+                        display_size,
+                        display_mtime,
+                        (
+                            display_description[:50] + "..."
+                            if len(display_description) > 50
+                            else display_description
+                        ),
+                    ),
+                    "tags": (mod_base_name,),
+                }
+            )
+
+        # 3. 分批插入 Batch insertion
+        batch_size = 20
+        total_items = len(items_to_insert)
+
+        def insert_batch(start_index):
+            if not self.local_tree.winfo_exists():
+                return
+
+            end_index = min(start_index + batch_size, total_items)
+            for i in range(start_index, end_index):
+                item = items_to_insert[i]
+                self.local_tree.insert(
+                    "", "end", values=item["values"], tags=item["tags"]
+                )
+
+            if end_index < total_items:
+                self.local_tree.after(5, lambda: insert_batch(end_index))
+            else:
+                # 更新選擇狀態 Update selection status
+                self.update_selection_status()
+
+        insert_batch(0)
 
     def toggle_local_mod(self, event=None) -> None:
         """雙擊切換本地模組啟用/停用狀態 - 參考 Prism Launcher"""
@@ -929,57 +1106,125 @@ class ModManagementFrame:
             return
 
         try:
-            # 優先使用 tags 中的檔案名稱
+            # 優先使用 tags 中的 base_name
             tags = self.local_tree.item(item, "tags")
-            mod_id = None
-            if tags and len(tags) > 0:
-                mod_id = tags[0]  # tags 中存儲的是基礎檔案名稱
-            else:
-                # fallback: 從顯示的模組名稱推斷
-                mod_id = mod_name
-
+            mod_id = tags[0] if tags and len(tags) > 0 else None
             if not mod_id:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status(f"無法識別模組: {mod_name}")
                 return
 
-            # 找到對應的模組
-            found_mod = None
-            for mod in self.mod_manager.scan_mods():
-                # 比較基礎檔案名稱（去除副檔名和 .disabled）
-                mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
+            # 快速路徑：用已載入的 local_mods 定位，不再每次 scan_mods
+            mods_by_base_name = {}
+            for m in getattr(self, "local_mods", []) or []:
+                base_name = m.filename.replace(".jar.disabled", "").replace(".jar", "")
+                existing = mods_by_base_name.get(base_name)
+                if existing is None or m.status == ModStatus.ENABLED:
+                    mods_by_base_name[base_name] = m
 
-                if mod_base_name == mod_id:
-                    found_mod = mod
-                    break
-            LogUtils.info(f"找到的模組: {found_mod}", "ModManagementFrame")
+            found_mod = mods_by_base_name.get(mod_id)
             if not found_mod:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status(f"找不到模組檔案: {mod_id}")
                 return
 
-            # 切換狀態
-            success = False
-            if found_mod.status == ModStatus.ENABLED:
-                success = self.mod_manager.disable_mod(mod_id)
-                action = "停用"
-            else:
-                success = self.mod_manager.enable_mod(mod_id)
-                action = "啟用"
+            def _set_controls_enabled(enabled: bool) -> None:
+                state = "normal" if enabled else "disabled"
+                try:
+                    if hasattr(self, "select_all_btn") and self.select_all_btn:
+                        self.select_all_btn.configure(state=state)
+                except Exception as e:
+                    LogUtils.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
+                try:
+                    if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
+                        self.batch_toggle_btn.configure(state=state)
+                except Exception as e:
+                    LogUtils.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
 
-            if success:
-                # 重新載入模組列表以反映狀態變更
-                self.parent.after_idle(self.load_local_mods)
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
-                    self.update_status(f"已{action}模組: {mod_name}")
-            else:
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
-                    self.update_status(f"{action}模組失敗: {mod_name}")
+            # 切換狀態（背景執行 rename），成功後僅更新該列顯示
+            def do_toggle() -> None:
+                self.ui_queue.put(lambda: _set_controls_enabled(False))
+
+                old_filename = found_mod.filename
+                old_file_path = getattr(found_mod, "file_path", "")
+                action = "停用" if found_mod.status == ModStatus.ENABLED else "啟用"
+                if found_mod.status == ModStatus.ENABLED:
+                    ok = self.mod_manager.disable_mod(mod_id)
+                    new_status = ModStatus.DISABLED
+                    new_filename = f"{mod_id}.jar.disabled"
+                else:
+                    ok = self.mod_manager.enable_mod(mod_id)
+                    new_status = ModStatus.ENABLED
+                    new_filename = f"{mod_id}.jar"
+
+                def apply_ui_update() -> None:
+                    try:
+                        if ok:
+                            found_mod.status = new_status
+                            found_mod.filename = new_filename
+                            if old_file_path:
+                                found_mod.file_path = old_file_path.replace(
+                                    old_filename, new_filename
+                                )
+
+                            # 移動 enhanced cache key，避免切換後顯示資訊消失
+                            if hasattr(self, "enhanced_mods_cache") and isinstance(
+                                self.enhanced_mods_cache, dict
+                            ):
+                                if (
+                                    old_filename in self.enhanced_mods_cache
+                                    and new_filename not in self.enhanced_mods_cache
+                                ):
+                                    self.enhanced_mods_cache[new_filename] = (
+                                        self.enhanced_mods_cache[old_filename]
+                                    )
+
+                            # 更新該列的 status 與 mtime（其他欄位保持不動）
+                            row_values = list(
+                                self.local_tree.item(item, "values") or []
+                            )
+                            if row_values:
+                                row_values[0] = (
+                                    "✅ 已啟用"
+                                    if new_status == ModStatus.ENABLED
+                                    else "❌ 已停用"
+                                )
+                                try:
+                                    mtime_val = os.path.getmtime(found_mod.file_path)
+                                    row_values[6] = datetime.fromtimestamp(
+                                        mtime_val
+                                    ).strftime("%Y-%m-%d %H:%M")
+                                except Exception:
+                                    row_values[6] = "未知"
+                                self.local_tree.item(
+                                    item, values=tuple(row_values), tags=(mod_id,)
+                                )
+
+                            if (
+                                hasattr(self, "status_label")
+                                and self.status_label.winfo_exists()
+                            ):
+                                self.update_status(f"已{action}模組: {mod_name}")
+                        else:
+                            if (
+                                hasattr(self, "status_label")
+                                and self.status_label.winfo_exists()
+                            ):
+                                self.update_status(f"{action}模組失敗: {mod_name}")
+                    finally:
+                        _set_controls_enabled(True)
+                        self.update_selection_status()
+
+                self.ui_queue.put(apply_ui_update)
+
+            threading.Thread(target=do_toggle, daemon=True).start()
 
         except Exception as e:
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.update_status(f"操作失敗: {e}")
-            LogUtils.error(f"切換模組狀態錯誤: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
 
     def filter_local_mods(self, *args) -> None:
         """篩選本地模組"""
@@ -991,7 +1236,9 @@ class ModManagementFrame:
         if not selection:
             return
 
-        menu = tk.Menu(self.parent, tearoff=0, font=get_font("Microsoft JhengHei", 18))  # 動態字體縮放
+        menu = tk.Menu(
+            self.parent, tearoff=0, font=get_font("Microsoft JhengHei", 18)
+        )  # 動態字體縮放
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
@@ -1019,12 +1266,17 @@ class ModManagementFrame:
                 mods_dir.mkdir(exist_ok=True)
 
                 target_path = mods_dir / Path(filename).name
-                shutil.copy2(filename, target_path)
-
-                UIUtils.show_info("成功", f"模組已匯入: {Path(filename).name}", self.parent)
+                # 複製檔案（修正：之前缺少實際複製檔案的操作）
+                shutil.copy2(filename, str(target_path))
+                UIUtils.show_info(
+                    "成功", f"模組已匯入: {Path(filename).name}", self.parent
+                )
                 self.load_local_mods()
 
             except Exception as e:
+                LogUtils.error(
+                    f"匯入模組失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+                )
                 UIUtils.show_error("錯誤", f"匯入模組失敗: {e}", self.parent)
 
     def open_mods_folder(self) -> None:
@@ -1055,11 +1307,12 @@ class ModManagementFrame:
                 # 複製到剪貼板
                 self.parent.clipboard_clear()
                 self.parent.clipboard_append(info)
-                self.parent.update()  # 確保剪貼板更新
-
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status("模組資訊已複製到剪貼板")
         except Exception as e:
+            LogUtils.error(
+                f"複製模組資訊失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"複製失敗: {e}")
 
@@ -1087,19 +1340,34 @@ class ModManagementFrame:
 
                 if mod_file and mod_file.exists():
                     # 在檔案總管中選中該檔案
-                    explorer_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "explorer.exe")
-                    subprocess.run([explorer_path, "/select,", str(mod_file)], shell=False)
+                    explorer_path = os.path.join(
+                        os.environ.get("WINDIR", "C:\\Windows"), "explorer.exe"
+                    )
+                    subprocess.run(
+                        [explorer_path, "/select,", str(mod_file)], shell=False
+                    )
 
-                    if hasattr(self, "status_label") and self.status_label.winfo_exists():
-                        self.status_label.configure(text=f"已在檔案總管中顯示: {mod_file.name}")
+                    if (
+                        hasattr(self, "status_label")
+                        and self.status_label.winfo_exists()
+                    ):
+                        self.status_label.configure(
+                            text=f"已在檔案總管中顯示: {mod_file.name}"
+                        )
                 else:
-                    if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                    if (
+                        hasattr(self, "status_label")
+                        and self.status_label.winfo_exists()
+                    ):
                         self.status_label.configure(text="找不到要顯示的模組檔案")
             else:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.status_label.configure(text="無法識別模組檔案")
 
         except Exception as e:
+            LogUtils.error(
+                f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"開啟檔案總管失敗: {e}")
 
@@ -1121,7 +1389,10 @@ class ModManagementFrame:
 
             # 確認刪除
             result = UIUtils.ask_yes_no_cancel(
-                "確認刪除", f"確定要刪除模組 '{mod_name}' 嗎？\n此操作無法復原。", parent=self.parent, show_cancel=False
+                "確認刪除",
+                f"確定要刪除模組 '{mod_name}' 嗎？\n此操作無法復原。",
+                parent=self.parent,
+                show_cancel=False,
             )
 
             if not result:
@@ -1143,17 +1414,26 @@ class ModManagementFrame:
                 if deleted:
                     # 重新載入和刷新模組列表
                     self.load_local_mods()
-                    if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                    if (
+                        hasattr(self, "status_label")
+                        and self.status_label.winfo_exists()
+                    ):
                         self.status_label.configure(text=f"已刪除模組: {mod_name}")
                     UIUtils.show_info("成功", f"模組 '{mod_name}' 已刪除", self.parent)
                 else:
-                    if hasattr(self, "status_label") and self.status_label.winfo_exists():
-                        self.status_label.configure(text="找不到要刪除的模組檔案")
+                    if (
+                        hasattr(self, "status_label")
+                        and self.status_label.winfo_exists()
+                    ):
+                        self.status_label.configure(text="刪除失敗")
             else:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.status_label.configure(text="無法識別要刪除的模組")
 
         except Exception as e:
+            LogUtils.error(
+                f"刪除模組失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"刪除失敗: {e}")
             UIUtils.show_error("錯誤", f"刪除模組失敗: {e}", self.parent)
@@ -1185,8 +1465,10 @@ class ModManagementFrame:
                     # 嘗試更新按鈕文字，考慮到可能有圖片
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="☑️ 全選")
-                except Exception:
-                    pass
+                except Exception as e:
+                    LogUtils.error_exc(
+                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
+                    )
             else:
                 # 全選
                 self.local_tree.selection_set(*items)
@@ -1203,14 +1485,17 @@ class ModManagementFrame:
                     # 嘗試更新按鈕文字，考慮到可能有圖片
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="❌ 取消全選")
-                except Exception:
-                    pass
-
+                except Exception as e:
+                    LogUtils.error_exc(
+                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
+                    )
             # 更新狀態顯示
             self.update_selection_status()
 
         except Exception as e:
-            LogUtils.error(f"切換全選失敗: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"切換全選失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
 
     def batch_toggle_selected(self) -> None:
         """批量切換選中模組的啟用/停用狀態"""
@@ -1222,78 +1507,169 @@ class ModManagementFrame:
             if not selected_items:
                 UIUtils.show_warning("提示", "請先選擇要操作的模組", self.parent)
                 return
-            selected_mods = []
-            processed_base_names = set()
-            for item in selected_items:
-                tags = self.local_tree.item(item, "tags")
+
+            # 用已載入的 local_mods 建索引，避免在主執行緒反覆 scan_mods 造成 UI 凍結
+            mods_by_base_name = {}
+            for mod in getattr(self, "local_mods", []) or []:
+                base_name = mod.filename.replace(".jar.disabled", "").replace(
+                    ".jar", ""
+                )
+                existing = mods_by_base_name.get(base_name)
+                if existing is None or mod.status == ModStatus.ENABLED:
+                    mods_by_base_name[base_name] = mod
+
+            selected_pairs = []  # (base_name, tree_item_id)
+            seen = set()
+            for tree_item_id in selected_items:
+                tags = self.local_tree.item(tree_item_id, "tags")
                 if tags and len(tags) > 0:
-                    mod_base_name = tags[0]
-                    if mod_base_name in processed_base_names:
-                        continue
-                    processed_base_names.add(mod_base_name)
-                    found_mod = None
-                    for mod in self.mod_manager.scan_mods():
-                        current_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
-                        if current_base_name == mod_base_name:
-                            if found_mod is None or mod.status == ModStatus.ENABLED:
-                                found_mod = mod
-                    if found_mod:
-                        selected_mods.append(found_mod)
-            if not selected_mods:
+                    base_name = tags[0]
+                    if base_name and base_name not in seen:
+                        seen.add(base_name)
+                        selected_pairs.append((base_name, tree_item_id))
+
+            selected_pairs = [
+                (b, tid) for (b, tid) in selected_pairs if b in mods_by_base_name
+            ]
+            if not selected_pairs:
                 UIUtils.show_warning("提示", "找不到對應的模組檔案", self.parent)
                 return
 
+            def _set_controls_enabled(enabled: bool) -> None:
+                state = "normal" if enabled else "disabled"
+                try:
+                    if hasattr(self, "select_all_btn") and self.select_all_btn:
+                        self.select_all_btn.configure(state=state)
+                except Exception as e:
+                    LogUtils.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
+                try:
+                    if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
+                        self.batch_toggle_btn.configure(state=state)
+                except Exception as e:
+                    LogUtils.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
+
             def do_batch():
-                total = len(selected_mods)
-                counter = [0]
-                lock = threading.Lock()
+                total = len(selected_pairs)
+                success_count = 0
+                last_percent = -1
 
-                def update_progress():
-                    percent = counter[0] / total * 100 if total else 0
-                    self.progress_var.set(percent)
-                    if hasattr(self, "progress_bar"):
-                        self.progress_bar.update_idletasks()
+                self.ui_queue.put(lambda: _set_controls_enabled(False))
+                self.update_status_safe(f"正在批量切換 {total} 個模組狀態...")
 
-                def toggle_mod(mod):
-                    mod_id = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
+                for idx, (base_name, tree_item_id) in enumerate(
+                    selected_pairs, start=1
+                ):
+                    mod = mods_by_base_name.get(base_name)
+                    if not mod:
+                        continue
+
+                    old_filename = getattr(mod, "filename", "")
+                    old_file_path = getattr(mod, "file_path", "")
+
                     if mod.status == ModStatus.ENABLED:
-                        result = self.mod_manager.disable_mod(mod_id)
+                        ok = self.mod_manager.disable_mod(base_name)
+                        new_status = ModStatus.DISABLED
+                        new_filename = f"{base_name}.jar.disabled"
+                        action = "停用"
                     else:
-                        result = self.mod_manager.enable_mod(mod_id)
-                    with lock:
-                        counter[0] += 1
-                        if hasattr(self, "main_frame") and self.main_frame and hasattr(self.main_frame, "after"):
-                            self.main_frame.after(0, update_progress)
-                        elif hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                            self.parent.after(0, update_progress)
-                    time.sleep(0.5)  # 讓進度條動畫更明顯
-                    return result
+                        ok = self.mod_manager.enable_mod(base_name)
+                        new_status = ModStatus.ENABLED
+                        new_filename = f"{base_name}.jar"
+                        action = "啟用"
 
-                with ThreadPoolExecutor(max_workers=8) as executor:
-                    results = list(executor.map(toggle_mod, selected_mods))
-                success_count = sum(1 for r in results if r)
+                    if ok:
+                        success_count += 1
 
-                # Safe progress reset
-                if hasattr(self, "main_frame") and self.main_frame and hasattr(self.main_frame, "after"):
-                    self.main_frame.after(0, lambda: self.progress_var.set(0))
-                elif hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, lambda: self.progress_var.set(0))
+                        # 更新記憶體中的 mod 物件與 cache（不做全量重掃）
+                        mod.status = new_status
+                        mod.filename = new_filename
+                        if old_file_path:
+                            try:
+                                mod.file_path = str(
+                                    Path(old_file_path).with_name(new_filename)
+                                )
+                            except Exception:
+                                mod.file_path = old_file_path.replace(
+                                    old_filename, new_filename
+                                )
 
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
-                    status_text = f"已切換 {success_count}/{len(selected_mods)} 個模組狀態"
-                    if hasattr(self, "main_frame") and self.main_frame and hasattr(self.main_frame, "after"):
-                        self.main_frame.after(0, lambda: self.status_label.configure(text=status_text))
-                    elif hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                        self.parent.after(0, lambda: self.status_label.configure(text=status_text))
+                        if hasattr(self, "enhanced_mods_cache") and isinstance(
+                            self.enhanced_mods_cache, dict
+                        ):
+                            if (
+                                old_filename in self.enhanced_mods_cache
+                                and new_filename not in self.enhanced_mods_cache
+                            ):
+                                self.enhanced_mods_cache[new_filename] = (
+                                    self.enhanced_mods_cache[old_filename]
+                                )
 
-                # Safe reload
-                if hasattr(self, "main_frame") and self.main_frame and hasattr(self.main_frame, "after"):
-                    self.main_frame.after(0, self.load_local_mods)
-                elif hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, self.load_local_mods)
+                        # 局部更新該列（狀態/mtime），避免整頁重繪
+                        def apply_row_update(
+                            item_id=tree_item_id,
+                            status=new_status,
+                            file_path=getattr(mod, "file_path", ""),
+                            mod_id=base_name,
+                        ) -> None:
+                            try:
+                                if not (
+                                    hasattr(self, "local_tree")
+                                    and self.local_tree
+                                    and self.local_tree.winfo_exists()
+                                ):
+                                    return
+                                row_values = list(
+                                    self.local_tree.item(item_id, "values") or []
+                                )
+                                if row_values:
+                                    row_values[0] = (
+                                        "✅ 已啟用"
+                                        if status == ModStatus.ENABLED
+                                        else "❌ 已停用"
+                                    )
+                                    try:
+                                        mtime_val = (
+                                            os.path.getmtime(file_path)
+                                            if file_path
+                                            else None
+                                        )
+                                        if mtime_val:
+                                            row_values[6] = datetime.fromtimestamp(
+                                                mtime_val
+                                            ).strftime("%Y-%m-%d %H:%M")
+                                    except Exception:
+                                        row_values[6] = "未知"
+                                    self.local_tree.item(
+                                        item_id,
+                                        values=tuple(row_values),
+                                        tags=(mod_id,),
+                                    )
+                            except Exception as e:
+                                # 批量過程中 UI 更新失敗不阻塞主流程
+                                LogUtils.debug(f"批量更新 UI row 失敗: {e}", "ModManagement")
+
+                        self.ui_queue.put(apply_row_update)
+                    else:
+                        # 失敗就只更新狀態列（不彈窗、不重掃）
+                        self.update_status_safe(f"{action}模組失敗: {base_name}")
+
+                    percent = (idx / total) * 100 if total else 0
+                    # 保留進度條行為，但節流 UI 更新頻率
+                    if int(percent) != int(last_percent):
+                        last_percent = percent
+                        self.update_progress_safe(percent)
+
+                # Reset progress + final status (保留原本進度條收尾動作)
+                self.update_progress_safe(0)
+                self.update_status_safe(f"已切換 {success_count}/{total} 個模組狀態")
+                self.ui_queue.put(self.update_selection_status)
+                self.ui_queue.put(lambda: _set_controls_enabled(True))
 
             threading.Thread(target=do_batch, daemon=True).start()
         except Exception as e:
+            LogUtils.error(
+                f"批量操作失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
             self.update_progress_safe(0)
             UIUtils.show_error("錯誤", f"批量操作失敗: {e}", self.parent)
 
@@ -1303,16 +1679,18 @@ class ModManagementFrame:
             selected_count = len(self.local_tree.selection())
             total_count = len(self.local_tree.get_children())
 
-            if selected_count == 0:
-                status_text = f"找到 {total_count} 個模組"
+            if selected_count > 0:
+                status_text = f"已選擇 {selected_count}/{total_count} 個模組"
             else:
-                status_text = f"找到 {total_count} 個模組，已選擇 {selected_count} 個"
+                status_text = f"找到 {total_count} 個模組"
 
             if hasattr(self, "status_label"):
                 self.status_label.configure(text=status_text)
 
         except Exception as e:
-            LogUtils.error(f"更新選擇狀態失敗: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
 
     def on_tree_selection_changed(self, event=None) -> None:
         """樹狀檢視選擇變化事件"""
@@ -1339,25 +1717,24 @@ class ModManagementFrame:
                 try:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="☑️ 全選")
-                except Exception:
-                    pass
+                except Exception as e:
+                    LogUtils.error_exc(
+                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
+                    )
             elif selected_items_count == total_items:
                 self.all_selected = True
                 try:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="❌ 取消全選")
-                except Exception:
-                    pass
-            else:
-                self.all_selected = False
-                try:
-                    if hasattr(self.select_all_btn, "configure"):
-                        self.select_all_btn.configure(text="☑️ 全選")
-                except Exception:
-                    pass
+                except Exception as e:
+                    LogUtils.error_exc(
+                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
+                    )
 
         except Exception as e:
-            LogUtils.error(f"處理選擇變化失敗: {e}", "ModManagementFrame")
+            LogUtils.error(
+                f"處理選擇變化失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
+            )
 
     def pack(self, **kwargs) -> None:
         """讓框架可以被 pack"""

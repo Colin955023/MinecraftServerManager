@@ -8,11 +8,12 @@ Implements dropdown functionality using button and listbox with wheel selection 
 """
 # ====== 標準函式庫 ======
 from typing import Callable, List
+import traceback
 import tkinter as tk
 import customtkinter as ctk
 # ====== 專案內部模組 ======
-from ..utils.font_manager import get_font
-from ..utils.ui_utils import UIUtils
+from ..utils import font_manager, get_font
+from ..utils import UIUtils, LogUtils
 
 class CustomDropdown(ctk.CTkFrame):
     """
@@ -142,59 +143,129 @@ class CustomDropdown(ctk.CTkFrame):
         self.dropdown_window.transient(self.winfo_toplevel())
 
         # 計算位置
+        try:
+            # 嘗試獲取 CustomTkinter 內部的縮放因子
+            scale = self.button._get_widget_scaling()
+        except AttributeError:
+            try:
+                scale = ctk.ScalingTracker.get_widget_scaling(self.button)
+            except Exception:
+                scale = font_manager.get_scale_factor()
+
         button_x = self.button.winfo_rootx()
         button_y = self.button.winfo_rooty()
         button_height = self.button.winfo_height()
+        button_width = self.button.winfo_width()  # 獲取按鈕實際寬度
+
+        # 轉換為邏輯寬度
+        logical_button_width = int(button_width / scale)
 
         # 計算下拉清單高度
-        item_height = 25  # 每個項目的高度
+        item_height = 30  # 增加項目高度以容納較大字體
         total_items = len(self.values)
         visible_items = min(total_items, self.max_visible_items)
-        dropdown_height = min(visible_items * item_height + 10, self.max_dropdown_height)
 
-        # 設定視窗位置和大小
-        self.dropdown_window.geometry(f"{self.width}x{dropdown_height}+{button_x}+{button_y + button_height}")
+        # 計算需要的總高度
+        needed_height = visible_items * item_height
+        if total_items > self.max_visible_items:
+            needed_height += 10  # 額外空間給 padding
+
+        dropdown_height = min(needed_height, self.max_dropdown_height)
+
+        # 設定視窗位置和大小 - 寬度與按鈕一致
+        self.dropdown_window.geometry(
+            f"{logical_button_width}x{dropdown_height}+{button_x}+{button_y + button_height}"
+        )
 
         # 建立滾動框架
         if total_items > self.max_visible_items:
             # 需要滾動條
             self.scroll_frame = ctk.CTkScrollableFrame(
                 self.dropdown_window,
-                width=self.width - 20,
-                height=dropdown_height - 10,
+                width=logical_button_width,  # 寬度與視窗一致
+                height=dropdown_height,
                 fg_color=("#ffffff", "#ffffff"),
                 scrollbar_button_color=("#d1d5db", "#d1d5db"),
                 scrollbar_button_hover_color=("#9ca3af", "#9ca3af"),
             )
-            self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+            self.scroll_frame.pack(fill="both", expand=True, padx=0, pady=0)
             container = self.scroll_frame
         else:
             # 不需要滾動條
-            container = ctk.CTkFrame(self.dropdown_window, fg_color=("#ffffff", "#ffffff"), corner_radius=5)
-            container.pack(fill="both", expand=True, padx=5, pady=5)
+            container = ctk.CTkFrame(
+                self.dropdown_window, fg_color=("#ffffff", "#ffffff"), corner_radius=0
+            )
+            container.pack(fill="both", expand=True, padx=0, pady=0)
 
         # 建立選項按鈕
         self.option_buttons = []
         current_value = self.variable.get()
 
-        for i, value in enumerate(self.values):
+        # 優化：預先建立字體物件和樣式設定，避免在迴圈中重複計算
+        font_obj = get_font(size=14)
+        btn_width = (
+            logical_button_width - 20
+            if total_items > self.max_visible_items
+            else logical_button_width
+        )
+
+        # 樣式常數
+        SELECTED_FG = ("#3b82f6", "#2563eb")
+        NORMAL_FG = "transparent"
+        SELECTED_TEXT = ("#ffffff", "#ffffff")
+        NORMAL_TEXT = ("#1f2937", "#1f2937")
+        SELECTED_HOVER = ("#2563eb", "#1d4ed8")
+        NORMAL_HOVER = ("#60a5fa", "#3b82f6")
+
+        # 分批載入設定
+        # 第一批載入數量：可見項目 + 緩衝區，確保打開時立即填滿視窗
+        INITIAL_BATCH_SIZE = self.max_visible_items + 5
+        # 後續批次載入數量
+        BATCH_SIZE = 20
+        # 批次載入間隔 (ms)
+        BATCH_INTERVAL = 5
+
+        def create_option_button(value):
+            """建立單個選項按鈕"""
             is_selected = value == current_value
 
             option_btn = ctk.CTkButton(
                 container,
                 text=value,
-                width=self.width - 30,
+                width=btn_width,
                 height=item_height,
                 command=lambda v=value: self._select_option(v),
                 anchor="w",
-                font=get_font(size=11),
-                fg_color=("#3b82f6", "#2563eb") if is_selected else "transparent",
-                text_color=("#ffffff", "#ffffff") if is_selected else ("#1f2937", "#1f2937"),
-                hover_color=("#60a5fa", "#3b82f6") if not is_selected else ("#2563eb", "#1d4ed8"),
+                font=font_obj,
+                fg_color=SELECTED_FG if is_selected else NORMAL_FG,
+                text_color=SELECTED_TEXT if is_selected else NORMAL_TEXT,
+                hover_color=NORMAL_HOVER if not is_selected else SELECTED_HOVER,
                 border_width=0,
+                corner_radius=0,
             )
-            option_btn.pack(fill="x", pady=1)
+            option_btn.pack(fill="x", pady=0)
             self.option_buttons.append(option_btn)
+
+        def load_batch(start_index):
+            """分批載入選項"""
+            # 如果下拉選單已關閉，停止載入
+            if not self.is_dropdown_open or not self.dropdown_window:
+                return
+
+            end_index = min(start_index + BATCH_SIZE, len(self.values))
+
+            # 批量建立按鈕
+            for i in range(start_index, end_index):
+                create_option_button(self.values[i])
+
+            # 如果還有剩餘項目，安排下一次載入
+            if end_index < len(self.values):
+                self.after(BATCH_INTERVAL, lambda: load_batch(end_index))
+
+        # 立即載入第一批
+        first_batch_end = min(INITIAL_BATCH_SIZE, len(self.values))
+        for i in range(first_batch_end):
+            create_option_button(self.values[i])
 
         # 綁定事件來關閉下拉選單
         self.dropdown_window.bind("<Escape>", lambda e: self._close_dropdown())
@@ -203,8 +274,9 @@ class CustomDropdown(ctk.CTkFrame):
         self.dropdown_window.deiconify()
         self.dropdown_window.focus_set()
 
-        # 捕獲全域點擊事件來關閉下拉選單
-        self.dropdown_window.bind("<Button-1>", self._close_dropdown)
+        # 開始載入剩餘項目
+        if first_batch_end < len(self.values):
+            self.after(BATCH_INTERVAL, lambda: load_batch(first_batch_end))
 
         # 延遲綁定全域點擊和焦點事件，避免立即觸發關閉
         self.after(150, self._delayed_bind_events)
@@ -215,9 +287,6 @@ class CustomDropdown(ctk.CTkFrame):
         delay binding events to avoid immediate closure
         """
         if self.dropdown_window and self.is_dropdown_open:
-            # 綁定焦點失去事件
-            self.dropdown_window.bind("<FocusOut>", self._on_focus_out)
-            # 綁定全域點擊事件
             self._bind_global_click()
 
     def _close_dropdown(self, event=None) -> None:
@@ -233,8 +302,6 @@ class CustomDropdown(ctk.CTkFrame):
             self.dropdown_window = None
 
         self.option_buttons = []
-
-        # 移除全域點擊綁定
         self._unbind_global_click()
 
     def _select_option(self, value: str) -> None:
@@ -251,7 +318,9 @@ class CustomDropdown(ctk.CTkFrame):
         # 更新選項按鈕樣式
         for btn in self.option_buttons:
             if btn.cget("text") == value:
-                btn.configure(fg_color=("#3b82f6", "#2563eb"), text_color=("#ffffff", "#ffffff"))
+                btn.configure(
+                    fg_color=("#3b82f6", "#2563eb"), text_color=("#ffffff", "#ffffff")
+                )
             else:
                 btn.configure(fg_color="transparent", text_color=("#1f2937", "#1f2937"))
 
@@ -260,7 +329,12 @@ class CustomDropdown(ctk.CTkFrame):
             try:
                 self.command(value)
             except Exception as e:
-                UIUtils.show_error("錯誤", f"下拉選單回調錯誤: {e}", self.winfo_toplevel())
+                LogUtils.error(
+                    f"下拉選單回調錯誤: {e}\n{traceback.format_exc()}", "CustomDropdown"
+                )
+                UIUtils.show_error(
+                    "錯誤", f"下拉選單回調錯誤: {e}", self.winfo_toplevel()
+                )
 
         # 關閉下拉選單 - 稍微延遲以確保點擊效果可見
         self.after(150, self._close_dropdown)
@@ -298,48 +372,15 @@ class CustomDropdown(ctk.CTkFrame):
                 try:
                     self.command(new_value)
                 except Exception as e:
-                    UIUtils.show_error("錯誤", f"滾輪事件回調錯誤: {e}", self.winfo_toplevel())
+                    LogUtils.error(
+                        f"滾輪事件回調錯誤: {e}\n{traceback.format_exc()}",
+                        "CustomDropdown",
+                    )
+                    UIUtils.show_error(
+                        "錯誤", f"滾輪事件回調錯誤: {e}", self.winfo_toplevel()
+                    )
 
         self.button.bind("<MouseWheel>", on_mouse_wheel)
-
-    def _on_focus_out(self, event) -> None:
-        """失去焦點時關閉下拉選單"""
-        # 檢查焦點是否真的離開了下拉選單區域
-        if not self.is_dropdown_open or not self.dropdown_window:
-            return
-
-        # 延遲檢查焦點，確保不是內部元件間的焦點切換
-        self.after(200, self._check_focus_and_close)
-
-    def _check_focus_and_close(self) -> None:
-        """檢查焦點狀態並決定是否關閉下拉選單"""
-        if not self.is_dropdown_open or not self.dropdown_window:
-            return
-
-        try:
-            # 檢查當前焦點是否在下拉選單相關的元件中
-            focus_widget = self.dropdown_window.focus_get()
-            if focus_widget is None:
-                # 沒有焦點，關閉下拉選單
-                self._close_dropdown()
-                return
-
-            # 檢查焦點是否在下拉選單或按鈕中
-            widget_hierarchy = []
-            current = focus_widget
-            while current:
-                widget_hierarchy.append(current)
-                current = current.master
-
-            # 如果焦點在下拉選單或按鈕的層次結構中，不關閉
-            if self.dropdown_window in widget_hierarchy or self.button in widget_hierarchy or self in widget_hierarchy:
-                return
-
-            # 焦點確實離開了，關閉下拉選單
-            self._close_dropdown()
-        except Exception:
-            # 如果檢查過程中出錯，安全地關閉下拉選單
-            self._close_dropdown()
 
     def _bind_global_click(self) -> None:
         """綁定全域點擊事件"""
@@ -366,18 +407,21 @@ class CustomDropdown(ctk.CTkFrame):
 
                 # 檢查點擊是否在下拉選單內
                 in_dropdown = (
-                    dropdown_x <= x <= dropdown_x + dropdown_width and dropdown_y <= y <= dropdown_y + dropdown_height
+                    dropdown_x <= x <= dropdown_x + dropdown_width
+                    and dropdown_y <= y <= dropdown_y + dropdown_height
                 )
 
                 # 檢查點擊是否在按鈕內
-                in_button = button_x <= x <= button_x + button_width and button_y <= y <= button_y + button_height
+                in_button = (
+                    button_x <= x <= button_x + button_width
+                    and button_y <= y <= button_y + button_height
+                )
 
                 # 如果點擊在下拉選單或按鈕外部，關閉下拉選單
                 if not (in_dropdown or in_button):
                     self._close_dropdown()
             except Exception as e:
-                # 如果出現錯誤，保持下拉選單開啟狀態
-                UIUtils.show_error("錯誤", f"全域點擊事件處理錯誤: {e}", self.winfo_toplevel())
+                LogUtils.error_exc(f"全域點擊處理失敗: {e}", "CustomDropdown", e)
 
         # 綁定到頂層視窗
         toplevel = self.winfo_toplevel()
@@ -390,8 +434,8 @@ class CustomDropdown(ctk.CTkFrame):
             try:
                 toplevel = self.winfo_toplevel()
                 toplevel.unbind("<Button-1>")
-            except Exception:
-                pass
+            except Exception as e:
+                LogUtils.error_exc(f"移除全域點擊綁定失敗: {e}", "CustomDropdown", e)
 
     # 公共方法，模擬 CTkComboBox/CTkOptionMenu 的介面
     def get(self) -> str:

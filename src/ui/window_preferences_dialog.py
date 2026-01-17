@@ -8,12 +8,17 @@ Window preferences dialog for configuring window behavior and appearance.
 from typing import Callable, Optional
 import customtkinter as ctk
 import sys
+import traceback
 # ====== 專案內部模組 ======
-from ..utils.app_restart import can_restart, schedule_restart_and_exit
-from ..utils.settings_manager import get_settings_manager
-from ..utils.ui_utils import DialogUtils, UIUtils
-from ..utils.window_manager import WindowManager
-from ..utils.font_manager import set_ui_scale_factor, get_font
+from ..utils import DialogUtils, UIUtils, get_settings_manager
+from ..utils import (
+    WindowManager,
+    can_restart,
+    schedule_restart_and_exit,
+    set_ui_scale_factor,
+    get_font,
+)
+from ..utils import LogUtils
 
 class WindowPreferencesDialog:
     """
@@ -43,7 +48,9 @@ class WindowPreferencesDialog:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_frame, text="🖥️ 視窗偏好設定", font=get_font(size=18, weight="bold"))
+        title_label = ctk.CTkLabel(
+            main_frame, text="🖥️ 視窗偏好設定", font=get_font(size=18, weight="bold")
+        )
         title_label.pack(pady=(0, 20))
 
         # 一般設定區域
@@ -58,7 +65,9 @@ class WindowPreferencesDialog:
         # 按鈕區域
         self._create_button_section(main_frame)
 
-    def _create_section_frame(self, parent, title: str, emoji: str = "") -> ctk.CTkFrame:
+    def _create_section_frame(
+        self, parent, title: str, emoji: str = ""
+    ) -> ctk.CTkFrame:
         """
         建立設定區域框架
         Create settings section frame
@@ -75,13 +84,15 @@ class WindowPreferencesDialog:
         frame.pack(fill="x", pady=(0, 15))
 
         section_title = f"{emoji} {title}" if emoji else title
-        ctk.CTkLabel(frame, text=section_title, font=get_font(size=14, weight="bold")).pack(
-            anchor="w", padx=15, pady=(15, 10)
-        )
+        ctk.CTkLabel(
+            frame, text=section_title, font=get_font(size=14, weight="bold")
+        ).pack(anchor="w", padx=15, pady=(15, 10))
 
         return frame
 
-    def _create_checkbox(self, parent, text: str, variable: ctk.BooleanVar) -> ctk.CTkCheckBox:
+    def _create_checkbox(
+        self, parent, text: str, variable: ctk.BooleanVar
+    ) -> ctk.CTkCheckBox:
         """
         建立複選框
         Create checkbox widget
@@ -94,7 +105,9 @@ class WindowPreferencesDialog:
         Returns:
             CTkCheckBox: 建立的複選框
         """
-        checkbox = ctk.CTkCheckBox(parent, text=text, variable=variable, font=get_font(size=12))
+        checkbox = ctk.CTkCheckBox(
+            parent, text=text, variable=variable, font=get_font(size=12)
+        )
         checkbox.pack(anchor="w", padx=25, pady=(0, 10))
         return checkbox
 
@@ -107,21 +120,30 @@ class WindowPreferencesDialog:
 
         # 建立所有複選框
         self.remember_size_var = ctk.BooleanVar()
-        self._create_checkbox(general_frame, "記住主視窗大小和位置", self.remember_size_var)
+        self._create_checkbox(
+            general_frame, "記住主視窗大小和位置", self.remember_size_var
+        )
 
         self.auto_center_var = ctk.BooleanVar()
-        self._create_checkbox(general_frame, "自動置中新的對話框視窗", self.auto_center_var)
+        self._create_checkbox(
+            general_frame, "自動置中新的對話框視窗", self.auto_center_var
+        )
 
         self.adaptive_sizing_var = ctk.BooleanVar()
-        self._create_checkbox(general_frame, "啟用自適應視窗大小調整", self.adaptive_sizing_var)
+        self._create_checkbox(
+            general_frame, "啟用自適應視窗大小調整", self.adaptive_sizing_var
+        )
 
         # 根據環境決定是否顯示調試選項
         # 開發環境顯示調試選項，打包環境隱藏
-        should_show_debug = not hasattr(sys, "_MEIPASS")
+        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+        should_show_debug = not is_packaged
 
         if should_show_debug:
             self.debug_logging_var = ctk.BooleanVar()
-            checkbox = self._create_checkbox(general_frame, "啟用調試日誌輸出", self.debug_logging_var)
+            checkbox = self._create_checkbox(
+                general_frame, "啟用調試日誌輸出", self.debug_logging_var
+            )
             checkbox.pack(anchor="w", padx=25, pady=(0, 15))  # 最後一個有額外間距
         else:
             # 如果是打包環境，隱藏調試選項並設為 False
@@ -144,9 +166,9 @@ class WindowPreferencesDialog:
             f"目前主視窗大小: {current_settings.get('width', 1200)} × {current_settings.get('height', 800)}"
         )
 
-        ctk.CTkLabel(main_window_frame, text=info_text, font=get_font(size=12), justify="left").pack(
-            anchor="w", padx=25, pady=(0, 15)
-        )
+        ctk.CTkLabel(
+            main_window_frame, text=info_text, font=get_font(size=12), justify="left"
+        ).pack(anchor="w", padx=25, pady=(0, 15))
 
         scale_factor = get_settings_manager().get_dpi_scaling()
         # 重設按鈕
@@ -171,7 +193,9 @@ class WindowPreferencesDialog:
         dpi_frame = ctk.CTkFrame(display_frame, fg_color="transparent")
         dpi_frame.pack(fill="x", padx=25, pady=(0, 15))
 
-        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=get_font(size=12)).pack(
+            side="left"
+        )
 
         scale_factor = get_settings_manager().get_dpi_scaling()
         self.dpi_scale_var = ctk.DoubleVar()
@@ -209,13 +233,25 @@ class WindowPreferencesDialog:
 
         # 按鈕配置
         buttons = [
-            ("恢復預設", self._reset_all_settings, "left", ("#dc2626", "#b91c1c"), ("#b91c1c", "#991b1b")),
+            (
+                "恢復預設",
+                self._reset_all_settings,
+                "left",
+                ("#dc2626", "#b91c1c"),
+                ("#b91c1c", "#991b1b"),
+            ),
             ("套用設定", self._apply_settings, "right", None, None),  # 使用預設顏色
             ("取消", self._cancel, "right", "gray", ("gray70", "gray30")),
         ]
 
         for text, command, side, fg_color, hover_color in buttons:
-            btn_config = {"text": text, "command": command, "font": get_font(size=12), "width": 100, "height": 35}
+            btn_config = {
+                "text": text,
+                "command": command,
+                "font": get_font(size=12),
+                "width": 100,
+                "height": 35,
+            }
 
             if text == "套用設定":
                 btn_config["font"] = get_font(size=12, weight="bold")
@@ -305,7 +341,10 @@ class WindowPreferencesDialog:
         Reset main window to default size
         """
         if UIUtils.ask_yes_no_cancel(
-            "確認重設", "確定要將主視窗重設為預設大小嗎？\n這將立即應用變更。", parent=self.dialog, show_cancel=False
+            "確認重設",
+            "確定要將主視窗重設為預設大小嗎？\n這將立即應用變更。",
+            parent=self.dialog,
+            show_cancel=False,
         ):
             self.settings.set_main_window_settings(1200, 800, None, None, False)
 
@@ -313,7 +352,9 @@ class WindowPreferencesDialog:
             if self.parent:
                 WindowManager.setup_main_window(self.parent, force_defaults=True)
 
-            UIUtils.show_info("重設完成", "主視窗大小已重設為預設值", parent=self.dialog)
+            UIUtils.show_info(
+                "重設完成", "主視窗大小已重設為預設值", parent=self.dialog
+            )
 
     def _reset_all_settings(self) -> None:
         """
@@ -321,7 +362,10 @@ class WindowPreferencesDialog:
         Reset all settings to defaults, and check if restart is needed
         """
         if UIUtils.ask_yes_no_cancel(
-            "確認恢復預設", "確定要恢復所有視窗設定為預設值嗎？", parent=self.dialog, show_cancel=False
+            "確認恢復預設",
+            "確定要恢復所有視窗設定為預設值嗎？",
+            parent=self.dialog,
+            show_cancel=False,
         ):
             # 取得恢復前的設定
             changes_before = self._get_setting_changes()
@@ -340,7 +384,10 @@ class WindowPreferencesDialog:
             # 取得恢復後的設定
             changes_after = self._get_setting_changes()
             # 用恢復前的 old 與現在的 new 比較
-            compare_changes = {"old": changes_before["old"], "new": changes_after["new"]}
+            compare_changes = {
+                "old": changes_before["old"],
+                "new": changes_after["new"],
+            }
             important_changes = self._has_important_changes(compare_changes)
 
             msg = "所有視窗設定已恢復為預設值"
@@ -362,6 +409,10 @@ class WindowPreferencesDialog:
                             schedule_restart_and_exit(self.parent, delay=0.5)
                             return
                         except Exception as restart_error:
+                            LogUtils.error(
+                                f"重啟失敗: {restart_error}\n{traceback.format_exc()}",
+                                "WindowPreferencesDialog",
+                            )
                             UIUtils.show_error(
                                 "重啟失敗",
                                 f"無法重新啟動應用程式: {restart_error}\n\n設定已恢復，請手動重新啟動程式以套用所有變更。",
@@ -403,7 +454,9 @@ class WindowPreferencesDialog:
             important_changes = self._has_important_changes(changes)
             success_msg = "視窗偏好設定已成功儲存並套用！"
             if important_changes:
-                success_msg += "\n\n設定已生效，部分變更可能需要重新啟動程式才能完全套用。"
+                success_msg += (
+                    "\n\n設定已生效，部分變更可能需要重新啟動程式才能完全套用。"
+                )
 
             UIUtils.show_info("設定套用成功", success_msg, parent=self.dialog)
 
@@ -416,11 +469,14 @@ class WindowPreferencesDialog:
                     show_cancel=False,
                 ):
                     try:
-                        self.dialog.destroy()
                         schedule_restart_and_exit(self.parent, delay=0.5)
                         return
 
                     except Exception as restart_error:
+                        LogUtils.error(
+                            f"重啟失敗: {restart_error}\n{traceback.format_exc()}",
+                            "WindowPreferencesDialog",
+                        )
                         UIUtils.show_error(
                             "重啟失敗",
                             f"無法重新啟動應用程式: {restart_error}\n\n設定已儲存，請手動重新啟動程式以套用所有變更。",
@@ -433,11 +489,13 @@ class WindowPreferencesDialog:
                     "設定已成功儲存！\n\n由於環境限制，無法自動重新啟動程式。\n請手動關閉並重新啟動應用程式以套用所有變更。",
                     parent=self.dialog,
                 )
-
             # 正常關閉對話框
             self.dialog.destroy()
 
         except Exception as e:
+            LogUtils.error(
+                f"儲存失敗: {e}\n{traceback.format_exc()}", "WindowPreferencesDialog"
+            )
             UIUtils.show_error("儲存失敗", f"無法儲存設定: {e}", parent=self.dialog)
 
     def _cancel(self) -> None:

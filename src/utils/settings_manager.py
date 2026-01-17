@@ -11,7 +11,7 @@ from typing import Any, Dict
 import json
 import sys
 # ====== 專案內部模組 ======
-from src.utils.runtime_paths import ensure_dir, get_user_data_dir
+from src.utils import LogUtils, ensure_dir, get_user_data_dir
 
 class SettingsManager:
     """
@@ -49,7 +49,9 @@ class SettingsManager:
         if not self.settings_path.exists():
             # 建立預設設定
             # 透過檢查是否為打包環境來設定調試日誌預設值
-            is_packaged = hasattr(sys, "_MEIPASS")
+            is_packaged = bool(
+                getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
+            )
             # 開發環境預設啟用調試日誌，打包環境預設關閉
             default_debug_logging = not is_packaged
 
@@ -90,14 +92,21 @@ class SettingsManager:
             if "window_preferences" not in settings:
                 settings["window_preferences"] = {
                     "remember_size_position": True,
-                    "main_window": {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False},
+                    "main_window": {
+                        "width": 1200,
+                        "height": 800,
+                        "x": None,
+                        "y": None,
+                        "maximized": False,
+                    },
                     "auto_center": True,
                     "adaptive_sizing": True,
                     "dpi_scaling": 1.0,
                 }
 
             return settings
-        except Exception:
+        except Exception as e:
+            LogUtils.error_exc(f"載入設定失敗: {e}", "SettingsManager", e)
             # 如果載入失敗，回傳預設設定
             return {
                 "servers_root": "",
@@ -105,7 +114,13 @@ class SettingsManager:
                 "first_run_completed": False,
                 "window_preferences": {
                     "remember_size_position": True,
-                    "main_window": {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False},
+                    "main_window": {
+                        "width": 1200,
+                        "height": 800,
+                        "x": None,
+                        "y": None,
+                        "maximized": False,
+                    },
                     "auto_center": True,
                     "adaptive_sizing": True,
                     "dpi_scaling": 1.0,
@@ -128,6 +143,9 @@ class SettingsManager:
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         except Exception as e:
+            LogUtils.error_exc(
+                f"無法寫入 user_settings.json: {e}", "SettingsManager", e
+            )
             raise Exception(f"無法寫入 user_settings.json: {e}")
 
     # ====== 基本設定操作 ======
@@ -147,19 +165,35 @@ class SettingsManager:
         return self._settings.get(key, default)
 
     # 設定值並儲存
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
         """
-        設定指定鍵值的資料並立即儲存到檔案
-        Set data for specified key and immediately save to file
+        設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）
+        Set data for specified key (optionally immediate or deferred save for batch updates)
 
         Args:
             key (str): 設定鍵值名稱
             value (Any): 要設定的值
+            immediate_save (bool): 是否立即儲存（預設 True）
 
         Returns:
             None
         """
         self._settings[key] = value
+        if immediate_save:
+            self._save_settings(self._settings)
+
+    def update_batch(self, updates: dict) -> None:
+        """
+        批次更新多個設定值並一次性儲存（優化 I/O 效能）
+        Batch update multiple settings and save once (optimize I/O performance)
+
+        Args:
+            updates (dict): 要更新的鍵值對字典
+
+        Returns:
+            None
+        """
+        self._settings.update(updates)
         self._save_settings(self._settings)
 
     # ====== 伺服器根目錄管理 ======
@@ -306,12 +340,23 @@ class SettingsManager:
         Returns:
             Dict[str, Any]: 主視窗設定字典
         """
-        default_settings = {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False}
+        default_settings = {
+            "width": 1200,
+            "height": 800,
+            "x": None,
+            "y": None,
+            "maximized": False,
+        }
         return self.get_window_preferences().get("main_window", default_settings)
 
     # 設定主視窗大小位置
     def set_main_window_settings(
-        self, width: int, height: int, x: int = None, y: int = None, maximized: bool = False
+        self,
+        width: int,
+        height: int,
+        x: int = None,
+        y: int = None,
+        maximized: bool = False,
     ) -> None:
         """
         設定主視窗的大小、位置和最大化狀態
@@ -328,7 +373,13 @@ class SettingsManager:
             None
         """
         prefs = self.get_window_preferences()
-        prefs["main_window"] = {"width": width, "height": height, "x": x, "y": y, "maximized": maximized}
+        prefs["main_window"] = {
+            "width": width,
+            "height": height,
+            "x": x,
+            "y": y,
+            "maximized": maximized,
+        }
         self.set("window_preferences", prefs)
 
     # 檢查是否自動置中新視窗
@@ -435,7 +486,8 @@ class SettingsManager:
             Dict[str, Any]: 調試設定字典
         """
         return self._settings.get(
-            "debug_settings", {"enable_debug_logging": False, "enable_window_state_logging": False}
+            "debug_settings",
+            {"enable_debug_logging": False, "enable_window_state_logging": False},
         )
 
     # 檢查是否啟用調試日誌
@@ -451,20 +503,6 @@ class SettingsManager:
             bool: 啟用調試日誌返回 True，否則返回 False
         """
         return self.get_debug_settings().get("enable_debug_logging", False)
-
-    # 檢查是否啟用視窗狀態日誌
-    def is_window_state_logging_enabled(self) -> bool:
-        """
-        檢查是否啟用視窗狀態儲存的日誌記錄功能
-        Check if window state saving logging feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用視窗狀態日誌返回 True，否則返回 False
-        """
-        return self.get_debug_settings().get("enable_window_state_logging", False)
 
     # 設定調試日誌開關
     def set_debug_logging(self, enabled: bool) -> None:

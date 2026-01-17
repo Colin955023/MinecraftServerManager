@@ -9,21 +9,21 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Callable, Optional
+import glob
 import os
+import queue
 import shutil
 import subprocess
+import threading
+import time
 import tkinter as tk
-import glob
+import traceback
 import customtkinter as ctk
 # ====== 專案內部模組 ======
-from ..core.server_detection import ServerDetectionUtils
-from ..core.server_manager import ServerConfig, ServerManager
-from ..utils.font_manager import get_font
-from ..utils.server_utils import ServerOperations
-from ..utils.memory_utils import MemoryUtils
-from ..utils.ui_utils import UIUtils
-from .server_monitor_window import ServerMonitorWindow
-from .server_properties_dialog import ServerPropertiesDialog
+from ..core import ServerConfig, ServerManager
+from ..utils import MemoryUtils, ServerDetectionUtils, ServerOperations, get_font
+from ..utils import LogUtils, UIUtils
+from . import ServerMonitorWindow, ServerPropertiesDialog
 
 class ManageServerFrame(ctk.CTkFrame):
     """
@@ -45,23 +45,82 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_manager = server_manager
         self.callback = callback
         self.on_navigate_callback = on_navigate_callback  # 添加導航回調
-        self.set_servers_root = set_servers_root  # 明確傳入 main_window 的 set_servers_root
+        self.set_servers_root = (
+            set_servers_root  # 明確傳入 main_window 的 set_servers_root
+        )
         self.selected_server: Optional[str] = None
 
+        # JAR 檔案搜尋快取（避免重複 glob 操作）
+        self._jar_search_cache = {}
+        self._jar_cache_timeout = 60  # 快取 60 秒
+
+        # 元件初始化旗標與關鍵屬性（避免在 UI 尚未建立時被 background refresh 觸發）
+        self._widgets_created = False
+        self.server_tree = None
+        self.action_buttons = {}
+
+        # 初始化 UI 更新佇列 Initialize UI update queue
+        self.ui_queue = queue.Queue()
+
+        # 先建立 UI 元件（建立 server_tree 等），再啟動 queue pump
         self.create_widgets()
-        self.refresh_servers()
+        UIUtils.start_ui_queue_pump(self, self.ui_queue)
+
+        self._post_action_immediate_job = None
+        self._post_action_delayed_job = None
+        self._delayed_refresh_job = None
+
+    def _schedule_post_action_updates(
+        self, immediate_delay_ms: int, delayed_delay_ms: int
+    ) -> None:
+        for attr_name in ("_post_action_immediate_job", "_post_action_delayed_job"):
+            job_id = getattr(self, attr_name, None)
+            if job_id:
+                try:
+                    self.after_cancel(job_id)
+                except Exception as e:
+                    LogUtils.error_exc(
+                        f"取消排程失敗 {attr_name}={job_id}: {e}",
+                        "ManageServerFrame",
+                        e,
+                    )
+                setattr(self, attr_name, None)
+
+        self._post_action_immediate_job = self.after(
+            immediate_delay_ms, self._immediate_update
+        )
+        self._post_action_delayed_job = self.after(
+            delayed_delay_ms, self._delayed_update
+        )
+
+    def _schedule_refresh(self, delay_ms: int) -> None:
+        job_id = getattr(self, "_delayed_refresh_job", None)
+        if job_id:
+            try:
+                self.after_cancel(job_id)
+            except Exception as e:
+                LogUtils.error_exc(
+                    f"取消刷新排程失敗 job={job_id}: {e}", "ManageServerFrame", e
+                )
+        self._delayed_refresh_job = self.after(delay_ms, self.refresh_servers)
 
     def create_widgets(self) -> None:
         """
         建立介面元件
         Create UI components
         """
+        if getattr(self, "_widgets_created", False):
+            return
+        self._widgets_created = True
+
         # 主容器
         main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_container, text="⚙️ 管理伺服器", font=get_font(size=24, weight="bold"))
+        title_label = ctk.CTkLabel(
+            main_container, text="⚙️ 管理伺服器", font=get_font(size=24, weight="bold")
+        )
         title_label.pack(pady=(0, 20))
 
         # 上方控制區
@@ -85,17 +144,23 @@ class ManageServerFrame(ctk.CTkFrame):
         control_frame.pack(fill="x", pady=(0, 20))
 
         # 標題
-        control_title = ctk.CTkLabel(control_frame, text="偵測設定", font=get_font(size=14, weight="bold"))
+        control_title = ctk.CTkLabel(
+            control_frame, text="偵測設定", font=get_font(size=14, weight="bold")
+        )
         control_title.pack(anchor="w", pady=(15, 10), padx=(15, 0))
 
         # 偵測路徑
         path_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         path_frame.pack(fill="x", padx=15, pady=(0, 10))
 
-        ctk.CTkLabel(path_frame, text="偵測路徑:", font=get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(path_frame, text="偵測路徑:", font=get_font(size=12)).pack(
+            side="left"
+        )
 
         self.detect_path_var = tk.StringVar(value=str(self.server_manager.servers_root))
-        self.detect_path_entry = ctk.CTkEntry(path_frame, textvariable=self.detect_path_var, font=get_font(size=11))
+        self.detect_path_entry = ctk.CTkEntry(
+            path_frame, textvariable=self.detect_path_var, font=get_font(size=11)
+        )
         self.detect_path_entry.pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         browse_button = UIUtils.create_styled_button(
@@ -149,16 +214,23 @@ class ManageServerFrame(ctk.CTkFrame):
         list_frame.pack(fill="both", expand=True, pady=(0, 20))
 
         style = ttk.Style()
-        style.configure("ServerList.TLabelframe.Label", font=get_font("Microsoft JhengHei", 18, "bold"))
+        style.configure(
+            "ServerList.TLabelframe.Label",
+            font=get_font("Microsoft JhengHei", 18, "bold"),
+        )
         list_frame.configure(style="ServerList.TLabelframe")
 
         # 建立 Treeview
         columns = ("名稱", "版本", "載入器", "狀態", "備份狀態", "路徑")
-        self.server_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
+        self.server_tree = ttk.Treeview(
+            list_frame, columns=columns, show="headings", selectmode="browse"
+        )
 
         # 配置 Treeview 的字體大小
         style.configure("Treeview", font=get_font("Microsoft JhengHei", 18))
-        style.configure("Treeview.Heading", font=get_font("Microsoft JhengHei", 22, "bold"))
+        style.configure(
+            "Treeview.Heading", font=get_font("Microsoft JhengHei", 22, "bold")
+        )
         # 設定欄位
         self.server_tree.heading("名稱", text="名稱")
         self.server_tree.heading("版本", text="版本")
@@ -181,7 +253,9 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_tree.bind("<Button-3>", self.show_server_context_menu)
 
         # 加入滾動條
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.server_tree.yview)
+        scrollbar = ttk.Scrollbar(
+            list_frame, orient="vertical", command=self.server_tree.yview
+        )
         self.server_tree.configure(yscrollcommand=scrollbar.set)
 
         # 佈局
@@ -200,7 +274,9 @@ class ManageServerFrame(ctk.CTkFrame):
         if not selection:
             return
         menu = tk.Menu(self, tearoff=0, font=get_font("Microsoft JhengHei", 18))
-        menu.add_command(label="🔄 重新檢測伺服器", command=self.recheck_selected_server)
+        menu.add_command(
+            label="🔄 重新檢測伺服器", command=self.recheck_selected_server
+        )
         menu.add_separator()
         menu.add_command(label="📁 重新設定備份路徑", command=self.reset_backup_path)
         menu.add_command(label="📂 開啟備份資料夾", command=self.open_backup_folder)
@@ -209,55 +285,77 @@ class ManageServerFrame(ctk.CTkFrame):
         finally:
             menu.grab_release()
 
+    def _get_selected_server_config(
+        self, show_warning: bool = True
+    ) -> Optional[ServerConfig]:
+        """
+        獲取當前選中的伺服器配置
+        Get current selected server configuration
+
+        Args:
+            show_warning (bool): 是否顯示警告訊息
+
+        Returns:
+            Optional[ServerConfig]: 伺服器配置物件，若無選擇或錯誤則返回 None
+        """
+        selection = self.server_tree.selection()
+        if not selection:
+            if show_warning:
+                UIUtils.show_warning("提示", "請先選擇伺服器", self.winfo_toplevel())
+            return None
+
+        item = self.server_tree.item(selection[0])
+        values = item["values"]
+        if not values or len(values) < 1:
+            if show_warning:
+                UIUtils.show_warning(
+                    "提示", "無法取得伺服器名稱", self.winfo_toplevel()
+                )
+            return None
+
+        server_name = values[0]
+        config = self.server_manager.servers.get(server_name)
+        if not config:
+            if show_warning:
+                UIUtils.show_error(
+                    "錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel()
+                )
+            return None
+
+        return config
+
     def recheck_selected_server(self) -> None:
         """
         重新檢測選中伺服器
         Recheck selected server
         """
-        selection = self.server_tree.selection()
-        if not selection:
-            return
-        item = self.server_tree.item(selection[0])
-        values = item["values"]
-        if not values or len(values) < 1:
-            UIUtils.show_warning("提示", "無法取得伺服器名稱", self.winfo_toplevel())
-            return
-        server_name = values[0]
-        config = self.server_manager.servers.get(server_name)
+        config = self._get_selected_server_config(show_warning=False)
         if not config:
-            UIUtils.show_error("錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel())
             return
+
+        server_name = config.name
         # 呼叫偵測
         ServerDetectionUtils.detect_server_type(Path(config.path), config)
         self.server_manager.save_servers_config()
         self.refresh_servers()
-        UIUtils.show_info("完成", f"已重新檢測伺服器：{server_name}", self.winfo_toplevel())
+        UIUtils.show_info(
+            "完成", f"已重新檢測伺服器：{server_name}", self.winfo_toplevel()
+        )
 
     def reset_backup_path(self) -> None:
         """
         重新設定選中伺服器的備份路徑
         Reset backup path for selected server
         """
-        selection = self.server_tree.selection()
-        if not selection:
-            UIUtils.show_warning("提示", "請先選擇要重設備份路徑的伺服器", self.winfo_toplevel())
-            return
-
-        item = self.server_tree.item(selection[0])
-        values = item["values"]
-        if not values or len(values) < 1:
-            UIUtils.show_warning("提示", "無法取得伺服器名稱", self.winfo_toplevel())
-            return
-
-        server_name = values[0]
-        config = self.server_manager.servers.get(server_name)
+        config = self._get_selected_server_config()
         if not config:
-            UIUtils.show_error("錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel())
             return
 
+        server_name = config.name
         # 詢問使用者選擇新的備份父路徑
         parent_backup_path = filedialog.askdirectory(
-            title=f"重新設定 {server_name} 的備份路徑", initialdir=os.path.expanduser("~")
+            title=f"重新設定 {server_name} 的備份路徑",
+            initialdir=os.path.expanduser("~"),
         )
 
         if parent_backup_path:
@@ -269,14 +367,22 @@ class ManageServerFrame(ctk.CTkFrame):
             try:
                 os.makedirs(new_backup_path, exist_ok=True)
             except Exception as e:
-                UIUtils.show_error("錯誤", f"無法建立備份資料夾: {e}", self.winfo_toplevel())
+                LogUtils.error(
+                    f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
+                    "ManageServerFrame",
+                )
+                UIUtils.show_error(
+                    "錯誤", f"無法建立備份資料夾: {e}", self.winfo_toplevel()
+                )
                 return
 
             # 更新配置
             config.backup_path = new_backup_path
             self.server_manager.save_servers_config()
             UIUtils.show_info(
-                "成功", f"已將伺服器 {server_name} 的備份路徑設定為：\n{new_backup_path}", self.winfo_toplevel()
+                "成功",
+                f"已將伺服器 {server_name} 的備份路徑設定為：\n{new_backup_path}",
+                self.winfo_toplevel(),
             )
             # 刷新列表以更新備份狀態顯示
             self.refresh_servers()
@@ -290,7 +396,9 @@ class ManageServerFrame(ctk.CTkFrame):
         """
         selection = self.server_tree.selection()
         if not selection:
-            UIUtils.show_warning("提示", "請先選擇要開啟備份資料夾的伺服器", self.winfo_toplevel())
+            UIUtils.show_warning(
+                "提示", "請先選擇要開啟備份資料夾的伺服器", self.winfo_toplevel()
+            )
             return
 
         item = self.server_tree.item(selection[0])
@@ -302,27 +410,39 @@ class ManageServerFrame(ctk.CTkFrame):
         server_name = values[0]
         config = self.server_manager.servers.get(server_name)
         if not config:
-            UIUtils.show_error("錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel())
+            UIUtils.show_error(
+                "錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel()
+            )
             return
 
         # 檢查是否有設定備份路徑
         if not hasattr(config, "backup_path") or not config.backup_path:
             UIUtils.show_warning(
-                "提示", f"伺服器 {server_name} 尚未設定備份路徑\n請先執行一次備份來設定備份路徑", self.winfo_toplevel()
+                "提示",
+                f"伺服器 {server_name} 尚未設定備份路徑\n請先執行一次備份來設定備份路徑",
+                self.winfo_toplevel(),
             )
             return
 
         # 檢查備份路徑是否存在
         if not os.path.exists(config.backup_path):
             UIUtils.show_error(
-                "錯誤", f"備份路徑不存在：\n{config.backup_path}\n\n請重新設定備份路徑", self.winfo_toplevel()
+                "錯誤",
+                f"備份路徑不存在：\n{config.backup_path}\n\n請重新設定備份路徑",
+                self.winfo_toplevel(),
             )
             return
 
         try:
             os.startfile(config.backup_path)
         except Exception as e:
-            UIUtils.show_error("錯誤", f"無法開啟備份資料夾: {e}", self.winfo_toplevel())
+            LogUtils.error(
+                f"無法開啟備份資料夾: {e}\n{traceback.format_exc()}",
+                "ManageServerFrame",
+            )
+            UIUtils.show_error(
+                "錯誤", f"無法開啟備份資料夾: {e}", self.winfo_toplevel()
+            )
 
     def get_backup_status(self, server_name: str) -> str:
         """
@@ -377,7 +497,10 @@ class ManageServerFrame(ctk.CTkFrame):
             else:
                 return "📁 已設定路徑"
 
-        except Exception:
+        except Exception as e:
+            LogUtils.error(
+                f"檢查備份狀態失敗: {e}\n{traceback.format_exc()}", "ManageServerFrame"
+            )
             return "❓ 檢查失敗"
 
     def create_actions(self, parent) -> None:
@@ -389,14 +512,18 @@ class ManageServerFrame(ctk.CTkFrame):
         action_frame.pack(fill="x")
 
         # 操作標題
-        action_title = ctk.CTkLabel(action_frame, text="操作", font=get_font(size=14, weight="bold"))
+        action_title = ctk.CTkLabel(
+            action_frame, text="操作", font=get_font(size=14, weight="bold")
+        )
         action_title.pack(anchor="w", pady=(5, 0), padx=(15, 0))
 
         # 資訊顯示
         info_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
         info_frame.pack(fill="x", padx=15, pady=(5, 5))
 
-        self.info_label = ctk.CTkLabel(info_frame, text="選擇一個伺服器以查看詳細資訊", font=get_font(size=14))
+        self.info_label = ctk.CTkLabel(
+            info_frame, text="選擇一個伺服器以查看詳細資訊", font=get_font(size=14)
+        )
         self.info_label.pack(anchor="w")
 
         # 按鈕區域（獨立一行）
@@ -408,7 +535,7 @@ class ManageServerFrame(ctk.CTkFrame):
             ("📊", "監控", self.monitor_server),
             ("⚙️", "設定", self.configure_server),
             ("📂", "開啟資料夾", self.open_server_folder),
-            ("💾", "備份", self.backup_server),
+            ("💾", "備份地圖檔", self.backup_server),
             ("🗑️", "刪除", self.delete_server),
         ]
 
@@ -436,24 +563,46 @@ class ManageServerFrame(ctk.CTkFrame):
             # 強制正規化分隔符與絕對路徑
             abs_path = os.path.abspath(path)
             norm_path = os.path.normpath(abs_path)
-            # 自動補上 servers 子資料夾
-            servers_root = os.path.join(norm_path, "servers")
-            servers_root = os.path.normpath(servers_root)
-            # 若不存在自動建立
+            base_dir = norm_path
+
+            # 呼叫 main_window 傳入的 set_servers_root：寫入 user_settings.json（儲存 base dir）
+            # 並回傳實際 servers_root (= <base>\servers)
+            servers_root = None
+            if self.set_servers_root:
+                try:
+                    servers_root = self.set_servers_root(base_dir)
+                except Exception as e:
+                    LogUtils.error(
+                        f"寫入伺服器路徑設定失敗: {e}\n{traceback.format_exc()}",
+                        "ManageServerFrame",
+                    )
+                    UIUtils.show_error(
+                        "錯誤", f"無法寫入設定: {e}", self.winfo_toplevel()
+                    )
+                    return
+
+            if not servers_root:
+                servers_root = os.path.normpath(os.path.join(base_dir, "servers"))
+
             servers_root_path = Path(servers_root)
             if not servers_root_path.exists():
                 try:
                     servers_root_path.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    UIUtils.show_error("錯誤", f"無法建立 servers 資料夾: {e}", self.winfo_toplevel())
+                    LogUtils.error(
+                        f"無法建立 servers 資料夾: {e}\n{traceback.format_exc()}",
+                        "ManageServerFrame",
+                    )
+                    UIUtils.show_error(
+                        "錯誤", f"無法建立 servers 資料夾: {e}", self.winfo_toplevel()
+                    )
                     return
-            # 更新 entry 顯示
+
+            # 更新 entry 顯示（顯示實際 servers 子資料夾）
             self.detect_path_var.set(servers_root)
-            # 呼叫 main_window 傳入的 set_servers_root 寫入 user_settings.json 並同步 self.server_manager.servers_root
-            if self.set_servers_root:
-                self.set_servers_root(servers_root)
-                # 重新指派 server_manager 的 root
-                self.server_manager.servers_root = Path(servers_root)
+
+            # 同步 server_manager 的 root
+            self.server_manager.servers_root = Path(servers_root)
             # 變更後自動刷新伺服器列表
             self.refresh_servers()
 
@@ -469,40 +618,61 @@ class ManageServerFrame(ctk.CTkFrame):
             if show_message:
                 UIUtils.show_error("錯誤", "請選擇有效的路徑", self.winfo_toplevel())
             return
-        try:
-            count = 0
-            for item in os.listdir(path):
-                item_path = os.path.join(path, item)
-                if os.path.isdir(item_path):
-                    item_path_obj = Path(item_path)
-                    if ServerDetectionUtils.is_valid_server_folder(item_path_obj):
-                        # 先建立 config 物件（無論新建或覆蓋都呼叫偵測）
-                        if item in self.server_manager.servers:
-                            config = self.server_manager.servers[item]
-                            config.path = str(item_path)
-                        else:
-                            config = ServerConfig(
-                                name=item,
-                                minecraft_version="Unknown",
-                                loader_type="Unknown",
-                                loader_version="Unknown",
-                                memory_max_mb=2048,
-                                path=item_path,
-                            )
-                        # 強制呼叫偵測
-                        ServerDetectionUtils.detect_server_type(item_path_obj, config)
-                        if item in self.server_manager.servers:
-                            self.server_manager.save_servers_config()
+
+        def task():
+            try:
+                count = self._detect_servers_task(path)
+                self.ui_queue.put(
+                    lambda: self._detect_servers_callback(count, show_message)
+                )
+            except Exception as error:
+                LogUtils.error(
+                    f"偵測失敗: {error}\n{traceback.format_exc()}", "ManageServerFrame"
+                )
+                self.ui_queue.put(
+                    lambda: UIUtils.show_error(
+                        "錯誤", f"偵測失敗: {error}", self.winfo_toplevel()
+                    )
+                )
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _detect_servers_task(self, path):
+        count = 0
+        for item in os.listdir(path):
+            item_path = os.path.join(path, item)
+            if os.path.isdir(item_path):
+                item_path_obj = Path(item_path)
+                if ServerDetectionUtils.is_valid_server_folder(item_path_obj):
+                    # 先建立 config 物件（無論新建或覆蓋都呼叫偵測）
+                    if item in self.server_manager.servers:
+                        config = self.server_manager.servers[item]
+                        config.path = str(item_path)
+                    else:
+                        config = ServerConfig(
+                            name=item,
+                            minecraft_version="Unknown",
+                            loader_type="Unknown",
+                            loader_version="Unknown",
+                            memory_max_mb=2048,
+                            path=item_path,
+                        )
+                    # 強制呼叫偵測
+                    ServerDetectionUtils.detect_server_type(item_path_obj, config)
+                    if item in self.server_manager.servers:
+                        self.server_manager.save_servers_config()
+                        count += 1
+                    else:
+                        if self.server_manager.create_server(config):
                             count += 1
-                        else:
-                            if self.server_manager.create_server(config):
-                                count += 1
-            if show_message:
-                UIUtils.show_info("完成", f"成功偵測/更新 {count} 個伺服器", self.winfo_toplevel())
-            self.refresh_servers()
-        except Exception as e:
-            if show_message:
-                UIUtils.show_error("錯誤", f"偵測失敗: {e}", self.winfo_toplevel())
+        return count
+
+    def _detect_servers_callback(self, count, show_message):
+        if show_message:
+            UIUtils.show_info(
+                "完成", f"成功偵測/更新 {count} 個伺服器", self.winfo_toplevel()
+            )
+        self.refresh_servers()
 
     def add_server(self) -> None:
         """
@@ -512,56 +682,108 @@ class ManageServerFrame(ctk.CTkFrame):
         if self.on_navigate_callback:
             self.on_navigate_callback()
 
+    def _get_server_status_text(self, name: str, config: ServerConfig) -> str:
+        """
+        獲取伺服器狀態文字
+        Get server status text
+        """
+        is_running = self.server_manager.is_server_running(name)
+        if is_running:
+            return "🟢 運行中"
+
+        # 檢查伺服器檔案（使用快取避免重複 glob 操作）
+        current_time = time.time()
+        cache_key = config.path
+
+        # 檢查快取是否有效
+        if cache_key in self._jar_search_cache:
+            cached_result, cache_time = self._jar_search_cache[cache_key]
+            if current_time - cache_time < self._jar_cache_timeout:
+                server_jar_exists = cached_result
+            else:
+                # 快取過期，重新搜尋並直接覆寫（無需先刪除）
+                server_jar_exists = self._check_server_jar_exists(config.path)
+                self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
+        else:
+            # 無快取，執行搜尋
+            server_jar_exists = self._check_server_jar_exists(config.path)
+            self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
+
+        eula_exists = os.path.exists(os.path.join(config.path, "eula.txt"))
+        eula_accepted = getattr(config, "eula_accepted", False)
+
+        if server_jar_exists and eula_exists and eula_accepted:
+            return "✅ 已就緒"
+        elif server_jar_exists and eula_exists and not eula_accepted:
+            return "⚠️ 需要接受 EULA"
+        elif server_jar_exists:
+            return "❌ 缺少 EULA"
+        else:
+            missing = ServerDetectionUtils.get_missing_server_files(Path(config.path))
+            if missing:
+                return f"❌ 未就緒 (缺少: {', '.join(missing)})"
+            return "❌ 未就緒"
+
+    def _check_server_jar_exists(self, server_path: str) -> bool:
+        """
+        檢查伺服器 JAR 檔案是否存在（輔助方法）
+        Check if server JAR file exists (helper method)
+
+        Args:
+            server_path (str): 伺服器路徑
+
+        Returns:
+            bool: JAR 檔案是否存在
+        """
+        jar_patterns = [
+            "server.jar",
+            "minecraft_server*.jar",
+            "fabric-server*.jar",
+            "forge-*.jar",
+        ]
+        for jar_pattern in jar_patterns:
+            if "*" in jar_pattern:
+                if glob.glob(os.path.join(server_path, jar_pattern)):
+                    return True
+            elif os.path.exists(os.path.join(server_path, jar_pattern)):
+                return True
+        return False
+
     def refresh_servers(self) -> None:
         """
         重新整理伺服器列表：只刷新 UI，不自動偵測。
         Refresh server list: only refresh UI, do not auto-detect.
         """
+
+        def task():
+            try:
+                server_data = self._refresh_servers_task()
+                self.ui_queue.put(lambda: self._refresh_servers_callback(server_data))
+            except Exception as e:
+                LogUtils.error(
+                    f"重新整理伺服器列表失敗: {e}\n{traceback.format_exc()}",
+                    "ManageServerFrame",
+                )
+                # 這裡可以選擇是否要顯示錯誤，或者靜默失敗
+                pass
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _refresh_servers_task(self):
+        """
+        後台任務：載入配置並獲取伺服器狀態
+        Background task: load config and get server status
+        """
         # 強制重載配置
         self.server_manager.load_servers_config()
 
-        # 清空現有項目
-        for item in self.server_tree.get_children():
-            self.server_tree.delete(item)
-
-        # 若無伺服器則不顯示任何項目
+        server_data = []
         if not self.server_manager.servers:
-            self.selected_server = None
-            self.update_selection()
-            return
+            return server_data
 
-        # 重新載入伺服器
         for name, config in self.server_manager.servers.items():
-            is_running = self.server_manager.is_server_running(name)
-            server_jar_exists = False
-            jar_patterns = ["server.jar", "minecraft_server*.jar", "fabric-server*.jar", "forge-*.jar"]
-            for jar_pattern in jar_patterns:
-                if "*" in jar_pattern:
-                    matches = glob.glob(os.path.join(config.path, jar_pattern))
-                    if matches:
-                        server_jar_exists = True
-                        break
-                else:
-                    if os.path.exists(os.path.join(config.path, jar_pattern)):
-                        server_jar_exists = True
-                        break
-            eula_exists = os.path.exists(os.path.join(config.path, "eula.txt"))
-            eula_accepted = getattr(config, "eula_accepted", False)
-            if is_running:
-                status = "🟢 運行中"
-            elif server_jar_exists and eula_exists and eula_accepted:
-                status = "✅ 已就緒"
-            elif server_jar_exists and eula_exists and not eula_accepted:
-                status = "⚠️ 需要接受 EULA"
-            elif server_jar_exists:
-                status = "❌ 缺少 EULA"
-            else:
-                # 顯示缺少哪些檔案
-                missing = ServerDetectionUtils.get_missing_server_files(Path(config.path))
-                if missing:
-                    status = f"❌ 未就緒 (缺少: {', '.join(missing)})"
-                else:
-                    status = "❌ 未就緒"
+            status = self._get_server_status_text(name, config)
+
             loader_type = (config.loader_type or "").lower()
             loader_version = (config.loader_version or "").lower()
             if loader_type == "vanilla":
@@ -572,15 +794,72 @@ class ManageServerFrame(ctk.CTkFrame):
                 loader_col = loader_type.capitalize()
                 if loader_version and loader_version != "unknown":
                     loader_col = f"{loader_col} v{config.loader_version}"
+
             mc_version = (
                 config.minecraft_version
-                if config.minecraft_version and config.minecraft_version.lower() != "unknown"
+                if config.minecraft_version
+                and config.minecraft_version.lower() != "unknown"
                 else "未知"
             )
             backup_status = self.get_backup_status(name)
-            self.server_tree.insert(
-                "", "end", values=(name, mc_version, loader_col, status, backup_status, config.path)
+
+            server_data.append(
+                (name, mc_version, loader_col, status, backup_status, config.path)
             )
+
+        return server_data
+
+    def _refresh_servers_callback(self, server_data):
+        """
+        UI 更新回調
+        UI update callback
+        """
+        if not getattr(self, "server_tree", None):
+            return
+
+        # 檢查數據是否變更（使用簡化的簽章檢查，避免過度計算）
+        try:
+            # 簡化簽章：使用長度 + 第一個項目 + 最後一個項目
+            if server_data:
+                first_item = str(server_data[0]) if server_data else ""
+                last_item = str(server_data[-1]) if len(server_data) > 1 else ""
+                current_data_hash = hash((len(server_data), first_item, last_item))
+            else:
+                current_data_hash = hash(0)
+        except (TypeError, IndexError):
+            # 如果資料無法處理，使用長度作為簽章
+            current_data_hash = hash(len(server_data))
+
+        if (
+            hasattr(self, "_last_server_data_hash")
+            and self._last_server_data_hash == current_data_hash
+        ):
+            # 如果數據沒變，只更新選擇狀態
+            self.update_selection()
+            return
+
+        self._last_server_data_hash = current_data_hash
+
+        # 清空現有項目（優化：單次操作而非迴圈）
+        children = self.server_tree.get_children()
+        if children:
+            self.server_tree.delete(*children)
+
+        if not server_data:
+            self.selected_server = None
+            self.update_selection()
+            return
+
+        # 重新載入伺服器（批次插入以提升大列表效能）
+        batch_size = 15
+        for i in range(0, len(server_data), batch_size):
+            batch = server_data[i : i + batch_size]
+            for item in batch:
+                self.server_tree.insert("", "end", values=item)
+            # 每批次後讓出 UI 執行緒
+            if i + batch_size < len(server_data):
+                self.server_tree.update_idletasks()
+
         self.selected_server = None
         self.update_selection()
 
@@ -623,10 +902,14 @@ class ManageServerFrame(ctk.CTkFrame):
             start_stop_key = "🟢 啟動"
             if is_running:
                 if start_stop_key in self.action_buttons:
-                    self.action_buttons[start_stop_key].configure(text="🛑 停止", state="normal")
+                    self.action_buttons[start_stop_key].configure(
+                        text="🛑 停止", state="normal"
+                    )
             else:
                 if start_stop_key in self.action_buttons:
-                    self.action_buttons[start_stop_key].configure(text="🟢 啟動", state="normal")
+                    self.action_buttons[start_stop_key].configure(
+                        text="🟢 啟動", state="normal"
+                    )
 
             # 其他按鈕
             for key, btn in self.action_buttons.items():
@@ -658,7 +941,9 @@ class ManageServerFrame(ctk.CTkFrame):
                 else:
                     memory_info = f"最大記憶體: {max_mem_str}"
             elif hasattr(config, "memory_mb") and config.memory_mb:
-                memory_info = f"記憶體: {MemoryUtils.format_memory_mb(config.memory_mb)}"
+                memory_info = (
+                    f"記憶體: {MemoryUtils.format_memory_mb(config.memory_mb)}"
+                )
             else:
                 memory_info = "記憶體: 未設定"
 
@@ -690,25 +975,39 @@ class ManageServerFrame(ctk.CTkFrame):
 
         if is_running:
             # 停止伺服器 - 使用工具函數
-            success = ServerOperations.graceful_stop_server(self.server_manager, self.selected_server)
+            success = ServerOperations.graceful_stop_server(
+                self.server_manager, self.selected_server
+            )
             if success:
-                UIUtils.show_info("成功", f"伺服器 {self.selected_server} 停止命令已發送", self.winfo_toplevel())
+                UIUtils.show_info(
+                    "成功",
+                    f"伺服器 {self.selected_server} 停止命令已發送",
+                    self.winfo_toplevel(),
+                )
             else:
-                UIUtils.show_error("錯誤", f"停止伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
+                UIUtils.show_error(
+                    "錯誤",
+                    f"停止伺服器 {self.selected_server} 失敗",
+                    self.winfo_toplevel(),
+                )
             # 立即更新一次，然後延遲再更新
-            self.after(100, self._immediate_update)
-            self.after(2000, self._delayed_update)
+            self._schedule_post_action_updates(100, 2000)
         else:
             # 啟動伺服器
-            success = self.server_manager.start_server(self.selected_server, parent=self.master)
+            success = self.server_manager.start_server(
+                self.selected_server, parent=self.master
+            )
             if success:
                 # 啟動成功後自動開啟監控視窗，彈窗通知交由監控視窗處理
                 self.monitor_server()
             else:
-                UIUtils.show_error("錯誤", f"啟動伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
+                UIUtils.show_error(
+                    "錯誤",
+                    f"啟動伺服器 {self.selected_server} 失敗",
+                    self.winfo_toplevel(),
+                )
             # 立即更新一次，然後延遲再更新
-            self.after(100, self._immediate_update)
-            self.after(1500, self._delayed_update)
+            self._schedule_post_action_updates(100, 1500)
 
     def _immediate_update(self) -> None:
         """
@@ -734,7 +1033,9 @@ class ManageServerFrame(ctk.CTkFrame):
             return
 
         # 導入並創建監控視窗
-        monitor_window = ServerMonitorWindow(self.winfo_toplevel(), self.server_manager, self.selected_server)
+        monitor_window = ServerMonitorWindow(
+            self.winfo_toplevel(), self.server_manager, self.selected_server
+        )
         monitor_window.show()
 
     def configure_server(self) -> None:
@@ -746,7 +1047,9 @@ class ManageServerFrame(ctk.CTkFrame):
             return
 
         config = self.server_manager.servers[self.selected_server]
-        dialog = ServerPropertiesDialog(self.winfo_toplevel(), config, self.server_manager)
+        dialog = ServerPropertiesDialog(
+            self.winfo_toplevel(), config, self.server_manager
+        )
 
         if dialog.result:
             # 更新配置
@@ -769,6 +1072,9 @@ class ManageServerFrame(ctk.CTkFrame):
         try:
             os.startfile(path)
         except Exception as e:
+            LogUtils.error(
+                f"無法開啟資料夾: {e}\n{traceback.format_exc()}", "ManageServerFrame"
+            )
             UIUtils.show_error("錯誤", f"無法開啟資料夾: {e}", self.winfo_toplevel())
 
     def delete_server(self) -> None:
@@ -784,14 +1090,19 @@ class ManageServerFrame(ctk.CTkFrame):
         # 檢查是否有備份
         has_backup = False
         backup_path = None
-        if hasattr(config, "backup_path") and config.backup_path and os.path.exists(config.backup_path):
+        if (
+            hasattr(config, "backup_path")
+            and config.backup_path
+            and os.path.exists(config.backup_path)
+        ):
             backup_path = config.backup_path
             has_backup = True
 
         # 基本刪除確認
         result = UIUtils.ask_yes_no_cancel(
             "確認刪除",
-            f"確定要刪除伺服器 '{self.selected_server}' 嗎？\n\n" + "⚠️ 這將永久刪除伺服器檔案，無法復原！",
+            f"確定要刪除伺服器 '{self.selected_server}' 嗎？\n\n"
+            + "⚠️ 這將永久刪除伺服器檔案，無法復原！",
             self.winfo_toplevel(),
             show_cancel=False,
         )
@@ -820,8 +1131,16 @@ class ManageServerFrame(ctk.CTkFrame):
             if delete_backup and backup_path:
                 try:
                     shutil.rmtree(backup_path)
-                    UIUtils.show_info("成功", f"伺服器 {self.selected_server} 和其備份已刪除", self.winfo_toplevel())
+                    UIUtils.show_info(
+                        "成功",
+                        f"伺服器 {self.selected_server} 和其備份已刪除",
+                        self.winfo_toplevel(),
+                    )
                 except Exception as e:
+                    LogUtils.error(
+                        f"刪除備份失敗: {e}\n{traceback.format_exc()}",
+                        "ManageServerFrame",
+                    )
                     UIUtils.show_warning(
                         "部分成功",
                         f"伺服器 {self.selected_server} 已刪除，但備份刪除失敗：\n{e}\n\n備份位置：{backup_path}",
@@ -835,11 +1154,17 @@ class ManageServerFrame(ctk.CTkFrame):
                         self.winfo_toplevel(),
                     )
                 else:
-                    UIUtils.show_info("成功", f"伺服器 {self.selected_server} 已刪除", self.winfo_toplevel())
+                    UIUtils.show_info(
+                        "成功",
+                        f"伺服器 {self.selected_server} 已刪除",
+                        self.winfo_toplevel(),
+                    )
 
             self.refresh_servers()
         else:
-            UIUtils.show_error("錯誤", f"刪除伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
+            UIUtils.show_error(
+                "錯誤", f"刪除伺服器 {self.selected_server} 失敗", self.winfo_toplevel()
+            )
 
     def backup_server(self) -> None:
         """
@@ -857,7 +1182,9 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 檢查世界資料夾是否存在
         if not os.path.exists(world_path):
-            UIUtils.show_error("錯誤", f"找不到世界資料夾: {world_path}", self.winfo_toplevel())
+            UIUtils.show_error(
+                "錯誤", f"找不到世界資料夾: {world_path}", self.winfo_toplevel()
+            )
             return
 
         # 檢查是否已有儲存的備份路徑
@@ -890,7 +1217,13 @@ class ManageServerFrame(ctk.CTkFrame):
             try:
                 os.makedirs(backup_location, exist_ok=True)
             except Exception as e:
-                UIUtils.show_error("錯誤", f"無法建立備份資料夾: {e}", self.winfo_toplevel())
+                LogUtils.error(
+                    f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
+                    "ManageServerFrame",
+                )
+                UIUtils.show_error(
+                    "錯誤", f"無法建立備份資料夾: {e}", self.winfo_toplevel()
+                )
                 return
 
             # 儲存備份路徑到配置檔案（儲存的是伺服器專用資料夾）
@@ -958,7 +1291,10 @@ pause"""
                 backup_msg += "是否立即執行備份？"
 
                 result = UIUtils.ask_yes_no_cancel(
-                    "備份檔案已建立", backup_msg, self.winfo_toplevel(), show_cancel=False
+                    "備份檔案已建立",
+                    backup_msg,
+                    self.winfo_toplevel(),
+                    show_cancel=False,
                 )
 
                 if not result:
@@ -979,22 +1315,36 @@ pause"""
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
 
-                subprocess.Popen([bat_file_path], startupinfo=startupinfo, shell=False)  # 安全性改進：移除 shell=True
+                subprocess.Popen(
+                    [bat_file_path], startupinfo=startupinfo, shell=False
+                )  # 安全性改進：移除 shell=True
 
                 UIUtils.show_info(
-                    "備份開始", f"備份已開始執行，請稍候...\n備份位置：{backup_full_path}", self.winfo_toplevel()
+                    "備份開始",
+                    f"備份已開始執行，請稍候...\n備份位置：{backup_full_path}",
+                    self.winfo_toplevel(),
                 )
 
                 # 立即刷新一次列表
                 self.refresh_servers()
 
-                # 延遲刷新列表以更新備份狀態（給備份一些時間完成）
-                self.after(2000, lambda: self.refresh_servers())
                 # 再次延遲刷新確保狀態正確
-                self.after(5000, lambda: self.refresh_servers())
+                self._schedule_refresh(5000)
 
             except Exception as e:
-                UIUtils.show_error("執行錯誤", f"執行備份批次檔失敗：{e}", self.winfo_toplevel())
+                LogUtils.error(
+                    f"執行備份批次檔失敗: {e}\n{traceback.format_exc()}",
+                    "ManageServerFrame",
+                )
+                UIUtils.show_error(
+                    "執行錯誤", f"執行備份批次檔失敗：{e}", self.winfo_toplevel()
+                )
 
         except Exception as e:
-            UIUtils.show_error("錯誤", f"建立備份批次檔失敗：{e}", self.winfo_toplevel())
+            LogUtils.error(
+                f"建立備份批次檔失敗: {e}\n{traceback.format_exc()}",
+                "ManageServerFrame",
+            )
+            UIUtils.show_error(
+                "錯誤", f"建立備份批次檔失敗：{e}", self.winfo_toplevel()
+            )

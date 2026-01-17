@@ -79,7 +79,7 @@ class WindowManager:
                 "center_y": screen_height // 2,
             }
         except Exception as e:
-            LogUtils.debug(f"取得螢幕資訊失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"取得螢幕資訊失敗: {e}", "WindowManager", e)
             # 回傳預設值
             return {
                 "width": 1920,
@@ -134,7 +134,9 @@ class WindowManager:
         return optimal_width, optimal_height
 
     @staticmethod
-    def calculate_center_position(screen_info: Dict[str, Any], width: int, height: int) -> Tuple[int, int]:
+    def calculate_center_position(
+        screen_info: Dict[str, Any], width: int, height: int
+    ) -> Tuple[int, int]:
         """
         計算視窗置中位置，考慮工作區域和多螢幕環境
         Calculate centered window position, considering work area and multi-monitor environments.
@@ -188,7 +190,9 @@ class WindowManager:
                 or x + width > screen_info["width"]
                 or y + height > screen_info["height"]
             ):
-                x, y = WindowManager.calculate_center_position(screen_info, width, height)
+                x, y = WindowManager.calculate_center_position(
+                    screen_info, width, height
+                )
 
         # 設定視窗幾何
         try:
@@ -196,12 +200,15 @@ class WindowManager:
             window.minsize(1000, 700)  # 設定最小尺寸
 
             # 如果記錄為最大化狀態
-            if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
+            if (
+                window_settings.get("maximized", False)
+                and settings.is_remember_size_position_enabled()
+            ):
                 window.after(100, lambda: window.state("zoomed"))
 
             LogUtils.debug_window_state(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
-            LogUtils.debug(f"設定主視窗失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"設定主視窗失敗: {e}", "WindowManager", e)
             # 備用設定
             window.geometry("1200x800")
             window.minsize(1000, 700)
@@ -223,7 +230,6 @@ class WindowManager:
 
             if not is_maximized:
                 # 取得當前視窗大小和位置
-                window.update_idletasks()
                 width = window.winfo_width()
                 height = window.winfo_height()
                 x = window.winfo_x()
@@ -244,15 +250,22 @@ class WindowManager:
 
             # 減少除錯訊息頻率：只有在沒有最近記錄時才顯示
             current_time = time.time()
-            if not hasattr(WindowManager, "_last_debug_time") or current_time - WindowManager._last_debug_time > 5:
+            if (
+                not hasattr(WindowManager, "_last_debug_time")
+                or current_time - WindowManager._last_debug_time > 5
+            ):
                 LogUtils.debug_window_state("已儲存主視窗狀態")
                 WindowManager._last_debug_time = current_time
         except Exception as e:
-            LogUtils.debug(f"儲存主視窗狀態失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"儲存主視窗狀態失敗: {e}", "WindowManager", e)
 
     @staticmethod
     def setup_dialog_window(
-        window, parent=None, width: int = None, height: int = None, center_on_parent: bool = True
+        window,
+        parent=None,
+        width: int = None,
+        height: int = None,
+        center_on_parent: bool = True,
     ) -> None:
         """
         設定對話框視窗的大小和位置
@@ -296,7 +309,9 @@ class WindowManager:
                 y = max(0, min(y, screen_info["height"] - height))
             except Exception:
                 # 螢幕置中作為備用
-                x, y = WindowManager.calculate_center_position(screen_info, width, height)
+                x, y = WindowManager.calculate_center_position(
+                    screen_info, width, height
+                )
         else:
             # 螢幕置中
             x, y = WindowManager.calculate_center_position(screen_info, width, height)
@@ -306,7 +321,7 @@ class WindowManager:
             window.geometry(f"{width}x{height}+{x}+{y}")
             LogUtils.debug(f"對話框設定: {width}x{height}+{x}+{y}", "WindowManager")
         except Exception as e:
-            LogUtils.debug(f"設定對話框失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"設定對話框失敗: {e}", "WindowManager", e)
 
     @staticmethod
     def bind_window_state_tracking(window) -> None:
@@ -321,7 +336,9 @@ class WindowManager:
                 # 延遲儲存狀態，避免頻繁寫入
                 if hasattr(window, "_save_timer"):
                     window.after_cancel(window._save_timer)
-                window._save_timer = window.after(1000, lambda: WindowManager.save_main_window_state(window))
+                window._save_timer = window.after(
+                    1000, lambda: WindowManager.save_main_window_state(window)
+                )
 
         def on_state_change(event):
             # 立即儲存狀態變更
