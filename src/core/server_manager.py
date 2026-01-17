@@ -16,18 +16,12 @@ import shutil
 import subprocess
 import threading
 import time
-import traceback
 import psutil
 import queue
 # ====== 專案內部模組 ======
 from ..models import ServerConfig
-from ..utils.server_utils import ServerCommands
-from ..utils.memory_utils import MemoryUtils
-from ..utils.log_utils import LogUtils
-from ..utils.ui_utils import UIUtils
-from .properties_helper import ServerPropertiesHelper
-from .server_detection import ServerDetectionUtils
-
+from ..utils import LogUtils, UIUtils
+from ..utils import ServerCommands, MemoryUtils, ServerPropertiesHelper, ServerDetectionUtils
 
 class ServerManager:
     """
@@ -132,7 +126,7 @@ class ServerManager:
             self.create_launch_script(config)
             return True
         except Exception as e:
-            LogUtils.error(f"建立伺服器失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"建立伺服器失敗: {e}", "ServerManager", e)
             return False
 
     def _create_eula_file(self, server_path: Path) -> None:
@@ -190,7 +184,7 @@ class ServerManager:
             memory_display = f"0-{MemoryUtils.format_memory_mb(max_memory)}"
 
         # 使用統一的 Java 命令構建邏輯
-        java_command_str = ServerCommands.build_java_command(self, config, return_list=False)
+        java_command_str = ServerCommands.build_java_command(config, return_list=False)
 
         # 調試信息
         LogUtils.debug(f"Java 命令: {java_command_str}", "ServerManager")
@@ -268,7 +262,7 @@ class ServerManager:
                     f.write(f"{k}={v}\n")
             return True
         except Exception as e:
-            LogUtils.error(f"update_server_properties 儲存失敗: {e}")
+            LogUtils.error_exc(f"update_server_properties 儲存失敗: {e}", "ServerManager", e)
             return False
 
     def start_server(self, server_name: str, parent=None) -> bool:
@@ -296,26 +290,14 @@ class ServerManager:
                 return False
 
             # 尋找可用的啟動腳本
-            script_candidates = [
-                "run.bat",  # Forge installer 預設
-                "start_server.bat",  # 我們建立的
-                "start.bat",  # 常見命名
-                "server.bat",  # 常見命名
-            ]
+            script_path = ServerDetectionUtils.find_startup_script(server_path)
 
-            # 找到第一個存在的啟動腳本
-            script_path = None
-            for script_name in script_candidates:
-                candidate_path = server_path / script_name
-                if candidate_path.exists():
-                    script_path = candidate_path
-                    LogUtils.info(f"找到啟動腳本: {script_path}", "ServerManager")  # 改為控制台輸出，避免彈窗干擾
-                    break
-
-            if not script_path:
+            if script_path:
+                LogUtils.info(f"找到啟動腳本: {script_path}", "ServerManager")
+            else:
                 UIUtils.show_error(
                     "啟動腳本未找到",
-                    f"找不到啟動腳本，檢查的路徑: {[str(server_path / name) for name in script_candidates]}",
+                    f"找不到啟動腳本 (run.bat, start_server.bat, start.bat, server.bat)",
                     parent=parent,
                 )
                 return False
@@ -363,7 +345,7 @@ class ServerManager:
                         if stderr:
                             LogUtils.error(f"標準錯誤: {stderr}", "ServerManager")
                     except Exception as e:
-                        LogUtils.error(f"無法讀取錯誤信息: {e}", "ServerManager")
+                        LogUtils.error_exc(f"無法讀取錯誤信息: {e}", "ServerManager", e)
                     UIUtils.show_error("啟動失敗", f"伺服器進程立即結束，返回碼: {poll_result}", parent=parent)
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process
@@ -384,7 +366,7 @@ class ServerManager:
                                     raw = proc.stdout.buffer.readline()
                                     line = raw.decode("utf-8", errors="ignore")
                                 except Exception as e2:
-                                    LogUtils.error(f"{name} 嚴重編碼錯誤: {e2}", "output_reader")
+                                    LogUtils.error_exc(f"{name} 嚴重編碼錯誤: {e2}", "output_reader", e2)
                                     continue
                             if not line:
                                 break
@@ -392,7 +374,7 @@ class ServerManager:
                             if proc.poll() is not None:
                                 break
                     except Exception as e:
-                        LogUtils.error(f"{name} 讀取錯誤: {e}", "output_reader")
+                        LogUtils.error_exc(f"{name} 讀取錯誤: {e}", "output_reader", e)
 
                 t = threading.Thread(target=_output_reader, args=(process, q, server_name), daemon=True)
                 t.start()
@@ -402,12 +384,11 @@ class ServerManager:
                 return True
 
             except FileNotFoundError as e:
-                LogUtils.error(f"檔案路徑錯誤: {e}", "ServerManager")
+                LogUtils.error_exc(f"檔案路徑錯誤: {e}", "ServerManager", e)
                 return False
 
         except Exception as e:
-            LogUtils.error(f"啟動伺服器失敗: {e}", "ServerManager")
-            traceback.print_exc()
+            LogUtils.error_exc(f"啟動伺服器失敗: {e}", "ServerManager", e)
             UIUtils.show_error("啟動失敗", f"無法啟動伺服器 {server_name}。錯誤: {e}")
             return False
 
@@ -437,7 +418,7 @@ class ServerManager:
             return True
 
         except Exception as e:
-            LogUtils.error(f"刪除伺服器失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"刪除伺服器失敗: {e}", "ServerManager", e)
             UIUtils.show_error("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}")
             return False
 
@@ -457,7 +438,7 @@ class ServerManager:
                 for name, config_data in data.items():
                     self.servers[name] = ServerConfig(**config_data)
         except Exception as e:
-            LogUtils.error(f"載入配置失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"載入配置失敗: {e}", "ServerManager", e)
 
     def save_servers_config(self) -> None:
         """
@@ -475,7 +456,7 @@ class ServerManager:
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            LogUtils.error(f"儲存配置失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"儲存配置失敗: {e}", "ServerManager", e)
 
     def get_default_server_properties(self) -> Dict[str, str]:
         """
@@ -569,7 +550,7 @@ class ServerManager:
             self.save_servers_config()
             return True
         except Exception as e:
-            LogUtils.error(f"添加伺服器失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"添加伺服器失敗: {e}", "ServerManager", e)
             return False
 
     def load_server_properties(self, server_name: str) -> Dict[str, str]:
@@ -601,7 +582,7 @@ class ServerManager:
             return properties
 
         except Exception as e:
-            LogUtils.error(f"讀取 server.properties 失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"讀取 server.properties 失敗: {e}", "ServerManager", e)
             return {}
 
     def is_server_running(self, server_name: str) -> bool:
@@ -671,7 +652,7 @@ class ServerManager:
             return True
 
         except Exception as e:
-            LogUtils.error(f"停止伺服器失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"停止伺服器失敗: {e}", "ServerManager", e)
             # 即使出現錯誤，也要清理記錄
             if server_name in self.running_servers:
                 del self.running_servers[server_name]
@@ -727,7 +708,7 @@ class ServerManager:
                     elif "version" in properties:
                         info["version"] = str(properties["version"])
             except Exception as e:
-                LogUtils.error(f"讀取 server.properties 失敗: {e}", "ServerManager")
+                LogUtils.error_exc(f"讀取 server.properties 失敗: {e}", "ServerManager", e)
 
             if self.is_server_running(server_name):
                 process = self.running_servers[server_name]
@@ -740,14 +721,14 @@ class ServerManager:
                         try:
                             if ps_process.name().lower().startswith("java"):
                                 all_candidates.append(ps_process)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            LogUtils.error_exc(f"取得進程名稱失敗 pid={process.pid}: {e}", "ServerManager", e)
                         try:
                             all_candidates.extend(
                                 [c for c in ps_process.children(recursive=True) if c.name().lower().startswith("java")]
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            LogUtils.error_exc(f"取得子進程清單失敗 pid={process.pid}: {e}", "ServerManager", e)
 
                         # 選擇 cmdline 含 server.jar/fabric/forge 關鍵字且記憶體用量最大的 java 進程
                         def is_server_java(proc):
@@ -788,7 +769,7 @@ class ServerManager:
             return info
 
         except Exception as e:
-            LogUtils.error(f"獲取伺服器資訊失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"獲取伺服器資訊失敗: {e}", "ServerManager", e)
             return None
 
     def send_command(self, server_name: str, command: str) -> bool:
@@ -843,7 +824,7 @@ class ServerManager:
                 return False
 
         except Exception as e:
-            LogUtils.error(f"發送命令失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"發送命令失敗: {e}", "ServerManager", e)
             return False
 
     def read_server_output(self, server_name: str, timeout: float = 0.1) -> List[str]:
@@ -884,7 +865,7 @@ class ServerManager:
                     break
             return output_lines
         except Exception as e:
-            LogUtils.error(f"讀取伺服器輸出失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"讀取伺服器輸出失敗: {e}", "ServerManager", e)
             return []
 
     def get_server_log_file(self, server_name: str) -> Optional[Path]:
@@ -919,5 +900,5 @@ class ServerManager:
             return None
 
         except Exception as e:
-            LogUtils.error(f"獲取伺服器日誌檔案失敗: {e}", "ServerManager")
+            LogUtils.error_exc(f"獲取伺服器日誌檔案失敗: {e}", "ServerManager", e)
             return None

@@ -10,14 +10,28 @@ Provides standardized HTTP request functionality including JSON retrieval, file 
 from typing import Any, Dict, Optional
 import requests
 # ====== 專案內部模組 ======
-from src.utils.log_utils import LogUtils
-from src.utils.ui_utils import UIUtils
+from src.utils import LogUtils
+from src.version_info import APP_NAME, APP_VERSION
 
 class HTTPUtils:
     """
     HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面
     HTTP network request utility class providing unified interface for various HTTP operations
     """
+    
+    @staticmethod
+    def _get_default_headers(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """
+        獲取包含預設 User-Agent 的標頭
+        Get headers with default User-Agent
+        """
+        default_headers = {
+            "User-Agent": f"{APP_NAME}/{APP_VERSION} (colin955023@gmail.com)"
+        }
+        if headers:
+            default_headers.update(headers)
+        return default_headers
+
     # ====== JSON 資料請求 ======
     # 發送 GET 請求取得 JSON 資料
     @staticmethod
@@ -37,16 +51,15 @@ class HTTPUtils:
         if not url or not isinstance(url, str):
             LogUtils.error("HTTP GET JSON 請求失敗: URL 參數無效", "HTTPUtils")
             return None
-        if timeout <= 0:
-            timeout = 10
+        timeout = max(10, timeout)  # 精簡條件檢查
 
         try:
-            response = requests.get(url, timeout=timeout, headers=headers)
+            final_headers = HTTPUtils._get_default_headers(headers)
+            response = requests.get(url, timeout=timeout, headers=final_headers)
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            LogUtils.error(f"HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils")
-            UIUtils.show_error("請求失敗", f"HTTP GET JSON 請求失敗 ({url}): {e}")
+            LogUtils.error_exc(f"HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils", e)
             return None
 
     # ====== 內容資料請求 ======
@@ -71,16 +84,15 @@ class HTTPUtils:
         if not url or not isinstance(url, str):
             LogUtils.error("HTTP GET 請求失敗: URL 參數無效", "HTTPUtils")
             return None
-        if timeout <= 0:
-            timeout = 30
+        timeout = max(30, timeout)  # 精簡條件檢查
 
         try:
-            response = requests.get(url, timeout=timeout, stream=stream, headers=headers)
+            final_headers = HTTPUtils._get_default_headers(headers)
+            response = requests.get(url, timeout=timeout, stream=stream, headers=final_headers)
             response.raise_for_status()
             return response
         except Exception as e:
-            LogUtils.error(f"HTTP GET 請求失敗 ({url}): {e}", "HTTPUtils")
-            UIUtils.show_error("請求失敗", f"HTTP GET 請求失敗 ({url}): {e}")
+            LogUtils.error_exc(f"HTTP GET 請求失敗 ({url}): {e}", "HTTPUtils", e)
             return None
 
     # ====== 檔案下載功能 ======
@@ -106,23 +118,21 @@ class HTTPUtils:
         if not local_path or not isinstance(local_path, str):
             LogUtils.error("檔案下載失敗: 本地路徑參數無效", "HTTPUtils")
             return False
-        if timeout <= 0:
-            timeout = 60
-        if chunk_size <= 0:
-            chunk_size = 65536
+
+        timeout = max(60, timeout)
+        chunk_size = max(65536, chunk_size)
 
         try:
-            response = HTTPUtils.get_content(url, timeout=timeout, stream=True)
-            if response is None:
-                return False
-
-            with open(local_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    f.write(chunk)
+            final_headers = HTTPUtils._get_default_headers()
+            with requests.get(url, stream=True, timeout=timeout, headers=final_headers) as r:
+                r.raise_for_status()
+                with open(local_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
             return True
         except Exception as e:
-            LogUtils.error(f"檔案下載失敗 ({url} -> {local_path}): {e}", "HTTPUtils")
-            UIUtils.show_error("檔案下載失敗", f"檔案下載失敗 ({url} -> {local_path}): {e}")
+            LogUtils.error_exc(f"檔案下載失敗 ({url} -> {local_path}): {e}", "HTTPUtils", e)
             return False
 
 # ====== 向後相容性函數別名 ======

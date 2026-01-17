@@ -1,187 +1,97 @@
-# Minecraft Server Manager - .gitignore
+## Minecraft Server Manager - .gitignore
 
-# ===================================
-# Python 相關
-# ===================================
-
-# Byte-compiled / optimized / DLL files
+# =====================
+# Python artifacts
+# Python 构件文件
+# =====================
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Distribution / packaging
-.Python
+# =====================
+# Virtual environments
+# =====================
+.venv/
+venv/
+ENV/
+
+# =====================
+# Build / packaging outputs
+# (Nuitka / general)
+# =====================
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.dist/
+*.build/
+*.onefile-build/
+*.onefile-dist/
+.nuitka-cache/
+*.spec
 *.manifest
-*.spec.backup
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
+# =====================
+# Test / typecheck / lint
+# =====================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .tox/
 .nox/
+htmlcov/
 .coverage
 .coverage.*
-.cache
-nosetests.xml
 coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
+nosetests.xml
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+# =====================
+# OS / editor
+# =====================
+.DS_Store
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# ===================================
-# PyInstaller 打包相關
-# ===================================
-
-# PyInstaller 輸出目錄
-/dist/
-/build/
-
-# PyInstaller 工作檔案
-*.spec.backup
-quick_test.spec
-
-# ===================================
-# 專案特定檔案
-# ===================================
-
-# 配置檔案（可能包含敏感資訊）
-config.json
-settings.json
-
-# 日誌檔案
-*.log
-logs/
-
-# 臨時檔案
-temp/
-tmp/
-*.tmp
-
-# 快取檔案
-cache/
-.cache/
-
-# ===================================
-# IDE 和編輯器
-# ===================================
-
-# Visual Studio Code
-.vscode/
+# VS Code: keep workspace config files
+.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
 
+# =====================
+# Project-local runtime files
+# (Should not be committed)
+# =====================
+config.json
+settings.json
+*.log
+logs/
+temp/
+tmp/
+cache/
 
-# ===================================
-# 作業系統檔案
-# ===================================
-
-# Windows
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
-*.stackdump
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.cab
+# Binaries (do not commit)
+*.exe
 *.msi
 *.msix
 *.msm
 *.msp
-*.lnk
 
-# ===================================
-# 版本控制
-# ===================================
-
-# Git
-.git/
-*.orig
-
-# ===================================
-# 其他
-# ===================================
-
-# 執行檔案（開發時產生的）
-*.exe
-*.out
-*.app
-
-# 但保留最終打包的執行檔案（如果需要的話）
-#!/dist/*.exe
-
-# 臨時檔案
+# =====================
+# 自訂忽略項目 (Custom ignore items)
+# =====================
 removed_code.txt
 file_version_info.txt
 INSTALLER_CONFIG.md
-reports/
-# Inno Setup中文語言檔案
-scripts/ChineseTraditional.isl
+report/
+*.xml
 scripts/cleanup.bat
 scripts/black.bat
-scripts/get_release_download_num.py
+scripts/GetReleaseDownloadNum.py
 scripts/rebase.bat
+docs/PLAGIARISM_DETECTION_TOOLS.md

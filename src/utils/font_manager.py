@@ -11,7 +11,7 @@ from typing import Dict, Tuple
 import weakref
 import customtkinter as ctk
 # ======專案內部模組 ======
-from src.utils.log_utils import LogUtils
+from src.utils import LogUtils
 
 class FontManager:
     """
@@ -133,7 +133,7 @@ class FontManager:
             self._font_refs[key] = weakref.ref(font, lambda ref: self._cleanup_font(key))
             return font
         except Exception as e:
-            LogUtils.error(f"建立字體失敗 {family}, {scaled_size}, {weight}: {e}", "FontManager")
+            LogUtils.error_exc(f"建立字體失敗 {family}, {scaled_size}, {weight}: {e}", "FontManager", e)
             # 回退到預設字體
             return self._get_fallback_font()
 
@@ -192,14 +192,14 @@ class FontManager:
                 try:
                     if hasattr(font, "destroy"):
                         font.destroy()
-                except Exception:
-                    pass
+                except Exception as e:
+                    LogUtils.error_exc(f"銷毀字體物件失敗: {e}", "FontManager", e)
 
             self._fonts.clear()
             self._font_refs.clear()
 
         except Exception as e:
-            LogUtils.error(f"清理字體快取時發生錯誤: {e}", "FontManager")
+            LogUtils.error_exc(f"清理字體快取時發生錯誤: {e}", "FontManager", e)
 
 # ====== 全域實例與便利函數 ======
 # 全域字體管理器實例
@@ -234,6 +234,20 @@ def set_ui_scale_factor(scale_factor: float) -> None:
         None
     """
     font_manager.set_scale_factor(scale_factor)
+
+# 取得全域縮放因子
+def get_scale_factor() -> float:
+    """
+    取得全域縮放因子的便利函數
+    Convenience function to get global scale factor
+
+    Args:
+        None
+
+    Returns:
+        float: 縮放因子
+    """
+    return font_manager.get_scale_factor()
 
 # 取得 DPI 縮放後的尺寸
 def get_dpi_scaled_size(base_size: int) -> int:

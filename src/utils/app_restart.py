@@ -14,9 +14,8 @@ import subprocess
 import sys
 import threading
 import time
-import traceback
 # ======專案內部模組 ======
-from src.utils.log_utils import LogUtils
+from src.utils import LogUtils
 
 # ====== 執行檔資訊檢測 ======
 # 取得當前執行檔的詳細資訊
@@ -35,7 +34,7 @@ def _get_executable_info() -> tuple[list[str], bool, Optional[Path]]:
     if is_frozen:
         return [sys.executable], True, None
     else:
-        script_path = Path(__file__).parent.parent.parent / "minecraft_server_manager.py"
+        script_path = Path(__file__).parent.parent / "main.py"
         return [sys.executable, str(script_path)], False, script_path
 
 # ====== 重啟功能檢測 ======
@@ -99,7 +98,7 @@ def restart_application(delay: float = 1.0) -> bool:
                     creation_flags = 0
 
                 if is_frozen:
-                    # PyInstaller 打包的執行檔
+                    # 打包後的執行檔 (frozen)
                     process = subprocess.Popen(
                         executable_cmd, cwd=os.path.dirname(executable_cmd[0]), creationflags=creation_flags
                     )
@@ -117,7 +116,7 @@ def restart_application(delay: float = 1.0) -> bool:
                     restart_error.set()
 
             except Exception as e:
-                LogUtils.error(f"重啟失敗: {e}", "AppRestart")
+                LogUtils.error_exc(f"重啟失敗: {e}", "AppRestart", e)
                 restart_error.set()
 
         # 在背景執行緒中執行延遲重啟
@@ -135,7 +134,7 @@ def restart_application(delay: float = 1.0) -> bool:
             return True
 
     except Exception as e:
-        LogUtils.error(f"準備重啟時發生錯誤: {e}", "AppRestart")
+        LogUtils.error_exc(f"準備重啟時發生錯誤: {e}", "AppRestart", e)
         return False
 
 # 安排重啟並退出當前應用程式
@@ -170,7 +169,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                             parent_window.quit()  # 停止主事件迴圈
                             parent_window.destroy()  # 銷毀視窗
                         except Exception as e:
-                            LogUtils.error(f"關閉視窗時發生錯誤: {e}", "AppRestart")
+                            LogUtils.error_exc(f"關閉視窗時發生錯誤: {e}", "AppRestart", e)
 
                         # 延遲退出以確保新程序有時間啟動
                         time.sleep(0.5)
@@ -180,13 +179,13 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                     parent_window.after(100, delayed_close)
 
                 except Exception as e:
-                    LogUtils.error(f"安排視窗關閉時發生錯誤: {e}", "AppRestart")
+                    LogUtils.error_exc(f"安排視窗關閉時發生錯誤: {e}", "AppRestart", e)
                     # 如果無法使用 after 方法，直接關閉
                     try:
                         parent_window.quit()
                         parent_window.destroy()
-                    except Exception:
-                        pass
+                    except Exception as e2:
+                        LogUtils.error_exc(f"直接關閉視窗失敗: {e2}", "AppRestart", e2)
                     time.sleep(0.5)
                     sys.exit(0)
             else:
@@ -194,8 +193,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                 time.sleep(0.5)
                 sys.exit(0)
         else:
-            LogUtils.warning("重啟失敗，程式將繼續運行", "AppRestart")
+            LogUtils.error("重啟失敗，程式將繼續運行", "AppRestart")
 
     except Exception as e:
-        LogUtils.error(f"重啟程序失敗: {e}", "AppRestart")
-        traceback.print_exc()
+        LogUtils.error_exc(f"重啟程序失敗: {e}", "AppRestart", e)

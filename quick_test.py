@@ -12,7 +12,7 @@ import os
 import sys
 import traceback
 import importlib
-import requests
+import tempfile
 
 # ====== 測試工具函數 ======
 
@@ -58,7 +58,7 @@ def test_python_environment():
         print_success(f"Python 環境正常 (版本: {version.major}.{version.minor}.{version.micro})")
         return True
     except Exception as e:
-        print_error(f"Python 環境檢查失敗: {e}")
+        print_error(f"Python 環境檢查失敗: {e}\n{traceback.format_exc()}")
         return False
 
 def test_basic_modules():
@@ -74,10 +74,10 @@ def test_basic_modules():
         print_success("基礎模組導入成功")
         return True
     except ImportError as e:
-        print_error(f"基礎模組導入失敗: {e}")
+        print_error(f"基礎模組導入失敗: {e}\n{traceback.format_exc()}")
         return False
     except Exception as e:
-        print_error(f"基礎模組測試出現異常: {e}")
+        print_error(f"基礎模組測試出現異常: {e}\n{traceback.format_exc()}")
         return False
 
 def test_project_dependencies():
@@ -105,7 +105,8 @@ def test_project_dependencies():
         print_error("專案依賴缺失:")
         for module in missing_modules:
             print(f"    • {module}")
-        print("請執行: pip install -r requirements.txt")
+        print("請先執行: pip install uv 安裝套件管理工具")
+        print("再執行: py -m uv sync --reinstall 以安裝缺失的依賴")
         return False
 
     print_success("專案依賴檢查通過")
@@ -115,38 +116,37 @@ def test_main_program_modules():
     """[4/8] 測試主程式模組載入"""
     print_step(4, 8, "測試主程式模組載入")
 
-    # 確保專案路徑在 sys.path 中（支援 PyInstaller 打包）
-    if hasattr(sys, '_MEIPASS'):
-        # 當運行在 PyInstaller 打包的執行檔中
-        script_dir = Path(sys._MEIPASS)
-        src_path = script_dir / "src"
-    else:
-        # 正常的 Python 腳本執行
-        script_dir = Path(__file__).parent.absolute()
-        src_path = script_dir / "src"
+    # quick_test.py 僅供「完整 repo」使用者快速測試，不做任何打包環境判斷
+    repo_root = Path(__file__).resolve().parent
+    src_path = repo_root / "src"
 
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
+    if not src_path.exists():
+        print_error(f"找不到 src 目錄: {src_path}")
+        print("    請確認你是在完整 repo 根目錄執行 quick_test.py")
+        return False
+
+    # 確保 repo root 在 sys.path 中，讓 `import src...` 能正常運作
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
     # 要測試的核心模組（只測試不需要外部依賴的模組）
     testable_modules = [
-        ('utils.log_utils', 'LogUtils'),
-        ('utils.settings_manager', 'SettingsManager'),
-        ('utils.runtime_paths', 'RuntimePaths'),
-        ('models', 'Models'),
-        ('version_info', 'VersionInfo'),
+        ('src.utils.log_utils', 'LogUtils'),
+        ('src.utils.settings_manager', 'SettingsManager'),
+        ('src.utils.runtime_paths', 'RuntimePaths'),
+        ('src.models', 'Models'),
+        ('src.version_info', 'VersionInfo'),
     ]
 
     # 這些模組需要檢查檔案存在性但不導入（因為可能有依賴問題）
     file_check_modules = [
-        ('core.version_manager', 'MinecraftVersionManager'),
-        ('core.loader_manager', 'LoaderManager'),
-        ('core.properties_helper', 'ServerPropertiesHelper'),
-        ('core.server_manager', 'ServerManager'),
-        ('core.server_detection', 'ServerDetectionUtils'),
-        ('ui.main_window', 'MainWindow'),
-        ('ui.create_server_frame', 'CreateServerFrame'),
-        ('ui.manage_server_frame', 'ManageServerFrame'),
+        ('src.core.version_manager', 'MinecraftVersionManager'),
+        ('src.core.loader_manager', 'LoaderManager'),
+        ('src.core.server_manager', 'ServerManager'),
+        ('src.utils.server_utils', 'ServerUtils'),
+        ('src.ui.main_window', 'MainWindow'),
+        ('src.ui.create_server_frame', 'CreateServerFrame'),
+        ('src.ui.manage_server_frame', 'ManageServerFrame'),
     ]
 
     failed_modules = []
@@ -168,7 +168,10 @@ def test_main_program_modules():
     # 檢查檔案存在性
     for module_name, display_name in file_check_modules:
         try:
-            module_file = src_path / f"{module_name.replace('.', '/')}.py"
+            rel_mod = module_name
+            if rel_mod.startswith("src."):
+                rel_mod = rel_mod[len("src."):]
+            module_file = src_path / f"{rel_mod.replace('.', '/')}.py"
             if not module_file.exists():
                 failed_modules.append(display_name)
                 error_details[module_name] = f"模組檔案不存在: {module_file}"
@@ -203,7 +206,7 @@ def test_main_program_modules():
         print("   2. 確保所有必要的 .py 檔案都存在於 src/ 目錄下")
         print("   3. 檢查模組中是否有語法錯誤")
         print("   4. 確認所有依賴套件都已正確安裝")
-        print("   5. 部分模組使用相對導入，需要在完整專案環境中執行")
+        print("   5. 請在完整 repo 根目錄執行 quick_test.py")
 
         # 如果有部分成功，不算完全失敗
         if successful_modules and len(successful_modules) >= len(failed_modules):
@@ -221,6 +224,8 @@ def test_network_connectivity():
     print_step(5, 8, "測試網路連線")
 
     try:
+        import requests
+
         response = requests.get('https://api.github.com', timeout=5)
 
         if response.status_code == 200:
@@ -248,31 +253,26 @@ def test_file_system_permissions():
     print_step(6, 8, "測試檔案系統權限")
 
     try:
-        # 測試創建臨時目錄
-        test_dir = "test_temp_dir"
-        os.makedirs(test_dir, exist_ok=True)
+        # 使用系統臨時目錄，避免污染 repo 或遇到同名目錄衝突
+        with tempfile.TemporaryDirectory(prefix="msm_quick_test_") as temp_dir:
+            test_file = os.path.join(temp_dir, "test_file.txt")
 
-        # 測試寫入檔案
-        test_file = os.path.join(test_dir, "test_file.txt")
-        with open(test_file, 'w', encoding='utf-8') as f:
-            f.write("測試內容")
+            # 測試寫入檔案
+            with open(test_file, 'w', encoding='utf-8') as f:
+                f.write("測試內容")
 
-        # 測試讀取檔案
-        with open(test_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        # 清理測試檔案
-        os.remove(test_file)
-        os.rmdir(test_dir)
+            # 測試讀取檔案
+            with open(test_file, 'r', encoding='utf-8') as f:
+                _ = f.read()
 
         print_success("檔案系統權限正常")
         return True
 
     except PermissionError as e:
-        print_error(f"檔案系統權限不足: {e}")
+        print_error(f"檔案系統權限不足: {e}\n{traceback.format_exc()}")
         return False
     except Exception as e:
-        print_error(f"檔案系統測試失敗: {e}")
+        print_error(f"檔案系統測試失敗: {e}\n{traceback.format_exc()}")
         return False
 
 
@@ -337,10 +337,10 @@ def test_window_management_logic():
         return True
 
     except ImportError as e:
-        print_error(f"視窗管理模組導入失敗: {e}")
+        print_error(f"視窗管理模組導入失敗: {e}\n{traceback.format_exc()}")
         return False
     except Exception as e:
-        print_error(f"視窗管理邏輯測試失敗: {e}")
+        print_error(f"視窗管理邏輯測試失敗: {e}\n{traceback.format_exc()}")
         return False
 
 
@@ -349,16 +349,13 @@ def test_environment_detection():
     print_step(8, 8, "測試環境檢測功能")
 
     try:
-        # 測試簡化的環境檢測邏輯
         print("    檢查環境檢測...")
-        
-        # 使用簡化的環境檢測邏輯
-        import sys
-        is_packaged = hasattr(sys, '_MEIPASS')
-        is_development = not is_packaged
-        
-        print(f"    • 是否為打包環境: {is_packaged}")
-        print(f"    • 是否為開發環境: {is_development}")
+
+        # quick_test.py 只針對完整 repo，這裡僅檢查 repo 結構是否合理
+        repo_root = Path(__file__).resolve().parent
+        src_dir = repo_root / "src"
+        print(f"    • repo_root: {repo_root}")
+        print(f"    • src 目錄存在: {src_dir.exists()}")
         
         # 測試設定管理器的調試相關功能
         from src.utils.settings_manager import get_settings_manager
@@ -388,10 +385,10 @@ def test_environment_detection():
         return True
 
     except ImportError as e:
-        print_error(f"環境檢測模組導入失敗: {e}")
+        print_error(f"環境檢測模組導入失敗: {e}\n{traceback.format_exc()}")
         return False
     except Exception as e:
-        print_error(f"環境檢測功能測試失敗: {e}")
+        print_error(f"環境檢測功能測試失敗: {e}\n{traceback.format_exc()}")
         return False
 
 
@@ -452,8 +449,8 @@ def main():
             if choice == 'y':
                 print("\n正在啟動 Minecraft 伺服器管理器...")
                 # 導入並啟動主程式
-                import minecraft_server_manager
-                minecraft_server_manager.main()
+                import src.main as app_main
+                app_main.main()
             else:
                 print("\n測試完成，感謝使用！")
         except KeyboardInterrupt:

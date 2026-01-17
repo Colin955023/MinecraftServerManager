@@ -19,7 +19,7 @@ from .http_utils import HTTPUtils
 from .runtime_paths import get_cache_dir
 from .ui_utils import UIUtils
 from .log_utils import LogUtils
-from src.core.version_manager import MinecraftVersionManager
+from src.core import MinecraftVersionManager
 from .java_downloader import install_java_with_winget
 
 COMMON_JAVA_PATHS = [
@@ -60,8 +60,8 @@ def get_java_version(java_path: str) -> int:
             if m.group(1) == "8":
                 return 8
             return int(m.group(1))
-    except Exception:
-        pass
+    except Exception as e:
+        LogUtils.error_exc(f"取得 Java 版本失敗 {java_path}: {e}", "JavaUtils", e)
     return None
 
 # 取得指定 Minecraft 版本所需的 Java 版本
@@ -129,10 +129,9 @@ def get_all_local_java_candidates() -> list:
     Returns:
         list: 格式為 (路徑, 主要版本) 的列表
     """
-    candidates = []
-    # 統一搜尋所有來源
     search_paths = set()
-    # 1.常見路徑
+    
+    # 1.常見路徑搜尋
     for base in COMMON_JAVA_PATHS:
         if os.path.exists(base):
             for d in os.listdir(base):
@@ -140,45 +139,39 @@ def get_all_local_java_candidates() -> list:
                 if os.path.isdir(subdir):
                     search_paths.add(os.path.join(subdir, "bin"))
 
-    # 2.JAVA_HOME
+    # 2.JAVA_HOME 環境變數
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
             for p in val.split(";"):
                 search_paths.add(os.path.join(p, "bin"))
 
-    # 3.環境變數中尋找
+    # 3.環境變數中的 Java 路徑
     try:
-        for key, value in os.environ.items():
-            if not value:
-                continue
-            # 只處理路徑型變數
+        for value in os.environ.values():
             if isinstance(value, str) and 'java' in value.lower():
-                # 支援多個路徑(如PATH)
                 for path in value.split(os.pathsep):
                     if 'java' in path.lower():
                         javaw_path = os.path.join(path, "bin", "javaw.exe")
                         if os.path.isfile(javaw_path):
-                            search_paths.add(javaw_path)
+                            search_paths.add(os.path.dirname(javaw_path))
     except Exception as e:
-        print(f"環境變數尋找 java 失敗：{e}")
+        LogUtils.error_exc(f"環境變數尋找 java 失敗：{e}", "JavaUtils", e)
 
-    # 4.where java 檢查，只保留 javaw.exe
+    # 4.where javaw 檢查
+    candidates = []
     try:
         result = subprocess.run(["where", "javaw"], capture_output=True, text=True, shell=False)
         if result.returncode == 0:
-            java_paths = result.stdout.strip().splitlines()
-            for java_path in java_paths:
-                if os.path.basename(java_path).lower() != "javaw.exe":
-                    continue
-                major = get_java_version(java_path)
-                if major:
-                    candidates.append((os.path.normpath(java_path), major))
+            for java_path in result.stdout.strip().splitlines():
+                if os.path.basename(java_path).lower() == "javaw.exe":
+                    major = get_java_version(java_path)
+                    if major:
+                        candidates.append((os.path.normpath(java_path), major))
     except Exception as e:
-        LogUtils.error(f"搜尋 Java 安裝失敗: {e}", "JavaUtils")
-        UIUtils.show_error("搜尋 Java 安裝失敗", f"無法搜尋 Java 安裝: {e}", topmost=True)
+        LogUtils.error_exc(f"搜尋 Java 失敗: {e}", "JavaUtils", e)
 
-    # 搜尋所有目錄下的 javaw.exe
+    # 5.搜尋所有目錄下的 javaw.exe
     for p in search_paths:
         javaw = os.path.join(p, "javaw.exe")
         if os.path.exists(javaw):
@@ -186,17 +179,14 @@ def get_all_local_java_candidates() -> list:
             if major:
                 candidates.append((os.path.normpath(javaw), major))
 
-    # 只保留 javaw.exe，並去除重複地
+    # 去重並按版本排序
     seen = set()
     result = []
     for path, major in candidates:
-        if os.path.basename(path).lower() != "javaw.exe":
-            continue
         if (path, major) not in seen:
             seen.add((path, major))
             result.append((path, major))
-
-    # 按照 major 版本排序
+    
     result.sort(key=lambda x: x[1])
     LogUtils.info(f"找到 {len(result)} 個 Java 執行檔選擇：", "JavaUtils")
     for path, major in result:
@@ -246,6 +236,7 @@ def get_best_java_path(mc_version: str, required_major: Optional[int] = None, as
                         )
                         return path
             except Exception as e:
+                LogUtils.error_exc(f"自動下載 Microsoft JDK {required_major} 失敗：{e}", "JavaUtils", e)
                 UIUtils.show_error(
                     "Java 下載失敗",
                     f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑。",

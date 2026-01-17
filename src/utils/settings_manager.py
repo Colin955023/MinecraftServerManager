@@ -11,7 +11,7 @@ from typing import Any, Dict
 import json
 import sys
 # ====== 專案內部模組 ======
-from src.utils.runtime_paths import ensure_dir, get_user_data_dir
+from src.utils import LogUtils, ensure_dir, get_user_data_dir
 
 class SettingsManager:
     """
@@ -49,7 +49,7 @@ class SettingsManager:
         if not self.settings_path.exists():
             # 建立預設設定
             # 透過檢查是否為打包環境來設定調試日誌預設值
-            is_packaged = hasattr(sys, "_MEIPASS")
+            is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
             # 開發環境預設啟用調試日誌，打包環境預設關閉
             default_debug_logging = not is_packaged
 
@@ -97,7 +97,8 @@ class SettingsManager:
                 }
 
             return settings
-        except Exception:
+        except Exception as e:
+            LogUtils.error_exc(f"載入設定失敗: {e}", "SettingsManager", e)
             # 如果載入失敗，回傳預設設定
             return {
                 "servers_root": "",
@@ -128,6 +129,7 @@ class SettingsManager:
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         except Exception as e:
+            LogUtils.error_exc(f"無法寫入 user_settings.json: {e}", "SettingsManager", e)
             raise Exception(f"無法寫入 user_settings.json: {e}")
 
     # ====== 基本設定操作 ======
@@ -451,20 +453,6 @@ class SettingsManager:
             bool: 啟用調試日誌返回 True，否則返回 False
         """
         return self.get_debug_settings().get("enable_debug_logging", False)
-
-    # 檢查是否啟用視窗狀態日誌
-    def is_window_state_logging_enabled(self) -> bool:
-        """
-        檢查是否啟用視窗狀態儲存的日誌記錄功能
-        Check if window state saving logging feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用視窗狀態日誌返回 True，否則返回 False
-        """
-        return self.get_debug_settings().get("enable_window_state_logging", False)
 
     # 設定調試日誌開關
     def set_debug_logging(self, enabled: bool) -> None:

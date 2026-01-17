@@ -6,6 +6,10 @@
 Logging Utilities Module
 Provides unified logging functionality
 """
+# ====== 標準函式庫 ======
+from typing import Optional
+import traceback
+
 # ====== 日誌工具類別 ======
 class LogUtils:
     """
@@ -52,6 +56,19 @@ class LogUtils:
             print(f"\033[91m[ERROR][{component}] {message}\033[0m")
         else:
             print(f"\033[91m[ERROR] {message}\033[0m")
+
+    @staticmethod
+    def error_exc(message: str, component: str = "", exc: Optional[BaseException] = None) -> None:
+        """以統一格式輸出錯誤並附上 traceback。
+
+        - 若提供 exc，使用該例外的 traceback（適合跨執行緒傳遞）。
+        - 否則使用當前 except 區塊的 traceback.format_exc()。
+        """
+        if exc is not None:
+            trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        else:
+            trace = traceback.format_exc()
+        LogUtils.error(f"{message}\n{trace}", component)
 
     # 輸出資訊訊息到控制台
     @staticmethod

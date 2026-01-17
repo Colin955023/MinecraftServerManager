@@ -5,15 +5,19 @@ UI 工具函數
 提供常用的界面元件和工具函數，避免重複代碼
 """
 # ====== 標準函式庫 ======
-from typing import Optional
+from typing import Optional, Callable
 import tkinter as tk
+import tkinter.messagebox
+import queue
+import threading
+import time
 # ====== 第三方函式庫 ======
 import customtkinter as ctk
 # ====== 專案內部模組 ======
-from .server_utils import PathUtils
+from .path_utils import PathUtils
 from .window_manager import WindowManager
 from .log_utils import LogUtils
-from ..utils.font_manager import font_manager
+from .font_manager import font_manager
 
 # 設置 CustomTkinter 主題
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
@@ -61,7 +65,7 @@ class DialogUtils:
                 dialog.grab_set()
                 dialog.focus_set()
             except Exception as e:
-                LogUtils.warning(f"設定模態視窗失敗: {e}")
+                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "DialogUtils", e)
         # 延遲綁定圖示
         IconUtils.set_window_icon(dialog, 250)
 
@@ -95,21 +99,24 @@ class IconUtils:
                 if not window.winfo_exists():
                     return
 
+                # 避免重複設定造成閃爍/撕裂
+                if getattr(window, "_msm_icon_set", False):
+                    return
+
                 # 使用統一的路徑工具
                 icon_path = PathUtils.get_assets_path() / "icon.ico"
                 if icon_path.exists():
                     window.iconbitmap(str(icon_path))
-                    # 強制刷新視窗以確保圖示生效
+                    setattr(window, "_msm_icon_set", True)
+                    # 只在 idle 時做一次輕量刷新，避免頻繁 update 導致閃爍
                     try:
-                        window.update_idletasks()
-                        # 再次確認圖示設定
-                        window.after(50, lambda: window.update_idletasks())
-                    except Exception:
-                        pass
+                        window.after_idle(window.update_idletasks)
+                    except Exception as e:
+                        LogUtils.error_exc(f"after_idle(update_idletasks) 失敗: {e}", "IconUtils", e)
                 else:
                     LogUtils.warning(f"圖示檔案不存在 - {icon_path}")
             except Exception as e:
-                LogUtils.warning(f"設定視窗圖示失敗 - {e}")
+                LogUtils.error_exc(f"設定視窗圖示失敗 - {e}", "IconUtils", e)
 
         # 延遲綁定圖示，確保視窗完全初始化完成
         try:
@@ -170,11 +177,278 @@ class UIUtils:
                 window.grab_set()
                 window.focus_set()
             except Exception as e:
-                LogUtils.warning(f"設定模態視窗失敗: {e}")
+                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "UIUtils", e)
 
         # 延遲綁定圖示，確保不會被覆蓋，使用更長的延遲
         if bind_icon:
             IconUtils.set_window_icon(window, delay_ms)
+
+    @staticmethod
+    def create_toplevel_dialog(
+        parent,
+        title: str,
+        *,
+        width: int | None = None,
+        height: int | None = None,
+        resizable: bool = True,
+        bind_icon: bool = True,
+        center_on_parent: bool = True,
+        make_modal: bool = True,
+        delay_ms: int = 200,
+    ) -> ctk.CTkToplevel:
+        """建立並套用專案一致的 dialog 視窗屬性。"""
+
+        dialog = ctk.CTkToplevel(parent)
+        dialog.title(title)
+        dialog.resizable(resizable, resizable)
+
+        UIUtils.setup_window_properties(
+            window=dialog,
+            parent=parent,
+            width=width,
+            height=height,
+            bind_icon=bind_icon,
+            center_on_parent=center_on_parent,
+            make_modal=make_modal,
+            delay_ms=delay_ms,
+        )
+        return dialog
+
+    @staticmethod
+    def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
+        """
+        安全地更新 widget，檢查 widget 是否存在
+        Safely update widget, checking if widget exists
+        """
+        try:
+            if widget and widget.winfo_exists():
+                update_func(widget, *args, **kwargs)
+        except Exception as e:
+            LogUtils.error_exc(f"更新 widget 失敗: {e}", "UIUtils", e)
+
+    @staticmethod
+    def safe_config_widget(widget, **config) -> None:
+        """
+        安全地配置 widget
+        Safely configure widget
+        """
+        UIUtils.safe_update_widget(widget, lambda w, **cfg: w.configure(**cfg), **config)
+
+    @staticmethod
+    def start_ui_queue_pump(
+        widget,
+        task_queue: "queue.Queue",
+        *,
+        interval_ms: int = 100,
+        busy_interval_ms: int = 25,
+        max_tasks_per_tick: int = 100,
+        job_attr: str = "_ui_queue_pump_job",
+    ) -> None:
+        """在 Tk/CTk 主執行緒安全地輪詢並執行 UI 任務佇列。
+
+        - 會自動 coalesce 成單一 after job，避免多重計時器造成撕裂/卡頓。
+        - 每次 tick 限制最多執行 max_tasks_per_tick，避免 UI 長時間凍結。
+        - 若佇列仍有積壓，會用較短的 busy_interval_ms 追趕。
+        """
+
+        def _alive() -> bool:
+            try:
+                return bool(widget) and widget.winfo_exists()
+            except Exception:
+                return False
+
+        def _cancel_existing() -> None:
+            try:
+                job_id = getattr(widget, job_attr, None)
+                if job_id:
+                    widget.after_cancel(job_id)
+            except Exception as e:
+                LogUtils.error_exc(f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {e}", "UIUtils", e)
+            try:
+                setattr(widget, job_attr, None)
+            except Exception as e:
+                LogUtils.error_exc(f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}", "UIUtils", e)
+
+        def _tick() -> None:
+            if not _alive():
+                return
+
+            processed = 0
+            while processed < max_tasks_per_tick:
+                try:
+                    task = task_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                try:
+                    task()
+                except Exception as e:
+                    LogUtils.error_exc(f"UI 任務執行失敗: {e}", "UIUtils", e)
+                processed += 1
+
+            if not _alive():
+                return
+
+            # 如果還有積壓，縮短下一次間隔；否則用一般間隔
+            try:
+                has_backlog = not task_queue.empty()
+            except Exception:
+                has_backlog = False
+
+            next_delay = busy_interval_ms if has_backlog else interval_ms
+            try:
+                setattr(widget, job_attr, widget.after(next_delay, _tick))
+            except Exception as e:
+                # 視窗可能正在銷毀，忽略
+                LogUtils.error_exc(f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {e}", "UIUtils", e)
+
+        if not _alive():
+            return
+
+        _cancel_existing()
+        _tick()
+
+    @staticmethod
+    def run_in_daemon_thread(
+        task_func: Callable,
+        *,
+        ui_queue: Optional["queue.Queue"] = None,
+        widget=None,
+        on_error: Optional[Callable[[], None]] = None,
+        error_log_prefix: str = "",
+        component: str = "UIUtils",
+    ) -> None:
+        """在背景執行緒執行任務，必要時把 UI 回呼安全地排回主執行緒。
+
+        - task_func：背景工作（請勿直接操作 Tk/CTk UI）。
+        - ui_queue：若提供，會把 on_error 以 callable 的形式丟回 UI 佇列（需由主執行緒 pump）。
+        - widget：若提供且有 `.after(...)`，會用 `widget.after(0, on_error)` 排回主執行緒。
+        - 兩者都未提供時，會直接呼叫 on_error（最後備援）。
+        """
+
+        def _dispatch(cb: Optional[Callable[[], None]]) -> None:
+            if cb is None:
+                return
+            if ui_queue is not None:
+                try:
+                    ui_queue.put(cb)
+                    return
+                except Exception:
+                    pass
+            if widget is not None:
+                try:
+                    widget.after(0, cb)
+                    return
+                except Exception:
+                    pass
+            try:
+                cb()
+            except Exception:
+                pass
+
+        def _wrapper() -> None:
+            try:
+                task_func()
+            except Exception as e:
+                prefix = (error_log_prefix + ": ") if error_log_prefix else ""
+                LogUtils.error_exc(f"{prefix}{e}", component, e)
+                _dispatch(on_error)
+
+        threading.Thread(target=_wrapper, daemon=True).start()
+
+    @staticmethod
+    def bind_tooltip(
+        widget,
+        text: str,
+        *,
+        bg: str = "#2b2b2b",
+        fg: str = "white",
+        font=None,
+        padx: int = 8,
+        pady: int = 4,
+        wraplength: Optional[int] = None,
+        justify: str = "left",
+        borderwidth: int = 0,
+        relief: str = "flat",
+        offset_x: int = 10,
+        offset_y: int = 10,
+        auto_hide_ms: Optional[int] = None,
+    ) -> None:
+        """綁定滑鼠移入/移出 tooltip（輕量、可重用）。
+
+        - 以 tk.Toplevel + wm_overrideredirect(True) 實作，避免影響視窗焦點。
+        - auto_hide_ms 可選：到期自動關閉（例如 5000ms）。
+        """
+        if not widget:
+            return
+
+        def _destroy_tooltip() -> None:
+            tip = getattr(widget, "_msm_tooltip", None)
+            if tip is not None:
+                try:
+                    if tip.winfo_exists():
+                        tip.destroy()
+                except Exception:
+                    pass
+            try:
+                setattr(widget, "_msm_tooltip", None)
+            except Exception:
+                pass
+            job = getattr(widget, "_msm_tooltip_job", None)
+            if job is not None:
+                try:
+                    widget.after_cancel(job)
+                except Exception:
+                    pass
+            try:
+                setattr(widget, "_msm_tooltip_job", None)
+            except Exception:
+                pass
+
+        def _show_tooltip(event) -> None:
+            try:
+                _destroy_tooltip()
+                tip = tk.Toplevel(widget.winfo_toplevel())
+                tip.wm_overrideredirect(True)
+                tip.configure(bg=bg)
+                tip.wm_geometry(f"+{event.x_root + offset_x}+{event.y_root + offset_y}")
+
+                label_kwargs = {
+                    "text": text or "",
+                    "bg": bg,
+                    "fg": fg,
+                    "padx": padx,
+                    "pady": pady,
+                    "borderwidth": borderwidth,
+                    "relief": relief,
+                }
+                if font is not None:
+                    label_kwargs["font"] = font
+                if wraplength is not None:
+                    label_kwargs["wraplength"] = wraplength
+                if justify is not None:
+                    label_kwargs["justify"] = justify
+
+                tk.Label(tip, **label_kwargs).pack()
+
+                setattr(widget, "_msm_tooltip", tip)
+
+                if auto_hide_ms:
+                    try:
+                        setattr(widget, "_msm_tooltip_job", tip.after(auto_hide_ms, _destroy_tooltip))
+                    except Exception:
+                        pass
+            except Exception as e:
+                LogUtils.error_exc(f"顯示 tooltip 失敗: {e}", "UIUtils", e)
+
+        def _hide_tooltip(_event=None) -> None:
+            _destroy_tooltip()
+
+        try:
+            widget.bind("<Enter>", _show_tooltip)
+            widget.bind("<Leave>", _hide_tooltip)
+        except Exception as e:
+            LogUtils.error_exc(f"綁定 tooltip 事件失敗: {e}", "UIUtils", e)
 
     # 顯示錯誤對話框
     @staticmethod
@@ -191,6 +465,9 @@ class UIUtils:
         Returns:
             None
         """
+        # 任何顯示給使用者的錯誤，都同時寫入 log，方便追蹤
+        LogUtils.error(f"{title}: {message}", "UIUtils")
+
         try:
             # 如果沒有父視窗，創建臨時根視窗
             if parent is None:
@@ -217,7 +494,7 @@ class UIUtils:
             else:
                 tk.messagebox.showerror(title, message, parent=parent)
         except Exception as e:
-            LogUtils.error(f"顯示錯誤對話框失敗: {e}")
+            LogUtils.error_exc(f"顯示錯誤對話框失敗: {e}", "UIUtils", e)
             LogUtils.error(f"錯誤: {title} - {message}")
 
     # 顯示警告對話框
@@ -261,7 +538,7 @@ class UIUtils:
             else:
                 tk.messagebox.showwarning(title, message, parent=parent)
         except Exception as e:
-            LogUtils.warning(f"顯示警告對話框失敗: {e}")
+            LogUtils.error_exc(f"顯示警告對話框失敗: {e}", "UIUtils", e)
             LogUtils.warning(f"警告: {title} - {message}")
 
     # 顯示資訊對話框
@@ -305,7 +582,7 @@ class UIUtils:
             else:
                 tk.messagebox.showinfo(title, message, parent=parent)
         except Exception as e:
-            LogUtils.warning(f"顯示資訊對話框失敗: {e}")
+            LogUtils.error_exc(f"顯示資訊對話框失敗: {e}", "UIUtils", e)
             LogUtils.warning(f"警告: {title} - {message}")
 
     # 顯示確認對話框（是/否/取消）
@@ -360,7 +637,7 @@ class UIUtils:
                 else:
                     return tk.messagebox.askyesno(title, message, parent=parent)
         except Exception as e:
-            LogUtils.warning(f"顯示確認對話框失敗: {e}")
+            LogUtils.error_exc(f"顯示確認對話框失敗: {e}", "UIUtils", e)
             LogUtils.warning(f"確認: {title} - {message}")
             return False if not show_cancel else None
 
@@ -413,68 +690,13 @@ class UIUtils:
                             dropdown_widget._command(values[new_index])
 
                 except Exception as e:
-                    LogUtils.warning(f"滑鼠滾輪處理錯誤: {e}")
+                    LogUtils.error_exc(f"滑鼠滾輪處理錯誤: {e}", "UIUtils", e)
 
             # 綁定滑鼠滾輪事件
             dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
 
         except Exception as e:
-            LogUtils.warning(f"應用下拉選單樣式失敗: {e}")
-
-    @staticmethod
-    def add_mousewheel_support(widget) -> None:
-        """
-        為下拉選單添加鼠標滾輪支援
-        Add mouse wheel support to dropdown widgets
-        """
-
-        def on_mousewheel(event):
-            try:
-                # 嘗試獲取下拉清單的內部元件
-                if hasattr(widget, "_dropdown_menu") and widget._dropdown_menu.winfo_exists():
-                    # 如果下拉清單是開啟的，滾動選項
-                    if hasattr(widget, "_dropdown_frame") and widget._dropdown_frame.winfo_viewable():
-                        # CustomTkinter 內部處理滾輪事件
-                        if event.delta > 0:
-                            # 向上滾動
-                            current_index = (
-                                widget.cget("values").index(widget.get())
-                                if widget.get() in widget.cget("values")
-                                else 0
-                            )
-                            if current_index > 0:
-                                widget.set(widget.cget("values")[current_index - 1])
-                        else:
-                            # 向下滾動
-                            current_index = (
-                                widget.cget("values").index(widget.get())
-                                if widget.get() in widget.cget("values")
-                                else -1
-                            )
-                            if current_index < len(widget.cget("values")) - 1:
-                                widget.set(widget.cget("values")[current_index + 1])
-                else:
-                    # 下拉清單未開啟時，直接切換選項
-                    values = widget.cget("values")
-                    if values and widget.get() in values:
-                        current_index = values.index(widget.get())
-                        if event.delta > 0 and current_index > 0:
-                            widget.set(values[current_index - 1])
-                        elif event.delta < 0 and current_index < len(values) - 1:
-                            widget.set(values[current_index + 1])
-
-                        # 觸發變更事件
-                        if hasattr(widget, "_variable") and widget._variable:
-                            widget._variable.set(widget.get())
-
-            except Exception as e:
-                LogUtils.warning(f"滾輪事件處理失敗: {e}")
-
-        # 綁定滾輪事件
-        widget.bind("<MouseWheel>", on_mousewheel)
-        # Linux 系統的滾輪事件
-        widget.bind("<Button-4>", lambda e: on_mousewheel(type("Event", (), {"delta": 120})()))
-        widget.bind("<Button-5>", lambda e: on_mousewheel(type("Event", (), {"delta": -120})()))
+            LogUtils.error_exc(f"應用下拉選單樣式失敗: {e}", "UIUtils", e)
 
     @staticmethod
     def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
@@ -558,7 +780,7 @@ class ProgressDialog:
                 self.dialog.grab_set()
                 self.dialog.focus_set()
             except Exception as e:
-                LogUtils.warning(f"設定模態視窗失敗: {e}")
+                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "ProgressDialog", e)
 
         # 延遲綁定圖示
         IconUtils.set_window_icon(self.dialog, 250)
@@ -595,19 +817,39 @@ class ProgressDialog:
             self.cancel_button.pack(pady=(15, 0))
 
         self.cancelled = False
+        self._last_ui_pump = 0.0
 
     def update_progress(self, percent, status_text) -> bool:
         """
-        更新進度
+        更新進度 (Thread-safe)
         Update the progress.
         """
         if self.cancelled:
             return False
 
-        self.progress.set(percent / 100.0)  # CustomTkinter 使用 0-1 範圍
-        self.status_label.configure(text=status_text)
-        self.percent_label.configure(text=f"{percent:.1f}%")
-        self.dialog.update()
+        def _update():
+            if self.cancelled:
+                return
+            try:
+                self.progress.set(percent / 100.0)  # CustomTkinter 使用 0-1 範圍
+                self.status_label.configure(text=status_text)
+                self.percent_label.configure(text=f"{percent:.1f}%")
+            except Exception as e:
+                LogUtils.error_exc(f"更新進度 UI 失敗: {e}", "ProgressDialog", e)
+
+        # 確保在主線程執行
+        if threading.current_thread() is threading.main_thread():
+            _update()
+            # 避免過於頻繁的 event loop pump 造成閃爍；仍保留可處理取消按鈕點擊的能力
+            now = time.monotonic()
+            if now - self._last_ui_pump >= 0.05:
+                self._last_ui_pump = now
+                self.dialog.update()
+            else:
+                self.dialog.update_idletasks()
+        else:
+            self.dialog.after(0, _update)
+            
         return True
 
     def cancel(self) -> None:
@@ -625,5 +867,5 @@ class ProgressDialog:
         """
         try:
             self.dialog.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            LogUtils.error_exc(f"關閉進度對話框失敗: {e}", "ProgressDialog", e)

@@ -8,12 +8,11 @@ Window preferences dialog for configuring window behavior and appearance.
 from typing import Callable, Optional
 import customtkinter as ctk
 import sys
+import traceback
 # ====== 專案內部模組 ======
-from ..utils.app_restart import can_restart, schedule_restart_and_exit
-from ..utils.settings_manager import get_settings_manager
-from ..utils.ui_utils import DialogUtils, UIUtils
-from ..utils.window_manager import WindowManager
-from ..utils.font_manager import set_ui_scale_factor, get_font
+from ..utils import DialogUtils, UIUtils, get_settings_manager
+from ..utils import WindowManager, can_restart, schedule_restart_and_exit, set_ui_scale_factor, get_font
+from ..utils import LogUtils
 
 class WindowPreferencesDialog:
     """
@@ -117,7 +116,8 @@ class WindowPreferencesDialog:
 
         # 根據環境決定是否顯示調試選項
         # 開發環境顯示調試選項，打包環境隱藏
-        should_show_debug = not hasattr(sys, "_MEIPASS")
+        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+        should_show_debug = not is_packaged
 
         if should_show_debug:
             self.debug_logging_var = ctk.BooleanVar()
@@ -362,6 +362,7 @@ class WindowPreferencesDialog:
                             schedule_restart_and_exit(self.parent, delay=0.5)
                             return
                         except Exception as restart_error:
+                            LogUtils.error(f"重啟失敗: {restart_error}\n{traceback.format_exc()}", "WindowPreferencesDialog")
                             UIUtils.show_error(
                                 "重啟失敗",
                                 f"無法重新啟動應用程式: {restart_error}\n\n設定已恢復，請手動重新啟動程式以套用所有變更。",
@@ -416,11 +417,11 @@ class WindowPreferencesDialog:
                     show_cancel=False,
                 ):
                     try:
-                        self.dialog.destroy()
                         schedule_restart_and_exit(self.parent, delay=0.5)
                         return
 
                     except Exception as restart_error:
+                        LogUtils.error(f"重啟失敗: {restart_error}\n{traceback.format_exc()}", "WindowPreferencesDialog")
                         UIUtils.show_error(
                             "重啟失敗",
                             f"無法重新啟動應用程式: {restart_error}\n\n設定已儲存，請手動重新啟動程式以套用所有變更。",
@@ -433,11 +434,11 @@ class WindowPreferencesDialog:
                     "設定已成功儲存！\n\n由於環境限制，無法自動重新啟動程式。\n請手動關閉並重新啟動應用程式以套用所有變更。",
                     parent=self.dialog,
                 )
-
             # 正常關閉對話框
             self.dialog.destroy()
 
         except Exception as e:
+            LogUtils.error(f"儲存失敗: {e}\n{traceback.format_exc()}", "WindowPreferencesDialog")
             UIUtils.show_error("儲存失敗", f"無法儲存設定: {e}", parent=self.dialog)
 
     def _cancel(self) -> None:

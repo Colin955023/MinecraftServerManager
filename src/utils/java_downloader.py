@@ -10,6 +10,7 @@ Provides functions to download and manage Java installations, supports Microsoft
 import subprocess
 # ====== 專案內部模組 ======
 from .ui_utils import UIUtils
+from .log_utils import LogUtils
 
 # 只負責安裝
 def install_java_with_winget(major: int):
@@ -39,8 +40,10 @@ def install_java_with_winget(major: int):
         # 直接在主程式同步執行 winget，安裝過程會在主程式 console 顯示
         subprocess.run(winget_cmd, shell=False, check=True)
     except subprocess.CalledProcessError as e:
+        LogUtils.error_exc(f"winget 安裝失敗: {e}", "JavaDownloader", e)
         UIUtils.show_error("winget 安裝失敗", f"winget 執行失敗，請檢查錯誤訊息：\n{e}", topmost=True)
         raise Exception(f"執行 winget 失敗: {e}")
     except Exception as e:
+        LogUtils.error_exc(f"winget 執行異常: {e}", "JavaDownloader", e)
         UIUtils.show_error("winget 執行異常", f"執行 winget 發生例外：{e}", topmost=True)
         raise

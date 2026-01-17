@@ -1,182 +1,93 @@
-# 🎮 Minecraft 伺服器管理器
+#  Minecraft 伺服器管理器 (Minecraft Server Manager)
 
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue)](https://github.com/)
-[![Python](https://img.shields.io/badge/Python-3.7%2B-green)](https://python.org)
-[![License](https://img.shields.io/badge/License-GPL%20v3-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-green)](https://python.org)
+[![License](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![GUI](https://img.shields.io/badge/GUI-CustomTkinter-orange)](https://github.com/TomSchimansky/CustomTkinter)
-[![Code Quality](https://img.shields.io/badge/Code%20Quality-優秀-green)](docs/CODE_REVIEW_AND_COMPLIANCE.md)
 
-Minecraft 伺服器建立與管理工具，**參考 [PrismLauncher](https://github.com/PrismLauncher/PrismLauncher) 的模組管理體驗**。
-採用現代化的 CustomTkinter 介面框架，提供專業且美觀的使用者體驗。
+**Minecraft 伺服器管理器** 是一款專為 Windows 平台設計的現代化伺服器管理工具。本專案旨在提供一個直觀、高效且功能強大的圖形化介面，讓使用者能夠輕鬆建立、配置與監控 Minecraft 伺服器。
 
-## 📖 目錄
-- [現代化界面](#-現代化界面)
-- [核心功能](#-核心功能)
-- [快速開始](#-快速開始)
-- [建置說明](#️-建置說明)
-- [測試](#-測試)
-- [疑難排解](#-疑難排解)
-- [致謝](#-致謝)
-- [授權](#-授權)
+本工具參考了 [PrismLauncher](https://github.com/PrismLauncher/PrismLauncher) 的模組管理體驗，並結合了自動化的 Java 環境配置與伺服器版本管理，為使用者帶來無縫的伺服器架設體驗。
 
-## 🎨 現代化界面
-- ✨ 基於 CustomTkinter 的現代化 GUI 設計  
-- 📱 響應式佈局設計
+##  核心特色
 
-## ✨ 核心功能
+###  現代化使用者介面
+- **CustomTkinter 框架**：採用現代化的 GUI 設計語言，提供流暢且美觀的操作體驗。
+- **響應式佈局**：介面可自適應視窗大小，確保在不同解析度下均能完美呈現。
+- **繁體中文支援**：全介面繁體中文在地化，降低使用門檻。
 
-### 🚦 智慧 Java 管理
-- **自動偵測**：根據常見安裝路徑偵測本機所有 Java 版本
-- **智慧選擇**：自動選擇最適合的 Java 版本（根據Minecraft官方json選擇）
-- **自動下載**：若本機無合適版本，會自動下載 Microsoft JDK
-- **多來源支持**：同時支援 Microsoft、Adoptium、Azul、Oracle JDK
+###  智慧型伺服器管理
+- **多載入器支援**：完整支援 Vanilla (原版)、Fabric 與 Forge 等主流載入器。
+- **自動化版本獲取**：即時同步 Minecraft 官方與載入器社群的最新版本資訊。
+- **一鍵建立與部署**：簡化繁瑣的伺服器架設流程，僅需數次點擊即可完成部署。
 
-### 🧩 模組管理（參考 Prism Launcher）
-- **即時掃描**：即時掃描 mods 資料夾內容
-- **快速切換**：雙擊啟用/停用（.jar ↔ .jar.disabled）
-- **批量操作**：支援多選、批量啟用/停用
-- **直觀介面**：清晰的模組狀態顯示
+###  智慧 Java 環境配置
+- **自動偵測**：智慧掃描系統中已安裝的 Java 版本。
+- **版本匹配**：根據 Minecraft 版本需求，自動選擇最合適的 Java 執行環境。
+- **自動下載**：若系統中缺乏合適的 Java 版本，將自動從 Microsoft JDK 等可靠來源下載並配置。
 
-### 🖥️ 伺服器管理
-- **多載入器支援**：Vanilla、Fabric、Forge
-- **版本管理**：自動獲取最新版本資訊
-- **資源監控**：即時記憶體使用率監控
-- **指令介面**：內建伺服器指令發送功能
-- **多伺服器**：支援多伺服器同時運行（需設定不同 server_port）
-- **一鍵操作**：簡單的啟動/停止伺服器功能
+###  專業模組管理
+- **即時掃描**：快速讀取 mods 資料夾內容，即時反映檔案變動。
+- **靈活切換**：支援雙擊啟用/停用模組 (.jar  .jar.disabled)，並提供批量操作功能。
+- **直觀狀態顯示**：清晰標示模組啟用狀態，管理大量模組更輕鬆。
 
-### 🎨 使用者介面
-- **現代化設計**：基於 CustomTkinter 的現代化 GUI
-- **響應式佈局**：自適應視窗大小變化
-- **繁體中文**：完整繁體中文介面
-- **即時同步**：狀態資訊即時更新
-- **分頁設計**：清晰的功能分類管理
+###  系統監控與維運
+- **即時資源監控**：即時顯示伺服器記憶體與 CPU 使用率。
+- **控制台整合**：內建伺服器控制台，支援即時日誌查看與指令發送。
+- **多伺服器並行**：支援同時運行多個伺服器實例（需配置不同連接埠）。
 
-## 🔍 進階功能
+##  文件索引
 
-請參閱：
-- [技術概覽](docs/TECHNICAL_OVERVIEW.md)
-- [使用指南](docs/USER_GUIDE.md)
+- [ 使用指南 (User Guide)](docs/USER_GUIDE.md)：詳細的操作說明與功能介紹。
+- [ 技術概覽 (Technical Overview)](docs/TECHNICAL_OVERVIEW.md)：系統架構、技術堆疊與開發資訊。
+- [ 程式碼規範 (Code Compliance)](docs/CODE_REVIEW_AND_COMPLIANCE.md)：程式碼品質標準與審查報告。
 
-## 🚀 快速開始
+##  快速開始
 
-### 💻 系統需求
-- **作業系統**：Windows 10 或更新版本
-- **Python 版本**：Python 3.7 或更新版本
-- **硬碟空間**：至少 2GB 可用空間
-- **記憶體**：建議 4GB 以上（執行伺服器時）
-- **網路連線**：下載版本資訊、伺服器檔案與 Java 安裝檔
-- **Java 環境**：無需手動安裝，程式會自動偵測/下載最適合的版本
+### 系統需求
+- **作業系統**：Windows 10 或更新版本 (64-bit)
+- **Python 版本**：Python 3.9 或更新版本
+- **硬體需求**：建議至少 4GB RAM (視伺服器規模而定)
 
-### 📦 安裝與啟動
+### 安裝與執行
 
-#### 直接執行（開發環境）
+#### 開發環境設置
 ```bash
-# 1. 複製或下載專案
+# 1. 複製專案儲存庫
 git clone https://github.com/Colin955023/MinecraftServerManager.git
 cd MinecraftServerManager
 
-# 2. 安裝 Python 依賴
-pip install -r requirements.txt
+# 2. 安裝 uv（允許使用 pip 安裝 uv 本體）
+py -m pip install --user -U uv
 
-# 3. 啟動程式
-python minecraft_server_manager.py
+# 3. 建立/同步專案環境（uv 會依 pyproject.toml + uv.lock 安裝依賴，並建立 .venv）
+uv sync
+
+# 4. 啟動應用程式（建議）
+uv run python -m src.main
 ```
 
-## 🏗️ 建置說明
-
-### 建置可執行檔
+#### 查看目前環境安裝了哪些套件
 ```bash
-# 執行自動化建置腳本
-scripts/build.bat
+uv pip list
+uv pip freeze
+uv tree
 ```
 
-建置腳本會自動完成以下步驟：
-1. **環境檢查**：驗證 Python 和依賴套件安裝狀況
-2. **依賴安裝**：自動安裝 PyInstaller 和專案依賴
-3. **清理舊檔**：清除之前的建置檔案
-4. **執行打包**：使用 PyInstaller 進行打包
-5. **結果驗證**：檢查打包結果並顯示檔案資訊
-
-### 建置輸出
-- **位置**：`dist/MinecraftServerManager/`
-- **主程式**：`MinecraftServerManager.exe`
-- **依賴檔案**：所有必要的函式庫和資源檔案
-- **可攜性**：整個資料夾可複製到其他 Windows 電腦使用
-
-## 🧪 測試
-
-### 快速功能測試
+#### 建置執行檔
+本專案提供自動化建置腳本，可將 Python 原始碼編譯為獨立執行檔。
 ```bash
-# 執行整合功能測試(需要有整個儲存庫src中的核心檔案)
-quick_test.py
+# 執行建置腳本
+scripts/build_installer_nuitka.bat
 ```
 
-測試內容包括：
-- ✅ **基礎模組導入測試**：驗證所有核心模組正常載入
-- ✅ **介面初始化測試**：檢查 GUI 元件初始化狀況
-- ✅ **Java 偵測測試**：測試 Java 版本偵測功能
-- ✅ **網路連線測試**：驗證版本資訊下載功能
-- ✅ **模組管理測試**：測試模組啟用/停用切換
-- ✅ **設定檔讀寫測試**：檢查設定檔案操作功能
+##  資料儲存位置
 
-### 手動測試步驟
-1. **執行測試腳本**：`scripts/quick_test.bat`
-2. **查看測試結果**：確認所有項目顯示 ✅ 通過
-3. **啟動主程式**：測試完成後可選擇啟動完整應用程式
-4. **功能驗證**：建立測試伺服器驗證完整功能
+- 使用者設定檔：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- 伺服器資料夾：由使用者選擇「主資料夾」後，程式會在該資料夾內建立 `servers` 子資料夾並存放所有伺服器資料。
 
-## 🔧 疑難排解
+##  貢獻與回饋
+歡迎提交 Issue 或 Pull Request 來協助改進本專案。您的回饋是我們進步的動力。
 
-### 常見問題
-
-#### Python 環境問題
-```bash
-# 問題：找不到 Python
-解決：確保已安裝 Python 3.7+ 並加入系統 PATH
-
-# 問題：套件安裝失敗
-解決：pip install --upgrade pip 升級 pip 後重試
-```
-
-#### Java 偵測問題
-```bash
-# 問題：Java 偵測失敗
-解決：程式會自動下載 Microsoft JDK，確保網路連線正常
-
-# 問題：Java 版本不相容
-解決：程式會自動選擇最適合的 Java 版本，無需手動處理
-```
-
-#### 建置問題
-```bash
-# 問題：PyInstaller 打包失敗
-解決：pip install --upgrade pyinstaller 升級後重試
-
-# 問題：打包檔案過大
-解決：正常現象，包含完整執行環境約 50-100MB
-```
-
-#### 執行時問題
-```bash
-# 問題：啟動緩慢
-解決：首次啟動較慢屬正常現象，後續啟動會較快
-
-# 問題：防毒軟體誤報
-解決：將程式加入防毒軟體白名單
-```
-
-### 取得支援
-- **GitHub Issues**：[提交問題回報](https://github.com/Colin955023/MinecraftServerManager/issues)
-- **文檔參考**：查看 `docs/` 資料夾內的詳細文檔
-- **版本確認**：確保使用最新版本以獲得最佳體驗
-
-
-## 🎉 致謝
-
-本專案模組管理功能設計參考了 [PrismLauncher](https://github.com/PrismLauncher/PrismLauncher) 及 [MinecraftModChecker](https://github.com/MrPlayerYork/MinecraftModChecker)。
-感謝 PrismLauncher 團隊與 MinecraftModChecker 作者在模組管理、相容性檢查等領域的開源貢獻。
-
-## 📄 授權
-
-本專案使用 [GPL v3 授權](LICENSE)。
+##  授權條款
+本專案採用 GNU GPLv3 授權條款，詳細內容請參閱 [LICENSE](LICENSE) 與 [COPYING.md](COPYING.md)。

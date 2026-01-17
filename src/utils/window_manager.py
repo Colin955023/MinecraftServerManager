@@ -79,7 +79,7 @@ class WindowManager:
                 "center_y": screen_height // 2,
             }
         except Exception as e:
-            LogUtils.debug(f"取得螢幕資訊失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"取得螢幕資訊失敗: {e}", "WindowManager", e)
             # 回傳預設值
             return {
                 "width": 1920,
@@ -201,7 +201,7 @@ class WindowManager:
 
             LogUtils.debug_window_state(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
-            LogUtils.debug(f"設定主視窗失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"設定主視窗失敗: {e}", "WindowManager", e)
             # 備用設定
             window.geometry("1200x800")
             window.minsize(1000, 700)
@@ -223,7 +223,6 @@ class WindowManager:
 
             if not is_maximized:
                 # 取得當前視窗大小和位置
-                window.update_idletasks()
                 width = window.winfo_width()
                 height = window.winfo_height()
                 x = window.winfo_x()
@@ -248,7 +247,7 @@ class WindowManager:
                 LogUtils.debug_window_state("已儲存主視窗狀態")
                 WindowManager._last_debug_time = current_time
         except Exception as e:
-            LogUtils.debug(f"儲存主視窗狀態失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"儲存主視窗狀態失敗: {e}", "WindowManager", e)
 
     @staticmethod
     def setup_dialog_window(
@@ -306,7 +305,7 @@ class WindowManager:
             window.geometry(f"{width}x{height}+{x}+{y}")
             LogUtils.debug(f"對話框設定: {width}x{height}+{x}+{y}", "WindowManager")
         except Exception as e:
-            LogUtils.debug(f"設定對話框失敗: {e}", "WindowManager")
+            LogUtils.error_exc(f"設定對話框失敗: {e}", "WindowManager", e)
 
     @staticmethod
     def bind_window_state_tracking(window) -> None:

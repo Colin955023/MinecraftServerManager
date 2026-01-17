@@ -6,3 +6,30 @@
 User Interface Modules Package
 Provides all user interface components and windows for the Minecraft Server Manager
 """
+
+from __future__ import annotations
+from typing import Dict, Tuple
+
+from .. import lazy_exports
+
+
+_EXPORTS: Dict[str, Tuple[str, str]] = {
+	# main window
+	"MinecraftServerManager": (".main_window", "MinecraftServerManager"),
+
+	# main frames
+	"CreateServerFrame": (".create_server_frame", "CreateServerFrame"),
+	"ManageServerFrame": (".manage_server_frame", "ManageServerFrame"),
+	"ModManagementFrame": (".mod_management", "ModManagementFrame"),
+
+	# dialogs/windows
+	"ServerMonitorWindow": (".server_monitor_window", "ServerMonitorWindow"),
+	"ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
+	"WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
+
+	# widgets
+	"CustomDropdown": (".custom_dropdown", "CustomDropdown"),
+}
+
+
+__getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)
