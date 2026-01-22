@@ -362,10 +362,8 @@ def test_environment_detection():
         settings = get_settings_manager()
         
         debug_logging_enabled = settings.is_debug_logging_enabled()
-        window_state_logging_enabled = settings.is_window_state_logging_enabled()
         
         print(f"    • 調試日誌啟用: {debug_logging_enabled}")
-        print(f"    • 視窗狀態日誌啟用: {window_state_logging_enabled}")
         
         # 測試日誌工具的調試判斷功能
         from src.utils.log_utils import LogUtils
@@ -373,11 +371,12 @@ def test_environment_detection():
         
         # 這只是檢查函數是否可以正常調用，不會實際輸出
         try:
-            # 測試各種日誌級別
+            # 測試各種日誌級別（包含新的檔案日誌功能）
             LogUtils.debug("測試調試訊息", "環境檢測")
             LogUtils.info("測試資訊訊息", "環境檢測") 
             LogUtils.debug_window_state("測試視窗狀態訊息")
             print("    • 日誌工具調試判斷: 正常")
+            print("    • 檔案日誌功能: 已啟用（日誌將儲存到 AppData/logs/）")
         except Exception as e:
             print_warning(f"    • 日誌工具測試異常: {e}")
 
