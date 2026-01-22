@@ -37,8 +37,8 @@ class LogUtils:
         
         try:
             # 取得日誌目錄路徑
-            from .runtime_paths import get_app_data_dir
-            log_dir = Path(get_app_data_dir()) / "logs"
+            from .runtime_paths import get_user_data_dir
+            log_dir = Path(get_user_data_dir()) / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             
             # 建立日誌檔案名稱（使用日期）

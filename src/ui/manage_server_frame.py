@@ -717,12 +717,18 @@ class ManageServerFrame(ctk.CTkFrame):
         if not getattr(self, "server_tree", None):
             return
 
-        # 檢查數據是否變更（使用雜湊比較而非字串轉換，提升效能）
+        # 檢查數據是否變更（使用簡化的簽章檢查，避免過度計算）
         try:
-            current_data_hash = hash(tuple(tuple(item) if isinstance(item, list) else item for item in server_data))
-        except TypeError:
-            # 如果資料無法雜湊，回退到字串比較
-            current_data_hash = hash(str(server_data))
+            # 簡化簽章：使用長度 + 第一個項目 + 最後一個項目
+            if server_data:
+                first_item = str(server_data[0]) if server_data else ''
+                last_item = str(server_data[-1]) if len(server_data) > 1 else ''
+                current_data_hash = hash((len(server_data), first_item, last_item))
+            else:
+                current_data_hash = hash(0)
+        except (TypeError, IndexError):
+            # 如果資料無法處理，使用長度作為簽章
+            current_data_hash = hash(len(server_data))
         
         if hasattr(self, '_last_server_data_hash') and self._last_server_data_hash == current_data_hash:
              # 如果數據沒變，只更新選擇狀態
