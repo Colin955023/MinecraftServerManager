@@ -131,6 +131,9 @@ class ModManagementFrame:
         # 多選狀態管理
         self.all_selected = False
         self.selected_mods = set()  # 儲存選中的模組 ID
+        
+        # 預編譯正則表達式（效能優化：避免每次 refresh 都重新編譯）
+        self.VERSION_PATTERN = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
 
         # UI 元件
         self.main_frame = None
@@ -807,6 +810,25 @@ class ModManagementFrame:
 
         threading.Thread(target=enhance_thread, daemon=True).start()
 
+    def _get_enhanced_attr(self, enhanced, attr: str, fallback):
+        """
+        從增強物件取得屬性的輔助方法（效能優化：減少重複的 hasattr 檢查）
+        Helper method to get attribute from enhanced object (performance optimization)
+        
+        Args:
+            enhanced: 增強資訊物件
+            attr: 屬性名稱
+            fallback: 後備值
+            
+        Returns:
+            屬性值或後備值
+        """
+        if enhanced:
+            value = getattr(enhanced, attr, None)
+            if value:
+                return value
+        return fallback
+
     def refresh_local_list(self) -> None:
         """
         重新整理本地模組列表 (使用分批載入優化)
@@ -821,7 +843,8 @@ class ModManagementFrame:
         # 2. 準備資料 Prepare data
         search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
         filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "all"
-        version_pattern = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
+        # 使用預編譯的正則表達式（效能優化）
+        version_pattern = self.VERSION_PATTERN
         
         items_to_insert = []
         
@@ -844,34 +867,34 @@ class ModManagementFrame:
             if m:
                 parsed_version = m.group(1)
 
-            display_name = enhanced.name if enhanced and hasattr(enhanced, "name") and enhanced.name else mod.name
-            display_author = (
-                enhanced.author
-                if enhanced and hasattr(enhanced, "author") and enhanced.author
-                else (mod.author or "Unknown")
-            )
+            # 使用輔助方法取得增強屬性（效能優化：減少 hasattr 呼叫）
+            display_name = self._get_enhanced_attr(enhanced, "name", mod.name)
+            display_author = self._get_enhanced_attr(enhanced, "author", mod.author or "Unknown")
 
             # 版本顯示優先順序 Version display priority
             if mod.version and mod.version not in ("", "未知"):
                 display_version = mod.version
-            elif enhanced and hasattr(enhanced, "version") and enhanced.version:
-                display_version = enhanced.version
-            elif enhanced and hasattr(enhanced, "versions") and enhanced.versions:
-                display_version = (
-                    enhanced.versions[0]
-                    if isinstance(enhanced.versions, list) and enhanced.versions
-                    else str(enhanced.versions)
-                )
+            elif enhanced:
+                enhanced_version = getattr(enhanced, "version", None)
+                enhanced_versions = getattr(enhanced, "versions", None)
+                if enhanced_version:
+                    display_version = enhanced_version
+                elif enhanced_versions:
+                    display_version = (
+                        enhanced_versions[0]
+                        if isinstance(enhanced_versions, list) and enhanced_versions
+                        else str(enhanced_versions)
+                    )
+                elif parsed_version and parsed_version not in ("", "未知"):
+                    display_version = parsed_version
+                else:
+                    display_version = "未知"
             elif parsed_version and parsed_version not in ("", "未知"):
                 display_version = parsed_version
             else:
                 display_version = "未知"
 
-            display_description = (
-                enhanced.description
-                if enhanced and hasattr(enhanced, "description") and enhanced.description
-                else (mod.description or "")
-            )
+            display_description = self._get_enhanced_attr(enhanced, "description", mod.description or "")
             
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
             mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")

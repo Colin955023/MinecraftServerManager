@@ -717,27 +717,39 @@ class ManageServerFrame(ctk.CTkFrame):
         if not getattr(self, "server_tree", None):
             return
 
-        # 檢查數據是否變更 (簡單快取檢查)
-        current_data_signature = str(server_data)
-        if hasattr(self, '_last_server_data') and self._last_server_data == current_data_signature:
+        # 檢查數據是否變更（使用雜湊比較而非字串轉換，提升效能）
+        try:
+            current_data_hash = hash(tuple(tuple(item) if isinstance(item, list) else item for item in server_data))
+        except TypeError:
+            # 如果資料無法雜湊，回退到字串比較
+            current_data_hash = hash(str(server_data))
+        
+        if hasattr(self, '_last_server_data_hash') and self._last_server_data_hash == current_data_hash:
              # 如果數據沒變，只更新選擇狀態
             self.update_selection()
             return
             
-        self._last_server_data = current_data_signature
+        self._last_server_data_hash = current_data_hash
 
-        # 清空現有項目
-        for item in self.server_tree.get_children():
-            self.server_tree.delete(item)
+        # 清空現有項目（優化：單次操作而非迴圈）
+        children = self.server_tree.get_children()
+        if children:
+            self.server_tree.delete(*children)
 
         if not server_data:
             self.selected_server = None
             self.update_selection()
             return
 
-        # 重新載入伺服器
-        for item in server_data:
-            self.server_tree.insert("", "end", values=item)
+        # 重新載入伺服器（批次插入以提升大列表效能）
+        batch_size = 15
+        for i in range(0, len(server_data), batch_size):
+            batch = server_data[i:i+batch_size]
+            for item in batch:
+                self.server_tree.insert("", "end", values=item)
+            # 每批次後讓出 UI 執行緒
+            if i + batch_size < len(server_data):
+                self.server_tree.update_idletasks()
             
         self.selected_server = None
         self.update_selection()
