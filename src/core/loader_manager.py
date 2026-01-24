@@ -18,7 +18,10 @@ from lxml import etree
 # ====== 專案內部模組 ======
 from src.models import LoaderVersion
 from src.utils import java_utils
-from src.utils import HTTPUtils, LogUtils, UIUtils, ensure_dir, get_cache_dir
+from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
+from src.utils.logger import get_logger
+
+logger = get_logger().bind(component="LoaderManager")
 
 class LoaderManager:
     """
@@ -57,14 +60,14 @@ class LoaderManager:
             # 清除記憶體快取
             self._version_cache.clear()
         except PermissionError as e:
-            LogUtils.error_exc(f"清除快取檔案失敗: {e}", "LoaderManager", e)
+            logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
                 "清除快取檔案失敗",
                 f"無法刪除快取檔案: {cache_file}\n權限不足\n{e}",
                 topmost=True,
             )
         except Exception as e:
-            LogUtils.error_exc(f"清除快取檔案失敗: {e}", "LoaderManager", e)
+            logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
                 "清除快取檔案失敗", f"無法刪除快取檔案: {cache_file}\n{e}", topmost=True
             )
@@ -185,7 +188,7 @@ class LoaderManager:
         self._preload_forge_versions()
 
     def _preload_fabric_versions(self):
-        LogUtils.debug("預先抓取 Fabric 載入器版本...", "LoaderManager")
+        logger.debug("預先抓取 Fabric 載入器版本...", "LoaderManager")
         fabric_url = "https://meta.fabricmc.net/v2/versions/loader"
         try:
             data = HTTPUtils.get_json(fabric_url, timeout=15)
@@ -193,7 +196,7 @@ class LoaderManager:
                 with open(self.fabric_cache_file, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            LogUtils.error_exc(f"載入 Fabric 版本失敗: {e}", "LoaderManager", e)
+            logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
                 "載入 Fabric 版本失敗",
                 f"無法從 API 獲取 Fabric 版本：{e}",
@@ -201,13 +204,13 @@ class LoaderManager:
             )
 
     def _preload_forge_versions(self):
-        LogUtils.debug("預先抓取  Forge 載入器版本...", "LoaderManager")
+        logger.debug("預先抓取  Forge 載入器版本...", "LoaderManager")
         try:
             forge_url = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
             response = HTTPUtils.get_content(forge_url, timeout=15)
 
             if response and response.status_code == 200:
-                LogUtils.debug("成功獲取 Forge XML 數據", "LoaderManager")
+                logger.debug("成功獲取 Forge XML 數據", "LoaderManager")
                 root = etree.fromstring(response.content)
                 versions = []
 
@@ -244,7 +247,7 @@ class LoaderManager:
                                         version_dict[mc_version] = []
                                     version_dict[mc_version].append(version)
                             except Exception as e:
-                                LogUtils.debug(f"解析 Forge 版本字串失敗 '{version}': {e}", "LoaderManager")
+                                logger.debug(f"解析 Forge 版本字串失敗 '{version}': {e}", "LoaderManager")
                                 continue
 
                     # 對每個 MC 版本的 Forge 版本進行排序（最新在前）
@@ -259,7 +262,7 @@ class LoaderManager:
                     return
 
         except Exception as e:
-            LogUtils.error_exc(f"Maven metadata API 方法失敗: {e}", "LoaderManager", e)
+            logger.exception(f"Maven metadata API 方法失敗: {e}")
             UIUtils.show_error(
                 "載入 Forge 版本失敗",
                 f"無法從 Maven metadata API 獲取 Forge 版本：{e}",
@@ -316,9 +319,7 @@ class LoaderManager:
                         self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"獲取 Fabric 版本時發生錯誤: {e}", "LoaderManager", e
-                    )
+                    logger.exception(f"獲取 Fabric 版本時發生錯誤: {e}")
                     return []
             # Forge
             elif loader_type.lower() == "forge":
@@ -341,9 +342,7 @@ class LoaderManager:
                         self._version_cache[cache_key] = result
                     return result
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"獲取 Forge 版本時發生錯誤: {e}", "LoaderManager", e
-                    )
+                    logger.exception(f"獲取 Forge 版本時發生錯誤: {e}")
                     return []
 
     def _is_fabric_compatible_version(self, mc_version: str) -> bool:
@@ -377,7 +376,7 @@ class LoaderManager:
             else:
                 return False
         except Exception as e:
-            LogUtils.error_exc(f"檢查 Fabric 相容性時發生錯誤: {e}", "LoaderManager", e)
+            logger.exception(f"檢查 Fabric 相容性時發生錯誤: {e}")
             return False
 
     def _parse_mc_version(self, version_str: str) -> list:
@@ -396,7 +395,7 @@ class LoaderManager:
             matches = re.findall(r"\d+", version_str)
             return [int(x) for x in matches] if matches else []
         except Exception as e:
-            LogUtils.error_exc(f"解析 MC 版本時發生錯誤: {e}", "LoaderManager", e)
+            logger.exception(f"解析 MC 版本時發生錯誤: {e}")
             return []
     # ---------------------- 私有輔助方法 ----------------------
     # === 下載 × 執行安裝器 ===
@@ -511,16 +510,14 @@ class LoaderManager:
                             progress_callback(install_start, f"處理中: {line[:40]}...")
 
             if process.returncode != 0:
-                LogUtils.error(
-                    f"安裝器執行失敗 (Code {process.returncode})", "LoaderManager"
-                )
+                logger.error(f"安裝器執行失敗 (Code {process.returncode})")
                 return self._fail(
                     progress_callback,
                     f"安裝器執行失敗 (Code {process.returncode})",
                     debug=f"[DEBUG] cmd: {' '.join(cmd)}",
                 )
         except Exception as e:
-            LogUtils.error_exc(f"執行安裝器時發生錯誤: {e}", "LoaderManager", e)
+            logger.exception(f"執行安裝器時發生錯誤: {e}")
             return self._fail(
                 progress_callback,
                 f"執行安裝器時發生錯誤: {e}",
@@ -551,7 +548,7 @@ class LoaderManager:
                     if java_line and "nogui" not in java_line.lower():
                         java_line += " nogui"
                 except Exception as e:
-                    LogUtils.warning(f"無法讀取 run.bat: {e}")
+                    logger.warning(f"無法讀取 run.bat: {e}")
                     UIUtils.show_warning(
                         "讀取失敗", f"無法讀取 run.bat：{e}", parent=parent_window
                     )
@@ -576,9 +573,7 @@ class LoaderManager:
                     with start_server_path.open("w", encoding="utf-8") as f:
                         f.writelines(new_lines)
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"修改 start_server.bat 失敗: {e}", "LoaderManager", e
-                    )
+                    logger.exception(f"修改 start_server.bat 失敗: {e}")
                     UIUtils.show_warning(
                         "修改失敗",
                         f"無法修改 start_server.bat：{e}",
@@ -598,9 +593,7 @@ class LoaderManager:
                     with suppress(FileNotFoundError):
                         file_path.unlink()
             except Exception as e:
-                LogUtils.error_exc(
-                    f"清理安裝檔失敗: {installer_path}: {e}", "LoaderManager", e
-                )
+                logger.exception(f"清理安裝檔失敗: {installer_path}: {e}")
                 UIUtils.show_warning(
                     "清理失敗",
                     f"安裝完成，但無法清理安裝器檔案：{installer_path}\n可手動刪除。",
@@ -608,7 +601,7 @@ class LoaderManager:
                 )
 
         except Exception as e:
-            LogUtils.error_exc(f"安裝過程中發生錯誤: {e}", "LoaderManager", e)
+            logger.exception(f"安裝過程中發生錯誤: {e}")
             UIUtils.show_error(
                 "安裝失敗", f"安裝過程中發生錯誤：{e}", parent=parent_window
             )
@@ -714,7 +707,7 @@ class LoaderManager:
                 )
             return True
         except Exception as e:
-            LogUtils.error_exc(f"下載失敗: {e}", "LoaderManager", e)
+            logger.exception(f"下載失敗: {e}")
             return self._fail(
                 progress_callback,
                 f"下載失敗: {e}",
@@ -747,9 +740,7 @@ class LoaderManager:
                 return None
             return ver_data["downloads"]["server"]["url"]
         except Exception as e:
-            LogUtils.error_exc(
-                f"獲取 Minecraft 伺服器 URL 失敗: {e}", "LoaderManager", e
-            )
+            logger.exception(f"獲取 Minecraft 伺服器 URL 失敗: {e}")
             return None
 
     def _standardize_loader_type(self, lt: str, loader_version: str) -> str:
@@ -788,7 +779,7 @@ class LoaderManager:
             是否成功
         """
         if debug:
-            LogUtils.debug(debug)
+            logger.debug(debug)
         if progress_callback:
             progress_callback(100, user_msg)
         return False

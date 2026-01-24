@@ -19,8 +19,11 @@ import time
 import toml
 import zipfile
 # ====== 專案內部模組 ======
-from ..utils import HTTPUtils, LogUtils, UIUtils
+from ..utils import HTTPUtils, UIUtils
+from ..utils.logger import get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+
+logger = get_logger().bind(component="ModManager")
 
 # ====== 模組狀態與平台定義 ======
 class ModStatus(Enum):
@@ -186,7 +189,7 @@ class ModManager:
                 file_size=file_path.stat().st_size,
             )
         except Exception as e:
-            LogUtils.error(f"解析模組檔案失敗 {file_path}: {e}", "ModManager")
+            logger.error(f"解析模組檔案失敗 {file_path}: {e}", "ModManager")
             return None
 
     def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
@@ -229,7 +232,7 @@ class ModManager:
                             if v and v != "${projectversion}":
                                 return v
         except Exception as e:
-            LogUtils.error_exc(f"讀取 MANIFEST.MF 版本資訊失敗: {e}", "ModManager", e)
+            logger.exception(f"讀取 MANIFEST.MF 版本資訊失敗: {e}")
         return None
 
     def _extract_metadata_from_jar(self, file_path: Path, mod_data: dict) -> None:
@@ -256,9 +259,7 @@ class ModManager:
                         extractor(jar, mod_data)
                         break  # 找到第一個匹配的元資料檔案即停止
         except Exception as e:
-            LogUtils.error_exc(
-                f"從 JAR 提取元資料失敗 {file_path}: {e}", "ModManager", e
-            )
+            logger.exception(f"從 JAR 提取元資料失敗 {file_path}: {e}")
 
     def _extract_fabric_metadata(self, jar, mod_data: dict) -> None:
         """
@@ -285,7 +286,7 @@ class ModManager:
                 mc_version = depends.get("minecraft", mod_data["mc_version"])
                 mod_data["mc_version"] = self._normalize_mc_version(mc_version)
         except (TypeError, Exception) as e:
-            LogUtils.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
+            logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
 
     def _extract_forge_metadata(self, jar, mod_data: dict) -> None:
         """
@@ -331,7 +332,7 @@ class ModManager:
                                 )
                                 break
         except Exception as e:
-            LogUtils.error_exc(f"解析 Forge 元資料失敗: {e}", "ModManager", e)
+            logger.exception(f"解析 Forge 元資料失敗: {e}")
 
     def _extract_legacy_forge_metadata(self, jar, mod_data: dict) -> None:
         """
@@ -364,9 +365,7 @@ class ModManager:
                 mod_data["mc_version"] = info.get("mcversion", mod_data["mc_version"])
                 mod_data["loader_type"] = "Forge"
         except Exception as e:
-            LogUtils.error_exc(
-                f"解析 legacy Forge mcmod.info 失敗: {e}", "ModManager", e
-            )
+            logger.exception(f"解析 legacy Forge mcmod.info 失敗: {e}")
 
     def _resolve_version(self, jar, version: str) -> str:
         """
@@ -621,9 +620,7 @@ class ModManager:
                 if platform_id:
                     platform = ModPlatform.MODRINTH
         except Exception as e:
-            LogUtils.error_exc(
-                f"從 JAR 偵測平台 ID 失敗 {file_path}: {e}", "ModManager", e
-            )
+            logger.exception(f"從 JAR 偵測平台 ID 失敗 {file_path}: {e}")
 
         # Fallback: search on Modrinth API
         if platform == ModPlatform.LOCAL or not platform_id:
@@ -646,9 +643,7 @@ class ModManager:
                 meta = json.load(f)
             return meta.get("id", "")
         except Exception as e:
-            LogUtils.error_exc(
-                f"解析 fabric.mod.json 取得平台 ID 失敗: {e}", "ModManager", e
-            )
+            logger.exception(f"解析 fabric.mod.json 取得平台 ID 失敗: {e}")
             return ""
 
     def _extract_platform_id_from_forge(self, jar) -> str:
@@ -674,7 +669,7 @@ class ModManager:
                     if m:
                         return m.group(2)
         except Exception as e:
-            LogUtils.error_exc(f"解析 mods.toml 取得平台 ID 失敗: {e}", "ModManager", e)
+            logger.exception(f"解析 mods.toml 取得平台 ID 失敗: {e}")
         return ""
 
     def _search_on_modrinth(
@@ -712,7 +707,7 @@ class ModManager:
                     hit = data["hits"][0]
                     return ModPlatform.MODRINTH, hit.get("slug", "")
         except Exception as e:
-            LogUtils.error_exc(f"Modrinth 搜尋失敗: {e}", "ModManager", e)
+            logger.exception(f"Modrinth 搜尋失敗: {e}")
 
         return ModPlatform.LOCAL, ""
 
@@ -804,7 +799,7 @@ class ModManager:
                 return True
             return False
         except Exception as e:
-            LogUtils.error(f"啟用模組失敗: {e}", "ModManager")
+            logger.error(f"啟用模組失敗: {e}", "ModManager")
             if threading.current_thread() is threading.main_thread():
                 UIUtils.show_error("啟用失敗", f"啟用模組失敗: {e}")
             return False
@@ -856,7 +851,7 @@ class ModManager:
                 return True
             return False
         except Exception as e:
-            LogUtils.error(f"停用模組失敗: {e}", "ModManager")
+            logger.error(f"停用模組失敗: {e}", "ModManager")
             if threading.current_thread() is threading.main_thread():
                 UIUtils.show_error("停用失敗", f"停用模組失敗: {e}")
             return False

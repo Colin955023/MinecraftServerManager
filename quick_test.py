@@ -91,6 +91,7 @@ def test_project_dependencies():
         ("requests", "Requests"),
         ("psutil", "PSUtil"),
         ("lxml", "LXML"),
+        ("loguru", "Loguru"),
     ]
 
     missing_modules = []
@@ -133,7 +134,7 @@ def test_main_program_modules():
 
     # 要測試的核心模組（只測試不需要外部依賴的模組）
     testable_modules = [
-        ("src.utils.log_utils", "LogUtils"),
+        ("src.utils.logger", "Logger"),
         ("src.utils.settings_manager", "SettingsManager"),
         ("src.utils.runtime_paths", "RuntimePaths"),
         ("src.models", "Models"),
@@ -371,16 +372,16 @@ def test_environment_detection():
         print(f"    • 調試日誌啟用: {debug_logging_enabled}")
 
         # 測試日誌工具的調試判斷功能
-        from src.utils.log_utils import LogUtils
+        import src.utils.logger as logger_utils
 
         print("    測試日誌工具調試判斷...")
 
         # 這只是檢查函數是否可以正常調用，不會實際輸出
         try:
             # 測試各種日誌級別（包含新的檔案日誌功能）
-            LogUtils.debug("測試調試訊息", "環境檢測")
-            LogUtils.info("測試資訊訊息", "環境檢測")
-            LogUtils.debug_window_state("測試視窗狀態訊息")
+            logger_utils.debug("測試調試訊息", "環境檢測")
+            logger_utils.info("測試資訊訊息", "環境檢測")
+            logger_utils.debug("測試視窗狀態訊息", "WindowDebug")
             print("    • 日誌工具調試判斷: 正常")
             print("    • 檔案日誌功能: 已啟用（日誌將儲存到 AppData/logs/）")
         except Exception as e:

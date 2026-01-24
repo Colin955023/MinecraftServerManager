@@ -34,7 +34,8 @@ from ..utils import (
     get_dpi_scaled_size,
     get_font,
 )
-from ..utils import get_settings_manager, UIUtils, LogUtils
+from ..utils import get_settings_manager, UIUtils
+from ..utils.logger import get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
     CreateServerFrame,
@@ -42,6 +43,8 @@ from . import (
     ModManagementFrame,
     WindowPreferencesDialog,
 )
+
+logger = get_logger().bind(component="MainWindow")
 
 
 class MinecraftServerManager:
@@ -76,9 +79,7 @@ class MinecraftServerManager:
                 try:
                     path.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    LogUtils.error(
-                        f"無法建立資料夾: {e}\n{traceback.format_exc()}", "MainWindow"
-                    )
+                    logger.error(f"無法建立資料夾: {e}\n{traceback.format_exc()}")
                     _fail_exit(f"無法建立資料夾: {e}")
 
         def _normalize_base_dir(path_str: str) -> str:
@@ -93,7 +94,7 @@ class MinecraftServerManager:
                     if parent:
                         return parent
             except Exception as e:
-                LogUtils.debug(f"路徑正規化輕微錯誤 (base dir check): {e}", "MainWindow")
+                logger.debug(f"路徑正規化輕微錯誤 (base dir check): {e}", "MainWindow")
             return norm
 
         def _servers_dir_from_base(base_dir: str) -> str:
@@ -125,9 +126,7 @@ class MinecraftServerManager:
             try:
                 settings.set_servers_root(base_dir)
             except Exception as e:
-                LogUtils.error(
-                    f"無法寫入設定: {e}\n{traceback.format_exc()}", "MainWindow"
-                )
+                logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
         else:
             stored = settings.get_servers_root()
@@ -138,9 +137,7 @@ class MinecraftServerManager:
                     try:
                         settings.set_servers_root(base_dir)
                     except Exception as e:
-                        LogUtils.error(
-                            f"無法寫入設定: {e}\n{traceback.format_exc()}", "MainWindow"
-                        )
+                        logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
                         UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
 
             # 向後相容：若舊設定直接存的是 ...\servers，這裡會自動轉成 base_dir 並回寫
@@ -151,7 +148,7 @@ class MinecraftServerManager:
                 ):
                     settings.set_servers_root(base_dir)
             except Exception as e:
-                LogUtils.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
+                logger.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
                 pass
 
         servers_root = _servers_dir_from_base(base_dir)
@@ -174,15 +171,15 @@ class MinecraftServerManager:
         Returns:
             None
         """
-        LogUtils.debug("程式即將關閉！", "MainWindow")
+        logger.debug("程式即將關閉！", "MainWindow")
 
         try:
             # 儲存視窗狀態
-            LogUtils.debug_window_state("儲存視窗狀態...")
+            get_logger().bind(component="WindowState").debug("儲存視窗狀態...")
             WindowManager.save_main_window_state(self.root)
 
             # 清理字體快取，避免銷毀時的錯誤
-            LogUtils.debug("清理字體快取...", "MainWindow")
+            logger.debug("清理字體快取...", "MainWindow")
             cleanup_fonts()
 
             # 清理可能的子視窗
@@ -191,23 +188,18 @@ class MinecraftServerManager:
                     if isinstance(widget, (tk.Toplevel, ctk.CTkToplevel)):
                         widget.destroy()
                 except Exception as e:
-                    LogUtils.error(
-                        f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}",
-                        "MainWindow",
+                    logger.error(
+                        f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}"
                     )
 
         except Exception as e:
-            LogUtils.error(
-                f"清理資源時發生錯誤: {e}\n{traceback.format_exc()}", "MainWindow"
-            )
+            logger.error(f"清理資源時發生錯誤: {e}\n{traceback.format_exc()}")
         finally:
             # 最後銷毀主視窗
             try:
                 self.root.destroy()
             except Exception as e:
-                LogUtils.error(
-                    f"銷毀主視窗時發生錯誤: {e}\n{traceback.format_exc()}", "MainWindow"
-                )
+                logger.error(f"銷毀主視窗時發生錯誤: {e}\n{traceback.format_exc()}")
                 # 強制退出
                 sys.exit(0)
 
@@ -296,12 +288,12 @@ class MinecraftServerManager:
         """
 
         def fetch_all():
-            LogUtils.debug("預先抓取 Minecraft 所有版本...", "MainWindow")
+            logger.debug("預先抓取 Minecraft 所有版本...", "MainWindow")
             self.version_manager.fetch_versions()
-            LogUtils.debug("Minecraft 所有版本載入完成", "MainWindow")
-            LogUtils.debug("預先抓取所有載入器版本...", "MainWindow")
+            logger.debug("Minecraft 所有版本載入完成", "MainWindow")
+            logger.debug("預先抓取所有載入器版本...", "MainWindow")
             self.loader_manager.preload_loader_versions()
-            LogUtils.debug("所有載入器版本載入完成", "MainWindow")
+            logger.debug("所有載入器版本載入完成", "MainWindow")
 
         threading.Thread(target=fetch_all, daemon=True).start()
 
@@ -326,7 +318,7 @@ class MinecraftServerManager:
                 )
             except Exception as e:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
-                self.ui_queue.put(lambda: LogUtils.error(error_msg, "MainWindow"))
+                self.ui_queue.put(lambda: logger.error(error_msg))
 
         threading.Thread(target=load_versions, daemon=True).start()
 
@@ -456,9 +448,7 @@ class MinecraftServerManager:
                 parent=self.root,
             )
         except Exception as e:
-            LogUtils.error(
-                f"自動更新檢查失敗: {e}\n{traceback.format_exc()}", "MainWindow"
-            )
+            logger.error(f"自動更新檢查失敗: {e}\n{traceback.format_exc()}")
             if show_msg:
                 UIUtils.show_error("更新檢查失敗", f"無法檢查更新：{e}", self.root)
 
@@ -608,7 +598,7 @@ class MinecraftServerManager:
             self.nav_container.grid_propagate(False)
             self.nav_container.configure(width=int(self._nav_full_width))
         except Exception as e:
-            LogUtils.debug(f"設定導航欄寬度失敗: {e}", "MainWindow")
+            logger.debug(f"設定導航欄寬度失敗: {e}", "MainWindow")
 
         # 右側內容容器
         self.content_container = ctk.CTkFrame(main_container, fg_color="transparent")
@@ -639,7 +629,7 @@ class MinecraftServerManager:
         try:
             self.create_server_frame.grid(row=0, column=0, sticky="nsew")
         except Exception as e:
-            LogUtils.debug(f"CreateServerFrame grid 設置失敗: {e}", "MainWindow")
+            logger.debug(f"CreateServerFrame grid 設置失敗: {e}", "MainWindow")
 
         # 延後建立，首次切換頁面時才初始化
         self.manage_server_frame = None
@@ -716,7 +706,7 @@ class MinecraftServerManager:
             )
             version_label.pack(anchor="w")
         except Exception as e:
-            LogUtils.error_exc(f"建立側邊欄底部資訊失敗: {e}", "MainWindow", e)
+            logger.exception(f"建立側邊欄底部資訊失敗: {e}")
 
     def create_nav_button(
         self, parent, icon, title, description, command
@@ -801,7 +791,7 @@ class MinecraftServerManager:
                         fg_color=colors["fg"], hover_color=colors["hover"]
                     )
             except Exception as e:
-                LogUtils.error_exc(f"設定導航按鈕顏色失敗: {e}", "MainWindow", e)
+                logger.exception(f"設定導航按鈕顏色失敗: {e}")
 
         # 只重置前一個 + 設定新的，避免每次遍歷所有導航按鈕造成撕裂
         prev_title = getattr(self, "active_nav_title", None)
@@ -829,9 +819,9 @@ class MinecraftServerManager:
                 try:
                     self.root.after_cancel(job)
                 except Exception as e:
-                    LogUtils.debug(f"取消 toggle_sidebar job 失敗: {e}", "MainWindow")
+                    logger.debug(f"取消 toggle_sidebar job 失敗: {e}", "MainWindow")
         except Exception as e:
-            LogUtils.debug(f"toggle_sidebar 發生錯誤: {e}", "MainWindow")
+            logger.debug(f"toggle_sidebar 發生錯誤: {e}", "MainWindow")
         self._sidebar_toggle_job = self.root.after_idle(self._apply_sidebar_visibility)
 
     def _apply_sidebar_visibility(self) -> None:
@@ -850,14 +840,14 @@ class MinecraftServerManager:
                     if nav is not None:
                         nav.configure(width=int(self._nav_mini_width))
                 except Exception as e:
-                    LogUtils.debug(f"設定 Nav 寬度 (Mini) 失敗: {e}", "MainWindow")
+                    logger.debug(f"設定 Nav 寬度 (Mini) 失敗: {e}", "MainWindow")
                     pass
 
                 if hasattr(self, "sidebar") and self.sidebar:
                     try:
                         self.sidebar.grid_remove()
                     except Exception as e:
-                        LogUtils.debug(f"隱藏 sidebar 失敗: {e}", "MainWindow")
+                        logger.debug(f"隱藏 sidebar 失敗: {e}", "MainWindow")
                         pass
                 self.create_mini_sidebar()
             else:
@@ -873,25 +863,23 @@ class MinecraftServerManager:
                     if nav is not None:
                         nav.configure(width=int(self._nav_full_width))
                 except Exception as e:
-                    LogUtils.debug(f"設定 Nav 寬度 (Full) 失敗: {e}", "MainWindow")
+                    logger.debug(f"設定 Nav 寬度 (Full) 失敗: {e}", "MainWindow")
                     pass
 
                 if hasattr(self, "mini_sidebar") and self.mini_sidebar:
                     try:
                         self.mini_sidebar.grid_remove()
                     except Exception as e:
-                        LogUtils.debug(f"隱藏 mini_sidebar 失敗: {e}", "MainWindow")
+                        logger.debug(f"隱藏 mini_sidebar 失敗: {e}", "MainWindow")
                         pass
                 if hasattr(self, "sidebar") and self.sidebar:
                     try:
                         self.sidebar.grid()
                     except Exception as e:
-                        LogUtils.debug(f"顯示 sidebar 失敗: {e}", "MainWindow")
+                        logger.debug(f"顯示 sidebar 失敗: {e}", "MainWindow")
                         pass
         except Exception as e:
-            LogUtils.error(
-                f"切換側邊欄失敗: {e}\n{traceback.format_exc()}", "MainWindow"
-            )
+            logger.error(f"切換側邊欄失敗: {e}\n{traceback.format_exc()}")
 
     def create_mini_sidebar(self) -> None:
         """
@@ -905,11 +893,11 @@ class MinecraftServerManager:
                     try:
                         self.mini_sidebar.grid(row=0, column=0, sticky="nsew")
                     except Exception as e:
-                        LogUtils.debug(f"重顯示 mini_sidebar 失敗: {e}", "MainWindow")
+                        logger.debug(f"重顯示 mini_sidebar 失敗: {e}", "MainWindow")
                         pass
                     return
             except Exception as e:
-                LogUtils.debug(f"檢查 mini_sidebar 失敗: {e}", "MainWindow")
+                logger.debug(f"檢查 mini_sidebar 失敗: {e}", "MainWindow")
                 pass
 
         # 使用簡化的迷你側邊欄
@@ -1036,9 +1024,8 @@ class MinecraftServerManager:
                             self.manage_server_frame.update_selection()
                             break
             except Exception as e:
-                LogUtils.error(
-                    f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}",
-                    "MainWindow",
+                logger.error(
+                    f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}"
                 )
 
         # coalesce：快速連點切換時取消舊的 refresh job
@@ -1047,7 +1034,7 @@ class MinecraftServerManager:
             if old_job:
                 self.root.after_cancel(old_job)
         except Exception as e:
-            LogUtils.debug(f"取消 _nav_refresh_job 失敗: {e}", "MainWindow")
+            logger.debug(f"取消 _nav_refresh_job 失敗: {e}", "MainWindow")
             pass
         self._nav_refresh_job = self.root.after(0, _refresh_and_optionally_select)
 
@@ -1169,7 +1156,7 @@ class MinecraftServerManager:
                 if server_name:
                     self._finalize_import(path, server_name)
         except Exception as e:
-            LogUtils.error(f"匯入錯誤: {e}\n{traceback.format_exc()}", "MainWindow")
+            logger.error(f"匯入錯誤: {e}\n{traceback.format_exc()}", "MainWindow")
             UIUtils.show_error("匯入錯誤", str(e), self.root)
 
     def _select_server_folder(self) -> Optional[Path]:
@@ -1337,7 +1324,7 @@ class MinecraftServerManager:
             self.show_manage_server(auto_select=server_name)
 
         except Exception as e:
-            LogUtils.error(f"匯入失敗: {e}\n{traceback.format_exc()}", "MainWindow")
+            logger.error(f"匯入失敗: {e}\n{traceback.format_exc()}", "MainWindow")
             UIUtils.show_error(
                 "匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {e}", self.root
             )
@@ -1354,7 +1341,7 @@ class MinecraftServerManager:
             try:
                 self.create_server_frame.pack_forget()
             except Exception as e:
-                LogUtils.debug(f"隱藏 create_server_frame 失敗: {e}", "MainWindow")
+                logger.debug(f"隱藏 create_server_frame 失敗: {e}", "MainWindow")
 
         if getattr(self, "manage_server_frame", None) is not None:
             try:
@@ -1363,7 +1350,7 @@ class MinecraftServerManager:
                 try:
                     self.manage_server_frame.pack_forget()
                 except Exception as e:
-                    LogUtils.debug(f"隱藏 manage_server_frame 失敗: {e}", "MainWindow")
+                    logger.debug(f"隱藏 manage_server_frame 失敗: {e}", "MainWindow")
 
         # 隱藏模組管理頁面
         if getattr(self, "mod_frame", None) is not None:
@@ -1374,7 +1361,7 @@ class MinecraftServerManager:
                 except Exception:
                     frame.pack_forget()
             except Exception as e:
-                LogUtils.debug(f"隱藏 mod_frame 失敗: {e}", "MainWindow")
+                logger.debug(f"隱藏 mod_frame 失敗: {e}", "MainWindow")
 
     def open_servers_folder(self) -> None:
         """
@@ -1389,7 +1376,7 @@ class MinecraftServerManager:
         try:
             os.startfile(str(folder_path))
         except Exception as e:
-            LogUtils.error(f"無法開啟路徑: {e}\n{traceback.format_exc()}", "MainWindow")
+            logger.error(f"無法開啟路徑: {e}\n{traceback.format_exc()}", "MainWindow")
             UIUtils.show_error("錯誤", f"無法開啟路徑: {e}", self.root)
 
     def show_about(self) -> None:
@@ -1578,7 +1565,7 @@ class MinecraftServerManager:
         def on_settings_changed():
             """設定變更回調"""
             # 可以在這裡添加設定變更後的處理邏輯
-            LogUtils.debug("視窗偏好設定已變更", "MainWindow")
+            logger.debug("視窗偏好設定已變更", "MainWindow")
 
         # 顯示視窗偏好設定對話框
         WindowPreferencesDialog(self.root, on_settings_changed)
@@ -1621,7 +1608,7 @@ class MinecraftServerManager:
         """
         # 目前僅作為記錄用途，未來可擴展為狀態同步等功能
         # Currently used only for logging, can be extended for state synchronization in the future
-        LogUtils.info(f"選中伺服器: {server_name}")
+        logger.info(f"選中伺服器: {server_name}")
 
     def complete_initialization(self, server_config: ServerConfig, init_dialog) -> None:
         """
@@ -1645,9 +1632,8 @@ class MinecraftServerManager:
                 properties = ServerPropertiesHelper.load_properties(properties_file)
                 server_config.properties = properties
         except Exception as e:
-            LogUtils.error(
-                f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}",
-                "MainWindow",
+            logger.error(
+                f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}"
             )
 
         # 直接提示初始化完成，並自動跳轉到管理伺服器頁面
@@ -1693,7 +1679,7 @@ class ServerInitializationDialog:
         try:
             self._console_queue.put_nowait(text)
         except Exception as e:
-            LogUtils.error_exc(f"加入 console queue 失敗: {e}", "InitServerDialog", e)
+            get_logger().bind(component="InitServerDialog").exception(f"加入 console queue 失敗: {e}")
 
     def _start_console_pump(self) -> None:
         if self._console_pump_job is not None:
@@ -1856,12 +1842,10 @@ class ServerInitializationDialog:
                 try:
                     self.server_process.wait(timeout=5)
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"等待程序終止逾時/失敗，改用 kill: {e}", "InitServerDialog", e
-                    )
+                    logger.exception(f"等待程序終止逾時/失敗，改用 kill: {e}")
                     self.server_process.kill()
         except Exception as e:
-            LogUtils.error_exc(f"終止伺服器程序失敗: {e}", "InitServerDialog", e)
+            get_logger().bind(component="InitServerDialog").exception(f"終止伺服器程序失敗: {e}")
 
     def _timeout_force_close(self) -> None:
         """超時強制關閉"""
@@ -1917,9 +1901,8 @@ class ServerInitializationDialog:
             self._handle_server_completion()
 
         except Exception as e:
-            LogUtils.error(
-                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}",
-                "ServerInitializationDialog",
+            get_logger().bind(component="ServerInitializationDialog").error(
+                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}"
             )
             self._handle_server_error(str(e))
 
@@ -1972,15 +1955,12 @@ class ServerInitializationDialog:
                         # 去除尾端的 %* 或其他 shell 變數符號
                         cleaned = re.sub(r"\s*[%$]\*?$", "", line.strip())
                         java_cmd = cleaned.split()
-                        LogUtils.debug(
-                            f"forge_java_command: {java_cmd}",
-                            "ServerInitializationDialog",
+                        get_logger().bind(component="ServerInitializationDialog").debug(
+                            f"forge_java_command: {java_cmd}"
                         )
                         return java_cmd
         except Exception as e:
-            LogUtils.error_exc(
-                f"提取 Java 命令失敗: {e}", "ServerInitializationDialog", e
-            )
+            logger.exception(f"提取 Java 命令失敗: {e}")
         return None
 
     def _monitor_server_output(self) -> None:

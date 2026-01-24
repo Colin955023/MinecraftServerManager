@@ -5,6 +5,10 @@
 提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
 Utility Modules Package
 Provides various utility functions and helper classes for the Minecraft Server Manager application
+
+Logger can be imported conveniently:
+    from src.utils import get_logger
+    logger = get_logger().bind(component="ComponentName")
 """
 
 from __future__ import annotations
@@ -13,8 +17,8 @@ import importlib
 from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
-    # logging
-    "LogUtils": (".log_utils", "LogUtils"),
+    # logger
+    "get_logger": (".logger", "get_logger"),
     # UI helpers
     "UIUtils": (".ui_utils", "UIUtils"),
     "DialogUtils": (".ui_utils", "DialogUtils"),

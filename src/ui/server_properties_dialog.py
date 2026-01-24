@@ -14,7 +14,10 @@ import customtkinter as ctk
 from ..utils import ServerPropertiesHelper
 from ..core import ServerConfig, ServerManager
 from ..utils import font_manager, get_dpi_scaled_size, get_font
-from ..utils import UIUtils, LogUtils
+from ..utils import UIUtils
+from ..utils.logger import get_logger
+
+logger = get_logger().bind(component="ServerPropertiesDialog")
 
 class ServerPropertiesDialog:
     """
@@ -78,9 +81,8 @@ class ServerPropertiesDialog:
         try:
             self.dialog.configure(bg="#ffffff")  # 淺色背景
         except Exception as e:
-            LogUtils.error(
-                f"應用對話框主題失敗: {e}\n{traceback.format_exc()}",
-                "ServerPropertiesDialog",
+            logger.error(
+                f"應用對話框主題失敗: {e}\n{traceback.format_exc()}"
             )
 
     def create_widgets(self) -> None:
@@ -211,9 +213,7 @@ class ServerPropertiesDialog:
                         canvas.after_cancel(state["job"])
                     state["job"] = canvas.after_idle(_apply_scrollregion)
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"排程 scrollregion 更新失敗: {e}", "ServerPropertiesDialog", e
-                    )
+                    logger.exception(f"排程 scrollregion 更新失敗: {e}")
 
             scrollable_frame.bind("<Configure>", _schedule_scrollregion_update)
 
@@ -247,9 +247,7 @@ class ServerPropertiesDialog:
                 defaults = self.server_manager.get_default_server_properties()
                 all_properties = {**defaults, **all_properties}
             except Exception as e:
-                LogUtils.error_exc(
-                    f"讀取預設 server.properties 失敗: {e}", "ServerPropertiesDialog", e
-                )
+                logger.exception(f"讀取預設 server.properties 失敗: {e}")
 
         all_keys = set(all_properties.keys())
         # 找出未分類的 key
@@ -396,9 +394,8 @@ class ServerPropertiesDialog:
             try:
                 UIUtils.apply_unified_dropdown_styling(widget)
             except Exception as e:
-                LogUtils.error(
-                    f"套用下拉選單樣式失敗: {e}\n{traceback.format_exc()}",
-                    "ServerPropertiesDialog",
+                logger.error(
+                    f"套用下拉選單樣式失敗: {e}\n{traceback.format_exc()}"
                 )
 
         elif prop_name in range_props:
@@ -498,9 +495,8 @@ class ServerPropertiesDialog:
                 UIUtils.show_error("錯誤", "儲存伺服器屬性失敗", self.dialog)
 
         except Exception as e:
-            LogUtils.error(
-                f"儲存時發生錯誤: {e}\n{traceback.format_exc()}",
-                "ServerPropertiesDialog",
+            logger.error(
+                f"儲存時發生錯誤: {e}\n{traceback.format_exc()}"
             )
             UIUtils.show_error("錯誤", f"儲存時發生錯誤: {e}", self.dialog)
 

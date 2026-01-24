@@ -26,6 +26,10 @@ import customtkinter as ctk
 from src.core import LoaderManager, MinecraftVersionManager
 from src.ui import MinecraftServerManager
 from src.utils import UIUtils, get_settings_manager, set_ui_scale_factor
+from src.utils.logger import get_logger
+
+# 初始化 logger
+logger = get_logger().bind(component="Main")
 
 # ====== 訊息顯示工具 ======
 
@@ -39,9 +43,12 @@ def show_message(title, message, message_type="error"):
             UIUtils.show_info(title, message, topmost=True)
         return True
     except Exception:
-        icon = "錯誤" if message_type == "error" else "資訊"
+        # 退回到 logger 輸出
         try:
-            print(f"[{icon}] {title}: {message}")
+            if message_type == "error":
+                logger.error(f"{title}: {message}")
+            else:
+                logger.info(f"{title}: {message}")
         except Exception:
             pass
         return False

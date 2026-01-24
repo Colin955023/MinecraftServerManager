@@ -11,7 +11,48 @@ from typing import Any, Dict
 import json
 import sys
 # ====== 專案內部模組 ======
-from src.utils import LogUtils, ensure_dir, get_user_data_dir
+from src.utils import ensure_dir, get_user_data_dir
+from src.utils.logger import get_logger
+
+logger = get_logger().bind(component="SettingsManager")
+
+# ====== 預設設定常數 Default Settings Constants ======
+DEFAULT_WINDOW_PREFERENCES = {
+    "remember_size_position": True,  # 記住視窗大小和位置
+    "main_window": {
+        "width": 1200,
+        "height": 800,
+        "x": None,  # None 表示置中
+        "y": None,
+        "maximized": False,
+    },
+    "auto_center": True,  # 自動置中新視窗
+    "adaptive_sizing": True,  # 根據螢幕大小自動調整
+    "dpi_scaling": 1.0,  # DPI 縮放因子
+}
+
+
+def _get_default_settings() -> Dict[str, Any]:
+    """
+    取得預設設定（根據環境動態計算）
+    Get default settings (dynamically calculated based on environment)
+    """
+    # 透過檢查是否為打包環境來設定調試日誌預設值
+    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+    # 開發環境預設啟用調試日誌，打包環境預設關閉
+    default_debug_logging = not is_packaged
+
+    return {
+        "servers_root": "",
+        "auto_update_enabled": True,  # 預設啟用自動更新
+        "first_run_completed": False,  # 標記是否已完成首次執行提示
+        "window_preferences": DEFAULT_WINDOW_PREFERENCES.copy(),
+        "debug_settings": {
+            "enable_debug_logging": default_debug_logging,  # 根據環境設定調試日誌預設值
+            "enable_window_state_logging": False,  # 控制視窗狀態儲存日誌
+        },
+    }
+
 
 class SettingsManager:
     """
@@ -48,35 +89,7 @@ class SettingsManager:
         """
         if not self.settings_path.exists():
             # 建立預設設定
-            # 透過檢查是否為打包環境來設定調試日誌預設值
-            is_packaged = bool(
-                getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS")
-            )
-            # 開發環境預設啟用調試日誌，打包環境預設關閉
-            default_debug_logging = not is_packaged
-
-            default_settings = {
-                "servers_root": "",
-                "auto_update_enabled": True,  # 預設啟用自動更新
-                "first_run_completed": False,  # 標記是否已完成首次執行提示
-                "window_preferences": {
-                    "remember_size_position": True,  # 記住視窗大小和位置
-                    "main_window": {
-                        "width": 1200,
-                        "height": 800,
-                        "x": None,  # None 表示置中
-                        "y": None,
-                        "maximized": False,
-                    },
-                    "auto_center": True,  # 自動置中新視窗
-                    "adaptive_sizing": True,  # 根據螢幕大小自動調整
-                    "dpi_scaling": 1.0,  # DPI 縮放因子
-                },
-                "debug_settings": {
-                    "enable_debug_logging": default_debug_logging,  # 根據環境設定調試日誌預設值
-                    "enable_window_state_logging": False,  # 控制視窗狀態儲存日誌
-                },
-            }
+            default_settings = _get_default_settings()
             self._save_settings(default_settings)
             return default_settings
 
@@ -90,42 +103,13 @@ class SettingsManager:
             if "first_run_completed" not in settings:
                 settings["first_run_completed"] = False
             if "window_preferences" not in settings:
-                settings["window_preferences"] = {
-                    "remember_size_position": True,
-                    "main_window": {
-                        "width": 1200,
-                        "height": 800,
-                        "x": None,
-                        "y": None,
-                        "maximized": False,
-                    },
-                    "auto_center": True,
-                    "adaptive_sizing": True,
-                    "dpi_scaling": 1.0,
-                }
+                settings["window_preferences"] = DEFAULT_WINDOW_PREFERENCES.copy()
 
             return settings
         except Exception as e:
-            LogUtils.error_exc(f"載入設定失敗: {e}", "SettingsManager", e)
+            logger.exception(f"載入設定失敗: {e}")
             # 如果載入失敗，回傳預設設定
-            return {
-                "servers_root": "",
-                "auto_update_enabled": True,
-                "first_run_completed": False,
-                "window_preferences": {
-                    "remember_size_position": True,
-                    "main_window": {
-                        "width": 1200,
-                        "height": 800,
-                        "x": None,
-                        "y": None,
-                        "maximized": False,
-                    },
-                    "auto_center": True,
-                    "adaptive_sizing": True,
-                    "dpi_scaling": 1.0,
-                },
-            }
+            return _get_default_settings()
 
     # 儲存設定到檔案
     def _save_settings(self, settings: Dict[str, Any]) -> None:
@@ -143,8 +127,8 @@ class SettingsManager:
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            LogUtils.error_exc(
-                f"無法寫入 user_settings.json: {e}", "SettingsManager", e
+            logger.exception(
+                f"無法寫入 user_settings.json: {e}"
             )
             raise Exception(f"無法寫入 user_settings.json: {e}")
 

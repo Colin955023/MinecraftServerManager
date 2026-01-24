@@ -12,7 +12,10 @@ import json
 import concurrent.futures
 import os
 # ====== 專案內部模組 ======
-from src.utils import HTTPUtils, LogUtils, UIUtils, ensure_dir, get_cache_dir
+from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
+from src.utils.logger import get_logger
+
+logger = get_logger().bind(component="VersionManager")
 
 class MinecraftVersionManager:
     """
@@ -50,7 +53,7 @@ class MinecraftVersionManager:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(versions, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            LogUtils.error_exc(f"寫入版本快取失敗: {e}", "VersionManager", e)
+            logger.exception(f"寫入版本快取失敗: {e}")
 
     # ====== 版本資料獲取 ======
     # 從官方 API 獲取版本列表
@@ -102,7 +105,7 @@ class MinecraftVersionManager:
             self._save_local_cache(versions)
             return versions
         except Exception as e:
-            LogUtils.error_exc(f"無法取得版本資訊: {e}", "VersionManager", e)
+            logger.exception(f"無法取得版本資訊: {e}")
             UIUtils.show_error("取得版本失敗", f"無法從官方 API 獲取版本資訊: {e}")
             return []
 
@@ -128,6 +131,6 @@ class MinecraftVersionManager:
             # 直接回傳版本列表，快取中已只包含正式發布版本
             return versions
         except Exception as e:
-            LogUtils.error_exc(f"獲取版本時發生錯誤: {e}", "VersionManager", e)
+            logger.exception(f"獲取版本時發生錯誤: {e}")
             UIUtils.show_error("獲取版本失敗", f"無法從快取獲取版本資訊: {e}")
             return []

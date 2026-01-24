@@ -18,7 +18,9 @@ from ..utils import (
     set_ui_scale_factor,
     get_font,
 )
-from ..utils import LogUtils
+from ..utils.logger import get_logger
+
+logger = get_logger().bind(component="WindowPreferencesDialog")
 
 class WindowPreferencesDialog:
     """
@@ -409,9 +411,8 @@ class WindowPreferencesDialog:
                             schedule_restart_and_exit(self.parent, delay=0.5)
                             return
                         except Exception as restart_error:
-                            LogUtils.error(
-                                f"重啟失敗: {restart_error}\n{traceback.format_exc()}",
-                                "WindowPreferencesDialog",
+                            logger.error(
+                                f"重啟失敗: {restart_error}\n{traceback.format_exc()}"
                             )
                             UIUtils.show_error(
                                 "重啟失敗",
@@ -473,9 +474,8 @@ class WindowPreferencesDialog:
                         return
 
                     except Exception as restart_error:
-                        LogUtils.error(
-                            f"重啟失敗: {restart_error}\n{traceback.format_exc()}",
-                            "WindowPreferencesDialog",
+                        logger.error(
+                            f"重啟失敗: {restart_error}\n{traceback.format_exc()}"
                         )
                         UIUtils.show_error(
                             "重啟失敗",
@@ -493,9 +493,7 @@ class WindowPreferencesDialog:
             self.dialog.destroy()
 
         except Exception as e:
-            LogUtils.error(
-                f"儲存失敗: {e}\n{traceback.format_exc()}", "WindowPreferencesDialog"
-            )
+            logger.error(f"儲存失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("儲存失敗", f"無法儲存設定: {e}", parent=self.dialog)
 
     def _cancel(self) -> None:

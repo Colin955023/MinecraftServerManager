@@ -5,44 +5,43 @@
 
 # ====== 標準函式庫 ======
 from pathlib import Path
+from typing import Optional
 import os
 import re
 import tempfile
 import threading
 import webbrowser
 
+# ====== 第三方函式庫 ======
+from packaging.version import Version, InvalidVersion
+
 # ====== 專案內部模組 ======
 from .http_utils import HTTPUtils
-from .log_utils import LogUtils
+from .logger import get_logger
 from .ui_utils import UIUtils
+
+logger = get_logger().bind(component="UpdateChecker")
 
 GITHUB_API = "https://api.github.com"
 
-# 預編譯正則表達式以提升效能
-_VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 
-
-def _normalize_version(v: str) -> tuple:
+def _parse_version(version_str: str) -> Optional[Version]:
     """
-    將版本字串標準化為可比較的 release 版本 tuple。
+    解析版本字串為 Version 物件
+    Parse version string to Version object
+    
+    Args:
+        version_str: 版本字串（可能包含 'v' 或 'V' 前綴）
+    
+    Returns:
+        Version 物件，解析失敗時返回 None
     """
-
-    if not v:
-        return (0, 0, 0)
-
-    text = str(v).strip()
-    if text.startswith(("v", "V")):
-        text = text[1:]
-
-    # 使用預編譯的正則表達式
-    m = _VERSION_PATTERN.search(text)
-    if not m:
-        return (0, 0, 0)
-
-    major = int(m.group(1))
-    minor = int(m.group(2))
-    patch = int(m.group(3)) if m.group(3) is not None else 0
-    return (major, minor, patch)
+    try:
+        # 移除前綴 'v' 或 'V'
+        clean_version = version_str.strip().lstrip('vV')
+        return Version(clean_version)
+    except (InvalidVersion, Exception):
+        return None
 
 
 def _get_latest_release(owner: str, repo: str) -> dict:
@@ -62,7 +61,7 @@ def _get_latest_release(owner: str, repo: str) -> dict:
             if rel and not rel.get("draft") and not rel.get("prerelease"):
                 return rel
         except Exception as e:
-            LogUtils.debug(f"檢查 release 資料時發生錯誤: {e}", "UpdateChecker")
+            logger.debug(f"檢查 release 資料時發生錯誤: {e}")
             continue
     return {}
 
@@ -77,7 +76,7 @@ def _choose_installer_asset(release: dict) -> dict:
             if name.endswith(".exe") and a.get("browser_download_url"):
                 exe_assets.append(a)
         except Exception as e:
-            LogUtils.debug(f"檢查 asset 資料時發生錯誤: {e}", "UpdateChecker")
+            logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
             continue
     if not exe_assets:
         return {}
@@ -138,7 +137,7 @@ def check_and_prompt_update(
                 return result["value"]
         except Exception as e:
             # 任何排程失敗都退回直接呼叫（最後備援）
-            LogUtils.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}", "UpdateChecker")
+            logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
             pass
         return func()
 
@@ -158,7 +157,17 @@ def check_and_prompt_update(
                 return
 
             latest_tag = latest.get("tag_name") or ""
-            if _normalize_version(latest_tag) <= _normalize_version(current_version):
+            
+            # 使用 packaging.version 進行版本比較
+            latest_ver = _parse_version(latest_tag)
+            current_ver = _parse_version(current_version)
+            
+            if not latest_ver or not current_ver:
+                logger.warning("無法解析版本號，跳過更新檢查")
+                return
+            
+            # 比較版本
+            if latest_ver <= current_ver:
                 if show_up_to_date_message:
                     _call_on_ui(
                         lambda: UIUtils.show_info(
@@ -243,7 +252,7 @@ def check_and_prompt_update(
                     )
                 )
         except Exception as e:
-            LogUtils.error_exc(f"更新檢查失敗: {e}", "UpdateChecker", e)
+            logger.exception(f"更新檢查失敗: {e}")
             _call_on_ui(
                 lambda: UIUtils.show_error(
                     "更新檢查失敗",

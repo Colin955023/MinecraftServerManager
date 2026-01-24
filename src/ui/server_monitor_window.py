@@ -22,7 +22,10 @@ from ..utils import (
     get_dpi_scaled_size,
     get_font,
 )
-from ..utils import UIUtils, LogUtils
+from ..utils import UIUtils
+from ..utils.logger import get_logger
+
+logger = get_logger().bind(component="ServerMonitorWindow")
 
 class ServerMonitorWindow:
     """
@@ -55,10 +58,8 @@ class ServerMonitorWindow:
             try:
                 self.window.after_cancel(self._auto_refresh_id)
             except Exception as e:
-                LogUtils.error_exc(
-                    f"停止自動刷新時取消 after 失敗（視窗可能已關閉）: {e}",
-                    "ServerMonitorWindow",
-                    e,
+                logger.exception(
+                    f"停止自動刷新時取消 after 失敗（視窗可能已關閉）: {e}"
                 )
             self._auto_refresh_id = None
 
@@ -112,9 +113,8 @@ class ServerMonitorWindow:
                 widget = getattr(self, widget_name)
                 UIUtils.safe_update_widget(widget, update_func, *args, **kwargs)
         except Exception as e:
-            LogUtils.error(
-                f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}",
-                "ServerMonitorWindow",
+            logger.error(
+                f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}"
             )
 
     def safe_config_widget(self, widget_name: str, **config) -> None:
@@ -279,9 +279,7 @@ class ServerMonitorWindow:
         self.version_label = ctk.CTkLabel(
             right_frame, text="📦 版本: N/A", font=get_font(size=18), anchor="w"
         )
-        LogUtils.debug(
-            "初始化 ServerMonitorWindow，預設版本顯示 N/A", "ServerMonitorWindow"
-        )
+        logger.debug("初始化 ServerMonitorWindow，預設版本顯示 N/A")
         self.version_label.pack(anchor="w", pady=2)
 
         # 玩家列表面板
@@ -329,9 +327,9 @@ class ServerMonitorWindow:
             self.window.clipboard_clear()
             self.window.clipboard_append(name)
             self.window.update()  # 確保剪貼簿更新生效
-            LogUtils.info(f"已複製玩家名稱: {name}", "ServerMonitorWindow")
+            logger.info(f"已複製玩家名稱: {name}")
         except Exception as e:
-            LogUtils.error(f"複製玩家名稱失敗: {e}", "ServerMonitorWindow")
+            logger.error(f"複製玩家名稱失敗: {e}")
 
     def create_console_panel(self, parent) -> None:
         """
@@ -410,7 +408,7 @@ class ServerMonitorWindow:
                         self.console_text.insert("end", text)
                         self.console_text.see("end")
                 except Exception as e:
-                    LogUtils.error(
+                    logger.error(
                         f"刷新控制台失敗: {e}\n{traceback.format_exc()}",
                         "ServerMonitorWindow",
                     )
@@ -450,7 +448,7 @@ class ServerMonitorWindow:
             try:
                 self.window.after_cancel(self._console_flush_job)
             except Exception as e:
-                LogUtils.error_exc(
+                logger.exception(
                     f"停止監控時取消 console flush job 失敗（視窗可能已關閉）: {e}",
                     "ServerMonitorWindow",
                     e,
@@ -465,7 +463,7 @@ class ServerMonitorWindow:
             try:
                 self.monitor_future.result(timeout=1)
             except Exception as e:
-                LogUtils.error_exc(
+                logger.exception(
                     f"等待監控 future 結束超時/失敗（忽略）: {e}",
                     "ServerMonitorWindow",
                     e,
@@ -505,7 +503,7 @@ class ServerMonitorWindow:
                                 last_log_mtime = current_mtime
                                 self.read_server_output()
                     except Exception as e:
-                        LogUtils.debug(
+                        logger.debug(
                             f"檢查日誌檔案變更時發生例外（忽略）: {e}",
                             "ServerMonitorWindow",
                         )
@@ -514,7 +512,7 @@ class ServerMonitorWindow:
                 # 適度休眠，減少 CPU 使用
                 self._monitor_stop_event.wait(0.1)
             except Exception as e:
-                LogUtils.error(
+                logger.error(
                     f"監控更新錯誤: {e}\n{traceback.format_exc()}",
                     "ServerMonitorWindow",
                 )
@@ -577,7 +575,7 @@ class ServerMonitorWindow:
                                             text=f"👥 玩家數量: {current_players}/{max_players}"
                                         )
                                 except Exception:
-                                    LogUtils.error(
+                                    logger.error(
                                         "更新玩家數量 label 失敗（可能視窗已關閉）",
                                         "ServerMonitorWindow",
                                     )
@@ -585,7 +583,7 @@ class ServerMonitorWindow:
 
                             self.ui_queue.put(_apply_players)
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"讀取伺服器輸出錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -680,7 +678,7 @@ class ServerMonitorWindow:
                 self._last_ui_state["btn_state_stop"] = btn_state_stop
 
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"_update_ui 更新 UI 狀態失敗: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -695,7 +693,7 @@ class ServerMonitorWindow:
             if success:
                 self.executor.submit(self._delayed_read_player_list)
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"更新玩家數量錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -756,7 +754,7 @@ class ServerMonitorWindow:
                 # 僅當真的沒抓到任何玩家列表才不動作
                 pass
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"讀取玩家列表時發生錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -785,7 +783,7 @@ class ServerMonitorWindow:
             else:
                 self.players_listbox.insert(tk.END, "無玩家在線")
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"更新玩家列表錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -805,9 +803,7 @@ class ServerMonitorWindow:
             # 在主線程中更新 UI
             self._update_ui(info)
         except Exception as e:
-            LogUtils.error(
-                f"更新狀態失敗: {e}\n{traceback.format_exc()}", "ServerMonitorWindow"
-            )
+            logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
 
     def start_server(self) -> None:
         """
@@ -847,7 +843,7 @@ class ServerMonitorWindow:
             if self.window and self.window.winfo_exists():
                 self.window.after(100, self.update_status)
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"安全 after 調用錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )
@@ -908,9 +904,7 @@ class ServerMonitorWindow:
             else:
                 self.add_console_message("⚠️ 未找到日誌檔案")
         except Exception as e:
-            LogUtils.error(
-                f"載入日誌失敗: {e}\n{traceback.format_exc()}", "ServerMonitorWindow"
-            )
+            logger.error(f"載入日誌失敗: {e}\n{traceback.format_exc()}")
             self.add_console_message(f"❌ 載入日誌失敗: {e}")
 
         # 更新狀態
@@ -1034,7 +1028,7 @@ class ServerMonitorWindow:
             UIUtils.show_info("伺服器啟動成功", msg, self.window)
             # 額外 debug log
         except Exception as e:
-            LogUtils.error(
+            logger.error(
                 f"handle_server_ready 執行錯誤: {e}\n{traceback.format_exc()}",
                 "ServerMonitorWindow",
             )

@@ -22,8 +22,11 @@ import customtkinter as ctk
 from ..core import LoaderManager, ServerManager, MinecraftVersionManager
 from ..models import ServerConfig
 from ..utils import java_utils
-from ..utils import LogUtils, ProgressDialog, UIUtils, font_manager, get_font
+from ..utils import ProgressDialog, UIUtils, font_manager, get_font
+from ..utils.logger import get_logger
 from . import CustomDropdown
+
+logger = get_logger().bind(component="CreateServerFrame")
 
 # ====== 主要 UI Frame 類別 ======
 class CreateServerFrame(ctk.CTkFrame):
@@ -41,7 +44,7 @@ class CreateServerFrame(ctk.CTkFrame):
         try:
             return psutil.virtual_memory().total // (1024**2)
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"無法獲取系統記憶體資訊: {e}\n{traceback.format_exc()}",
                 "CreateServerFrame",
             )
@@ -100,7 +103,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=("red", "red")
             )
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}",
                 "CreateServerFrame",
             )
@@ -482,7 +485,7 @@ class CreateServerFrame(ctk.CTkFrame):
             try:
                 self.loader_manager.preload_loader_versions()
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"預載入載入器版本失敗: {e}\n{traceback.format_exc()}",
                     "CreateServerFrame",
                 )
@@ -654,9 +657,7 @@ class CreateServerFrame(ctk.CTkFrame):
             self.max_memory_var.set("2048")
             UIUtils.show_info("重設完成", "表單已重設為預設值", self.winfo_toplevel())
         except Exception as e:
-            LogUtils.error(
-                f"重設表單失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
-            )
+            logger.error(f"重設表單失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error(
                 "重設失敗", f"重設表單時發生錯誤：\n{str(e)}", self.winfo_toplevel()
             )
@@ -832,7 +833,7 @@ class CreateServerFrame(ctk.CTkFrame):
                     if hasattr(self, "_loading_key"):
                         delattr(self, "_loading_key")
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"更新載入器版本 UI 失敗: {e}\n{traceback.format_exc()}",
                         "CreateServerFrame",
                     )
@@ -841,7 +842,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
             self.ui_queue.put(update_ui)
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"載入載入器版本失敗: {e}\n{traceback.format_exc()}",
                 "CreateServerFrame",
             )
@@ -856,8 +857,8 @@ class CreateServerFrame(ctk.CTkFrame):
                             "disabled",
                         )
                 except Exception as e2:
-                    LogUtils.error_exc(
-                        f"更新載入器版本失敗狀態 UI 失敗: {e2}", "CreateServerFrame", e2
+                    logger.exception(
+                        f"更新載入器版本失敗狀態 UI 失敗: {e2}"
                     )
                 if hasattr(self, "_loading_key"):
                     delattr(self, "_loading_key")
@@ -1012,9 +1013,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 return
             success = self.server_manager.create_server(config)
             if not success:
-                LogUtils.error(
-                    f"建立伺服器基礎結構失敗 config: {config}", "CreateServerFrame"
-                )
+                logger.error(f"建立伺服器基礎結構失敗 config: {config}")
                 progress_dialog.close()
                 raise Exception("建立伺服器基礎結構失敗")
             # 檢查 config 欄位
@@ -1040,7 +1039,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 # 下載成功後重建啟動腳本，確保 server.jar 存在
                 self.server_manager.create_launch_script(config)
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"下載伺服器檔案失敗: {e}\n{traceback.format_exc()}",
                     "CreateServerFrame",
                 )
@@ -1059,7 +1058,7 @@ class CreateServerFrame(ctk.CTkFrame):
             # 給使用者短暫時間看到 100% 再關閉（不阻塞背景執行緒）
             self.after(1000, on_success)
         except Exception as error:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}",
                 "CreateServerFrame",
             )
@@ -1135,7 +1134,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
             )
             UIUtils.show_error("下載失敗", msg, topmost=True)
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"server_path: {server_path}\nconfig: {config}\n{traceback.format_exc()}",
                 "CreateServerFrame",
             )

@@ -19,6 +19,7 @@ dependencies = [
   "nuitka>=2.8.9",
   "zstandard>=0.15",
   "uv>=0.6.0",
+  "loguru>=0.7.3",
 ]
 
 [project.scripts]

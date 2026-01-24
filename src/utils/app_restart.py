@@ -15,7 +15,9 @@ import sys
 import threading
 import time
 # ======專案內部模組 ======
-from src.utils import LogUtils
+from src.utils.logger import get_logger
+
+logger = get_logger().bind(component="AppRestart")
 
 # ====== 執行檔資訊檢測 ======
 # 取得當前執行檔的詳細資訊
@@ -124,7 +126,7 @@ def restart_application(delay: float = 1.0) -> bool:
                     restart_error.set()
 
             except Exception as e:
-                LogUtils.error_exc(f"重啟失敗: {e}", "AppRestart", e)
+                logger.exception(f"重啟失敗: {e}")
                 restart_error.set()
 
         # 在背景執行緒中執行延遲重啟
@@ -142,7 +144,7 @@ def restart_application(delay: float = 1.0) -> bool:
             return True
 
     except Exception as e:
-        LogUtils.error_exc(f"準備重啟時發生錯誤: {e}", "AppRestart", e)
+        logger.exception(f"準備重啟時發生錯誤: {e}")
         return False
 
 # 安排重啟並退出當前應用程式
@@ -163,7 +165,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
         restart_initiated = restart_application(delay)
 
         if restart_initiated:
-            LogUtils.info("重啟程序已啟動，準備關閉當前應用程式", "AppRestart")
+            logger.info("重啟程序已啟動，準備關閉當前應用程式")
 
             # 給重啟程序一些時間來準備
             time.sleep(0.2)
@@ -177,9 +179,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                             parent_window.quit()  # 停止主事件迴圈
                             parent_window.destroy()  # 銷毀視窗
                         except Exception as e:
-                            LogUtils.error_exc(
-                                f"關閉視窗時發生錯誤: {e}", "AppRestart", e
-                            )
+                            logger.exception(f"關閉視窗時發生錯誤: {e}")
 
                         # 延遲退出以確保新程序有時間啟動
                         time.sleep(0.5)
@@ -189,13 +189,13 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                     parent_window.after(100, delayed_close)
 
                 except Exception as e:
-                    LogUtils.error_exc(f"安排視窗關閉時發生錯誤: {e}", "AppRestart", e)
+                    logger.exception(f"安排視窗關閉時發生錯誤: {e}")
                     # 如果無法使用 after 方法，直接關閉
                     try:
                         parent_window.quit()
                         parent_window.destroy()
                     except Exception as e2:
-                        LogUtils.error_exc(f"直接關閉視窗失敗: {e2}", "AppRestart", e2)
+                        logger.exception(f"直接關閉視窗失敗: {e2}")
                     time.sleep(0.5)
                     sys.exit(0)
             else:
@@ -203,7 +203,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
                 time.sleep(0.5)
                 sys.exit(0)
         else:
-            LogUtils.error("重啟失敗，程式將繼續運行", "AppRestart")
+            logger.error("重啟失敗，程式將繼續運行")
 
     except Exception as e:
-        LogUtils.error_exc(f"重啟程序失敗: {e}", "AppRestart", e)
+        logger.exception(f"重啟程序失敗: {e}")
