@@ -318,7 +318,7 @@ class MinecraftServerManager:
                 )
             except Exception as e:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
-                self.ui_queue.put(lambda: logger.error(error_msg, "MainWindow"))
+                self.ui_queue.put(lambda: logger.error(error_msg))
 
         threading.Thread(target=load_versions, daemon=True).start()
 

@@ -19,7 +19,6 @@ from packaging.version import Version, InvalidVersion
 from .http_utils import HTTPUtils
 from .logger import get_logger
 from .ui_utils import UIUtils
-from packaging.version import Version, InvalidVersion
 
 logger = get_logger().bind(component="UpdateChecker")
 

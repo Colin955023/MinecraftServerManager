@@ -354,19 +354,19 @@ class UIUtils:
                     ui_queue.put(cb)
                     return
                 except Exception as e:
-                    logger.debug(f"ui_queue put 失敗: {e}", "UIUtils")
+                    logger.debug(f"ui_queue put 失敗: {e}")
                     pass
             if widget is not None:
                 try:
                     widget.after(0, cb)
                     return
                 except Exception as e:
-                    logger.debug(f"widget.after 失敗: {e}", "UIUtils")
+                    logger.debug(f"widget.after 失敗: {e}")
                     pass
             try:
                 cb()
             except Exception as e:
-                logger.debug(f"直接執行 callback 失敗: {e}", "UIUtils")
+                logger.debug(f"直接執行 callback 失敗: {e}")
                 pass
 
         def _wrapper() -> None:
@@ -501,7 +501,7 @@ class UIUtils:
             None
         """
         # 任何顯示給使用者的錯誤，都同時寫入 log，方便追蹤
-        logger.error(f"{title}: {message}", "UIUtils")
+        logger.error(f"{title}: {message}")
 
         try:
             # 如果沒有父視窗，創建臨時根視窗

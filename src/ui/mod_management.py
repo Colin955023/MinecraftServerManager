@@ -345,9 +345,8 @@ class ModManagementFrame:
             elif current_tab == 1:  # 線上瀏覽頁面
                 pass  # 線上頁面不需要自動重新整理
         except Exception as e:
-            logger.bind(component="").error(
-                f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}",
-                "ModManagementFrame",
+            logger.error(
+                f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}"
             )
 
     def create_local_toolbar(self) -> None:

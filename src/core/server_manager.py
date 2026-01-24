@@ -432,8 +432,7 @@ class ServerManager:
                 self.output_threads[server_name] = t
 
                 logger.info(
-                    f"伺服器 {server_name} 啟動成功，PID: {process.pid}",
-                    "ServerManager",
+                    f"伺服器 {server_name} 啟動成功，PID: {process.pid}"
                 )
                 return True
 

@@ -59,9 +59,7 @@ class ServerMonitorWindow:
                 self.window.after_cancel(self._auto_refresh_id)
             except Exception as e:
                 logger.exception(
-                    f"停止自動刷新時取消 after 失敗（視窗可能已關閉）: {e}",
-                    "ServerMonitorWindow",
-                    e,
+                    f"停止自動刷新時取消 after 失敗（視窗可能已關閉）: {e}"
                 )
             self._auto_refresh_id = None
 
@@ -116,8 +114,7 @@ class ServerMonitorWindow:
                 UIUtils.safe_update_widget(widget, update_func, *args, **kwargs)
         except Exception as e:
             logger.error(
-                f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}",
-                "ServerMonitorWindow",
+                f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}"
             )
 
     def safe_config_widget(self, widget_name: str, **config) -> None:
