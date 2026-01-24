@@ -15,6 +15,9 @@ from typing import Optional
 
 from loguru import logger
 
+# 記憶體常數 Memory Constants
+MB = 1024 * 1024
+
 
 class LoggerConfig:
     """Loguru 日誌配置管理"""
@@ -23,6 +26,7 @@ class LoggerConfig:
     _log_dir: Optional[Path] = None
     _max_folder_size_mb = 10
     _logs_to_delete_when_full = 10
+    _settings_manager = None  # 快取 settings manager
     
     @classmethod
     def initialize(cls) -> None:
@@ -110,7 +114,7 @@ class LoggerConfig:
         except Exception:
             pass
         
-        return total_size / (1024 * 1024)
+        return total_size / MB
     
     @classmethod
     def _cleanup_old_logs_if_needed(cls) -> None:
@@ -167,9 +171,11 @@ class LoggerConfig:
         
         # DEBUG 和 INFO 根據設定決定
         try:
-            from .settings_manager import get_settings_manager
-            settings = get_settings_manager()
-            return settings.is_debug_logging_enabled()
+            # 使用快取的 settings manager
+            if cls._settings_manager is None:
+                from .settings_manager import get_settings_manager
+                cls._settings_manager = get_settings_manager()
+            return cls._settings_manager.is_debug_logging_enabled()
         except Exception:
             # 如果無法取得設定，DEBUG 不輸出，INFO 輸出
             return level == "INFO"

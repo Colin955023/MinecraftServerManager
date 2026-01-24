@@ -39,7 +39,8 @@ class ServerManager:
     STARTUP_CHECK_DELAY = 0.1  # 伺服器啟動檢查延遲（秒）
     # 伺服器停止檢查常數
     STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
-    MAX_STOP_CHECKS = 50  # 最大停止檢查次數（總計約 5 秒: 50 * 0.1s）
+    STOP_TIMEOUT_SECONDS = 5  # 停止超時時間（秒）
+    MAX_STOP_CHECKS = int(STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL)  # 最大停止檢查次數
     # 輸出佇列大小限制
     OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
 
