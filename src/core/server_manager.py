@@ -18,7 +18,6 @@ import subprocess
 import threading
 import time
 import psutil
-import queue
 # ====== 專案內部模組 ======
 from ..models import ServerConfig
 from ..utils import LogUtils, UIUtils
@@ -40,7 +39,7 @@ class ServerManager:
     STARTUP_CHECK_DELAY = 0.1  # 伺服器啟動檢查延遲（秒）
     # 伺服器停止檢查常數
     STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
-    MAX_STOP_CHECKS = 50  # 最大停止檢查次數（總計 5 秒）
+    MAX_STOP_CHECKS = 50  # 最大停止檢查次數（總計約 5 秒: 50 * 0.1s）
     # 輸出佇列大小限制
     OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
 
@@ -256,17 +255,15 @@ class ServerManager:
             if not config:
                 return False
             # 取得 server_path
-            server_path = getattr(config, "path", None)
-            if not server_path:
-                server_path = getattr(config, "server_path", None)
+            server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
             if not server_path:
                 LogUtils.error(
                     f"找不到伺服器路徑，無法儲存 server.properties。config={config}"
                 )
                 return False
-            properties_path = os.path.join(server_path, "server.properties")
+            properties_path = Path(server_path) / "server.properties"
             # 讀取原本的 server.properties
-            if os.path.exists(properties_path):
+            if properties_path.exists():
                 with open(properties_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
                 original = {}
@@ -278,9 +275,7 @@ class ServerManager:
             else:
                 original = {}
             # 合併：只覆蓋有變動的欄位
-            merged = dict(original)
-            for k, v in properties.items():
-                merged[k] = v
+            merged = {**original, **properties}
             # 寫回
             with open(properties_path, "w", encoding="utf-8") as f:
                 f.write("# Minecraft server properties\n")

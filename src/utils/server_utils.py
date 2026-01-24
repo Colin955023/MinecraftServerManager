@@ -21,6 +21,12 @@ from .ui_utils import UIUtils
 from . import java_utils
 
 
+# ====== 記憶體常數 Memory Constants ======
+KB = 1024
+MB = 1024 * 1024
+GB = 1024 * 1024 * 1024
+
+
 # ====== 記憶體工具類別 Memory Utilities ======
 class MemoryUtils:
     """
@@ -66,14 +72,14 @@ class MemoryUtils:
         格式化記憶體大小
         Format memory size
         """
-        if memory_bytes < 1024:
+        if memory_bytes < KB:
             return f"{memory_bytes:.1f} B"
-        elif memory_bytes < 1024 * 1024:
-            return f"{memory_bytes / 1024:.1f} KB"
-        elif memory_bytes < 1024 * 1024 * 1024:
-            return f"{memory_bytes / (1024 * 1024):.1f} MB"
+        elif memory_bytes < MB:
+            return f"{memory_bytes / KB:.1f} KB"
+        elif memory_bytes < GB:
+            return f"{memory_bytes / MB:.1f} MB"
         else:
-            return f"{memory_bytes / (1024 * 1024 * 1024):.1f} GB"
+            return f"{memory_bytes / GB:.1f} GB"
 
     @staticmethod
     def format_memory_mb(memory_mb: int) -> str:

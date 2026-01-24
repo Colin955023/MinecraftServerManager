@@ -26,7 +26,7 @@
 ### 3. 工具層 (Utils Layer) - src/utils/
 提供跨模組共用的通用功能與輔助函式。
 - **JavaUtils / JavaDownloader**: Java 環境的偵測、驗證與自動下載。
-- **LogUtils**: 統一的日誌記錄系統，支援多級別日誌輸出。
+- **Logger (基於 loguru)**: 統一的日誌記錄系統，支援多級別日誌輸出與自動日誌管理。
 - **SettingsManager**: 應用程式設定的持久化存儲與讀取。
 - **UIUtils**: 通用的 UI 輔助函式，如對話框顯示、字體管理等。
 
@@ -107,6 +107,9 @@ MinecraftServerManger/
 ##  使用者資料與伺服器資料路徑
 
 - 使用者設定檔固定存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- 日誌檔案存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
+  - 日誌檔案命名格式：`YYYY-MM-DD-HH-mm.log`
+  - 自動清理機制：當日誌資料夾超過 10MB 時，會自動刪除最舊的 10 筆日誌
 - `user_settings.json` 會記錄「使用者選擇的伺服器主資料夾」(base dir)，實際伺服器資料會放在該資料夾內的 `servers` 子資料夾。
 
 ##  技術堆疊 (Tech Stack)
@@ -121,6 +124,7 @@ MinecraftServerManger/
 - **psutil**: 跨平台系統監控，用於獲取 CPU 與記憶體使用率。
 - **lxml**: 高效能 XML 解析，用於處理 Maven Metadata。
 - **toml**: 解析 TOML 設定檔 (如 Fabric/Forge 配置)。
+- **loguru**: 現代化的日誌記錄函式庫，提供彩色輸出、自動日誌輪轉與執行緒安全等功能。
 
 ##  安全性與合規性
 

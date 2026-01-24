@@ -84,6 +84,7 @@ scripts/build_installer_nuitka.bat
 ##  資料儲存位置
 
 - 使用者設定檔：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- 日誌檔案：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`（自動管理，超過 10MB 時會刪除最舊的 10 筆日誌）
 - 伺服器資料夾：由使用者選擇「主資料夾」後，程式會在該資料夾內建立 `servers` 子資料夾並存放所有伺服器資料。
 
 ##  貢獻與回饋
