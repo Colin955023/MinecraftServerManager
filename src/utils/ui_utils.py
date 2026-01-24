@@ -285,7 +285,6 @@ class UIUtils:
             except Exception as e:
                 logger.exception(
                     f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}"
-                    e,
                 )
 
         def _tick() -> None:
