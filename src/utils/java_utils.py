@@ -49,24 +49,37 @@ def get_java_version(java_path: str) -> int:
         out = subprocess.check_output(
             [java_path, "-version"], stderr=subprocess.STDOUT, encoding="utf-8"
         )
-        m = re.search(r'version "([0-9]+)\.([0-9]+)', out)
+        # 統一的版本解析模式
+        # 先試圖匹配 "version \"X.Y" 格式（Java 9+）
+        m = re.search(r'version "(\d+)\.(\d+)', out)
         if m:
             major = int(m.group(1))
+            # Java 8 及以前版本格式為 "1.8"，需要取第二個數字
             if major == 1:
-                # 1.x 代表 Java 8 及以前
-                m2 = re.search(r'version "1\.([0-9]+)', out)
-                if m2 and m2.group(1) == "8":
-                    return 8
-                return major
+                return int(m.group(2))
+            # Java 9+ 格式為 "9.x", "11.x" 等，直接取第一個數字
             return major
-        m = re.search(r'version "1\.([0-9]+)', out)
+        
+        # 備用模式：直接匹配 "version \"X" 格式
+        m = re.search(r'version "(\d+)"', out)
         if m:
-            if m.group(1) == "8":
-                return 8
             return int(m.group(1))
     except Exception as e:
         logger.exception(f"取得 Java 版本失敗 {java_path}: {e}")
     return None
+
+
+def _ensure_cache_exists(cache_path):
+    """確保快取檔案存在且非空"""
+    if not cache_path.exists() or cache_path.stat().st_size == 0:
+        try:
+            vm = MinecraftVersionManager()
+            vm.fetch_versions()
+        except Exception as e:
+            raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}")
+        # 再次檢查
+        if not cache_path.exists() or cache_path.stat().st_size == 0:
+            raise FileNotFoundError(f"找不到 {cache_path} 或檔案為空")
 
 # 取得指定 Minecraft 版本所需的 Java 版本
 def get_required_java_major(mc_version: str) -> int:
@@ -82,17 +95,10 @@ def get_required_java_major(mc_version: str) -> int:
     """
     if not isinstance(mc_version, str) or not mc_version:
         raise ValueError("mc_version 必須為非空字串")
+    
     cache_path = get_cache_dir() / "mc_versions_cache.json"
-    # 若快取不存在或內容為空，則自動建立快取
-    if not cache_path.exists() or cache_path.stat().st_size == 0:
-        try:
-            vm = MinecraftVersionManager()
-            vm.fetch_versions()
-        except Exception as e:
-            raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}")
-    # 再次檢查
-    if not cache_path.exists() or cache_path.stat().st_size == 0:
-        raise FileNotFoundError(f"找不到 {cache_path} 或檔案為空")
+    _ensure_cache_exists(cache_path)
+    
     with open(cache_path, "r", encoding="utf-8") as f:
         try:
             data = json.load(f)
