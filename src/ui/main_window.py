@@ -188,9 +188,8 @@ class MinecraftServerManager:
                     if isinstance(widget, (tk.Toplevel, ctk.CTkToplevel)):
                         widget.destroy()
                 except Exception as e:
-                    LogUtils.error(
-                        f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}",
-                        "MainWindow",
+                    logger.error(
+                        f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}"
                     )
 
         except Exception as e:
@@ -1025,9 +1024,8 @@ class MinecraftServerManager:
                             self.manage_server_frame.update_selection()
                             break
             except Exception as e:
-                LogUtils.error(
-                    f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}",
-                    "MainWindow",
+                logger.error(
+                    f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}"
                 )
 
         # coalesce：快速連點切換時取消舊的 refresh job
@@ -1634,9 +1632,8 @@ class MinecraftServerManager:
                 properties = ServerPropertiesHelper.load_properties(properties_file)
                 server_config.properties = properties
         except Exception as e:
-            LogUtils.error(
-                f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}",
-                "MainWindow",
+            logger.error(
+                f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}"
             )
 
         # 直接提示初始化完成，並自動跳轉到管理伺服器頁面
@@ -1904,9 +1901,8 @@ class ServerInitializationDialog:
             self._handle_server_completion()
 
         except Exception as e:
-            LogUtils.error(
-                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}",
-                "ServerInitializationDialog",
+            get_logger().bind(component="ServerInitializationDialog").error(
+                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}"
             )
             self._handle_server_error(str(e))
 
@@ -1959,9 +1955,8 @@ class ServerInitializationDialog:
                         # 去除尾端的 %* 或其他 shell 變數符號
                         cleaned = re.sub(r"\s*[%$]\*?$", "", line.strip())
                         java_cmd = cleaned.split()
-                        LogUtils.debug(
-                            f"forge_java_command: {java_cmd}",
-                            "ServerInitializationDialog",
+                        get_logger().bind(component="ServerInitializationDialog").debug(
+                            f"forge_java_command: {java_cmd}"
                         )
                         return java_cmd
         except Exception as e:

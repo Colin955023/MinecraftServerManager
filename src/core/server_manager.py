@@ -131,7 +131,7 @@ class ServerManager:
                             f"偵測失敗：loader_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
                         )
                 except Exception as e:
-                    logger.error(f"自動偵測伺服器類型失敗: {e}", "ServerManager")
+                    logger.error(f"自動偵測伺服器類型失敗: {e}")
                     raise
             # 儲存配置
             self.servers[config.name] = config
@@ -213,8 +213,8 @@ class ServerManager:
         java_command_str = ServerCommands.build_java_command(config, return_list=False)
 
         # 調試信息
-        logger.debug(f"Java 命令: {java_command_str}", "ServerManager")
-        logger.debug(f"記憶體參數: {memory_args}", "ServerManager")
+        logger.debug(f"Java 命令: {java_command_str}")
+        logger.debug(f"記憶體參數: {memory_args}")
 
         # Windows 批次檔
         bat_lines = [
@@ -261,7 +261,7 @@ class ServerManager:
             # 取得 server_path
             server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
             if not server_path:
-                LogUtils.error(
+                logger.error(
                     f"找不到伺服器路徑，無法儲存 server.properties。config={config}"
                 )
                 return False
@@ -325,7 +325,7 @@ class ServerManager:
             script_path = ServerDetectionUtils.find_startup_script(server_path)
 
             if script_path:
-                logger.info(f"找到啟動腳本: {script_path}", "ServerManager")
+                logger.info(f"找到啟動腳本: {script_path}")
             else:
                 UIUtils.show_error(
                     "啟動腳本未找到",
@@ -335,9 +335,9 @@ class ServerManager:
                 return False
 
             # 增加調試信息
-            logger.debug(f"準備啟動伺服器: {server_name}", "ServerManager")
-            logger.debug(f"腳本路徑: {script_path}", "ServerManager")
-            logger.debug(f"工作目錄: {server_path}", "ServerManager")
+            logger.debug(f"準備啟動伺服器: {server_name}")
+            logger.debug(f"腳本路徑: {script_path}")
+            logger.debug(f"工作目錄: {server_path}")
 
             # 啟動伺服器 (Windows)
             try:
@@ -347,8 +347,8 @@ class ServerManager:
 
                 # 建構正確的命令
                 cmd = [str(abs_script_path)]
-                logger.debug(f"執行命令: {cmd}", "ServerManager")
-                logger.debug(f"工作目錄: {abs_server_path}", "ServerManager")
+                logger.debug(f"執行命令: {cmd}")
+                logger.debug(f"工作目錄: {abs_server_path}")
 
                 # 在伺服器目錄中執行，支援標準輸入/輸出管道
                 process = subprocess.Popen(
@@ -375,9 +375,9 @@ class ServerManager:
                     # 嘗試讀取錯誤信息
                     try:
                         stdout, stderr = process.communicate(timeout=1)
-                        logger.error(f"標準輸出: {stdout}", "ServerManager")
+                        logger.error(f"標準輸出: {stdout}")
                         if stderr:
-                            logger.error(f"標準錯誤: {stderr}", "ServerManager")
+                            logger.error(f"標準錯誤: {stderr}")
                     except Exception as e:
                         logger.exception(f"無法讀取錯誤信息: {e}")
                     UIUtils.show_error(
@@ -407,7 +407,7 @@ class ServerManager:
                                     raw = proc.stdout.buffer.readline()
                                     line = raw.decode("utf-8", errors="ignore")
                                 except Exception as e2:
-                                    LogUtils.error_exc(
+                                    logger.exception(
                                         f"{name} 嚴重編碼錯誤: {e2}",
                                         "output_reader",
                                         e2,
@@ -431,7 +431,7 @@ class ServerManager:
                 t.start()
                 self.output_threads[server_name] = t
 
-                LogUtils.info(
+                logger.info(
                     f"伺服器 {server_name} 啟動成功，PID: {process.pid}",
                     "ServerManager",
                 )
@@ -671,7 +671,7 @@ class ServerManager:
         """
         try:
             if server_name not in self.running_servers:
-                logger.info(f"伺服器 {server_name} 未在運行", "ServerManager")
+                logger.info(f"伺服器 {server_name} 未在運行")
                 return False
 
             process = self.running_servers[server_name]
@@ -692,7 +692,7 @@ class ServerManager:
                         process.kill()
                         process.wait()
 
-                logger.info(f"伺服器 {server_name} 已停止", "ServerManager")
+                logger.info(f"伺服器 {server_name} 已停止")
 
             # 清理所有相關資源
             del self.running_servers[server_name]
@@ -778,7 +778,7 @@ class ServerManager:
                             if ps_process.name().lower().startswith("java"):
                                 all_candidates.append(ps_process)
                         except Exception as e:
-                            LogUtils.error_exc(
+                            logger.exception(
                                 f"取得進程名稱失敗 pid={process.pid}: {e}",
                                 "ServerManager",
                                 e,
@@ -792,7 +792,7 @@ class ServerManager:
                                 ]
                             )
                         except Exception as e:
-                            LogUtils.error_exc(
+                            logger.exception(
                                 f"取得子進程清單失敗 pid={process.pid}: {e}",
                                 "ServerManager",
                                 e,
@@ -863,13 +863,13 @@ class ServerManager:
         """
         try:
             if server_name not in self.running_servers:
-                logger.info(f"伺服器 {server_name} 未在運行", "ServerManager")
+                logger.info(f"伺服器 {server_name} 未在運行")
                 return False
 
             process = self.running_servers[server_name]
             if process.poll() is not None:  # 程序已結束
                 del self.running_servers[server_name]
-                logger.info(f"伺服器 {server_name} 程序已結束", "ServerManager")
+                logger.info(f"伺服器 {server_name} 程序已結束")
                 return False
 
             # 發送命令
@@ -889,7 +889,7 @@ class ServerManager:
                                 # 程序已停止
                                 if server_name in self.running_servers:
                                     del self.running_servers[server_name]
-                                    LogUtils.info(
+                                    logger.info(
                                         f"伺服器 {server_name} 已確認停止",
                                         "ServerManager",
                                     )
@@ -900,7 +900,7 @@ class ServerManager:
 
                 return True
             else:
-                LogUtils.error(
+                logger.error(
                     f"無法向伺服器 {server_name} 發送命令：stdin 不可用",
                     "ServerManager",
                 )
