@@ -13,8 +13,10 @@ import webbrowser
 
 # ====== 專案內部模組 ======
 from .http_utils import HTTPUtils
-from .log_utils import LogUtils
+from .logger import get_logger
 from .ui_utils import UIUtils
+
+logger = get_logger().bind(component="UpdateChecker")
 
 GITHUB_API = "https://api.github.com"
 
@@ -62,7 +64,7 @@ def _get_latest_release(owner: str, repo: str) -> dict:
             if rel and not rel.get("draft") and not rel.get("prerelease"):
                 return rel
         except Exception as e:
-            LogUtils.debug(f"檢查 release 資料時發生錯誤: {e}", "UpdateChecker")
+            logger.debug(f"檢查 release 資料時發生錯誤: {e}")
             continue
     return {}
 
@@ -77,7 +79,7 @@ def _choose_installer_asset(release: dict) -> dict:
             if name.endswith(".exe") and a.get("browser_download_url"):
                 exe_assets.append(a)
         except Exception as e:
-            LogUtils.debug(f"檢查 asset 資料時發生錯誤: {e}", "UpdateChecker")
+            logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
             continue
     if not exe_assets:
         return {}
@@ -138,7 +140,7 @@ def check_and_prompt_update(
                 return result["value"]
         except Exception as e:
             # 任何排程失敗都退回直接呼叫（最後備援）
-            LogUtils.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}", "UpdateChecker")
+            logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
             pass
         return func()
 
@@ -243,7 +245,7 @@ def check_and_prompt_update(
                     )
                 )
         except Exception as e:
-            LogUtils.error_exc(f"更新檢查失敗: {e}", "UpdateChecker", e)
+            logger.exception(f"更新檢查失敗: {e}")
             _call_on_ui(
                 lambda: UIUtils.show_error(
                     "更新檢查失敗",

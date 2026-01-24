@@ -201,3 +201,46 @@ _logger = LoggerConfig.get_logger()
 def get_logger():
     """取得全域 logger 實例"""
     return _logger
+
+
+# 便捷函數，直接使用 loguru（不需要 component 參數時的簡化版本）
+def info(message: str, component: str = ""):
+    """記錄 INFO 級別訊息"""
+    if component:
+        _logger.bind(component=component).info(message)
+    else:
+        _logger.bind(component="").info(message)
+
+
+def warning(message: str, component: str = ""):
+    """記錄 WARNING 級別訊息"""
+    if component:
+        _logger.bind(component=component).warning(message)
+    else:
+        _logger.bind(component="").warning(message)
+
+
+def error(message: str, component: str = ""):
+    """記錄 ERROR 級別訊息"""
+    if component:
+        _logger.bind(component=component).error(message)
+    else:
+        _logger.bind(component="").error(message)
+
+
+def debug(message: str, component: str = ""):
+    """記錄 DEBUG 級別訊息"""
+    if component:
+        _logger.bind(component=component).debug(message)
+    else:
+        _logger.bind(component="").debug(message)
+
+
+def error_with_exception(message: str, component: str = "", exc: Exception = None):
+    """記錄錯誤並附上 traceback"""
+    import traceback
+    if exc is not None:
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    else:
+        trace = traceback.format_exc()
+    error(f"{message}\n{trace}", component)

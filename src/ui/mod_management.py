@@ -24,9 +24,12 @@ import customtkinter as ctk
 # ====== 專案內部模組 ======
 from . import CustomDropdown
 from ..core import MinecraftVersionManager, ModManager, ModStatus
-from ..utils import HTTPUtils, LogUtils, UIUtils, get_settings_manager
+from ..utils import HTTPUtils, UIUtils, get_settings_manager
+from ..utils.logger import get_logger
 from ..utils import font_manager, get_dpi_scaled_size, get_font
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+
+logger = get_logger().bind(component="ModManagement")
 
 # 提供同步查詢的 search_mods_online 及 enhance_local_mod 包裝
 def search_mods_online(
@@ -66,7 +69,7 @@ def search_mods_online(
     full_url = url + "?" + urllib.parse.urlencode(params)
     response = HTTPUtils.get_json(url=full_url, headers=headers, timeout=10)
     if not response:
-        LogUtils.error("Modrinth API request failed")
+        logger.error("Modrinth API request failed")
         return []
     hits = response.get("hits", [])
     mods = []
@@ -194,9 +197,7 @@ class ModManagementFrame:
                 else:
                     self.status_label.configure(text=message)
         except Exception as e:
-            LogUtils.error(
-                f"更新狀態失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
 
     def update_status_safe(self, message: str) -> None:
         """
@@ -344,7 +345,7 @@ class ModManagementFrame:
             elif current_tab == 1:  # 線上瀏覽頁面
                 pass  # 線上頁面不需要自動重新整理
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}",
                 "ModManagementFrame",
             )
@@ -510,7 +511,7 @@ class ModManagementFrame:
                     self.enhance_local_mods()
                     self.update_status_safe(f"找到 {len(mods)} 個本地模組 (已重新整理)")
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"強制掃描失敗: {e}\n{traceback.format_exc()}",
                         "ModManagementFrame",
                     )
@@ -720,7 +721,7 @@ class ModManagementFrame:
                         if result:
                             os.startfile(file_path)
                     except Exception as e:
-                        LogUtils.error(
+                        logger.bind(component="").error(
                             f"開啟檔案失敗: {e}\n{traceback.format_exc()}",
                             "ModManagementFrame",
                         )
@@ -754,9 +755,7 @@ class ModManagementFrame:
             dialog.bind("<Escape>", lambda e: dialog.destroy())
 
         except Exception as e:
-            LogUtils.error(
-                f"匯出對話框錯誤: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"匯出對話框錯誤: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("匯出對話框錯誤", str(e), self.parent)
 
     def create_status_bar(self) -> None:
@@ -814,7 +813,7 @@ class ModManagementFrame:
                 self.on_server_changed()
 
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"載入伺服器列表失敗: {e}\n{traceback.format_exc()}",
                 "ModManagementFrame",
             )
@@ -852,9 +851,7 @@ class ModManagementFrame:
                 self.on_server_selected(server_name)
 
         except Exception as e:
-            LogUtils.error(
-                f"切換伺服器失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"切換伺服器失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("錯誤", f"切換伺服器失敗: {e}", self.parent)
 
     def load_local_mods(self) -> None:
@@ -888,9 +885,7 @@ class ModManagementFrame:
                 self.enhance_local_mods()
                 self.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
-                LogUtils.error(
-                    f"掃描失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-                )
+                logger.error(f"掃描失敗: {e}\n{traceback.format_exc()}")
                 self.update_progress_safe(0)
                 self.update_status_safe(f"掃描失敗: {e}")
 
@@ -904,7 +899,7 @@ class ModManagementFrame:
                 if enhanced:
                     self.enhanced_mods_cache[mod.filename] = enhanced
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}",
                     "ModManagementFrame",
                 )
@@ -1134,12 +1129,12 @@ class ModManagementFrame:
                     if hasattr(self, "select_all_btn") and self.select_all_btn:
                         self.select_all_btn.configure(state=state)
                 except Exception as e:
-                    LogUtils.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
+                    logger.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
                 try:
                     if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
                         self.batch_toggle_btn.configure(state=state)
                 except Exception as e:
-                    LogUtils.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
+                    logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
 
             # 切換狀態（背景執行 rename），成功後僅更新該列顯示
             def do_toggle() -> None:
@@ -1222,9 +1217,7 @@ class ModManagementFrame:
         except Exception as e:
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.update_status(f"操作失敗: {e}")
-            LogUtils.error(
-                f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}")
 
     def filter_local_mods(self, *args) -> None:
         """篩選本地模組"""
@@ -1274,9 +1267,7 @@ class ModManagementFrame:
                 self.load_local_mods()
 
             except Exception as e:
-                LogUtils.error(
-                    f"匯入模組失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-                )
+                logger.error(f"匯入模組失敗: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error("錯誤", f"匯入模組失敗: {e}", self.parent)
 
     def open_mods_folder(self) -> None:
@@ -1310,9 +1301,7 @@ class ModManagementFrame:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status("模組資訊已複製到剪貼板")
         except Exception as e:
-            LogUtils.error(
-                f"複製模組資訊失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"複製模組資訊失敗: {e}\n{traceback.format_exc()}")
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"複製失敗: {e}")
 
@@ -1365,9 +1354,7 @@ class ModManagementFrame:
                     self.status_label.configure(text="無法識別模組檔案")
 
         except Exception as e:
-            LogUtils.error(
-                f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"開啟檔案總管失敗: {e}")
 
@@ -1431,9 +1418,7 @@ class ModManagementFrame:
                     self.status_label.configure(text="無法識別要刪除的模組")
 
         except Exception as e:
-            LogUtils.error(
-                f"刪除模組失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"刪除模組失敗: {e}\n{traceback.format_exc()}")
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text=f"刪除失敗: {e}")
             UIUtils.show_error("錯誤", f"刪除模組失敗: {e}", self.parent)
@@ -1443,7 +1428,7 @@ class ModManagementFrame:
         if hasattr(self, "main_frame") and self.main_frame:
             return self.main_frame
         else:
-            LogUtils.debug("主框架未初始化")
+            logger.debug("主框架未初始化")
             return None
 
     def toggle_select_all(self) -> None:
@@ -1466,9 +1451,7 @@ class ModManagementFrame:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="☑️ 全選")
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
-                    )
+                    logger.exception(f"更新全選按鈕文字失敗: {e}")
             else:
                 # 全選
                 self.local_tree.selection_set(*items)
@@ -1486,16 +1469,12 @@ class ModManagementFrame:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="❌ 取消全選")
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
-                    )
+                    logger.exception(f"更新全選按鈕文字失敗: {e}")
             # 更新狀態顯示
             self.update_selection_status()
 
         except Exception as e:
-            LogUtils.error(
-                f"切換全選失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"切換全選失敗: {e}\n{traceback.format_exc()}")
 
     def batch_toggle_selected(self) -> None:
         """批量切換選中模組的啟用/停用狀態"""
@@ -1541,12 +1520,12 @@ class ModManagementFrame:
                     if hasattr(self, "select_all_btn") and self.select_all_btn:
                         self.select_all_btn.configure(state=state)
                 except Exception as e:
-                    LogUtils.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
+                    logger.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
                 try:
                     if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
                         self.batch_toggle_btn.configure(state=state)
                 except Exception as e:
-                    LogUtils.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
+                    logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
 
             def do_batch():
                 total = len(selected_pairs)
@@ -1646,7 +1625,7 @@ class ModManagementFrame:
                                     )
                             except Exception as e:
                                 # 批量過程中 UI 更新失敗不阻塞主流程
-                                LogUtils.debug(f"批量更新 UI row 失敗: {e}", "ModManagement")
+                                logger.debug(f"批量更新 UI row 失敗: {e}", "ModManagement")
 
                         self.ui_queue.put(apply_row_update)
                     else:
@@ -1667,9 +1646,7 @@ class ModManagementFrame:
 
             threading.Thread(target=do_batch, daemon=True).start()
         except Exception as e:
-            LogUtils.error(
-                f"批量操作失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"批量操作失敗: {e}\n{traceback.format_exc()}")
             self.update_progress_safe(0)
             UIUtils.show_error("錯誤", f"批量操作失敗: {e}", self.parent)
 
@@ -1688,9 +1665,7 @@ class ModManagementFrame:
                 self.status_label.configure(text=status_text)
 
         except Exception as e:
-            LogUtils.error(
-                f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}")
 
     def on_tree_selection_changed(self, event=None) -> None:
         """樹狀檢視選擇變化事件"""
@@ -1718,34 +1693,28 @@ class ModManagementFrame:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="☑️ 全選")
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
-                    )
+                    logger.exception(f"更新全選按鈕文字失敗: {e}")
             elif selected_items_count == total_items:
                 self.all_selected = True
                 try:
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="❌ 取消全選")
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"更新全選按鈕文字失敗: {e}", "ModManagementFrame", e
-                    )
+                    logger.exception(f"更新全選按鈕文字失敗: {e}")
 
         except Exception as e:
-            LogUtils.error(
-                f"處理選擇變化失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
-            )
+            logger.error(f"處理選擇變化失敗: {e}\n{traceback.format_exc()}")
 
     def pack(self, **kwargs) -> None:
         """讓框架可以被 pack"""
         if hasattr(self, "main_frame") and self.main_frame:
             self.main_frame.pack(**kwargs)
         else:
-            LogUtils.debug("主框架未初始化，無法打包", "ModManagementFrame")
+            logger.debug("主框架未初始化，無法打包", "ModManagementFrame")
 
     def grid(self, **kwargs) -> None:
         """讓框架可以被 grid"""
         if hasattr(self, "main_frame") and self.main_frame:
             self.main_frame.grid(**kwargs)
         else:
-            LogUtils.debug("主框架未初始化，無法佈局", "ModManagementFrame")
+            logger.debug("主框架未初始化，無法佈局", "ModManagementFrame")

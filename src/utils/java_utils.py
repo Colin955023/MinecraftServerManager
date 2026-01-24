@@ -18,9 +18,11 @@ from typing import Optional
 from .http_utils import HTTPUtils
 from .runtime_paths import get_cache_dir
 from .ui_utils import UIUtils
-from .log_utils import LogUtils
+from .logger import get_logger
 from src.core import MinecraftVersionManager
 from .java_downloader import install_java_with_winget
+
+logger = get_logger().bind(component="JavaUtils")
 
 COMMON_JAVA_PATHS = [
     r"C:\\Program Files\\Java",
@@ -63,7 +65,7 @@ def get_java_version(java_path: str) -> int:
                 return 8
             return int(m.group(1))
     except Exception as e:
-        LogUtils.error_exc(f"取得 Java 版本失敗 {java_path}: {e}", "JavaUtils", e)
+        logger.exception(f"取得 Java 版本失敗 {java_path}: {e}")
     return None
 
 # 取得指定 Minecraft 版本所需的 Java 版本
@@ -162,7 +164,7 @@ def get_all_local_java_candidates() -> list:
                     if os.path.isfile(javaw_path):
                         search_paths.add(os.path.dirname(javaw_path))
     except Exception as e:
-        LogUtils.error_exc(f"PATH 環境變數尋找 java 失敗：{e}", "JavaUtils", e)
+        logger.exception(f"PATH 環境變數尋找 java 失敗：{e}")
 
     # 4.where javaw 檢查
     candidates = []
@@ -177,7 +179,7 @@ def get_all_local_java_candidates() -> list:
                     if major:
                         candidates.append((os.path.normpath(java_path), major))
     except Exception as e:
-        LogUtils.error_exc(f"搜尋 Java 失敗: {e}", "JavaUtils", e)
+        logger.exception(f"搜尋 Java 失敗: {e}")
 
     # 5.搜尋所有目錄下的 javaw.exe
     for p in search_paths:
@@ -196,9 +198,9 @@ def get_all_local_java_candidates() -> list:
             result.append((path, major))
 
     result.sort(key=lambda x: x[1])
-    LogUtils.info(f"找到 {len(result)} 個 Java 執行檔選擇：", "JavaUtils")
+    logger.info(f"找到 {len(result)} 個 Java 執行檔選擇：")
     for path, major in result:
-        LogUtils.info(f"  {path} -> {major}", "JavaUtils")
+        logger.info(f"  {path} -> {major}")
     return result
 
 
@@ -249,8 +251,8 @@ def get_best_java_path(
                         )
                         return path
             except Exception as e:
-                LogUtils.error_exc(
-                    f"自動下載 Microsoft JDK {required_major} 失敗：{e}", "JavaUtils", e
+                logger.exception(
+                    f"自動下載 Microsoft JDK {required_major} 失敗：{e}"
                 )
                 UIUtils.show_error(
                     "Java 下載失敗",

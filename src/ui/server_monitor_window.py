@@ -22,7 +22,10 @@ from ..utils import (
     get_dpi_scaled_size,
     get_font,
 )
-from ..utils import UIUtils, LogUtils
+from ..utils import UIUtils
+from ..utils.logger import get_logger
+
+logger = get_logger().bind(component="ServerMonitorWindow")
 
 class ServerMonitorWindow:
     """
@@ -279,9 +282,7 @@ class ServerMonitorWindow:
         self.version_label = ctk.CTkLabel(
             right_frame, text="📦 版本: N/A", font=get_font(size=18), anchor="w"
         )
-        LogUtils.debug(
-            "初始化 ServerMonitorWindow，預設版本顯示 N/A", "ServerMonitorWindow"
-        )
+        logger.debug("初始化 ServerMonitorWindow，預設版本顯示 N/A")
         self.version_label.pack(anchor="w", pady=2)
 
         # 玩家列表面板
@@ -329,9 +330,9 @@ class ServerMonitorWindow:
             self.window.clipboard_clear()
             self.window.clipboard_append(name)
             self.window.update()  # 確保剪貼簿更新生效
-            LogUtils.info(f"已複製玩家名稱: {name}", "ServerMonitorWindow")
+            logger.info(f"已複製玩家名稱: {name}", "ServerMonitorWindow")
         except Exception as e:
-            LogUtils.error(f"複製玩家名稱失敗: {e}", "ServerMonitorWindow")
+            logger.error(f"複製玩家名稱失敗: {e}", "ServerMonitorWindow")
 
     def create_console_panel(self, parent) -> None:
         """
@@ -805,9 +806,7 @@ class ServerMonitorWindow:
             # 在主線程中更新 UI
             self._update_ui(info)
         except Exception as e:
-            LogUtils.error(
-                f"更新狀態失敗: {e}\n{traceback.format_exc()}", "ServerMonitorWindow"
-            )
+            logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
 
     def start_server(self) -> None:
         """
@@ -908,9 +907,7 @@ class ServerMonitorWindow:
             else:
                 self.add_console_message("⚠️ 未找到日誌檔案")
         except Exception as e:
-            LogUtils.error(
-                f"載入日誌失敗: {e}\n{traceback.format_exc()}", "ServerMonitorWindow"
-            )
+            logger.error(f"載入日誌失敗: {e}\n{traceback.format_exc()}")
             self.add_console_message(f"❌ 載入日誌失敗: {e}")
 
         # 更新狀態

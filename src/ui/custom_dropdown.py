@@ -13,7 +13,10 @@ import tkinter as tk
 import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..utils import font_manager, get_font
-from ..utils import UIUtils, LogUtils
+from ..utils import UIUtils
+from ..utils.logger import get_logger
+
+logger = get_logger().bind(component="CustomDropdown")
 
 class CustomDropdown(ctk.CTkFrame):
     """
@@ -329,9 +332,7 @@ class CustomDropdown(ctk.CTkFrame):
             try:
                 self.command(value)
             except Exception as e:
-                LogUtils.error(
-                    f"下拉選單回調錯誤: {e}\n{traceback.format_exc()}", "CustomDropdown"
-                )
+                logger.error(f"下拉選單回調錯誤: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error(
                     "錯誤", f"下拉選單回調錯誤: {e}", self.winfo_toplevel()
                 )
@@ -372,7 +373,7 @@ class CustomDropdown(ctk.CTkFrame):
                 try:
                     self.command(new_value)
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"滾輪事件回調錯誤: {e}\n{traceback.format_exc()}",
                         "CustomDropdown",
                     )
@@ -421,7 +422,7 @@ class CustomDropdown(ctk.CTkFrame):
                 if not (in_dropdown or in_button):
                     self._close_dropdown()
             except Exception as e:
-                LogUtils.error_exc(f"全域點擊處理失敗: {e}", "CustomDropdown", e)
+                logger.exception(f"全域點擊處理失敗: {e}")
 
         # 綁定到頂層視窗
         toplevel = self.winfo_toplevel()
@@ -435,7 +436,7 @@ class CustomDropdown(ctk.CTkFrame):
                 toplevel = self.winfo_toplevel()
                 toplevel.unbind("<Button-1>")
             except Exception as e:
-                LogUtils.error_exc(f"移除全域點擊綁定失敗: {e}", "CustomDropdown", e)
+                logger.exception(f"移除全域點擊綁定失敗: {e}")
 
     # 公共方法，模擬 CTkComboBox/CTkOptionMenu 的介面
     def get(self) -> str:

@@ -22,8 +22,11 @@ import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..core import ServerConfig, ServerManager
 from ..utils import MemoryUtils, ServerDetectionUtils, ServerOperations, get_font
-from ..utils import LogUtils, UIUtils
+from ..utils import UIUtils
+from ..utils.logger import get_logger
 from . import ServerMonitorWindow, ServerPropertiesDialog
+
+logger = get_logger().bind(component="ManageServerFrame")
 
 class ManageServerFrame(ctk.CTkFrame):
     """
@@ -79,10 +82,8 @@ class ManageServerFrame(ctk.CTkFrame):
                 try:
                     self.after_cancel(job_id)
                 except Exception as e:
-                    LogUtils.error_exc(
-                        f"取消排程失敗 {attr_name}={job_id}: {e}",
-                        "ManageServerFrame",
-                        e,
+                    logger.exception(
+                        f"取消排程失敗 {attr_name}={job_id}: {e}"
                     )
                 setattr(self, attr_name, None)
 
@@ -99,9 +100,7 @@ class ManageServerFrame(ctk.CTkFrame):
             try:
                 self.after_cancel(job_id)
             except Exception as e:
-                LogUtils.error_exc(
-                    f"取消刷新排程失敗 job={job_id}: {e}", "ManageServerFrame", e
-                )
+                logger.exception(f"取消刷新排程失敗 job={job_id}: {e}")
         self._delayed_refresh_job = self.after(delay_ms, self.refresh_servers)
 
     def create_widgets(self) -> None:
@@ -367,7 +366,7 @@ class ManageServerFrame(ctk.CTkFrame):
             try:
                 os.makedirs(new_backup_path, exist_ok=True)
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
                     "ManageServerFrame",
                 )
@@ -436,7 +435,7 @@ class ManageServerFrame(ctk.CTkFrame):
         try:
             os.startfile(config.backup_path)
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"無法開啟備份資料夾: {e}\n{traceback.format_exc()}",
                 "ManageServerFrame",
             )
@@ -498,9 +497,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 return "📁 已設定路徑"
 
         except Exception as e:
-            LogUtils.error(
-                f"檢查備份狀態失敗: {e}\n{traceback.format_exc()}", "ManageServerFrame"
-            )
+            logger.error(f"檢查備份狀態失敗: {e}\n{traceback.format_exc()}")
             return "❓ 檢查失敗"
 
     def create_actions(self, parent) -> None:
@@ -572,7 +569,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 try:
                     servers_root = self.set_servers_root(base_dir)
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"寫入伺服器路徑設定失敗: {e}\n{traceback.format_exc()}",
                         "ManageServerFrame",
                     )
@@ -589,7 +586,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 try:
                     servers_root_path.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"無法建立 servers 資料夾: {e}\n{traceback.format_exc()}",
                         "ManageServerFrame",
                     )
@@ -626,9 +623,7 @@ class ManageServerFrame(ctk.CTkFrame):
                     lambda: self._detect_servers_callback(count, show_message)
                 )
             except Exception as error:
-                LogUtils.error(
-                    f"偵測失敗: {error}\n{traceback.format_exc()}", "ManageServerFrame"
-                )
+                logger.error(f"偵測失敗: {error}\n{traceback.format_exc()}")
                 self.ui_queue.put(
                     lambda: UIUtils.show_error(
                         "錯誤", f"偵測失敗: {error}", self.winfo_toplevel()
@@ -760,7 +755,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 server_data = self._refresh_servers_task()
                 self.ui_queue.put(lambda: self._refresh_servers_callback(server_data))
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"重新整理伺服器列表失敗: {e}\n{traceback.format_exc()}",
                     "ManageServerFrame",
                 )
@@ -1072,9 +1067,7 @@ class ManageServerFrame(ctk.CTkFrame):
         try:
             os.startfile(path)
         except Exception as e:
-            LogUtils.error(
-                f"無法開啟資料夾: {e}\n{traceback.format_exc()}", "ManageServerFrame"
-            )
+            logger.error(f"無法開啟資料夾: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("錯誤", f"無法開啟資料夾: {e}", self.winfo_toplevel())
 
     def delete_server(self) -> None:
@@ -1137,7 +1130,7 @@ class ManageServerFrame(ctk.CTkFrame):
                         self.winfo_toplevel(),
                     )
                 except Exception as e:
-                    LogUtils.error(
+                    logger.bind(component="").error(
                         f"刪除備份失敗: {e}\n{traceback.format_exc()}",
                         "ManageServerFrame",
                     )
@@ -1217,7 +1210,7 @@ class ManageServerFrame(ctk.CTkFrame):
             try:
                 os.makedirs(backup_location, exist_ok=True)
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
                     "ManageServerFrame",
                 )
@@ -1332,7 +1325,7 @@ pause"""
                 self._schedule_refresh(5000)
 
             except Exception as e:
-                LogUtils.error(
+                logger.bind(component="").error(
                     f"執行備份批次檔失敗: {e}\n{traceback.format_exc()}",
                     "ManageServerFrame",
                 )
@@ -1341,7 +1334,7 @@ pause"""
                 )
 
         except Exception as e:
-            LogUtils.error(
+            logger.bind(component="").error(
                 f"建立備份批次檔失敗: {e}\n{traceback.format_exc()}",
                 "ManageServerFrame",
             )

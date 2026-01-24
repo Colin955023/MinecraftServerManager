@@ -15,8 +15,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import aiohttp
 # ====== 專案內部模組 ======
-from src.utils import LogUtils
+from src.utils.logger import get_logger
 from src.version_info import APP_NAME, APP_VERSION
+
+logger = get_logger().bind(component="HTTPUtils")
 
 class HTTPUtils:
     """
@@ -85,7 +87,7 @@ class HTTPUtils:
             Optional[Dict[str, Any]]: 成功時返回 JSON 字典，失敗時返回 None
         """
         if not url or not isinstance(url, str):
-            LogUtils.error("HTTP GET JSON 請求失敗: URL 參數無效", "HTTPUtils")
+            logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
         timeout = max(10, timeout)
 
@@ -96,7 +98,7 @@ class HTTPUtils:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            LogUtils.error_exc(f"HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils", e)
+            logger.exception(f"HTTP GET JSON 請求失敗 ({url}): {e}")
             return None
 
     # ====== 內容資料請求 ======
@@ -123,7 +125,7 @@ class HTTPUtils:
             Optional[requests.Response]: 成功時返回 Response 物件，失敗時返回 None
         """
         if not url or not isinstance(url, str):
-            LogUtils.error("HTTP GET 請求失敗: URL 參數無效", "HTTPUtils")
+            logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
         timeout = max(30, timeout)
 
@@ -136,7 +138,7 @@ class HTTPUtils:
             response.raise_for_status()
             return response
         except Exception as e:
-            LogUtils.error_exc(f"HTTP GET 請求失敗 ({url}): {e}", "HTTPUtils", e)
+            logger.exception(f"HTTP GET 請求失敗 ({url}): {e}")
             return None
 
     # ====== 檔案下載功能 ======
@@ -159,10 +161,10 @@ class HTTPUtils:
             bool: 下載成功返回 True，失敗返回 False
         """
         if not url or not isinstance(url, str):
-            LogUtils.error("檔案下載失敗: URL 參數無效", "HTTPUtils")
+            logger.error("檔案下載失敗: URL 參數無效")
             return False
         if not local_path or not isinstance(local_path, str):
-            LogUtils.error("檔案下載失敗: 本地路徑參數無效", "HTTPUtils")
+            logger.error("檔案下載失敗: 本地路徑參數無效")
             return False
 
         timeout = max(60, timeout)
@@ -181,8 +183,8 @@ class HTTPUtils:
                             f.write(chunk)
             return True
         except Exception as e:
-            LogUtils.error_exc(
-                f"檔案下載失敗 ({url} -> {local_path}): {e}", "HTTPUtils", e
+            logger.exception(
+                f"檔案下載失敗 ({url} -> {local_path}): {e}"
             )
             return False
 
@@ -221,8 +223,8 @@ class HTTPUtils:
                     response.raise_for_status()
                     return await response.json()
             except Exception as e:
-                LogUtils.error_exc(
-                    f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}", "HTTPUtils", e
+                logger.exception(
+                    f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}"
                 )
                 return None
 
@@ -274,7 +276,7 @@ class HTTPUtils:
                     HTTPUtils.get_json_batch_async(urls, timeout, headers, max_workers)
                 )
         except Exception as e:
-            LogUtils.error_exc(f"批次 HTTP 請求失敗: {e}", "HTTPUtils", e)
+            logger.exception(f"批次 HTTP 請求失敗: {e}")
             return [None] * len(urls)
 
 # ====== 向後相容性函數別名 ======

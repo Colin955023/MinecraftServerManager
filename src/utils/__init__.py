@@ -13,8 +13,13 @@ import importlib
 from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
-    # logging
-    "LogUtils": (".log_utils", "LogUtils"),
+    # logging (now using loguru directly)
+    "get_logger": (".logger", "get_logger"),
+    "log_info": (".logger", "info"),
+    "log_warning": (".logger", "warning"),
+    "log_error": (".logger", "error"),
+    "log_debug": (".logger", "debug"),
+    "log_error_with_exception": (".logger", "error_with_exception"),
     # UI helpers
     "UIUtils": (".ui_utils", "UIUtils"),
     "DialogUtils": (".ui_utils", "DialogUtils"),

@@ -13,7 +13,9 @@ import ctypes
 import time
 # ====== 專案內部模組 ======
 from .settings_manager import get_settings_manager
-from .log_utils import LogUtils
+from .logger import get_logger
+
+logger = get_logger().bind(component="WindowManager")
 
 class WindowManager:
     """
@@ -79,7 +81,7 @@ class WindowManager:
                 "center_y": screen_height // 2,
             }
         except Exception as e:
-            LogUtils.error_exc(f"取得螢幕資訊失敗: {e}", "WindowManager", e)
+            logger.exception(f"取得螢幕資訊失敗: {e}")
             # 回傳預設值
             return {
                 "width": 1920,
@@ -206,9 +208,9 @@ class WindowManager:
             ):
                 window.after(100, lambda: window.state("zoomed"))
 
-            LogUtils.debug_window_state(f"主視窗設定: {width}x{height}+{x}+{y}")
+            get_logger().bind(component="WindowState").debug(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
-            LogUtils.error_exc(f"設定主視窗失敗: {e}", "WindowManager", e)
+            logger.exception(f"設定主視窗失敗: {e}")
             # 備用設定
             window.geometry("1200x800")
             window.minsize(1000, 700)
@@ -254,10 +256,10 @@ class WindowManager:
                 not hasattr(WindowManager, "_last_debug_time")
                 or current_time - WindowManager._last_debug_time > 5
             ):
-                LogUtils.debug_window_state("已儲存主視窗狀態")
+                get_logger().bind(component="WindowState").debug("已儲存主視窗狀態")
                 WindowManager._last_debug_time = current_time
         except Exception as e:
-            LogUtils.error_exc(f"儲存主視窗狀態失敗: {e}", "WindowManager", e)
+            logger.exception(f"儲存主視窗狀態失敗: {e}")
 
     @staticmethod
     def setup_dialog_window(
@@ -319,9 +321,9 @@ class WindowManager:
         # 設定視窗幾何
         try:
             window.geometry(f"{width}x{height}+{x}+{y}")
-            LogUtils.debug(f"對話框設定: {width}x{height}+{x}+{y}", "WindowManager")
+            logger.debug(f"對話框設定: {width}x{height}+{x}+{y}")
         except Exception as e:
-            LogUtils.error_exc(f"設定對話框失敗: {e}", "WindowManager", e)
+            logger.exception(f"設定對話框失敗: {e}")
 
     @staticmethod
     def bind_window_state_tracking(window) -> None:

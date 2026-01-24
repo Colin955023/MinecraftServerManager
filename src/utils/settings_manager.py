@@ -11,7 +11,10 @@ from typing import Any, Dict
 import json
 import sys
 # ====== 專案內部模組 ======
-from src.utils import LogUtils, ensure_dir, get_user_data_dir
+from src.utils import ensure_dir, get_user_data_dir
+from src.utils.logger import get_logger
+
+logger = get_logger().bind(component="SettingsManager")
 
 class SettingsManager:
     """
@@ -106,7 +109,7 @@ class SettingsManager:
 
             return settings
         except Exception as e:
-            LogUtils.error_exc(f"載入設定失敗: {e}", "SettingsManager", e)
+            logger.exception(f"載入設定失敗: {e}")
             # 如果載入失敗，回傳預設設定
             return {
                 "servers_root": "",
@@ -143,8 +146,8 @@ class SettingsManager:
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            LogUtils.error_exc(
-                f"無法寫入 user_settings.json: {e}", "SettingsManager", e
+            logger.exception(
+                f"無法寫入 user_settings.json: {e}"
             )
             raise Exception(f"無法寫入 user_settings.json: {e}")
 

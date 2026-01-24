@@ -16,8 +16,10 @@ import customtkinter as ctk
 # ====== 專案內部模組 ======
 from .path_utils import PathUtils
 from .window_manager import WindowManager
-from .log_utils import LogUtils
+from .logger import get_logger
 from .font_manager import font_manager
+
+logger = get_logger().bind(component="UIUtils")
 
 # 設置 CustomTkinter 主題
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
@@ -69,7 +71,7 @@ class DialogUtils:
                 dialog.grab_set()
                 dialog.focus_set()
             except Exception as e:
-                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "DialogUtils", e)
+                logger.exception(f"設定模態視窗失敗: {e}")
         # 延遲綁定圖示
         IconUtils.set_window_icon(dialog, 250)
 
@@ -116,13 +118,13 @@ class IconUtils:
                     try:
                         window.after_idle(window.update_idletasks)
                     except Exception as e:
-                        LogUtils.error_exc(
-                            f"after_idle(update_idletasks) 失敗: {e}", "IconUtils", e
+                        logger.exception(
+                            f"after_idle(update_idletasks) 失敗: {e}"
                         )
                 else:
-                    LogUtils.warning(f"圖示檔案不存在 - {icon_path}")
+                    logger.warning(f"圖示檔案不存在 - {icon_path}")
             except Exception as e:
-                LogUtils.error_exc(f"設定視窗圖示失敗 - {e}", "IconUtils", e)
+                logger.exception(f"設定視窗圖示失敗 - {e}")
 
         # 延遲綁定圖示，確保視窗完全初始化完成
         try:
@@ -134,7 +136,7 @@ class IconUtils:
             else:
                 _delayed_icon_bind()  # 立即執行作為備選
         except Exception as e:
-            LogUtils.warning(f"無法延遲執行圖示綁定: {e}")
+            logger.warning(f"無法延遲執行圖示綁定: {e}")
             _delayed_icon_bind()  # 直接執行作為最後備選
 
 # ====== UI 通用工具類別 ======
@@ -187,7 +189,7 @@ class UIUtils:
                 window.grab_set()
                 window.focus_set()
             except Exception as e:
-                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "UIUtils", e)
+                logger.exception(f"設定模態視窗失敗: {e}")
 
         # 延遲綁定圖示，確保不會被覆蓋，使用更長的延遲
         if bind_icon:
@@ -234,7 +236,7 @@ class UIUtils:
             if widget and widget.winfo_exists():
                 update_func(widget, *args, **kwargs)
         except Exception as e:
-            LogUtils.error_exc(f"更新 widget 失敗: {e}", "UIUtils", e)
+            logger.exception(f"更新 widget 失敗: {e}")
 
     @staticmethod
     def safe_config_widget(widget, **config) -> None:
@@ -275,17 +277,14 @@ class UIUtils:
                 if job_id:
                     widget.after_cancel(job_id)
             except Exception as e:
-                LogUtils.error_exc(
-                    f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {e}",
-                    "UIUtils",
-                    e,
+                logger.exception(
+                    f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {e}"
                 )
             try:
                 setattr(widget, job_attr, None)
             except Exception as e:
-                LogUtils.error_exc(
-                    f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}",
-                    "UIUtils",
+                logger.exception(
+                    f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}"
                     e,
                 )
 
@@ -303,7 +302,7 @@ class UIUtils:
                 try:
                     task()
                 except Exception as e:
-                    LogUtils.error_exc(f"UI 任務執行失敗: {e}", "UIUtils", e)
+                    logger.exception(f"UI 任務執行失敗: {e}")
                 processed += 1
 
             if not _alive():
@@ -320,10 +319,8 @@ class UIUtils:
                 setattr(widget, job_attr, widget.after(next_delay, _tick))
             except Exception as e:
                 # 視窗可能正在銷毀，忽略
-                LogUtils.error_exc(
-                    f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {e}",
-                    "UIUtils",
-                    e,
+                logger.exception(
+                    f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {e}"
                 )
 
         if not _alive():
@@ -358,19 +355,19 @@ class UIUtils:
                     ui_queue.put(cb)
                     return
                 except Exception as e:
-                    LogUtils.debug(f"ui_queue put 失敗: {e}", "UIUtils")
+                    logger.debug(f"ui_queue put 失敗: {e}", "UIUtils")
                     pass
             if widget is not None:
                 try:
                     widget.after(0, cb)
                     return
                 except Exception as e:
-                    LogUtils.debug(f"widget.after 失敗: {e}", "UIUtils")
+                    logger.debug(f"widget.after 失敗: {e}", "UIUtils")
                     pass
             try:
                 cb()
             except Exception as e:
-                LogUtils.debug(f"直接執行 callback 失敗: {e}", "UIUtils")
+                logger.debug(f"直接執行 callback 失敗: {e}", "UIUtils")
                 pass
 
         def _wrapper() -> None:
@@ -378,7 +375,7 @@ class UIUtils:
                 task_func()
             except Exception as e:
                 prefix = (error_log_prefix + ": ") if error_log_prefix else ""
-                LogUtils.error_exc(f"{prefix}{e}", component, e)
+                get_logger().bind(component=component).exception(f"{prefix}{e}")
                 _dispatch(on_error)
 
         threading.Thread(target=_wrapper, daemon=True).start()
@@ -416,23 +413,23 @@ class UIUtils:
                     if tip.winfo_exists():
                         tip.destroy()
                 except Exception as e:
-                    LogUtils.debug(f"銷毀 tooltip 失敗: {e}", "UIUtils")
+                    logger.debug(f"銷毀 tooltip 失敗: {e}", "UIUtils")
                     pass
             try:
                 setattr(widget, "_msm_tooltip", None)
             except Exception as e:
-                LogUtils.debug(f"重置 _msm_tooltip 屬性失敗: {e}", "UIUtils")
+                logger.debug(f"重置 _msm_tooltip 屬性失敗: {e}", "UIUtils")
             job = getattr(widget, "_msm_tooltip_job", None)
             if job is not None:
                 try:
                     widget.after_cancel(job)
                 except Exception as e:
-                    LogUtils.debug(f"取消 tooltip job 失敗: {e}", "UIUtils")
+                    logger.debug(f"取消 tooltip job 失敗: {e}", "UIUtils")
                     pass
             try:
                 setattr(widget, "_msm_tooltip_job", None)
             except Exception as e:
-                LogUtils.debug(f"重置 _msm_tooltip_job 屬性失敗: {e}", "UIUtils")
+                logger.debug(f"重置 _msm_tooltip_job 屬性失敗: {e}", "UIUtils")
 
         def _show_tooltip(event) -> None:
             try:
@@ -470,10 +467,10 @@ class UIUtils:
                             tip.after(auto_hide_ms, _destroy_tooltip),
                         )
                     except Exception as e:
-                        LogUtils.debug(f"設定 tooltip 自動隱藏失敗: {e}", "UIUtils")
+                        logger.debug(f"設定 tooltip 自動隱藏失敗: {e}", "UIUtils")
                         pass
             except Exception as e:
-                LogUtils.error_exc(f"顯示 tooltip 失敗: {e}", "UIUtils", e)
+                logger.exception(f"顯示 tooltip 失敗: {e}")
 
         def _hide_tooltip(_event=None) -> None:
             _destroy_tooltip()
@@ -482,7 +479,7 @@ class UIUtils:
             widget.bind("<Enter>", _show_tooltip)
             widget.bind("<Leave>", _hide_tooltip)
         except Exception as e:
-            LogUtils.error_exc(f"綁定 tooltip 事件失敗: {e}", "UIUtils", e)
+            logger.exception(f"綁定 tooltip 事件失敗: {e}")
 
     # 顯示錯誤對話框
     @staticmethod
@@ -505,7 +502,7 @@ class UIUtils:
             None
         """
         # 任何顯示給使用者的錯誤，都同時寫入 log，方便追蹤
-        LogUtils.error(f"{title}: {message}", "UIUtils")
+        logger.error(f"{title}: {message}", "UIUtils")
 
         try:
             # 如果沒有父視窗，創建臨時根視窗
@@ -533,8 +530,8 @@ class UIUtils:
             else:
                 tk.messagebox.showerror(title, message, parent=parent)
         except Exception as e:
-            LogUtils.error_exc(f"顯示錯誤對話框失敗: {e}", "UIUtils", e)
-            LogUtils.error(f"錯誤: {title} - {message}")
+            logger.exception(f"顯示錯誤對話框失敗: {e}")
+            logger.error(f"錯誤: {title} - {message}")
 
     # 顯示警告對話框
     @staticmethod
@@ -582,8 +579,8 @@ class UIUtils:
             else:
                 tk.messagebox.showwarning(title, message, parent=parent)
         except Exception as e:
-            LogUtils.error_exc(f"顯示警告對話框失敗: {e}", "UIUtils", e)
-            LogUtils.warning(f"警告: {title} - {message}")
+            logger.exception(f"顯示警告對話框失敗: {e}")
+            logger.warning(f"警告: {title} - {message}")
 
     # 顯示資訊對話框
     @staticmethod
@@ -631,8 +628,8 @@ class UIUtils:
             else:
                 tk.messagebox.showinfo(title, message, parent=parent)
         except Exception as e:
-            LogUtils.error_exc(f"顯示資訊對話框失敗: {e}", "UIUtils", e)
-            LogUtils.warning(f"警告: {title} - {message}")
+            logger.exception(f"顯示資訊對話框失敗: {e}")
+            logger.warning(f"警告: {title} - {message}")
 
     # 顯示確認對話框（是/否/取消）
     @staticmethod
@@ -690,8 +687,8 @@ class UIUtils:
                 else:
                     return tk.messagebox.askyesno(title, message, parent=parent)
         except Exception as e:
-            LogUtils.error_exc(f"顯示確認對話框失敗: {e}", "UIUtils", e)
-            LogUtils.warning(f"確認: {title} - {message}")
+            logger.exception(f"顯示確認對話框失敗: {e}")
+            logger.warning(f"確認: {title} - {message}")
             return False if not show_cancel else None
 
     @staticmethod
@@ -746,13 +743,13 @@ class UIUtils:
                             dropdown_widget._command(values[new_index])
 
                 except Exception as e:
-                    LogUtils.error_exc(f"滑鼠滾輪處理錯誤: {e}", "UIUtils", e)
+                    logger.exception(f"滑鼠滾輪處理錯誤: {e}")
 
             # 綁定滑鼠滾輪事件
             dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
 
         except Exception as e:
-            LogUtils.error_exc(f"應用下拉選單樣式失敗: {e}", "UIUtils", e)
+            logger.exception(f"應用下拉選單樣式失敗: {e}")
 
     @staticmethod
     def create_styled_button(
@@ -840,7 +837,7 @@ class ProgressDialog:
                 self.dialog.grab_set()
                 self.dialog.focus_set()
             except Exception as e:
-                LogUtils.error_exc(f"設定模態視窗失敗: {e}", "ProgressDialog", e)
+                logger.exception(f"設定模態視窗失敗: {e}")
 
         # 延遲綁定圖示
         IconUtils.set_window_icon(self.dialog, 250)
@@ -901,7 +898,7 @@ class ProgressDialog:
                 self.status_label.configure(text=status_text)
                 self.percent_label.configure(text=f"{percent:.1f}%")
             except Exception as e:
-                LogUtils.error_exc(f"更新進度 UI 失敗: {e}", "ProgressDialog", e)
+                logger.exception(f"更新進度 UI 失敗: {e}")
 
         # 確保在主線程執行
         if threading.current_thread() is threading.main_thread():
@@ -934,4 +931,4 @@ class ProgressDialog:
         try:
             self.dialog.destroy()
         except Exception as e:
-            LogUtils.error_exc(f"關閉進度對話框失敗: {e}", "ProgressDialog", e)
+            logger.exception(f"關閉進度對話框失敗: {e}")
