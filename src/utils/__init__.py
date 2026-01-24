@@ -5,6 +5,9 @@
 提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
 Utility Modules Package
 Provides various utility functions and helper classes for the Minecraft Server Manager application
+
+Note: Logger functions are imported directly from .logger module:
+    from src.utils.logger import get_logger
 """
 
 from __future__ import annotations
@@ -13,13 +16,6 @@ import importlib
 from typing import Dict, Tuple
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
-    # logging (now using loguru directly)
-    "get_logger": (".logger", "get_logger"),
-    "log_info": (".logger", "info"),
-    "log_warning": (".logger", "warning"),
-    "log_error": (".logger", "error"),
-    "log_debug": (".logger", "debug"),
-    "log_error_with_exception": (".logger", "error_with_exception"),
     # UI helpers
     "UIUtils": (".ui_utils", "UIUtils"),
     "DialogUtils": (".ui_utils", "DialogUtils"),
