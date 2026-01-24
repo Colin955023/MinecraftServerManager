@@ -109,7 +109,7 @@ MinecraftServerManger/
 - 使用者設定檔固定存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
 - 日誌檔案存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
   - 日誌檔案命名格式：`YYYY-MM-DD-HH-mm.log`
-  - 自動清理機制：當日誌資料夾超過 10MB 時，會自動刪除最舊的 10 筆日誌
+  - 自動清理機制：當日誌資料夾超過 10MB 時，會自動刪除相當於 8MB 的舊日誌
 - `user_settings.json` 會記錄「使用者選擇的伺服器主資料夾」(base dir)，實際伺服器資料會放在該資料夾內的 `servers` 子資料夾。
 
 ##  技術堆疊 (Tech Stack)

@@ -25,7 +25,7 @@ class LoggerConfig:
     _initialized = False
     _log_dir: Optional[Path] = None
     _max_folder_size_mb = 10
-    _logs_to_delete_when_full = 10
+    _target_cleanup_size_mb = 8  # 當超過限制時，刪除相當於 8MB 的舊日誌
     _settings_manager = None  # 快取 settings manager
     
     @classmethod
@@ -119,8 +119,8 @@ class LoggerConfig:
     @classmethod
     def _cleanup_old_logs_if_needed(cls) -> None:
         """
-        檢查日誌資料夾大小，如果超過 10MB 則刪除最舊的 10 筆日誌
-        Check log folder size, delete oldest 10 logs if exceeds 10MB
+        檢查日誌資料夾大小，如果超過 10MB 則刪除相當於 8MB 的舊日誌
+        Check log folder size, delete logs worth 8MB if exceeds 10MB
         """
         if cls._log_dir is None:
             return
@@ -129,24 +129,33 @@ class LoggerConfig:
             folder_size = cls._get_folder_size_mb(cls._log_dir)
             
             if folder_size > cls._max_folder_size_mb:
-                # 取得所有日誌檔案並按修改時間排序
+                # 取得所有日誌檔案並按修改時間排序（最舊的在前）
                 log_files = sorted(
                     cls._log_dir.glob("*.log"),
                     key=lambda f: f.stat().st_mtime
                 )
                 
-                # 刪除最舊的 N 筆
+                # 刪除舊日誌直到釋放 8MB 空間
+                deleted_size_mb = 0.0
                 files_deleted = 0
-                for log_file in log_files[:cls._logs_to_delete_when_full]:
+                target_mb = cls._target_cleanup_size_mb
+                
+                for log_file in log_files:
+                    if deleted_size_mb >= target_mb:
+                        break
+                    
                     try:
+                        # 取得檔案大小（MB）
+                        file_size_mb = log_file.stat().st_size / MB
                         log_file.unlink()
+                        deleted_size_mb += file_size_mb
                         files_deleted += 1
                     except Exception:
                         pass
                 
                 if files_deleted > 0:
                     logger.bind(component="Logger").info(
-                        f"日誌資料夾大小超過 {cls._max_folder_size_mb}MB，已刪除 {files_deleted} 個舊日誌檔案"
+                        f"日誌資料夾大小超過 {cls._max_folder_size_mb}MB，已刪除 {files_deleted} 個舊日誌檔案（釋放 {deleted_size_mb:.2f}MB）"
                     )
         except Exception as e:
             logger.bind(component="Logger").warning(f"清理舊日誌時發生錯誤: {e}")
