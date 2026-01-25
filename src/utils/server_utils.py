@@ -71,8 +71,8 @@ class MemoryUtils:
     @staticmethod
     def format_memory(memory_bytes: float) -> str:
         """
-        格式化記憶體大小
-        Format memory size
+        格式化記憶體大小（位元組輸入）
+        Format memory size (bytes input)
         """
         if memory_bytes < KB:
             return f"{memory_bytes:.1f} B"
@@ -89,13 +89,11 @@ class MemoryUtils:
         格式化記憶體顯示（MB輸入），自動選擇 M 或 G 單位
         Format memory display (MB input), automatically selecting M or G units
         """
+        # 使用統一的格式化邏輯: 轉換為 bytes 後使用 format_memory
+        # 但保留 M/G 簡潔格式而非小數點顯示
         if memory_mb >= 1024:
-            if memory_mb % 1024 == 0:
-                return f"{memory_mb // 1024}G"
-            else:
-                return f"{memory_mb / 1024:.1f}G"
-        else:
-            return f"{memory_mb}M"
+            return f"{memory_mb // 1024}G" if memory_mb % 1024 == 0 else f"{memory_mb / 1024:.1f}G"
+        return f"{memory_mb}M"
 
 
 # ====== Server Properties 說明助手 Server Properties Helper ======

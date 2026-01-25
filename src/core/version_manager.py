@@ -9,12 +9,11 @@ Responsible for retrieving version information from official API with version qu
 # ====== 標準函式庫 ======
 from pathlib import Path
 from typing import Optional
-import json
 import concurrent.futures
-import os
 # ====== 專案內部模組 ======
 from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
 from src.utils.logger import get_logger
+from src.utils.path_utils import PathUtils
 
 logger = get_logger().bind(component="VersionManager")
 
@@ -53,19 +52,11 @@ class MinecraftVersionManager:
             ensure_dir(cache_path.parent)
             
             # 檢查資料是否異動，避免不必要的寫入
-            if cache_path.exists():
-                try:
-                    with open(cache_path, "r", encoding="utf-8") as f:
-                        existing_data = json.load(f)
-                    # 若內容一致，直接返回不寫入
-                    if existing_data == versions:
-                        return
-                except Exception:
-                    # 讀取或比對失敗則繼續寫入
-                    pass
+            existing_data = PathUtils.load_json(cache_path)
+            if existing_data == versions:
+                return
             
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(versions, f, ensure_ascii=False, indent=2)
+            PathUtils.save_json(cache_path, versions)
         except Exception as e:
             logger.exception(f"寫入版本快取失敗: {e}")
 
@@ -90,14 +81,11 @@ class MinecraftVersionManager:
 
             # 讀取現有快取以保留已查詢過的 server_url
             cache_map = {}
-            if os.path.exists(self.cache_file):
-                try:
-                    with open(self.cache_file, "r", encoding="utf-8") as f:
-                        cached_list = json.load(f)
-                        for v in cached_list:
-                            cache_map[v["id"]] = v
-                except Exception:
-                    pass
+            cache_path = Path(self.cache_file)
+            cached_list = PathUtils.load_json(cache_path)
+            if cached_list:
+                for v in cached_list:
+                    cache_map[v["id"]] = v
 
             versions_to_process = []
             final_list = []

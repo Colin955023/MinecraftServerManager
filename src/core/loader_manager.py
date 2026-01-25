@@ -10,8 +10,6 @@ Responsible for managing and downloading versions of Fabric and Forge loaders wi
 from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional, Union
-import json
-import os
 import re
 import subprocess
 from lxml import etree
@@ -21,6 +19,7 @@ from src.models import LoaderVersion
 from src.utils import java_utils
 from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
 from src.utils.logger import get_logger
+from src.utils.path_utils import PathUtils
 
 logger = get_logger().bind(component="LoaderManager")
 
@@ -54,23 +53,26 @@ class LoaderManager:
             None
         """
         try:
-            cache_file = self.fabric_cache_file
-            os.remove(cache_file)
-            cache_file = self.forge_cache_file
-            os.remove(cache_file)
+            # 使用 Path.unlink 替代 os.remove
+            fabric_path = Path(self.fabric_cache_file)
+            forge_path = Path(self.forge_cache_file)
+            
+            fabric_path.unlink(missing_ok=True)
+            forge_path.unlink(missing_ok=True)
+            
             # 清除記憶體快取
             self._version_cache.clear()
         except PermissionError as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
                 "清除快取檔案失敗",
-                f"無法刪除快取檔案: {cache_file}\n權限不足\n{e}",
+                f"無法刪除快取檔案\n權限不足\n{e}",
                 topmost=True,
             )
         except Exception as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
-                "清除快取檔案失敗", f"無法刪除快取檔案: {cache_file}\n{e}", topmost=True
+                "清除快取檔案失敗", f"無法刪除快取檔案\n{e}", topmost=True
             )
 
     # ======== 公開 API ========
@@ -196,18 +198,13 @@ class LoaderManager:
             if data:
                 # 比較現有快取，減少磁碟寫入
                 write_needed = True
-                if os.path.exists(self.fabric_cache_file):
-                    try:
-                        with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
-                            existing = json.load(f)
-                        if existing == data:
-                            write_needed = False
-                    except Exception:
-                        pass
+                fabric_path = Path(self.fabric_cache_file)
+                existing = PathUtils.load_json(fabric_path)
+                if existing == data:
+                    write_needed = False
                         
                 if write_needed:
-                    with open(self.fabric_cache_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    PathUtils.save_json(fabric_path, data)
         except Exception as e:
             logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
@@ -271,19 +268,14 @@ class LoaderManager:
 
                     # 比較現有快取，減少磁碟寫入
                     write_needed = True
-                    if os.path.exists(self.forge_cache_file):
-                        try:
-                            with open(self.forge_cache_file, "r", encoding="utf-8") as f:
-                                existing = json.load(f)
-                            if existing == version_dict:
-                                write_needed = False
-                        except Exception:
-                            pass
+                    forge_path = Path(self.forge_cache_file)
+                    existing = PathUtils.load_json(forge_path)
+                    if existing == version_dict:
+                        write_needed = False
 
                     if write_needed:
                         # 寫入快取檔案
-                        with open(self.forge_cache_file, "w", encoding="utf-8") as f:
-                            json.dump(version_dict, f, ensure_ascii=False, indent=2)
+                        PathUtils.save_json(forge_path, version_dict)
                     return
 
         except Exception as e:
@@ -329,8 +321,10 @@ class LoaderManager:
                         # 不快取空結果，因為相容性可能在未來改變
                         return []
 
-                    with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
-                        cache = json.load(f)
+                    cache = PathUtils.load_json(Path(self.fabric_cache_file))
+                    if not cache:
+                        return []
+                    
                     result = []
                     # 返回與兼容的MC版本相對應的Fabric加載器版本
                     for item in cache:
@@ -349,8 +343,9 @@ class LoaderManager:
             # Forge
             elif loader_type.lower() == "forge":
                 try:
-                    with open(self.forge_cache_file, "r", encoding="utf-8") as f:
-                        cache = json.load(f)
+                    cache = PathUtils.load_json(Path(self.forge_cache_file))
+                    if not cache:
+                        return []
 
                     result = []
 
