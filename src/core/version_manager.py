@@ -174,13 +174,12 @@ class MinecraftVersionManager:
             list: Minecraft 版本列表
         """
         try:
-            if force_fetch or not os.path.exists(self.cache_file):
+            cache_path = Path(self.cache_file)
+            if force_fetch or not cache_path.exists():
                 return self.fetch_versions()
 
-            try:
-                with open(self.cache_file, "r", encoding="utf-8") as f:
-                    versions = json.load(f)
-            except json.JSONDecodeError:
+            versions = PathUtils.load_json(cache_path)
+            if not versions:
                 logger.warning("版本快取檔案損壞，嘗試重新獲取...")
                 return self.fetch_versions()
 
