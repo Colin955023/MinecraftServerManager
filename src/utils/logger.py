@@ -106,15 +106,12 @@ class LoggerConfig:
         Returns:
             float: 資料夾大小（MB）
         """
-        total_size = 0
         try:
-            for file in folder.glob("*.log"):
-                if file.is_file():
-                    total_size += file.stat().st_size
+            # 使用生成器表達式和 sum 優化效能
+            total_size = sum(f.stat().st_size for f in folder.glob("*.log") if f.is_file())
+            return total_size / MB
         except Exception:
-            pass
-        
-        return total_size / MB
+            return 0.0
     
     @classmethod
     def _cleanup_old_logs_if_needed(cls) -> None:

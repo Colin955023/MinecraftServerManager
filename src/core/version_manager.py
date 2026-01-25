@@ -33,6 +33,21 @@ class MinecraftVersionManager:
             "https://launchermeta.mojang.com/mc/game/version_manifest.json"
         )
         self.cache_file = str(ensure_dir(get_cache_dir()) / "mc_versions_cache.json")
+    
+    @staticmethod
+    def _has_valid_server_url(version: dict) -> bool:
+        """
+        檢查版本是否有有效的伺服器下載 URL
+        Check if version has a valid server download URL
+        
+        Args:
+            version (dict): 版本資料字典
+            
+        Returns:
+            bool: 是否有有效的 server_url
+        """
+        url = version.get("server_url")
+        return url is not None and url != ""
 
     # 儲存本地快取
     def _save_local_cache(self, versions: list) -> None:
@@ -99,7 +114,7 @@ class MinecraftVersionManager:
                 
                 # 檢查快取
                 cached_v = cache_map.get(vid)
-                if cached_v and cached_v.get("server_url") is not None:
+                if cached_v and self._has_valid_server_url(cached_v):
                     final_list.append(cached_v)
                 else:
                     # 需要查詢的項目
@@ -136,7 +151,7 @@ class MinecraftVersionManager:
             self._save_local_cache(final_list)
 
             # 回傳給 UI 的列表只包含有效的伺服器版本
-            valid_versions = [v for v in final_list if v.get("server_url")]
+            valid_versions = [v for v in final_list if self._has_valid_server_url(v)]
             logger.info(f"版本列表更新完成，共 {len(valid_versions)} 個可用伺服器版本")
             return valid_versions
 
@@ -184,7 +199,7 @@ class MinecraftVersionManager:
                 return self.fetch_versions()
 
             # 過濾出有有效 server_url 的版本回傳
-            valid_versions = [v for v in versions if v.get("server_url")]
+            valid_versions = [v for v in versions if self._has_valid_server_url(v)]
             
             if not valid_versions and not force_fetch:
                 # 如果快取讀出來是空的（或全無 url），可能需要強制更新一次

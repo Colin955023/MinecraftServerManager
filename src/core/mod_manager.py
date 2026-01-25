@@ -204,12 +204,9 @@ class ModManager:
             tuple[str, bool, str]: 檔案名稱、啟用狀態、基本名稱
         """
         filename = file_path.name
-        if filename.endswith(".jar.disabled"):
-            enabled = False
-            base_name = filename[:-13]
-        else:
-            enabled = True
-            base_name = filename[:-4]
+        # 使用 removesuffix (Python 3.9+) 更簡潔
+        enabled = not filename.endswith(".jar.disabled")
+        base_name = filename.removesuffix(".jar.disabled").removesuffix(".jar")
         return filename, enabled, base_name
 
     def _get_manifest_version(self, jar) -> Optional[str]:
