@@ -8,17 +8,19 @@ This module provides functions to find Java installations in the Windows registr
 common installation paths, and environment variables.
 """
 # ====== 標準函式庫 ======
+from pathlib import Path
+from typing import Optional
 import json
 import os
-import requests
 import re
 import subprocess
-from typing import Optional
+import shutil
 # ====== 專案內部模組 ======
 from .http_utils import HTTPUtils
 from .runtime_paths import get_cache_dir
 from .ui_utils import UIUtils
 from .logger import get_logger
+from .path_utils import PathUtils
 from src.core import MinecraftVersionManager
 from .java_downloader import install_java_with_winget
 
@@ -59,7 +61,7 @@ def get_java_version(java_path: str) -> int:
                 return int(m.group(2))
             # Java 9+ 格式為 "9.x", "11.x" 等，直接取第一個數字
             return major
-        
+
         # 備用模式：直接匹配 "version \"X" 格式
         m = re.search(r'version "(\d+)"', out)
         if m:
@@ -95,15 +97,14 @@ def get_required_java_major(mc_version: str) -> int:
     """
     if not isinstance(mc_version, str) or not mc_version:
         raise ValueError("mc_version 必須為非空字串")
-    
+
     cache_path = get_cache_dir() / "mc_versions_cache.json"
     _ensure_cache_exists(cache_path)
-    
-    with open(cache_path, "r", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-        except Exception as e:
-            raise ValueError(f"無法解析 {cache_path} 內容: {e}")
+
+    data = PathUtils.load_json(cache_path)
+    if data is None:
+        raise ValueError(f"無法解析 {cache_path} 內容")
+
     if isinstance(data, dict):
         data = [data]
     for v in data:
@@ -111,18 +112,19 @@ def get_required_java_major(mc_version: str) -> int:
             url = v["url"]
             ver_json = HTTPUtils.get_json(url, timeout=8)
             if ver_json:
+                # 優先檢查 javaVersion 結構
                 java_info = ver_json.get("javaVersion")
                 if java_info and "majorVersion" in java_info:
                     return int(java_info["majorVersion"])
+                # 次要檢查 java_version 結構
                 java_info2 = ver_json.get("java_version")
                 if java_info2 and "major" in java_info2:
                     return int(java_info2["major"])
-                # 萬一格式不同，正則搜尋 major
-                resp = requests.get(url, timeout=8)
-                if resp.ok:
-                    m = re.search(r'"major(?:Version)?"\s*:\s*(\d+)', resp.text)
-                    if m:
-                        return int(m.group(1))
+                # 最後使用正則搜尋 (在已解析的JSON上搜尋)
+                json_str = json.dumps(ver_json)
+                m = re.search(r'"major(?:Version)?"\s*:\s*(\d+)', json_str)
+                if m:
+                    return int(m.group(1))
             raise ValueError(f"找不到 majorVersion，url: {url}")
     raise ValueError(f"找不到對應 mc_version: {mc_version}")
 
@@ -142,58 +144,66 @@ def get_all_local_java_candidates() -> list:
     search_paths = set()
 
     # 1.常見路徑搜尋
-    for base in COMMON_JAVA_PATHS:
-        if os.path.exists(base):
-            for d in os.listdir(base):
-                subdir = os.path.join(base, d)
-                if os.path.isdir(subdir):
-                    search_paths.add(os.path.join(subdir, "bin"))
+    for base_str in COMMON_JAVA_PATHS:
+        base = Path(base_str)
+        if base.exists():
+            for subdir in base.iterdir():
+                if subdir.is_dir():
+                    search_paths.add(str(subdir / "bin"))
 
     # 2.JAVA_HOME 環境變數
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
             for p in val.split(";"):
-                search_paths.add(os.path.join(p, "bin"))
+                java_bin = Path(p) / "bin"
+                search_paths.add(str(java_bin))
 
     # 3.PATH 環境變數中的 Java 路徑（優化：只掃描 PATH 而非所有環境變數）
     try:
         path_env = os.environ.get("PATH", "")
         if path_env:
-            for path in path_env.split(os.pathsep):
-                if "java" in path.lower():
+            for path_str in path_env.split(os.pathsep):
+                if "java" in path_str.lower():
+                    path = Path(path_str)
+                    # 判斷是否已經在 bin 目錄
                     javaw_path = (
-                        os.path.join(path, "bin", "javaw.exe")
-                        if not path.endswith("bin")
-                        else os.path.join(path, "javaw.exe")
+                        path / "javaw.exe"
+                        if path.name == "bin"
+                        else path / "bin" / "javaw.exe"
                     )
-                    if os.path.isfile(javaw_path):
-                        search_paths.add(os.path.dirname(javaw_path))
+                    if javaw_path.is_file():
+                        search_paths.add(str(javaw_path.parent))
     except Exception as e:
         logger.exception(f"PATH 環境變數尋找 java 失敗：{e}")
 
     # 4.where javaw 檢查
     candidates = []
     try:
+        where_path = shutil.which("where")
+        if not where_path:
+            return candidates
+
         result = subprocess.run(
-            ["where", "javaw"], capture_output=True, text=True, shell=False
+            [where_path, "javaw"], capture_output=True, text=True, shell=False
         )
         if result.returncode == 0:
-            for java_path in result.stdout.strip().splitlines():
-                if os.path.basename(java_path).lower() == "javaw.exe":
-                    major = get_java_version(java_path)
+            for java_path_str in result.stdout.strip().splitlines():
+                java_path = Path(java_path_str)
+                if java_path.name.lower() == "javaw.exe":
+                    major = get_java_version(str(java_path))
                     if major:
-                        candidates.append((os.path.normpath(java_path), major))
+                        candidates.append((str(java_path.resolve()), major))
     except Exception as e:
         logger.exception(f"搜尋 Java 失敗: {e}")
 
     # 5.搜尋所有目錄下的 javaw.exe
-    for p in search_paths:
-        javaw = os.path.join(p, "javaw.exe")
-        if os.path.exists(javaw):
-            major = get_java_version(javaw)
+    for p_str in search_paths:
+        javaw = Path(p_str) / "javaw.exe"
+        if javaw.exists():
+            major = get_java_version(str(javaw))
             if major:
-                candidates.append((os.path.normpath(javaw), major))
+                candidates.append((str(javaw.resolve()), major))
 
     # 去重並按版本排序
     seen = set()
@@ -257,9 +267,7 @@ def get_best_java_path(
                         )
                         return path
             except Exception as e:
-                logger.exception(
-                    f"自動下載 Microsoft JDK {required_major} 失敗：{e}"
-                )
+                logger.exception(f"自動下載 Microsoft JDK {required_major} 失敗：{e}")
                 UIUtils.show_error(
                     "Java 下載失敗",
                     f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑。",

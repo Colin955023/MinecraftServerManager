@@ -6,10 +6,10 @@ server.properties 設定對話框
 """
 # ====== 標準函式庫 ======
 from tkinter import ttk
+from typing import Dict
 import tkinter as tk
 import traceback
 import webbrowser
-from typing import Dict
 import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..utils import ServerPropertiesHelper
@@ -71,7 +71,7 @@ class ServerPropertiesDialog:
         設定對話框
         """
         self.dialog.title(f"伺服器設定 - {self.server_config.name}")
-        min_width = int(900 * font_manager.get_scale_factor())  # 900 * DPI
+        min_width = int(1000 * font_manager.get_scale_factor())  # 1000 * DPI
         min_height = int(600 * font_manager.get_scale_factor())  # 600 * DPI
         self.dialog.minsize(min_width, min_height)
         self.dialog.resizable(True, True)
@@ -80,9 +80,7 @@ class ServerPropertiesDialog:
         try:
             self.dialog.configure(bg="#ffffff")  # 淺色背景
         except Exception as e:
-            logger.error(
-                f"應用對話框主題失敗: {e}\n{traceback.format_exc()}"
-            )
+            logger.error(f"應用對話框主題失敗: {e}\n{traceback.format_exc()}")
 
     def create_widgets(self) -> None:
         """
@@ -164,7 +162,7 @@ class ServerPropertiesDialog:
             ),
             fg_color=("#dc2626", "#b91c1c"),
             hover_color=("#b91c1c", "#991b1b"),
-        ).pack(side="right", padx=(0, get_dpi_scaled_size(15)))
+        ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
 
         # 說明標籤
         help_label = ctk.CTkLabel(
@@ -181,13 +179,13 @@ class ServerPropertiesDialog:
             text="【官方設定說明】",
             font=get_font(size=16, underline=True),
             text_color=("blue", "#4dabf7"),
-            cursor="hand2"
+            cursor="hand2",
         )
         link_label.pack(side="left", padx=(5, 0))
-        
+
         def open_wiki(event):
             webbrowser.open("https://zh.minecraft.wiki/w/Server.properties")
-            
+
         link_label.bind("<Button-1>", open_wiki)
 
     def create_property_tabs(self) -> None:
@@ -297,10 +295,10 @@ class ServerPropertiesDialog:
                 prop_frame,
                 text=f"{prop_name}:",
                 font=get_font("Microsoft JhengHei", 20, "bold"),  # 20 * DPI
-                cursor="hand2"
+                cursor="hand2",
             )
             label.pack(anchor="w")
-            
+
             # 綁定點擊事件以複製屬性名稱
             def copy_name(event, name=prop_name):
                 self.dialog.clipboard_clear()
@@ -426,9 +424,7 @@ class ServerPropertiesDialog:
             try:
                 UIUtils.apply_unified_dropdown_styling(widget)
             except Exception as e:
-                logger.error(
-                    f"套用下拉選單樣式失敗: {e}\n{traceback.format_exc()}"
-                )
+                logger.error(f"套用下拉選單樣式失敗: {e}\n{traceback.format_exc()}")
 
         elif prop_name in range_props:
             # 數字範圍
@@ -527,9 +523,7 @@ class ServerPropertiesDialog:
                 UIUtils.show_error("錯誤", "儲存伺服器屬性失敗", self.dialog)
 
         except Exception as e:
-            logger.error(
-                f"儲存時發生錯誤: {e}\n{traceback.format_exc()}"
-            )
+            logger.error(f"儲存時發生錯誤: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("錯誤", f"儲存時發生錯誤: {e}", self.dialog)
 
     def show_dialog(self) -> None:

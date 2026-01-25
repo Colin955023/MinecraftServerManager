@@ -22,14 +22,13 @@ from . import java_utils
 
 logger = get_logger().bind(component="ServerUtils")
 
-
 # ====== 記憶體常數 Memory Constants ======
 KB = 1024
 MB = 1024 * 1024
 GB = 1024 * 1024 * 1024
 
 
-# ====== 記憶體工具類別 Memory Utilities ======
+# 記憶體工具類別 Memory Utilities
 class MemoryUtils:
     """
     記憶體工具類別，提供記憶體相關的解析和格式化功能
@@ -71,8 +70,8 @@ class MemoryUtils:
     @staticmethod
     def format_memory(memory_bytes: float) -> str:
         """
-        格式化記憶體大小
-        Format memory size
+        格式化記憶體大小（位元組輸入）
+        Format memory size (bytes input)
         """
         if memory_bytes < KB:
             return f"{memory_bytes:.1f} B"
@@ -89,13 +88,15 @@ class MemoryUtils:
         格式化記憶體顯示（MB輸入），自動選擇 M 或 G 單位
         Format memory display (MB input), automatically selecting M or G units
         """
+        # 使用統一的格式化邏輯: 轉換為 bytes 後使用 format_memory
+        # 但保留 M/G 簡潔格式而非小數點顯示
         if memory_mb >= 1024:
-            if memory_mb % 1024 == 0:
-                return f"{memory_mb // 1024}G"
-            else:
-                return f"{memory_mb / 1024:.1f}G"
-        else:
-            return f"{memory_mb}M"
+            return (
+                f"{memory_mb // 1024}G"
+                if memory_mb % 1024 == 0
+                else f"{memory_mb / 1024:.1f}G"
+            )
+        return f"{memory_mb}M"
 
 
 # ====== Server Properties 說明助手 Server Properties Helper ======
@@ -344,9 +345,7 @@ class ServerPropertiesHelper:
                             key, value = line.split("=", 1)
                             properties[key.strip()] = value.strip()
         except Exception as e:
-            logger.exception(
-                f"載入 server.properties 失敗: {e}"
-            )
+            logger.exception(f"載入 server.properties 失敗: {e}")
 
         return properties
 
@@ -369,9 +368,7 @@ class ServerPropertiesHelper:
                 for key, value in properties.items():
                     f.write(f"{key}={value}\n")
         except Exception as e:
-            logger.exception(
-                f"儲存 server.properties 失敗: {e}"
-            )
+            logger.exception(f"儲存 server.properties 失敗: {e}")
 
 
 # ====== 伺服器檢測工具類別 Server Detection Utilities ======
@@ -526,9 +523,7 @@ class ServerDetectionUtils:
                         # 移除 pause 命令
                         if line_stripped in ["pause", "@pause", "pause.", "@pause."]:
                             script_modified = True
-                            logger.info(
-                                f"發現並移除 pause 命令: {line.strip()}"
-                            )
+                            logger.info(f"發現並移除 pause 命令: {line.strip()}")
                             continue
 
                         # 檢查 Java 命令行並處理 nogui
@@ -538,9 +533,7 @@ class ServerDetectionUtils:
                             if "nogui" not in line.lower():
                                 line = line.rstrip("\r\n") + " nogui\n"
                                 script_modified = True
-                                logger.info(
-                                    "在 Java 命令行添加 nogui 參數"
-                                )
+                                logger.info("在 Java 命令行添加 nogui 參數")
 
                             # 解析記憶體設定
                             if not max_m:
@@ -555,17 +548,11 @@ class ServerDetectionUtils:
                     try:
                         with open(fpath, "w", encoding="utf-8") as f:
                             f.writelines(script_content)
-                        logger.info(
-                            f"已從 {fpath} 移除 pause 命令"
-                        )
+                        logger.info(f"已從 {fpath} 移除 pause 命令")
                     except Exception as e:
-                        logger.exception(
-                            f"無法重寫腳本 {fpath}: {e}"
-                        )
+                        logger.exception(f"無法重寫腳本 {fpath}: {e}")
             except Exception as e:
-                logger.exception(
-                    f"解析啟動腳本失敗 {fpath}: {e}"
-                )
+                logger.exception(f"解析啟動腳本失敗 {fpath}: {e}")
 
             return max_m, min_m
 
@@ -581,9 +568,7 @@ class ServerDetectionUtils:
                         if not min_mem:
                             min_mem = MemoryUtils.parse_memory_setting(content, "Xms")
                 except Exception as e:
-                    logger.exception(
-                        f"解析 JVM 參數檔失敗 {fpath}: {e}"
-                    )
+                    logger.exception(f"解析 JVM 參數檔失敗 {fpath}: {e}")
 
         # === 2. 優先解析常見啟動腳本 ===
         for bat_name in ["start_server.bat", "start.bat"]:
@@ -686,9 +671,7 @@ class ServerDetectionUtils:
             if print_result:
                 logger.info(f"偵測結果 - 路徑: {server_path.name}")
                 logger.info(f"  載入器: {config.loader_type}")
-                logger.info(
-                    f"  MC版本: {config.minecraft_version}"
-                )
+                logger.info(f"  MC版本: {config.minecraft_version}")
                 logger.info(
                     f"  EULA狀態: {'已接受' if config.eula_accepted else '未接受'}"
                 )
@@ -699,9 +682,7 @@ class ServerDetectionUtils:
                             f"  記憶體: 最小 {config.memory_min_mb}MB, 最大 {config.memory_max_mb}MB"
                         )
                     else:
-                        logger.info(
-                            f"  記憶體: 0-{config.memory_max_mb}MB"
-                        )
+                        logger.info(f"  記憶體: 0-{config.memory_max_mb}MB")
                 else:
                     logger.info("  記憶體: 未設定")
 
@@ -730,9 +711,9 @@ class ServerDetectionUtils:
             "fabric-server-launch.jar",
             "fabric-server-launcher.jar",
         ]
-        for jar_name in server_jars:
-            if (folder_path / jar_name).exists():
-                return True
+        # 使用 any() 優化檢查
+        if any((folder_path / jar_name).exists() for jar_name in server_jars):
+            return True
 
         # 檢查 Forge/其他 jar 檔案
         for file in folder_path.glob("*.jar"):
@@ -742,9 +723,8 @@ class ServerDetectionUtils:
 
         # 檢查特徵檔案
         server_indicators = ["server.properties", "eula.txt"]
-        for indicator in server_indicators:
-            if (folder_path / indicator).exists():
-                return True
+        if any((folder_path / indicator).exists() for indicator in server_indicators):
+            return True
 
         return False
 
@@ -888,9 +868,7 @@ class ServerDetectionUtils:
                 if "forgeVersion" in data:
                     set_if_unknown("loader_version", data["forgeVersion"])
             except Exception as e:
-                logger.exception(
-                    f"解析 version.json 失敗 {fp}: {e}"
-                )
+                logger.exception(f"解析 version.json 失敗 {fp}: {e}")
 
         # －－－－－－－－－－ 主流程 －－－－－－－－－－
 
@@ -942,15 +920,11 @@ class ServerDetectionUtils:
             logger.debug(f"forge_lib_dir={forge_lib_dir}")
             if forge_lib_dir.is_dir():
                 arg_files = list(forge_lib_dir.rglob("win_args.txt"))
-                logger.debug(
-                    f"rglob args.txt found: {[str(f) for f in arg_files]}"
-                )
+                logger.debug(f"rglob args.txt found: {[str(f) for f in arg_files]}")
                 if arg_files:
                     arg_files.sort(key=lambda p: len(p.parts), reverse=True)
                     result = f"@{arg_files[0].relative_to(server_path)}"
-                    logger.debug(
-                        f"return (forge new args.txt): {result}"
-                    )
+                    logger.debug(f"return (forge new args.txt): {result}")
                     return result
 
             # 2. 舊版 Forge：尋找 jar 名中含 forge-<mc>-<forge> 結構
@@ -972,36 +946,26 @@ class ServerDetectionUtils:
                         and forge_ver in lower
                         and "installer" not in lower
                     ):
-                        logger.debug(
-                            f"return (forge old): {fname}"
-                        )
+                        logger.debug(f"return (forge old): {fname}")
                         return fname
 
             # 3. fallback: 任一含 forge 且非 installer 的 jar
             for fname, lower in zip(jar_files, jar_files_lower):
                 if "forge" in lower and "installer" not in lower:
-                    logger.debug(
-                        f"return (forge fallback): {fname}"
-                    )
+                    logger.debug(f"return (forge fallback): {fname}")
                     return fname
 
             # 4. fallback: server.jar 存在
             if (server_path / "server.jar").exists():
-                logger.debug(
-                    "return (server.jar fallback): server.jar"
-                )
+                logger.debug("return (server.jar fallback): server.jar")
                 return "server.jar"
 
             # 5. fallback: 任一 jar
             if jar_files:
-                logger.debug(
-                    f"return (any jar fallback): {jar_files[0]}"
-                )
+                logger.debug(f"return (any jar fallback): {jar_files[0]}")
                 return jar_files[0]
 
-            logger.debug(
-                "return (final fallback): server.jar"
-            )
+            logger.debug("return (final fallback): server.jar")
             return "server.jar"
 
         # ---------- Fabric ----------
@@ -1012,26 +976,18 @@ class ServerDetectionUtils:
                 "server.jar",
             ]:
                 if (server_path / candidate).exists():
-                    logger.debug(
-                        f"return (fabric): {candidate}"
-                    )
+                    logger.debug(f"return (fabric): {candidate}")
                     return candidate
-            logger.debug(
-                "return (fabric fallback): server.jar"
-            )
+            logger.debug("return (fabric fallback): server.jar")
             return "server.jar"
 
         # ---------- Vanilla / Unknown ----------
         else:
             for candidate in ["server.jar", "minecraft_server.jar"]:
                 if (server_path / candidate).exists():
-                    logger.debug(
-                        f"return (vanilla): {candidate}"
-                    )
+                    logger.debug(f"return (vanilla): {candidate}")
                     return candidate
-            logger.debug(
-                "return (vanilla fallback): server.jar"
-            )
+            logger.debug("return (vanilla fallback): server.jar")
             return "server.jar"
 
 

@@ -9,6 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Callable, Optional
+from concurrent.futures import ThreadPoolExecutor
+import tkinter as tk
+import customtkinter as ctk
 import json
 import os
 import re
@@ -16,11 +19,8 @@ import shutil
 import subprocess
 import threading
 import traceback
-import tkinter as tk
 import urllib.parse
 import queue
-from concurrent.futures import ThreadPoolExecutor
-import customtkinter as ctk
 # ====== 專案內部模組 ======
 from . import CustomDropdown
 from ..core import MinecraftVersionManager, ModManager, ModStatus
@@ -345,9 +345,7 @@ class ModManagementFrame:
             elif current_tab == 1:  # 線上瀏覽頁面
                 pass  # 線上頁面不需要自動重新整理
         except Exception as e:
-            logger.error(
-                f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}"
-            )
+            logger.error(f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}")
 
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列"""
@@ -602,7 +600,7 @@ class ModManagementFrame:
         is_dark = ctk.get_appearance_mode() == "Dark"
         bg_odd = "#2b2b2b" if is_dark else "#ffffff"
         bg_even = "#3a3a3a" if is_dark else "#f1f5f9"
-        
+
         self.local_tree.tag_configure("odd", background=bg_odd)
         self.local_tree.tag_configure("even", background=bg_even)
 
@@ -1644,7 +1642,9 @@ class ModManagementFrame:
                                     )
                             except Exception as e:
                                 # 批量過程中 UI 更新失敗不阻塞主流程
-                                logger.debug(f"批量更新 UI row 失敗: {e}", "ModManagement")
+                                logger.debug(
+                                    f"批量更新 UI row 失敗: {e}", "ModManagement"
+                                )
 
                         self.ui_queue.put(apply_row_update)
                     else:

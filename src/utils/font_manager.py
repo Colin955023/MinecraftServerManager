@@ -7,11 +7,10 @@ Font Manager Module
 Provides unified font management functionality with DPI scaling and font caching to avoid duplicate font object creation
 """
 # ====== 標準函式庫 ======
-from typing import Dict, Tuple, OrderedDict as TOrderedDict
+from typing import Dict, Tuple
 import collections
-import weakref
 import customtkinter as ctk
-# ======專案內部模組 ======
+# ====== 專案內部模組 ======
 from src.utils.logger import get_logger
 
 logger = get_logger().bind(component="FontManager")
@@ -152,40 +151,19 @@ class FontManager:
                 underline=underline,
                 overstrike=overstrike,
             )
-            
+
             # 加入快取
             self._fonts[key] = font
-            
+
             # [Optimization] 維護快取大小
             if len(self._fonts) > self.MAX_CACHE_SIZE:
                 self._fonts.popitem(last=False)  # 移除最舊的項目 (First In)
-                
+
             return font
         except Exception as e:
-            logger.exception(
-                f"建立字體失敗 {family}, {scaled_size}, {weight}: {e}"
-            )
+            logger.exception(f"建立字體失敗 {family}, {scaled_size}, {weight}: {e}")
             # 回退到預設字體
             return self._get_fallback_font()
-            
-    # [Deprecated] 移除舊的 _cleanup_font 方法
-    # def _cleanup_font(self, key: Tuple) -> None: ...
-
-    # 取得回退字體
-        """
-        清理無效的字體引用，釋放記憶體資源
-        Clean up invalid font references to free memory resources
-
-        Args:
-            key (Tuple[str, int, str]): 字體識別鍵值
-
-        Returns:
-            None
-        """
-        if key in self._fonts:
-            del self._fonts[key]
-        if key in self._font_refs:
-            del self._font_refs[key]
 
     # 取得回退字體
     def _get_fallback_font(self) -> ctk.CTkFont:

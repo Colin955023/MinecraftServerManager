@@ -6,11 +6,13 @@ UI 工具函數
 """
 # ====== 標準函式庫 ======
 from typing import Optional, Callable
+import os
 import tkinter as tk
 import tkinter.messagebox
 import queue
 import threading
 import time
+import webbrowser
 # ====== 第三方函式庫 ======
 import customtkinter as ctk
 # ====== 專案內部模組 ======
@@ -118,9 +120,7 @@ class IconUtils:
                     try:
                         window.after_idle(window.update_idletasks)
                     except Exception as e:
-                        logger.exception(
-                            f"after_idle(update_idletasks) 失敗: {e}"
-                        )
+                        logger.exception(f"after_idle(update_idletasks) 失敗: {e}")
                 else:
                     logger.warning(f"圖示檔案不存在 - {icon_path}")
             except Exception as e:
@@ -629,7 +629,23 @@ class UIUtils:
         except Exception as e:
             logger.exception(f"顯示資訊對話框失敗: {e}")
             logger.warning(f"警告: {title} - {message}")
-
+    @staticmethod
+    def open_external(target) -> None:
+        """
+        開啟外部資源（檔案、資料夾或 URL）。
+        Open external resource (file, folder, or URL).
+        使用系統預設程式開啟。
+        """
+        try:
+            target_str = str(target)
+            # 簡單判斷是否為 URL
+            if target_str.startswith("http://") or target_str.startswith("https://"):
+                webbrowser.open(target_str)
+            else:
+                # 嘗試作為路徑開啟
+                os.startfile(target_str)
+        except Exception as e:
+            logger.exception(f"開啟外部資源失敗: {target}")
     # 顯示確認對話框（是/否/取消）
     @staticmethod
     def ask_yes_no_cancel(

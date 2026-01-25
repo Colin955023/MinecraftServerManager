@@ -183,9 +183,7 @@ class HTTPUtils:
                             f.write(chunk)
             return True
         except Exception as e:
-            logger.exception(
-                f"檔案下載失敗 ({url} -> {local_path}): {e}"
-            )
+            logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")
             return False
 
     # ====== 非同步批次請求 ======
@@ -223,9 +221,7 @@ class HTTPUtils:
                     response.raise_for_status()
                     return await response.json()
             except Exception as e:
-                logger.exception(
-                    f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}"
-                )
+                logger.exception(f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}")
                 return None
 
         # 配置連線器限制並行數量

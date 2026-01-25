@@ -8,7 +8,7 @@ REM 讀取版本資訊
 for /f "delims=" %%A in ('py -c "from src.version_info import APP_VERSION; print(APP_VERSION)"') do set APP_VERSION=%%A
 for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(APP_NAME)"') do set APP_NAME=%%A
 
-if "%APP_VERSION%"=="" set APP_VERSION=1.5
+if "%APP_VERSION%"=="" set APP_VERSION=1.6
 if "%APP_NAME%"=="" set APP_NAME=MinecraftServerManager
 
 echo ========================================================

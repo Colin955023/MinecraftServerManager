@@ -11,8 +11,6 @@ from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
-import json
-import os
 import shutil
 import subprocess
 import threading
@@ -22,6 +20,7 @@ import psutil
 from ..models import ServerConfig
 from ..utils import UIUtils
 from ..utils.logger import get_logger
+from ..utils.path_utils import PathUtils
 from ..utils import (
     ServerCommands,
     MemoryUtils,
@@ -43,7 +42,9 @@ class ServerManager:
     # 伺服器停止檢查常數
     STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
     STOP_TIMEOUT_SECONDS = 5  # 停止超時時間（秒）
-    MAX_STOP_CHECKS = int(STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL)  # 最大停止檢查次數
+    MAX_STOP_CHECKS = int(
+        STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL
+    )  # 最大停止檢查次數
     # 輸出佇列大小限制
     OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
 
@@ -239,7 +240,7 @@ class ServerManager:
         bat_content = "\n".join(bat_lines)
 
         start_script_path = server_path / "start_server.bat"
-        
+
         # 比較現有檔案內容，避免不必要的磁碟寫入
         try:
             if start_script_path.exists():
@@ -248,8 +249,8 @@ class ServerManager:
                 if existing_content == bat_content:
                     logger.debug("啟動腳本內容未變更，跳過寫入")
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
 
         with open(start_script_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
@@ -273,7 +274,9 @@ class ServerManager:
             if not config:
                 return False
             # 取得 server_path
-            server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
+            server_path = getattr(config, "path", None) or getattr(
+                config, "server_path", None
+            )
             if not server_path:
                 logger.error(
                     f"找不到伺服器路徑，無法儲存 server.properties。config={config}"
@@ -404,19 +407,21 @@ class ServerManager:
 
                 # 使用等待線程來實現非阻塞的結束通知
                 # 這樣就不需要 UI 端進行輪詢 (Polling) 了
-                def _process_waiter(proc, name, exit_callback=None):
+                def _process_waiter(proc, name):
                     try:
                         proc.wait()  # 阻塞直到進程結束，但只阻塞這個線程
                         # 進程結束後的清理與通知 (可以在這裡擴充回調機制)
-                        logger.info(f"伺服器 {name} 已停止 (Exit code: {proc.returncode})")
+                        logger.info(
+                            f"伺服器 {name} 已停止 (Exit code: {proc.returncode})"
+                        )
                     except Exception as e:
                         logger.error(f"等待伺服器 {name}結束時發生錯誤: {e}")
 
                 threading.Thread(
-                    target=_process_waiter, 
-                    args=(process, server_name), 
+                    target=_process_waiter,
+                    args=(process, server_name),
                     daemon=True,
-                    name=f"Waiter-{server_name}"
+                    name=f"Waiter-{server_name}",
                 ).start()
 
                 # 建立有界 deque 與 output thread（防止記憶體洩漏，原子操作）
@@ -452,7 +457,9 @@ class ServerManager:
                             if proc.poll() is not None:
                                 break
                     except Exception as e:
-                        get_logger().bind(component="output_reader").exception(f"{name} 讀取錯誤: {e}")
+                        get_logger().bind(component="output_reader").exception(
+                            f"{name} 讀取錯誤: {e}"
+                        )
 
                 t = threading.Thread(
                     target=_output_reader,
@@ -462,9 +469,7 @@ class ServerManager:
                 t.start()
                 self.output_threads[server_name] = t
 
-                logger.info(
-                    f"伺服器 {server_name} 啟動成功，PID: {process.pid}"
-                )
+                logger.info(f"伺服器 {server_name} 啟動成功，PID: {process.pid}")
                 return True
 
             except FileNotFoundError as e:
@@ -515,10 +520,8 @@ class ServerManager:
             config_file (Path): 伺服器配置檔案路徑
         """
         try:
-            if self.config_file.exists():
-                with open(self.config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
+            data = PathUtils.load_json(self.config_file)
+            if data:
                 for name, config_data in data.items():
                     self.servers[name] = ServerConfig(**config_data)
         except Exception as e:
@@ -533,12 +536,8 @@ class ServerManager:
             config_file (Path): 伺服器配置檔案路徑
         """
         try:
-            data = {}
-            for name, config in self.servers.items():
-                data[name] = asdict(config)
-
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            data = {name: asdict(config) for name, config in self.servers.items()}
+            PathUtils.save_json(self.config_file, data)
         except Exception as e:
             logger.exception(f"儲存配置失敗: {e}")
 
@@ -666,8 +665,9 @@ class ServerManager:
             except OSError:
                 return {}
 
-            cached_mtime, cached_props = self._properties_cache.get(server_name, (0, None))
-            
+            cached_mtime, cached_props = self._properties_cache.get(
+                server_name, (0, None)
+            )
             if cached_props is not None and mtime == cached_mtime:
                 return cached_props
 

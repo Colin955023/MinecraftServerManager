@@ -10,13 +10,11 @@ Responsible for the user interface to create a new Minecraft server
 from pathlib import Path
 from tkinter import filedialog
 from typing import Callable
-import os
 import threading
-import psutil
-import webbrowser
 import tkinter as tk
 import traceback
 import queue
+import psutil
 import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..core import LoaderManager, ServerManager, MinecraftVersionManager
@@ -159,7 +157,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 return
             java_path = java_utils.get_best_java_path(mc_version)
             if java_path:
-                java_path_win = os.path.normpath(java_path)
+                java_path_win = str(Path(java_path))
                 self.java_path_var.set(java_path_win)
 
         auto_btn = UIUtils.create_styled_button(
@@ -236,7 +234,7 @@ class CreateServerFrame(ctk.CTkFrame):
         )
         eula_link.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=6)
         eula_link.bind(
-            "<Button-1>", lambda e: webbrowser.open("https://aka.ms/MinecraftEULA")
+            "<Button-1>", lambda e: UIUtils.open_external("https://aka.ms/MinecraftEULA")
         )
 
         # 內容容器
@@ -505,8 +503,8 @@ class CreateServerFrame(ctk.CTkFrame):
         self._update_combo_state(self.mc_version_combo)
 
         def task():
-            if os.path.exists(self.version_manager.cache_file):
-                os.remove(self.version_manager.cache_file)
+            if Path(self.version_manager.cache_file).exists():
+                Path(self.version_manager.cache_file).unlink()
             versions = self.version_manager.fetch_versions()
 
             self.ui_queue.put(lambda: self.update_versions(versions))
@@ -696,9 +694,7 @@ class CreateServerFrame(ctk.CTkFrame):
             return
 
         # 只顯示穩定版且 server_url 不為 null 的版本
-        display_versions = [
-            v for v in self.release_versions if v.get("server_url")
-        ]
+        display_versions = [v for v in self.release_versions if v.get("server_url")]
 
         if not display_versions:
             self.mc_version_combo.configure(values=["無可用版本"], state="disabled")
@@ -857,9 +853,7 @@ class CreateServerFrame(ctk.CTkFrame):
                             "disabled",
                         )
                 except Exception as e2:
-                    logger.exception(
-                        f"更新載入器版本失敗狀態 UI 失敗: {e2}"
-                    )
+                    logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e2}")
                 if hasattr(self, "_loading_key"):
                     delattr(self, "_loading_key")
 

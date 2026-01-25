@@ -8,6 +8,7 @@ Provides functions to download and manage Java installations, supports Microsoft
 """
 # ====== 標準函式庫 ======
 import subprocess
+import shutil
 # ====== 專案內部模組 ======
 from .ui_utils import UIUtils
 from .logger import get_logger
@@ -17,9 +18,12 @@ logger = get_logger().bind(component="JavaDownloader")
 # 只負責安裝
 def install_java_with_winget(major: int):
     def is_winget_available():
+        winget_path = shutil.which("winget")
+        if not winget_path:
+            return False
         try:
             subprocess.run(
-                ["winget", "--version"],
+                [winget_path, "--version"],
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

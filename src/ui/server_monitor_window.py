@@ -6,13 +6,13 @@
 """
 # ====== 標準函式庫 ======
 from typing import Callable
+from concurrent.futures import ThreadPoolExecutor
 import re
 import time
 import queue
 import threading
 import traceback
 import tkinter as tk
-from concurrent.futures import ThreadPoolExecutor
 import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..utils import (
@@ -22,9 +22,9 @@ from ..utils import (
     get_dpi_scaled_size,
     get_font,
     WindowManager,
+    UIUtils,
+    get_logger
 )
-from ..utils import UIUtils
-from ..utils.logger import get_logger
 
 logger = get_logger().bind(component="ServerMonitorWindow")
 
@@ -114,9 +114,7 @@ class ServerMonitorWindow:
                 widget = getattr(self, widget_name)
                 UIUtils.safe_update_widget(widget, update_func, *args, **kwargs)
         except Exception as e:
-            logger.error(
-                f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}"
-            )
+            logger.error(f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}")
 
     def safe_config_widget(self, widget_name: str, **config) -> None:
         """
@@ -140,12 +138,12 @@ class ServerMonitorWindow:
         # 定義基礎尺寸 (邏輯像素)
         base_width = 1000
         base_height = 950
-        
+
         # 計算實際像素尺寸 (用於 minsize 和最終幾何設定)
         scale = font_manager.get_scale_factor()
         physical_min_width = int(base_width * scale)
         physical_min_height = int(base_height * scale)
-        
+
         self.window.minsize(physical_min_width, physical_min_height)
         self.window.resizable(True, True)
 
@@ -187,39 +185,41 @@ class ServerMonitorWindow:
             # 獲取當前實際像素寬高
             current_width = self.window.winfo_width()
             current_height = self.window.winfo_height()
-            
+
             # 確保不小於最小尺寸 (實際像素)
             final_width = max(current_width, physical_min_width)
             final_height = max(current_height, physical_min_height)
-            
+
             x = 0
             y = 0
-            
+
             # 計算螢幕資訊 (用於邊界檢查)
             screen_info = WindowManager.get_screen_info(self.window)
-            
+
             if self.parent and self.parent.winfo_exists():
                 # 相對於父視窗置中
                 parent_x = self.parent.winfo_rootx()
                 parent_y = self.parent.winfo_rooty()
                 parent_w = self.parent.winfo_width()
                 parent_h = self.parent.winfo_height()
-                
+
                 x = parent_x + (parent_w - final_width) // 2
                 y = parent_y + (parent_h - final_height) // 2
             else:
                 # 螢幕置中
                 x = (screen_info["width"] - final_width) // 2
                 y = (screen_info["usable_height"] - final_height) // 2
-            
+
             # 確保視窗不會超出螢幕邊界或變成負座標
             x = max(0, min(x, screen_info["width"] - final_width))
             y = max(0, min(y, screen_info["height"] - final_height))
-            
+
             # 應用最終幾何設定
             self.window.geometry(f"{final_width}x{final_height}+{int(x)}+{int(y)}")
-            logger.debug(f"監控視窗最終設定: {final_width}x{final_height}+{int(x)}+{int(y)}")
-            
+            logger.debug(
+                f"監控視窗最終設定: {final_width}x{final_height}+{int(x)}+{int(y)}"
+            )
+
         except Exception as e:
             logger.error(f"視窗置中失敗: {e}\n{traceback.format_exc()}")
 

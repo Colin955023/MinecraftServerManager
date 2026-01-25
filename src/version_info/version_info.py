@@ -10,7 +10,7 @@ Defines application version, name and related system constants
 # ====== 應用程式基本資訊 ======
 
 # 應用程式版本號
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 
 # 應用程式英文名稱
 APP_NAME = "Minecraft Server Manager"

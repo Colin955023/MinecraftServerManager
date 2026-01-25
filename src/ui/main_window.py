@@ -188,9 +188,7 @@ class MinecraftServerManager:
                     if isinstance(widget, (tk.Toplevel, ctk.CTkToplevel)):
                         widget.destroy()
                 except Exception as e:
-                    logger.error(
-                        f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}"
-                    )
+                    logger.error(f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}")
 
         except Exception as e:
             logger.error(f"清理資源時發生錯誤: {e}\n{traceback.format_exc()}")
@@ -1048,6 +1046,8 @@ class MinecraftServerManager:
         """
         self.hide_all_frames()
         self._ensure_mod_management_frame()
+        # 每次顯示頁面時，重新載入伺服器列表並預設選擇第一個
+        self.mod_frame.load_servers()
         frame = self.mod_frame.get_frame()
         try:
             frame.grid(row=0, column=0, sticky="nsew")
@@ -1679,7 +1679,9 @@ class ServerInitializationDialog:
         try:
             self._console_queue.put_nowait(text)
         except Exception as e:
-            get_logger().bind(component="InitServerDialog").exception(f"加入 console queue 失敗: {e}")
+            get_logger().bind(component="InitServerDialog").exception(
+                f"加入 console queue 失敗: {e}"
+            )
 
     def _start_console_pump(self) -> None:
         if self._console_pump_job is not None:
@@ -1845,7 +1847,9 @@ class ServerInitializationDialog:
                     logger.exception(f"等待程序終止逾時/失敗，改用 kill: {e}")
                     self.server_process.kill()
         except Exception as e:
-            get_logger().bind(component="InitServerDialog").exception(f"終止伺服器程序失敗: {e}")
+            get_logger().bind(component="InitServerDialog").exception(
+                f"終止伺服器程序失敗: {e}"
+            )
 
     def _timeout_force_close(self) -> None:
         """超時強制關閉"""

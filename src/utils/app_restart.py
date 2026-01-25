@@ -97,11 +97,7 @@ def restart_application(delay: float = 1.0) -> bool:
                 time.sleep(delay)
 
                 # Windows 平台隱藏命令提示字元視窗
-                if sys.platform == "win32":
-                    # 使用 CREATE_NO_WINDOW 標誌隱藏命令提示字元視窗
-                    creation_flags = subprocess.CREATE_NO_WINDOW
-                else:
-                    creation_flags = 0
+                creation_flags = subprocess.CREATE_NO_WINDOW
 
                 if is_frozen:
                     # 打包後的執行檔 (frozen)

@@ -8,11 +8,11 @@ Provides unified user settings management including auto-update, window preferen
 """
 # ====== 標準函式庫 ======
 from typing import Any, Dict
-import json
 import sys
 # ====== 專案內部模組 ======
 from src.utils import ensure_dir, get_user_data_dir
 from src.utils.logger import get_logger
+from src.utils.path_utils import PathUtils
 
 logger = get_logger().bind(component="SettingsManager")
 
@@ -40,8 +40,9 @@ def _get_default_settings() -> Dict[str, Any]:
     # 透過檢查是否為打包環境來設定調試日誌預設值
     # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
     is_nuitka = "__compiled__" in globals()
-    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
-    
+    is_packaged = bool(
+        getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka
+    )
     # 開發環境預設啟用調試日誌，打包環境預設關閉
     default_debug_logging = not is_packaged
 
@@ -96,23 +97,20 @@ class SettingsManager:
             self._save_settings(default_settings)
             return default_settings
 
-        try:
-            with open(self.settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-
-            # 確保所有必要的鍵值都存在（向後相容性）
-            if "auto_update_enabled" not in settings:
-                settings["auto_update_enabled"] = True
-            if "first_run_completed" not in settings:
-                settings["first_run_completed"] = False
-            if "window_preferences" not in settings:
-                settings["window_preferences"] = DEFAULT_WINDOW_PREFERENCES.copy()
-
-            return settings
-        except Exception as e:
-            logger.exception(f"載入設定失敗: {e}")
+        settings = PathUtils.load_json(self.settings_path)
+        if not settings:
             # 如果載入失敗，回傳預設設定
             return _get_default_settings()
+
+        # 確保所有必要的鍵值都存在（向後相容性）
+        if "auto_update_enabled" not in settings:
+            settings["auto_update_enabled"] = True
+        if "first_run_completed" not in settings:
+            settings["first_run_completed"] = False
+        if "window_preferences" not in settings:
+            settings["window_preferences"] = DEFAULT_WINDOW_PREFERENCES.copy()
+
+        return settings
 
     # 儲存設定到檔案
     def _save_settings(self, settings: Dict[str, Any]) -> None:
@@ -126,14 +124,8 @@ class SettingsManager:
         Returns:
             None
         """
-        try:
-            with open(self.settings_path, "w", encoding="utf-8") as f:
-                json.dump(settings, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.exception(
-                f"無法寫入 user_settings.json: {e}"
-            )
-            raise Exception(f"無法寫入 user_settings.json: {e}")
+        if not PathUtils.save_json(self.settings_path, settings):
+            logger.error("無法寫入 user_settings.json")
 
     # ====== 基本設定操作 ======
     # 取得設定值

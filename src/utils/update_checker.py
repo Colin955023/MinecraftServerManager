@@ -29,16 +29,16 @@ def _parse_version(version_str: str) -> Optional[Version]:
     """
     解析版本字串為 Version 物件
     Parse version string to Version object
-    
+
     Args:
         version_str: 版本字串（可能包含 'v' 或 'V' 前綴）
-    
+
     Returns:
         Version 物件，解析失敗時返回 None
     """
     try:
         # 移除前綴 'v' 或 'V'
-        clean_version = version_str.strip().lstrip('vV')
+        clean_version = version_str.strip().lstrip("vV")
         return Version(clean_version)
     except (InvalidVersion, Exception):
         return None
@@ -157,15 +157,15 @@ def check_and_prompt_update(
                 return
 
             latest_tag = latest.get("tag_name") or ""
-            
+
             # 使用 packaging.version 進行版本比較
             latest_ver = _parse_version(latest_tag)
             current_ver = _parse_version(current_version)
-            
+
             if not latest_ver or not current_ver:
                 logger.warning("無法解析版本號，跳過更新檢查")
                 return
-            
+
             # 比較版本
             if latest_ver <= current_ver:
                 if show_up_to_date_message:

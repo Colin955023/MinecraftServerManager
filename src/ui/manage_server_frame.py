@@ -82,9 +82,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 try:
                     self.after_cancel(job_id)
                 except Exception as e:
-                    logger.exception(
-                        f"取消排程失敗 {attr_name}={job_id}: {e}"
-                    )
+                    logger.exception(f"取消排程失敗 {attr_name}={job_id}: {e}")
                 setattr(self, attr_name, None)
 
         self._post_action_immediate_job = self.after(

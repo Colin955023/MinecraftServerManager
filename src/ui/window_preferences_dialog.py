@@ -6,9 +6,9 @@ Window preferences dialog for configuring window behavior and appearance.
 """
 # ====== 標準函式庫 ======
 from typing import Callable, Optional
-import customtkinter as ctk
 import sys
 import traceback
+import customtkinter as ctk
 # ====== 專案內部模組 ======
 from ..utils import DialogUtils, UIUtils, get_settings_manager
 from ..utils import (
@@ -140,7 +140,9 @@ class WindowPreferencesDialog:
         # 開發環境顯示調試選項，打包環境隱藏
         # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
         is_nuitka = "__compiled__" in globals()
-        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
+        is_packaged = bool(
+            getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka
+        )
         should_show_debug = not is_packaged
 
         if should_show_debug:

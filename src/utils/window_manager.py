@@ -208,7 +208,9 @@ class WindowManager:
             ):
                 window.after(100, lambda: window.state("zoomed"))
 
-            get_logger().bind(component="WindowState").debug(f"主視窗設定: {width}x{height}+{x}+{y}")
+            get_logger().bind(component="WindowState").debug(
+                f"主視窗設定: {width}x{height}+{x}+{y}"
+            )
         except Exception as e:
             logger.exception(f"設定主視窗失敗: {e}")
             # 備用設定

@@ -9,7 +9,6 @@ Provides core functionality modules for Minecraft Server Manager including serve
 
 from __future__ import annotations
 from typing import Dict, Tuple
-
 from .. import lazy_exports
 
 _EXPORTS: Dict[str, Tuple[str, str]] = {
@@ -21,6 +20,5 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "ModStatus": (".mod_manager", "ModStatus"),
     "ModPlatform": (".mod_manager", "ModPlatform"),
 }
-
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

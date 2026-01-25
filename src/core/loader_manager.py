@@ -10,8 +10,6 @@ Responsible for managing and downloading versions of Fabric and Forge loaders wi
 from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional, Union
-import json
-import os
 import re
 import subprocess
 from lxml import etree
@@ -21,6 +19,7 @@ from src.models import LoaderVersion
 from src.utils import java_utils
 from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
 from src.utils.logger import get_logger
+from src.utils.path_utils import PathUtils
 
 logger = get_logger().bind(component="LoaderManager")
 
@@ -54,23 +53,26 @@ class LoaderManager:
             None
         """
         try:
-            cache_file = self.fabric_cache_file
-            os.remove(cache_file)
-            cache_file = self.forge_cache_file
-            os.remove(cache_file)
+            # 使用 Path.unlink 替代 os.remove
+            fabric_path = Path(self.fabric_cache_file)
+            forge_path = Path(self.forge_cache_file)
+
+            fabric_path.unlink(missing_ok=True)
+            forge_path.unlink(missing_ok=True)
+
             # 清除記憶體快取
             self._version_cache.clear()
         except PermissionError as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
                 "清除快取檔案失敗",
-                f"無法刪除快取檔案: {cache_file}\n權限不足\n{e}",
+                f"無法刪除快取檔案\n權限不足\n{e}",
                 topmost=True,
             )
         except Exception as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
-                "清除快取檔案失敗", f"無法刪除快取檔案: {cache_file}\n{e}", topmost=True
+                "清除快取檔案失敗", f"無法刪除快取檔案\n{e}", topmost=True
             )
 
     # ======== 公開 API ========
@@ -107,7 +109,7 @@ class LoaderManager:
         lt = self._standardize_loader_type(loader_type, loader_version)
 
         # 1. 取得 Java 執行檔路徑（先找，找不到就自動安裝再找一次）
-        if user_java_path and os.path.exists(user_java_path):
+        if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
             java_path = java_utils.get_best_java_path(minecraft_version)
@@ -133,7 +135,7 @@ class LoaderManager:
                     "-loader",
                     loader_version,
                     "-dir",
-                    os.path.dirname(download_path),
+                    str(Path(download_path).parent),
                 ],
                 minecraft_version=minecraft_version,
                 loader_version=loader_version,
@@ -196,18 +198,13 @@ class LoaderManager:
             if data:
                 # 比較現有快取，減少磁碟寫入
                 write_needed = True
-                if os.path.exists(self.fabric_cache_file):
-                    try:
-                        with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
-                            existing = json.load(f)
-                        if existing == data:
-                            write_needed = False
-                    except Exception:
-                        pass
-                        
+                fabric_path = Path(self.fabric_cache_file)
+                existing = PathUtils.load_json(fabric_path)
+                if existing == data:
+                    write_needed = False
+
                 if write_needed:
-                    with open(self.fabric_cache_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    PathUtils.save_json(fabric_path, data)
         except Exception as e:
             logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
@@ -260,7 +257,10 @@ class LoaderManager:
                                         version_dict[mc_version] = []
                                     version_dict[mc_version].append(version)
                             except Exception as e:
-                                logger.debug(f"解析 Forge 版本字串失敗 '{version}': {e}", "LoaderManager")
+                                logger.debug(
+                                    f"解析 Forge 版本字串失敗 '{version}': {e}",
+                                    "LoaderManager",
+                                )
                                 continue
 
                     # 對每個 MC 版本的 Forge 版本進行排序（最新在前）
@@ -271,19 +271,14 @@ class LoaderManager:
 
                     # 比較現有快取，減少磁碟寫入
                     write_needed = True
-                    if os.path.exists(self.forge_cache_file):
-                        try:
-                            with open(self.forge_cache_file, "r", encoding="utf-8") as f:
-                                existing = json.load(f)
-                            if existing == version_dict:
-                                write_needed = False
-                        except Exception:
-                            pass
+                    forge_path = Path(self.forge_cache_file)
+                    existing = PathUtils.load_json(forge_path)
+                    if existing == version_dict:
+                        write_needed = False
 
                     if write_needed:
                         # 寫入快取檔案
-                        with open(self.forge_cache_file, "w", encoding="utf-8") as f:
-                            json.dump(version_dict, f, ensure_ascii=False, indent=2)
+                        PathUtils.save_json(forge_path, version_dict)
                     return
 
         except Exception as e:
@@ -316,8 +311,9 @@ class LoaderManager:
             return self._version_cache[cache_key]
 
         # 檢查快取檔案是否存在
-        if not os.path.exists(self.fabric_cache_file) and not os.path.exists(
-            self.forge_cache_file
+        if (
+            not Path(self.fabric_cache_file).exists()
+            and not Path(self.forge_cache_file).exists()
         ):
             return []
         else:
@@ -329,8 +325,10 @@ class LoaderManager:
                         # 不快取空結果，因為相容性可能在未來改變
                         return []
 
-                    with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
-                        cache = json.load(f)
+                    cache = PathUtils.load_json(Path(self.fabric_cache_file))
+                    if not cache:
+                        return []
+
                     result = []
                     # 返回與兼容的MC版本相對應的Fabric加載器版本
                     for item in cache:
@@ -349,8 +347,9 @@ class LoaderManager:
             # Forge
             elif loader_type.lower() == "forge":
                 try:
-                    with open(self.forge_cache_file, "r", encoding="utf-8") as f:
-                        cache = json.load(f)
+                    cache = PathUtils.load_json(Path(self.forge_cache_file))
+                    if not cache:
+                        return []
 
                     result = []
 
@@ -454,9 +453,7 @@ class LoaderManager:
                 Union[bool, str]: 成功時返回 True，失敗時返回錯誤訊息。
 
         """
-        installer_path = os.path.join(
-            os.path.dirname(download_path), os.path.basename(installer_url)
-        )
+        installer_path = str(Path(download_path).parent / Path(installer_url).name)
 
         # 設定進度範圍
         if need_vanilla:
@@ -510,7 +507,7 @@ class LoaderManager:
         try:
             process = subprocess.Popen(
                 cmd,
-                cwd=os.path.dirname(download_path),
+                cwd=str(Path(download_path).parent),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -652,10 +649,9 @@ class LoaderManager:
             progress_callback(10, "查詢 Minecraft 版本資訊...")
 
         # 優先使用 VersionManager 的快取查詢，失敗則回退到本地方法
-        server_url = (
-            MinecraftVersionManager().get_server_download_url(minecraft_version)
-            or self._get_minecraft_server_url(minecraft_version)
-        )
+        server_url = MinecraftVersionManager().get_server_download_url(
+            minecraft_version
+        ) or self._get_minecraft_server_url(minecraft_version)
 
         if not server_url:
             return self._fail(progress_callback, "找不到 Minecraft 版本資訊")
@@ -732,9 +728,7 @@ class LoaderManager:
                                 f"{status_text} ({downloaded // 1024 // 1024} MB)",
                             )
             if progress_callback:
-                progress_callback(
-                    end_percent, f"下載完成: {os.path.basename(dest_path)}"
-                )
+                progress_callback(end_percent, f"下載完成: {Path(dest_path).name}")
             return True
         except Exception as e:
             logger.exception(f"下載失敗: {e}")
