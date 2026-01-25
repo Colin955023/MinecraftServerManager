@@ -125,7 +125,7 @@ class SettingsManager:
         """
         if not PathUtils.save_json(self.settings_path, settings):
             logger.error("無法寫入 user_settings.json")
-            raise Exception(f"無法寫入 user_settings.json: {e}")
+
 
     # ====== 基本設定操作 ======
     # 取得設定值

@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Optional
 
 from loguru import logger
-from .constants import MB
+
+# 記憶體常數 Memory Constants
+MB = 1024 * 1024
 
 
 class LoggerConfig:

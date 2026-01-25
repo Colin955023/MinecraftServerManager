@@ -18,10 +18,14 @@ import re
 from ..models import ServerConfig
 from .logger import get_logger
 from .ui_utils import UIUtils
-from .constants import KB, MB, GB
 from . import java_utils
 
 logger = get_logger().bind(component="ServerUtils")
+
+# ====== 記憶體常數 Memory Constants ======
+KB = 1024
+MB = 1024 * 1024
+GB = 1024 * 1024 * 1024
 
 
 # 記憶體工具類別 Memory Utilities

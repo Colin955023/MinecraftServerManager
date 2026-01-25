@@ -21,6 +21,7 @@ from .logger import get_logger
 from .path_utils import PathUtils
 from src.core import MinecraftVersionManager
 from .java_downloader import install_java_with_winget
+import os
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -118,9 +119,8 @@ def get_required_java_major(mc_version: str) -> int:
                 java_info2 = ver_json.get("java_version")
                 if java_info2 and "major" in java_info2:
                     return int(java_info2["major"])
-                # 最後使用正則搜尋 (直接從 JSON 字串搜尋，無需額外請求)
-                import json as json_lib
-                json_str = json_lib.dumps(ver_json)
+                # 最後使用正則搜尋 (在已解析的JSON上搜尋)
+                json_str = json.dumps(ver_json)
                 m = re.search(r'"major(?:Version)?"\s*:\s*(\d+)', json_str)
                 if m:
                     return int(m.group(1))
@@ -151,7 +151,6 @@ def get_all_local_java_candidates() -> list:
                     search_paths.add(str(subdir / "bin"))
 
     # 2.JAVA_HOME 環境變數
-    import os
     for var in ENV_VARS:
         val = os.environ.get(var)
         if val:
