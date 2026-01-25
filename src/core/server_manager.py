@@ -11,8 +11,6 @@ from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
-import json
-import os
 import shutil
 import subprocess
 import threading
@@ -22,6 +20,7 @@ import psutil
 from ..models import ServerConfig
 from ..utils import UIUtils
 from ..utils.logger import get_logger
+from ..utils.path_utils import PathUtils
 from ..utils import (
     ServerCommands,
     MemoryUtils,
@@ -515,10 +514,8 @@ class ServerManager:
             config_file (Path): 伺服器配置檔案路徑
         """
         try:
-            if self.config_file.exists():
-                with open(self.config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
+            data = PathUtils.load_json(self.config_file)
+            if data:
                 for name, config_data in data.items():
                     self.servers[name] = ServerConfig(**config_data)
         except Exception as e:
@@ -533,12 +530,8 @@ class ServerManager:
             config_file (Path): 伺服器配置檔案路徑
         """
         try:
-            data = {}
-            for name, config in self.servers.items():
-                data[name] = asdict(config)
-
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            data = {name: asdict(config) for name, config in self.servers.items()}
+            PathUtils.save_json(self.config_file, data)
         except Exception as e:
             logger.exception(f"儲存配置失敗: {e}")
 
