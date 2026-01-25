@@ -38,7 +38,10 @@ def _get_default_settings() -> Dict[str, Any]:
     Get default settings (dynamically calculated based on environment)
     """
     # 透過檢查是否為打包環境來設定調試日誌預設值
-    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+    # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
+    is_nuitka = "__compiled__" in globals()
+    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
+    
     # 開發環境預設啟用調試日誌，打包環境預設關閉
     default_debug_logging = not is_packaged
 

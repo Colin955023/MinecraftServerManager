@@ -72,6 +72,7 @@ class ServerManager:
         self.running_servers: Dict[str, subprocess.Popen] = {}  # 追踪運行中的伺服器
         self.output_queues = {}  # server_name -> queue.Queue
         self.output_threads = {}  # server_name -> Thread
+        self._properties_cache = {}  # server_name -> (mtime, properties)
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
@@ -237,7 +238,20 @@ class ServerManager:
 
         bat_content = "\n".join(bat_lines)
 
-        with open(server_path / "start_server.bat", "w", encoding="utf-8") as f:
+        start_script_path = server_path / "start_server.bat"
+        
+        # 比較現有檔案內容，避免不必要的磁碟寫入
+        try:
+            if start_script_path.exists():
+                with open(start_script_path, "r", encoding="utf-8") as f:
+                    existing_content = f.read()
+                if existing_content == bat_content:
+                    logger.debug("啟動腳本內容未變更，跳過寫入")
+                    return
+        except Exception:
+            pass
+
+        with open(start_script_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
 
     def update_server_properties(
@@ -387,6 +401,23 @@ class ServerManager:
                     )
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process
+
+                # 使用等待線程來實現非阻塞的結束通知
+                # 這樣就不需要 UI 端進行輪詢 (Polling) 了
+                def _process_waiter(proc, name, exit_callback=None):
+                    try:
+                        proc.wait()  # 阻塞直到進程結束，但只阻塞這個線程
+                        # 進程結束後的清理與通知 (可以在這裡擴充回調機制)
+                        logger.info(f"伺服器 {name} 已停止 (Exit code: {proc.returncode})")
+                    except Exception as e:
+                        logger.error(f"等待伺服器 {name}結束時發生錯誤: {e}")
+
+                threading.Thread(
+                    target=_process_waiter, 
+                    args=(process, server_name), 
+                    daemon=True,
+                    name=f"Waiter-{server_name}"
+                ).start()
 
                 # 建立有界 deque 與 output thread（防止記憶體洩漏，原子操作）
                 # 使用 deque 替代 Queue 以獲得更好的記憶體管理與原子操作
@@ -608,8 +639,8 @@ class ServerManager:
 
     def load_server_properties(self, server_name: str) -> Dict[str, str]:
         """
-        載入伺服器的 server.properties 檔案內容
-        Load the server.properties file content for the server.
+        載入伺服器的 server.properties 檔案內容 (附帶緩存機制)
+        Load the server.properties file content for the server (with caching).
 
         Args:
             server_name (str): 伺服器名稱
@@ -625,8 +656,24 @@ class ServerManager:
             server_path = Path(config.path)
             properties_file = server_path / "server.properties"
 
+            # 檢查檔案是否存在
+            if not properties_file.exists():
+                return {}
+
+            # 檢查檔案修改時間
+            try:
+                mtime = properties_file.stat().st_mtime
+            except OSError:
+                return {}
+
+            cached_mtime, cached_props = self._properties_cache.get(server_name, (0, None))
+            
+            if cached_props is not None and mtime == cached_mtime:
+                return cached_props
+
             # 使用統一的載入方法
             properties = ServerPropertiesHelper.load_properties(properties_file)
+            self._properties_cache[server_name] = (mtime, properties)
 
             # 更新配置中的屬性
             config.properties = properties

@@ -21,6 +21,7 @@ from ..utils import (
     font_manager,
     get_dpi_scaled_size,
     get_font,
+    WindowManager,
 )
 from ..utils import UIUtils
 from ..utils.logger import get_logger
@@ -136,19 +137,28 @@ class ServerMonitorWindow:
         self.window.title(f"伺服器監控 - {self.server_name}")
         self.window.state("normal")
 
-        min_width = int(1200 * font_manager.get_scale_factor())  # 1200 * DPI
-        min_height = int(900 * font_manager.get_scale_factor())  # 900 * DPI
-        self.window.minsize(min_width, min_height)
+        # 定義基礎尺寸 (邏輯像素)
+        base_width = 1000
+        base_height = 950
+        
+        # 計算實際像素尺寸 (用於 minsize 和最終幾何設定)
+        scale = font_manager.get_scale_factor()
+        physical_min_width = int(base_width * scale)
+        physical_min_height = int(base_height * scale)
+        
+        self.window.minsize(physical_min_width, physical_min_height)
         self.window.resizable(True, True)
 
         # 監控視窗為獨立視窗，僅需要綁定圖示和置中，不需要模態
+        # 注意: setup_window_properties 會 internally 呼叫 setup_dialog_window 並進行 DPI 縮放
+        # 所以這裡傳入 邏輯尺寸 (base_width/base_height)，避免雙重縮放
         UIUtils.setup_window_properties(
             window=self.window,
             parent=self.parent,
-            width=min_width,
-            height=min_height,
+            width=base_width,
+            height=base_height,
             bind_icon=True,
-            center_on_parent=True,
+            center_on_parent=False,
             make_modal=False,
             delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
         )
@@ -169,6 +179,49 @@ class ServerMonitorWindow:
         self.create_control_panel(main_frame)
         # 底部控制台輸出區
         self.create_console_panel(main_frame)
+
+        # 強制更新 UI 以計算正確尺寸
+        self.window.update_idletasks()
+        try:
+            # 手動計算正確的置中位置，避免依賴 setup_dialog_window 可能的雙重縮放問題
+            # 獲取當前實際像素寬高
+            current_width = self.window.winfo_width()
+            current_height = self.window.winfo_height()
+            
+            # 確保不小於最小尺寸 (實際像素)
+            final_width = max(current_width, physical_min_width)
+            final_height = max(current_height, physical_min_height)
+            
+            x = 0
+            y = 0
+            
+            # 計算螢幕資訊 (用於邊界檢查)
+            screen_info = WindowManager.get_screen_info(self.window)
+            
+            if self.parent and self.parent.winfo_exists():
+                # 相對於父視窗置中
+                parent_x = self.parent.winfo_rootx()
+                parent_y = self.parent.winfo_rooty()
+                parent_w = self.parent.winfo_width()
+                parent_h = self.parent.winfo_height()
+                
+                x = parent_x + (parent_w - final_width) // 2
+                y = parent_y + (parent_h - final_height) // 2
+            else:
+                # 螢幕置中
+                x = (screen_info["width"] - final_width) // 2
+                y = (screen_info["usable_height"] - final_height) // 2
+            
+            # 確保視窗不會超出螢幕邊界或變成負座標
+            x = max(0, min(x, screen_info["width"] - final_width))
+            y = max(0, min(y, screen_info["height"] - final_height))
+            
+            # 應用最終幾何設定
+            self.window.geometry(f"{final_width}x{final_height}+{int(x)}+{int(y)}")
+            logger.debug(f"監控視窗最終設定: {final_width}x{final_height}+{int(x)}+{int(y)}")
+            
+        except Exception as e:
+            logger.error(f"視窗置中失敗: {e}\n{traceback.format_exc()}")
 
     def create_control_panel(self, parent) -> None:
         """
@@ -762,8 +815,8 @@ class ServerMonitorWindow:
 
     def update_player_list(self, players: list) -> None:
         """
-        更新玩家列表顯示
-        Update player list display
+        更新玩家列表顯示（支援條紋交替顏色）
+        Update player list display (supports alternating striped colors)
 
         Args:
             players (list): 玩家名稱列表
@@ -774,14 +827,20 @@ class ServerMonitorWindow:
                 return
             self._last_player_names = players_tuple
 
-            # 清空現有列表
             self.players_listbox.delete(0, tk.END)
+            is_dark = ctk.get_appearance_mode() == "Dark"
+            bg_odd = "#2b2b2b" if is_dark else "#f8fafc"
+            bg_even = "#363636" if is_dark else "#e2e8f0"
+
             if players:
-                for player in players:
+                for i, player in enumerate(players):
                     if player:  # 確保玩家名稱不為空
                         self.players_listbox.insert(tk.END, player)
+                        bg_color = bg_odd if i % 2 == 0 else bg_even
+                        self.players_listbox.itemconfigure(i, {"bg": bg_color})
             else:
                 self.players_listbox.insert(tk.END, "無玩家在線")
+                self.players_listbox.itemconfigure(0, {"bg": bg_odd})
         except Exception as e:
             logger.error(
                 f"更新玩家列表錯誤: {e}\n{traceback.format_exc()}",

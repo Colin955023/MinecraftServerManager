@@ -48,14 +48,20 @@ echo [3/4] 執行 Nuitka 打包 (Standalone 模式)...
 py -m uv run python -m nuitka ^
     --standalone ^
     --enable-plugin=tk-inter ^
+    --include-package-data=customtkinter ^
+    --include-package=src ^
+    --python-flag=no_docstrings ^
     --windows-console-mode=disable ^
     --windows-icon-from-ico=assets/icon.ico ^
-    --include-data-dir=src=src ^
     --include-data-dir=assets=assets ^
     --include-data-file=README.md=README.md ^
     --include-data-file=LICENSE=LICENSE ^
     --include-data-file=pyproject.toml=pyproject.toml ^
     --include-data-file=uv.lock=uv.lock ^
+    --nofollow-import-to=tkinter.test ^
+    --nofollow-import-to=unittest ^
+    --nofollow-import-to=pydoc ^
+    --nofollow-import-to=distutils ^
     --output-dir=dist ^
     --output-filename=MinecraftServerManager.exe ^
     --assume-yes-for-downloads ^

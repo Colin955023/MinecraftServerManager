@@ -16,6 +16,7 @@ import re
 import subprocess
 from lxml import etree
 # ====== 專案內部模組 ======
+from .version_manager import MinecraftVersionManager
 from src.models import LoaderVersion
 from src.utils import java_utils
 from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
@@ -193,8 +194,20 @@ class LoaderManager:
         try:
             data = HTTPUtils.get_json(fabric_url, timeout=15)
             if data:
-                with open(self.fabric_cache_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                # 比較現有快取，減少磁碟寫入
+                write_needed = True
+                if os.path.exists(self.fabric_cache_file):
+                    try:
+                        with open(self.fabric_cache_file, "r", encoding="utf-8") as f:
+                            existing = json.load(f)
+                        if existing == data:
+                            write_needed = False
+                    except Exception:
+                        pass
+                        
+                if write_needed:
+                    with open(self.fabric_cache_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
@@ -256,9 +269,21 @@ class LoaderManager:
                         # 限制每個版本最多10個 Forge 版本，避免數據過多
                         version_dict[mc_version] = version_dict[mc_version][:10]
 
-                    # 寫入快取檔案
-                    with open(self.forge_cache_file, "w", encoding="utf-8") as f:
-                        json.dump(version_dict, f, ensure_ascii=False, indent=2)
+                    # 比較現有快取，減少磁碟寫入
+                    write_needed = True
+                    if os.path.exists(self.forge_cache_file):
+                        try:
+                            with open(self.forge_cache_file, "r", encoding="utf-8") as f:
+                                existing = json.load(f)
+                            if existing == version_dict:
+                                write_needed = False
+                        except Exception:
+                            pass
+
+                    if write_needed:
+                        # 寫入快取檔案
+                        with open(self.forge_cache_file, "w", encoding="utf-8") as f:
+                            json.dump(version_dict, f, ensure_ascii=False, indent=2)
                     return
 
         except Exception as e:
@@ -626,7 +651,12 @@ class LoaderManager:
         if progress_callback:
             progress_callback(10, "查詢 Minecraft 版本資訊...")
 
-        server_url = self._get_minecraft_server_url(minecraft_version)
+        # 優先使用 VersionManager 的快取查詢，失敗則回退到本地方法
+        server_url = (
+            MinecraftVersionManager().get_server_download_url(minecraft_version)
+            or self._get_minecraft_server_url(minecraft_version)
+        )
+
         if not server_url:
             return self._fail(progress_callback, "找不到 Minecraft 版本資訊")
 

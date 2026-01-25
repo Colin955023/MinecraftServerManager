@@ -8,6 +8,7 @@ server.properties 設定對話框
 from tkinter import ttk
 import tkinter as tk
 import traceback
+import webbrowser
 from typing import Dict
 import customtkinter as ctk
 # ====== 專案內部模組 ======
@@ -54,8 +55,8 @@ class ServerPropertiesDialog:
         UIUtils.setup_window_properties(
             window=self.dialog,
             parent=self.parent,
-            width=int(1200 * font_manager.get_scale_factor()),
-            height=int(900 * font_manager.get_scale_factor()),
+            width=int(800 * font_manager.get_scale_factor()),
+            height=int(600 * font_manager.get_scale_factor()),
             bind_icon=True,
             center_on_parent=True,  # 使用螢幕置中
             make_modal=True,
@@ -70,10 +71,8 @@ class ServerPropertiesDialog:
         設定對話框
         """
         self.dialog.title(f"伺服器設定 - {self.server_config.name}")
-        # 移除固定大小設定，讓視窗根據內容動態調整
-        # 只設定最小尺寸
-        min_width = int(1200 * font_manager.get_scale_factor())  # 1200 * DPI
-        min_height = int(900 * font_manager.get_scale_factor())  # 900 * DPI
+        min_width = int(900 * font_manager.get_scale_factor())  # 900 * DPI
+        min_height = int(600 * font_manager.get_scale_factor())  # 600 * DPI
         self.dialog.minsize(min_width, min_height)
         self.dialog.resizable(True, True)
 
@@ -107,9 +106,13 @@ class ServerPropertiesDialog:
             font=get_font("Microsoft JhengHei", 21, "bold"),  # 21px
         )
         title_label.pack(pady=(0, get_dpi_scaled_size(15)))
+        style = ttk.Style()
+        style.configure(
+            "ServerProps.TNotebook.Tab", font=get_font("Microsoft JhengHei", 16, "bold")
+        )
 
         # 建立筆記本 (分頁)
-        self.notebook = ttk.Notebook(main_frame)
+        self.notebook = ttk.Notebook(main_frame, style="ServerProps.TNotebook")
         self.notebook.pack(fill="both", expand=True, pady=(0, get_dpi_scaled_size(15)))
 
         # 建立各個分頁
@@ -167,10 +170,25 @@ class ServerPropertiesDialog:
         help_label = ctk.CTkLabel(
             button_frame,
             text="💡 將滑鼠移到設定項目上可查看詳細說明",
-            font=get_font(size=14),
+            font=get_font(size=16),
             text_color=("gray60", "gray50"),
         )
         help_label.pack(side="left")
+
+        # 官方說明連結
+        link_label = ctk.CTkLabel(
+            button_frame,
+            text="【官方設定說明】",
+            font=get_font(size=16, underline=True),
+            text_color=("blue", "#4dabf7"),
+            cursor="hand2"
+        )
+        link_label.pack(side="left", padx=(5, 0))
+        
+        def open_wiki(event):
+            webbrowser.open("https://zh.minecraft.wiki/w/Server.properties")
+            
+        link_label.bind("<Button-1>", open_wiki)
 
     def create_property_tabs(self) -> None:
         """
@@ -278,9 +296,18 @@ class ServerPropertiesDialog:
             label = ttk.Label(
                 prop_frame,
                 text=f"{prop_name}:",
-                font=get_font("Microsoft JhengHei", 14, "bold"),  # 14 * DPI
+                font=get_font("Microsoft JhengHei", 20, "bold"),  # 20 * DPI
+                cursor="hand2"
             )
             label.pack(anchor="w")
+            
+            # 綁定點擊事件以複製屬性名稱
+            def copy_name(event, name=prop_name):
+                self.dialog.clipboard_clear()
+                self.dialog.clipboard_append(name)
+                self.dialog.update()  # 確保剪貼簿內容更新
+
+            label.bind("<Button-1>", copy_name)
 
             # 根據屬性類型建立控制項
             var = tk.StringVar()
@@ -313,7 +340,6 @@ class ServerPropertiesDialog:
             "use-native-transport",
             "enable-jmx-monitoring",
             "enable-rcon",
-            "debug",
             "prevent-proxy-connections",
             "hide-online-players",
             "force-gamemode",
@@ -323,6 +349,11 @@ class ServerPropertiesDialog:
             "enable-status",
             "log-ips",
             "require-resource-pack",
+            "enable-code-of-conduct",
+            "accepts-transfers",
+            "sync-chunk-writes",
+            "management-server-enabled",
+            "management-server-tls-enabled",
         ]
 
         # 選項屬性
@@ -335,6 +366,7 @@ class ServerPropertiesDialog:
                 "minecraft:large_biomes",
                 "minecraft:amplified",
             ],
+            "region-file-compression": ["deflate", "lz4", "none"],
         }
 
         # 數字範圍屬性
@@ -362,7 +394,7 @@ class ServerPropertiesDialog:
                 parent,
                 variable=bool_var,
                 text="啟用",
-                font=get_font(size=12),  # 統一字體
+                font=get_font(size=16),  # 統一字體
                 width=get_dpi_scaled_size(180),
                 height=get_dpi_scaled_size(36),
             )
@@ -384,8 +416,8 @@ class ServerPropertiesDialog:
                 parent,
                 variable=var,
                 values=choice_props[prop_name],
-                font=get_font(size=11),
-                dropdown_font=get_font(size=11),
+                font=get_font(size=16),
+                dropdown_font=get_font(size=16),
                 width=get_dpi_scaled_size(300),
             )
             widget.pack(fill="x", pady=get_dpi_scaled_size(3))
@@ -407,7 +439,7 @@ class ServerPropertiesDialog:
                 from_=min_val,
                 to=max_val,
                 width=get_dpi_scaled_size(30),  # 放大寬度
-                font=get_font("Microsoft JhengHei", 15),
+                font=get_font("Microsoft JhengHei", 16),
             )
             widget.pack(anchor="w")
 
@@ -416,7 +448,7 @@ class ServerPropertiesDialog:
             widget = ttk.Entry(
                 parent,
                 textvariable=var,
-                font=get_font("Microsoft JhengHei", 15),
+                font=get_font("Microsoft JhengHei", 16),
             )
             widget.pack(fill="x")
 
@@ -433,7 +465,7 @@ class ServerPropertiesDialog:
             description,
             bg="lightyellow",
             fg="black",
-            font=get_font("Microsoft JhengHei", 14),
+            font=get_font("Microsoft JhengHei", 16),
             padx=8,
             pady=4,
             wraplength=get_dpi_scaled_size(600),

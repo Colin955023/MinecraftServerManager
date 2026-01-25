@@ -233,11 +233,11 @@ class ModManagementFrame:
         # 伺服器選擇區域
         self.create_server_selection()
 
-        # 頁籤介面
-        self.create_notebook()
-
         # 狀態列
         self.create_status_bar()
+
+        # 頁籤介面
+        self.create_notebook()
 
     def create_server_selection(self) -> None:
         """建立伺服器選擇區域"""
@@ -540,6 +540,15 @@ class ModManagementFrame:
         # 建立包含 Treeview 和滾動條的容器
         tree_container = ctk.CTkFrame(list_frame)
         tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        style = ttk.Style()
+        style.configure(
+            "ModList.Treeview",
+            font=get_font(size=16),
+            rowheight=int(25 * font_manager.get_scale_factor()),
+        )
+        style.configure(
+            "ModList.Treeview.Heading", font=get_font(size=18, weight="bold")
+        )
 
         # 建立 Treeview
         columns = (
@@ -558,6 +567,7 @@ class ModManagementFrame:
             show="headings",
             height=15,
             selectmode="extended",  # 支援多選
+            style="ModList.Treeview",
         )
 
         column_config = {
@@ -589,6 +599,12 @@ class ModManagementFrame:
         self.local_tree.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        bg_odd = "#2b2b2b" if is_dark else "#ffffff"
+        bg_even = "#3a3a3a" if is_dark else "#f1f5f9"
+        
+        self.local_tree.tag_configure("odd", background=bg_odd)
+        self.local_tree.tag_configure("even", background=bg_even)
 
         # 配置 grid 權重
         tree_container.grid_rowconfigure(0, weight=1)
@@ -762,7 +778,7 @@ class ModManagementFrame:
         status_frame = ctk.CTkFrame(
             self.main_frame, height=int(40 * font_manager.get_scale_factor())
         )
-        status_frame.pack(fill="x", padx=20, pady=0)
+        status_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
         status_frame.pack_propagate(False)
 
         # 狀態標籤
@@ -807,7 +823,7 @@ class ModManagementFrame:
                     self.refresh_local_list()
             else:
                 self.server_combo.configure(values=server_names)
-                if not self.server_var.get() and server_names:
+                if server_names:
                     self.server_var.set(server_names[0])
                 self.on_server_changed()
 
@@ -894,6 +910,9 @@ class ModManagementFrame:
         """本地模組資訊（同步查詢），查詢完自動刷新列表（可選）"""
         def enhance_single(mod):
             try:
+                if mod.filename in self.enhanced_mods_cache:
+                    return
+
                 enhanced = enhance_local_mod(mod.filename)
                 if enhanced:
                     self.enhanced_mods_cache[mod.filename] = enhanced
@@ -904,7 +923,7 @@ class ModManagementFrame:
                 )
 
         def enhance_thread():
-            with ThreadPoolExecutor(max_workers=5) as executor:
+            with ThreadPoolExecutor(max_workers=20) as executor:
                 executor.map(enhance_single, self.local_mods)
 
             # 使用佇列更新 UI Use queue to update UI
@@ -1036,6 +1055,7 @@ class ModManagementFrame:
                 if mtime_val
                 else "未知"
             )
+            parity_tag = "odd" if len(items_to_insert) % 2 == 0 else "even"
 
             items_to_insert.append(
                 {
@@ -1053,7 +1073,7 @@ class ModManagementFrame:
                             else display_description
                         ),
                     ),
-                    "tags": (mod_base_name,),
+                    "tags": (mod_base_name, parity_tag),
                 }
             )
 

@@ -19,8 +19,10 @@ DefaultGroupName=Minecraft 伺服器管理器
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
 OutputBaseFilename={#AppName}-Setup-{#AppVersion}
-Compression=lzma
+Compression=lzma2/ultra64
 SolidCompression=yes
+LZMAUseSeparateProcess=yes
+LZMADictionarySize=32768
 WizardStyle=modern
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\assets\icon.ico
@@ -56,21 +58,25 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  DataRoot, CacheDir, SettingsPath: string;
+  DataRoot, CacheDir, LogDir, SettingsPath: string;
 begin
   if CurUninstallStep = usUninstall then
   begin
     DataRoot := GetDataRoot();
     CacheDir := DataRoot + '\\Cache';
+    LogDir := DataRoot + '\\log';
     SettingsPath := DataRoot + '\\user_settings.json';
 
     if DirExists(CacheDir) then
       DelTree(CacheDir, True, True, True);
 
+    if DirExists(LogDir) then
+      DelTree(LogDir, True, True, True);
+
     if FileExists(SettingsPath) then
       DeleteFile(SettingsPath);
 
     if DirExists(DataRoot) then
-      RemoveDir(DataRoot);
+      DelTree(DataRoot, True, True, True);
   end;
 end;

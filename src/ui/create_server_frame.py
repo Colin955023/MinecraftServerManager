@@ -697,7 +697,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
         # 只顯示穩定版且 server_url 不為 null 的版本
         display_versions = [
-            v for v in self.release_versions if v.get("server_url") is not None
+            v for v in self.release_versions if v.get("server_url")
         ]
 
         if not display_versions:

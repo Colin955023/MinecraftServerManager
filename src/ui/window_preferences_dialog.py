@@ -138,7 +138,9 @@ class WindowPreferencesDialog:
 
         # 根據環境決定是否顯示調試選項
         # 開發環境顯示調試選項，打包環境隱藏
-        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"))
+        # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
+        is_nuitka = "__compiled__" in globals()
+        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
         should_show_debug = not is_packaged
 
         if should_show_debug:
