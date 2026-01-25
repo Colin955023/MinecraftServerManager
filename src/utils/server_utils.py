@@ -18,18 +18,13 @@ import re
 from ..models import ServerConfig
 from .logger import get_logger
 from .ui_utils import UIUtils
+from .constants import KB, MB, GB
 from . import java_utils
 
 logger = get_logger().bind(component="ServerUtils")
 
 
-# ====== 記憶體常數 Memory Constants ======
-KB = 1024
-MB = 1024 * 1024
-GB = 1024 * 1024 * 1024
-
-
-# ====== 記憶體工具類別 Memory Utilities ======
+# 記憶體工具類別 Memory Utilities
 class MemoryUtils:
     """
     記憶體工具類別，提供記憶體相關的解析和格式化功能
@@ -728,9 +723,9 @@ class ServerDetectionUtils:
             "fabric-server-launch.jar",
             "fabric-server-launcher.jar",
         ]
-        for jar_name in server_jars:
-            if (folder_path / jar_name).exists():
-                return True
+        # 使用 any() 優化檢查
+        if any((folder_path / jar_name).exists() for jar_name in server_jars):
+            return True
 
         # 檢查 Forge/其他 jar 檔案
         for file in folder_path.glob("*.jar"):
@@ -740,9 +735,8 @@ class ServerDetectionUtils:
 
         # 檢查特徵檔案
         server_indicators = ["server.properties", "eula.txt"]
-        for indicator in server_indicators:
-            if (folder_path / indicator).exists():
-                return True
+        if any((folder_path / indicator).exists() for indicator in server_indicators):
+            return True
 
         return False
 

@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from loguru import logger
-
-# 記憶體常數 Memory Constants
-MB = 1024 * 1024
+from .constants import MB
 
 
 class LoggerConfig:
@@ -215,34 +213,22 @@ def get_logger():
 # 便捷函數，直接使用 loguru（不需要 component 參數時的簡化版本）
 def info(message: str, component: str = ""):
     """記錄 INFO 級別訊息"""
-    if component:
-        _logger.bind(component=component).info(message)
-    else:
-        _logger.bind(component="").info(message)
+    _logger.bind(component=component or "").info(message)
 
 
 def warning(message: str, component: str = ""):
     """記錄 WARNING 級別訊息"""
-    if component:
-        _logger.bind(component=component).warning(message)
-    else:
-        _logger.bind(component="").warning(message)
+    _logger.bind(component=component or "").warning(message)
 
 
 def error(message: str, component: str = ""):
     """記錄 ERROR 級別訊息"""
-    if component:
-        _logger.bind(component=component).error(message)
-    else:
-        _logger.bind(component="").error(message)
+    _logger.bind(component=component or "").error(message)
 
 
 def debug(message: str, component: str = ""):
     """記錄 DEBUG 級別訊息"""
-    if component:
-        _logger.bind(component=component).debug(message)
-    else:
-        _logger.bind(component="").debug(message)
+    _logger.bind(component=component or "").debug(message)
 
 
 def error_with_exception(message: str, component: str = "", exc: Exception = None):
