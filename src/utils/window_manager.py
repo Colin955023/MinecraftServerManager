@@ -6,14 +6,11 @@
 Window Manager Module
 Provides window management functionality for dynamic sizing, positioning, and DPI support
 """
-# ====== 標準函式庫 ======
 from typing import Any, Dict, Tuple
 import tkinter as tk
 import ctypes
 import time
-# ====== 專案內部模組 ======
-from .settings_manager import get_settings_manager
-from .logger import get_logger
+from . import get_settings_manager, get_logger
 
 logger = get_logger().bind(component="WindowManager")
 
@@ -22,8 +19,6 @@ class WindowManager:
     Windows 專用視窗管理器類別，處理動態大小調整、位置管理和 DPI 縮放
     Windows-specific window manager class for handling dynamic sizing, positioning, and DPI scaling
     """
-    # ====== 螢幕資訊檢測 ======
-    # 取得螢幕資訊
     @staticmethod
     def get_screen_info(window=None) -> Dict[str, Any]:
         """

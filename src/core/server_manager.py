@@ -6,7 +6,6 @@
 Server Manager
 Responsible for creating, managing, and configuring Minecraft servers.
 """
-# ====== 標準函式庫 ======
 from collections import deque
 from dataclasses import asdict
 from pathlib import Path
@@ -16,16 +15,15 @@ import subprocess
 import threading
 import time
 import psutil
-# ====== 專案內部模組 ======
 from ..models import ServerConfig
-from ..utils import UIUtils
-from ..utils.logger import get_logger
-from ..utils.path_utils import PathUtils
 from ..utils import (
     ServerCommands,
     MemoryUtils,
     ServerPropertiesHelper,
     ServerDetectionUtils,
+    get_logger,
+    PathUtils,
+    UIUtils,
 )
 
 logger = get_logger().bind(component="ServerManager")
@@ -346,7 +344,7 @@ class ServerManager:
             else:
                 UIUtils.show_error(
                     "啟動腳本未找到",
-                    f"找不到啟動腳本 (run.bat, start_server.bat, start.bat, server.bat)",
+                    "找不到啟動腳本 (run.bat, start_server.bat, start.bat, server.bat)",
                     parent=parent,
                 )
                 return False

@@ -6,20 +6,23 @@
 Loader Manager Module
 Responsible for managing and downloading versions of Fabric and Forge loaders with automatic version retrieval and compatibility checks
 """
-# ====== 標準函式庫 ======
 from contextlib import suppress
 from pathlib import Path
 from typing import List, Optional, Union
 import re
 import subprocess
-from lxml import etree
-# ====== 專案內部模組 ======
+import xml.etree.ElementTree as ET
 from .version_manager import MinecraftVersionManager
 from src.models import LoaderVersion
-from src.utils import java_utils
-from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
-from src.utils.logger import get_logger
-from src.utils.path_utils import PathUtils
+from src.utils import (
+    HTTPUtils,
+    UIUtils,
+    ensure_dir,
+    get_cache_dir,
+    get_logger,
+    PathUtils,
+    get_best_java_path,
+)
 
 logger = get_logger().bind(component="LoaderManager")
 
@@ -53,7 +56,6 @@ class LoaderManager:
             None
         """
         try:
-            # 使用 Path.unlink 替代 os.remove
             fabric_path = Path(self.fabric_cache_file)
             forge_path = Path(self.forge_cache_file)
 
@@ -112,7 +114,7 @@ class LoaderManager:
         if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
-            java_path = java_utils.get_best_java_path(minecraft_version)
+            java_path = get_best_java_path(minecraft_version)
         if not java_path:
             return False
 
@@ -217,15 +219,15 @@ class LoaderManager:
         logger.debug("預先抓取  Forge 載入器版本...", "LoaderManager")
         try:
             forge_url = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
-            response = HTTPUtils.get_content(forge_url, timeout=15)
+            content = HTTPUtils.get_content(forge_url, timeout=15)
 
-            if response and response.status_code == 200:
+            if content:
                 logger.debug("成功獲取 Forge XML 數據", "LoaderManager")
-                root = etree.fromstring(response.content)
+                root = ET.fromstring(content)
                 versions = []
 
                 # 提取所有版本
-                for version_elem in root.xpath("//versions/version"):
+                for version_elem in root.findall(".//version"):
                     version_text = version_elem.text
                     if version_text and "-" in version_text:
                         # 篩除含 pre 或 prelease 的版本
@@ -388,8 +390,9 @@ class LoaderManager:
             if not version_parts:
                 return False
 
-            major, minor = version_parts[0], (
-                version_parts[1] if len(version_parts) > 1 else 0
+            major, minor = (
+                version_parts[0],
+                (version_parts[1] if len(version_parts) > 1 else 0),
             )
 
             # Fabric supports 1.14+
@@ -695,48 +698,30 @@ class LoaderManager:
         Returns:
             是否成功
         """
-        try:
-            r = HTTPUtils.get_content(url, stream=True, timeout=30)
-            if not r:
-                return self._fail(progress_callback, "下載失敗：無法獲取檔案")
-            total = int(r.headers.get("content-length", 0))
-            downloaded = 0
-            chunk_size = 65536
-            with open(dest_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size):
-                    if cancel_flag and cancel_flag.get("cancelled"):
-                        return self._fail(progress_callback, "已取消下載")
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total and progress_callback:
-                            percent = start_percent + (end_percent - start_percent) * (
-                                downloaded / total
-                            )
-                            progress_callback(min(percent, end_percent), status_text)
-                        elif progress_callback:
-                            # 無法得知總大小時，顯示不確定進度或僅更新文字
-                            # 這裡簡單地每 1MB 增加一點點，但不超過 end_percent
-                            fake_progress = min(
-                                end_percent,
-                                start_percent
-                                + (downloaded / (100 * 1024 * 1024))
-                                * (end_percent - start_percent),
-                            )
-                            progress_callback(
-                                fake_progress,
-                                f"{status_text} ({downloaded // 1024 // 1024} MB)",
-                            )
-            if progress_callback:
-                progress_callback(end_percent, f"下載完成: {Path(dest_path).name}")
+        def on_progress(downloaded, total):
+            if total > 0 and progress_callback:
+                percent = start_percent + (downloaded / total) * (
+                    end_percent - start_percent
+                )
+                progress_callback(percent, status_text)
+
+        def check_cancel():
+            if cancel_flag and cancel_flag.get("cancelled"):
+                if progress_callback:
+                    self._fail(progress_callback, "已取消下載")
+                return True
+            return False
+
+        if HTTPUtils.download_file_with_progress(
+            url,
+            dest_path,
+            progress_callback=on_progress,
+            timeout=30,
+            cancel_check=check_cancel,
+        ):
             return True
-        except Exception as e:
-            logger.exception(f"下載失敗: {e}")
-            return self._fail(
-                progress_callback,
-                f"下載失敗: {e}",
-                debug=f"[DEBUG] download exception {url} -> {dest_path}: {e}",
-            )
+        else:
+            return self._fail(progress_callback, "下載失敗：無法獲取檔案")
 
     def _get_minecraft_server_url(self, mc_version: str) -> Optional[str]:
         """

@@ -6,7 +6,6 @@
 Create Server Page
 Responsible for the user interface to create a new Minecraft server
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from tkinter import filedialog
 from typing import Callable
@@ -16,13 +15,17 @@ import traceback
 import queue
 import psutil
 import customtkinter as ctk
-# ====== 專案內部模組 ======
 from ..core import LoaderManager, ServerManager, MinecraftVersionManager
 from ..models import ServerConfig
-from ..utils import java_utils
-from ..utils import ProgressDialog, UIUtils, font_manager, get_font
-from ..utils.logger import get_logger
 from . import CustomDropdown
+from ..utils import (
+    ProgressDialog,
+    UIUtils,
+    font_manager,
+    get_font,
+    get_best_java_path,
+    get_logger,
+)
 
 logger = get_logger().bind(component="CreateServerFrame")
 
@@ -69,9 +72,7 @@ class CreateServerFrame(ctk.CTkFrame):
             if (
                 max_memory > system_memory or min_memory > system_memory
             ) and min_memory >= 1024:
-                warning_text = (
-                    f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
-                )
+                warning_text = f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
                 self.memory_warning_label.configure(
                     text=warning_text, text_color=("red", "red")
                 )
@@ -155,7 +156,7 @@ class CreateServerFrame(ctk.CTkFrame):
                     "Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel()
                 )
                 return
-            java_path = java_utils.get_best_java_path(mc_version)
+            java_path = get_best_java_path(mc_version)
             if java_path:
                 java_path_win = str(Path(java_path))
                 self.java_path_var.set(java_path_win)
@@ -234,7 +235,8 @@ class CreateServerFrame(ctk.CTkFrame):
         )
         eula_link.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=6)
         eula_link.bind(
-            "<Button-1>", lambda e: UIUtils.open_external("https://aka.ms/MinecraftEULA")
+            "<Button-1>",
+            lambda e: UIUtils.open_external("https://aka.ms/MinecraftEULA"),
         )
 
         # 內容容器

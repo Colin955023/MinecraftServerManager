@@ -6,13 +6,9 @@
 Settings Manager Module
 Provides unified user settings management including auto-update, window preferences, debug settings etc.
 """
-# ====== 標準函式庫 ======
 from typing import Any, Dict
 import sys
-# ====== 專案內部模組 ======
-from src.utils import ensure_dir, get_user_data_dir
-from src.utils.logger import get_logger
-from src.utils.path_utils import PathUtils
+from . import ensure_dir, get_user_data_dir, get_logger, PathUtils
 
 logger = get_logger().bind(component="SettingsManager")
 
@@ -64,33 +60,11 @@ class SettingsManager:
     Centralized manager class for all user settings including auto-update and window preferences
     """
     # ====== 初始化與檔案操作 ======
-    # 初始化設定管理器
     def __init__(self):
-        """
-        初始化設定管理器，載入或建立使用者設定檔案
-        Initialize settings manager, load or create user settings file
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
         self.settings_path = ensure_dir(get_user_data_dir()) / "user_settings.json"
         self._settings = self._load_settings()
 
-    # 載入設定檔案
     def _load_settings(self) -> Dict[str, Any]:
-        """
-        載入使用者設定檔案，如不存在則建立預設設定
-        Load user settings file, create default settings if it doesn't exist
-
-        Args:
-            None
-
-        Returns:
-            Dict[str, Any]: 設定資料字典
-        """
         if not self.settings_path.exists():
             # 建立預設設定
             default_settings = _get_default_settings()
@@ -112,50 +86,20 @@ class SettingsManager:
 
         return settings
 
-    # 儲存設定到檔案
     def _save_settings(self, settings: Dict[str, Any]) -> None:
-        """
-        將設定資料儲存到 JSON 檔案
-        Save settings data to JSON file
-
-        Args:
-            settings (Dict[str, Any]): 要儲存的設定資料字典
-
-        Returns:
-            None
-        """
         if not PathUtils.save_json(self.settings_path, settings):
             logger.error("無法寫入 user_settings.json")
 
     # ====== 基本設定操作 ======
-    # 取得設定值
     def get(self, key: str, default: Any = None) -> Any:
         """
         取得指定鍵值的設定資料
-        Get setting data for specified key
-
-        Args:
-            key (str): 設定鍵值名稱
-            default (Any): 預設值，當鍵值不存在時返回
-
-        Returns:
-            Any: 設定值或預設值
         """
         return self._settings.get(key, default)
 
-    # 設定值並儲存
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
         """
         設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）
-        Set data for specified key (optionally immediate or deferred save for batch updates)
-
-        Args:
-            key (str): 設定鍵值名稱
-            value (Any): 要設定的值
-            immediate_save (bool): 是否立即儲存（預設 True）
-
-        Returns:
-            None
         """
         self._settings[key] = value
         if immediate_save:
@@ -164,145 +108,42 @@ class SettingsManager:
     def update_batch(self, updates: dict) -> None:
         """
         批次更新多個設定值並一次性儲存（優化 I/O 效能）
-        Batch update multiple settings and save once (optimize I/O performance)
-
-        Args:
-            updates (dict): 要更新的鍵值對字典
-
-        Returns:
-            None
         """
         self._settings.update(updates)
         self._save_settings(self._settings)
 
     # ====== 伺服器根目錄管理 ======
-    # 取得伺服器根目錄
     def get_servers_root(self) -> str:
         """
         取得使用者設定的伺服器根目錄路徑
-        Get user configured servers root directory path
-
-        Args:
-            None
-
-        Returns:
-            str: 伺服器根目錄路徑字串
         """
         return str(self._settings.get("servers_root", "")).strip()
 
-    # 設定伺服器根目錄
     def set_servers_root(self, path: str) -> None:
-        """
-        設定伺服器根目錄路徑
-        Set servers root directory path
-
-        Args:
-            path (str): 伺服器根目錄路徑
-
-        Returns:
-            None
-        """
         self.set("servers_root", path)
 
     # ====== 自動更新設定管理 ======
-    # 檢查是否啟用自動更新
     def is_auto_update_enabled(self) -> bool:
-        """
-        檢查是否啟用自動更新檢查功能
-        Check if auto-update checking feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用自動更新返回 True，否則返回 False
-        """
         return bool(self._settings.get("auto_update_enabled", True))
 
-    # 設定自動更新開關
     def set_auto_update_enabled(self, enabled: bool) -> None:
-        """
-        設定自動更新檢查功能的開關狀態
-        Set the on/off state of auto-update checking feature
-
-        Args:
-            enabled (bool): True 啟用，False 停用
-
-        Returns:
-            None
-        """
         self.set("auto_update_enabled", enabled)
 
     # ====== 首次執行狀態管理 ======
-    # 檢查是否完成首次執行
     def is_first_run_completed(self) -> bool:
-        """
-        檢查是否已完成首次執行的設定流程
-        Check if first-run setup process has been completed
-
-        Args:
-            None
-
-        Returns:
-            bool: 已完成首次執行返回 True，否則返回 False
-        """
         return bool(self._settings.get("first_run_completed", False))
 
-    # 標記首次執行完成
     def mark_first_run_completed(self) -> None:
-        """
-        標記首次執行設定流程已完成
-        Mark first-run setup process as completed
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
         self.set("first_run_completed", True)
 
     # ====== 視窗偏好設定管理 ======
-    # 取得視窗偏好設定
     def get_window_preferences(self) -> Dict[str, Any]:
-        """
-        取得所有視窗相關的偏好設定
-        Get all window-related preference settings
-
-        Args:
-            None
-
-        Returns:
-            Dict[str, Any]: 視窗偏好設定字典
-        """
         return self._settings.get("window_preferences", {})
 
-    # 檢查是否記住視窗大小位置
     def is_remember_size_position_enabled(self) -> bool:
-        """
-        檢查是否啟用記住視窗大小和位置的功能
-        Check if remember window size and position feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用記住功能返回 True，否則返回 False
-        """
         return self.get_window_preferences().get("remember_size_position", True)
 
-    # 設定是否記住視窗大小位置
     def set_remember_size_position(self, enabled: bool) -> None:
-        """
-        設定是否記住視窗大小和位置的功能開關
-        Set whether to remember window size and position feature
-
-        Args:
-            enabled (bool): True 啟用，False 停用
-
-        Returns:
-            None
-        """
         prefs = self.get_window_preferences()
         prefs["remember_size_position"] = enabled
         self.set("window_preferences", prefs)

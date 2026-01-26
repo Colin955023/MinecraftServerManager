@@ -4,7 +4,6 @@
 模組管理頁面
 參考 Prism Launcher 設計，支援線上模組查詢與下載
 """
-# ====== 標準函式庫 ======
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
@@ -21,13 +20,18 @@ import threading
 import traceback
 import urllib.parse
 import queue
-# ====== 專案內部模組 ======
 from . import CustomDropdown
+from src.version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..core import MinecraftVersionManager, ModManager, ModStatus
-from ..utils import HTTPUtils, UIUtils, get_settings_manager
-from ..utils.logger import get_logger
-from ..utils import font_manager, get_dpi_scaled_size, get_font
-from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+from ..utils import (
+    HTTPUtils,
+    UIUtils,
+    get_settings_manager,
+    get_logger,
+    font_manager,
+    get_dpi_scaled_size,
+    get_font,
+)
 
 logger = get_logger().bind(component="ModManagement")
 
@@ -1044,7 +1048,7 @@ class ModManagementFrame:
             # 修改時間顯示 Modification time display
             mtime_val = None
             try:
-                mtime_val = os.path.getmtime(mod.file_path)
+                mtime_val = Path(mod.file_path).stat().st_mtime
             except Exception:
                 mtime_val = None
 
@@ -1202,7 +1206,9 @@ class ModManagementFrame:
                                     else "❌ 已停用"
                                 )
                                 try:
-                                    mtime_val = os.path.getmtime(found_mod.file_path)
+                                    mtime_val = (
+                                        Path(found_mod.file_path).stat().st_mtime
+                                    )
                                     row_values[6] = datetime.fromtimestamp(
                                         mtime_val
                                     ).strftime("%Y-%m-%d %H:%M")
@@ -1346,8 +1352,8 @@ class ModManagementFrame:
 
                 if mod_file and mod_file.exists():
                     # 在檔案總管中選中該檔案
-                    explorer_path = os.path.join(
-                        os.environ.get("WINDIR", "C:\\Windows"), "explorer.exe"
+                    explorer_path = str(
+                        Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
                     )
                     subprocess.run(
                         [explorer_path, "/select,", str(mod_file)], shell=False
@@ -1625,7 +1631,7 @@ class ModManagementFrame:
                                     )
                                     try:
                                         mtime_val = (
-                                            os.path.getmtime(file_path)
+                                            Path(file_path).stat().st_mtime
                                             if file_path
                                             else None
                                         )

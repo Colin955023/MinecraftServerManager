@@ -120,11 +120,10 @@ MinecraftServerManger/
 - **Nuitka**: 將 Python 程式編譯為高效能的可執行檔與依賴資料夾（standalone/onedir）。
 
 ### 關鍵第三方函式庫
-- **requests / aiohttp**: 處理 HTTP 請求，用於獲取版本資訊與下載檔案。
+- **urllib**: 處理 HTTP 請求，用於獲取版本資訊與下載檔案
+- **concurrent.futures**: 使用 Python 標準庫提供的 ThreadPoolExecutor 管理非同步/多執行緒任務
 - **psutil**: 跨平台系統監控，用於獲取 CPU 與記憶體使用率。
-- **lxml**: 高效能 XML 解析，用於處理 Maven Metadata。
 - **toml**: 解析 TOML 設定檔 (如 Fabric/Forge 配置)。
-- **loguru**: 現代化的日誌記錄函式庫，提供彩色輸出、自動日誌輪轉與執行緒安全等功能。
 
 ##  安全性與合規性
 

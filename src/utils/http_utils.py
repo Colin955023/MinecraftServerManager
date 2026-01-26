@@ -6,16 +6,13 @@ HTTP 網路請求工具模組
 HTTP Network Request Utilities Module
 Provides standardized HTTP request functionality including JSON retrieval, file downloading and other common operations
 """
-# ====== 標準函式庫 ======
-from typing import Any, Dict, List, Optional
-import asyncio
+from typing import Any, Dict, List, Optional, Callable
+import json
+import urllib.request
+import urllib.error
+import urllib.parse
 import concurrent.futures
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-import aiohttp
-# ====== 專案內部模組 ======
-from src.utils.logger import get_logger
+from .logger import get_logger
 from src.version_info import APP_NAME, APP_VERSION
 
 logger = get_logger().bind(component="HTTPUtils")
@@ -23,35 +20,7 @@ logger = get_logger().bind(component="HTTPUtils")
 class HTTPUtils:
     """
     HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面
-    HTTP network request utility class providing unified interface for various HTTP operations
     """
-
-    # 類別層級的共享 session，啟用連線池與自動重試
-    _session = None
-
-    @classmethod
-    def _get_session(cls) -> requests.Session:
-        """
-        取得共享的 requests.Session 實例，配置連線池與重試策略
-        Get shared requests.Session instance with connection pooling and retry strategy
-        """
-        if cls._session is None:
-            cls._session = requests.Session()
-            # 配置重試策略：連線錯誤重試 3 次，指數退避
-            retry_strategy = Retry(
-                total=3,
-                backoff_factor=0.3,
-                status_forcelist=[429, 500, 502, 503, 504],
-                allowed_methods=["HEAD", "GET", "OPTIONS"],
-            )
-            adapter = HTTPAdapter(
-                max_retries=retry_strategy,
-                pool_connections=10,  # 連線池大小
-                pool_maxsize=20,  # 最大連線數
-            )
-            cls._session.mount("http://", adapter)
-            cls._session.mount("https://", adapter)
-        return cls._session
 
     @staticmethod
     def _get_default_headers(
@@ -68,8 +37,6 @@ class HTTPUtils:
             default_headers.update(headers)
         return default_headers
 
-    # ====== JSON 資料請求 ======
-    # 發送 GET 請求取得 JSON 資料
     @classmethod
     def get_json(
         cls, url: str, timeout: int = 10, headers: Optional[Dict[str, str]] = None
@@ -92,17 +59,15 @@ class HTTPUtils:
         timeout = max(10, timeout)
 
         try:
-            session = cls._get_session()
             final_headers = cls._get_default_headers(headers)
-            response = session.get(url, timeout=timeout, headers=final_headers)
-            response.raise_for_status()
-            return response.json()
+            req = urllib.request.Request(url, headers=final_headers)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                data = response.read()
+                return json.loads(data)
         except Exception as e:
             logger.exception(f"HTTP GET JSON 請求失敗 ({url}): {e}")
             return None
 
-    # ====== 內容資料請求 ======
-    # 發送 GET 請求取得 Response 物件
     @classmethod
     def get_content(
         cls,
@@ -110,7 +75,7 @@ class HTTPUtils:
         timeout: int = 30,
         stream: bool = False,
         headers: Optional[Dict[str, str]] = None,
-    ) -> Optional[requests.Response]:
+    ) -> Optional[bytes]:
         """
         發送 HTTP GET 請求並回傳完整的 Response 物件（使用連線池）
         Send HTTP GET request and return complete Response object (with connection pooling)
@@ -130,35 +95,38 @@ class HTTPUtils:
         timeout = max(30, timeout)
 
         try:
-            session = cls._get_session()
             final_headers = cls._get_default_headers(headers)
-            response = session.get(
-                url, timeout=timeout, stream=stream, headers=final_headers
-            )
-            response.raise_for_status()
-            return response
+            req = urllib.request.Request(url, headers=final_headers)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                return response.read()
         except Exception as e:
             logger.exception(f"HTTP GET 請求失敗 ({url}): {e}")
             return None
 
-    # ====== 檔案下載功能 ======
-    # 下載檔案到本機
     @classmethod
     def download_file(
         cls, url: str, local_path: str, timeout: int = 60, chunk_size: int = 65536
     ) -> bool:
         """
-        從指定 URL 下載檔案並儲存到本機路徑（使用連線池）
-        Download file from specified URL and save to local path (with connection pooling)
+        從指定 URL 下載檔案並儲存到本機路徑
+        """
+        return cls.download_file_with_progress(
+            url, local_path, timeout=timeout, chunk_size=chunk_size
+        )
 
-        Args:
-            url (str): 檔案下載的來源 URL
-            local_path (str): 檔案儲存的本機路徑
-            timeout (int): 下載超時時間（秒）
-            chunk_size (int): 每次下載的資料塊大小（位元組）
-
-        Returns:
-            bool: 下載成功返回 True，失敗返回 False
+    @classmethod
+    def download_file_with_progress(
+        cls,
+        url: str,
+        local_path: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        timeout: int = 60,
+        chunk_size: int = 65536,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> bool:
+        """
+        下載檔案並回報進度
+        progress_callback: (downloaded_bytes, total_bytes) -> None
         """
         if not url or not isinstance(url, str):
             logger.error("檔案下載失敗: URL 參數無效")
@@ -168,69 +136,29 @@ class HTTPUtils:
             return False
 
         timeout = max(60, timeout)
-        chunk_size = max(65536, chunk_size)
 
         try:
-            session = cls._get_session()
             final_headers = cls._get_default_headers()
-            with session.get(
-                url, stream=True, timeout=timeout, headers=final_headers
-            ) as r:
-                r.raise_for_status()
+            req = urllib.request.Request(url, headers=final_headers)
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                total_size = int(response.headers.get("Content-Length", 0))
+                downloaded = 0
+
                 with open(local_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=chunk_size):
-                        if chunk:
-                            f.write(chunk)
+                    while True:
+                        if cancel_check and cancel_check():
+                            return False
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback:
+                            progress_callback(downloaded, total_size)
             return True
         except Exception as e:
             logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")
             return False
-
-    # ====== 非同步批次請求 ======
-    # 非同步批次取得 JSON 資料
-    @staticmethod
-    async def get_json_batch_async(
-        urls: List[str],
-        timeout: int = 10,
-        headers: Optional[Dict[str, str]] = None,
-        max_workers: int = 10,
-    ) -> List[Optional[Dict[str, Any]]]:
-        """
-        非同步批次發送 HTTP GET 請求並解析回傳的 JSON 資料
-        Asynchronously batch send HTTP GET requests and parse returned JSON data
-
-        Args:
-            urls (List[str]): 請求的目標 URL 列表
-            timeout (int): 請求超時時間（秒）
-            headers (Optional[Dict[str, str]]): 可選的 HTTP 請求標頭
-            max_workers (int): 最大並行數量
-
-        Returns:
-            List[Optional[Dict[str, Any]]]: JSON 字典列表，失敗的請求返回 None
-        """
-        timeout = max(10, timeout)
-        final_headers = HTTPUtils._get_default_headers(headers)
-
-        async def fetch_one(
-            session: aiohttp.ClientSession, url: str
-        ) -> Optional[Dict[str, Any]]:
-            try:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=timeout)
-                ) as response:
-                    response.raise_for_status()
-                    return await response.json()
-            except Exception as e:
-                logger.exception(f"非同步 HTTP GET JSON 請求失敗 ({url}): {e}")
-                return None
-
-        # 配置連線器限制並行數量
-        connector = aiohttp.TCPConnector(limit=max_workers, limit_per_host=5)
-        async with aiohttp.ClientSession(
-            headers=final_headers, connector=connector
-        ) as session:
-            tasks = [fetch_one(session, url) for url in urls]
-            return await asyncio.gather(*tasks)
 
     @staticmethod
     def get_json_batch(
@@ -240,40 +168,32 @@ class HTTPUtils:
         max_workers: int = 10,
     ) -> List[Optional[Dict[str, Any]]]:
         """
-        批次發送 HTTP GET 請求並解析回傳的 JSON 資料（同步包裝，智慧處理事件迴圈）
-        Batch send HTTP GET requests and parse returned JSON data (synchronous wrapper with smart event loop handling)
-
-        Args:
-            urls (List[str]): 請求的目標 URL 列表
-            timeout (int): 請求超時時間（秒）
-            headers (Optional[Dict[str, str]]): 可選的 HTTP 請求標頭
-            max_workers (int): 最大並行數量
-
-        Returns:
-            List[Optional[Dict[str, Any]]]: JSON 字典列表，失敗的請求返回 None
+        批次發送 HTTP GET 請求並解析回傳的 JSON 資料
         """
         try:
-            # 檢查是否已有執行中的事件迴圈
-            try:
-                loop = asyncio.get_running_loop()
-                # 已在事件迴圈中，使用 ThreadPoolExecutor 在背景執行緒中執行同步請求
-                # 保持順序並行處理，避免阻塞事件迴圈
-                with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=min(max_workers, len(urls))
-                ) as executor:
-                    futures = [
-                        executor.submit(HTTPUtils.get_json, url, timeout, headers)
-                        for url in urls
-                    ]
-                    return [f.result() for f in futures]  # 按提交順序等待結果
-            except RuntimeError:
-                # 沒有執行中的迴圈，可以創建新的並使用真正的 async
-                return asyncio.run(
-                    HTTPUtils.get_json_batch_async(urls, timeout, headers, max_workers)
-                )
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(max_workers, len(urls))
+            ) as executor:
+                futures = [
+                    executor.submit(HTTPUtils.get_json, url, timeout, headers)
+                    for url in urls
+                ]
+                return [f.result() for f in futures]
         except Exception as e:
             logger.exception(f"批次 HTTP 請求失敗: {e}")
             return [None] * len(urls)
+
+    @staticmethod
+    async def get_json_batch_async(
+        urls: List[str],
+        timeout: int = 10,
+        headers: Optional[Dict[str, str]] = None,
+        max_workers: int = 10,
+    ) -> List[Optional[Dict[str, Any]]]:
+        """
+        相容性包裝：使用 ThreadPoolExecutor 模擬 async 批次請求
+        """
+        return HTTPUtils.get_json_batch(urls, timeout, headers, max_workers)
 
 # ====== 向後相容性函數別名 ======
 # 提供向後相容的模組級別函數別名

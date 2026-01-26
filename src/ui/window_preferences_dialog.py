@@ -4,12 +4,10 @@
 視窗偏好設定對話框
 Window preferences dialog for configuring window behavior and appearance.
 """
-# ====== 標準函式庫 ======
 from typing import Callable, Optional
 import sys
 import traceback
 import customtkinter as ctk
-# ====== 專案內部模組 ======
 from ..utils import DialogUtils, UIUtils, get_settings_manager
 from ..utils import (
     WindowManager,
@@ -17,8 +15,8 @@ from ..utils import (
     schedule_restart_and_exit,
     set_ui_scale_factor,
     get_font,
+    get_logger,
 )
-from ..utils.logger import get_logger
 
 logger = get_logger().bind(component="WindowPreferencesDialog")
 

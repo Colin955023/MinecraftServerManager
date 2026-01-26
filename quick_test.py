@@ -6,16 +6,13 @@ Minecraft 伺服器管理器 - 快速測試腳本
 Minecraft Server Manager - Quick Test Script
 Provides system environment checking, dependency verification and main program module loading status testing
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
-import os
 import sys
 import traceback
 import importlib
 import tempfile
 
 # ====== 測試工具函數 ======
-
 # 列印測試步驟標題
 def print_step(step_num, total_steps, description):
     """
@@ -90,8 +87,6 @@ def test_project_dependencies():
         ("customtkinter", "CustomTkinter"),
         ("requests", "Requests"),
         ("psutil", "PSUtil"),
-        ("lxml", "LXML"),
-        ("loguru", "Loguru"),
     ]
 
     missing_modules = []
@@ -258,7 +253,7 @@ def test_file_system_permissions():
     try:
         # 使用系統臨時目錄，避免污染 repo 或遇到同名目錄衝突
         with tempfile.TemporaryDirectory(prefix="msm_quick_test_") as temp_dir:
-            test_file = os.path.join(temp_dir, "test_file.txt")
+            test_file = Path(temp_dir) / "test_file.txt"
 
             # 測試寫入檔案
             with open(test_file, "w", encoding="utf-8") as f:

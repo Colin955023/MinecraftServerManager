@@ -6,14 +6,17 @@ Minecraft 版本管理器模組
 Minecraft Version Manager Module
 Responsible for retrieving version information from official API with version querying, downloading and caching capabilities
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from typing import Optional
 import concurrent.futures
-# ====== 專案內部模組 ======
-from src.utils import HTTPUtils, UIUtils, ensure_dir, get_cache_dir
-from src.utils.logger import get_logger
-from src.utils.path_utils import PathUtils
+from src.utils import (
+    HTTPUtils,
+    UIUtils,
+    ensure_dir,
+    get_cache_dir,
+    get_logger,
+    PathUtils,
+)
 
 logger = get_logger().bind(component="VersionManager")
 

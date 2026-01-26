@@ -4,7 +4,6 @@
 路徑工具模組
 Path Utilities Module
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from typing import Any, Dict, Optional
 import json
@@ -19,10 +18,6 @@ class PathUtils:
     def get_project_root() -> Path:
         """
         獲取專案根目錄路徑
-        Get project root directory path
-
-        Returns:
-            Path: 專案根目錄路徑物件 (Project root directory path object)
         """
         return Path(__file__).parent.parent.parent
 
@@ -30,10 +25,6 @@ class PathUtils:
     def get_assets_path() -> Path:
         """
         獲取 assets 目錄路徑
-        Get assets directory path
-
-        Returns:
-            Path: assets 目錄路徑物件 (Assets directory path object)
         """
         return PathUtils.get_project_root() / "assets"
 

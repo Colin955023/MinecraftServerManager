@@ -50,6 +50,10 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     # restart
     "can_restart": (".app_restart", "can_restart"),
     "schedule_restart_and_exit": (".app_restart", "schedule_restart_and_exit"),
+    "install_java_with_winget": (".java_downloader", "install_java_with_winget"),
+    # java
+    "get_best_java_path": (".java_utils", "get_best_java_path"),
+    "get_java_version": (".java_utils", "get_java_version"),
     # paths
     "PathUtils": (".path_utils", "PathUtils"),
     # server utilities

@@ -6,7 +6,6 @@
 Mod Manager Module
 Responsible for managing Minecraft server mods with downloading, updating, enabling/disabling, removing capabilities
 """
-# ====== 標準函式庫 ======
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -18,9 +17,7 @@ import threading
 import time
 import toml
 import zipfile
-# ====== 專案內部模組 ======
-from ..utils import HTTPUtils, UIUtils
-from ..utils.logger import get_logger
+from ..utils import HTTPUtils, UIUtils, get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
@@ -923,7 +920,7 @@ class ModManager:
             for mod in mods:
                 html.append(
                     "<tr>"
-                    f'<td>{"✅" if mod.status == ModStatus.ENABLED else "❌"}</td>'
+                    f"<td>{'✅' if mod.status == ModStatus.ENABLED else '❌'}</td>"
                     f"<td>{mod.name}</td>"
                     f"<td>{mod.version}</td>"
                     f"<td>{mod.author}</td>"

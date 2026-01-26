@@ -5,7 +5,6 @@
 Minecraft Server Manager Main Application
 Main entry point for creating, managing and monitoring Minecraft servers
 """
-# ====== 標準函式庫 ======
 import sys
 import traceback
 from pathlib import Path
@@ -15,9 +14,7 @@ if __name__ == "__main__" and __package__ is None:
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-# ====== 第三方套件 ======
 import customtkinter as ctk
-# ====== 專案內部模組 ======
 from src.core import LoaderManager, MinecraftVersionManager
 from src.ui import MinecraftServerManager
 from src.utils import UIUtils, get_settings_manager, set_ui_scale_factor, get_logger

@@ -5,7 +5,6 @@
 Minecraft 伺服器管理器的主要使用者介面
 This module defines the main window for the Minecraft Server Manager application.
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from tkinter import filedialog
 from typing import List, Optional
@@ -21,7 +20,6 @@ import tkinter as tk
 import zipfile
 import customtkinter as ctk
 import webbrowser
-# ====== 專案內部模組 ======
 from ..core import LoaderManager, ServerManager, MinecraftVersionManager
 from ..models import ServerConfig
 from ..utils import (
@@ -33,9 +31,10 @@ from ..utils import (
     cleanup_fonts,
     get_dpi_scaled_size,
     get_font,
+    get_settings_manager,
+    UIUtils,
+    get_logger,
 )
-from ..utils import get_settings_manager, UIUtils
-from ..utils.logger import get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
     CreateServerFrame,
@@ -45,7 +44,6 @@ from . import (
 )
 
 logger = get_logger().bind(component="MainWindow")
-
 
 class MinecraftServerManager:
     """
@@ -87,10 +85,10 @@ class MinecraftServerManager:
 
             - 若輸入本身已是 ...\\servers，則回傳其上層資料夾（向後相容舊設定）。
             """
-            norm = os.path.normpath(os.path.abspath(path_str))
+            norm = str(Path(path_str).resolve())
             try:
-                if os.path.basename(norm).lower() == "servers":
-                    parent = os.path.dirname(norm)
+                if Path(norm).name.lower() == "servers":
+                    parent = str(Path(norm).parent)
                     if parent:
                         return parent
             except Exception as e:
@@ -98,7 +96,7 @@ class MinecraftServerManager:
             return norm
 
         def _servers_dir_from_base(base_dir: str) -> str:
-            return os.path.normpath(os.path.join(base_dir, "servers"))
+            return str((Path(base_dir) / "servers").resolve())
 
         def _prompt_for_directory() -> str:
             """提示選擇目錄"""
@@ -118,7 +116,7 @@ class MinecraftServerManager:
                     self.root.destroy()
                     exit(0)
                 return ""
-            return os.path.normpath(folder)
+            return str(Path(folder))
 
         # === 執行主邏輯 ===
         if new_root:
@@ -142,10 +140,7 @@ class MinecraftServerManager:
 
             # 向後相容：若舊設定直接存的是 ...\servers，這裡會自動轉成 base_dir 並回寫
             try:
-                if (
-                    stored
-                    and os.path.basename(os.path.normpath(stored)).lower() == "servers"
-                ):
+                if stored and Path(stored).name.lower() == "servers":
                     settings.set_servers_root(base_dir)
             except Exception as e:
                 logger.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
@@ -1424,7 +1419,7 @@ class MinecraftServerManager:
             font=get_font(size=21, weight="bold"),
         ).pack(anchor="w", pady=(0, 10))
 
-        dev_info = f"""• 開發者: Minecraft Server Manager Team
+        dev_info = """• 開發者: Minecraft Server Manager Team
 • 技術棧: Python 3.7+, tkinter, coustomtkinter, requests
 • Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化
 • 架構: 模組化設計, 事件驅動

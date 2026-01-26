@@ -6,15 +6,11 @@
 Custom Dropdown Component Module
 Implements dropdown functionality using button and listbox with wheel selection and scrollbar support
 """
-# ====== 標準函式庫 ======
 from typing import Callable, List
 import traceback
 import tkinter as tk
 import customtkinter as ctk
-# ====== 專案內部模組 ======
-from ..utils import font_manager, get_font
-from ..utils import UIUtils
-from ..utils.logger import get_logger
+from ..utils import font_manager, get_font, get_logger, UIUtils
 
 logger = get_logger().bind(component="CustomDropdown")
 

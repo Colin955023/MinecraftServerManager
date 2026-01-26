@@ -19,6 +19,9 @@
 也可以在已啟用虛擬環境的情況下執行 `python -m src.main`，或雙擊已建置的執行檔 MinecraftServerManager.exe。
 首次啟動時，程式會引導您選擇「伺服器主資料夾」的存放位置，程式會在該資料夾內自動建立 `servers` 子資料夾。
 
+> **自動更新提示**：若有新版本發布，啟動時會自動彈出通知視窗，引導您完成下載與更新。
+
+
 使用者設定會儲存在：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
 
 日誌檔案會自動記錄於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`

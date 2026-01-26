@@ -4,7 +4,6 @@
 Data Model Definitions
 Defines core data structures and configuration classes used in the application
 """
-# ====== 標準函式庫 ======
 from dataclasses import dataclass
 from typing import Dict, Optional
 

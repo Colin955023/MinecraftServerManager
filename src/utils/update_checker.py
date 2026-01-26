@@ -3,29 +3,22 @@
 提供 GitHub Release 版本檢查與自動下載安裝功能
 """
 
-# ====== 標準函式庫 ======
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 import os
 import re
 import tempfile
 import threading
 import webbrowser
-
-# ====== 第三方函式庫 ======
-from packaging.version import Version, InvalidVersion
-
-# ====== 專案內部模組 ======
-from .http_utils import HTTPUtils
-from .logger import get_logger
-from .ui_utils import UIUtils
+import subprocess
+from . import HTTPUtils, get_logger, UIUtils
 
 logger = get_logger().bind(component="UpdateChecker")
 
 GITHUB_API = "https://api.github.com"
 
 
-def _parse_version(version_str: str) -> Optional[Version]:
+def _parse_version(version_str: str) -> Optional[Tuple[int, ...]]:
     """
     解析版本字串為 Version 物件
     Parse version string to Version object
@@ -37,15 +30,18 @@ def _parse_version(version_str: str) -> Optional[Version]:
         Version 物件，解析失敗時返回 None
     """
     try:
-        # 移除前綴 'v' 或 'V'
-        clean_version = version_str.strip().lstrip("vV")
-        return Version(clean_version)
-    except (InvalidVersion, Exception):
+        # 移除前綴並只保留數字與點號
+        clean = version_str.strip().lstrip("vV")
+        # 簡單解析：取前面的數字部分 (例如 1.2.3-beta -> 1.2.3)
+        m = re.match(r"(\d+(?:\.\d+)*)", clean)
+        if m:
+            return tuple(map(int, m.group(1).split(".")))
+        return None
+    except Exception:
         return None
 
 
 def _get_latest_release(owner: str, repo: str) -> dict:
-    """從 GitHub API 取得最新正式發布版本資訊（排除 draft/prerelease）。"""
     url = f"{GITHUB_API}/repos/{owner}/{repo}/releases"
     data = HTTPUtils.get_json(url, timeout=15)
     if not data:
@@ -67,7 +63,6 @@ def _get_latest_release(owner: str, repo: str) -> dict:
 
 
 def _choose_installer_asset(release: dict) -> dict:
-    """從 release assets 中挑選可用的 Windows 安裝檔（.exe）。"""
     assets = release.get("assets") or []
     exe_assets = []
     for a in assets:
@@ -90,8 +85,10 @@ def _choose_installer_asset(release: dict) -> dict:
 
 
 def _launch_installer(installer_path: Path) -> None:
-    """啟動 Windows 安裝程式。"""
-    os.startfile(str(installer_path))
+    try:
+        os.startfile(str(installer_path))
+    except (AttributeError, OSError):
+        subprocess.Popen([str(installer_path)], shell=True)
 
 
 def check_and_prompt_update(
@@ -101,14 +98,7 @@ def check_and_prompt_update(
     show_up_to_date_message: bool = True,
     parent=None,
 ) -> None:
-    """檢查是否有新版本並提示使用者更新（背景執行以避免阻塞 UI）。
-
-    注意：Tkinter/CustomTkinter 的 UI 操作應在主執行緒進行。
-    若傳入 parent（通常是主視窗 root），本函式會把所有對話框呼叫排回主執行緒。
-    """
-
     def _call_on_ui(func):
-        """確保 UI 對話框在主執行緒執行，並等待其完成（保留既有流程語意）。"""
         try:
             if (
                 parent is not None
@@ -136,7 +126,6 @@ def check_and_prompt_update(
                     raise result["exc"]
                 return result["value"]
         except Exception as e:
-            # 任何排程失敗都退回直接呼叫（最後備援）
             logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
             pass
         return func()
@@ -158,7 +147,6 @@ def check_and_prompt_update(
 
             latest_tag = latest.get("tag_name") or ""
 
-            # 使用 packaging.version 進行版本比較
             latest_ver = _parse_version(latest_tag)
             current_ver = _parse_version(current_version)
 
@@ -220,8 +208,10 @@ def check_and_prompt_update(
                 return
 
             download_url = asset.get("browser_download_url")
-            fd, temp_path = tempfile.mkstemp(prefix="msm_update_", suffix=".exe")
-            os.close(fd)
+            with tempfile.NamedTemporaryFile(
+                delete=False, prefix="msm_update_", suffix=".exe"
+            ) as tmp:
+                temp_path = tmp.name
             dest = Path(temp_path)
 
             _call_on_ui(
@@ -253,10 +243,11 @@ def check_and_prompt_update(
                 )
         except Exception as e:
             logger.exception(f"更新檢查失敗: {e}")
+            error_msg = str(e)
             _call_on_ui(
                 lambda: UIUtils.show_error(
                     "更新檢查失敗",
-                    f"無法完成更新檢查或下載：{e}",
+                    f"無法完成更新檢查或下載：{error_msg}",
                     parent=parent,
                     topmost=True,
                 )

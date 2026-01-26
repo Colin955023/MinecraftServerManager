@@ -4,19 +4,21 @@
 server.properties 設定對話框
 提供視覺化的 server.properties 編輯介面
 """
-# ====== 標準函式庫 ======
 from tkinter import ttk
 from typing import Dict
 import tkinter as tk
 import traceback
 import webbrowser
 import customtkinter as ctk
-# ====== 專案內部模組 ======
-from ..utils import ServerPropertiesHelper
 from ..core import ServerConfig, ServerManager
-from ..utils import font_manager, get_dpi_scaled_size, get_font
-from ..utils import UIUtils
-from ..utils.logger import get_logger
+from ..utils import (
+    ServerPropertiesHelper,
+    font_manager,
+    get_dpi_scaled_size,
+    get_font,
+    UIUtils,
+    get_logger,
+)
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
 

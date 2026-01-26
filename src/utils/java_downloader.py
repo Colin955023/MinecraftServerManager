@@ -6,16 +6,12 @@ Java 下載工具模組
 Java Download Utility Module
 Provides functions to download and manage Java installations, supports Microsoft JDK automatic download and installation
 """
-# ====== 標準函式庫 ======
 import subprocess
 import shutil
-# ====== 專案內部模組 ======
-from .ui_utils import UIUtils
-from .logger import get_logger
+from . import UIUtils, get_logger
 
 logger = get_logger().bind(component="JavaDownloader")
 
-# 只負責安裝
 def install_java_with_winget(major: int):
     def is_winget_available():
         winget_path = shutil.which("winget")
@@ -56,7 +52,6 @@ def install_java_with_winget(major: int):
         pkg,
     ]
     try:
-        # 直接在主程式同步執行 winget，安裝過程會在主程式 console 顯示
         subprocess.run(winget_cmd, shell=False, check=True)
     except subprocess.CalledProcessError as e:
         logger.exception(f"winget 安裝失敗: {e}")

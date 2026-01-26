@@ -6,21 +6,16 @@
 Application Restart Utilities Module
 Provides safe application restart functionality for both packaged executables and Python script modes
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from typing import Optional
-import os
 import subprocess
 import sys
 import threading
 import time
-# ======專案內部模組 ======
-from src.utils.logger import get_logger
+from .logger import get_logger
 
 logger = get_logger().bind(component="AppRestart")
 
-# ====== 執行檔資訊檢測 ======
-# 取得當前執行檔的詳細資訊
 def _get_executable_info() -> tuple[list[str], bool, Optional[Path]]:
     """
     取得當前應用程式的執行檔資訊，區分打包檔案和 Python 腳本
@@ -39,18 +34,9 @@ def _get_executable_info() -> tuple[list[str], bool, Optional[Path]]:
         script_path = Path(__file__).parent.parent / "main.py"
         return [sys.executable, str(script_path)], False, script_path
 
-# ====== 重啟功能檢測 ======
-# 檢查應用程式是否具備重啟能力
 def can_restart() -> bool:
     """
     檢查當前環境是否支援應用程式重啟功能
-    Check if current environment supports application restart functionality
-
-    Args:
-        None
-
-    Returns:
-        bool: 支援重啟返回 True，否則返回 False
     """
     try:
         executable_path, is_frozen, script_path = _get_executable_info()
@@ -60,7 +46,7 @@ def can_restart() -> bool:
             return (
                 isinstance(executable_path, list)
                 and len(executable_path) > 0
-                and os.path.exists(executable_path[0])
+                and Path(executable_path[0]).exists()
             )
         else:
             # 直接檢查腳本路徑是否存在
@@ -69,7 +55,6 @@ def can_restart() -> bool:
         return False
 
 # ====== 重啟執行功能 ======
-# 重啟應用程式主要函數
 def restart_application(delay: float = 1.0) -> bool:
     """
     重啟應用程式，支援延遲啟動和狀態檢測
@@ -103,13 +88,15 @@ def restart_application(delay: float = 1.0) -> bool:
                     # 打包後的執行檔 (frozen)
                     process = subprocess.Popen(
                         executable_cmd,
-                        cwd=os.path.dirname(executable_cmd[0]),
+                        cwd=str(Path(executable_cmd[0]).parent),
                         creationflags=creation_flags,
                     )
                 else:
                     # Python 腳本
                     process = subprocess.Popen(
-                        executable_cmd, cwd=os.getcwd(), creationflags=creation_flags
+                        executable_cmd,
+                        cwd=str(Path.cwd()),
+                        creationflags=creation_flags,
                     )
 
                 # 等待一小段時間確保新程序啟動成功
@@ -143,7 +130,6 @@ def restart_application(delay: float = 1.0) -> bool:
         logger.exception(f"準備重啟時發生錯誤: {e}")
         return False
 
-# 安排重啟並退出當前應用程式
 def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
     """
     安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理

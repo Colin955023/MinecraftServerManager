@@ -4,12 +4,10 @@
 管理伺服器頁面
 負責管理現有 Minecraft 伺服器的使用者介面
 """
-# ====== 標準函式庫 ======
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Callable, Optional
-import glob
 import os
 import queue
 import shutil
@@ -19,12 +17,16 @@ import time
 import tkinter as tk
 import traceback
 import customtkinter as ctk
-# ====== 專案內部模組 ======
 from ..core import ServerConfig, ServerManager
-from ..utils import MemoryUtils, ServerDetectionUtils, ServerOperations, get_font
-from ..utils import UIUtils
-from ..utils.logger import get_logger
 from . import ServerMonitorWindow, ServerPropertiesDialog
+from ..utils import (
+    MemoryUtils,
+    ServerDetectionUtils,
+    ServerOperations,
+    get_font,
+    UIUtils,
+    get_logger,
+)
 
 logger = get_logger().bind(component="ManageServerFrame")
 
@@ -352,17 +354,17 @@ class ManageServerFrame(ctk.CTkFrame):
         # 詢問使用者選擇新的備份父路徑
         parent_backup_path = filedialog.askdirectory(
             title=f"重新設定 {server_name} 的備份路徑",
-            initialdir=os.path.expanduser("~"),
+            initialdir=str(Path.home()),
         )
 
         if parent_backup_path:
             # 建立伺服器專用的備份資料夾
             backup_folder_name = f"{server_name}_backup"
-            new_backup_path = os.path.join(parent_backup_path, backup_folder_name)
+            new_backup_path = str(Path(parent_backup_path) / backup_folder_name)
 
             # 建立備份資料夾（如果不存在）
             try:
-                os.makedirs(new_backup_path, exist_ok=True)
+                Path(new_backup_path).mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logger.bind(component="").error(
                     f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
@@ -422,7 +424,7 @@ class ManageServerFrame(ctk.CTkFrame):
             return
 
         # 檢查備份路徑是否存在
-        if not os.path.exists(config.backup_path):
+        if not Path(config.backup_path).exists():
             UIUtils.show_error(
                 "錯誤",
                 f"備份路徑不存在：\n{config.backup_path}\n\n請重新設定備份路徑",
@@ -462,16 +464,16 @@ class ManageServerFrame(ctk.CTkFrame):
             return "❌ 未設定路徑"
 
         # 檢查備份路徑是否存在
-        if not os.path.exists(config.backup_path):
+        if not Path(config.backup_path).exists():
             return "❌ 路徑不存在"
 
         try:
             # 檢查備份資料夾中的world資料夾是否存在
-            backup_world_path = os.path.join(config.backup_path, "world")
+            backup_world_path = str(Path(config.backup_path) / "world")
 
-            if os.path.exists(backup_world_path):
+            if Path(backup_world_path).exists():
                 # 取得備份world資料夾的修改時間
-                backup_time = os.path.getmtime(backup_world_path)
+                backup_time = Path(backup_world_path).stat().st_mtime
                 backup_datetime = datetime.fromtimestamp(backup_time)
 
                 # 計算距離現在的時間
@@ -556,8 +558,8 @@ class ManageServerFrame(ctk.CTkFrame):
         path = filedialog.askdirectory(title="選擇伺服器目錄")
         if path:
             # 強制正規化分隔符與絕對路徑
-            abs_path = os.path.abspath(path)
-            norm_path = os.path.normpath(abs_path)
+            abs_path = Path(path).resolve()
+            norm_path = str(abs_path)
             base_dir = norm_path
 
             # 呼叫 main_window 傳入的 set_servers_root：寫入 user_settings.json（儲存 base dir）
@@ -577,7 +579,7 @@ class ManageServerFrame(ctk.CTkFrame):
                     return
 
             if not servers_root:
-                servers_root = os.path.normpath(os.path.join(base_dir, "servers"))
+                servers_root = str((Path(base_dir) / "servers").resolve())
 
             servers_root_path = Path(servers_root)
             if not servers_root_path.exists():
@@ -609,7 +611,7 @@ class ManageServerFrame(ctk.CTkFrame):
             show_message (bool): 是否顯示完成通知
         """
         path = self.detect_path_var.get()
-        if not path or not os.path.exists(path):
+        if not path or not Path(path).exists():
             if show_message:
                 UIUtils.show_error("錯誤", "請選擇有效的路徑", self.winfo_toplevel())
             return
@@ -622,9 +624,10 @@ class ManageServerFrame(ctk.CTkFrame):
                 )
             except Exception as error:
                 logger.error(f"偵測失敗: {error}\n{traceback.format_exc()}")
+                error_msg = str(error)
                 self.ui_queue.put(
                     lambda: UIUtils.show_error(
-                        "錯誤", f"偵測失敗: {error}", self.winfo_toplevel()
+                        "錯誤", f"偵測失敗: {error_msg}", self.winfo_toplevel()
                     )
                 )
 
@@ -632,10 +635,11 @@ class ManageServerFrame(ctk.CTkFrame):
 
     def _detect_servers_task(self, path):
         count = 0
-        for item in os.listdir(path):
-            item_path = os.path.join(path, item)
-            if os.path.isdir(item_path):
-                item_path_obj = Path(item_path)
+        path_obj = Path(path)
+        for item_path_obj in path_obj.iterdir():
+            if item_path_obj.is_dir():
+                item = item_path_obj.name
+                item_path = str(item_path_obj)
                 if ServerDetectionUtils.is_valid_server_folder(item_path_obj):
                     # 先建立 config 物件（無論新建或覆蓋都呼叫偵測）
                     if item in self.server_manager.servers:
@@ -702,7 +706,7 @@ class ManageServerFrame(ctk.CTkFrame):
             server_jar_exists = self._check_server_jar_exists(config.path)
             self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
 
-        eula_exists = os.path.exists(os.path.join(config.path, "eula.txt"))
+        eula_exists = (Path(config.path) / "eula.txt").exists()
         eula_accepted = getattr(config, "eula_accepted", False)
 
         if server_jar_exists and eula_exists and eula_accepted:
@@ -736,9 +740,9 @@ class ManageServerFrame(ctk.CTkFrame):
         ]
         for jar_pattern in jar_patterns:
             if "*" in jar_pattern:
-                if glob.glob(os.path.join(server_path, jar_pattern)):
+                if list(Path(server_path).glob(jar_pattern)):
                     return True
-            elif os.path.exists(os.path.join(server_path, jar_pattern)):
+            elif (Path(server_path) / jar_pattern).exists():
                 return True
         return False
 
@@ -1084,7 +1088,7 @@ class ManageServerFrame(ctk.CTkFrame):
         if (
             hasattr(config, "backup_path")
             and config.backup_path
-            and os.path.exists(config.backup_path)
+            and Path(config.backup_path).exists()
         ):
             backup_path = config.backup_path
             has_backup = True
@@ -1169,10 +1173,10 @@ class ManageServerFrame(ctk.CTkFrame):
         server_name = self.selected_server
         config = self.server_manager.servers[server_name]
         server_path = config.path
-        world_path = os.path.join(server_path, "world")
+        world_path = str(Path(server_path) / "world")
 
         # 檢查世界資料夾是否存在
-        if not os.path.exists(world_path):
+        if not Path(world_path).exists():
             UIUtils.show_error(
                 "錯誤", f"找不到世界資料夾: {world_path}", self.winfo_toplevel()
             )
@@ -1184,7 +1188,7 @@ class ManageServerFrame(ctk.CTkFrame):
 
         if hasattr(config, "backup_path") and config.backup_path:
             # 檢查儲存的路徑是否仍然存在
-            if os.path.exists(config.backup_path):
+            if Path(config.backup_path).exists():
                 backup_location = config.backup_path
             else:
                 # 路徑不存在，清除配置中的路徑
@@ -1194,7 +1198,7 @@ class ManageServerFrame(ctk.CTkFrame):
         # 如果沒有備份路徑，詢問使用者
         if not backup_location:
             parent_backup_location = filedialog.askdirectory(
-                title="選擇備份儲存位置", initialdir=os.path.expanduser("~")
+                title="選擇備份儲存位置", initialdir=str(Path.home())
             )
 
             if not parent_backup_location:
@@ -1202,11 +1206,11 @@ class ManageServerFrame(ctk.CTkFrame):
 
             # 建立伺服器專用的備份資料夾
             backup_folder_name = f"{server_name}_backup"
-            backup_location = os.path.join(parent_backup_location, backup_folder_name)
+            backup_location = str(Path(parent_backup_location) / backup_folder_name)
 
             # 建立備份資料夾（如果不存在）
             try:
-                os.makedirs(backup_location, exist_ok=True)
+                Path(backup_location).mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 logger.bind(component="").error(
                     f"無法建立備份資料夾: {e}\n{traceback.format_exc()}",
@@ -1227,12 +1231,12 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 建立備份檔案路徑
         backup_full_path = backup_location  # 備份路徑就是伺服器專用資料夾
-        backup_world_path = os.path.join(backup_full_path, "world")
+        backup_world_path = str(Path(backup_full_path) / "world")
 
         # 轉換路徑為 Windows 格式
-        world_path = os.path.normpath(world_path)
-        backup_full_path = os.path.normpath(backup_full_path)
-        backup_world_path = os.path.normpath(backup_world_path)
+        world_path = str(Path(world_path))
+        backup_full_path = str(Path(backup_full_path))
+        backup_world_path = str(Path(backup_world_path))
 
         # 生成批次檔內容
         bat_content = f"""@echo off
@@ -1264,7 +1268,7 @@ echo.
 pause"""
 
         # 儲存批次檔到備份資料夾內
-        bat_file_path = os.path.join(backup_full_path, f"backup_{server_name}.bat")
+        bat_file_path = str(Path(backup_full_path) / f"backup_{server_name}.bat")
 
         try:
             with open(bat_file_path, "w", encoding="utf-8") as f:

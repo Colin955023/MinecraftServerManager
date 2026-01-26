@@ -7,7 +7,6 @@ Utility functions for detecting and managing Java installations on Windows.
 This module provides functions to find Java installations in the Windows registry,
 common installation paths, and environment variables.
 """
-# ====== 標準函式庫 ======
 from pathlib import Path
 from typing import Optional
 import json
@@ -15,14 +14,15 @@ import os
 import re
 import subprocess
 import shutil
-# ====== 專案內部模組 ======
-from .http_utils import HTTPUtils
-from .runtime_paths import get_cache_dir
-from .ui_utils import UIUtils
-from .logger import get_logger
-from .path_utils import PathUtils
 from src.core import MinecraftVersionManager
-from .java_downloader import install_java_with_winget
+from . import (
+    HTTPUtils,
+    PathUtils,
+    get_cache_dir,
+    UIUtils,
+    get_logger,
+    install_java_with_winget,
+)
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -276,7 +276,7 @@ def get_best_java_path(
         else:
             UIUtils.show_info(
                 "請手動下載 Java",
-                f"請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK 17/21 等。",
+                "請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK 17/21 等。",
                 topmost=True,
             )
     return None

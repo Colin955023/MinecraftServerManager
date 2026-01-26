@@ -4,22 +4,15 @@
 UI 工具函數
 提供常用的界面元件和工具函數，避免重複代碼
 """
-# ====== 標準函式庫 ======
 from typing import Optional, Callable
 import os
 import tkinter as tk
-import tkinter.messagebox
 import queue
 import threading
 import time
 import webbrowser
-# ====== 第三方函式庫 ======
 import customtkinter as ctk
-# ====== 專案內部模組 ======
-from .path_utils import PathUtils
-from .window_manager import WindowManager
-from .logger import get_logger
-from .font_manager import font_manager
+from . import PathUtils, WindowManager, get_logger, font_manager
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -27,13 +20,7 @@ logger = get_logger().bind(component="UIUtils")
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
 ctk.set_default_color_theme("blue")  # 淺色藍色主題
 
-# ====== 對話框創建工具類別 ======
 class DialogUtils:
-    """
-    對話框創建工具類別
-    Dialog creation utility class for modal windows and common dialogs
-    """
-    # 創建模態對話框的通用函數
     @staticmethod
     def create_modal_dialog(
         parent,
@@ -79,13 +66,7 @@ class DialogUtils:
 
         return dialog
 
-# ====== 圖示管理工具類別 ======
 class IconUtils:
-    """
-    統一的圖示綁定工具類別
-    Unified icon binding utility class for window icon management
-    """
-    # 設定視窗圖示（無置頂邏輯）
     @staticmethod
     def set_window_icon(window, delay_ms=200) -> None:
         """
@@ -101,7 +82,6 @@ class IconUtils:
         """
 
         def _delayed_icon_bind():
-            """延遲圖示綁定，確保視窗完全初始化"""
             try:
                 # 檢查視窗是否仍然存在
                 if not window.winfo_exists():
@@ -139,13 +119,7 @@ class IconUtils:
             logger.warning(f"無法延遲執行圖示綁定: {e}")
             _delayed_icon_bind()  # 直接執行作為最後備選
 
-# ====== UI 通用工具類別 ======
 class UIUtils:
-    """
-    UI 工具類別：常用視窗、訊息框、檔案/資料夾選擇等功能
-    UI utility class for common windows, message boxes, file/folder selection and other UI functions
-    """
-    # 統一設定視窗屬性
     @staticmethod
     def setup_window_properties(
         window,
@@ -240,10 +214,6 @@ class UIUtils:
 
     @staticmethod
     def safe_config_widget(widget, **config) -> None:
-        """
-        安全地配置 widget
-        Safely configure widget
-        """
         UIUtils.safe_update_widget(
             widget, lambda w, **cfg: w.configure(**cfg), **config
         )
@@ -258,13 +228,6 @@ class UIUtils:
         max_tasks_per_tick: int = 100,
         job_attr: str = "_ui_queue_pump_job",
     ) -> None:
-        """在 Tk/CTk 主執行緒安全地輪詢並執行 UI 任務佇列。
-
-        - 會自動 coalesce 成單一 after job，避免多重計時器造成撕裂/卡頓。
-        - 每次 tick 限制最多執行 max_tasks_per_tick，避免 UI 長時間凍結。
-        - 若佇列仍有積壓，會用較短的 busy_interval_ms 追趕。
-        """
-
         def _alive() -> bool:
             try:
                 return bool(widget) and widget.winfo_exists()
@@ -338,14 +301,6 @@ class UIUtils:
         error_log_prefix: str = "",
         component: str = "UIUtils",
     ) -> None:
-        """在背景執行緒執行任務，必要時把 UI 回呼安全地排回主執行緒。
-
-        - task_func：背景工作（請勿直接操作 Tk/CTk UI）。
-        - ui_queue：若提供，會把 on_error 以 callable 的形式丟回 UI 佇列（需由主執行緒 pump）。
-        - widget：若提供且有 `.after(...)`，會用 `widget.after(0, on_error)` 排回主執行緒。
-        - 兩者都未提供時，會直接呼叫 on_error（最後備援）。
-        """
-
         def _dispatch(cb: Optional[Callable[[], None]]) -> None:
             if cb is None:
                 return
@@ -397,11 +352,6 @@ class UIUtils:
         offset_y: int = 10,
         auto_hide_ms: Optional[int] = None,
     ) -> None:
-        """綁定滑鼠移入/移出 tooltip（輕量、可重用）。
-
-        - 以 tk.Toplevel + wm_overrideredirect(True) 實作，避免影響視窗焦點。
-        - auto_hide_ms 可選：到期自動關閉（例如 5000ms）。
-        """
         if not widget:
             return
 
@@ -480,7 +430,6 @@ class UIUtils:
         except Exception as e:
             logger.exception(f"綁定 tooltip 事件失敗: {e}")
 
-    # 顯示錯誤對話框
     @staticmethod
     def show_error(
         title: str = "錯誤",
@@ -532,7 +481,6 @@ class UIUtils:
             logger.exception(f"顯示錯誤對話框失敗: {e}")
             logger.error(f"錯誤: {title} - {message}")
 
-    # 顯示警告對話框
     @staticmethod
     def show_warning(
         title: str = "警告",
@@ -581,7 +529,6 @@ class UIUtils:
             logger.exception(f"顯示警告對話框失敗: {e}")
             logger.warning(f"警告: {title} - {message}")
 
-    # 顯示資訊對話框
     @staticmethod
     def show_info(
         title: str = "資訊",
@@ -629,6 +576,7 @@ class UIUtils:
         except Exception as e:
             logger.exception(f"顯示資訊對話框失敗: {e}")
             logger.warning(f"警告: {title} - {message}")
+
     @staticmethod
     def open_external(target) -> None:
         """
@@ -644,9 +592,9 @@ class UIUtils:
             else:
                 # 嘗試作為路徑開啟
                 os.startfile(target_str)
-        except Exception as e:
+        except Exception:
             logger.exception(f"開啟外部資源失敗: {target}")
-    # 顯示確認對話框（是/否/取消）
+
     @staticmethod
     def ask_yes_no_cancel(
         title: str = "確認",
@@ -708,10 +656,6 @@ class UIUtils:
 
     @staticmethod
     def apply_unified_dropdown_styling(dropdown_widget) -> None:
-        """
-        統一下拉選單樣式
-        Apply unified dropdown styling for light theme with mouse wheel support
-        """
         try:
             # 固定淺色模式：白色背景黑字
             style_config = {
@@ -832,11 +776,6 @@ class UIUtils:
         return ctk.CTkButton(parent, text=text, command=command, **final_style)
 
 class ProgressDialog:
-    """
-    進度條對話框
-    Progress dialog with a progress bar and status label.
-    """
-
     def __init__(self, parent, title="進度", show_cancel=True):
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(title)
@@ -898,10 +837,6 @@ class ProgressDialog:
         self._last_ui_pump = 0.0
 
     def update_progress(self, percent, status_text) -> bool:
-        """
-        更新進度 (Thread-safe)
-        Update the progress.
-        """
         if self.cancelled:
             return False
 
@@ -931,18 +866,10 @@ class ProgressDialog:
         return True
 
     def cancel(self) -> None:
-        """
-        取消操作
-        Cancel the operation.
-        """
         self.cancelled = True
         self.dialog.destroy()
 
     def close(self) -> None:
-        """
-        關閉對話框
-        Close the dialog.
-        """
         try:
             self.dialog.destroy()
         except Exception as e:

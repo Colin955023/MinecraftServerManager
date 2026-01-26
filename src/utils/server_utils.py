@@ -6,29 +6,21 @@
 Server Utilities Module
 Integrates memory management, property settings, server detection, and operations
 """
-
-# ====== 標準函式庫 Standard Libraries ======
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 import json
-import os
 import re
-
-# ====== 專案內部模組 Internal Modules ======
 from ..models import ServerConfig
-from .logger import get_logger
-from .ui_utils import UIUtils
-from . import java_utils
+from . import get_logger, UIUtils, java_utils
 
 logger = get_logger().bind(component="ServerUtils")
 
-# ====== 記憶體常數 Memory Constants ======
 KB = 1024
 MB = 1024 * 1024
 GB = 1024 * 1024 * 1024
 
 
-# 記憶體工具類別 Memory Utilities
+# ====== 記憶體工具類別 ======
 class MemoryUtils:
     """
     記憶體工具類別，提供記憶體相關的解析和格式化功能
@@ -85,11 +77,9 @@ class MemoryUtils:
     @staticmethod
     def format_memory_mb(memory_mb: int) -> str:
         """
-        格式化記憶體顯示（MB輸入），自動選擇 M 或 G 單位
-        Format memory display (MB input), automatically selecting M or G units
+        格式化記憶體顯示
+        Format memory display
         """
-        # 使用統一的格式化邏輯: 轉換為 bytes 後使用 format_memory
-        # 但保留 M/G 簡潔格式而非小數點顯示
         if memory_mb >= 1024:
             return (
                 f"{memory_mb // 1024}G"
@@ -99,7 +89,7 @@ class MemoryUtils:
         return f"{memory_mb}M"
 
 
-# ====== Server Properties 說明助手 Server Properties Helper ======
+# ====== Server Properties 說明助手  ======
 class ServerPropertiesHelper:
     """
     server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。
@@ -214,7 +204,6 @@ class ServerPropertiesHelper:
             Dict[str, list]: 分類名稱對應屬性列表的字典 (Dictionary mapping category names to property lists)
         """
         return {
-            # 伺服器啟動與基本資訊
             "基本設定": [
                 "server-port",
                 "server-ip",
@@ -232,7 +221,6 @@ class ServerPropertiesHelper:
                 "hide-online-players",
                 "enable-code-of-conduct",
             ],
-            # 世界生成與地圖
             "世界設定": [
                 "level-name",
                 "level-seed",
@@ -244,18 +232,15 @@ class ServerPropertiesHelper:
                 "initial-enabled-packs",
                 "initial-disabled-packs",
             ],
-            # 玩家行為與閒置
             "玩家設定": [
                 "player-idle-timeout",
                 "pause-when-empty-seconds",
                 "allow-flight",
                 "allow-nether",
             ],
-            # 生物生成
             "生物設定": [
                 "spawn-monsters",
             ],
-            # 功能開關
             "功能設定": [
                 "enable-command-block",
                 "enable-query",
@@ -266,7 +251,6 @@ class ServerPropertiesHelper:
                 "sync-chunk-writes",
                 "status-heartbeat-interval",
             ],
-            # 網路與安全
             "網路設定": [
                 "network-compression-threshold",
                 "rate-limit",
@@ -274,7 +258,6 @@ class ServerPropertiesHelper:
                 "enforce-secure-profile",
                 "log-ips",
             ],
-            # 管理與權限
             "管理設定": [
                 "op-permission-level",
                 "function-permission-level",
@@ -286,7 +269,6 @@ class ServerPropertiesHelper:
                 "text-filtering-config",
                 "text-filtering-version",
             ],
-            # 管理伺服器協定
             "管理伺服器設定": [
                 "management-server-enabled",
                 "management-server-host",
@@ -297,7 +279,6 @@ class ServerPropertiesHelper:
                 "management-server-tls-keystore-password",
                 "management-server-allowed-origins",
             ],
-            # 效能與區塊
             "效能設定": [
                 "view-distance",
                 "simulation-distance",
@@ -313,7 +294,6 @@ class ServerPropertiesHelper:
                 "resource-pack-prompt",
                 "resource-pack-id",
             ],
-            # 進階/其他
             "進階設定": [
                 "bug-report-link",
                 "region-file-compression",
@@ -371,7 +351,7 @@ class ServerPropertiesHelper:
             logger.exception(f"儲存 server.properties 失敗: {e}")
 
 
-# ====== 伺服器檢測工具類別 Server Detection Utilities ======
+# ====== 伺服器檢測工具類別 ======
 class ServerDetectionUtils:
     """
     伺服器檢測工具類別，提供各種伺服器相關的檢測和驗證功能
@@ -391,10 +371,10 @@ class ServerDetectionUtils:
             Optional[Path]: 啟動腳本路徑，若未找到則返回 None (Startup script path, or None if not found)
         """
         script_candidates = [
-            "run.bat",  # Forge installer 預設
-            "start_server.bat",  # 我們建立的
-            "start.bat",  # 常見命名
-            "server.bat",  # 常見命名
+            "run.bat",
+            "start_server.bat",
+            "start.bat",
+            "server.bat",
         ]
 
         for script_name in script_candidates:
@@ -404,7 +384,7 @@ class ServerDetectionUtils:
 
         return None
 
-    # ====== 檔案與設定檢測 File and Config Detection ======
+    # ====== 檔案與設定檢測  ======
     @staticmethod
     def get_missing_server_files(folder_path: Path) -> list:
         """
@@ -456,7 +436,6 @@ class ServerDetectionUtils:
             with open(eula_file, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
 
-            # 查找 eula=true 設定（忽略大小寫和空白）
             for line in content.split("\n"):
                 line = line.strip()
                 if line.startswith("#"):
@@ -470,7 +449,7 @@ class ServerDetectionUtils:
             logger.exception(f"讀取 eula.txt 失敗: {e}")
             return False
 
-    # ====== 記憶體設定管理 Memory Settings Management ======
+    # ====== 記憶體設定管理 ======
     @staticmethod
     def update_forge_user_jvm_args(server_path: Path, config: ServerConfig) -> None:
         """
@@ -511,7 +490,6 @@ class ServerDetectionUtils:
         min_mem = None
 
         def process_script_file(fpath: Path) -> tuple:
-            """ ""統一處理腳本檔案，返回 (max_mem, min_mem, modified_content)"""
             max_m, min_m = None, None
             script_content = []
             script_modified = False
@@ -520,22 +498,17 @@ class ServerDetectionUtils:
                 with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         line_stripped = line.strip().lower()
-                        # 移除 pause 命令
                         if line_stripped in ["pause", "@pause", "pause.", "@pause."]:
                             script_modified = True
-                            logger.info(f"發現並移除 pause 命令: {line.strip()}")
                             continue
 
-                        # 檢查 Java 命令行並處理 nogui
                         if "java" in line and (
                             "-Xmx" in line or "-Xms" in line or ".jar" in line
                         ):
                             if "nogui" not in line.lower():
                                 line = line.rstrip("\r\n") + " nogui\n"
                                 script_modified = True
-                                logger.info("在 Java 命令行添加 nogui 參數")
 
-                            # 解析記憶體設定
                             if not max_m:
                                 max_m = MemoryUtils.parse_memory_setting(line, "Xmx")
                             if not min_m:
@@ -543,7 +516,6 @@ class ServerDetectionUtils:
 
                         script_content.append(line)
 
-                # 如果修改了腳本，重寫檔案
                 if script_modified:
                     try:
                         with open(fpath, "w", encoding="utf-8") as f:
@@ -556,7 +528,6 @@ class ServerDetectionUtils:
 
             return max_m, min_m
 
-        # === 1. 解析 JVM 參數檔 ===
         for args_file in ["user_jvm_args.txt", "jvm.args"]:
             fpath = server_path / args_file
             if fpath.exists():
@@ -570,7 +541,6 @@ class ServerDetectionUtils:
                 except Exception as e:
                     logger.exception(f"解析 JVM 參數檔失敗 {fpath}: {e}")
 
-        # === 2. 優先解析常見啟動腳本 ===
         for bat_name in ["start_server.bat", "start.bat"]:
             fpath = server_path / bat_name
             if fpath.exists():
@@ -580,20 +550,16 @@ class ServerDetectionUtils:
                 if not min_mem and parsed_min:
                     min_mem = parsed_min
 
-                # 提前結束：如果兩個值都找到了，不需要繼續
                 if max_mem and min_mem:
                     break
 
-        # === 3. 備援：掃描所有 .bat 和 .sh 腳本（僅在需要時） ===
         if max_mem is None or min_mem is None:
-            # 正確的方式：分別 glob 兩種檔案類型並合併
             import itertools
 
             scripts = itertools.chain(
                 server_path.glob("*.bat"), server_path.glob("*.sh")
             )
             for script in scripts:
-                # 跳過已處理的檔案
                 if script.name in ["start_server.bat", "start.bat"]:
                     continue
 
@@ -603,11 +569,9 @@ class ServerDetectionUtils:
                 if not min_mem and parsed_min:
                     min_mem = parsed_min
 
-                # 提前結束
                 if max_mem and min_mem:
                     break
 
-        # 寫入 config
         if max_mem:
             config.memory_max_mb = max_mem
             config.memory_min_mb = min_mem
@@ -615,7 +579,6 @@ class ServerDetectionUtils:
             config.memory_max_mb = min_mem
             config.memory_min_mb = min_mem
 
-        # 若是 Forge，則自動覆蓋 user_jvm_args.txt
         if (
             hasattr(config, "loader_type")
             and str(getattr(config, "loader_type", "")).lower() == "forge"
@@ -639,7 +602,6 @@ class ServerDetectionUtils:
             jar_files = list(server_path.glob("*.jar"))
             jar_names = [f.name.lower() for f in jar_files]
 
-            # 判斷 loader_type
             fabric_files = ["fabric-server-launch.jar", "fabric-server-launcher.jar"]
             if any((server_path / f).exists() for f in fabric_files):
                 config.loader_type = "fabric"
@@ -654,20 +616,16 @@ class ServerDetectionUtils:
             else:
                 config.loader_type = "unknown"
 
-            # 呼叫進一步偵測
             ServerDetectionUtils.detect_loader_and_version_from_sources(
                 server_path, config, config.loader_type
             )
 
-            # 偵測記憶體設定
             ServerDetectionUtils.detect_memory_from_sources(server_path, config)
 
-            # 偵測 EULA 狀態
             config.eula_accepted = ServerDetectionUtils.detect_eula_acceptance(
                 server_path
             )
 
-            # 顯示結果（若有啟用）
             if print_result:
                 logger.info(f"偵測結果 - 路徑: {server_path.name}")
                 logger.info(f"  載入器: {config.loader_type}")
@@ -675,7 +633,6 @@ class ServerDetectionUtils:
                 logger.info(
                     f"  EULA狀態: {'已接受' if config.eula_accepted else '未接受'}"
                 )
-                # 記憶體顯示邏輯
                 if hasattr(config, "memory_max_mb") and config.memory_max_mb:
                     if hasattr(config, "memory_min_mb") and config.memory_min_mb:
                         logger.info(
@@ -704,24 +661,20 @@ class ServerDetectionUtils:
         if not folder_path.is_dir():
             return False
 
-        # 檢查伺服器 jar 檔案
         server_jars = [
             "server.jar",
             "minecraft_server.jar",
             "fabric-server-launch.jar",
             "fabric-server-launcher.jar",
         ]
-        # 使用 any() 優化檢查
         if any((folder_path / jar_name).exists() for jar_name in server_jars):
             return True
 
-        # 檢查 Forge/其他 jar 檔案
         for file in folder_path.glob("*.jar"):
             jar_name = file.name.lower()
             if any(pattern in jar_name for pattern in ["forge", "server", "minecraft"]):
                 return True
 
-        # 檢查特徵檔案
         server_indicators = ["server.properties", "eula.txt"]
         if any((folder_path / indicator).exists() for indicator in server_indicators):
             return True
@@ -757,7 +710,6 @@ class ServerDetectionUtils:
                     return m.group(1)
             return None
 
-        # ---------- 偵測來源 ----------
         def detect_from_logs():
             log_files = ["latest.log", "server.log", "debug.log"]
             loader_patterns = {
@@ -769,8 +721,8 @@ class ServerDetectionUtils:
                 ],
                 "forge": [
                     r"fml.forgeVersion, (\d+\.\d+\.\d+)",
-                    r"Forge Mod Loader version (\d+\.\d+\.\d+)",  # 1.12.2 以下
-                    r"MinecraftForge v(\d+\.\d+\.\d+)",  # 1.12.2 以下
+                    r"Forge Mod Loader version (\d+\.\d+\.\d+)",
+                    r"MinecraftForge v(\d+\.\d+\.\d+)",
                     r"Forge (\d+\.\d+\.\d+)",
                     r"forge-(\d+\.\d+\.\d+)",
                 ],
@@ -800,7 +752,7 @@ class ServerDetectionUtils:
                 if not is_unknown(config.loader_version) and not is_unknown(
                     config.minecraft_version
                 ):
-                    break  # 已取得兩版本即可提前結束
+                    break
 
         def detect_from_forge_lib():
             forge_dir = server_path / "libraries" / "net" / "minecraftforge" / "forge"
@@ -817,7 +769,6 @@ class ServerDetectionUtils:
                 set_if_unknown("minecraft_version", mc)
                 set_if_unknown("loader_version", forge_ver)
 
-            # 再從同層 JAR 補值
             for jar in subdirs[0].glob("*.jar"):
                 m2 = re.match(
                     r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)-.*\.jar", jar.name
@@ -831,7 +782,6 @@ class ServerDetectionUtils:
             for jar in server_path.glob("*.jar"):
                 name_lower = jar.name.lower()
 
-                # loader_type
                 if is_unknown(config.loader_type):
                     if "fabric" in name_lower:
                         config.loader_type = "fabric"
@@ -840,7 +790,6 @@ class ServerDetectionUtils:
                     else:
                         config.loader_type = "vanilla"
 
-                # Forge 版本(1.12.2 以下)
                 m = re.search(
                     r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\.jar", jar.name
                 )
@@ -870,24 +819,17 @@ class ServerDetectionUtils:
             except Exception as e:
                 logger.exception(f"解析 version.json 失敗 {fp}: {e}")
 
-        # －－－－－－－－－－ 主流程 －－－－－－－－－－
-
-        # 1. logs
         detect_from_logs()
 
-        # Fabric 若仍無版本，統一為 'unknown'
         if loader == "fabric" and is_unknown(config.loader_version):
             config.loader_version = "unknown"
 
-        # 2. Forge libraries
         if loader == "forge":
             detect_from_forge_lib()
 
-        # 3. JAR 與 version.json
         detect_from_jars()
         detect_from_version_json()
 
-        # 4. 最終保底 loader_type
         if is_unknown(config.loader_type):
             detect_from_jars()
             if is_unknown(config.loader_type):
@@ -910,12 +852,10 @@ class ServerDetectionUtils:
         logger.debug(f"loader_type={loader_type}")
 
         loader_type_lc = loader_type.lower() if loader_type else ""
-        jar_files = [f for f in os.listdir(server_path) if f.endswith(".jar")]
+        jar_files = [f.name for f in server_path.glob("*.jar")]
         jar_files_lower = [f.lower() for f in jar_files]
 
-        # ---------- Forge ----------
         if loader_type_lc == "forge":
-            # 1. 新版 Forge：libraries/.../forge/**/win_args.txt
             forge_lib_dir = server_path / "libraries/net/minecraftforge/forge"
             logger.debug(f"forge_lib_dir={forge_lib_dir}")
             if forge_lib_dir.is_dir():
@@ -927,7 +867,6 @@ class ServerDetectionUtils:
                     logger.debug(f"return (forge new args.txt): {result}")
                     return result
 
-            # 2. 舊版 Forge：尋找 jar 名中含 forge-<mc>-<forge> 結構
             mc_ver = None
             forge_ver = None
             for fname in jar_files:
@@ -949,18 +888,15 @@ class ServerDetectionUtils:
                         logger.debug(f"return (forge old): {fname}")
                         return fname
 
-            # 3. fallback: 任一含 forge 且非 installer 的 jar
             for fname, lower in zip(jar_files, jar_files_lower):
                 if "forge" in lower and "installer" not in lower:
                     logger.debug(f"return (forge fallback): {fname}")
                     return fname
 
-            # 4. fallback: server.jar 存在
             if (server_path / "server.jar").exists():
                 logger.debug("return (server.jar fallback): server.jar")
                 return "server.jar"
 
-            # 5. fallback: 任一 jar
             if jar_files:
                 logger.debug(f"return (any jar fallback): {jar_files[0]}")
                 return jar_files[0]
@@ -968,7 +904,6 @@ class ServerDetectionUtils:
             logger.debug("return (final fallback): server.jar")
             return "server.jar"
 
-        # ---------- Fabric ----------
         elif loader_type_lc == "fabric":
             for candidate in [
                 "fabric-server-launch.jar",
@@ -981,7 +916,6 @@ class ServerDetectionUtils:
             logger.debug("return (fabric fallback): server.jar")
             return "server.jar"
 
-        # ---------- Vanilla / Unknown ----------
         else:
             for candidate in ["server.jar", "minecraft_server.jar"]:
                 if (server_path / candidate).exists():
@@ -1028,7 +962,7 @@ class ServerOperations:
             return False
 
 
-# ====== 伺服器指令工具類別 Server Commands ======
+# ====== 伺服器指令工具類別 ======
 class ServerCommands:
     """
     伺服器指令工具類別
@@ -1053,7 +987,6 @@ class ServerCommands:
         memory_min = max(512, getattr(server_config, "memory_min_mb", 1024))
         memory_max = max(memory_min, getattr(server_config, "memory_max_mb", 2048))
 
-        # Java 執行檔自動偵測
         java_exe = (
             java_utils.get_best_java_path(
                 getattr(server_config, "minecraft_version", None)
@@ -1061,10 +994,8 @@ class ServerCommands:
             or "java"
         )
 
-        # 偵測主 JAR 檔案
         main_jar = ServerDetectionUtils.detect_main_jar_file(server_path, loader_type)
 
-        # 構建命令
         cmd_list = [
             java_exe,
             f"-Xms{memory_min}M",
@@ -1077,7 +1008,6 @@ class ServerCommands:
         if return_list:
             return cmd_list
         else:
-            # 處理包含空格的路徑
             if " " in java_exe and not (
                 java_exe.startswith('"') and java_exe.endswith('"')
             ):

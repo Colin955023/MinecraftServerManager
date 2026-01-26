@@ -4,7 +4,6 @@
 伺服器監控視窗
 提供即時的伺服器狀態監控、控制台輸出和資源使用情況
 """
-# ====== 標準函式庫 ======
 from typing import Callable
 from concurrent.futures import ThreadPoolExecutor
 import re
@@ -14,7 +13,6 @@ import threading
 import traceback
 import tkinter as tk
 import customtkinter as ctk
-# ====== 專案內部模組 ======
 from ..utils import (
     MemoryUtils,
     ServerOperations,
@@ -23,7 +21,7 @@ from ..utils import (
     get_font,
     WindowManager,
     UIUtils,
-    get_logger
+    get_logger,
 )
 
 logger = get_logger().bind(component="ServerMonitorWindow")
@@ -583,7 +581,7 @@ class ServerMonitorWindow:
             for line in output_lines:
                 if line.strip():  # 只顯示非空行
                     # 控制台輸出：每行只排一個 UI 任務
-                    self.ui_queue.put(lambda l=line: self.add_console_message(l))
+                    self.ui_queue.put(lambda msg=line: self.add_console_message(msg))
 
                     # 玩家加入/離開：背景執行緒直接觸發 list 指令（避免 UI thread 多工排程）
                     if "joined the game" in line or "left the game" in line:
