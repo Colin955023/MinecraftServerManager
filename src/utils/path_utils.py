@@ -1,44 +1,39 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-路徑工具模組
+"""路徑工具模組
 Path Utilities Module
 """
-from pathlib import Path
-from typing import Any, Dict, Optional
+
 import json
+from pathlib import Path
+from typing import Any
+
 
 class PathUtils:
-    """
-    路徑處理工具類別，提供專案路徑管理和安全路徑操作
+    """路徑處理工具類別，提供專案路徑管理和安全路徑操作
     Path utilities class for project path management and safe path operations
     """
 
     @staticmethod
     def get_project_root() -> Path:
-        """
-        獲取專案根目錄路徑
-        """
+        """獲取專案根目錄路徑"""
         return Path(__file__).parent.parent.parent
 
     @staticmethod
     def get_assets_path() -> Path:
-        """
-        獲取 assets 目錄路徑
-        """
+        """獲取 assets 目錄路徑"""
         return PathUtils.get_project_root() / "assets"
 
     @staticmethod
-    def load_json(path: Path) -> Optional[Dict[str, Any]]:
-        """
-        讀取 JSON 檔案，統一處理編碼和錯誤
+    def load_json(path: Path) -> dict[str, Any] | None:
+        """讀取 JSON 檔案，統一處理編碼和錯誤
         Load JSON file with unified encoding and error handling
 
         Args:
             path: JSON 檔案路徑 (JSON file path)
 
         Returns:
-            Optional[Dict[str, Any]]: JSON 資料字典，失敗時返回 None (JSON data dict, None on failure)
+            Dict[str, Any] | None: JSON 資料字典，失敗時返回 None (JSON data dict, None on failure)
+
         """
         try:
             if not path.exists():
@@ -48,9 +43,8 @@ class PathUtils:
             return None
 
     @staticmethod
-    def save_json(path: Path, data: Dict[str, Any], indent: int = 2) -> bool:
-        """
-        儲存 JSON 檔案，統一處理編碼和錯誤
+    def save_json(path: Path, data: dict[str, Any], indent: int = 2) -> bool:
+        """儲存 JSON 檔案，統一處理編碼和錯誤
         Save JSON file with unified encoding and error handling
 
         Args:
@@ -60,12 +54,11 @@ class PathUtils:
 
         Returns:
             bool: 儲存成功返回 True (True if saved successfully)
+
         """
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8"
-            )
+            path.write_text(json.dumps(data, indent=indent, ensure_ascii=False), encoding="utf-8")
             return True
         except (OSError, TypeError):
             return False

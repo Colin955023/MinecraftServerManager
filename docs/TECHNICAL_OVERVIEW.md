@@ -26,7 +26,7 @@
 ### 3. 工具層 (Utils Layer) - src/utils/
 提供跨模組共用的通用功能與輔助函式。
 - **JavaUtils / JavaDownloader**: Java 環境的偵測、驗證與自動下載。
-- **Logger (基於 loguru)**: 統一的日誌記錄系統，支援多級別日誌輸出與自動日誌管理。
+- **Logger (標準 logging)**: 統一的日誌記錄系統，提供 loguru 風格介面並自動輪替日誌檔案。
 - **SettingsManager**: 應用程式設定的持久化存儲與讀取。
 - **UIUtils**: 通用的 UI 輔助函式，如對話框顯示、字體管理等。
 
@@ -47,10 +47,10 @@ MinecraftServerManger/
    docs/
       TECHNICAL_OVERVIEW.md
       USER_GUIDE.md
-      CODE_REVIEW_AND_COMPLIANCE.md
-   scripts/                        # 依 .gitignore 忽略清單，結構表不列出被忽略的腳本
+   scripts/
       build_installer_nuitka.bat
-      build_nuitka.bat
+      package-portable.bat
+      update-portable.bat
       installer.iss
    src/
       __init__.py
@@ -81,7 +81,7 @@ MinecraftServerManger/
          http_utils.py
          java_downloader.py
          java_utils.py
-         log_utils.py
+         logger.py
          path_utils.py
          runtime_paths.py
          server_utils.py
@@ -94,23 +94,72 @@ MinecraftServerManger/
          version_info.py
 ```
 
+##  核心元件重點
+
+- **ServerManager**（core/server_manager.py）：以 `servers_config.json` 在使用者指定的主資料夾中持久化伺服器清單，能掃描、重偵測既有伺服器，並自動建立啟動批次檔與 `server.properties`。啟動流程會尋找已存在的啟動腳本（run/start_server/start/server.bat），並透過佇列串流輸出供 UI 控制台即時顯示。
+- **LoaderManager**（core/loader_manager.py）：預抓 Fabric 與 Forge 版本清單並以快取檔保存；下載流程會先檢查或安裝最合適的 Java，再執行對應載入器安裝器，並回報進度。
+- **MinecraftVersionManager**（core/version_manager.py）：使用多執行緒抓取 Mojang 版本資訊並快取，只回傳具備可用 server JAR 的正式版，避免 UI 等待過久。
+- **Logging 與快取路徑**：`utils/logger.py` 以標準 logging 提供 loguru 風格 API。路徑支援便攜模式與安裝模式：
+  - **便攜模式**：日誌 `.log/`、快取 `.config/Cache/`（相對於可執行檔目錄）
+  - **安裝模式**：日誌與快取位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager\` 下（`log/`、`Cache/`）
+- **UI 模組**：`ui/main_window.py` 掛載各 Frame；`manage_server_frame.py` 支援偵測既有伺服器、右鍵重新檢測、設定備份路徑與打開備份資料夾；`server_monitor_window.py` 提供資源監控與即時控制台。
+- **Lazy Re-export**：core、ui、utils 皆採 lazy 匯出策略，透過 package `__init__.py` 延遲載入實際模組以降低啟動開銷並減少循環 import。
+
 ##  模組匯出策略（re-export）
 
 為了讓 import 更一致、降低跨模組耦合，本專案在多個 package 使用「lazy re-export」：
 
 - `src/core/__init__.py`：集中匯出核心管理器（例如 `ServerManager`, `LoaderManager`, `MinecraftVersionManager`, `ModManager`）。
-- `src/utils/__init__.py`：集中匯出常用工具（例如 `UIUtils`, `LogUtils`, `HTTPUtils`, `font_manager`, `get_settings_manager` 等）。
+- `src/utils/__init__.py`：集中匯出常用工具（例如 `UIUtils`, `logger.get_logger`, `HTTPUtils`, `font_manager`, `get_settings_manager` 等）。
 - `src/ui/__init__.py`：集中匯出 UI 主要入口（例如 `MinecraftServerManager` 與各 Frame/對話框）。
 
 匯出採用 lazy import，可降低啟動時載入成本並減少循環 import 的風險。
 
 ##  使用者資料與伺服器資料路徑
 
+### 安裝版本
 - 使用者設定檔固定存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
 - 日誌檔案存放於：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
   - 日誌檔案命名格式：`YYYY-MM-DD-HH-mm.log`
-  - 自動清理機制：當日誌資料夾超過 10MB 時，會自動刪除相當於 8MB 的舊日誌
+  - 自動清理機制：最多保留 10 個檔案，超過時自動刪除最舊的
 - `user_settings.json` 會記錄「使用者選擇的伺服器主資料夾」(base dir)，實際伺服器資料會放在該資料夾內的 `servers` 子資料夾。
+
+### 可攜式版本
+- 使用者設定檔存放於：與程式同目錄下的 `.config/user_settings.json`
+- 日誌檔案存放於：與程式同目錄下的 `.log/` 資料夾
+- 所有資料均相對於程式位置，允許複製到 USB 隨身碟或多個位置並獨立運行
+
+##  部署方式
+
+### 開發模式
+```bash
+# 需要 Python 3.9+ 和 Git
+git clone https://github.com/Colin955023/MinecraftServerManager.git
+cd MinecraftServerManager
+py -m pip install --user -U uv
+uv sync
+uv run python -m src.main
+```
+
+### 可攜式版本
+- **生成方式**：
+  1. 執行 `scripts/build_installer_nuitka.bat` 生成 `dist/MinecraftServerManager/`
+  2. 執行 `scripts/package-portable.bat` 自動將 `update-portable.bat` 包含並壓縮成 `.zip`
+- **分發方式**：壓縮為 `.zip`，用戶解壓即可直接執行
+- **包含內容**：
+  - `MinecraftServerManager.exe` - 主程式
+  - `update-portable.bat` - 自動更新工具（用戶執行以檢查並安裝新版本）
+  - 其他運行時依賴與資源
+- **優點**：無需安裝、可攜帶在 USB 上、資料獨立存儲、包含自動更新工具
+- **手動更新**：用戶需主動執行資料夾中的 `update-portable.bat` 才能檢查並安裝最新版本（不會自動更新）
+- **檔案路徑**：GitHub Release 發布為 `MinecraftServerManager-v*.*.* -portable.zip`
+
+### 安裝版本
+- **生成方式**：執行 `scripts/build_installer_nuitka.bat` 生成可執行檔，再透過 Inno Setup 打包
+- **安裝位置**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\`
+- **優點**：自動更新、系統整合（開始菜單快捷方式、檔案關聯等）
+- **自動更新機制**：程式啟動時自動檢查 GitHub Release，若有新版本則提示用戶下載並執行新版本安裝程式
+- **檔案路徑**：GitHub Release 發布為 `MinecraftServerManager-v*.*.* -installer.exe`
 
 ##  技術堆疊 (Tech Stack)
 
@@ -120,10 +169,10 @@ MinecraftServerManger/
 - **Nuitka**: 將 Python 程式編譯為高效能的可執行檔與依賴資料夾（standalone/onedir）。
 
 ### 關鍵第三方函式庫
-- **urllib**: 處理 HTTP 請求，用於獲取版本資訊與下載檔案
-- **concurrent.futures**: 使用 Python 標準庫提供的 ThreadPoolExecutor 管理非同步/多執行緒任務
+- **requests**: 高階 HTTP 客戶端，用於版本資訊查詢與檔案下載。
 - **psutil**: 跨平台系統監控，用於獲取 CPU 與記憶體使用率。
 - **toml**: 解析 TOML 設定檔 (如 Fabric/Forge 配置)。
+- **defusedxml**: 安全解析 XML（Forge maven-metadata），避免常見 XML 漏洞。
 
 ##  安全性與合規性
 
@@ -131,4 +180,3 @@ MinecraftServerManger/
 - **資料隱私**: 應用程式僅在本地運行，不會收集或上傳使用者的伺服器資料。
 - **網路安全**: 所有網路請求均透過 HTTPS 進行，確保資料傳輸安全。
 
-詳細資訊請參閱 [程式碼規範與審查報告](CODE_REVIEW_AND_COMPLIANCE.md)。

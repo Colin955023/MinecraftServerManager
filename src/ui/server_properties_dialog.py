@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-server.properties 設定對話框
+"""server.properties 設定對話框
 提供視覺化的 server.properties 編輯介面
 """
-from tkinter import ttk
-from typing import Dict
+
 import tkinter as tk
 import traceback
 import webbrowser
+from tkinter import ttk
+
 import customtkinter as ctk
+
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     ServerPropertiesHelper,
+    UIUtils,
     font_manager,
     get_dpi_scaled_size,
     get_font,
-    UIUtils,
     get_logger,
+    pack_main_frame,
 )
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
 
+
 class ServerPropertiesDialog:
-    """
-    server.properties 設定對話框
+    """server.properties 設定對話框
     Server Properties Dialog
     提供視覺化的 server.properties 編輯介面
     (Provides a visual interface for editing server.properties)
     """
 
-    def __init__(
-        self, parent, server_config: ServerConfig, server_manager: ServerManager
-    ):
+    def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
         self.parent = parent
         self.server_config = server_config
         self.server_manager = server_manager
@@ -46,8 +45,8 @@ class ServerPropertiesDialog:
         self.setup_dialog()
 
         # 屬性值
-        self.property_vars: Dict[str, tk.StringVar] = {}
-        self.property_widgets: Dict[str, ttk.Widget] = {}
+        self.property_vars: dict[str, tk.StringVar] = {}
+        self.property_widgets: dict[str, ttk.Widget] = {}
 
         # 建立介面
         self.create_widgets()
@@ -69,9 +68,7 @@ class ServerPropertiesDialog:
         self.show_dialog()
 
     def setup_dialog(self) -> None:
-        """
-        設定對話框
-        """
+        """設定對話框"""
         self.dialog.title(f"伺服器設定 - {self.server_config.name}")
         min_width = int(1000 * font_manager.get_scale_factor())  # 1000 * DPI
         min_height = int(600 * font_manager.get_scale_factor())  # 600 * DPI
@@ -85,19 +82,12 @@ class ServerPropertiesDialog:
             logger.error(f"應用對話框主題失敗: {e}\n{traceback.format_exc()}")
 
     def create_widgets(self) -> None:
-        """
-        建立介面元件
+        """建立介面元件
         Create the interface widgets
         """
-
         # 主框架
         main_frame = ttk.Frame(self.dialog)
-        main_frame.pack(
-            fill="both",
-            expand=True,
-            padx=get_dpi_scaled_size(15),
-            pady=get_dpi_scaled_size(15),
-        )
+        pack_main_frame(main_frame)
 
         # 標題
         title_label = ttk.Label(
@@ -107,15 +97,11 @@ class ServerPropertiesDialog:
         )
         title_label.pack(pady=(0, get_dpi_scaled_size(15)))
         style = ttk.Style()
-        style.configure(
-            "ServerProps.TNotebook.Tab", font=get_font("Microsoft JhengHei", 16, "bold")
-        )
+        style.configure("ServerProps.TNotebook.Tab", font=get_font("Microsoft JhengHei", 16, "bold"))
 
-        # 建立筆記本 (分頁)
         self.notebook = ttk.Notebook(main_frame, style="ServerProps.TNotebook")
         self.notebook.pack(fill="both", expand=True, pady=(0, get_dpi_scaled_size(15)))
 
-        # 建立各個分頁
         self.create_property_tabs()
 
         # 按鈕框架
@@ -133,9 +119,7 @@ class ServerPropertiesDialog:
             command=self.save_properties,
             width=button_width,
             height=button_height,
-            font=ctk.CTkFont(
-                family="Microsoft JhengHei", size=button_font_size, weight="bold"
-            ),
+            font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#2563eb", "#1d4ed8"),
             hover_color=("#1d4ed8", "#1e40af"),
         ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
@@ -146,9 +130,7 @@ class ServerPropertiesDialog:
             command=self.reset_properties,
             width=button_width,
             height=button_height,
-            font=ctk.CTkFont(
-                family="Microsoft JhengHei", size=button_font_size, weight="bold"
-            ),
+            font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#f59e0b", "#d97706"),
             hover_color=("#d97706", "#b45309"),
         ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
@@ -159,9 +141,7 @@ class ServerPropertiesDialog:
             command=self.dialog.destroy,
             width=button_width,
             height=button_height,
-            font=ctk.CTkFont(
-                family="Microsoft JhengHei", size=button_font_size, weight="bold"
-            ),
+            font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#dc2626", "#b91c1c"),
             hover_color=("#b91c1c", "#991b1b"),
         ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
@@ -185,14 +165,13 @@ class ServerPropertiesDialog:
         )
         link_label.pack(side="left", padx=(5, 0))
 
-        def open_wiki(event):
+        def open_wiki(_event):
             webbrowser.open("https://zh.minecraft.wiki/w/Server.properties")
 
         link_label.bind("<Button-1>", open_wiki)
 
     def create_property_tabs(self) -> None:
-        """
-        建立屬性分頁，並自動補充未分類屬性到「其他」分頁
+        """建立屬性分頁，並自動補充未分類屬性到「其他」分頁
         Create the property tabs and automatically add uncategorized properties to the "Other" tab
         """
 
@@ -201,12 +180,13 @@ class ServerPropertiesDialog:
             self.notebook.add(tab_frame, text=tab_name)
 
             canvas = tk.Canvas(tab_frame)
-            scrollbar = ttk.Scrollbar(
-                tab_frame, orient="vertical", command=canvas.yview
-            )
+            scrollbar = ttk.Scrollbar(tab_frame, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas)
 
-            state = {"job": None, "last": None}
+            state: dict[str, str | tuple[int, int, int, int] | None] = {
+                "job": None,
+                "last": None,
+            }
 
             def _apply_scrollregion() -> None:
                 state["job"] = None
@@ -218,18 +198,19 @@ class ServerPropertiesDialog:
                         return
                     x0, y0, x1, y1 = bbox
                     height = max(y1 - y0, canvas.winfo_height())
-                    region = (x0, y0, x1, y0 + height)
+                    region: tuple[int, int, int, int] = (x0, y0, x1, y0 + height)
                     if region != state["last"]:
                         canvas.configure(scrollregion=region)
                         state["last"] = region
                 except Exception:
                     return
 
-            def _schedule_scrollregion_update(event=None) -> None:
+            def _schedule_scrollregion_update(_event=None) -> None:
                 try:
-                    if state["job"] is not None:
-                        canvas.after_cancel(state["job"])
-                    state["job"] = canvas.after_idle(_apply_scrollregion)
+                    job_id = state["job"]
+                    if job_id is not None and isinstance(job_id, str):
+                        canvas.after_cancel(job_id)
+                    state["job"] = str(canvas.after_idle(_apply_scrollregion))
                 except Exception as e:
                     logger.exception(f"排程 scrollregion 更新失敗: {e}")
 
@@ -250,6 +231,7 @@ class ServerPropertiesDialog:
 
             # 初次排版完成後再更新一次 scrollregion
             _schedule_scrollregion_update()
+
         categories = self.properties_helper.get_property_categories()
         # 收集所有已分類的 key
         categorized_keys = set()
@@ -269,7 +251,7 @@ class ServerPropertiesDialog:
 
         all_keys = set(all_properties.keys())
         # 找出未分類的 key
-        uncategorized_keys = sorted(list(all_keys - categorized_keys))
+        uncategorized_keys = sorted(all_keys - categorized_keys)
 
         # 先建立分類分頁
         for category_name, properties in categories.items():
@@ -280,17 +262,13 @@ class ServerPropertiesDialog:
             _add_scrollable_tab("其他", uncategorized_keys)
 
     def create_property_controls(self, parent, properties) -> None:
-        """
-        建立屬性控制項
+        """建立屬性控制項
         Create the property controls for the given properties
         """
-
-        for i, prop_name in enumerate(properties):
+        for _i, prop_name in enumerate(properties):
             # 建立框架
             prop_frame = ttk.Frame(parent)
-            prop_frame.pack(
-                fill="x", padx=get_dpi_scaled_size(15), pady=get_dpi_scaled_size(8)
-            )
+            prop_frame.pack(fill="x", padx=get_dpi_scaled_size(15), pady=get_dpi_scaled_size(8))
 
             # 屬性標籤
             label = ttk.Label(
@@ -302,7 +280,7 @@ class ServerPropertiesDialog:
             label.pack(anchor="w")
 
             # 綁定點擊事件以複製屬性名稱
-            def copy_name(event, name=prop_name):
+            def copy_name(_event, name=prop_name):
                 self.dialog.clipboard_clear()
                 self.dialog.clipboard_append(name)
                 self.dialog.update()  # 確保剪貼簿內容更新
@@ -319,11 +297,8 @@ class ServerPropertiesDialog:
             # 添加工具提示
             self.create_tooltip(widget, prop_name)
 
-    def create_property_widget(
-        self, parent, prop_name: str, var: tk.StringVar
-    ) -> ttk.Widget:
-        """
-        根據屬性類型建立控制項
+    def create_property_widget(self, parent, prop_name: str, var: tk.StringVar) -> ttk.Widget:
+        """根據屬性類型建立控制項
         Create the appropriate widget for the property type
         """
         # 布林值屬性
@@ -401,10 +376,10 @@ class ServerPropertiesDialog:
             widget.pack(anchor="w", pady=get_dpi_scaled_size(3))
 
             # 連接到字串變數
-            def update_string_var(*args, bv=bool_var, sv=var):
+            def update_string_var(*_args, bv=bool_var, sv=var):
                 sv.set("true" if bv.get() else "false")
 
-            def update_bool_var(*args, bv=bool_var, sv=var):
+            def update_bool_var(*_args, bv=bool_var, sv=var):
                 bv.set(sv.get().lower() == "true")
 
             bool_var.trace_add("write", update_string_var)
@@ -453,8 +428,7 @@ class ServerPropertiesDialog:
         return widget
 
     def create_tooltip(self, widget, prop_name: str) -> None:
-        """
-        建立工具提示
+        """建立工具提示
         Create a tooltip for the given widget
         """
         description = self.properties_helper.get_property_description(prop_name)
@@ -476,14 +450,11 @@ class ServerPropertiesDialog:
         )
 
     def load_properties(self) -> None:
-        """
-        載入屬性值
+        """載入屬性值
         Load the property values from the server configuration or file
         """
         # 首先嘗試從檔案載入現有屬性
-        current_properties = self.server_manager.load_server_properties(
-            self.server_config.name
-        )
+        current_properties = self.server_manager.load_server_properties(self.server_config.name)
         # 如果沒有找到檔案，使用配置中的屬性
         if not current_properties:
             current_properties = dict(self.server_config.properties or {})
@@ -497,8 +468,7 @@ class ServerPropertiesDialog:
                 self.property_vars[prop_name].set(str(value))
 
     def save_properties(self) -> None:
-        """
-        儲存屬性
+        """儲存屬性
         Save the properties to the server configuration or file
         """
         try:
@@ -510,9 +480,7 @@ class ServerPropertiesDialog:
                     properties[prop_name] = value
 
             # 更新伺服器屬性
-            success = self.server_manager.update_server_properties(
-                self.server_config.name, properties
-            )
+            success = self.server_manager.update_server_properties(self.server_config.name, properties)
 
             if success:
                 UIUtils.show_info(
@@ -529,20 +497,15 @@ class ServerPropertiesDialog:
             UIUtils.show_error("錯誤", f"儲存時發生錯誤: {e}", self.dialog)
 
     def show_dialog(self) -> None:
-        """
-        顯示對話框
-        """
+        """顯示對話框"""
         self.dialog.focus_set()
         self.dialog.wait_window()
 
     def reset_properties(self) -> None:
-        """
-        重設所有屬性為預設值
+        """重設所有屬性為預設值
         Reset all properties to default values
         """
-        if UIUtils.ask_yes_no_cancel(
-            "確認", "確定要重設所有屬性為預設值嗎？", self.dialog, show_cancel=False
-        ):
+        if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self.dialog, show_cancel=False):
             default_properties = self.server_manager.get_default_server_properties()
             for prop_name, value in default_properties.items():
                 if prop_name in self.property_vars:

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-工具模組套件
+"""工具模組套件
 提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
 Utility Modules Package
 Provides various utility functions and helper classes for the Minecraft Server Manager application
@@ -14,9 +12,8 @@ Logger can be imported conveniently:
 from __future__ import annotations
 
 import importlib
-from typing import Dict, Tuple
 
-_EXPORTS: Dict[str, Tuple[str, str]] = {
+_EXPORTS: dict[str, tuple[str, str]] = {
     # logger
     "get_logger": (".logger", "get_logger"),
     # UI helpers
@@ -24,6 +21,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "DialogUtils": (".ui_utils", "DialogUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
+    "pack_main_frame": (".ui_utils", "pack_main_frame"),
     # runtime paths
     "ensure_dir": (".runtime_paths", "ensure_dir"),
     "get_user_data_dir": (".runtime_paths", "get_user_data_dir"),

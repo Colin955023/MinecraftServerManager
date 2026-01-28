@@ -68,7 +68,7 @@ $RECYCLE.BIN/
 # (Should not be committed)
 # =====================
 config.json
-settings.json
+/settings.json
 *.log
 logs/
 temp/

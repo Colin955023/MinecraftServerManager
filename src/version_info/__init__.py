@@ -4,7 +4,7 @@
 from src.version_info import APP_NAME, APP_VERSION, ...
 """
 
-from .version_info import (  # noqa: F401
+from .version_info import (
     APP_DESCRIPTION,
     APP_NAME,
     APP_VERSION,
@@ -14,9 +14,9 @@ from .version_info import (  # noqa: F401
 )
 
 __all__ = [
-    "APP_VERSION",
-    "APP_NAME",
     "APP_DESCRIPTION",
+    "APP_NAME",
+    "APP_VERSION",
     "GITHUB_OWNER",
     "GITHUB_REPO",
     "VERSION_PREFIX",

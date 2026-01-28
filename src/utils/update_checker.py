@@ -1,26 +1,25 @@
-"""
-應用程式更新檢查器模組
+"""應用程式更新檢查器模組
 提供 GitHub Release 版本檢查與自動下載安裝功能
 """
 
-from pathlib import Path
-from typing import Optional, Tuple
 import os
 import re
+import subprocess
 import tempfile
 import threading
 import webbrowser
-import subprocess
-from . import HTTPUtils, get_logger, UIUtils
+from pathlib import Path
+from typing import Any
+
+from . import HTTPUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="UpdateChecker")
 
 GITHUB_API = "https://api.github.com"
 
 
-def _parse_version(version_str: str) -> Optional[Tuple[int, ...]]:
-    """
-    解析版本字串為 Version 物件
+def _parse_version(version_str: str) -> tuple[int, ...] | None:
+    """解析版本字串為 Version 物件
     Parse version string to Version object
 
     Args:
@@ -28,6 +27,7 @@ def _parse_version(version_str: str) -> Optional[Tuple[int, ...]]:
 
     Returns:
         Version 物件，解析失敗時返回 None
+
     """
     try:
         # 移除前綴並只保留數字與點號
@@ -87,8 +87,11 @@ def _choose_installer_asset(release: dict) -> dict:
 def _launch_installer(installer_path: Path) -> None:
     try:
         os.startfile(str(installer_path))
-    except (AttributeError, OSError):
-        subprocess.Popen([str(installer_path)], shell=True)
+    except (AttributeError, OSError) as e:
+        try:
+            subprocess.Popen([str(installer_path)], shell=False)
+        except Exception:
+            logger.exception(f"安裝程式啟動失敗: {e}")
 
 
 def check_and_prompt_update(
@@ -109,7 +112,7 @@ def check_and_prompt_update(
                 if threading.current_thread() is threading.main_thread():
                     return func()
 
-                result = {"value": None, "exc": None}
+                result: dict[str, Any] = {"value": None, "exc": None}
                 done = threading.Event()
 
                 def _runner():
@@ -122,12 +125,11 @@ def check_and_prompt_update(
 
                 parent.after(0, _runner)
                 done.wait()
-                if result["exc"] is not None:
+                if isinstance(result["exc"], Exception):
                     raise result["exc"]
                 return result["value"]
         except Exception as e:
             logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
-            pass
         return func()
 
     def _work() -> None:
@@ -141,7 +143,7 @@ def check_and_prompt_update(
                             "無法取得最新版本資訊，或沒有可用的正式發布版本。",
                             parent=parent,
                             topmost=True,
-                        )
+                        ),
                     )
                 return
 
@@ -163,7 +165,7 @@ def check_and_prompt_update(
                             f"目前版本 {current_version} 已是最新版本，無須更新。",
                             parent=parent,
                             topmost=True,
-                        )
+                        ),
                     )
                 return
 
@@ -179,7 +181,7 @@ def check_and_prompt_update(
                     parent=parent,
                     show_cancel=False,
                     topmost=True,
-                )
+                ),
             ):
                 if html_url and _call_on_ui(
                     lambda: UIUtils.ask_yes_no_cancel(
@@ -188,7 +190,7 @@ def check_and_prompt_update(
                         parent=parent,
                         show_cancel=False,
                         topmost=True,
-                    )
+                    ),
                 ):
                     webbrowser.open(html_url)
                 return
@@ -201,16 +203,14 @@ def check_and_prompt_update(
                         "找不到可用的安裝檔（.exe）。將開啟發行頁面，請手動下載。",
                         parent=parent,
                         topmost=True,
-                    )
+                    ),
                 )
                 if html_url:
                     webbrowser.open(html_url)
                 return
 
             download_url = asset.get("browser_download_url")
-            with tempfile.NamedTemporaryFile(
-                delete=False, prefix="msm_update_", suffix=".exe"
-            ) as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, prefix="msm_update_", suffix=".exe") as tmp:
                 temp_path = tmp.name
             dest = Path(temp_path)
 
@@ -220,7 +220,7 @@ def check_and_prompt_update(
                     "正在下載安裝檔，請稍候...",
                     parent=parent,
                     topmost=True,
-                )
+                ),
             )
             if HTTPUtils.download_file(download_url, str(dest)):
                 _call_on_ui(
@@ -229,7 +229,7 @@ def check_and_prompt_update(
                         "將啟動安裝程式進行更新，請依畫面指示操作。",
                         parent=parent,
                         topmost=True,
-                    )
+                    ),
                 )
                 _launch_installer(dest)
             else:
@@ -239,7 +239,7 @@ def check_and_prompt_update(
                         "無法下載安裝檔，請稍後再試。",
                         parent=parent,
                         topmost=True,
-                    )
+                    ),
                 )
         except Exception as e:
             logger.exception(f"更新檢查失敗: {e}")
@@ -250,7 +250,7 @@ def check_and_prompt_update(
                     f"無法完成更新檢查或下載：{error_msg}",
                     parent=parent,
                     topmost=True,
-                )
+                ),
             )
 
     threading.Thread(target=_work, daemon=True).start()

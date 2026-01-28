@@ -20,6 +20,7 @@
 - **多載入器支援**：完整支援 Vanilla (原版)、Fabric 與 Forge 等主流載入器。
 - **自動化版本獲取**：即時同步 Minecraft 官方與載入器社群的最新版本資訊。
 - **一鍵建立與部署**：簡化繁瑣的伺服器架設流程，僅需數次點擊即可完成部署。
+- **偵測與匯入**：可掃描指定資料夾的既有伺服器，並將其設定、路徑與備份資訊納入管理。
 
 ###  智慧 Java 環境配置
 - **自動偵測**：智慧掃描系統中已安裝的 Java 版本。
@@ -41,18 +42,38 @@
 
 - [ 使用指南 (User Guide)](docs/USER_GUIDE.md)：詳細的操作說明與功能介紹。
 - [ 技術概覽 (Technical Overview)](docs/TECHNICAL_OVERVIEW.md)：系統架構、技術堆疊與開發資訊。
-- [ 程式碼規範 (Code Compliance)](docs/CODE_REVIEW_AND_COMPLIANCE.md)：程式碼品質標準與審查報告。
 
 ##  快速開始
 
 ### 系統需求
 - **作業系統**：Windows 10 或更新版本 (64-bit)
-- **Python 版本**：Python 3.9 或更新版本
 - **硬體需求**：建議至少 4GB RAM (視伺服器規模而定)
 
 ### 安裝與執行
 
-#### 開發環境設置
+#### 選項 1：可攜式版本（推薦新手）
+最簡單的方式，無需安裝 Python 或任何依賴。
+
+1. 從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載 `MinecraftServerManager-v*.*.* -portable.zip`
+2. 解壓到任意位置
+3. 雙擊執行 `MinecraftServerManager.exe`
+4. **⚠️ 手動更新**：程式啟動時不會自動檢查更新。需要更新時，請執行資料夾中的 `update-portable.bat`，腳本會自動檢查並下載最新版本
+
+#### 選項 2：安裝版本（推薦日常使用）
+包含自動更新、系統整合等功能。
+
+1. 從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載 `MinecraftServerManager-v*.*.* -installer.exe`
+2. 執行安裝程式並按照指示操作
+3. 安裝完成後會自動啟動程式
+
+#### 選項 3：開發環境
+用於開發者或需要修改程式碼的情況。
+
+**需求**：
+- Python 3.9 或更新版本
+- Git
+
+**安裝步驟**：
 ```bash
 # 1. 複製專案儲存庫
 git clone https://github.com/Colin955023/MinecraftServerManager.git
@@ -64,29 +85,52 @@ py -m pip install --user -U uv
 # 3. 建立/同步專案環境（uv 會依 pyproject.toml + uv.lock 安裝依賴，並建立 .venv）
 uv sync
 
-# 4. 啟動應用程式（建議）
+# 4. 啟動應用程式
 uv run python -m src.main
 ```
 
-#### 查看目前環境安裝了哪些套件
+**查看已安裝的套件**：
 ```bash
 uv pip list
 uv pip freeze
 uv tree
 ```
 
-#### 建置執行檔
-本專案提供自動化建置腳本，可將 Python 原始碼編譯為獨立執行檔。
+#### 選項 4：自行編譯執行檔
+本專案提供自動化建置腳本，可將 Python 原始碼編譯為可攜式版本或安裝程式。
+
+**需求**：
+- Python 3.9 或更新版本
+- Visual Studio C++ 編譯工具（需要預先安裝）
+
+**編譯與打包步驟**：
 ```bash
-# 執行建置腳本
+# 1. 執行編譯腳本（生成可執行檔）
 scripts/build_installer_nuitka.bat
+
+# 2. 執行打包腳本（將便攜版打包成 ZIP，並包含更新工具）
+scripts/package-portable.bat
 ```
+
+編譯完成後，會在 `dist/` 資料夾中產生：
+- `MinecraftServerManager-v*.*.* -portable.zip` - 便攜版 (用戶下載用)
+- `installer/MinecraftServerManager-Setup-v*.*.* .exe` - 安裝版 (用戶下載用)
+- `MinecraftServerManager/` - 未壓縮的便攜版資料夾 (開發用)
 
 ##  資料儲存位置
 
+### 安裝版本
 - 使用者設定檔：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
-- 日誌檔案：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`（自動管理，超過 10MB 時會刪除相當於 8MB 的舊日誌）
+- 日誌檔案：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`（自動管理，最多保留 10 個檔案）
 - 伺服器資料夾：由使用者選擇「主資料夾」後，程式會在該資料夾內建立 `servers` 子資料夾並存放所有伺服器資料。
+- 伺服器清單設定：同一個主資料夾下的 `servers_config.json` 會記錄每個伺服器的版本、載入器、路徑與備份設定。
+
+### 可攜式版本
+- 使用者設定檔：與程式同目錄下的 `.config/user_settings.json`
+- 日誌檔案：與程式同目錄下的 `.log/` 資料夾
+- 伺服器資料夾：由使用者選擇「主資料夾」後，程式會在該資料夾內建立 `servers` 子資料夾
+
+> **提示**：可攜式版本可複製到 USB 隨身碟上使用，資料完全獨立不依賴系統位置。
 
 ##  貢獻與回饋
 歡迎提交 Issue 或 Pull Request 來協助改進本專案。您的回饋是我們進步的動力。

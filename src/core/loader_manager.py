@@ -1,36 +1,52 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 模組載入器管理器
-負責處理 Fabric、Forge 載入器的版本管理與下載，支援自動取得最新版本資訊並提供相容性檢查
+負責處理 Fabric、Forge 載入器的版本管理與下載
+支援自動取得最新版本資訊並提供相容性檢查
 Loader Manager Module
 Responsible for managing and downloading versions of Fabric and Forge loaders with automatic version retrieval and compatibility checks
 """
-from contextlib import suppress
-from pathlib import Path
-from typing import List, Optional, Union
+
 import re
 import subprocess
-import xml.etree.ElementTree as ET
-from .version_manager import MinecraftVersionManager
+from contextlib import suppress
+from pathlib import Path
+
+from defusedxml import ElementTree as ET
+
 from src.models import LoaderVersion
 from src.utils import (
     HTTPUtils,
+    PathUtils,
     UIUtils,
     ensure_dir,
+    get_best_java_path,
     get_cache_dir,
     get_logger,
-    PathUtils,
-    get_best_java_path,
 )
 
+from .version_manager import MinecraftVersionManager
+
 logger = get_logger().bind(component="LoaderManager")
+
 
 class LoaderManager:
     """
     模組載入器管理器類別，管理 Fabric 和 Forge 載入器版本
     Loader Manager class for managing Fabric and Forge loader versions
     """
+
+    _instance: "LoaderManager | None" = None
+    _initialized: bool = False
+
+    def __new__(cls):
+        """實現單例模式，確保只有一個實例
+        Implement singleton pattern to ensure only one instance
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     # ====== 初始化與快取管理 ======
     # 初始化載入器管理器
     def __init__(self):
@@ -38,11 +54,15 @@ class LoaderManager:
         初始化載入器管理器
         Initialize loader manager
         """
+        # 避免重複初始化
+        if self._initialized:
+            return
         cache_dir = ensure_dir(get_cache_dir())
         self.fabric_cache_file = str(cache_dir / "fabric_versions_cache.json")
         self.forge_cache_file = str(cache_dir / "forge_versions_cache.json")
         # 添加記憶體快取以避免重複讀取檔案
         self._version_cache = {}
+        self._initialized = True
 
     def clear_cache_file(self):
         """
@@ -73,9 +93,7 @@ class LoaderManager:
             )
         except Exception as e:
             logger.exception(f"清除快取檔案失敗: {e}")
-            UIUtils.show_error(
-                "清除快取檔案失敗", f"無法刪除快取檔案\n{e}", topmost=True
-            )
+            UIUtils.show_error("清除快取檔案失敗", f"無法刪除快取檔案\n{e}", topmost=True)
 
     # ======== 公開 API ========
     def download_server_jar_with_progress(
@@ -85,10 +103,10 @@ class LoaderManager:
         loader_version: str,
         download_path: str,
         progress_callback=None,
-        cancel_flag: Optional[dict] = None,
-        user_java_path: Optional[str] = None,
+        cancel_flag: dict | None = None,
+        user_java_path: str | None = None,
         parent_window=None,
-    ) -> Union[bool, str]:
+    ) -> bool | str:
         """
         依 loader_type 下載並部署伺服器檔案。
         Vanila/Fabric → bool；Forge → 成功時回傳主 JAR 相對路徑字串。
@@ -100,13 +118,13 @@ class LoaderManager:
             minecraft_version (str): Minecraft 版本
             loader_version (str): 載入器版本
             download_path (str): 下載路徑
-            progress_callback (Optional[Callable[[int], None]]): 進度回調函數
-            cancel_flag (Optional[dict]): 取消標誌
-            user_java_path (Optional[str]): 使用者指定的 Java 路徑
-            parent_window (Optional[tk.Toplevel]): 父視窗
+            progress_callback (Callable[[int] | None]): 進度回調函數
+            cancel_flag (dict | None): 取消標誌
+            user_java_path (str | None): 使用者指定的 Java 路徑
+            parent_window (tk.Toplevel | None): 父視窗
 
         Returns:
-            Union[bool, str]: 下載結果
+            bool | str: 下載結果
         """
         lt = self._standardize_loader_type(loader_type, loader_version)
 
@@ -120,9 +138,7 @@ class LoaderManager:
 
         # 2. 依不同載入器執行
         if lt == "vanilla":
-            return self._download_vanilla_server(
-                minecraft_version, download_path, progress_callback, cancel_flag
-            )
+            return self._download_vanilla_server(minecraft_version, download_path, progress_callback, cancel_flag)
 
         if lt == "fabric":
             return self._download_and_run_installer(
@@ -140,7 +156,7 @@ class LoaderManager:
                     str(Path(download_path).parent),
                 ],
                 minecraft_version=minecraft_version,
-                loader_version=loader_version,
+                _loader_version=loader_version,
                 download_path=download_path,
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
@@ -154,7 +170,7 @@ class LoaderManager:
                 f"{minecraft_version}-{loader_version}/"
                 f"forge-{minecraft_version}-{loader_version}-installer.jar"
             )
-            result = self._download_and_run_installer(
+            return self._download_and_run_installer(
                 installer_url=installer_url,
                 installer_args=[
                     java_path,
@@ -163,14 +179,13 @@ class LoaderManager:
                     "--installServer",
                 ],
                 minecraft_version=minecraft_version,
-                loader_version=loader_version,
+                _loader_version=loader_version,
                 download_path=download_path,
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=False,
                 parent_window=parent_window,
             )
-            return result
 
         return self._fail(
             progress_callback,
@@ -184,7 +199,7 @@ class LoaderManager:
         get all loader versions from API and overwrite json.
 
         Args:
-            parent (Optional[tk.Toplevel]): 父視窗
+            parent (tk.Toplevel | None): 父視窗
 
         Returns:
             None
@@ -215,7 +230,7 @@ class LoaderManager:
                 topmost=True,
             )
 
-    def _preload_forge_versions(self):
+    def _preload_forge_versions(self) -> None:
         logger.debug("預先抓取  Forge 載入器版本...", "LoaderManager")
         try:
             forge_url = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
@@ -248,7 +263,7 @@ class LoaderManager:
 
                 if len(filtered_versions) > 0:
                     # 按 Minecraft 版本分組
-                    version_dict = {}
+                    version_dict: dict[str, list[str]] = {}
                     for version in filtered_versions:
                         if "-" in version:
                             try:
@@ -282,6 +297,7 @@ class LoaderManager:
                         # 寫入快取檔案
                         PathUtils.save_json(forge_path, version_dict)
                     return
+            return
 
         except Exception as e:
             logger.exception(f"Maven metadata API 方法失敗: {e}")
@@ -290,10 +306,9 @@ class LoaderManager:
                 f"無法從 Maven metadata API 獲取 Forge 版本：{e}",
                 topmost=True,
             )
+            return
 
-    def get_compatible_loader_versions(
-        self, mc_version: str, loader_type: str
-    ) -> List[LoaderVersion]:
+    def get_compatible_loader_versions(self, mc_version: str, loader_type: str) -> list[LoaderVersion]:
         """
         只從 json 快取檔案取得相容的載入器版本列表（使用記憶體快取優化）。
         get all compatible loader versions from cache (with memory caching optimization).
@@ -313,63 +328,60 @@ class LoaderManager:
             return self._version_cache[cache_key]
 
         # 檢查快取檔案是否存在
-        if (
-            not Path(self.fabric_cache_file).exists()
-            and not Path(self.forge_cache_file).exists()
-        ):
+        if not Path(self.fabric_cache_file).exists() and not Path(self.forge_cache_file).exists():
             return []
-        else:
-            # Fabric
-            if loader_type.lower() == "fabric":
-                try:
-                    # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
-                    if not self._is_fabric_compatible_version(mc_version):
-                        # 不快取空結果，因為相容性可能在未來改變
-                        return []
-
-                    cache = PathUtils.load_json(Path(self.fabric_cache_file))
-                    if not cache:
-                        return []
-
-                    result = []
-                    # 返回與兼容的MC版本相對應的Fabric加載器版本
-                    for item in cache:
-                        if isinstance(item, dict) and "version" in item:
-                            ver = item["version"]
-                            if ver:
-                                result.append(LoaderVersion(version=ver))
-
-                    # 只快取非空結果
-                    if result:
-                        self._version_cache[cache_key] = result
-                    return result
-                except Exception as e:
-                    logger.exception(f"獲取 Fabric 版本時發生錯誤: {e}")
+        # Fabric
+        if loader_type.lower() == "fabric":
+            try:
+                # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
+                if not self._is_fabric_compatible_version(mc_version):
+                    # 不快取空結果，因為相容性可能在未來改變
                     return []
-            # Forge
-            elif loader_type.lower() == "forge":
-                try:
-                    cache = PathUtils.load_json(Path(self.forge_cache_file))
-                    if not cache:
-                        return []
 
-                    result = []
-
-                    # 檢查格式（完整版本 API）: { "1.21.4": ["1.21.4-54.0.0", "1.21.4-54.0.1", ...] }
-                    if mc_version in cache and isinstance(cache[mc_version], list):
-                        for version in cache[mc_version]:
-                            # 提取 Forge 版本號（去掉 MC 版本前綴）
-                            if "-" in version and version.startswith(mc_version):
-                                forge_version = version.split("-", 1)[1]
-                                result.append(LoaderVersion(version=forge_version))
-
-                    # 只快取非空結果
-                    if result:
-                        self._version_cache[cache_key] = result
-                    return result
-                except Exception as e:
-                    logger.exception(f"獲取 Forge 版本時發生錯誤: {e}")
+                cache = PathUtils.load_json(Path(self.fabric_cache_file))
+                if not cache:
                     return []
+
+                result = []
+                # 返回與兼容的MC版本相對應的Fabric加載器版本
+                for item in cache:
+                    if isinstance(item, dict) and "version" in item:
+                        ver = item["version"]
+                        if ver:
+                            result.append(LoaderVersion(version=ver))
+
+                # 只快取非空結果
+                if result:
+                    self._version_cache[cache_key] = result
+                return result
+            except Exception as e:
+                logger.exception(f"獲取 Fabric 版本時發生錯誤: {e}")
+                return []
+        # Forge
+        elif loader_type.lower() == "forge":
+            try:
+                cache = PathUtils.load_json(Path(self.forge_cache_file))
+                if not cache:
+                    return []
+
+                result = []
+
+                # 檢查格式（完整版本 API）: { "1.21.4": ["1.21.4-54.0.0", "1.21.4-54.0.1", ...] }
+                if mc_version in cache and isinstance(cache[mc_version], list):
+                    for version in cache[mc_version]:
+                        # 提取 Forge 版本號（去掉 MC 版本前綴）
+                        if "-" in version and version.startswith(mc_version):
+                            forge_version = version.split("-", 1)[1]
+                            result.append(LoaderVersion(version=forge_version))
+
+                # 只快取非空結果
+                if result:
+                    self._version_cache[cache_key] = result
+                return result
+            except Exception as e:
+                logger.exception(f"獲取 Forge 版本時發生錯誤: {e}")
+                return []
+        return []
 
     def _is_fabric_compatible_version(self, mc_version: str) -> bool:
         """
@@ -396,19 +408,13 @@ class LoaderManager:
             )
 
             # Fabric supports 1.14+
-            if major > 1:
-                return True
-            elif major == 1 and minor >= 14:
-                return True
-            else:
-                return False
+            return bool(major > 1 or major == 1 and minor >= 14)
         except Exception as e:
             logger.exception(f"檢查 Fabric 相容性時發生錯誤: {e}")
             return False
 
     def _parse_mc_version(self, version_str: str) -> list:
-        """
-        解析 MC 版本字串為數字列表，例如 "1.14.4" -> [1, 14, 4]
+        """解析 MC 版本字串為數字列表，例如 "1.14.4" -> [1, 14, 4]
         extract the major, minor, and patch version numbers.
 
         Args:
@@ -416,6 +422,7 @@ class LoaderManager:
 
         Returns:
             list: 包含主要、次要和修補版本號的整數列表
+
         """
         try:
             # 提取版本號，處理類似「1.14.4」、「1.14」、「1.20.1」等情況。
@@ -424,37 +431,36 @@ class LoaderManager:
         except Exception as e:
             logger.exception(f"解析 MC 版本時發生錯誤: {e}")
             return []
+
     # ---------------------- 私有輔助方法 ----------------------
     # === 下載 × 執行安裝器 ===
     def _download_and_run_installer(
         self,
         installer_url: str,
-        installer_args: List[str],
+        installer_args: list[str],
         minecraft_version: str,
-        loader_version: str,
+        _loader_version: str,
         download_path: str,
         progress_callback,
         cancel_flag,
         need_vanilla: bool = False,
         parent_window=None,
-    ) -> Union[bool, str]:
-        """
-        Fabric 與 Forge 共用：下載安裝器 → （可選）先下載 vanilla → 執行安裝器。
+    ) -> bool | str:
+        """Fabric 與 Forge 共用：下載安裝器 → （可選）先下載 vanilla → 執行安裝器。
 
-            Arg:
-                self: LoaderManager 實例。
-                installer_url (str): 安裝器的下載 URL。
-                installer_args (List[str]): 安裝器的啟動參數。
-                minecraft_version (str): Minecraft 版本。
-                loader_version (str): 載入器版本。
-                download_path (str): 下載路徑。
-                progress_callback: 進度回調函數。
-                cancel_flag: 取消標誌。
-                need_vanilla (bool): 是否需要下載 vanilla 伺服器。
-                parent_window: 父視窗，用於顯示錯誤對話框。
-            Returns:
-                Union[bool, str]: 成功時返回 True，失敗時返回錯誤訊息。
-
+        Arg:
+            self: LoaderManager 實例。
+            installer_url (str): 安裝器的下載 URL。
+            installer_args (List[str]): 安裝器的啟動參數。
+            minecraft_version (str): Minecraft 版本。
+            loader_version (str): 載入器版本。
+            download_path (str): 下載路徑。
+            progress_callback: 進度回調函數。
+            cancel_flag: 取消標誌。
+            need_vanilla (bool): 是否需要下載 vanilla 伺服器。
+            parent_window: 父視窗，用於顯示錯誤對話框。
+        Returns:
+            bool | str: 成功時返回 True，失敗時返回錯誤訊息。
         """
         installer_path = str(Path(download_path).parent / Path(installer_url).name)
 
@@ -483,28 +489,23 @@ class LoaderManager:
             return False
 
         # 需要 vanilla 伺服器？（Fabric）
-        if need_vanilla:
-            if not self._download_vanilla_server(
-                minecraft_version,
-                download_path,
-                lambda p, s: (
-                    progress_callback(
-                        vanilla_start + p * (vanilla_end - vanilla_start) / 100, s
-                    )
-                    if progress_callback
-                    else None
-                ),
-                cancel_flag,
-            ):
-                return False
+        if need_vanilla and not self._download_vanilla_server(
+            minecraft_version,
+            download_path,
+            lambda p, s: (
+                progress_callback(vanilla_start + p * (vanilla_end - vanilla_start) / 100, s)
+                if progress_callback
+                else None
+            ),
+            cancel_flag,
+        ):
+            return False
 
         # 執行安裝器
         if progress_callback:
             progress_callback(install_start, "準備執行安裝器...")
 
-        cmd = [
-            arg if arg != "{installer}" else installer_path for arg in installer_args
-        ]
+        cmd = [arg if arg != "{installer}" else installer_path for arg in installer_args]
 
         # 使用 Popen 讀取輸出
         try:
@@ -520,6 +521,9 @@ class LoaderManager:
             )
 
             # 讀取輸出並更新進度
+            if process.stdout is None:
+                return False
+
             while True:
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
@@ -564,9 +568,7 @@ class LoaderManager:
                 try:
                     with run_bat_path.open("r", encoding="utf-8", errors="ignore") as f:
                         for line in f:
-                            if re.search(
-                                r"\bjava\s+@user_jvm_args\\.txt\b", line, re.I
-                            ):
+                            if re.search(r"\bjava\s+@user_jvm_args\\.txt\b", line, re.IGNORECASE):
                                 java_line = line.strip()
                                 break
                     # 確保加上 nogui
@@ -574,22 +576,18 @@ class LoaderManager:
                         java_line += " nogui"
                 except Exception as e:
                     logger.warning(f"無法讀取 run.bat: {e}")
-                    UIUtils.show_warning(
-                        "讀取失敗", f"無法讀取 run.bat：{e}", parent=parent_window
-                    )
+                    UIUtils.show_warning("讀取失敗", f"無法讀取 run.bat：{e}", parent=parent_window)
 
             # 2. 修改 start_server.bat 中以 java 開頭的指令行
             if java_line and start_server_path.exists():
                 try:
-                    with start_server_path.open(
-                        "r", encoding="utf-8", errors="ignore"
-                    ) as f:
+                    with start_server_path.open("r", encoding="utf-8", errors="ignore") as f:
                         lines = f.readlines()
 
                     new_lines = []
                     replaced = False
                     for line in lines:
-                        if not replaced and re.match(r"^\s*java\b", line, re.I):
+                        if not replaced and re.match(r"^\s*java\b", line, re.IGNORECASE):
                             new_lines.append(java_line + "\n")
                             replaced = True
                         else:
@@ -627,17 +625,19 @@ class LoaderManager:
 
         except Exception as e:
             logger.exception(f"安裝過程中發生錯誤: {e}")
-            UIUtils.show_error(
-                "安裝失敗", f"安裝過程中發生錯誤：{e}", parent=parent_window
-            )
+            UIUtils.show_error("安裝失敗", f"安裝過程中發生錯誤：{e}", parent=parent_window)
 
         return True
+
     # === Vanilla ===
     def _download_vanilla_server(
-        self, minecraft_version: str, download_path: str, progress_callback, cancel_flag
+        self,
+        minecraft_version: str,
+        download_path: str,
+        progress_callback,
+        cancel_flag,
     ) -> bool:
-        """
-        下載 Minecraft Vanilla 伺服器 JAR 檔案。
+        """下載 Minecraft Vanilla 伺服器 JAR 檔案。
         Download Minecraft Vanilla server JAR file.
 
         Args:
@@ -647,13 +647,14 @@ class LoaderManager:
             cancel_flag: 取消標誌
         Returns:
             是否成功
+
         """
         if progress_callback:
             progress_callback(10, "查詢 Minecraft 版本資訊...")
 
         # 優先使用 VersionManager 的快取查詢，失敗則回退到本地方法
         server_url = MinecraftVersionManager().get_server_download_url(
-            minecraft_version
+            minecraft_version,
         ) or self._get_minecraft_server_url(minecraft_version)
 
         if not server_url:
@@ -671,6 +672,7 @@ class LoaderManager:
             "下載 Minecraft 伺服器...",
             cancel_flag,
         )
+
     # === 小工具 ===
     def _download_file_with_progress(
         self,
@@ -680,10 +682,9 @@ class LoaderManager:
         start_percent: int,
         end_percent: int,
         status_text: str,
-        cancel_flag: Optional[dict],
+        cancel_flag: dict | None,
     ) -> bool:
-        """
-        下載檔案並顯示進度。
+        """下載檔案並顯示進度。
         Download file and show progress.
 
         Args:
@@ -697,12 +698,12 @@ class LoaderManager:
 
         Returns:
             是否成功
+
         """
+
         def on_progress(downloaded, total):
             if total > 0 and progress_callback:
-                percent = start_percent + (downloaded / total) * (
-                    end_percent - start_percent
-                )
+                percent = start_percent + (downloaded / total) * (end_percent - start_percent)
                 progress_callback(percent, status_text)
 
         def check_cancel():
@@ -720,12 +721,10 @@ class LoaderManager:
             cancel_check=check_cancel,
         ):
             return True
-        else:
-            return self._fail(progress_callback, "下載失敗：無法獲取檔案")
+        return self._fail(progress_callback, "下載失敗：無法獲取檔案")
 
-    def _get_minecraft_server_url(self, mc_version: str) -> Optional[str]:
-        """
-        根據 Minecraft 版本獲取伺服器 JAR 下載 URL。
+    def _get_minecraft_server_url(self, mc_version: str) -> str | None:
+        """根據 Minecraft 版本獲取伺服器 JAR 下載 URL。
         According to the Minecraft version, get the server JAR download URL.
 
         Args:
@@ -733,6 +732,7 @@ class LoaderManager:
 
         Returns:
             伺服器 JAR 下載 URL
+
         """
         try:
             manifest = HTTPUtils.get_json(
@@ -741,9 +741,7 @@ class LoaderManager:
             )
             if not manifest:
                 return None
-            ver_url = next(
-                v["url"] for v in manifest["versions"] if v["id"] == mc_version
-            )
+            ver_url = next(v["url"] for v in manifest["versions"] if v["id"] == mc_version)
             ver_data = HTTPUtils.get_json(ver_url, timeout=10)
             if not ver_data:
                 return None
@@ -753,8 +751,7 @@ class LoaderManager:
             return None
 
     def _standardize_loader_type(self, lt: str, loader_version: str) -> str:
-        """
-        標準化載入器類型：將輸入轉為小寫並進行基本推斷。
+        """標準化載入器類型：將輸入轉為小寫並進行基本推斷。
         Standardize loader type: convert input to lowercase and make basic inferences.
 
         Args:
@@ -763,6 +760,7 @@ class LoaderManager:
 
         Returns:
             標準化後的載入器類型
+
         """
         lt_low = lt.lower()
         if lt_low != "unknown":
@@ -775,8 +773,7 @@ class LoaderManager:
         return "vanilla"
 
     def _fail(self, progress_callback, user_msg: str, debug: str = "") -> bool:
-        """
-        通用失敗處理：顯示錯誤訊息並回傳 False。
+        """通用失敗處理：顯示錯誤訊息並回傳 False。
         Generic failure handler: show error message and return False.
 
         Args:
@@ -786,6 +783,7 @@ class LoaderManager:
 
         Returns:
             是否成功
+
         """
         if debug:
             logger.debug(debug)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 核心模組套件
 提供 Minecraft 伺服器管理器的核心功能模組，包含伺服器管理、版本控制、載入器管理等
@@ -8,10 +7,10 @@ Provides core functionality modules for Minecraft Server Manager including serve
 """
 
 from __future__ import annotations
-from typing import Dict, Tuple
+
 from .. import lazy_exports
 
-_EXPORTS: Dict[str, Tuple[str, str]] = {
+_EXPORTS: dict[str, tuple[str, str]] = {
     "ServerManager": (".server_manager", "ServerManager"),
     "ServerConfig": (".server_manager", "ServerConfig"),
     "LoaderManager": (".loader_manager", "LoaderManager"),
