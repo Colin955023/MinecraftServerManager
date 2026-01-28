@@ -1,8 +1,5 @@
 ; Inno Setup 安裝腳本（繁體中文）
-; 可由 build_installer.bat 傳入 /DAppVersion 與 /DAppName 覆蓋下述定義
-#define GetStringDef(param, def) (param == "" ? def : param)
-#define AppVersion GetStringDef(AppVersion, "1.6.1")
-#define AppName GetStringDef(AppName, "MinecraftServerManager")
+; 必須由 build_installer_nuitka.bat 傳入 /DAppVersion、/DAppName 與 /DAppId
 
 [Setup]
 AppId={{B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}}
@@ -18,7 +15,7 @@ DefaultDirName={localappdata}\Programs\MinecraftServerManager
 DefaultGroupName=Minecraft 伺服器管理器
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
-OutputBaseFilename={#AppName}-Setup-{#AppVersion}
+OutputBaseFilename={#AppId}-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes

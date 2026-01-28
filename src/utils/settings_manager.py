@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-設定管理器模組
+"""設定管理器模組
 提供統一的使用者設定管理功能，包含自動更新、視窗偏好、調試設定等
 Settings Manager Module
 Provides unified user settings management including auto-update, window preferences, debug settings etc.
 """
-from typing import Any, Dict
+
 import sys
-from . import ensure_dir, get_user_data_dir, get_logger, PathUtils
+from typing import Any
+
+from . import PathUtils, ensure_dir, get_logger, get_user_data_dir
 
 logger = get_logger().bind(component="SettingsManager")
 
@@ -28,17 +28,14 @@ DEFAULT_WINDOW_PREFERENCES = {
 }
 
 
-def _get_default_settings() -> Dict[str, Any]:
-    """
-    取得預設設定（根據環境動態計算）
+def _get_default_settings() -> dict[str, Any]:
+    """取得預設設定（根據環境動態計算）
     Get default settings (dynamically calculated based on environment)
     """
     # 透過檢查是否為打包環境來設定調試日誌預設值
     # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
     is_nuitka = "__compiled__" in globals()
-    is_packaged = bool(
-        getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka
-    )
+    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
     # 開發環境預設啟用調試日誌，打包環境預設關閉
     default_debug_logging = not is_packaged
 
@@ -55,16 +52,16 @@ def _get_default_settings() -> Dict[str, Any]:
 
 
 class SettingsManager:
-    """
-    統一管理所有使用者設定的管理器類別
+    """統一管理所有使用者設定的管理器類別
     Centralized manager class for all user settings including auto-update and window preferences
     """
+
     # ====== 初始化與檔案操作 ======
     def __init__(self):
         self.settings_path = ensure_dir(get_user_data_dir()) / "user_settings.json"
         self._settings = self._load_settings()
 
-    def _load_settings(self) -> Dict[str, Any]:
+    def _load_settings(self) -> dict[str, Any]:
         if not self.settings_path.exists():
             # 建立預設設定
             default_settings = _get_default_settings()
@@ -86,37 +83,29 @@ class SettingsManager:
 
         return settings
 
-    def _save_settings(self, settings: Dict[str, Any]) -> None:
+    def _save_settings(self, settings: dict[str, Any]) -> None:
         if not PathUtils.save_json(self.settings_path, settings):
             logger.error("無法寫入 user_settings.json")
 
     # ====== 基本設定操作 ======
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        取得指定鍵值的設定資料
-        """
+        """取得指定鍵值的設定資料"""
         return self._settings.get(key, default)
 
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
-        """
-        設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）
-        """
+        """設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）"""
         self._settings[key] = value
         if immediate_save:
             self._save_settings(self._settings)
 
     def update_batch(self, updates: dict) -> None:
-        """
-        批次更新多個設定值並一次性儲存（優化 I/O 效能）
-        """
+        """批次更新多個設定值並一次性儲存（優化 I/O 效能）"""
         self._settings.update(updates)
         self._save_settings(self._settings)
 
     # ====== 伺服器根目錄管理 ======
     def get_servers_root(self) -> str:
-        """
-        取得使用者設定的伺服器根目錄路徑
-        """
+        """取得使用者設定的伺服器根目錄路徑"""
         return str(self._settings.get("servers_root", "")).strip()
 
     def set_servers_root(self, path: str) -> None:
@@ -137,7 +126,7 @@ class SettingsManager:
         self.set("first_run_completed", True)
 
     # ====== 視窗偏好設定管理 ======
-    def get_window_preferences(self) -> Dict[str, Any]:
+    def get_window_preferences(self) -> dict[str, Any]:
         return self._settings.get("window_preferences", {})
 
     def is_remember_size_position_enabled(self) -> bool:
@@ -149,9 +138,8 @@ class SettingsManager:
         self.set("window_preferences", prefs)
 
     # 取得主視窗設定
-    def get_main_window_settings(self) -> Dict[str, Any]:
-        """
-        取得主視窗的大小、位置和狀態設定
+    def get_main_window_settings(self) -> dict[str, Any]:
+        """取得主視窗的大小、位置和狀態設定
         Get main window size, position and state settings
 
         Args:
@@ -159,6 +147,7 @@ class SettingsManager:
 
         Returns:
             Dict[str, Any]: 主視窗設定字典
+
         """
         default_settings = {
             "width": 1200,
@@ -174,12 +163,11 @@ class SettingsManager:
         self,
         width: int,
         height: int,
-        x: int = None,
-        y: int = None,
+        x: int | None = None,
+        y: int | None = None,
         maximized: bool = False,
     ) -> None:
-        """
-        設定主視窗的大小、位置和最大化狀態
+        """設定主視窗的大小、位置和最大化狀態
         Set main window size, position and maximized state
 
         Args:
@@ -191,6 +179,7 @@ class SettingsManager:
 
         Returns:
             None
+
         """
         prefs = self.get_window_preferences()
         prefs["main_window"] = {
@@ -204,8 +193,7 @@ class SettingsManager:
 
     # 檢查是否自動置中新視窗
     def is_auto_center_enabled(self) -> bool:
-        """
-        檢查是否啟用自動置中新視窗的功能
+        """檢查是否啟用自動置中新視窗的功能
         Check if auto-center new windows feature is enabled
 
         Args:
@@ -213,13 +201,13 @@ class SettingsManager:
 
         Returns:
             bool: 啟用自動置中返回 True，否則返回 False
+
         """
         return self.get_window_preferences().get("auto_center", True)
 
     # 設定自動置中新視窗
     def set_auto_center(self, enabled: bool) -> None:
-        """
-        設定是否自動置中新視窗的功能
+        """設定是否自動置中新視窗的功能
         Set whether to auto-center new windows
 
         Args:
@@ -227,6 +215,7 @@ class SettingsManager:
 
         Returns:
             None
+
         """
         prefs = self.get_window_preferences()
         prefs["auto_center"] = enabled
@@ -234,8 +223,7 @@ class SettingsManager:
 
     # 檢查是否啟用自適應大小調整
     def is_adaptive_sizing_enabled(self) -> bool:
-        """
-        檢查是否啟用根據螢幕大小自適應調整視窗的功能
+        """檢查是否啟用根據螢幕大小自適應調整視窗的功能
         Check if adaptive sizing based on screen size feature is enabled
 
         Args:
@@ -243,13 +231,13 @@ class SettingsManager:
 
         Returns:
             bool: 啟用自適應大小返回 True，否則返回 False
+
         """
         return self.get_window_preferences().get("adaptive_sizing", True)
 
     # 設定自適應大小調整
     def set_adaptive_sizing(self, enabled: bool) -> None:
-        """
-        設定是否啟用根據螢幕大小自適應調整視窗的功能
+        """設定是否啟用根據螢幕大小自適應調整視窗的功能
         Set whether to enable adaptive sizing based on screen size
 
         Args:
@@ -257,6 +245,7 @@ class SettingsManager:
 
         Returns:
             None
+
         """
         prefs = self.get_window_preferences()
         prefs["adaptive_sizing"] = enabled
@@ -264,8 +253,7 @@ class SettingsManager:
 
     # 取得 DPI 縮放因子
     def get_dpi_scaling(self) -> float:
-        """
-        取得當前設定的 DPI 縮放因子
+        """取得當前設定的 DPI 縮放因子
         Get current DPI scaling factor setting
 
         Args:
@@ -273,13 +261,13 @@ class SettingsManager:
 
         Returns:
             float: DPI 縮放因子 (0.5-3.0)
+
         """
         return float(self.get_window_preferences().get("dpi_scaling", 1.0))
 
     # 設定 DPI 縮放因子
     def set_dpi_scaling(self, scaling: float) -> None:
-        """
-        設定 DPI 縮放因子，會自動限制在合理範圍內
+        """設定 DPI 縮放因子，會自動限制在合理範圍內
         Set DPI scaling factor, automatically limited to reasonable range
 
         Args:
@@ -287,6 +275,7 @@ class SettingsManager:
 
         Returns:
             None
+
         """
         prefs = self.get_window_preferences()
         prefs["dpi_scaling"] = max(0.5, min(3.0, scaling))  # 限制在 0.5-3.0 範圍內
@@ -294,9 +283,8 @@ class SettingsManager:
 
     # ====== 調試設定管理 ======
     # 取得調試設定
-    def get_debug_settings(self) -> Dict[str, Any]:
-        """
-        取得所有調試相關的設定
+    def get_debug_settings(self) -> dict[str, Any]:
+        """取得所有調試相關的設定
         Get all debug-related settings
 
         Args:
@@ -304,6 +292,7 @@ class SettingsManager:
 
         Returns:
             Dict[str, Any]: 調試設定字典
+
         """
         return self._settings.get(
             "debug_settings",
@@ -312,8 +301,7 @@ class SettingsManager:
 
     # 檢查是否啟用調試日誌
     def is_debug_logging_enabled(self) -> bool:
-        """
-        檢查是否啟用調試日誌輸出功能
+        """檢查是否啟用調試日誌輸出功能
         Check if debug logging output feature is enabled
 
         Args:
@@ -321,13 +309,13 @@ class SettingsManager:
 
         Returns:
             bool: 啟用調試日誌返回 True，否則返回 False
+
         """
         return self.get_debug_settings().get("enable_debug_logging", False)
 
     # 設定調試日誌開關
     def set_debug_logging(self, enabled: bool) -> None:
-        """
-        設定調試日誌輸出功能的開關
+        """設定調試日誌輸出功能的開關
         Set debug logging output feature on/off
 
         Args:
@@ -335,19 +323,21 @@ class SettingsManager:
 
         Returns:
             None
+
         """
         debug_settings = self.get_debug_settings()
         debug_settings["enable_debug_logging"] = enabled
         self.set("debug_settings", debug_settings)
 
+
 # ====== 全域實例管理 ======
 # 全域設定管理器實例
 _settings_manager = None
 
+
 # 取得全域設定管理器實例
 def get_settings_manager() -> SettingsManager:
-    """
-    取得全域設定管理器的單例實例
+    """取得全域設定管理器的單例實例
     Get singleton instance of global settings manager
 
     Args:
@@ -355,6 +345,7 @@ def get_settings_manager() -> SettingsManager:
 
     Returns:
         SettingsManager: 設定管理器實例
+
     """
     global _settings_manager
     if _settings_manager is None:

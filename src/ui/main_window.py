@@ -1,39 +1,41 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-主視窗
+"""主視窗
 Minecraft 伺服器管理器的主要使用者介面
 This module defines the main window for the Minecraft Server Manager application.
 """
-from pathlib import Path
-from tkinter import filedialog
-from typing import List, Optional
+
+import contextlib
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import threading
-import traceback
-import queue
 import tkinter as tk
-import zipfile
-import customtkinter as ctk
+import traceback
 import webbrowser
-from ..core import LoaderManager, ServerManager, MinecraftVersionManager
+import zipfile
+from pathlib import Path
+from tkinter import filedialog
+from typing import Any, Callable
+
+import customtkinter as ctk
+
+from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
     ServerCommands,
     ServerDetectionUtils,
     ServerPropertiesHelper,
+    UIUtils,
     WindowManager,
     check_and_prompt_update,
     cleanup_fonts,
     get_dpi_scaled_size,
     get_font,
-    get_settings_manager,
-    UIUtils,
     get_logger,
+    get_settings_manager,
 )
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
@@ -45,16 +47,16 @@ from . import (
 
 logger = get_logger().bind(component="MainWindow")
 
+
 class MinecraftServerManager:
-    """
-    Minecraft 伺服器管理器主視窗類別
+    """Minecraft 伺服器管理器主視窗類別
     Main window class for Minecraft Server Manager application
     """
+
     # ====== 核心設定與初始化 ======
     # 設定伺服器根目錄
-    def set_servers_root(self, new_root: Optional[str] = None) -> None:
-        """
-        取得或設定伺服器根目錄
+    def set_servers_root(self, new_root: str | None = None) -> str:
+        """取得或設定伺服器根目錄
         Get or set the servers root directory
 
         Args:
@@ -62,6 +64,7 @@ class MinecraftServerManager:
 
         Returns:
             str: 伺服器根目錄完整路徑
+
         """
         settings = get_settings_manager()
 
@@ -144,7 +147,6 @@ class MinecraftServerManager:
                     settings.set_servers_root(base_dir)
             except Exception as e:
                 logger.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
-                pass
 
         servers_root = _servers_dir_from_base(base_dir)
 
@@ -156,8 +158,7 @@ class MinecraftServerManager:
 
     # 應用程式關閉處理
     def on_closing(self) -> None:
-        """
-        主視窗關閉處理，清理快取並儲存視窗狀態
+        """主視窗關閉處理，清理快取並儲存視窗狀態
         Handle main window closing, clear caches and save window state
 
         Args:
@@ -165,6 +166,7 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
         logger.debug("程式即將關閉！", "MainWindow")
 
@@ -198,8 +200,7 @@ class MinecraftServerManager:
 
     # 主視窗初始化
     def __init__(self, root: tk.Tk):
-        """
-        初始化主視窗管理器
+        """初始化主視窗管理器
         Initialize main window manager
 
         Args:
@@ -207,11 +208,16 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
         self.root = root
+        self.mini_sidebar: Any | None = None
+        self.active_nav_title: str | None = None
+        self.nav_buttons: dict[str, Any] = {}
+        self._console_queue: queue.Queue[Any] = queue.Queue()
 
         # 初始化 UI 更新佇列 Initialize UI update queue
-        self.ui_queue = queue.Queue()
+        self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
         UIUtils.start_ui_queue_pump(self.root, self.ui_queue)
 
         # 獲取設定管理器
@@ -269,8 +275,7 @@ class MinecraftServerManager:
     # ====== 資料載入與版本管理 ======
     # 預載所有版本資訊
     def preload_all_versions(self) -> None:
-        """
-        啟動時預先抓取版本資訊
+        """啟動時預先抓取版本資訊
         Preload version information at startup
 
         Args:
@@ -278,6 +283,7 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
 
         def fetch_all():
@@ -292,8 +298,7 @@ class MinecraftServerManager:
 
     # 非同步載入資料
     def load_data_async(self) -> None:
-        """
-        非同步載入資料
+        """非同步載入資料
         Load data asynchronously
 
         Args:
@@ -301,14 +306,13 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
 
         def load_versions():
             try:
                 versions = self.version_manager.get_versions()
-                self.ui_queue.put(
-                    lambda: self.create_server_frame.update_versions(versions)
-                )
+                self.ui_queue.put(lambda: self.create_server_frame.update_versions(versions))
             except Exception as e:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
                 self.ui_queue.put(lambda: logger.error(error_msg))
@@ -318,8 +322,7 @@ class MinecraftServerManager:
     # ====== 啟動任務與首次執行處理 ======
     # 處理啟動任務
     def _handle_startup_tasks(self) -> None:
-        """
-        處理啟動時的任務：首次執行提示和自動更新檢查
+        """處理啟動時的任務：首次執行提示和自動更新檢查
         Handle startup tasks: first-run prompt and auto-update check
 
         Args:
@@ -327,6 +330,7 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
         settings = get_settings_manager()
 
@@ -339,14 +343,14 @@ class MinecraftServerManager:
             self._check_for_updates(show_msg=False)
 
     def _show_first_run_prompt(self) -> None:
-        """
-        顯示首次執行的自動更新設定提示
+        """顯示首次執行的自動更新設定提示
         Show first-run prompt for auto-update preference.
         """
         settings = get_settings_manager()
 
         # 創建首次執行對話框
         first_run_dialog = ctk.CTkToplevel(self.root)
+        first_run_dialog.withdraw()  # 先隱藏
         first_run_dialog.title("歡迎使用 Minecraft 伺服器管理器")
         first_run_dialog.resizable(False, False)
 
@@ -363,15 +367,14 @@ class MinecraftServerManager:
             make_modal=True,
             delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
         )
+        first_run_dialog.deiconify()  # 顯示
 
         # 主容器
         main_frame = ctk.CTkFrame(first_run_dialog)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(
-            main_frame, text="🎮 歡迎使用！", font=get_font(size=18, weight="bold")
-        )
+        title_label = ctk.CTkLabel(main_frame, text="🎮 歡迎使用！", font=get_font(size=18, weight="bold"))
         title_label.pack(pady=(10, 15))
 
         # 說明文字
@@ -424,12 +427,12 @@ class MinecraftServerManager:
         disable_btn.pack(side="right", padx=(10, 20))
 
     def _check_for_updates(self, show_msg: bool = True) -> None:
-        """
-        檢查更新
+        """檢查更新
         Check for updates.
 
         Args:
             show_msg (bool): 是否顯示「已是最新版本」的訊息
+
         """
         try:
             # 使用版本資訊常數
@@ -448,8 +451,7 @@ class MinecraftServerManager:
     # ====== 視窗設定與主題配置 ======
     # 設定主視窗
     def setup_window(self) -> None:
-        """
-        設定主視窗標題、圖示和現代化樣式
+        """設定主視窗標題、圖示和現代化樣式
         Set up the main window with title, icon, and modern style
 
         Args:
@@ -457,6 +459,7 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
         # 設定主視窗標題
         self.root.title("Minecraft 伺服器管理器")
@@ -475,8 +478,7 @@ class MinecraftServerManager:
         )
 
     def setup_light_theme(self) -> None:
-        """
-        設定淺色主題配置
+        """設定淺色主題配置
         Set up light theme configuration for CustomTkinter.
         """
         # 淺色主題色彩配置
@@ -497,8 +499,7 @@ class MinecraftServerManager:
     # ====== 介面元件創建 ======
     # 建立所有介面元件
     def create_widgets(self) -> None:
-        """
-        建立所有介面元件，包含標題和主要內容
+        """建立所有介面元件，包含標題和主要內容
         Create all interface widgets including header and main content
 
         Args:
@@ -506,6 +507,7 @@ class MinecraftServerManager:
 
         Returns:
             None
+
         """
         # CustomTkinter 會自動處理背景顏色
 
@@ -519,8 +521,7 @@ class MinecraftServerManager:
         self.show_create_server()
 
     def create_header(self) -> None:
-        """
-        建立現代化標題區域
+        """建立現代化標題區域
         Create a modern header section with title.
         """
         header_frame = ctk.CTkFrame(self.root, height=60, corner_radius=0)
@@ -558,8 +559,7 @@ class MinecraftServerManager:
         title_label.pack(anchor="w")
 
     def create_main_content(self) -> None:
-        """
-        建立主內容區域
+        """建立主內容區域
         Create the main content area with sidebar and content frames.
         """
         # 主容器
@@ -577,9 +577,7 @@ class MinecraftServerManager:
         # 你期望的 UX：完整側邊欄會「推開」內容區；切到迷你側邊欄時，整個頁面跟著收窄。
         # 這裡用 2 欄 grid：左側 nav_container 固定寬度（切換只改寬度），右側 content_container 自動伸縮。
         main_container.grid_rowconfigure(0, weight=1)
-        main_container.grid_columnconfigure(
-            0, weight=0, minsize=self._nav_full_width + self._nav_column_padding
-        )
+        main_container.grid_columnconfigure(0, weight=0, minsize=self._nav_full_width + self._nav_column_padding)
         main_container.grid_columnconfigure(1, weight=1)
 
         # 左側導航容器
@@ -595,9 +593,7 @@ class MinecraftServerManager:
 
         # 右側內容容器
         self.content_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        self.content_container.grid(
-            row=0, column=1, sticky="nsew", padx=(0, 20), pady=20
-        )
+        self.content_container.grid(row=0, column=1, sticky="nsew", padx=(0, 20), pady=20)
         self.content_container.grid_rowconfigure(0, weight=1)
         self.content_container.grid_columnconfigure(0, weight=1)
 
@@ -629,17 +625,15 @@ class MinecraftServerManager:
         self.mod_frame = None
 
     def create_sidebar(self, parent) -> None:
-        """
-        建立現代化側邊欄
+        """建立現代化側邊欄
         Create a modern sidebar with navigation buttons and status information.
 
         Args:
             parent: 父元件
+
         """
         # 側邊欄（放進 nav_container 內；切換僅影響 nav_container 寬度與顯示的 frame）
-        self.sidebar = ctk.CTkFrame(
-            parent, width=self._nav_full_width, fg_color=self.colors["menu_bg"]
-        )
+        self.sidebar = ctk.CTkFrame(parent, width=self._nav_full_width, fg_color=self.colors["menu_bg"])
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
 
@@ -673,9 +667,7 @@ class MinecraftServerManager:
         ]
 
         for emoji, title, desc, command in nav_items:
-            btn_frame = self.create_nav_button(
-                self.nav_scroll_frame, emoji, title, desc, command
-            )
+            btn_frame = self.create_nav_button(self.nav_scroll_frame, emoji, title, desc, command)
             btn_frame.pack(fill="x", padx=5, pady=3)
 
         # 底部資訊（完整/迷你側邊欄都要顯示）
@@ -701,11 +693,8 @@ class MinecraftServerManager:
         except Exception as e:
             logger.exception(f"建立側邊欄底部資訊失敗: {e}")
 
-    def create_nav_button(
-        self, parent, icon, title, description, command
-    ) -> ctk.CTkFrame:
-        """
-        建立導航按鈕
+    def create_nav_button(self, parent, icon, title, description, command) -> ctk.CTkFrame:
+        """建立導航按鈕
         Create navigation button
 
         Args:
@@ -717,6 +706,7 @@ class MinecraftServerManager:
 
         Returns:
             CTkFrame: 按鈕容器框架
+
         """
         btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
 
@@ -758,12 +748,12 @@ class MinecraftServerManager:
         return btn_frame
 
     def set_active_nav_button(self, title: str) -> None:
-        """
-        設定活動導航按鈕
+        """設定活動導航按鈕
         Set active navigation button
 
         Args:
             title: 要設為活動的導航標題
+
         """
         if not title:
             return
@@ -780,9 +770,7 @@ class MinecraftServerManager:
             """安全地設定按鈕顏色 / Safely configure button colors"""
             try:
                 if btn_widget and hasattr(btn_widget, "configure"):
-                    btn_widget.configure(
-                        fg_color=colors["fg"], hover_color=colors["hover"]
-                    )
+                    btn_widget.configure(fg_color=colors["fg"], hover_color=colors["hover"])
             except Exception as e:
                 logger.exception(f"設定導航按鈕顏色失敗: {e}")
 
@@ -800,9 +788,7 @@ class MinecraftServerManager:
         self.active_nav_title = title
 
     def toggle_sidebar(self) -> None:
-        """
-        乾淨利索地切換側邊欄顯示/隱藏，無動畫
-        """
+        """乾淨利索地切換側邊欄顯示/隱藏，無動畫"""
         # 用 after_idle coalesce 多次點擊，減少反覆觸發造成撕裂。
         # 參考 tkinter 事件迴圈/after(): https://docs.python.org/3/library/tkinter.html
         self.sidebar_visible = not bool(getattr(self, "sidebar_visible", True))
@@ -826,22 +812,18 @@ class MinecraftServerManager:
                     container = getattr(self, "main_container", None)
                     if container is not None:
                         pad = int(getattr(self, "_nav_column_padding", 0))
-                        container.grid_columnconfigure(
-                            0, minsize=int(self._nav_mini_width) + pad
-                        )
+                        container.grid_columnconfigure(0, minsize=int(self._nav_mini_width) + pad)
                     nav = getattr(self, "nav_container", None)
                     if nav is not None:
                         nav.configure(width=int(self._nav_mini_width))
                 except Exception as e:
                     logger.debug(f"設定 Nav 寬度 (Mini) 失敗: {e}", "MainWindow")
-                    pass
 
                 if hasattr(self, "sidebar") and self.sidebar:
                     try:
                         self.sidebar.grid_remove()
                     except Exception as e:
                         logger.debug(f"隱藏 sidebar 失敗: {e}", "MainWindow")
-                        pass
                 self.create_mini_sidebar()
             else:
                 # 顯示完整側邊欄，隱藏迷你側邊欄
@@ -849,34 +831,28 @@ class MinecraftServerManager:
                     container = getattr(self, "main_container", None)
                     if container is not None:
                         pad = int(getattr(self, "_nav_column_padding", 0))
-                        container.grid_columnconfigure(
-                            0, minsize=int(self._nav_full_width) + pad
-                        )
+                        container.grid_columnconfigure(0, minsize=int(self._nav_full_width) + pad)
                     nav = getattr(self, "nav_container", None)
                     if nav is not None:
                         nav.configure(width=int(self._nav_full_width))
                 except Exception as e:
                     logger.debug(f"設定 Nav 寬度 (Full) 失敗: {e}", "MainWindow")
-                    pass
 
                 if hasattr(self, "mini_sidebar") and self.mini_sidebar:
                     try:
                         self.mini_sidebar.grid_remove()
                     except Exception as e:
                         logger.debug(f"隱藏 mini_sidebar 失敗: {e}", "MainWindow")
-                        pass
                 if hasattr(self, "sidebar") and self.sidebar:
                     try:
                         self.sidebar.grid()
                     except Exception as e:
                         logger.debug(f"顯示 sidebar 失敗: {e}", "MainWindow")
-                        pass
         except Exception as e:
             logger.error(f"切換側邊欄失敗: {e}\n{traceback.format_exc()}")
 
     def create_mini_sidebar(self) -> None:
-        """
-        創建迷你側邊欄（只顯示圖示）
+        """創建迷你側邊欄（只顯示圖示）
         Create a mini sidebar that only shows icons for quick access.
         """
         # 只建立一次；之後切換僅 grid/grid_remove，避免重建大量元件造成撕裂
@@ -887,17 +863,13 @@ class MinecraftServerManager:
                         self.mini_sidebar.grid(row=0, column=0, sticky="nsew")
                     except Exception as e:
                         logger.debug(f"重顯示 mini_sidebar 失敗: {e}", "MainWindow")
-                        pass
                     return
             except Exception as e:
                 logger.debug(f"檢查 mini_sidebar 失敗: {e}", "MainWindow")
-                pass
 
         # 使用簡化的迷你側邊欄
         container = getattr(self, "nav_container", None) or self.sidebar.master
-        self.mini_sidebar = ctk.CTkFrame(
-            container, width=self._nav_mini_width, fg_color=self.colors["menu_bg"]
-        )
+        self.mini_sidebar = ctk.CTkFrame(container, width=self._nav_mini_width, fg_color=self.colors["menu_bg"])
         self.mini_sidebar.grid(row=0, column=0, sticky="nsew")
         self.mini_sidebar.grid_propagate(False)
 
@@ -944,8 +916,7 @@ class MinecraftServerManager:
         self._create_sidebar_footer(self.mini_sidebar, mini=True)
 
     def create_tooltip(self, widget, text) -> None:
-        """
-        為元件創建工具提示
+        """為元件創建工具提示
         Create a tooltip for a widget.
         """
         UIUtils.bind_tooltip(
@@ -962,12 +933,12 @@ class MinecraftServerManager:
         )
 
     def show_create_server(self) -> None:
-        """
-        顯示建立伺服器頁面
+        """顯示建立伺服器頁面
         Show create server page
 
         Args:
             None
+
         """
         self.hide_all_frames()
         try:
@@ -978,14 +949,14 @@ class MinecraftServerManager:
         self.set_active_nav_button("建立伺服器")
 
     def show_manage_server(self, auto_select=None) -> None:
-        """
-        顯示管理伺服器頁面
+        """顯示管理伺服器頁面
         每次都強制刷新伺服器列表
         Show manage server page
         Force refresh server list each time
 
         Args:
             auto_select: 跳轉後自動選擇的伺服器名稱（可選）
+
         """
         self.hide_all_frames()
         self._ensure_manage_server_frame()
@@ -1007,9 +978,7 @@ class MinecraftServerManager:
                     and self.manage_server_frame.server_tree
                 ):
                     for item in self.manage_server_frame.server_tree.get_children():
-                        values = self.manage_server_frame.server_tree.item(item)[
-                            "values"
-                        ]
+                        values = self.manage_server_frame.server_tree.item(item)["values"]
                         if values and values[0] == auto_select:
                             self.manage_server_frame.server_tree.selection_set(item)
                             self.manage_server_frame.server_tree.see(item)
@@ -1017,9 +986,7 @@ class MinecraftServerManager:
                             self.manage_server_frame.update_selection()
                             break
             except Exception as e:
-                logger.error(
-                    f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}"
-                )
+                logger.error(f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}")
 
         # coalesce：快速連點切換時取消舊的 refresh job
         try:
@@ -1028,16 +995,15 @@ class MinecraftServerManager:
                 self.root.after_cancel(old_job)
         except Exception as e:
             logger.debug(f"取消 _nav_refresh_job 失敗: {e}", "MainWindow")
-            pass
         self._nav_refresh_job = self.root.after(0, _refresh_and_optionally_select)
 
     def show_mod_management(self) -> None:
-        """
-        顯示模組管理頁面
+        """顯示模組管理頁面
         Show mod management page
 
         Args:
             None
+
         """
         self.hide_all_frames()
         self._ensure_mod_management_frame()
@@ -1052,14 +1018,14 @@ class MinecraftServerManager:
         self.set_active_nav_button("模組管理")
 
     def import_server(self) -> None:
-        """
-        匯入伺服器（資料夾或壓縮檔）
+        """匯入伺服器（資料夾或壓縮檔）
         統一入口匯入伺服器，支援資料夾和壓縮檔
         Import server (folder or archive)
         Unified entry to import a server from folder or archive
         """
         # 建立選擇對話框
         dialog = ctk.CTkToplevel(self.root)
+        dialog.withdraw()  # 先隱藏
         dialog.title("匯入伺服器")
         dialog.resizable(False, False)
 
@@ -1072,6 +1038,7 @@ class MinecraftServerManager:
             center_on_parent=True,
             make_modal=True,
         )
+        dialog.deiconify()  # 顯示
 
         choice = {"value": None}
 
@@ -1079,12 +1046,8 @@ class MinecraftServerManager:
         content = ctk.CTkFrame(dialog)
         content.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(
-            content, text="選擇匯入方式", font=get_font(size=18, weight="bold")
-        ).pack(pady=(10, 15))
-        ctk.CTkLabel(
-            content, text="請選擇要匯入的伺服器類型:", font=get_font(size=14)
-        ).pack(pady=(0, 20))
+        ctk.CTkLabel(content, text="選擇匯入方式", font=get_font(size=18, weight="bold")).pack(pady=(10, 15))
+        ctk.CTkLabel(content, text="請選擇要匯入的伺服器類型:", font=get_font(size=14)).pack(pady=(0, 20))
 
         button_frame = ctk.CTkFrame(content, fg_color="transparent")
         button_frame.pack(fill="x", padx=20)
@@ -1106,7 +1069,7 @@ class MinecraftServerManager:
             )
             btn.pack(fill="x", pady=5)
 
-        dialog.bind("<Escape>", lambda e: self._set_choice(choice, "cancel", dialog))
+        dialog.bind("<Escape>", lambda _e: self._set_choice(choice, "cancel", dialog))
         dialog.wait_window()
 
         if choice["value"] in [None, "cancel"]:
@@ -1116,25 +1079,25 @@ class MinecraftServerManager:
         self._handle_import_choice(choice["value"])
 
     def _set_choice(self, choice_dict, value, dialog) -> None:
-        """
-        設定選擇並關閉對話框
+        """設定選擇並關閉對話框
         Set choice and close dialog
 
         Args:
             choice_dict: 儲存選擇的字典
             value: 選擇的值
             dialog: 對話框實例
+
         """
         choice_dict["value"] = value
         dialog.destroy()
 
     def _handle_import_choice(self, choice_type) -> None:
-        """
-        處理匯入選擇
+        """處理匯入選擇
         Handle import choice
 
         Args:
             choice_type: 選擇的匯入類型
+
         """
         try:
             if choice_type == "folder":
@@ -1145,18 +1108,15 @@ class MinecraftServerManager:
                 return
 
             if path:
-                server_name = self._prompt_server_name(
-                    path.stem if path.is_file() else path.name
-                )
+                server_name = self._prompt_server_name(path.stem if path.is_file() else path.name)
                 if server_name:
                     self._finalize_import(path, server_name)
         except Exception as e:
             logger.error(f"匯入錯誤: {e}\n{traceback.format_exc()}", "MainWindow")
             UIUtils.show_error("匯入錯誤", str(e), self.root)
 
-    def _select_server_folder(self) -> Optional[Path]:
-        """
-        選擇伺服器資料夾
+    def _select_server_folder(self) -> Path | None:
+        """選擇伺服器資料夾
         Select server folder
         """
         folder_path = filedialog.askdirectory(title="選擇伺服器資料夾")
@@ -1172,9 +1132,8 @@ class MinecraftServerManager:
             return None
         return path
 
-    def _select_server_archive(self) -> Optional[Path]:
-        """
-        選擇伺服器壓縮檔
+    def _select_server_archive(self) -> Path | None:
+        """選擇伺服器壓縮檔
         Select server archive
         """
         file_path = filedialog.askopenfilename(
@@ -1193,9 +1152,8 @@ class MinecraftServerManager:
             return None
         return path
 
-    def _prompt_server_name(self, default_name: str) -> str:
-        """
-        提示輸入伺服器名稱
+    def _prompt_server_name(self, default_name: str) -> str | None:
+        """提示輸入伺服器名稱
         Prompt for server name input
 
         Args:
@@ -1203,8 +1161,10 @@ class MinecraftServerManager:
 
         Returns:
             str: 使用者輸入的名稱
+
         """
         dialog = ctk.CTkToplevel(self.root)
+        dialog.withdraw()  # 先隱藏
         dialog.title("輸入伺服器名稱")
         dialog.resizable(False, False)
 
@@ -1217,15 +1177,14 @@ class MinecraftServerManager:
             center_on_parent=True,
             make_modal=True,
         )
+        dialog.deiconify()  # 顯示
 
         result = {"name": None}
 
         frame = ctk.CTkFrame(dialog)
         frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(frame, text="請輸入伺服器名稱:", font=get_font(size=14)).pack(
-            pady=(10, 15)
-        )
+        ctk.CTkLabel(frame, text="請輸入伺服器名稱:", font=get_font(size=14)).pack(pady=(10, 15))
 
         entry = ctk.CTkEntry(frame, font=get_font(size=14), width=300)
         entry.pack(pady=(0, 20))
@@ -1245,40 +1204,35 @@ class MinecraftServerManager:
             if (root / name).exists():
                 UIUtils.show_error("名稱重複", f"'{name}' 已存在，請換一個名稱", dialog)
                 return
-            if self.server_manager.server_exists(name):
-                if not UIUtils.ask_yes_no_cancel(
-                    "名稱衝突",
-                    f"'{name}' 已存在於設定，是否覆蓋?",
-                    dialog,
-                    show_cancel=False,
-                ):
-                    return
+            if self.server_manager.server_exists(name) and not UIUtils.ask_yes_no_cancel(
+                "名稱衝突",
+                f"'{name}' 已存在於設定，是否覆蓋?",
+                dialog,
+                show_cancel=False,
+            ):
+                return
             result["name"] = name
             dialog.destroy()
 
         def _cancel():
             dialog.destroy()
 
-        ctk.CTkButton(btn_frame, text="確定", command=_ok, width=80, height=35).pack(
-            side="left", padx=(0, 10)
-        )
-        ctk.CTkButton(
-            btn_frame, text="取消", command=_cancel, width=80, height=35
-        ).pack(side="left")
+        ctk.CTkButton(btn_frame, text="確定", command=_ok, width=80, height=35).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_frame, text="取消", command=_cancel, width=80, height=35).pack(side="left")
 
-        entry.bind("<Return>", lambda e: _ok())
-        dialog.bind("<Escape>", lambda e: _cancel())
+        entry.bind("<Return>", lambda _e: _ok())
+        dialog.bind("<Escape>", lambda _e: _cancel())
         dialog.wait_window()
         return result["name"]
 
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
-        """
-        完成伺服器匯入流程
+        """完成伺服器匯入流程
         Complete server import process
 
         Args:
             source_path: 來源路徑
             server_name: 伺服器名稱
+
         """
         target_path = self.server_manager.servers_root / server_name
 
@@ -1320,14 +1274,11 @@ class MinecraftServerManager:
 
         except Exception as e:
             logger.error(f"匯入失敗: {e}\n{traceback.format_exc()}", "MainWindow")
-            UIUtils.show_error(
-                "匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {e}", self.root
-            )
+            UIUtils.show_error("匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {e}", self.root)
             raise e
 
     def hide_all_frames(self) -> None:
-        """
-        隱藏所有頁面
+        """隱藏所有頁面
         Hide all content frames except the sidebar.
         """
         try:
@@ -1359,8 +1310,7 @@ class MinecraftServerManager:
                 logger.debug(f"隱藏 mod_frame 失敗: {e}", "MainWindow")
 
     def open_servers_folder(self) -> None:
-        """
-        開啟伺服器資料夾
+        """開啟伺服器資料夾
         Open servers folder
         """
         folder = self.servers_root  # 直接使用目前已載入的 servers_root
@@ -1375,11 +1325,11 @@ class MinecraftServerManager:
             UIUtils.show_error("錯誤", f"無法開啟路徑: {e}", self.root)
 
     def show_about(self) -> None:
-        """
-        顯示關於對話框
+        """顯示關於對話框
         Show the about dialog with application information.
         """
         about_dialog = ctk.CTkToplevel(self.root)
+        about_dialog.withdraw()  # 先隱藏
         about_dialog.title("關於 Minecraft 伺服器管理器")
         about_dialog.resizable(True, True)
 
@@ -1393,6 +1343,7 @@ class MinecraftServerManager:
             center_on_parent=True,
             make_modal=True,
         )
+        about_dialog.deiconify()  # 顯示
 
         # 創建滾動框架
         scrollable_frame = ctk.CTkScrollableFrame(about_dialog)
@@ -1420,7 +1371,7 @@ class MinecraftServerManager:
         ).pack(anchor="w", pady=(0, 10))
 
         dev_info = """• 開發者: Minecraft Server Manager Team
-• 技術棧: Python 3.7+, tkinter, coustomtkinter, requests
+• 技術棧: Python 3.7+, tkinter, coustomtkinter
 • Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化
 • 架構: 模組化設計, 事件驅動
 • 參考專案: PrismLauncher、MinecraftModChecker"""
@@ -1442,14 +1393,13 @@ class MinecraftServerManager:
             anchor="w",
         )
         github_lbl.pack(anchor="w", pady=(0, 20))
-        github_lbl.bind(
-            "<Button-1>", lambda e, url=github_url: webbrowser.open_new(url)
-        )
+        github_lbl.bind("<Button-1>", lambda _e, url=github_url: webbrowser.open_new(url))
 
         # 授權條款
-        ctk.CTkLabel(
-            scrollable_frame, text="📄 授權條款", font=get_font(size=24, weight="bold")
-        ).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(scrollable_frame, text="📄 授權條款", font=get_font(size=24, weight="bold")).pack(
+            anchor="w",
+            pady=(0, 10),
+        )
 
         license_info = """• 本專案採用 GNU General Public License v3.0 授權條款
 • 部分設計理念參考 PrismLauncher、MinecraftModChecker
@@ -1467,9 +1417,10 @@ class MinecraftServerManager:
         ).pack(anchor="w", pady=(0, 30))
 
         # 更新設定區域
-        ctk.CTkLabel(
-            scrollable_frame, text="🔄 更新設定", font=get_font(size=24, weight="bold")
-        ).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(scrollable_frame, text="🔄 更新設定", font=get_font(size=24, weight="bold")).pack(
+            anchor="w",
+            pady=(0, 10),
+        )
 
         settings_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
         settings_frame.pack(fill="x", pady=(0, 20))
@@ -1483,13 +1434,12 @@ class MinecraftServerManager:
             text="自動檢查更新",
             variable=auto_update_var,
             font=get_font(size=15),
-            command=lambda: self._on_auto_update_changed(
-                auto_update_var.get(), manual_check_btn
-            ),
+            command=lambda: self._on_auto_update_changed(auto_update_var.get(), manual_check_btn),
         )
         auto_update_checkbox.pack(anchor="w", pady=(0, 10))
 
         # 手動檢查更新按鈕
+        manual_check_btn: ctk.CTkButton | None = None
         manual_check_btn = ctk.CTkButton(
             settings_frame,
             text="檢查更新",
@@ -1524,16 +1474,16 @@ class MinecraftServerManager:
         ).pack(pady=(10, 0))
 
         # Escape 鍵關閉
-        about_dialog.bind("<Escape>", lambda e: about_dialog.destroy())
+        about_dialog.bind("<Escape>", lambda _e: about_dialog.destroy())
 
     def _on_auto_update_changed(self, enabled: bool, manual_check_btn) -> None:
-        """
-        自動更新設定變更時的回調
+        """自動更新設定變更時的回調
         Callback when auto-update setting is changed.
 
         Args:
             enabled: 是否啟用自動更新
             manual_check_btn: 手動檢查按鈕
+
         """
         settings = get_settings_manager()
         settings.set_auto_update_enabled(enabled)
@@ -1545,15 +1495,13 @@ class MinecraftServerManager:
             manual_check_btn.pack(anchor="w", pady=(0, 10))
 
     def _manual_check_updates(self) -> None:
-        """
-        手動檢查更新
+        """手動檢查更新
         Manually check for updates.
         """
         self._check_for_updates()
 
     def _show_window_preferences(self) -> None:
-        """
-        顯示視窗偏好設定對話框
+        """顯示視窗偏好設定對話框
         Show window preferences dialog.
         """
 
@@ -1566,33 +1514,30 @@ class MinecraftServerManager:
         WindowPreferencesDialog(self.root, on_settings_changed)
 
     def on_server_created(self, server_config: ServerConfig) -> None:
-        """
-        伺服器建立完成的回調
+        """伺服器建立完成的回調
         Callback for server creation completion.
 
         Args:
             server_config: 伺服器設定
             server_path: 伺服器根目錄
+
         """
         # 首次啟動伺服器進行初始化
         self.initialize_server(server_config)
 
     def initialize_server(self, server_config: ServerConfig) -> None:
-        """
-        初始化新建立的伺服器
+        """初始化新建立的伺服器
         Initialize the newly created server.
 
         Args:
             server_path: 伺服器根目錄
+
         """
-        dialog = ServerInitializationDialog(
-            self.root, server_config, self.complete_initialization
-        )
+        dialog = ServerInitializationDialog(self.root, server_config, self.complete_initialization)
         dialog.start_initialization()
 
     def on_server_selected(self, server_name: str) -> None:
-        """
-        伺服器被選中的回調
+        """伺服器被選中的回調
         Server selection callback.
 
         當使用者在管理伺服器或模組管理頁面選擇伺服器時，此方法會被呼叫。
@@ -1600,19 +1545,20 @@ class MinecraftServerManager:
 
         Args:
             server_name: 選中的伺服器名稱
+
         """
         # 目前僅作為記錄用途，未來可擴展為狀態同步等功能
         # Currently used only for logging, can be extended for state synchronization in the future
         logger.info(f"選中伺服器: {server_name}")
 
     def complete_initialization(self, server_config: ServerConfig, init_dialog) -> None:
-        """
-        完成初始化流程
+        """完成初始化流程
         Complete the initialization process.
 
         Args:
             server_config: 伺服器設定
             init_dialog: 初始化對話框
+
         """
         # 關閉初始化對話框
         init_dialog.destroy()
@@ -1627,56 +1573,48 @@ class MinecraftServerManager:
                 properties = ServerPropertiesHelper.load_properties(properties_file)
                 server_config.properties = properties
         except Exception as e:
-            logger.error(
-                f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}"
-            )
+            logger.error(f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}")
 
         # 直接提示初始化完成，並自動跳轉到管理伺服器頁面
         self.show_manage_server(auto_select=server_config.name)
 
         UIUtils.show_info(
             "初始化完成",
-            f"伺服器 '{server_config.name}' 已成功初始化並可開始使用！\n\n"
-            "你現在可以進一步調整伺服器設定或直接啟動",
+            f"伺服器 「{server_config.name}」 已成功初始化並可開始使用！\n\n你現在可以進一步調整伺服器設定或直接啟動",
             self.root,
         )
 
 
 class ServerInitializationDialog:
-    """
-    伺服器初始化對話框
+    """伺服器初始化對話框
     Server initialization dialog class.
     """
 
-    def __init__(
-        self, parent: tk.Tk, server_config: ServerConfig, completion_callback=None
-    ):
+    def __init__(self, parent: tk.Tk, server_config: ServerConfig, completion_callback=None):
         self.parent = parent
         self.server_config = server_config
         self.server_path = Path(server_config.path)
         self.completion_callback = completion_callback
 
         # 狀態變數
-        self.server_process = None
+        self.server_process: subprocess.Popen[str] | None = None
         self.done_detected = False
 
         # UI 元件
-        self.init_dialog = None
-        self.console_text = None
-        self.progress_label = None
-        self.close_button = None
+        self.init_dialog: ctk.CTkToplevel | None = None
+        self.console_text: ctk.CTkTextbox | None = None
+        self.progress_label: ctk.CTkLabel | None = None
+        self.close_button: ctk.CTkButton | None = None
 
         # 控制台輸出批次刷新（避免每行都觸發一次 UI 更新造成撕裂）
-        self._console_queue = queue.Queue()
+        self._console_queue: queue.Queue[str] = queue.Queue()
         self._console_pump_job = None
 
     def _enqueue_console(self, text: str) -> None:
         try:
             self._console_queue.put_nowait(text)
         except Exception as e:
-            get_logger().bind(component="InitServerDialog").exception(
-                f"加入 console queue 失敗: {e}"
-            )
+            get_logger().bind(component="InitServerDialog").exception(f"加入 console queue 失敗: {e}")
 
     def _start_console_pump(self) -> None:
         if self._console_pump_job is not None:
@@ -1707,11 +1645,13 @@ class ServerInitializationDialog:
 
             delay = 25 if not self._console_queue.empty() else 100
             try:
-                self._console_pump_job = self.init_dialog.after(delay, _tick)
+                if self.init_dialog:
+                    self._console_pump_job = self.init_dialog.after(delay, _tick)
             except tk.TclError:
                 return
 
-        self._console_pump_job = self.init_dialog.after(50, _tick)
+        if self.init_dialog:
+            self._console_pump_job = self.init_dialog.after(50, _tick)
 
     def start_initialization(self) -> None:
         """開始初始化流程"""
@@ -1774,6 +1714,8 @@ class ServerInitializationDialog:
 
     def _create_progress_label(self) -> None:
         """建立進度標籤"""
+        if not self.init_dialog:
+            return
         self.progress_label = ctk.CTkLabel(
             self.init_dialog,
             text="狀態: 準備啟動...",
@@ -1783,6 +1725,8 @@ class ServerInitializationDialog:
 
     def _create_buttons(self) -> None:
         """建立按鈕區域"""
+        if not self.init_dialog:
+            return
         # 按鈕區域
         button_frame = ctk.CTkFrame(self.init_dialog, fg_color="transparent")
         button_frame.pack(pady=10)
@@ -1805,7 +1749,8 @@ class ServerInitializationDialog:
     def _setup_timeout(self) -> None:
         """設定超時自動關閉"""
         # 2分鐘超時自動強制關閉
-        self.init_dialog.after(120000, self._timeout_force_close)
+        if self.init_dialog:
+            self.init_dialog.after(120000, self._timeout_force_close)
 
     def _start_server_thread(self) -> None:
         """在背景執行緒中啟動伺服器"""
@@ -1815,15 +1760,13 @@ class ServerInitializationDialog:
         """關閉初始化伺服器"""
         if self.done_detected:
             # 正常關閉
-            if self.init_dialog.winfo_exists():
-                UIUtils.show_info(
-                    "初始化完成", "伺服器已成功初始化並安全關閉。", parent=self.parent
-                )
+            if self.init_dialog and self.init_dialog.winfo_exists():
+                UIUtils.show_info("初始化完成", "伺服器已成功初始化並安全關閉。", parent=self.parent)
                 self.init_dialog.destroy()
         else:
             # 強制關閉
             self._terminate_server_process()
-            if self.init_dialog.winfo_exists():
+            if self.init_dialog and self.init_dialog.winfo_exists():
                 UIUtils.show_warning(
                     "強制關閉",
                     "伺服器初始化未完成，已強制關閉。請檢查伺服器日誌。",
@@ -1842,22 +1785,19 @@ class ServerInitializationDialog:
                     logger.exception(f"等待程序終止逾時/失敗，改用 kill: {e}")
                     self.server_process.kill()
         except Exception as e:
-            get_logger().bind(component="InitServerDialog").exception(
-                f"終止伺服器程序失敗: {e}"
-            )
+            get_logger().bind(component="InitServerDialog").exception(f"終止伺服器程序失敗: {e}")
 
     def _timeout_force_close(self) -> None:
         """超時強制關閉"""
-        if self.init_dialog.winfo_exists() and not self.done_detected:
+        if self.init_dialog and self.init_dialog.winfo_exists() and not self.done_detected:
             self._close_init_server()
 
     def _update_console(self, text: str) -> None:
-        """
-        更新控制台輸出
+        """更新控制台輸出
         Update the console output.
         """
         try:
-            if self.init_dialog.winfo_exists():  # 檢查對話框是否還存在
+            if self.init_dialog and self.init_dialog.winfo_exists() and self.console_text:
                 self.console_text.insert("end", text)
                 # 自動滾動到最新一行
                 self.console_text.see("end")
@@ -1866,20 +1806,20 @@ class ServerInitializationDialog:
             pass
 
     def _run_server(self) -> None:
-        """
-        在背景執行緒中啟動伺服器
+        """在背景執行緒中啟動伺服器
         Start the server in a background thread.
         """
         try:
             # 更新狀態
-            self.init_dialog.after(
-                0,
-                lambda: (
-                    self.progress_label.configure(text="狀態: 正在啟動伺服器...")
-                    if self.progress_label.winfo_exists()
-                    else None
-                ),
-            )
+            if self.init_dialog:
+                self.init_dialog.after(
+                    0,
+                    lambda: (
+                        self.progress_label.configure(text="狀態: 正在啟動伺服器...")
+                        if self.progress_label and self.progress_label.winfo_exists()
+                        else None
+                    ),
+                )
             self._enqueue_console("正在啟動 Minecraft 伺服器...\n")
 
             java_cmd = self._build_java_command()
@@ -1901,33 +1841,28 @@ class ServerInitializationDialog:
 
         except Exception as e:
             get_logger().bind(component="ServerInitializationDialog").error(
-                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}"
+                f"伺服器啟動失敗: {e}\n{traceback.format_exc()}",
             )
             self._handle_server_error(str(e))
 
-    def _build_java_command(self) -> List[str]:
+    def _build_java_command(self) -> list[str]:
         """建立 Java 命令"""
         loader_type = str(self.server_config.loader_type or "").lower()
 
         # --- Forge 專用初始化 ---
         if loader_type == "forge":
             return self._build_forge_command()
-        else:
-            # 其他類型
-            java_cmd = ServerCommands.build_java_command(
-                self.server_config, return_list=True
-            )
-            self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
-            return java_cmd
+        # 其他類型
+        java_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
+        self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
+        return java_cmd
 
-    def _build_forge_command(self) -> List[str]:
+    def _build_forge_command(self) -> list[str]:
         """建立 Forge 伺服器命令"""
         # 強制覆蓋 Forge 的 user_jvm_args.txt
         user_args = Path(self.server_path) / "user_jvm_args.txt"
         if user_args.exists():
-            ServerDetectionUtils.update_forge_user_jvm_args(
-                self.server_path, self.server_config
-            )
+            ServerDetectionUtils.update_forge_user_jvm_args(self.server_path, self.server_config)
 
         # 檢查並選擇啟動腳本
         start_bat = Path(self.server_path) / "start_server.bat"
@@ -1938,24 +1873,22 @@ class ServerInitializationDialog:
 
         # fallback: 用 build_java_command()
         if not java_cmd:
-            java_cmd = ServerCommands.build_java_command(
-                self.server_config, return_list=True
-            )
+            java_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
             self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
 
         return java_cmd
 
-    def _extract_java_command_from_bat(self, start_bat: Path) -> Optional[List[str]]:
+    def _extract_java_command_from_bat(self, start_bat: Path) -> list[str] | None:
         """從 bat 檔案提取 Java 命令"""
         try:
             with start_bat.open("r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
-                    if re.search(r"\bjava\b.*@user_jvm_args\.txt\b", line, re.I):
+                    if re.search(r"\bjava\b.*@user_jvm_args\.txt\b", line, re.IGNORECASE):
                         # 去除尾端的 %* 或其他 shell 變數符號
                         cleaned = re.sub(r"\s*[%$]\*?$", "", line.strip())
                         java_cmd = cleaned.split()
                         get_logger().bind(component="ServerInitializationDialog").debug(
-                            f"forge_java_command: {java_cmd}"
+                            f"forge_java_command: {java_cmd}",
                         )
                         return java_cmd
         except Exception as e:
@@ -1963,10 +1896,12 @@ class ServerInitializationDialog:
         return None
 
     def _monitor_server_output(self) -> None:
-        """
-        監控伺服器輸出
+        """監控伺服器輸出
         Monitor server output.
         """
+        if self.server_process is None or self.server_process.stdout is None:
+            return
+
         while True:
             output = self.server_process.stdout.readline()
             if output == "" and self.server_process.poll() is not None:
@@ -1980,81 +1915,89 @@ class ServerInitializationDialog:
                     break
 
         # 等待程序結束
-        self.server_process.wait()
+        if self.server_process is not None:
+            self.server_process.wait()
 
     def _process_server_output(self, output: str) -> None:
-        """
-        處理伺服器輸出
+        """處理伺服器輸出
         Handle server output.
 
         Args:
             output (str): 伺服器輸出
+
         """
+        if self.init_dialog is None or not self.init_dialog.winfo_exists():
+            return
+
         if "Loading dimension" in output or "Preparing spawn area" in output:
-            try:
+            with contextlib.suppress(tk.TclError):
                 self.init_dialog.after(
                     0,
                     lambda: (
                         self.progress_label.configure(text="狀態: 準備世界...")
-                        if self.init_dialog.winfo_exists()
+                        if self.progress_label and self.progress_label.winfo_exists()
                         else None
                     ),
                 )
-            except tk.TclError:
-                pass
         elif "Preparing level" in output:
-            try:
+            with contextlib.suppress(tk.TclError):
                 self.init_dialog.after(
                     0,
                     lambda: (
                         self.progress_label.configure(text="狀態: 載入世界...")
-                        if self.init_dialog.winfo_exists()
+                        if self.progress_label and self.progress_label.winfo_exists()
                         else None
                     ),
                 )
-            except tk.TclError:
-                pass
         # 檢查是否載入完成 - 更精確的條件
-        elif "Done (" in output and 'For help, type "help"' in output:
-            if not self.done_detected:
-                self.done_detected = True
-                # 修改按鈕為"關閉伺服器"並切換行為
-                if self.close_button.winfo_exists():
-                    self.close_button.configure(
-                        text="關閉伺服器",
-                        command=self._close_init_server,
-                        fg_color="#059669",
-                    )
+        elif "Done (" in output and 'For help, type "help"' in output and not self.done_detected:
+            self.done_detected = True
+            # 修改按鈕為"關閉伺服器"並切換行為
+            if self.close_button and self.close_button.winfo_exists():
+                self.close_button.configure(
+                    text="關閉伺服器",
+                    command=self._close_init_server,
+                    fg_color="#059669",
+                )
 
     def _handle_server_ready(self, output: str) -> None:
-        """
-        處理伺服器就緒狀態
+        """處理伺服器就緒狀態
         Handle server ready status.
         """
         if "ERROR" in output.upper() or "WARN" in output.upper():
             self._enqueue_console(f"[注意] {output}")
 
         def update_closing_status():
-            if self.init_dialog.winfo_exists() and self.progress_label.winfo_exists():
+            if (
+                self.init_dialog
+                and self.init_dialog.winfo_exists()
+                and self.progress_label
+                and self.progress_label.winfo_exists()
+            ):
                 self.progress_label.configure(text="狀態: 伺服器完全啟動，正在關閉...")
                 self._enqueue_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
 
-        self.init_dialog.after(0, update_closing_status)
+        if self.init_dialog:
+            self.init_dialog.after(0, update_closing_status)
+
         # 發送 stop 命令
-        self.server_process.stdin.write("stop\n")
-        self.server_process.stdin.flush()
+        if self.server_process and self.server_process.stdin:
+            self.server_process.stdin.write("stop\n")
+            self.server_process.stdin.flush()
 
     def _handle_server_completion(self) -> None:
-        """
-        處理伺服器完成狀態
+        """處理伺服器完成狀態
         Handle server completion status.
         """
+        if self.init_dialog is None:
+            return
+
         if self.done_detected:
 
             def complete_init():
-                if self.init_dialog.winfo_exists():
+                if self.init_dialog and self.init_dialog.winfo_exists():
                     self._update_console("[系統] 伺服器初始化完成！\n")
-                    if self.progress_label.winfo_exists():
+                    if self.progress_label and self.progress_label.winfo_exists():
                         self.progress_label.configure(text="狀態: 初始化完成")
 
             self.init_dialog.after(0, complete_init)
@@ -2063,41 +2006,42 @@ class ServerInitializationDialog:
             if self.completion_callback:
                 self.init_dialog.after(
                     2000,
-                    lambda: self.completion_callback(
-                        self.server_config, self.init_dialog
+                    lambda: self.completion_callback(  # type: ignore
+                        self.server_config,
+                        self.init_dialog,
                     ),
                 )
         else:
 
             def show_error():
-                if self.init_dialog.winfo_exists():
+                if self.init_dialog and self.init_dialog.winfo_exists():
                     self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
-                    if self.progress_label.winfo_exists():
+                    if self.progress_label and self.progress_label.winfo_exists():
                         self.progress_label.configure(text="狀態: 啟動異常")
 
             self.init_dialog.after(0, show_error)
 
     def _handle_server_error(self, err_msg: str) -> None:
-        """
-        處理伺服器錯誤
+        """處理伺服器錯誤
         Handle server errors.
 
         Args:
             err_msg (str): 錯誤訊息
+
         """
+        if self.init_dialog is None:
+            return
 
         def show_error():
-            if self.init_dialog.winfo_exists():
+            if self.init_dialog and self.init_dialog.winfo_exists():
                 self._update_console(f"[錯誤] 啟動失敗: {err_msg}\n")
-                if self.progress_label.winfo_exists():
+                if self.progress_label and self.progress_label.winfo_exists():
                     self.progress_label.configure(text="狀態: 啟動失敗")
 
         self.init_dialog.after(0, show_error)
 
     def run(self) -> None:
-        """
-        執行主程式，註冊關閉事件
+        """執行主程式，註冊關閉事件
         Run the main application and register the close event.
         """
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.root.mainloop()
+        # Note: This method is part of MainWindow class, not ServerInitializationDialog

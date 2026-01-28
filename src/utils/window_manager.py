@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-視窗管理器模組
+"""視窗管理器模組
 提供動態視窗大小調整、位置管理和 DPI視窗管理功能
 Window Manager Module
 Provides window management functionality for dynamic sizing, positioning, and DPI support
 """
-from typing import Any, Dict, Tuple
-import tkinter as tk
+
 import ctypes
 import time
-from . import get_settings_manager, get_logger
+import tkinter as tk
+from typing import Any
+
+from . import get_logger, get_settings_manager
 
 logger = get_logger().bind(component="WindowManager")
 
+
 class WindowManager:
-    """
-    Windows 專用視窗管理器類別，處理動態大小調整、位置管理和 DPI 縮放
+    """Windows 專用視窗管理器類別，處理動態大小調整、位置管理和 DPI 縮放
     Windows-specific window manager class for handling dynamic sizing, positioning, and DPI scaling
     """
+
+    _last_debug_time: float = 0.0
+
     @staticmethod
-    def get_screen_info(window=None) -> Dict[str, Any]:
-        """
-        取得 Windows 系統的螢幕資訊，包含 DPI 縮放和工作區域
+    def get_screen_info(window=None) -> dict[str, Any]:
+        """取得 Windows 系統的螢幕資訊，包含 DPI 縮放和工作區域
         Get Windows system screen information including DPI scaling and work area
 
         Args:
@@ -30,6 +32,7 @@ class WindowManager:
 
         Returns:
             Dict[str, Any]: 包含螢幕寬高、DPI 縮放、可用區域等資訊的字典
+
         """
         try:
             if window is None:
@@ -90,10 +93,11 @@ class WindowManager:
 
     @staticmethod
     def calculate_optimal_size(
-        screen_info: Dict[str, Any], min_width: int = 1000, min_height: int = 700
-    ) -> Tuple[int, int]:
-        """
-        根據螢幕大小計算最佳視窗尺寸
+        screen_info: dict[str, Any],
+        min_width: int = 1000,
+        min_height: int = 700,
+    ) -> tuple[int, int]:
+        """根據螢幕大小計算最佳視窗尺寸
         Calculate optimal window size based on screen dimensions.
         """
         settings = get_settings_manager()
@@ -131,11 +135,8 @@ class WindowManager:
         return optimal_width, optimal_height
 
     @staticmethod
-    def calculate_center_position(
-        screen_info: Dict[str, Any], width: int, height: int
-    ) -> Tuple[int, int]:
-        """
-        計算視窗置中位置，考慮工作區域和多螢幕環境
+    def calculate_center_position(screen_info: dict[str, Any], width: int, height: int) -> tuple[int, int]:
+        """計算視窗置中位置，考慮工作區域和多螢幕環境
         Calculate centered window position, considering work area and multi-monitor environments.
         """
         # 取得螢幕可用區域（排除工作列等）
@@ -157,8 +158,7 @@ class WindowManager:
 
     @staticmethod
     def setup_main_window(window, force_defaults: bool = False) -> None:
-        """
-        設定主視窗的大小、位置和狀態
+        """設定主視窗的大小、位置和狀態
         Setup main window size, position, and state with preference persistence.
         """
         settings = get_settings_manager()
@@ -187,9 +187,7 @@ class WindowManager:
                 or x + width > screen_info["width"]
                 or y + height > screen_info["height"]
             ):
-                x, y = WindowManager.calculate_center_position(
-                    screen_info, width, height
-                )
+                x, y = WindowManager.calculate_center_position(screen_info, width, height)
 
         # 設定視窗幾何
         try:
@@ -197,15 +195,10 @@ class WindowManager:
             window.minsize(1000, 700)  # 設定最小尺寸
 
             # 如果記錄為最大化狀態
-            if (
-                window_settings.get("maximized", False)
-                and settings.is_remember_size_position_enabled()
-            ):
+            if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
                 window.after(100, lambda: window.state("zoomed"))
 
-            get_logger().bind(component="WindowState").debug(
-                f"主視窗設定: {width}x{height}+{x}+{y}"
-            )
+            get_logger().bind(component="WindowState").debug(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
             logger.exception(f"設定主視窗失敗: {e}")
             # 備用設定
@@ -214,8 +207,7 @@ class WindowManager:
 
     @staticmethod
     def save_main_window_state(window) -> None:
-        """
-        儲存主視窗狀態
+        """儲存主視窗狀態
         Save main window state to preferences.
         """
         settings = get_settings_manager()
@@ -249,10 +241,7 @@ class WindowManager:
 
             # 減少除錯訊息頻率：只有在沒有最近記錄時才顯示
             current_time = time.time()
-            if (
-                not hasattr(WindowManager, "_last_debug_time")
-                or current_time - WindowManager._last_debug_time > 5
-            ):
+            if not hasattr(WindowManager, "_last_debug_time") or current_time - WindowManager._last_debug_time > 5:
                 get_logger().bind(component="WindowState").debug("已儲存主視窗狀態")
                 WindowManager._last_debug_time = current_time
         except Exception as e:
@@ -262,12 +251,11 @@ class WindowManager:
     def setup_dialog_window(
         window,
         parent=None,
-        width: int = None,
-        height: int = None,
+        width: int | None = None,
+        height: int | None = None,
         center_on_parent: bool = True,
     ) -> None:
-        """
-        設定對話框視窗的大小和位置
+        """設定對話框視窗的大小和位置
         Setup dialog window size and position with intelligent positioning.
         """
         settings = get_settings_manager()
@@ -308,9 +296,7 @@ class WindowManager:
                 y = max(0, min(y, screen_info["height"] - height))
             except Exception:
                 # 螢幕置中作為備用
-                x, y = WindowManager.calculate_center_position(
-                    screen_info, width, height
-                )
+                x, y = WindowManager.calculate_center_position(screen_info, width, height)
         else:
             # 螢幕置中
             x, y = WindowManager.calculate_center_position(screen_info, width, height)
@@ -324,8 +310,7 @@ class WindowManager:
 
     @staticmethod
     def bind_window_state_tracking(window) -> None:
-        """
-        綁定視窗狀態追蹤事件
+        """綁定視窗狀態追蹤事件
         Bind window state tracking events for automatic saving.
         """
 
@@ -335,11 +320,9 @@ class WindowManager:
                 # 延遲儲存狀態，避免頻繁寫入
                 if hasattr(window, "_save_timer"):
                     window.after_cancel(window._save_timer)
-                window._save_timer = window.after(
-                    1000, lambda: WindowManager.save_main_window_state(window)
-                )
+                window._save_timer = window.after(1000, lambda: WindowManager.save_main_window_state(window))
 
-        def on_state_change(event):
+        def on_state_change(_event):
             # 立即儲存狀態變更
             WindowManager.save_main_window_state(window)
 

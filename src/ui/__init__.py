@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-使用者介面模組套件
+"""使用者介面模組套件
 提供 Minecraft 伺服器管理器的所有使用者介面元件和視窗
 User Interface Modules Package
 Provides all user interface components and windows for the Minecraft Server Manager
 """
 
 from __future__ import annotations
-from typing import Dict, Tuple
 
 from .. import lazy_exports
 
-_EXPORTS: Dict[str, Tuple[str, str]] = {
+_EXPORTS: dict[str, tuple[str, str]] = {
     # main window
     "MinecraftServerManager": (".main_window", "MinecraftServerManager"),
     # main frames

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Minecraft 伺服器管理器 - 快速測試腳本
 提供系統環境檢查、依賴驗證和主程式模組載入狀態測試功能
 Minecraft Server Manager - Quick Test Script
 Provides system environment checking, dependency verification and main program module loading status testing
 """
-from pathlib import Path
-import sys
-import traceback
+
 import importlib
+import sys
 import tempfile
+import traceback
+from pathlib import Path
+
 
 # ====== 測試工具函數 ======
 # 列印測試步驟標題
@@ -29,17 +30,21 @@ def print_step(step_num, total_steps, description):
     """
     print(f"\n[{step_num}/{total_steps}] {description}...")
 
+
 def print_success(message):
     """打印成功訊息"""
     print(f"✅ {message}")
+
 
 def print_error(message):
     """打印錯誤訊息"""
     print(f"❌ {message}")
 
+
 def print_warning(message):
     """打印警告訊息"""
     print(f"⚠️ {message}")
+
 
 def test_python_environment():
     """[1/8] 檢查 Python 環境"""
@@ -52,13 +57,12 @@ def test_python_environment():
             print("    請安裝 Python 3.7 或更新版本")
             return False
 
-        print_success(
-            f"Python 環境正常 (版本: {version.major}.{version.minor}.{version.micro})"
-        )
+        print_success(f"Python 環境正常 (版本: {version.major}.{version.minor}.{version.micro})")
         return True
     except Exception as e:
         print_error(f"Python 環境檢查失敗: {e}\n{traceback.format_exc()}")
         return False
+
 
 def test_basic_modules():
     """[2/8] 測試基礎模組導入"""
@@ -79,14 +83,15 @@ def test_basic_modules():
         print_error(f"基礎模組測試出現異常: {e}\n{traceback.format_exc()}")
         return False
 
+
 def test_project_dependencies():
     """[3/8] 檢查專案依賴"""
     print_step(3, 8, "檢查專案依賴")
 
     required_modules = [
         ("customtkinter", "CustomTkinter"),
-        ("requests", "Requests"),
         ("psutil", "PSUtil"),
+        ("toml", "TOML"),
     ]
 
     missing_modules = []
@@ -109,6 +114,7 @@ def test_project_dependencies():
 
     print_success("專案依賴檢查通過")
     return True
+
 
 def test_main_program_modules():
     """[4/8] 測試主程式模組載入"""
@@ -176,7 +182,7 @@ def test_main_program_modules():
                 continue
 
             # 簡單的語法檢查
-            with open(module_file, "r", encoding="utf-8") as f:
+            with open(module_file, encoding="utf-8") as f:
                 content = f.read()
 
             try:
@@ -222,25 +228,17 @@ def test_network_connectivity():
     print_step(5, 8, "測試網路連線")
 
     try:
-        import requests
+        from src.utils.http_utils import HTTPUtils
 
-        response = requests.get("https://api.github.com", timeout=5)
+        # 使用專案內封裝的 HTTP 工具，而非 requests
+        data = HTTPUtils.get_json("https://api.github.com", timeout=5)
 
-        if response.status_code == 200:
+        if data:
             print_success("網路連線正常")
             return True
         else:
-            print_warning(f"網路連線異常 (狀態碼: {response.status_code})")
+            print_warning("網路連線測試失敗 (無法取得數據)")
             return False
-    except ImportError:
-        print_warning("requests 模組未安裝，跳過網路測試")
-        return True  # 不算作失敗，因為這不是必要功能
-    except requests.exceptions.Timeout:
-        print_warning("網路連線超時（可能影響版本下載功能）")
-        return False
-    except requests.exceptions.RequestException as e:
-        print_warning(f"網路連線測試失敗: {e}")
-        return False
     except Exception as e:
         print_warning(f"網路測試出現異常: {e}")
         return False
@@ -260,7 +258,7 @@ def test_file_system_permissions():
                 f.write("測試內容")
 
             # 測試讀取檔案
-            with open(test_file, "r", encoding="utf-8") as f:
+            with open(test_file, encoding="utf-8") as f:
                 _ = f.read()
 
         print_success("檔案系統權限正常")
@@ -317,9 +315,7 @@ def test_window_management_logic():
                 optimal_width = min(1600, usable_width)
                 optimal_height = min(1000, usable_height)
 
-            print(
-                f"    • {screen['width']}x{screen['height']} → 最佳視窗: {optimal_width}x{optimal_height}"
-            )
+            print(f"    • {screen['width']}x{screen['height']} → 最佳視窗: {optimal_width}x{optimal_height}")
 
         # 測試設定修改
         print("    測試設定修改...")
@@ -367,16 +363,18 @@ def test_environment_detection():
         print(f"    • 調試日誌啟用: {debug_logging_enabled}")
 
         # 測試日誌工具的調試判斷功能
-        import src.utils.logger as logger_utils
+        from src.utils.logger import get_logger
 
         print("    測試日誌工具調試判斷...")
 
         # 這只是檢查函數是否可以正常調用，不會實際輸出
         try:
             # 測試各種日誌級別（包含新的檔案日誌功能）
-            logger_utils.debug("測試調試訊息", "環境檢測")
-            logger_utils.info("測試資訊訊息", "環境檢測")
-            logger_utils.debug("測試視窗狀態訊息", "WindowDebug")
+            logger = get_logger().bind(component="環境檢測")
+            logger.debug("測試調試訊息")
+            logger.info("測試資訊訊息")
+            window_logger = get_logger().bind(component="WindowDebug")
+            window_logger.debug("測試視窗狀態訊息")
             print("    • 日誌工具調試判斷: 正常")
             print("    • 檔案日誌功能: 已啟用（日誌將儲存到 AppData/logs/）")
         except Exception as e:
@@ -446,11 +444,7 @@ def main():
         # 詢問是否啟動主程式
         try:
             print("\n🚀 啟動主程式？")
-            choice = (
-                input("按 Y 啟動 Minecraft 伺服器管理器，按其他鍵退出: ")
-                .strip()
-                .lower()
-            )
+            choice = input("按 Y 啟動 Minecraft 伺服器管理器，按其他鍵退出: ").strip().lower()
             if choice == "y":
                 print("\n正在啟動 Minecraft 伺服器管理器...")
                 # 導入並啟動主程式

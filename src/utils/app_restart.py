@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-應用程式重啟工具模組
+"""應用程式重啟工具模組
 提供安全的應用程式重啟功能，支援打包執行檔和 Python 腳本模式
 Application Restart Utilities Module
 Provides safe application restart functionality for both packaged executables and Python script modes
 """
-from pathlib import Path
-from typing import Optional
+
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
+
 from .logger import get_logger
 
 logger = get_logger().bind(component="AppRestart")
 
-def _get_executable_info() -> tuple[list[str], bool, Optional[Path]]:
-    """
-    取得當前應用程式的執行檔資訊，區分打包檔案和 Python 腳本
+
+def _get_executable_info() -> tuple[list[str], bool, Path | None]:
+    """取得當前應用程式的執行檔資訊，區分打包檔案和 Python 腳本
     Get current application executable information, distinguishing between packaged files and Python scripts
 
     Args:
@@ -26,38 +25,32 @@ def _get_executable_info() -> tuple[list[str], bool, Optional[Path]]:
 
     Returns:
         tuple: (執行命令列表, 是否為打包檔案, 腳本路徑)
+
     """
     is_frozen = getattr(sys, "frozen", False)
     if is_frozen:
         return [sys.executable], True, None
-    else:
-        script_path = Path(__file__).parent.parent / "main.py"
-        return [sys.executable, str(script_path)], False, script_path
+    script_path = Path(__file__).parent.parent / "main.py"
+    return [sys.executable, str(script_path)], False, script_path
+
 
 def can_restart() -> bool:
-    """
-    檢查當前環境是否支援應用程式重啟功能
-    """
+    """檢查當前環境是否支援應用程式重啟功能"""
     try:
         executable_path, is_frozen, script_path = _get_executable_info()
 
         if is_frozen:
             # executable_path 是 list，取第一個（執行檔路徑）
-            return (
-                isinstance(executable_path, list)
-                and len(executable_path) > 0
-                and Path(executable_path[0]).exists()
-            )
-        else:
-            # 直接檢查腳本路徑是否存在
-            return script_path is not None and script_path.exists()
+            return isinstance(executable_path, list) and len(executable_path) > 0 and Path(executable_path[0]).exists()
+        # 直接檢查腳本路徑是否存在
+        return script_path is not None and script_path.exists()
     except Exception:
         return False
 
+
 # ====== 重啟執行功能 ======
 def restart_application(delay: float = 1.0) -> bool:
-    """
-    重啟應用程式，支援延遲啟動和狀態檢測
+    """重啟應用程式，支援延遲啟動和狀態檢測
     Restart the application with delayed start and status detection support
 
     Args:
@@ -65,6 +58,7 @@ def restart_application(delay: float = 1.0) -> bool:
 
     Returns:
         bool: 重啟程序啟動成功返回 True，失敗返回 False
+
     """
     try:
         executable_cmd, is_frozen, script_path = _get_executable_info()
@@ -74,25 +68,23 @@ def restart_application(delay: float = 1.0) -> bool:
         restart_error = threading.Event()
 
         def delayed_restart():
-            """
-            延遲重啟函數
+            """延遲重啟函數
             Delayed restart function
             """
             try:
                 time.sleep(delay)
-
                 # Windows 平台隱藏命令提示字元視窗
                 creation_flags = subprocess.CREATE_NO_WINDOW
 
                 if is_frozen:
-                    # 打包後的執行檔 (frozen)
+                    # 對於打包檔案，直接執行可執行檔，不改變工作目錄
+                    exe_path = executable_cmd[0]
                     process = subprocess.Popen(
-                        executable_cmd,
-                        cwd=str(Path(executable_cmd[0]).parent),
+                        [exe_path],
                         creationflags=creation_flags,
                     )
                 else:
-                    # Python 腳本
+                    # 對於 Python 腳本，保持在當前工作目錄
                     process = subprocess.Popen(
                         executable_cmd,
                         cwd=str(Path.cwd()),
@@ -120,19 +112,16 @@ def restart_application(delay: float = 1.0) -> bool:
         max_wait_time = delay + 2.0
         if restart_success.wait(timeout=max_wait_time):
             return True
-        elif restart_error.is_set():
-            return False
-        else:
-            # 超時情況下仍然返回 True，假設重啟會成功
-            return True
+        # 如果發生錯誤則返回 False，否則（超時）返回 True
+        return not restart_error.is_set()
 
     except Exception as e:
         logger.exception(f"準備重啟時發生錯誤: {e}")
         return False
 
+
 def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
-    """
-    安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理
+    """安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理
     Schedule application restart and safely close current instance with GUI window handling
 
     Args:
@@ -141,6 +130,7 @@ def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
 
     Returns:
         None
+
     """
     try:
         # 首先嘗試啟動重啟程序
