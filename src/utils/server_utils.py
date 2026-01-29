@@ -370,7 +370,8 @@ class ServerDetectionUtils:
         try:
             matches = re.findall(r"\d+", version_str)
             return [int(x) for x in matches] if matches else []
-        except Exception:
+        except Exception as e:
+            logger.exception(f"解析 MC 版本時發生錯誤: {e}")
             return []
 
     @staticmethod
@@ -393,8 +394,9 @@ class ServerDetectionUtils:
             minor = version_parts[1] if len(version_parts) > 1 else 0
 
             # Fabric supports 1.14+
-            return bool(major > 1 or (major == 1 and minor >= FABRIC_MIN_MC_VERSION[1]))
-        except Exception:
+            return bool(major > 1 or (major == 1 and minor >= 14))
+        except Exception as e:
+            logger.exception(f"檢查 Fabric 相容性時發生錯誤: {e}")
             return False
 
     @staticmethod
@@ -460,9 +462,7 @@ class ServerDetectionUtils:
         )[0]
         # 移除結尾的非英數字元
         v = re.sub(r"[^\w\d.]+$", "", v)
-        # 移除開頭的非英數字元
-        v = re.sub(r"^[^\w\d]+", "", v)
-        return v
+        return v.strip()
 
     @staticmethod
     def extract_mc_version_from_text(text: str) -> str | None:
@@ -569,8 +569,8 @@ class ServerDetectionUtils:
         if not path_str:
             return None, None
         
-        # 匹配格式: "1.20.1-47.3.29"
-        match = re.match(r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+\.\d+)$", path_str)
+        # 匹配格式: "1.20.1-47.3.29" 或 "1.12.2-14.23" (支援不同長度的 Forge 版本)
+        match = re.match(r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)*)$", path_str)
         if match:
             return match.group(1), match.group(2)
         
@@ -917,11 +917,9 @@ class ServerDetectionUtils:
                 if (server_path / FORGE_LIBRARY_PATH).is_dir():
                     detection_source["loader_type"] = f"目錄 {FORGE_LIBRARY_PATH}"
                 else:
-                    jar_names_lower = [n.lower() for n in jar_names]
                     detected_file = next((name for name in jar_names if "forge" in name.lower()), None)
                     detection_source["loader_type"] = f"JAR 檔案 {detected_file}" if detected_file else "Forge JAR"
             elif detected_loader == "vanilla":
-                jar_names_lower = [n.lower() for n in jar_names]
                 detected_file = next(
                     (name for name in jar_names if name.lower() in ("server.jar", "minecraft_server.jar")), None
                 )
@@ -1189,7 +1187,7 @@ class ServerDetectionUtils:
         detect_from_jars()
         detect_from_version_json()
 
-        if is_unknown(config.loader_type) and is_unknown(config.loader_type):
+        if is_unknown(config.loader_type) and is_unknown(config.loader_version):
             config.loader_type = "vanilla"
 
     @staticmethod
