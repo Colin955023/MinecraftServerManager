@@ -214,15 +214,19 @@ class LoaderManager:
         try:
             data = HTTPUtils.get_json(fabric_url, timeout=15)
             if data:
+                # 只保留 stable 版本（正式版）
+                stable_versions = [v for v in data if v.get("stable", False)]
+                logger.debug(f"Fabric 版本過濾: {len(data)} -> {len(stable_versions)} (只保留 stable)")
+                
                 # 比較現有快取，減少磁碟寫入
                 write_needed = True
                 fabric_path = Path(self.fabric_cache_file)
                 existing = PathUtils.load_json(fabric_path)
-                if existing == data:
+                if existing == stable_versions:
                     write_needed = False
 
                 if write_needed:
-                    PathUtils.save_json(fabric_path, data)
+                    PathUtils.save_json(fabric_path, stable_versions)
         except Exception as e:
             logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
@@ -246,11 +250,14 @@ class LoaderManager:
                 for version_elem in root.findall(".//version"):
                     version_text = version_elem.text
                     if version_text and "-" in version_text:
-                        # 篩除含 pre 或 prelease 的版本
+                        # 篩除測試版本：pre, prerelease, beta, alpha, snapshot, rc
                         lower_text = version_text.lower()
-                        if "pre" in lower_text or "prelease" in lower_text:
+                        test_keywords = ["pre", "prelease", "beta", "alpha", "snapshot", "rc"]
+                        if any(keyword in lower_text for keyword in test_keywords):
                             continue
                         versions.append(version_text.strip())
+                
+                logger.debug(f"Forge 版本過濾後: {len(versions)} 個穩定版本")
 
                 # 處理版本號，移除非數字與點號的字元
                 filtered_versions = []
