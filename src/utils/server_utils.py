@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 from ..models import ServerConfig
-from . import UIUtils, get_logger, java_utils
+from . import LoaderDetector, ServerJarLocator, UIUtils, get_logger, java_utils
 
 logger = get_logger().bind(component="ServerUtils")
 
@@ -623,28 +623,36 @@ class ServerDetectionUtils:
         """
         try:
             jar_files = list(server_path.glob("*.jar"))
-            jar_names = [f.name.lower() for f in jar_files]
+            jar_names = [f.name for f in jar_files]
 
             detection_source = {}  # 紀錄偵測來源
 
-            fabric_files = ["fabric-server-launch.jar", "fabric-server-launcher.jar"]
-            if any((server_path / f).exists() for f in fabric_files):
-                config.loader_type = "fabric"
-                detected_file = next(f for f in fabric_files if (server_path / f).exists())
-                detection_source["loader_type"] = f"檔案 {detected_file}"
-            elif (server_path / "libraries/net/minecraftforge/forge").is_dir():
-                config.loader_type = "forge"
-                detection_source["loader_type"] = "目錄 libraries/net/minecraftforge/forge"
-            elif any("forge" in name for name in jar_names):
-                config.loader_type = "forge"
-                detected_file = next(name for name in jar_names if "forge" in name)
-                detection_source["loader_type"] = f"JAR 檔案 {detected_file}"
-            elif any(name in ("server.jar", "minecraft_server.jar") for name in jar_names):
-                config.loader_type = "vanilla"
-                detected_file = next(name for name in jar_names if name in ("server.jar", "minecraft_server.jar"))
-                detection_source["loader_type"] = f"JAR 檔案 {detected_file}"
+            # 使用 LoaderDetector 進行統一偵測
+            detected_loader = LoaderDetector.detect_loader_type(server_path, jar_names)
+            config.loader_type = detected_loader
+
+            # 記錄偵測來源（用於日誌）
+            if detected_loader == "fabric":
+                from .loader_constants import FABRIC_JAR_NAMES
+
+                detected_file = next((f for f in FABRIC_JAR_NAMES if (server_path / f).exists()), None)
+                detection_source["loader_type"] = f"檔案 {detected_file}" if detected_file else "Fabric 檔案"
+            elif detected_loader == "forge":
+                from .loader_constants import FORGE_LIBRARY_PATH
+
+                if (server_path / FORGE_LIBRARY_PATH).is_dir():
+                    detection_source["loader_type"] = f"目錄 {FORGE_LIBRARY_PATH}"
+                else:
+                    jar_names_lower = [n.lower() for n in jar_names]
+                    detected_file = next((name for name in jar_names if "forge" in name.lower()), None)
+                    detection_source["loader_type"] = f"JAR 檔案 {detected_file}" if detected_file else "Forge JAR"
+            elif detected_loader == "vanilla":
+                jar_names_lower = [n.lower() for n in jar_names]
+                detected_file = next(
+                    (name for name in jar_names if name.lower() in ("server.jar", "minecraft_server.jar")), None
+                )
+                detection_source["loader_type"] = f"JAR 檔案 {detected_file}" if detected_file else "Vanilla JAR"
             else:
-                config.loader_type = "unknown"
                 detection_source["loader_type"] = "無法判斷"
 
             ServerDetectionUtils.detect_loader_and_version_from_sources(
@@ -923,10 +931,9 @@ class ServerDetectionUtils:
             tuple[str | None, str | None]: (minecraft_version, forge_version)
 
         """
-        m = re.match(r"(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)", path_str)
-        if m:
-            groups = m.groups()
-            return (groups[0], groups[1])
+        result = LoaderDetector.extract_version_from_forge_path(path_str)
+        if result:
+            return result
         return None, None
 
     @staticmethod
@@ -1043,104 +1050,8 @@ class ServerDetectionUtils:
         logger.debug(f"server_path={server_path}")
         logger.debug(f"loader_type={loader_type}")
 
-        loader_type_lc = loader_type.lower() if loader_type else ""
-        jar_files = [f.name for f in server_path.glob("*.jar")]
-        jar_files_lower = [f.lower() for f in jar_files]
-
-        if loader_type_lc == "forge":
-            # 使用共用的查找邏輯
-            args_path = ServerDetectionUtils.find_forge_args_file(server_path, server_config)
-
-            if args_path:
-                # 解析參數檔
-                args_info = ServerDetectionUtils._parse_forge_args_file(args_path)
-
-                # 情況 1: Modern 1.21.11+ 使用 -jar 格式
-                jar_val = args_info.get("jar")
-                if jar_val and isinstance(jar_val, str):
-                    return jar_val
-
-                # 情況 2+3: 嘗試從參數檔中尋找 forge library JAR
-                # (無論是 BootstrapLauncher 還是其他格式，優先返回具體的 JAR)
-                libs_val = args_info.get("forge_libraries")
-                if libs_val and isinstance(libs_val, list) and libs_val:
-                    # 優先選擇名稱中包含 "server" 的 JAR，或最長的那個
-                    candidates = [lib for lib in libs_val if "server" in lib.lower()]
-                    if not candidates:
-                        candidates = sorted(libs_val, key=len, reverse=True)
-                    if candidates:
-                        logger.info(f"從參數檔解析出 Forge JAR: {candidates[0]}")
-                        return candidates[0]
-
-                # 情況 4: 如果 BootstrapLauncher 但沒有找到具體 JAR，返回參數檔本身
-                bootstrap_val = args_info.get("bootstraplauncher")
-                if bootstrap_val:
-                    result = f"@{args_path.relative_to(server_path)}"
-                    logger.info(f"BootstrapLauncher 模式，使用參數檔啟動: {result}")
-                    return result
-
-                # 如果無法解析，返回參數檔本身作為 fallback
-                result = f"@{args_path.relative_to(server_path)}"
-                logger.info(f"使用參數檔作為主要執行檔: {result}")
-                return result
-
-            mc_ver = None
-            forge_ver = None
-            for fname in jar_files:
-                m = re.match(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\\.jar", fname)
-                if m:
-                    mc_ver, forge_ver = m.group(1), m.group(2)
-                    break
-
-            if mc_ver and forge_ver:
-                for fname, lower in zip(jar_files, jar_files_lower):
-                    if "forge" in lower and mc_ver in lower and forge_ver in lower and "installer" not in lower:
-                        logger.info(f"偵測到 Forge JAR (版本匹配): {fname}")
-                        return fname
-
-            for fname, lower in zip(jar_files, jar_files_lower):
-                if "forge" in lower and "installer" not in lower:
-                    logger.info(f"偵測到 Forge JAR (模糊匹配): {fname}")
-                    return fname
-
-            for fname, lower in zip(jar_files, jar_files_lower):
-                if "installer" not in lower and lower != "server.jar" and "minecraft_server" not in lower:
-                    logger.info(f"偵測到自定義主程式 JAR: {fname}")
-                    return fname
-
-            if (server_path / "server.jar").exists():
-                logger.info("回退使用 server.jar")
-                return "server.jar"
-
-            if (server_path / "minecraft_server.jar").exists():
-                logger.info("回退使用 minecraft_server.jar")
-                return "minecraft_server.jar"
-
-            if jar_files:
-                logger.info(f"回退使用資料夾中第一個發現的 JAR: {jar_files[0]}")
-                return jar_files[0]
-
-            logger.info("未發現可用 JAR，最終回退: server.jar")
-            return "server.jar"
-
-        if loader_type_lc == "fabric":
-            for candidate in [
-                "fabric-server-launch.jar",
-                "fabric-server-launcher.jar",
-                "server.jar",
-            ]:
-                if (server_path / candidate).exists():
-                    logger.info(f"偵測到 Fabric 啟動 JAR: {candidate}")
-                    return candidate
-            logger.info("未發現 Fabric 啟動 JAR，回退: server.jar")
-            return "server.jar"
-
-        for candidate in ["server.jar", "minecraft_server.jar"]:
-            if (server_path / candidate).exists():
-                logger.info(f"偵測到原版 JAR: {candidate}")
-                return candidate
-        logger.info("未發現原版 JAR，回退: server.jar")
-        return "server.jar"
+        # 使用 ServerJarLocator 進行統一偵測
+        return ServerJarLocator.find_main_jar(server_path, loader_type, server_config)
 
 
 # ====== 伺服器操作工具類別 Server Operations ======

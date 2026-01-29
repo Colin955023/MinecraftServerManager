@@ -17,6 +17,7 @@ from defusedxml import ElementTree as ET
 from src.models import LoaderVersion
 from src.utils import (
     HTTPUtils,
+    LoaderDetector,
     PathUtils,
     UIUtils,
     ensure_dir,
@@ -334,7 +335,7 @@ class LoaderManager:
         if loader_type.lower() == "fabric":
             try:
                 # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
-                if not self._is_fabric_compatible_version(mc_version):
+                if not LoaderDetector.is_fabric_compatible_version(mc_version):
                     # 不快取空結果，因為相容性可能在未來改變
                     return []
 
@@ -382,55 +383,6 @@ class LoaderManager:
                 logger.exception(f"獲取 Forge 版本時發生錯誤: {e}")
                 return []
         return []
-
-    def _is_fabric_compatible_version(self, mc_version: str) -> bool:
-        """
-        檢查 MC 版本是否與 Fabric 相容。
-        Fabric 最早支援 1.14 版本。
-        Check if the MC version is compatible with Fabric.
-        Fabric only supports versions 1.14 and above.
-
-        Args:
-            mc_version (str): 要檢查的 MC 版本字串
-
-        Returns:
-            bool: 如果相容則為 True，否則為 False
-        """
-        try:
-            # 解析 MC 版本以與 1.14 進行比較
-            version_parts = self._parse_mc_version(mc_version)
-            if not version_parts:
-                return False
-
-            major, minor = (
-                version_parts[0],
-                (version_parts[1] if len(version_parts) > 1 else 0),
-            )
-
-            # Fabric supports 1.14+
-            return bool(major > 1 or major == 1 and minor >= 14)
-        except Exception as e:
-            logger.exception(f"檢查 Fabric 相容性時發生錯誤: {e}")
-            return False
-
-    def _parse_mc_version(self, version_str: str) -> list:
-        """解析 MC 版本字串為數字列表，例如 "1.14.4" -> [1, 14, 4]
-        extract the major, minor, and patch version numbers.
-
-        Args:
-            version_str (str): 要解析的版本字串
-
-        Returns:
-            list: 包含主要、次要和修補版本號的整數列表
-
-        """
-        try:
-            # 提取版本號，處理類似「1.14.4」、「1.14」、「1.20.1」等情況。
-            matches = re.findall(r"\d+", version_str)
-            return [int(x) for x in matches] if matches else []
-        except Exception as e:
-            logger.exception(f"解析 MC 版本時發生錯誤: {e}")
-            return []
 
     # ---------------------- 私有輔助方法 ----------------------
     # === 下載 × 執行安裝器 ===
@@ -762,15 +714,7 @@ class LoaderManager:
             標準化後的載入器類型
 
         """
-        lt_low = lt.lower()
-        if lt_low != "unknown":
-            return lt_low
-        # fallback 推斷
-        if loader_version.replace(".", "").isdigit():
-            return "forge"
-        if "fabric" in loader_version.lower():
-            return "fabric"
-        return "vanilla"
+        return LoaderDetector.standardize_loader_type(lt, loader_version)
 
     def _fail(self, progress_callback, user_msg: str, debug: str = "") -> bool:
         """通用失敗處理：顯示錯誤訊息並回傳 False。

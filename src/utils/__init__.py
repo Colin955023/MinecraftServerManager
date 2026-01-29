@@ -60,6 +60,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerDetectionUtils": (".server_utils", "ServerDetectionUtils"),
     "ServerOperations": (".server_utils", "ServerOperations"),
     "ServerCommands": (".server_utils", "ServerCommands"),
+    # loader detection and JAR location
+    "LoaderDetector": (".loader_detector", "LoaderDetector"),
+    "ServerJarLocator": (".server_jar_locator", "ServerJarLocator"),
 }
 
 

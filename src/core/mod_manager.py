@@ -19,7 +19,7 @@ from typing import Callable
 
 import toml
 
-from ..utils import HTTPUtils, UIUtils, get_logger
+from ..utils import HTTPUtils, LoaderDetector, UIUtils, get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
@@ -525,11 +525,7 @@ class ModManager:
         Returns:
             偵測到的載入器類型
         """
-        if re.search(r"forge", base_name, re.IGNORECASE):
-            return "Forge"
-        if re.search(r"fabric", base_name, re.IGNORECASE):
-            return "Fabric"
-        return "未知"
+        return LoaderDetector.detect_loader_from_filename(base_name)
 
     def _apply_server_config_overrides(self, mod_data: dict) -> None:
         """
