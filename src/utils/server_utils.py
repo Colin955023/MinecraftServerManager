@@ -477,25 +477,36 @@ class ServerDetectionUtils:
         """
         if not text:
             return None
-        # 匹配常見的版本格式，包含 snapshot 和 pre-release
+        # 匹配常見的版本格式，按優先級排序
         patterns = [
-            # Snapshot: 24w14a, 25w46a
-            r"\b(2[0-9]w[0-9]{1,2}[a-z])\b",
-            # Pre-release/RC: 1.21.4-pre3, 1.21.4-rc1
-            r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?-(?:pre|rc)[0-9]+)\b",
-            # Standard with minecraft prefix: minecraft:1.20.1
-            r"minecraft[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            # Standard with minecraft prefix: minecraft:1.20.1 (最高優先級)
+            (r"minecraft[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
             # Standard with mc prefix: mc:1.20.1
-            r"mc[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            (r"mc[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
             # Standard with version prefix: version:1.20.1
-            r"version[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
-            # Standard version number: 1.20.1
-            r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b",
+            (r"version[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
+            # Pre-release/RC: 1.21.4-pre3, 1.21.4-rc1
+            (r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?-(?:pre|rc)[0-9]+)\b", 2),
+            # New snapshot format: 26.1-snapshot-5
+            (r"\b([0-9]+\.[0-9]+-snapshot-[0-9]+)\b", 3),
+            # Traditional snapshot: 24w14a, 25w46a
+            (r"\b(2[0-9]w[0-9]{1,2}[a-z])\b", 3),
+            # Standard version number: 1.20.1 (最低優先級，避免誤匹配)
+            (r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", 4),
         ]
-        for pattern in patterns:
+        
+        # 收集所有匹配結果及其優先級
+        matches = []
+        for pattern, priority in patterns:
             m = re.search(pattern, text, re.IGNORECASE)
             if m:
-                return m.group(1)
+                matches.append((m.group(1), priority))
+        
+        # 如果有多個匹配，返回優先級最高的（數字最小）
+        if matches:
+            matches.sort(key=lambda x: x[1])
+            return matches[0][0]
+        
         return None
 
     @staticmethod
@@ -569,7 +580,8 @@ class ServerDetectionUtils:
         Extract version info from Forge path string
         
         Args:
-            path_str: Forge 版本資料夾名稱，格式如 "1.20.1-47.3.29"
+            path_str: Forge 版本資料夾名稱或 JAR 檔名
+                格式如 "1.20.1-47.3.29", "forge-1.12.2-14.23.5.2859.jar"
             
         Returns:
             (minecraft_version, forge_version) 或 (None, None)
@@ -577,10 +589,32 @@ class ServerDetectionUtils:
         if not path_str:
             return None, None
         
-        # 匹配格式: "1.20.1-47.3.29" 或 "1.12.2-14.23" (支援不同長度的 Forge 版本)
-        match = re.match(r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)*)$", path_str)
-        if match:
-            return match.group(1), match.group(2)
+        # 移除 .jar 後綴和 "forge-" 前綴
+        clean_str = path_str
+        if clean_str.endswith(".jar"):
+            clean_str = clean_str[:-4]
+        if clean_str.startswith("forge-"):
+            clean_str = clean_str[6:]
+        
+        # 匹配多種 Forge 版本格式:
+        # 1. 標準格式: "1.20.1-47.3.29" (MC版本-Forge版本)
+        # 2. 舊版格式: "1.12.2-14.23.5.2859" (4段Forge版本號)
+        # 3. 短版格式: "1.7.10-10.13" (2段Forge版本號)
+        patterns = [
+            # 匹配: MC版本(1-3段)-Forge版本(2-4段)
+            r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?(?:\.\d+)?)$",
+            # 匹配帶額外標記的: 1.20.1-47.3.29-installer
+            r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?(?:\.\d+)?)-.*$",
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, clean_str)
+            if match:
+                mc_ver = match.group(1)
+                forge_ver = match.group(2)
+                # 驗證版本號格式合理
+                if mc_ver and forge_ver and len(mc_ver.split('.')) >= 2 and len(forge_ver.split('.')) >= 2:
+                    return mc_ver, forge_ver
         
         return None, None
 

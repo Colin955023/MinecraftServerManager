@@ -47,7 +47,7 @@ class MinecraftVersionManager:
         if self._initialized:
             return
 
-        self.version_manifest_url = "https://launchermeta.mojang.com/mc/game/version_manifest.json"
+        self.version_manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest.json"
         self.cache_file = str(ensure_dir(get_cache_dir()) / "mc_versions_cache.json")
         self._lock = threading.Lock()
         self._initialized = True
