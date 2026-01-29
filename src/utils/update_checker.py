@@ -19,25 +19,26 @@ GITHUB_API = "https://api.github.com"
 
 
 def _parse_version(version_str: str) -> tuple[int, ...] | None:
-    """解析版本字串為 Version 物件
-    Parse version string to Version object
-
+    """解析版本字串為數字元組（使用簡單的標準方法）
+    Parse version string to tuple of integers
+    
     Args:
         version_str: 版本字串（可能包含 'v' 或 'V' 前綴）
-
+        
     Returns:
-        Version 物件，解析失敗時返回 None
-
+        版本數字元組，解析失敗時返回 None
+        
+    Examples:
+        "v1.2.3" -> (1, 2, 3)
+        "1.2.3-beta" -> (1, 2, 3)
     """
     try:
-        # 移除前綴並只保留數字與點號
+        # 移除 v/V 前綴，取數字部分
         clean = version_str.strip().lstrip("vV")
-        # 簡單解析：取前面的數字部分 (例如 1.2.3-beta -> 1.2.3)
-        m = re.match(r"(\d+(?:\.\d+)*)", clean)
-        if m:
-            return tuple(map(int, m.group(1).split(".")))
-        return None
-    except Exception:
+        # 只取數字和點號部分（忽略 -beta 等後綴）
+        version_part = clean.split("-")[0].split("+")[0]
+        return tuple(int(x) for x in version_part.split(".") if x.isdigit())
+    except (ValueError, AttributeError):
         return None
 
 

@@ -151,24 +151,14 @@ _logger = LoggerConfig.get_logger()
 
 
 def get_logger():
+    """獲取全局 logger 實例
+    Get global logger instance
+    
+    Returns:
+        LoguruShim: Logger instance
+        
+    Usage:
+        logger = get_logger().bind(component="MyComponent")
+        logger.info("message")
+    """
     return _logger
-
-
-def info(message: str, component: str = ""):
-    _logger.bind(component=component).info(message)
-
-
-def warning(message: str, component: str = ""):
-    _logger.bind(component=component).warning(message)
-
-
-def error(message: str, component: str = ""):
-    _logger.bind(component=component).error(message)
-
-
-def debug(message: str, component: str = ""):
-    _logger.bind(component=component).debug(message)
-
-
-def error_with_exception(message: str, component: str = "", exc: Exception | None = None):
-    _logger.bind(component=component).exception(message if not exc else f"{message}: {exc}")

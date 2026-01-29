@@ -665,7 +665,7 @@ class LoaderManager:
                 return True
             return False
 
-        if HTTPUtils.download_file_with_progress(
+        if HTTPUtils.download_file(
             url,
             dest_path,
             progress_callback=on_progress,

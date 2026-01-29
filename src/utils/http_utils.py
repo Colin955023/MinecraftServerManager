@@ -97,12 +97,7 @@ class HTTPUtils:
             return None
 
     @classmethod
-    def download_file(cls, url: str, local_path: str, timeout: int = 60, chunk_size: int = 65536) -> bool:
-        """從指定 URL 下載檔案並儲存到本機路徑"""
-        return cls.download_file_with_progress(url, local_path, timeout=timeout, chunk_size=chunk_size)
-
-    @classmethod
-    def download_file_with_progress(
+    def download_file(
         cls,
         url: str,
         local_path: str,
@@ -111,8 +106,19 @@ class HTTPUtils:
         chunk_size: int = 65536,
         cancel_check: Callable[[], bool] | None = None,
     ) -> bool:
-        """下載檔案並回報進度
-        progress_callback: (downloaded_bytes, total_bytes) -> None
+        """下載檔案並儲存到本機路徑
+        Download file from URL and save to local path
+        
+        Args:
+            url: 下載 URL
+            local_path: 本機儲存路徑
+            progress_callback: 進度回調函數 (downloaded_bytes, total_bytes) -> None
+            timeout: 超時時間（秒）
+            chunk_size: 區塊大小
+            cancel_check: 取消檢查函數，返回 True 則取消下載
+            
+        Returns:
+            bool: 下載成功返回 True
         """
         if not url or not isinstance(url, str):
             logger.error("檔案下載失敗: URL 參數無效")
@@ -166,16 +172,6 @@ class HTTPUtils:
             logger.exception(f"批次 HTTP 請求失敗: {e}")
             return [None] * len(urls)
 
-    @staticmethod
-    async def get_json_batch_async(
-        urls: list[str],
-        timeout: int = 10,
-        headers: dict[str, str] | None = None,
-        max_workers: int = 10,
-    ) -> list[dict[str, Any] | None]:
-        """相容性包裝：使用 ThreadPoolExecutor 模擬 async 批次請求"""
-        return HTTPUtils.get_json_batch(urls, timeout, headers, max_workers)
-
 
 # ====== 向後相容性函數別名 ======
 # 提供向後相容的模組級別函數別名
@@ -183,4 +179,3 @@ get_json = HTTPUtils.get_json
 get_content = HTTPUtils.get_content
 download_file = HTTPUtils.download_file
 get_json_batch = HTTPUtils.get_json_batch
-get_json_batch_async = HTTPUtils.get_json_batch_async
