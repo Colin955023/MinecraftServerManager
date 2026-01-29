@@ -19,7 +19,7 @@ from typing import Callable
 
 import toml
 
-from ..utils import HTTPUtils, LoaderDetector, UIUtils, get_logger
+from ..utils import HTTPUtils, ServerDetectionUtils, UIUtils, get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
@@ -279,7 +279,7 @@ class ModManager:
             depends = meta.get("depends", {})
             if isinstance(depends, dict):
                 mc_version = depends.get("minecraft", mod_data["mc_version"])
-                mod_data["mc_version"] = self._normalize_mc_version(mc_version)
+                mod_data["mc_version"] = ServerDetectionUtils.normalize_mc_version(mc_version)
         except (TypeError, Exception) as e:
             logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
 
@@ -313,7 +313,7 @@ class ModManager:
                         for d in dep:
                             if d.get("modId") == "minecraft":
                                 mc_version = d.get("versionRange", mod_data["mc_version"])
-                                mod_data["mc_version"] = self._normalize_mc_version(mc_version)
+                                mod_data["mc_version"] = ServerDetectionUtils.normalize_mc_version(mc_version)
                                 break
         except Exception as e:
             logger.exception(f"解析 Forge 元資料失敗: {e}")
@@ -387,25 +387,6 @@ class ModManager:
             return authors
         return ""
 
-    def _normalize_mc_version(self, mc_version) -> str:
-        """
-        標準化 Minecraft 版本字串
-        normalize Minecraft version string
-
-        Args:
-            mc_version: 要標準化的 Minecraft 版本字串
-
-        Returns:
-            標準化後的 Minecraft 版本字串
-        """
-        if isinstance(mc_version, list) and mc_version:
-            mc_version = str(mc_version[0])
-        if isinstance(mc_version, str) and (mc_version.startswith(("[", "("))):
-            m = re.search(r"(\d+\.\d+)", mc_version)
-            if m:
-                mc_version = m.group(1)
-        return mc_version
-
     def _apply_fallback_logic(self, base_name: str, mod_data: dict) -> None:
         """
         套用後備邏輯來填充模組資料
@@ -435,7 +416,7 @@ class ModManager:
 
         # 從檔名回退偵測載入器類型
         if mod_data["loader_type"] == "未知":
-            mod_data["loader_type"] = self._detect_loader_from_filename(base_name)
+            mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_filename(base_name)
 
     def _extract_name_from_filename(self, base_name: str) -> str:
         """
@@ -485,7 +466,7 @@ class ModManager:
             for i, p in enumerate(parts):
                 if any(c.isdigit() for c in p):
                     version = "-".join(parts[i:])
-                    return self._clean_version(version)
+                    return ServerDetectionUtils.clean_version(version)
         return "未知"
 
     def _extract_mc_version_from_filename(self, base_name: str) -> str:
@@ -513,19 +494,6 @@ class ModManager:
                 return m.group(1)
 
         return "未知"
-
-    def _detect_loader_from_filename(self, base_name: str) -> str:
-        """
-        從檔名偵測載入器類型
-        Detect loader type from filename
-
-        Args:
-            base_name: 基礎檔案名稱
-
-        Returns:
-            偵測到的載入器類型
-        """
-        return LoaderDetector.detect_loader_from_filename(base_name)
 
     def _apply_server_config_overrides(self, mod_data: dict) -> None:
         """
@@ -679,29 +647,6 @@ class ModManager:
             logger.exception(f"Modrinth 搜尋失敗: {e}")
 
         return ModPlatform.LOCAL, ""
-
-    def _clean_version(self, version: str) -> str:
-        """
-        清理版本字串，移除後綴如 +, -mc, -fabric, -forge, -kotlin 等
-        Clean version string
-
-        Args:
-            version: 版本字串
-
-        Returns:
-            清理後的版本字串
-        """
-        if not version or version == "未知":
-            return version
-        # 移除後綴如 +、-mc、-fabric、-forge、-kotlin 等
-        v = re.split(
-            r"[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot",
-            version,
-            flags=re.IGNORECASE,
-        )[0]
-        # 移除結尾的非英數字元
-        v = re.sub(r"[^\w\d.]+$", "", v)
-        return v.strip()
 
     def _clean_author(self, author: str) -> str:
         """

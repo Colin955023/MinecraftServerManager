@@ -17,7 +17,7 @@ from defusedxml import ElementTree as ET
 from src.models import LoaderVersion
 from src.utils import (
     HTTPUtils,
-    LoaderDetector,
+    ServerDetectionUtils,
     PathUtils,
     UIUtils,
     ensure_dir,
@@ -335,7 +335,7 @@ class LoaderManager:
         if loader_type.lower() == "fabric":
             try:
                 # 檢查 MC 版本是否與 Fabric 兼容（1.14+）
-                if not LoaderDetector.is_fabric_compatible_version(mc_version):
+                if not ServerDetectionUtils.is_fabric_compatible_version(mc_version):
                     # 不快取空結果，因為相容性可能在未來改變
                     return []
 
@@ -714,7 +714,7 @@ class LoaderManager:
             標準化後的載入器類型
 
         """
-        return LoaderDetector.standardize_loader_type(lt, loader_version)
+        return ServerDetectionUtils.standardize_loader_type(lt, loader_version)
 
     def _fail(self, progress_callback, user_msg: str, debug: str = "") -> bool:
         """通用失敗處理：顯示錯誤訊息並回傳 False。

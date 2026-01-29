@@ -10,13 +10,21 @@ import re
 from pathlib import Path
 
 from ..models import ServerConfig
-from . import LoaderDetector, ServerJarLocator, UIUtils, get_logger, java_utils
+from . import UIUtils, get_logger, java_utils
 
 logger = get_logger().bind(component="ServerUtils")
 
 KB = 1024
 MB = 1024 * 1024
 GB = 1024 * 1024 * 1024
+
+# Loader detection constants
+FABRIC_JAR_NAMES = [
+    "fabric-server-launch.jar",
+    "fabric-server-launcher.jar",
+]
+FORGE_LIBRARY_PATH = "libraries/net/minecraftforge/forge"
+FABRIC_MIN_MC_VERSION = (1, 14)
 
 
 # ====== 記憶體工具類別 ======
@@ -345,6 +353,276 @@ class ServerDetectionUtils:
     Server detection utility class providing various server-related detection and validation functions
     """
 
+    # ====== Shared Utility Methods ======
+    @staticmethod
+    def parse_mc_version(version_str: str) -> list[int]:
+        """解析 Minecraft 版本字串為整數列表
+        Parse Minecraft version string to list of integers
+        
+        Args:
+            version_str: 版本字串，如 "1.20.1"
+            
+        Returns:
+            版本數字列表，如 [1, 20, 1]
+        """
+        if not version_str or not isinstance(version_str, str):
+            return []
+        try:
+            matches = re.findall(r"\d+", version_str)
+            return [int(x) for x in matches] if matches else []
+        except Exception:
+            return []
+
+    @staticmethod
+    def is_fabric_compatible_version(mc_version: str) -> bool:
+        """檢查 MC 版本是否與 Fabric 相容（1.14+）
+        Check if MC version is compatible with Fabric (1.14+)
+        
+        Args:
+            mc_version: 要檢查的 MC 版本字串
+            
+        Returns:
+            如果相容則為 True，否則為 False
+        """
+        try:
+            version_parts = ServerDetectionUtils.parse_mc_version(mc_version)
+            if not version_parts:
+                return False
+
+            major = version_parts[0]
+            minor = version_parts[1] if len(version_parts) > 1 else 0
+
+            # Fabric supports 1.14+
+            return bool(major > 1 or (major == 1 and minor >= FABRIC_MIN_MC_VERSION[1]))
+        except Exception:
+            return False
+
+    @staticmethod
+    def standardize_loader_type(loader_type: str, loader_version: str = "") -> str:
+        """標準化載入器類型：將輸入轉為小寫並進行基本推斷
+        Standardize loader type: convert to lowercase and make basic inferences
+        
+        Args:
+            loader_type: 載入器類型
+            loader_version: 載入器版本（用於推斷）
+            
+        Returns:
+            標準化後的載入器類型
+        """
+        lt_low = loader_type.lower()
+        if lt_low not in ["unknown", "未知"]:
+            return lt_low
+
+        # fallback 推斷
+        if loader_version and loader_version.replace(".", "").isdigit():
+            return "forge"
+        if loader_version and "fabric" in loader_version.lower():
+            return "fabric"
+        return "vanilla"
+
+    @staticmethod
+    def normalize_mc_version(mc_version) -> str:
+        """標準化 Minecraft 版本字串
+        Normalize Minecraft version string
+        
+        Args:
+            mc_version: 要標準化的 Minecraft 版本字串
+            
+        Returns:
+            標準化後的 Minecraft 版本字串
+        """
+        if isinstance(mc_version, list) and mc_version:
+            mc_version = str(mc_version[0])
+        if isinstance(mc_version, str) and (mc_version.startswith(("[", "("))):
+            m = re.search(r"(\d+\.\d+)", mc_version)
+            if m:
+                mc_version = m.group(1)
+        return mc_version
+
+    @staticmethod
+    def clean_version(version: str) -> str:
+        """清理版本字串，移除後綴如 +, -mc, -fabric, -forge, -kotlin 等
+        Clean version string, removing suffixes
+        
+        Args:
+            version: 版本字串
+            
+        Returns:
+            清理後的版本字串
+        """
+        if not version or version == "未知":
+            return version
+        # 移除後綴如 +、-mc、-fabric、-forge、-kotlin 等
+        v = re.split(
+            r"[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot",
+            version,
+            flags=re.IGNORECASE,
+        )[0]
+        # 移除結尾的非英數字元
+        v = re.sub(r"[^\w\d.]+$", "", v)
+        # 移除開頭的非英數字元
+        v = re.sub(r"^[^\w\d]+", "", v)
+        return v
+
+    @staticmethod
+    def extract_mc_version_from_text(text: str) -> str | None:
+        """從文本中提取 Minecraft 版本
+        Extract Minecraft version from text
+        
+        Args:
+            text: 要解析的文本
+            
+        Returns:
+            提取的版本字串，如 "1.20.1"，找不到則返回 None
+        """
+        if not text:
+            return None
+        # 匹配常見的版本格式: 1.x, 1.x.x
+        patterns = [
+            r"minecraft[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            r"mc[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            r"version[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b",
+        ]
+        for pattern in patterns:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        return None
+
+    @staticmethod
+    def detect_loader_from_text(text: str) -> str:
+        """從文本中偵測載入器類型
+        Detect loader type from text
+        
+        Args:
+            text: 要解析的文本（檔名或內容）
+            
+        Returns:
+            偵測到的載入器類型: "fabric", "forge", "vanilla"
+        """
+        if not text:
+            return "vanilla"
+        text_lower = text.lower()
+        if "fabric" in text_lower:
+            return "fabric"
+        if "forge" in text_lower:
+            return "forge"
+        return "vanilla"
+
+    # ====== Loader Detection Methods (formerly LoaderDetector) ======
+    @staticmethod
+    def detect_loader_type(server_path: Path, jar_names: list[str]) -> str:
+        """偵測載入器類型
+        Detect loader type from server path and JAR files
+        
+        Args:
+            server_path: 伺服器路徑
+            jar_names: JAR 檔案名稱列表
+            
+        Returns:
+            載入器類型: "fabric", "forge", "vanilla"
+        """
+        # Check for Fabric
+        for fabric_jar in FABRIC_JAR_NAMES:
+            if (server_path / fabric_jar).exists():
+                return "fabric"
+        
+        # Check for Forge
+        if (server_path / FORGE_LIBRARY_PATH).is_dir():
+            return "forge"
+        
+        # Check JAR names
+        jar_names_lower = [n.lower() for n in jar_names]
+        for name in jar_names_lower:
+            if "fabric" in name:
+                return "fabric"
+            if "forge" in name:
+                return "forge"
+        
+        return "vanilla"
+
+    @staticmethod
+    def detect_loader_from_filename(base_name: str) -> str:
+        """從檔名偵測載入器類型
+        Detect loader type from filename
+        
+        Args:
+            base_name: 基礎檔案名稱
+            
+        Returns:
+            偵測到的載入器類型
+        """
+        return ServerDetectionUtils.detect_loader_from_text(base_name)
+
+    @staticmethod
+    def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
+        """從 Forge 路徑字串提取版本資訊
+        Extract version info from Forge path string
+        
+        Args:
+            path_str: Forge 版本資料夾名稱，格式如 "1.20.1-47.3.29"
+            
+        Returns:
+            (minecraft_version, forge_version) 或 (None, None)
+        """
+        if not path_str:
+            return None, None
+        
+        # 匹配格式: "1.20.1-47.3.29"
+        match = re.match(r"^(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+\.\d+)$", path_str)
+        if match:
+            return match.group(1), match.group(2)
+        
+        return None, None
+
+    # ====== Server JAR Location Methods (formerly ServerJarLocator) ======
+    @staticmethod
+    def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
+        """尋找主要 JAR 檔案
+        Find main JAR file based on loader type
+        
+        Args:
+            server_path: 伺服器路徑
+            loader_type: 載入器類型
+            server_config: 伺服器配置（可選）
+            
+        Returns:
+            主 JAR 檔案名稱或路徑
+        """
+        loader_type = (loader_type or "").lower()
+        
+        # Forge server
+        if loader_type == "forge":
+            # Check for win_args.txt (Forge 1.17+)
+            args_file = ServerDetectionUtils.find_forge_args_file(server_path, server_config)
+            if args_file and args_file.exists():
+                return f"@{args_file.name}"
+            
+            # Check for forge JAR files
+            for jar_file in server_path.glob("*.jar"):
+                if "forge" in jar_file.name.lower():
+                    return jar_file.name
+        
+        # Fabric server
+        elif loader_type == "fabric":
+            for fabric_jar in FABRIC_JAR_NAMES:
+                if (server_path / fabric_jar).exists():
+                    return fabric_jar
+        
+        # Vanilla or fallback
+        for jar_name in ["server.jar", "minecraft_server.jar"]:
+            if (server_path / jar_name).exists():
+                return jar_name
+        
+        # Fallback: any JAR file
+        jar_files = list(server_path.glob("*.jar"))
+        if jar_files:
+            return jar_files[0].name
+        
+        return "server.jar"
+
+    # ====== Original Methods ======
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
         """尋找伺服器啟動腳本
@@ -627,19 +905,15 @@ class ServerDetectionUtils:
 
             detection_source = {}  # 紀錄偵測來源
 
-            # 使用 LoaderDetector 進行統一偵測
-            detected_loader = LoaderDetector.detect_loader_type(server_path, jar_names)
+            # 使用 ServerDetectionUtils 進行統一偵測
+            detected_loader = ServerDetectionUtils.detect_loader_type(server_path, jar_names)
             config.loader_type = detected_loader
 
             # 記錄偵測來源（用於日誌）
             if detected_loader == "fabric":
-                from .loader_constants import FABRIC_JAR_NAMES
-
                 detected_file = next((f for f in FABRIC_JAR_NAMES if (server_path / f).exists()), None)
                 detection_source["loader_type"] = f"檔案 {detected_file}" if detected_file else "Fabric 檔案"
             elif detected_loader == "forge":
-                from .loader_constants import FORGE_LIBRARY_PATH
-
                 if (server_path / FORGE_LIBRARY_PATH).is_dir():
                     detection_source["loader_type"] = f"目錄 {FORGE_LIBRARY_PATH}"
                 else:
@@ -931,7 +1205,7 @@ class ServerDetectionUtils:
             tuple[str | None, str | None]: (minecraft_version, forge_version)
 
         """
-        result = LoaderDetector.extract_version_from_forge_path(path_str)
+        result = ServerDetectionUtils.extract_version_from_forge_path(path_str)
         if result:
             return result
         return None, None
@@ -1050,8 +1324,8 @@ class ServerDetectionUtils:
         logger.debug(f"server_path={server_path}")
         logger.debug(f"loader_type={loader_type}")
 
-        # 使用 ServerJarLocator 進行統一偵測
-        return ServerJarLocator.find_main_jar(server_path, loader_type, server_config)
+        # 使用 ServerDetectionUtils.find_main_jar 進行統一偵測
+        return ServerDetectionUtils.find_main_jar(server_path, loader_type, server_config)
 
 
 # ====== 伺服器操作工具類別 Server Operations ======
