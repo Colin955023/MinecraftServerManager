@@ -477,11 +477,19 @@ class ServerDetectionUtils:
         """
         if not text:
             return None
-        # 匹配常見的版本格式: 1.x, 1.x.x
+        # 匹配常見的版本格式，包含 snapshot 和 pre-release
         patterns = [
+            # Snapshot: 24w14a, 25w46a
+            r"\b(2[0-9]w[0-9]{1,2}[a-z])\b",
+            # Pre-release/RC: 1.21.4-pre3, 1.21.4-rc1
+            r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?-(?:pre|rc)[0-9]+)\b",
+            # Standard with minecraft prefix: minecraft:1.20.1
             r"minecraft[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            # Standard with mc prefix: mc:1.20.1
             r"mc[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            # Standard with version prefix: version:1.20.1
             r"version[:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)",
+            # Standard version number: 1.20.1
             r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b",
         ]
         for pattern in patterns:

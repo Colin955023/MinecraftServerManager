@@ -267,8 +267,9 @@ class ModManager:
             jar: zipfile.ZipFile 物件
         """
         try:
-            with jar.open("fabric.mod.json") as f:
-                meta = json.load(f)
+            meta = self._read_json_from_jar(jar, "fabric.mod.json")
+            if not meta:
+                return
 
             mod_data["name"] = meta.get("name", mod_data["name"])
             mod_data["version"] = self._resolve_version(jar, meta.get("version", mod_data["version"]))
@@ -293,9 +294,9 @@ class ModManager:
             mod_data (dict): 模組元資料字典
         """
         try:
-            with jar.open("META-INF/mods.toml") as f:
-                toml_txt = f.read().decode(errors="ignore")
-                meta = toml.loads(toml_txt)
+            meta = self._read_toml_from_jar(jar, "META-INF/mods.toml")
+            if not meta:
+                return
 
             modlist = meta.get("mods", [])
             if modlist and isinstance(modlist, list):
@@ -328,24 +329,61 @@ class ModManager:
             mod_data (dict): 模組元資料字典
         """
         try:
-            with jar.open("mcmod.info") as f:
-                info_txt = f.read().decode(errors="ignore")
-                info = json.loads(info_txt)
+            info = self._read_json_from_jar(jar, "mcmod.info")
+            if not info:
+                return
 
-                if isinstance(info, list):
-                    info = info[0]
+            if isinstance(info, list):
+                info = info[0]
 
-                mod_data["name"] = info.get("name", mod_data["name"])
-                mod_data["version"] = info.get("version", mod_data["version"])
-                mod_data["description"] = info.get("description", mod_data["description"])
+            mod_data["name"] = info.get("name", mod_data["name"])
+            mod_data["version"] = info.get("version", mod_data["version"])
+            mod_data["description"] = info.get("description", mod_data["description"])
 
-                # Handle authorList or author field
-                authors = info.get("authorList") or info.get("author", mod_data["author"])
-                mod_data["author"] = self._process_authors(authors)
-                mod_data["mc_version"] = info.get("mcversion", mod_data["mc_version"])
-                mod_data["loader_type"] = "Forge"
+            # Handle authorList or author field
+            authors = info.get("authorList") or info.get("author", mod_data["author"])
+            mod_data["author"] = self._process_authors(authors)
+            mod_data["mc_version"] = info.get("mcversion", mod_data["mc_version"])
+            mod_data["loader_type"] = "Forge"
         except Exception as e:
             logger.exception(f"解析 legacy Forge mcmod.info 失敗: {e}")
+
+    def _read_json_from_jar(self, jar, file_path: str) -> dict | list | None:
+        """
+        從 JAR 檔案中讀取 JSON
+        Read JSON from JAR file
+
+        Args:
+            jar: zipfile.ZipFile 物件
+            file_path: JAR 內的檔案路徑
+
+        Returns:
+            解析後的 JSON 資料，失敗返回 None
+        """
+        try:
+            with jar.open(file_path) as f:
+                return json.load(f)
+        except (KeyError, json.JSONDecodeError, Exception):
+            return None
+
+    def _read_toml_from_jar(self, jar, file_path: str) -> dict | None:
+        """
+        從 JAR 檔案中讀取 TOML
+        Read TOML from JAR file
+
+        Args:
+            jar: zipfile.ZipFile 物件
+            file_path: JAR 內的檔案路徑
+
+        Returns:
+            解析後的 TOML 資料，失敗返回 None
+        """
+        try:
+            with jar.open(file_path) as f:
+                toml_txt = f.read().decode(errors="ignore")
+                return toml.loads(toml_txt)
+        except (KeyError, toml.TOMLDecodeError, Exception):
+            return None
 
     def _resolve_version(self, jar, version: str) -> str:
         """
