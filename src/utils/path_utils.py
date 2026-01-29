@@ -80,7 +80,7 @@ class PathUtils:
             if not path.exists():
                 return None
             return path.read_text(encoding=encoding, errors=errors)
-        except (OSError, UnicodeDecodeError):
+        except OSError:
             return None
 
     @staticmethod
@@ -100,7 +100,7 @@ class PathUtils:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding=encoding)
             return True
-        except (OSError, UnicodeEncodeError):
+        except OSError:
             return False
 
     @staticmethod

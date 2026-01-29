@@ -268,7 +268,7 @@ class ModManager:
         """
         try:
             meta = self._read_json_from_jar(jar, "fabric.mod.json")
-            if not meta:
+            if not meta or not isinstance(meta, dict):
                 return
 
             mod_data["name"] = meta.get("name", mod_data["name"])
@@ -295,12 +295,14 @@ class ModManager:
         """
         try:
             meta = self._read_toml_from_jar(jar, "META-INF/mods.toml")
-            if not meta:
+            if not meta or not isinstance(meta, dict):
                 return
 
             modlist = meta.get("mods", [])
             if modlist and isinstance(modlist, list):
                 modmeta = modlist[0]
+                if not isinstance(modmeta, dict):
+                    return
                 mod_data["name"] = modmeta.get("displayName", mod_data["name"])
                 mod_data["version"] = self._resolve_version(jar, modmeta.get("version", mod_data["version"]))
                 mod_data["description"] = modmeta.get("description", mod_data["description"])
@@ -312,6 +314,8 @@ class ModManager:
                 for dep in meta["dependencies"].values():
                     if isinstance(dep, list):
                         for d in dep:
+                            if not isinstance(d, dict):
+                                continue
                             if d.get("modId") == "minecraft":
                                 mc_version = d.get("versionRange", mod_data["mc_version"])
                                 mod_data["mc_version"] = ServerDetectionUtils.normalize_mc_version(mc_version)
@@ -334,7 +338,12 @@ class ModManager:
                 return
 
             if isinstance(info, list):
+                if not info:  # Empty list check
+                    return
                 info = info[0]
+
+            if not isinstance(info, dict):
+                return
 
             mod_data["name"] = info.get("name", mod_data["name"])
             mod_data["version"] = info.get("version", mod_data["version"])
@@ -363,7 +372,11 @@ class ModManager:
         try:
             with jar.open(file_path) as f:
                 return json.load(f)
-        except (KeyError, json.JSONDecodeError, Exception):
+        except (KeyError, json.JSONDecodeError) as e:
+            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"讀取 JAR 中的 JSON 時發生錯誤 {file_path}: {e}")
             return None
 
     def _read_toml_from_jar(self, jar, file_path: str) -> dict | None:
@@ -382,7 +395,11 @@ class ModManager:
             with jar.open(file_path) as f:
                 toml_txt = f.read().decode(errors="ignore")
                 return toml.loads(toml_txt)
-        except (KeyError, toml.TOMLDecodeError, Exception):
+        except (KeyError, toml.TOMLDecodeError) as e:
+            logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {e}")
+            return None
+        except Exception as e:
+            logger.exception(f"讀取 JAR 中的 TOML 時發生錯誤 {file_path}: {e}")
             return None
 
     def _resolve_version(self, jar, version: str) -> str:
