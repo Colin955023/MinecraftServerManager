@@ -1,29 +1,60 @@
 [project]
 name = "minecraft-server-manager"
-version = "1.6.1"
+dynamic = ["version"]
 description = "Minecraft 伺服器管理器"
 readme = "README.md"
 requires-python = ">=3.9, <3.13"
 license = { file = "LICENSE" }
 
 dependencies = [
-  "requests>=2.32.5",
-  "urllib3>=2.6.2",
-  "aiohttp>=3.13.2",
-  "psutil>=7.1.3",
-  "packaging>=25.0",
-  "rich>=14.2.0",
-  "lxml>=6.0.2",
+  "psutil>=7.2.2",
   "toml>=0.10.2",
   "customtkinter>=5.2.2",
+  "requests>=2.32.5",
+  "defusedxml>=0.7.1",
+  "markdown>=3.9",
+]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.19.1",
+  "types-psutil>=7.2.1.20260116",
+  "types-toml>=0.10.8.20240310",
   "nuitka>=2.8.9",
-  "zstandard>=0.15",
+  "types-requests>=2.31.0.20240406",
   "uv>=0.6.0",
-  "loguru>=0.7.3",
+  "ruff>=0.14.0",
+  "types-markdown>=3.10.0.20251106",
 ]
 
 [project.scripts]
 minecraft-server-manager = "src.main:main"
+
+[tool.mypy]
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["src"]
+extend-exclude = ["report", "assets"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E402", "B023", "E501"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.setuptools.dynamic]
+version = {attr = "src.version_info.version_info.APP_VERSION"}
 
 [tool.uv]
 managed = true

@@ -1,8 +1,5 @@
 ; Inno Setup 安裝腳本（繁體中文）
-; 可由 build_installer.bat 傳入 /DAppVersion 與 /DAppName 覆蓋下述定義
-#define GetStringDef(param, def) (param == "" ? def : param)
-#define AppVersion GetStringDef(AppVersion, "1.6.1")
-#define AppName GetStringDef(AppName, "MinecraftServerManager")
+; 必須由 build_installer_nuitka.bat 傳入 /DAppVersion、/DAppName 與 /DAppId
 
 [Setup]
 AppId={{B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}}
@@ -17,8 +14,8 @@ AppUpdatesURL=https://github.com/Colin955023/MinecraftServerManager/releases
 DefaultDirName={localappdata}\Programs\MinecraftServerManager
 DefaultGroupName=Minecraft 伺服器管理器
 DisableProgramGroupPage=yes
-OutputDir=..\dist\installer
-OutputBaseFilename={#AppName}-Setup-{#AppVersion}
+OutputDir=..\dist
+OutputBaseFilename={#AppId}-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
@@ -50,33 +47,89 @@ Name: "desktopicon"; Description: "在桌面建立捷徑"; GroupDescription: "�
 [Run]
 Filename: "{app}\MinecraftServerManager.exe"; Description: "安裝後立即執行"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
+
 [Code]
-function GetDataRoot(): string;
+
+function FindPortableRoot(const StartPath: string): string;
+var
+  P, TryPath: string;
 begin
+  Result := '';
+  TryPath := StartPath;
+  while TryPath <> '' do
+  begin
+    P := ExpandConstant(TryPath + '\\.portable');
+    if FileExists(P) then
+    begin
+      Result := StartPath; // portable marker applies to the folder containing .portable
+      Exit;
+    end;
+    // move up one directory
+    if (TryPath = '\\') or (TryPath = '') then
+      Break;
+    TryPath := ExtractFileDir(TryPath);
+    // stop if we reached a drive root
+    if (TryPath = ExtractFileDrive(TryPath) + ':') then
+      Break;
+  end;
+end;
+
+function GetDataRoot(): string;
+var
+  AppFolder: string;
+  PortableFound: string;
+begin
+  AppFolder := ExpandConstant('{app}');
+  PortableFound := FindPortableRoot(AppFolder);
+  if PortableFound <> '' then
+  begin
+    Result := AppFolder;
+    exit;
+  end;
   Result := ExpandConstant('{localappdata}\\Programs\\MinecraftServerManager');
+end;
+
+function IsPortable(): Boolean;
+begin
+  Result := FindPortableRoot(ExpandConstant('{app}')) <> '';
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataRoot, CacheDir, LogDir, SettingsPath: string;
+  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // 強制關閉應用程式以避免檔案被占用
+    if Exec('taskkill.exe', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      // 確保程式已被殺死
+    end;
+
     DataRoot := GetDataRoot();
     CacheDir := DataRoot + '\\Cache';
     LogDir := DataRoot + '\\log';
     SettingsPath := DataRoot + '\\user_settings.json';
 
-    if DirExists(CacheDir) then
-      DelTree(CacheDir, True, True, True);
+    // If installed as portable, do not remove user data on uninstall
+    if IsPortable() then
+    begin
+      // leave portable data intact
+    end
+    else
+    begin
+      if DirExists(CacheDir) then
+        DelTree(CacheDir, True, True, True);
 
-    if DirExists(LogDir) then
-      DelTree(LogDir, True, True, True);
+      if DirExists(LogDir) then
+        DelTree(LogDir, True, True, True);
 
-    if FileExists(SettingsPath) then
-      DeleteFile(SettingsPath);
+      if FileExists(SettingsPath) then
+        DeleteFile(SettingsPath);
 
-    if DirExists(DataRoot) then
-      DelTree(DataRoot, True, True, True);
+      if DirExists(DataRoot) then
+        DelTree(DataRoot, True, True, True);
+    end;
   end;
 end;

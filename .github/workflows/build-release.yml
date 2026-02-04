@@ -1,0 +1,170 @@
+name: Build and Create Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Install Inno Setup 6
+        shell: powershell
+        run: |
+          choco install innosetup -y
+
+      - name: Download Inno Setup Chinese Traditional Language File
+        shell: powershell
+        run: |
+          $langDir = 'C:\Program Files (x86)\Inno Setup 6\Languages'
+          if (-not (Test-Path $langDir)) {
+            New-Item -ItemType Directory -Path $langDir -Force | Out-Null
+          }
+
+          # Download Chinese Traditional language file from Inno Setup official GitHub
+          $url = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl'
+          $output = Join-Path $langDir 'ChineseTraditional.isl'
+
+          Invoke-WebRequest -Uri $url -OutFile $output
+          Write-Host ("Downloaded Chinese Traditional language file to {0}" -f $output)
+          
+      - name: Build executable and installer
+        shell: cmd
+        run: |
+          cd /d %GITHUB_WORKSPACE%
+          call scripts\build_installer_nuitka.bat
+
+      - name: Generate SHA256 checksums
+        shell: powershell
+        run: |
+          $version = python -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
+          
+          # Installer SHA256
+          $instPath = "dist\MinecraftServerManager-Setup-$version.exe"
+          if (Test-Path $instPath) {
+              $hash = (Get-FileHash -Algorithm SHA256 -Path $instPath).Hash
+              $name = Split-Path $instPath -Leaf
+              "$hash  $name" | Out-File -FilePath "$instPath.sha256" -Encoding ASCII -Force
+              Write-Host "Installer SHA256: $hash"
+          }
+          
+          # Portable ZIP SHA256
+          $zipPath = "dist\MinecraftServerManager-v$version-portable.zip"
+          if (Test-Path $zipPath) {
+              $hash = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash
+              $name = Split-Path $zipPath -Leaf
+              "$hash  $name" | Out-File -FilePath "$zipPath.sha256" -Encoding ASCII -Force
+              Write-Host "Portable ZIP SHA256: $hash"
+          }
+
+      - name: Extract release notes
+        id: release_notes
+        shell: python
+        run: |
+          import os
+          import re
+          import sys
+
+          # Ensure we can import from src
+          sys.path.append(os.getcwd())
+          
+          print(f"CWD: {os.getcwd()}")
+
+          try:
+              from src.version_info.version_info import APP_VERSION
+              version = str(APP_VERSION)
+              print(f"Detected version: {version}")
+          except Exception as e:
+              print(f"Error importing version: {e}")
+              version = ""
+
+          changelog_file = "CHANGELOG.md"
+          notes = ""
+          
+          if os.path.exists(changelog_file) and version:
+              try:
+                  # Use utf-8-sig to handle POTENTIAL BOM
+                  with open(changelog_file, "r", encoding="utf-8-sig") as f:
+                      lines = f.readlines()
+                  
+                  print(f"Read {len(lines)} lines from {changelog_file}")
+
+                  capture = False
+                  captured_lines = []
+                  
+                  # Regex to match version line: ## v1.6.2 or ## 1.6.2, optionally followed by date/text
+                  version_pattern = re.compile(fr"^##\s+v?{re.escape(version)}(?:\s+|$)")
+                  # Regex to match next version header: ## v... or ## [Unreleased]
+                  next_section_pattern = re.compile(r"^##\s+(?:v?\d|\[)")
+
+                  for line in lines:
+                      if version_pattern.match(line):
+                          print(f"Found version section: {line.strip()}")
+                          capture = True
+                          continue
+                      
+                      # Stop if we hit the next header
+                      if capture and next_section_pattern.match(line):
+                          print(f"Found next section, stopping capture: {line.strip()}")
+                          break
+                      
+                      if capture:
+                          captured_lines.append(line.rstrip())
+                          
+                  notes = "\n".join(captured_lines).strip()
+                  print(f"Captured release notes length: {len(notes)}")
+              except Exception as e:
+                  print(f"Error reading changelog: {e}")
+
+          if not notes:
+              print("No release notes captured, using default.")
+              notes = "See commits for details"
+          
+          # Write to GITHUB_OUTPUT with explicit utf-8 encoding
+          if "GITHUB_OUTPUT" in os.environ:
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                  f.write(f"notes<<EOF\n{notes}\nEOF\n")
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: Minecraft Server Manager ${{ github.ref_name }}
+          files: |
+            dist/MinecraftServerManager-Setup-*.exe
+            dist/MinecraftServerManager-Setup-*.exe.sha256
+            dist/MinecraftServerManager-v*-portable.zip
+            dist/MinecraftServerManager-v*-portable.zip.sha256
+          body: ${{ steps.release_notes.outputs.notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            dist/MinecraftServerManager-Setup-*
+            dist/MinecraftServerManager-v*-portable.zip*
+          retention-days: 7

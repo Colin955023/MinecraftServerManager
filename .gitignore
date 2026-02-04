@@ -68,7 +68,7 @@ $RECYCLE.BIN/
 # (Should not be committed)
 # =====================
 config.json
-settings.json
+/settings.json
 *.log
 logs/
 temp/
@@ -81,7 +81,7 @@ cache/
 *.msix
 *.msm
 *.msp
-
+!scripts/update_portable.exe
 # =====================
 # 自訂忽略項目 (Custom ignore items)
 # =====================
