@@ -1,14 +1,37 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-日誌工具模組
+"""日誌工具模組
 提供統一的日誌記錄功能 (使用標準 logging 庫替代 loguru 以減少依賴與體積)
 """
+
 import logging
-import sys
 import os
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
+
+from .runtime_paths import get_exe_dir
+
+
+def _get_log_dir() -> Path:
+    """取得日誌目錄路徑（支援便攜模式與安裝模式）
+    Get log directory path (supports both portable and installed modes)
+
+    Returns:
+        Path: 日誌目錄路徑
+    """
+    # 使用 runtime_paths 提供的 exe 目錄判斷
+    exe_dir = get_exe_dir()
+
+    portable_marker = exe_dir / ".portable"
+    config_dir = exe_dir / ".config"
+
+    if portable_marker.exists() or config_dir.exists():
+        # 便攜模式：使用相對於可執行檔的 .log 資料夾
+        return exe_dir / ".log"
+    # 安裝模式：使用 %LOCALAPPDATA%\Programs\MinecraftServerManager\log
+    localappdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
+    return Path(localappdata) / "Programs" / "MinecraftServerManager" / "log"
+
 
 class LoguruShim:
     def __init__(self, logger_impl, extra=None):
@@ -39,7 +62,6 @@ class LoguruShim:
                 if args:
                     _ = msg % args
             except TypeError:
-                pass
                 # 這通常是原始代碼多傳了參數 (例如 component)，我們將其附加在後方顯示
                 msg = f"{msg} " + " ".join(map(str, args))
                 args = ()
@@ -75,6 +97,7 @@ class LoguruShim:
     def remove(self, *args, **kwargs):
         pass
 
+
 class LoggerConfig:
     _initialized = False
 
@@ -89,9 +112,7 @@ class LoggerConfig:
         if root.handlers:
             return
 
-        fmt = logging.Formatter(
-            "%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
         ch = logging.StreamHandler(sys.stderr)
         ch.setFormatter(fmt)
@@ -99,26 +120,23 @@ class LoggerConfig:
         root.addHandler(ch)
 
         try:
-            localappdata = os.environ.get(
-                "LOCALAPPDATA", str(Path.home() / "AppData" / "Local")
-            )
-            log_dir = Path(localappdata) / "Programs" / "MinecraftServerManager" / "log"
+            log_dir = _get_log_dir()
             log_dir.mkdir(parents=True, exist_ok=True)
 
             logs = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime)
             while len(logs) >= 10:
                 try:
                     logs.pop(0).unlink()
-                except Exception:
-                    pass
+                except Exception as cleanup_error:
+                    root.warning(f"移除舊日誌檔案失敗: {cleanup_error}")
 
             log_file = log_dir / datetime.now().strftime("%Y-%m-%d-%H-%M.log")
             fh = logging.FileHandler(log_file, encoding="utf-8")
             fh.setFormatter(fmt)
             fh.setLevel(logging.DEBUG)
             root.addHandler(fh)
-        except Exception:
-            pass
+        except Exception as log_error:
+            root.warning(f"初始化檔案日誌處理器失敗: {log_error}")
 
         LoggerConfig._initialized = True
 
@@ -127,24 +145,15 @@ class LoggerConfig:
         LoggerConfig.initialize()
         return LoguruShim(logging.getLogger("MSM"))
 
+
 _logger = LoggerConfig.get_logger()
 
+
 def get_logger():
+    """獲取全局 logger 實例
+    Get global logger instance
+
+    Returns:
+        LoguruShim: Logger instance
+    """
     return _logger
-
-def info(message: str, component: str = ""):
-    _logger.bind(component=component).info(message)
-
-def warning(message: str, component: str = ""):
-    _logger.bind(component=component).warning(message)
-
-def error(message: str, component: str = ""):
-    _logger.bind(component=component).error(message)
-
-def debug(message: str, component: str = ""):
-    _logger.bind(component=component).debug(message)
-
-def error_with_exception(message: str, component: str = "", exc: Exception = None):
-    _logger.bind(component=component).exception(
-        message if not exc else f"{message}: {exc}"
-    )

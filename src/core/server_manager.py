@@ -1,56 +1,58 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-伺服器管理器
+"""伺服器管理器
 負責建立、管理和配置 Minecraft 伺服器
 Server Manager
 Responsible for creating, managing, and configuring Minecraft servers.
 """
+
+import shutil
+import subprocess as _subprocess
+from subprocess import PIPE, STDOUT, Popen, TimeoutExpired
+
+CREATE_NO_WINDOW = getattr(_subprocess, "CREATE_NO_WINDOW", 0)
+import threading
+import time
 from collections import deque
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, List, Optional
-import shutil
-import subprocess
-import threading
-import time
+from typing import Any
+
 import psutil
+
 from ..models import ServerConfig
 from ..utils import (
-    ServerCommands,
     MemoryUtils,
-    ServerPropertiesHelper,
-    ServerDetectionUtils,
-    get_logger,
     PathUtils,
+    ServerCommands,
+    ServerDetectionUtils,
+    ServerPropertiesHelper,
     UIUtils,
+    get_logger,
+    popen_checked,
 )
 
 logger = get_logger().bind(component="ServerManager")
 
 
 class ServerManager:
-    """
-    伺服器管理器類別，負責建立、管理和配置 Minecraft 伺服器
+    """伺服器管理器類別，負責建立、管理和配置 Minecraft 伺服器
     Server Manager class responsible for creating, managing, and configuring Minecraft servers
     """
+
     # ====== 類別常數 ======
     # 伺服器啟動檢查常數
     STARTUP_CHECK_DELAY = 0.1  # 伺服器啟動檢查延遲（秒）
     # 伺服器停止檢查常數
     STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
     STOP_TIMEOUT_SECONDS = 5  # 停止超時時間（秒）
-    MAX_STOP_CHECKS = int(
-        STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL
-    )  # 最大停止檢查次數
+    MAX_STOP_CHECKS = int(STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL)
     # 輸出佇列大小限制
     OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
 
     # ====== 初始化與配置管理 ======
     # 初始化伺服器管理器
-    def __init__(self, servers_root: str = None):
-        """
-        初始化伺服器管理器
+    def __init__(self, servers_root: str | None = None):
+        """初始化伺服器管理器
         Initialize server manager
 
         Args:
@@ -58,29 +60,25 @@ class ServerManager:
 
         Returns:
             None
+
         """
         # servers_root 必須由外部明確傳入，且必須是 servers 資料夾的絕對路徑
         if not servers_root:
-            raise ValueError(
-                "ServerManager 必須指定 servers_root 路徑，且不可為空。請於 UI 層先處理。"
-            )
+            raise ValueError("ServerManager 必須指定 servers_root 路徑，且不可為空。請於 UI 層先處理。")
         self.servers_root = Path(servers_root).resolve()
         self.servers_root.mkdir(parents=True, exist_ok=True)
         self.config_file = self.servers_root / "servers_config.json"
-        self.servers: Dict[str, ServerConfig] = {}
-        self.running_servers: Dict[str, subprocess.Popen] = {}  # 追踪運行中的伺服器
-        self.output_queues = {}  # server_name -> queue.Queue
-        self.output_threads = {}  # server_name -> Thread
-        self._properties_cache = {}  # server_name -> (mtime, properties)
+        self.servers: dict[str, ServerConfig] = {}
+        self.running_servers: dict[str, Popen] = {}  # 追踪運行中的伺服器
+        self.output_queues: dict[str, tuple[deque, threading.Lock]] = {}  # server_name -> (deque, lock)
+        self.output_threads: dict[str, threading.Thread] = {}  # server_name -> Thread
+        self._properties_cache: dict[str, Any] = {}  # server_name -> (mtime, properties)
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
     # 建立新伺服器
-    def create_server(
-        self, config: ServerConfig, properties: Optional[Dict[str, str]] = None
-    ) -> bool:
-        """
-        建立新伺服器並初始化設定
+    def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
+        """建立新伺服器並初始化設定
         Create new server and initialize configuration
 
         Args:
@@ -89,6 +87,7 @@ class ServerManager:
 
         Returns:
             bool: 建立成功返回 True，失敗返回 False
+
         """
         try:
             server_path = self.servers_root / config.name
@@ -104,9 +103,7 @@ class ServerManager:
                 or (
                     config.loader_type
                     and config.loader_type.lower() in ["forge", "fabric"]
-                    and (
-                        not config.loader_version or config.loader_version == "unknown"
-                    )
+                    and (not config.loader_version or config.loader_version == "unknown")
                 )
             )
             if need_detect:
@@ -115,20 +112,17 @@ class ServerManager:
                     # 強制補齊欄位
                     if not config.loader_type or config.loader_type == "unknown":
                         raise Exception(
-                            f"偵測失敗：loader_type 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                            f"偵測失敗：loader_type 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}",
                         )
-                    if (
-                        not config.minecraft_version
-                        or config.minecraft_version == "unknown"
-                    ):
+                    if not config.minecraft_version or config.minecraft_version == "unknown":
                         raise Exception(
-                            f"偵測失敗：minecraft_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                            f"偵測失敗：minecraft_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}",
                         )
                     if config.loader_type.lower() in ["forge", "fabric"] and (
                         not config.loader_version or config.loader_version == "unknown"
                     ):
                         raise Exception(
-                            f"偵測失敗：loader_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}"
+                            f"偵測失敗：loader_version 無法判斷，name={config.name}, path={config.path}, loader_type={config.loader_type}, minecraft_version={config.minecraft_version}, loader_version={config.loader_version}",
                         )
                 except Exception as e:
                     logger.error(f"自動偵測伺服器類型失敗: {e}")
@@ -158,25 +152,25 @@ class ServerManager:
             return False
 
     def _create_eula_file(self, server_path: Path) -> None:
-        """
-        建立並同意 EULA 檔案
+        """建立並同意 EULA 檔案
         Create and accept EULA file.
 
         Args:
             server_path (Path): 伺服器根目錄路徑
+
         """
         eula_content = """eula=true"""
         with open(server_path / "eula.txt", "w", encoding="utf-8") as f:
             f.write(eula_content)
 
     def _create_server_structure(self, path: Path, loader_type: str) -> None:
-        """
-        建立伺服器檔案結構
+        """建立伺服器檔案結構
         Create server file structure.
 
         Args:
             path (Path): 伺服器根目錄路徑
             loader_type (str): 伺服器載入器類型
+
         """
         # 建立基本目錄
         if loader_type.lower() == "vanilla":
@@ -188,12 +182,12 @@ class ServerManager:
             (path / directory).mkdir(exist_ok=True)
 
     def create_launch_script(self, config: ServerConfig) -> None:
-        """
-        建立伺服器啟動腳本 (Windows)
+        """建立伺服器啟動腳本 (Windows)
         Create server launch script (Windows).
 
         Args:
             config (ServerConfig): 伺服器配置物件
+
         """
         server_path = Path(config.path)
 
@@ -205,27 +199,71 @@ class ServerManager:
         memory_args = f"-Xmx{max_memory}M"
         if min_memory:
             memory_args = f"-Xmx{max_memory}M -Xms{min_memory}M"
-            memory_display = f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
+            memory_display = (
+                f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
+            )
         else:
             memory_display = f"0-{MemoryUtils.format_memory_mb(max_memory)}"
 
-        # 使用統一的 Java 命令構建邏輯
-        java_command_str = ServerCommands.build_java_command(config, return_list=False)
+        # 使用統一的 Java 命令構建邏輯（返回列表形式便於處理）
+        java_cmd_list = ServerCommands.build_java_command(config, return_list=True)
 
         # 調試信息
-        logger.debug(f"Java 命令: {java_command_str}")
+        logger.debug(f"Java 命令列表: {java_cmd_list}")
         logger.debug(f"記憶體參數: {memory_args}")
+
+        # 處理命令列表，轉換為批次檔相容格式
+        # 確保路徑使用絕對路徑並加上引號
+        java_exe = java_cmd_list[0]
+        if " " in java_exe and not (java_exe.startswith('"') and java_exe.endswith('"')):
+            java_exe = f'"{java_exe}"'
+
+        # 檢查是否使用 @args.txt 格式（Forge）
+        # java_cmd_list 格式：[java_exe, "@args.txt", "nogui"] 或更多參數
+        uses_args_file = len(java_cmd_list) >= 2 and java_cmd_list[1].startswith("@")
+
+        if uses_args_file:
+            # Forge 伺服器：使用 @args.txt（包含 JVM 參數），需要添加 nogui 參數
+            args_spec = java_cmd_list[1]
+            args_rel_path = args_spec[1:]  # 移除 @ 符號
+            args_path = server_path / args_rel_path
+            if args_path.exists():
+                java_command_str = f"{java_exe} {args_spec} nogui"
+            else:
+                logger.warning(f"參數檔案不存在: {args_path}")
+                java_command_str = f"{java_exe} {args_spec} nogui"
+        else:
+            # 其他伺服器（Vanilla / Fabric）：使用 -jar 格式
+            cmd_parts = [java_exe]
+
+            # 從列表中提取參數並轉換 JAR 路徑
+            i = 1
+            while i < len(java_cmd_list):
+                arg = java_cmd_list[i]
+                if arg == "-jar" and i + 1 < len(java_cmd_list):
+                    cmd_parts.append(arg)
+                    jar_spec = java_cmd_list[i + 1]
+                    jar_path = server_path / jar_spec
+                    if jar_path.exists():
+                        cmd_parts.append(f'"{jar_path.resolve()}"')
+                    else:
+                        cmd_parts.append(f'"{jar_spec}"')
+                    i += 2
+                else:
+                    cmd_parts.append(arg)
+                    i += 1
+
+            java_command_str = " ".join(cmd_parts)
 
         # Windows 批次檔
         bat_lines = [
             "@echo off",
-            "chcp 65001 > nul",
             f"title {config.name} Minecraft Server",
             "echo ===============================================",
-            f"echo   正在啟動 {config.name} 伺服器",
-            f"echo   Minecraft 版本: {config.minecraft_version}",
-            f"echo   模組載入器: {config.loader_type}",
-            f"echo   記憶體配置: {memory_display}",
+            f"echo 正在啟動 {config.name} 伺服器",
+            f"echo Minecraft 版本: {config.minecraft_version}",
+            f"echo 模組載入器: {config.loader_type}",
+            f"echo 記憶體配置: {memory_display}",
             "echo ===============================================",
             "echo.",
             "",
@@ -239,10 +277,10 @@ class ServerManager:
 
         start_script_path = server_path / "start_server.bat"
 
-        # 比較現有檔案內容，避免不必要的磁碟寫入
+        # 比較現有檔案內容，避免不必要的磁碟寫入（使用 GBK 編碼來自動比較）
         try:
             if start_script_path.exists():
-                with open(start_script_path, "r", encoding="utf-8") as f:
+                with open(start_script_path, encoding="gbk", errors="ignore") as f:
                     existing_content = f.read()
                 if existing_content == bat_content:
                     logger.debug("啟動腳本內容未變更，跳過寫入")
@@ -250,14 +288,12 @@ class ServerManager:
         except Exception as e:
             logger.debug(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
 
-        with open(start_script_path, "w", encoding="utf-8") as f:
+        # 使用 GBK/ANSI 編碼寫入批次檔，避免 "is not recognized" 錯誤
+        with open(start_script_path, "w", encoding="gbk", errors="replace") as f:
             f.write(bat_content)
 
-    def update_server_properties(
-        self, server_name: str, properties: Dict[str, str]
-    ) -> bool:
-        """
-        更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值
+    def update_server_properties(self, server_name: str, properties: dict[str, str]) -> bool:
+        """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值
         update server.properties, only overwrite changed fields, keep other fields unchanged
 
         Args:
@@ -266,24 +302,21 @@ class ServerManager:
 
         Returns:
             bool: 更新成功返回 True，否則返回 False
+
         """
         try:
             config = self.servers.get(server_name)
             if not config:
                 return False
             # 取得 server_path
-            server_path = getattr(config, "path", None) or getattr(
-                config, "server_path", None
-            )
+            server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
             if not server_path:
-                logger.error(
-                    f"找不到伺服器路徑，無法儲存 server.properties。config={config}"
-                )
+                logger.error(f"找不到伺服器路徑，無法儲存 server.properties。config={config}")
                 return False
             properties_path = Path(server_path) / "server.properties"
             # 讀取原本的 server.properties
             if properties_path.exists():
-                with open(properties_path, "r", encoding="utf-8") as f:
+                with open(properties_path, encoding="utf-8") as f:
                     lines = f.readlines()
                 original = {}
                 for line in lines:
@@ -307,8 +340,7 @@ class ServerManager:
             return False
 
     def start_server(self, server_name: str, parent=None) -> bool:
-        """
-        啟動伺服器
+        """啟動伺服器
         Start the server.
 
         Args:
@@ -317,12 +349,11 @@ class ServerManager:
 
         Returns:
             bool: 啟動成功返回 True，否則返回 False
+
         """
         try:
             if server_name not in self.servers:
-                UIUtils.show_error(
-                    "伺服器未找到", f"找不到伺服器: {server_name}", parent=parent
-                )
+                UIUtils.show_error("伺服器未找到", f"找不到伺服器: {server_name}", parent=parent)
                 return False
 
             config = self.servers[server_name]
@@ -336,7 +367,10 @@ class ServerManager:
                 )
                 return False
 
-            # 尋找可用的啟動腳本
+            # 確保啟動腳本存在且是最新的（每次啟動前重新建立，確保 JVM 參數正確）
+            self.create_launch_script(config)
+
+            # 尋找可用的啟動腳本（優先使用 start_server.bat）
             script_path = ServerDetectionUtils.find_startup_script(server_path)
 
             if script_path:
@@ -344,7 +378,7 @@ class ServerManager:
             else:
                 UIUtils.show_error(
                     "啟動腳本未找到",
-                    "找不到啟動腳本 (run.bat, start_server.bat, start.bat, server.bat)",
+                    "找不到啟動腳本 (start_server.bat, run.bat, start.bat, server.bat)",
                     parent=parent,
                 )
                 return False
@@ -354,7 +388,6 @@ class ServerManager:
             logger.debug(f"腳本路徑: {script_path}")
             logger.debug(f"工作目錄: {server_path}")
 
-            # 啟動伺服器 (Windows)
             try:
                 # 使用絕對路徑避免路徑問題
                 abs_script_path = script_path.resolve()
@@ -366,20 +399,17 @@ class ServerManager:
                 logger.debug(f"工作目錄: {abs_server_path}")
 
                 # 在伺服器目錄中執行，支援標準輸入/輸出管道
-                process = subprocess.Popen(
+                process = popen_checked(
                     cmd,
                     cwd=str(abs_server_path),
-                    shell=False,  # 安全性改進：移除 shell=True
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
+                    stdin=PIPE,
+                    stdout=PIPE,
+                    stderr=STDOUT,
                     text=True,
                     encoding="utf-8",
                     bufsize=0,  # 無緩衝，立即輸出
                     universal_newlines=True,
-                    creationflags=getattr(
-                        subprocess, "CREATE_NO_WINDOW", 0
-                    ),  # 隱藏 console 視窗
+                    creationflags=CREATE_NO_WINDOW,  # 隱藏 console 視窗
                 )
 
                 # 檢查進程是否立即失敗（減少等待時間提升響應）
@@ -389,29 +419,33 @@ class ServerManager:
                     logger.error(f"進程立即結束，返回碼: {poll_result}")
                     # 嘗試讀取錯誤信息
                     try:
-                        stdout, stderr = process.communicate(timeout=1)
-                        logger.error(f"標準輸出: {stdout}")
-                        if stderr:
-                            logger.error(f"標準錯誤: {stderr}")
+                        stdout, _ = process.communicate(timeout=1)
+                        if stdout:
+                            logger.error(f"程序輸出: {stdout}")
                     except Exception as e:
-                        logger.exception(f"無法讀取錯誤信息: {e}")
+                        logger.exception(f"無法讀取程序輸出: {e}")
+
+                    # 檢查啟動腳本內容以供調試
+                    try:
+                        with open(script_path, encoding="utf-8") as f:
+                            script_content = f.read()
+                        logger.debug(f"啟動腳本內容:\n{script_content}")
+                    except Exception as e:
+                        logger.exception(f"無法讀取啟動腳本: {e}")
+
                     UIUtils.show_error(
                         "啟動失敗",
-                        f"伺服器進程立即結束，返回碼: {poll_result}",
+                        f"伺服器進程立即結束，返回碼: {poll_result}\n請檢查日誌了解詳細信息",
                         parent=parent,
                     )
                     return False  # 記錄運行中的伺服器
                 self.running_servers[server_name] = process
 
                 # 使用等待線程來實現非阻塞的結束通知
-                # 這樣就不需要 UI 端進行輪詢 (Polling) 了
                 def _process_waiter(proc, name):
                     try:
-                        proc.wait()  # 阻塞直到進程結束，但只阻塞這個線程
-                        # 進程結束後的清理與通知 (可以在這裡擴充回調機制)
-                        logger.info(
-                            f"伺服器 {name} 已停止 (Exit code: {proc.returncode})"
-                        )
+                        proc.wait()
+                        logger.info(f"伺服器 {name} 已停止 (Exit code: {proc.returncode})")
                     except Exception as e:
                         logger.error(f"等待伺服器 {name}結束時發生錯誤: {e}")
 
@@ -422,9 +456,7 @@ class ServerManager:
                     name=f"Waiter-{server_name}",
                 ).start()
 
-                # 建立有界 deque 與 output thread（防止記憶體洩漏，原子操作）
-                # 使用 deque 替代 Queue 以獲得更好的記憶體管理與原子操作
-                output_deque = deque(maxlen=self.OUTPUT_QUEUE_MAX_SIZE)
+                output_deque: deque[str] = deque(maxlen=self.OUTPUT_QUEUE_MAX_SIZE)
                 output_lock = threading.Lock()
                 self.output_queues[server_name] = (output_deque, output_lock)
 
@@ -455,9 +487,7 @@ class ServerManager:
                             if proc.poll() is not None:
                                 break
                     except Exception as e:
-                        get_logger().bind(component="output_reader").exception(
-                            f"{name} 讀取錯誤: {e}"
-                        )
+                        get_logger().bind(component="output_reader").exception(f"{name} 讀取錯誤: {e}")
 
                 t = threading.Thread(
                     target=_output_reader,
@@ -480,12 +510,12 @@ class ServerManager:
             return False
 
     def delete_server(self, server_name: str) -> bool:
-        """
-        刪除伺服器
+        """刪除伺服器
         Delete the server.
 
         Args:
             server_name (str): 伺服器名稱
+
         """
         try:
             if server_name not in self.servers:
@@ -510,12 +540,12 @@ class ServerManager:
             return False
 
     def load_servers_config(self) -> None:
-        """
-        載入伺服器配置
+        """載入伺服器配置
         Load server configuration.
 
         Args:
             config_file (Path): 伺服器配置檔案路徑
+
         """
         try:
             data = PathUtils.load_json(self.config_file)
@@ -526,12 +556,12 @@ class ServerManager:
             logger.exception(f"載入配置失敗: {e}")
 
     def save_servers_config(self) -> None:
-        """
-        儲存伺服器配置
+        """儲存伺服器配置
         Save server configuration.
 
         Args:
             config_file (Path): 伺服器配置檔案路徑
+
         """
         try:
             data = {name: asdict(config) for name, config in self.servers.items()}
@@ -539,9 +569,8 @@ class ServerManager:
         except Exception as e:
             logger.exception(f"儲存配置失敗: {e}")
 
-    def get_default_server_properties(self) -> Dict[str, str]:
-        """
-        獲取預設伺服器屬性
+    def get_default_server_properties(self) -> dict[str, str]:
+        """獲取預設伺服器屬性
         Get default server properties.
         """
         return {
@@ -609,22 +638,22 @@ class ServerManager:
         }
 
     def server_exists(self, name: str) -> bool:
-        """
-        檢查伺服器是否已存在
+        """檢查伺服器是否已存在
         Check if the server exists.
 
         Args:
             name (str): 伺服器名稱
+
         """
         return name in self.servers
 
     def add_server(self, config: ServerConfig) -> bool:
-        """
-        添加伺服器配置（用於匯入）
+        """添加伺服器配置（用於匯入）
         Add server configuration (for import).
 
         Args:
             config (ServerConfig): 伺服器配置
+
         """
         try:
             self.servers[config.name] = config
@@ -634,9 +663,8 @@ class ServerManager:
             logger.exception(f"添加伺服器失敗: {e}")
             return False
 
-    def load_server_properties(self, server_name: str) -> Dict[str, str]:
-        """
-        載入伺服器的 server.properties 檔案內容 (附帶緩存機制)
+    def load_server_properties(self, server_name: str) -> dict[str, str]:
+        """載入伺服器的 server.properties 檔案內容 (附帶緩存機制)
         Load the server.properties file content for the server (with caching).
 
         Args:
@@ -644,6 +672,7 @@ class ServerManager:
 
         Returns:
             Dict[str, str]: 伺服器屬性設定
+
         """
         try:
             if server_name not in self.servers:
@@ -663,9 +692,7 @@ class ServerManager:
             except OSError:
                 return {}
 
-            cached_mtime, cached_props = self._properties_cache.get(
-                server_name, (0, None)
-            )
+            cached_mtime, cached_props = self._properties_cache.get(server_name, (0, None))
             if cached_props is not None and mtime == cached_mtime:
                 return cached_props
 
@@ -684,8 +711,7 @@ class ServerManager:
             return {}
 
     def is_server_running(self, server_name: str) -> bool:
-        """
-        檢查伺服器是否正在運行
+        """檢查伺服器是否正在運行
         Check if the server is running.
 
         Args:
@@ -693,6 +719,7 @@ class ServerManager:
 
         Returns:
             bool: 如果伺服器正在運行，則為 True，否則為 False
+
         """
         if server_name not in self.running_servers:
             return False
@@ -700,18 +727,17 @@ class ServerManager:
         process = self.running_servers[server_name]
         if process.poll() is None:  # 程序還在運行
             return True
-        else:
-            # 程序已結束，從記錄中移除
-            del self.running_servers[server_name]
-            return False
+        # 程序已結束，從記錄中移除
+        del self.running_servers[server_name]
+        return False
 
     def stop_server(self, server_name: str) -> bool:
-        """
-        停止伺服器
+        """停止伺服器
         Stop the server.
 
         Args:
             server_name (str): 伺服器名稱
+
         """
         try:
             if server_name not in self.running_servers:
@@ -722,16 +748,17 @@ class ServerManager:
             if process.poll() is None:  # 程序還在運行
                 # 先嘗試優雅停止
                 try:
-                    process.stdin.write("stop\n")
-                    process.stdin.flush()
+                    if process.stdin:
+                        process.stdin.write("stop\n")
+                        process.stdin.flush()
                     # 等待 5 秒讓伺服器自己停止
                     process.wait(timeout=5)
-                except (subprocess.TimeoutExpired, OSError, BrokenPipeError):
+                except (TimeoutExpired, OSError, BrokenPipeError):
                     # 如果優雅停止失敗，使用 terminate
                     try:
                         process.terminate()
                         process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
+                    except TimeoutExpired:
                         # 最後手段：強制終止
                         process.kill()
                         process.wait()
@@ -756,16 +783,16 @@ class ServerManager:
                 del self.running_servers[server_name]
             return False
 
-    def get_server_info(self, server_name: str) -> Optional[Dict]:
-        """
-        獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位
+    def get_server_info(self, server_name: str) -> dict | None:
+        """獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位
         Get server information, including running status and resource usage, fill in the fields needed by the UI.
 
         Args:
             server_name (str): 伺服器名稱
 
         Returns:
-            Optional[Dict]: 伺服器資訊字典，如果伺服器不存在則為 None
+            Dict | None: 伺服器資訊字典，如果伺服器不存在則為 None
+
         """
         try:
             if server_name not in self.servers:
@@ -781,7 +808,7 @@ class ServerManager:
                 "memory_mb": 0.0,
                 "memory": 0,
                 "uptime": "00:00:00",
-                "players": 0,  # 由 UI 端 list 指令即時更新
+                "players": 0,
                 "max_players": 0,
                 "version": "N/A",
             }
@@ -790,9 +817,7 @@ class ServerManager:
             try:
                 properties = self.load_server_properties(server_name)
                 if properties:
-                    max_players = properties.get("max-players") or properties.get(
-                        "max_players"
-                    )
+                    max_players = properties.get("max-players") or properties.get("max_players")
                     if max_players:
                         try:
                             info["max_players"] = int(max_players)
@@ -821,40 +846,36 @@ class ServerManager:
                         try:
                             if ps_process.name().lower().startswith("java"):
                                 all_candidates.append(ps_process)
+                        except psutil.NoSuchProcess:
+                            # 進程已結束，忽略
+                            pass
                         except Exception as e:
-                            logger.exception(
+                            logger.warning(
                                 f"取得進程名稱失敗 pid={process.pid}: {e}",
                                 "ServerManager",
-                                e,
                             )
                         try:
                             all_candidates.extend(
-                                [
-                                    c
-                                    for c in ps_process.children(recursive=True)
-                                    if c.name().lower().startswith("java")
-                                ]
+                                [c for c in ps_process.children(recursive=True) if c.name().lower().startswith("java")],
                             )
+                        except psutil.NoSuchProcess:
+                            # 進程已結束，忽略
+                            pass
                         except Exception as e:
-                            logger.exception(
+                            logger.warning(
                                 f"取得子進程清單失敗 pid={process.pid}: {e}",
                                 "ServerManager",
-                                e,
                             )
 
                         # 選擇 cmdline 含 server.jar/fabric/forge 關鍵字且記憶體用量最大的 java 進程
                         def is_server_java(proc):
                             try:
                                 cmd = " ".join(proc.cmdline()).lower()
-                                return any(
-                                    k in cmd for k in ["server.jar", "fabric", "forge"]
-                                )
+                                return any(k in cmd for k in ["server.jar", "fabric", "forge"])
                             except Exception:
                                 return False
 
-                        server_java_candidates = [
-                            p for p in all_candidates if is_server_java(p)
-                        ]
+                        server_java_candidates = [p for p in all_candidates if is_server_java(p)]
                         if server_java_candidates:
                             # 取記憶體用量最大的
                             target_proc = max(
@@ -862,12 +883,9 @@ class ServerManager:
                                 key=lambda p: p.memory_info().rss,
                             )
                         elif all_candidates:
-                            target_proc = max(
-                                all_candidates, key=lambda p: p.memory_info().rss
-                            )
+                            target_proc = max(all_candidates, key=lambda p: p.memory_info().rss)
                         else:
                             target_proc = ps_process
-                        # 更新 info 以 Java 進程為主
                         info["pid"] = target_proc.pid
                         cpu_percent = target_proc.cpu_percent()
                         memory_info = target_proc.memory_info()
@@ -883,10 +901,9 @@ class ServerManager:
                         info["uptime"] = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
                 except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
                     logger.warning(f"無法獲取程序資訊，可能已停止: {e}")
-                    if server_name in self.running_servers:
-                        if self.running_servers[server_name].poll() is not None:
-                            del self.running_servers[server_name]
-                            info["is_running"] = False
+                    if server_name in self.running_servers and self.running_servers[server_name].poll() is not None:
+                        del self.running_servers[server_name]
+                        info["is_running"] = False
             return info
 
         except Exception as e:
@@ -894,8 +911,7 @@ class ServerManager:
             return None
 
     def send_command(self, server_name: str, command: str) -> bool:
-        """
-        向運行中的伺服器發送命令
+        """向運行中的伺服器發送命令
         Send a command to the running server.
 
         Args:
@@ -904,6 +920,7 @@ class ServerManager:
 
         Returns:
             bool: 如果命令發送成功則為 True，否則為 False
+
         """
         try:
             if server_name not in self.running_servers:
@@ -927,44 +944,40 @@ class ServerManager:
 
                     def check_stop():
                         # 使用輪詢檢查，總時長約 5 秒
-                        for i in range(self.MAX_STOP_CHECKS):
+                        for _i in range(self.MAX_STOP_CHECKS):
                             time.sleep(self.STOP_CHECK_INTERVAL)
                             if process.poll() is not None:
-                                # 程序已停止
+                                # 程式已停止
                                 if server_name in self.running_servers:
                                     del self.running_servers[server_name]
-                                    logger.info(
-                                        f"伺服器 {server_name} 已確認停止",
-                                        "ServerManager",
-                                    )
+                                    logger.info(f"伺服器 {server_name} 已確認停止")
                                 break
 
                     # 在背景執行檢查
                     threading.Thread(target=check_stop, daemon=True).start()
 
                 return True
-            else:
-                logger.error(
-                    f"無法向伺服器 {server_name} 發送命令：stdin 不可用",
-                    "ServerManager",
-                )
-                return False
+            logger.error(
+                f"無法向伺服器 {server_name} 發送命令：stdin 不可用",
+                "ServerManager",
+            )
+            return False
 
         except Exception as e:
             logger.exception(f"發送命令失敗: {e}")
             return False
 
-    def read_server_output(self, server_name: str, timeout: float = 0.1) -> List[str]:
-        """
-        讀取伺服器輸出（非阻塞，避免 readline 卡住）
+    def read_server_output(self, server_name: str, _timeout: float = 0.1) -> list[str]:
+        """讀取伺服器輸出（非阻塞，避免 readline 卡住）
         Read server output (non-blocking, avoid readline blocking).
 
         Args:
             server_name (str): 伺服器名稱
-            timeout (float): 讀取超時時間
+            _timeout (float): 讀取超時時間
 
         Returns:
             List[str]: 伺服器輸出行列表
+
         """
         try:
             if server_name not in self.running_servers:
@@ -993,16 +1006,16 @@ class ServerManager:
             logger.exception(f"讀取伺服器輸出失敗: {e}")
             return []
 
-    def get_server_log_file(self, server_name: str) -> Optional[Path]:
-        """
-        獲取伺服器日誌檔案路徑
+    def get_server_log_file(self, server_name: str) -> Path | None:
+        """獲取伺服器日誌檔案路徑
         Get the server log file path.
 
         Args:
             server_name (str): 伺服器名稱
 
         Returns:
-            Optional[Path]: 伺服器日誌檔案路徑，如果不存在則為 None
+            Path | None: 伺服器日誌檔案路徑，如果不存在則為 None
+
         """
         try:
             if server_name not in self.servers:

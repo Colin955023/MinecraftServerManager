@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-工具模組套件
+"""工具模組套件
 提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
 Utility Modules Package
 Provides various utility functions and helper classes for the Minecraft Server Manager application
@@ -14,9 +12,8 @@ Logger can be imported conveniently:
 from __future__ import annotations
 
 import importlib
-from typing import Dict, Tuple
 
-_EXPORTS: Dict[str, Tuple[str, str]] = {
+_EXPORTS: dict[str, tuple[str, str]] = {
     # logger
     "get_logger": (".logger", "get_logger"),
     # UI helpers
@@ -24,10 +21,13 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "DialogUtils": (".ui_utils", "DialogUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
+    "pack_main_frame": (".ui_utils", "pack_main_frame"),
     # runtime paths
     "ensure_dir": (".runtime_paths", "ensure_dir"),
     "get_user_data_dir": (".runtime_paths", "get_user_data_dir"),
     "get_cache_dir": (".runtime_paths", "get_cache_dir"),
+    "is_portable_mode": (".runtime_paths", "is_portable_mode"),
+    "_get_portable_base_dir": (".runtime_paths", "_get_portable_base_dir"),
     # http
     "HTTPUtils": (".http_utils", "HTTPUtils"),
     "get_json": (".http_utils", "get_json"),
@@ -51,6 +51,7 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "can_restart": (".app_restart", "can_restart"),
     "schedule_restart_and_exit": (".app_restart", "schedule_restart_and_exit"),
     "install_java_with_winget": (".java_downloader", "install_java_with_winget"),
+    "get_restart_diagnostics": (".app_restart", "get_restart_diagnostics"),
     # java
     "get_best_java_path": (".java_utils", "get_best_java_path"),
     "get_java_version": (".java_utils", "get_java_version"),
@@ -62,6 +63,11 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "ServerDetectionUtils": (".server_utils", "ServerDetectionUtils"),
     "ServerOperations": (".server_utils", "ServerOperations"),
     "ServerCommands": (".server_utils", "ServerCommands"),
+    # singleton
+    "Singleton": (".singleton", "Singleton"),
+    # subprocess
+    "popen_checked": (".subprocess_utils", "popen_checked"),
+    "run_checked": (".subprocess_utils", "run_checked"),
 }
 
 

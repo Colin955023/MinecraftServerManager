@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-UI 工具函數
+"""UI 工具函數
 提供常用的界面元件和工具函數，避免重複代碼
 """
-from typing import Optional, Callable
+
 import os
-import tkinter as tk
 import queue
+import shutil
 import threading
 import time
+import tkinter as tk
+import tkinter.messagebox
 import webbrowser
+from pathlib import Path
+from typing import Any, Callable
+
 import customtkinter as ctk
-from . import PathUtils, WindowManager, get_logger, font_manager
+
+from . import (
+    PathUtils,
+    WindowManager,
+    font_manager,
+    get_dpi_scaled_size,
+    get_logger,
+    run_checked,
+)
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -20,17 +31,43 @@ logger = get_logger().bind(component="UIUtils")
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
 ctk.set_default_color_theme("blue")  # 淺色藍色主題
 
+
+def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
+    """統一的主框架布局方法
+    Unified main frame packing method to avoid code duplication
+
+    Args:
+        frame: 要布局的框架物件 (CTkFrame 或 ttk.Frame)
+        padx (int): 水平內邊距，默認 DPI 縮放 15px
+        pady (int): 垂直內邊距，默認 DPI 縮放 15px
+
+    Returns:
+        None
+
+    """
+    if padx is None:
+        padx = get_dpi_scaled_size(15)
+    if pady is None:
+        pady = get_dpi_scaled_size(15)
+
+    frame.pack(
+        fill="both",
+        expand=True,
+        padx=padx,
+        pady=pady,
+    )
+
+
 class DialogUtils:
     @staticmethod
     def create_modal_dialog(
         parent,
         title: str,
-        size: tuple = None,
+        size: tuple | None = None,
         resizable: bool = True,
         center: bool = True,
     ) -> ctk.CTkToplevel:
-        """
-        創建標準模態對話框，統一視窗屬性設定
+        """創建標準模態對話框，統一視窗屬性設定
         Create standard modal dialog with unified window properties setup
 
         Args:
@@ -42,6 +79,7 @@ class DialogUtils:
 
         Returns:
             CTkToplevel: 設定完成的對話框物件
+
         """
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
@@ -66,11 +104,11 @@ class DialogUtils:
 
         return dialog
 
+
 class IconUtils:
     @staticmethod
     def set_window_icon(window, delay_ms=200) -> None:
-        """
-        只設定視窗圖示，不執行任何置頂邏輯，適用於已手動設定 transient 的對話框
+        """只設定視窗圖示，不執行任何置頂邏輯，適用於已手動設定 transient 的對話框
         Only set window icon without any positioning logic, suitable for dialogs with manual transient setup
 
         Args:
@@ -79,6 +117,7 @@ class IconUtils:
 
         Returns:
             None
+
         """
 
         def _delayed_icon_bind():
@@ -95,7 +134,7 @@ class IconUtils:
                 icon_path = PathUtils.get_assets_path() / "icon.ico"
                 if icon_path.exists():
                     window.iconbitmap(str(icon_path))
-                    setattr(window, "_msm_icon_set", True)
+                    window._msm_icon_set = True
                     # 只在 idle 時做一次輕量刷新，避免頻繁 update 導致閃爍
                     try:
                         window.after_idle(window.update_idletasks)
@@ -119,6 +158,7 @@ class IconUtils:
             logger.warning(f"無法延遲執行圖示綁定: {e}")
             _delayed_icon_bind()  # 直接執行作為最後備選
 
+
 class UIUtils:
     @staticmethod
     def setup_window_properties(
@@ -131,8 +171,7 @@ class UIUtils:
         make_modal=True,
         delay_ms=200,
     ) -> None:
-        """
-        統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能
+        """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能
         Unified window properties setup function that integrates icon binding, window centering, and modal setup
 
         Args:
@@ -147,6 +186,7 @@ class UIUtils:
 
         Returns:
             None
+
         """
         # 設定視窗大小與置中，統一呼叫 WindowManager 的 setup_dialog_window
         WindowManager.setup_dialog_window(
@@ -183,7 +223,6 @@ class UIUtils:
         delay_ms: int = 200,
     ) -> ctk.CTkToplevel:
         """建立並套用專案一致的 dialog 視窗屬性。"""
-
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
         dialog.resizable(resizable, resizable)
@@ -202,8 +241,7 @@ class UIUtils:
 
     @staticmethod
     def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
-        """
-        安全地更新 widget，檢查 widget 是否存在
+        """安全地更新 widget，檢查 widget 是否存在
         Safely update widget, checking if widget exists
         """
         try:
@@ -214,9 +252,7 @@ class UIUtils:
 
     @staticmethod
     def safe_config_widget(widget, **config) -> None:
-        UIUtils.safe_update_widget(
-            widget, lambda w, **cfg: w.configure(**cfg), **config
-        )
+        UIUtils.safe_update_widget(widget, lambda w, **cfg: w.configure(**cfg), **config)
 
     @staticmethod
     def start_ui_queue_pump(
@@ -240,15 +276,11 @@ class UIUtils:
                 if job_id:
                     widget.after_cancel(job_id)
             except Exception as e:
-                logger.exception(
-                    f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {e}"
-                )
+                logger.debug(f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {e}")
             try:
                 setattr(widget, job_attr, None)
             except Exception as e:
-                logger.exception(
-                    f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}"
-                )
+                logger.debug(f"重設 UI queue pump job 欄位失敗（視窗可能已關閉）: {e}")
 
         def _tick() -> None:
             if not _alive():
@@ -281,9 +313,7 @@ class UIUtils:
                 setattr(widget, job_attr, widget.after(next_delay, _tick))
             except Exception as e:
                 # 視窗可能正在銷毀，忽略
-                logger.exception(
-                    f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {e}"
-                )
+                logger.exception(f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {e}")
 
         if not _alive():
             return
@@ -295,13 +325,13 @@ class UIUtils:
     def run_in_daemon_thread(
         task_func: Callable,
         *,
-        ui_queue: Optional["queue.Queue"] = None,
+        ui_queue: "queue.Queue | None" = None,
         widget=None,
-        on_error: Optional[Callable[[], None]] = None,
+        on_error: Callable[[], None] | None = None,
         error_log_prefix: str = "",
         component: str = "UIUtils",
     ) -> None:
-        def _dispatch(cb: Optional[Callable[[], None]]) -> None:
+        def _dispatch(cb: Callable[[], None] | None) -> None:
             if cb is None:
                 return
             if ui_queue is not None:
@@ -310,19 +340,16 @@ class UIUtils:
                     return
                 except Exception as e:
                     logger.debug(f"ui_queue put 失敗: {e}")
-                    pass
             if widget is not None:
                 try:
                     widget.after(0, cb)
                     return
                 except Exception as e:
                     logger.debug(f"widget.after 失敗: {e}")
-                    pass
             try:
                 cb()
             except Exception as e:
                 logger.debug(f"直接執行 callback 失敗: {e}")
-                pass
 
         def _wrapper() -> None:
             try:
@@ -344,13 +371,13 @@ class UIUtils:
         font=None,
         padx: int = 8,
         pady: int = 4,
-        wraplength: Optional[int] = None,
+        wraplength: int | None = None,
         justify: str = "left",
         borderwidth: int = 0,
         relief: str = "flat",
         offset_x: int = 10,
         offset_y: int = 10,
-        auto_hide_ms: Optional[int] = None,
+        auto_hide_ms: int | None = None,
     ) -> None:
         if not widget:
             return
@@ -363,9 +390,8 @@ class UIUtils:
                         tip.destroy()
                 except Exception as e:
                     logger.debug(f"銷毀 tooltip 失敗: {e}", "UIUtils")
-                    pass
             try:
-                setattr(widget, "_msm_tooltip", None)
+                widget._msm_tooltip = None
             except Exception as e:
                 logger.debug(f"重置 _msm_tooltip 屬性失敗: {e}", "UIUtils")
             job = getattr(widget, "_msm_tooltip_job", None)
@@ -374,9 +400,8 @@ class UIUtils:
                     widget.after_cancel(job)
                 except Exception as e:
                     logger.debug(f"取消 tooltip job 失敗: {e}", "UIUtils")
-                    pass
             try:
-                setattr(widget, "_msm_tooltip_job", None)
+                widget._msm_tooltip_job = None
             except Exception as e:
                 logger.debug(f"重置 _msm_tooltip_job 屬性失敗: {e}", "UIUtils")
 
@@ -388,7 +413,7 @@ class UIUtils:
                 tip.configure(bg=bg)
                 tip.wm_geometry(f"+{event.x_root + offset_x}+{event.y_root + offset_y}")
 
-                label_kwargs = {
+                label_kwargs: dict[str, Any] = {
                     "text": text or "",
                     "bg": bg,
                     "fg": fg,
@@ -406,18 +431,13 @@ class UIUtils:
 
                 tk.Label(tip, **label_kwargs).pack()
 
-                setattr(widget, "_msm_tooltip", tip)
+                widget._msm_tooltip = tip
 
                 if auto_hide_ms:
                     try:
-                        setattr(
-                            widget,
-                            "_msm_tooltip_job",
-                            tip.after(auto_hide_ms, _destroy_tooltip),
-                        )
+                        widget._msm_tooltip_job = tip.after(auto_hide_ms, _destroy_tooltip)
                     except Exception as e:
                         logger.debug(f"設定 tooltip 自動隱藏失敗: {e}", "UIUtils")
-                        pass
             except Exception as e:
                 logger.exception(f"顯示 tooltip 失敗: {e}")
 
@@ -437,8 +457,7 @@ class UIUtils:
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """
-        顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中
+        """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中
         Display error message dialog using tk with automatic icon and centering handling
 
         Args:
@@ -448,6 +467,7 @@ class UIUtils:
 
         Returns:
             None
+
         """
         # 任何顯示給使用者的錯誤，都同時寫入 log，方便追蹤
         logger.error(f"{title}: {message}")
@@ -482,14 +502,47 @@ class UIUtils:
             logger.error(f"錯誤: {title} - {message}")
 
     @staticmethod
+    def show_manual_restart_dialog(parent, details: str | None) -> None:
+        """顯示需要手動重啟的對話框，並提供複製診斷按鈕。
+        Centralized manual-restart dialog used in multiple places to avoid duplication.
+        """
+        try:
+            dlg = UIUtils.create_toplevel_dialog(parent, "需要手動重啟", width=560, height=360, make_modal=True)
+            import tkinter as _tk
+            from tkinter import scrolledtext as _st
+
+            _tk.Label(dlg, text="設定已變更，但需要手動重新啟動應用程式。", anchor="w").pack(
+                fill="x", padx=12, pady=(12, 6)
+            )
+            txt = _st.ScrolledText(dlg, wrap="word", height=12)
+            txt.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+            txt.insert("1.0", details or "")
+            txt.configure(state="disabled")
+
+            def _copy():
+                try:
+                    dlg.clipboard_clear()
+                    dlg.clipboard_append(details or "")
+                except Exception as e:
+                    logger.debug("copy to clipboard failed: %s", e)
+
+            btn_frame = _tk.Frame(dlg)
+            btn_frame.pack(fill="x", padx=12, pady=(0, 12))
+            from tkinter import Button as _Button
+
+            _Button(btn_frame, text="複製診斷", command=_copy).pack(side="left")
+            _Button(btn_frame, text="我會手動重啟", command=dlg.destroy).pack(side="right")
+        except Exception:
+            UIUtils.show_info("需要手動重啟", f"設定已變更，但自動重啟失敗。\n\n診斷：\n{details}", parent=parent)
+
+    @staticmethod
     def show_warning(
         title: str = "警告",
         message: str = "警告訊息",
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """
-        顯示警告訊息對話框，使用 tk 並自動處理圖示和置中
+        """顯示警告訊息對話框，使用 tk 並自動處理圖示和置中
         Display warning message dialog using tk with automatic icon and centering handling
 
         Args:
@@ -499,6 +552,7 @@ class UIUtils:
 
         Returns:
             None
+
         """
         try:
             # 如果沒有父視窗，創建臨時根視窗
@@ -536,8 +590,7 @@ class UIUtils:
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """
-        顯示資訊對話框，使用 tk 並自動處理圖示和置中
+        """顯示資訊對話框，使用 tk 並自動處理圖示和置中
         Display information dialog using tk with automatic icon and centering handling
 
         Args:
@@ -547,6 +600,7 @@ class UIUtils:
 
         Returns:
             None
+
         """
         try:
             # 如果沒有父視窗，創建臨時根視窗
@@ -579,21 +633,44 @@ class UIUtils:
 
     @staticmethod
     def open_external(target) -> None:
-        """
-        開啟外部資源（檔案、資料夾或 URL）。
+        """開啟外部資源（檔案、資料夾或 URL）。
         Open external resource (file, folder, or URL).
         使用系統預設程式開啟。
         """
         try:
             target_str = str(target)
             # 簡單判斷是否為 URL
-            if target_str.startswith("http://") or target_str.startswith("https://"):
+            if target_str.startswith(("http://", "https://")):
                 webbrowser.open(target_str)
-            else:
-                # 嘗試作為路徑開啟
-                os.startfile(target_str)
-        except Exception:
-            logger.exception(f"開啟外部資源失敗: {target}")
+                return
+
+            # 嘗試作為路徑開啟，先檢查路徑是否存在
+            try:
+                if not os.path.exists(target_str):
+                    logger.error(f"開啟外部資源失敗：路徑不存在 - {target_str}")
+                    return
+            except Exception as e:
+                logger.debug(f"檢查路徑存在性時發生例外: {e}")
+
+            # 使用安全的 subprocess helper 或系統開啟方式
+            try:
+                explorer = shutil.which("explorer") or str(
+                    Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
+                )
+                try:
+                    run_checked([explorer, target_str], check=True)
+                    return
+                except Exception as e:
+                    logger.debug(f"使用 explorer 開啟失敗，改用 startfile: {e}")
+                    try:
+                        os.startfile(target_str)  # nosec: B606
+                        return
+                    except Exception as e2:
+                        logger.exception(f"開啟外部資源失敗 (startfile): {target_str} - {e2}")
+            except Exception as e:
+                logger.exception(f"透過系統開啟外部資源失敗: {target_str} - {e}")
+        except Exception as e:
+            logger.exception(f"開啟外部資源失敗: {e}")
 
     @staticmethod
     def ask_yes_no_cancel(
@@ -602,9 +679,8 @@ class UIUtils:
         parent=None,
         show_cancel: bool = True,
         topmost: bool = False,
-    ) -> Optional[bool]:
-        """
-        顯示確認對話框，支援是/否/取消選項，使用 tk 並呼叫 setup_window_properties
+    ) -> bool | None:
+        """顯示確認對話框，支援是/否/取消選項，使用 tk 並呼叫 setup_window_properties
         Display confirmation dialog with Yes/No/Cancel options using tk and setup_window_properties
 
         Args:
@@ -616,6 +692,7 @@ class UIUtils:
 
         Returns:
             bool or None: True=點擊是, False=點擊否, None=點擊取消 (僅當 show_cancel=True 時)
+
         """
         try:
             # 如果沒有父視窗，創建臨時根視窗
@@ -644,11 +721,9 @@ class UIUtils:
                     result = tk.messagebox.askyesno(title, message, parent=root)
                 root.destroy()
                 return result
-            else:
-                if show_cancel:
-                    return tk.messagebox.askyesnocancel(title, message, parent=parent)
-                else:
-                    return tk.messagebox.askyesno(title, message, parent=parent)
+            if show_cancel:
+                return tk.messagebox.askyesnocancel(title, message, parent=parent)
+            return tk.messagebox.askyesno(title, message, parent=parent)
         except Exception as e:
             logger.exception(f"顯示確認對話框失敗: {e}")
             logger.warning(f"確認: {title} - {message}")
@@ -695,10 +770,7 @@ class UIUtils:
                         dropdown_widget.set(values[new_index])
 
                         # 如果有 command 回調，執行它
-                        if (
-                            hasattr(dropdown_widget, "_command")
-                            and dropdown_widget._command
-                        ):
+                        if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
                             dropdown_widget._command(values[new_index])
 
                 except Exception as e:
@@ -711,11 +783,8 @@ class UIUtils:
             logger.exception(f"應用下拉選單樣式失敗: {e}")
 
     @staticmethod
-    def create_styled_button(
-        parent, text, command, button_type="secondary", **kwargs
-    ) -> ctk.CTkButton:
-        """
-        建立統一樣式的按鈕
+    def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
+        """建立統一樣式的按鈕
         建立具有統一樣式的按鈕，自動應用全域DPI縮放因子
 
         Args:
@@ -724,6 +793,7 @@ class UIUtils:
             command: 點擊事件
             button_type: 'primary', 'secondary', 'small', 'cancel'
             **kwargs: 其他按鈕參數（會覆蓋預設值）
+
         """
         # 從字體管理器獲取當前的DPI縮放因子
         scale_factor = font_manager.get_scale_factor()
@@ -734,9 +804,7 @@ class UIUtils:
                 "fg_color": ("#1f4e79", "#0f2a44"),  # 更深的藍色，提高對比
                 "hover_color": ("#0f2a44", "#071925"),
                 "text_color": ("#ffffff", "#ffffff"),  # 確保文字為白色
-                "font": font_manager.get_font(
-                    family="Microsoft JhengHei", size=18, weight="bold"
-                ),
+                "font": font_manager.get_font(family="Microsoft JhengHei", size=18, weight="bold"),
                 "width": int(180 * scale_factor),
                 "height": int(60 * scale_factor),
             }
@@ -775,6 +843,7 @@ class UIUtils:
 
         return ctk.CTkButton(parent, text=text, command=command, **final_style)
 
+
 class ProgressDialog:
     def __init__(self, parent, title="進度", show_cancel=True):
         self.dialog = ctk.CTkToplevel(parent)
@@ -801,22 +870,16 @@ class ProgressDialog:
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 狀態標籤
-        self.status_label = ctk.CTkLabel(
-            content_frame, text="準備中...", font=font_manager.get_font(size=12)
-        )
+        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=font_manager.get_font(size=12))
         self.status_label.pack(pady=(10, 15))
 
         # 進度條
-        self.progress = ctk.CTkProgressBar(
-            content_frame, width=410, height=20
-        )  # 調整寬度以配合新的視窗大小
+        self.progress = ctk.CTkProgressBar(content_frame, width=410, height=20)  # 調整寬度以配合新的視窗大小
         self.progress.pack(pady=(0, 15))
         self.progress.set(0)
 
         # 百分比標籤
-        self.percent_label = ctk.CTkLabel(
-            content_frame, text="0%", font=font_manager.get_font(size=11)
-        )
+        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=font_manager.get_font(size=11))
         self.percent_label.pack()
 
         # 取消按鈕（可選）
