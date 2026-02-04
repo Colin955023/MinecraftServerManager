@@ -110,7 +110,6 @@ jobs:
                   capture = False
                   captured_lines = []
                   
-                  # Regex to match version line: ## v1.6.2 or ## 1.6.2, optionally followed by date/text
                   version_pattern = re.compile(fr"^##\s+v?{re.escape(version)}(?:\s+|$)")
                   # Regex to match next version header: ## v... or ## [Unreleased]
                   next_section_pattern = re.compile(r"^##\s+(?:v?\d|\[)")

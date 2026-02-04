@@ -90,7 +90,7 @@ def test_project_dependencies():
 
     required_modules = [
         ("customtkinter", "CustomTkinter"),
-        ("psutil", "PSUtil"),
+        ("requests", "Requests"),
         ("toml", "TOML"),
     ]
 
@@ -138,6 +138,11 @@ def test_main_program_modules():
         ("src.utils.logger", "Logger"),
         ("src.utils.settings_manager", "SettingsManager"),
         ("src.utils.runtime_paths", "RuntimePaths"),
+        ("src.utils.app_restart", "AppRestart"),
+        ("src.utils.java_downloader", "JavaDownloader"),
+        ("src.utils.java_utils", "JavaUtils"),
+        ("src.utils.update_checker", "UpdateChecker"),
+        ("src.utils.subprocess_utils", "SubprocessUtils"),
         ("src.models", "Models"),
         ("src.version_info", "VersionInfo"),
     ]
@@ -168,6 +173,37 @@ def test_main_program_modules():
         except Exception as e:
             failed_modules.append(display_name)
             error_details[module_name] = f"載入錯誤: {str(e)}"
+
+    # 驗證重構後的工具類別結構 (Refactored Utils Structure Check)
+    try:
+        from src import utils as src_utils
+
+        print("    驗證重構工具類別匯出...")
+
+        refactored_checks = [
+            ("RuntimePaths", "get_user_data_dir"),
+            ("AppRestart", "can_restart"),
+            ("JavaDownloader", "install_java_with_winget"),
+            ("JavaUtils", "get_java_version"),
+            ("UpdateChecker", "check_and_prompt_update"),
+            ("SubprocessUtils", "run_checked"),
+        ]
+
+        for cls_name, method in refactored_checks:
+            if not hasattr(src_utils, cls_name):
+                failed_modules.append(f"UtilsExport.{cls_name}")
+                error_details[f"src.utils.{cls_name}"] = "找不到類別 export"
+                continue
+
+            cls_obj = getattr(src_utils, cls_name)
+            if not hasattr(cls_obj, method):
+                failed_modules.append(f"UtilsExport.{cls_name}")
+                error_details[f"src.utils.{cls_name}"] = f"缺少方法: {method}"
+            else:
+                successful_modules.append(f"Utils.{cls_name}")
+
+    except Exception as e:
+        print_warning(f"工具類別結構驗證異常: {e}")
 
     # 檢查檔案存在性
     for module_name, display_name in file_check_modules:
@@ -228,17 +264,18 @@ def test_network_connectivity():
     print_step(5, 8, "測試網路連線")
 
     try:
-        from src.utils.http_utils import HTTPUtils
+        import requests
 
-        # 使用專案內封裝的 HTTP 工具，而非 requests
-        data = HTTPUtils.get_json("https://api.github.com", timeout=5)
-
-        if data:
+        response = requests.get("https://api.github.com", timeout=5)
+        if response.status_code == 200:
             print_success("網路連線正常")
             return True
         else:
-            print_warning("網路連線測試失敗 (無法取得數據)")
+            print_warning(f"網路連線測試失敗 (Status: {response.status_code})")
             return False
+    except ImportError:
+        print_error("找不到 requests 模組，請先執行 pip install requests")
+        return False
     except Exception as e:
         print_warning(f"網路測試出現異常: {e}")
         return False
@@ -353,29 +390,29 @@ def test_environment_detection():
         print(f"    • repo_root: {repo_root}")
         print(f"    • src 目錄存在: {src_dir.exists()}")
 
-        # 測試設定管理器的調試相關功能
+        # 測試設定管理器的除錯相關功能
         from src.utils.settings_manager import get_settings_manager
 
         settings = get_settings_manager()
 
         debug_logging_enabled = settings.is_debug_logging_enabled()
 
-        print(f"    • 調試日誌啟用: {debug_logging_enabled}")
+        print(f"    • 除錯日誌啟用: {debug_logging_enabled}")
 
-        # 測試日誌工具的調試判斷功能
+        # 測試日誌工具的除錯判斷功能
         from src.utils.logger import get_logger
 
-        print("    測試日誌工具調試判斷...")
+        print("    測試日誌工具除錯判斷...")
 
         # 這只是檢查函數是否可以正常調用，不會實際輸出
         try:
             # 測試各種日誌級別（包含新的檔案日誌功能）
             logger = get_logger().bind(component="環境檢測")
-            logger.debug("測試調試訊息")
+            logger.debug("測試除錯訊息")
             logger.info("測試資訊訊息")
             window_logger = get_logger().bind(component="WindowDebug")
             window_logger.debug("測試視窗狀態訊息")
-            print("    • 日誌工具調試判斷: 正常")
+            print("    • 日誌工具除錯判斷: 正常")
             print("    • 檔案日誌功能: 已啟用（日誌將儲存到 AppData/logs/）")
         except Exception as e:
             print_warning(f"    • 日誌工具測試異常: {e}")

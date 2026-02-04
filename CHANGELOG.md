@@ -4,28 +4,29 @@
 
 格式基於 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)。
 
-## [Unreleased]
+## v1.6.3 - 2026-02-04
 
 ### 新增
-- GitHub Actions 自動化構建與發布流程
-- 自動生成 SHA256 checksum 檔案（含檔案名稱）
-- 安裝版更新時自動關閉主程式以避免檔案佔用
+- 新增 `system_utils.py` 系統工具模組，使用 Windows API 取代 psutil 依賴
+  - 提供記憶體監控與進程管理功能
+  - 減少打包體積約 500KB
 
 ### 優化
-- 簡化打包流程，安裝檔直接輸出到 `dist/` 目錄
-- 可攜版打包腳本改為 PowerShell 版本（`package-portable.ps1`）
-- 更新檢查器優化：減少可攜版更新通知次數
-- 更新檢查器增強：支援從 GitHub Release 下載並驗證 SHA256 checksum
-- 批次檔複製邏輯改進：使用 PowerShell 搭配 xcopy fallback 提高可靠性
+- **安全性強化**
+  - PathUtils: 新增 Zip Slip 防護、檔案雜湊值計算 (SHA256/MD5)、安全的檔案操作
+  - SubprocessUtils: 強制 `shell=False` 防止命令注入攻擊
+  - UpdateChecker: 自動刪除損壞的下載檔案
 
-### 修復
-- 修復安裝程式重複啟動的問題（移除 fallback 邏輯）
-- 修復解除安裝時程式卡住的問題（自動終止執行中的程式）
-- 修復 GitHub Actions 輸出路徑與打包設定不一致的問題
-- 修復 rebase.bat 在有未暫存改動時執行失敗的問題
+- **程式碼重構**
+  - 將 `RuntimePaths`、`SubprocessUtils`、`UpdateChecker` 重構為類別
+  - 統一模組引用方式，降低耦合度
+
+- **UI 改進**
+  - 新增 `call_on_ui()`、`run_async()`、`reveal_in_explorer()` 工具函數
+  - 改善視窗狀態管理與錯誤處理
 
 ### 移除
-- 移除舊版 `package-portable.bat` 和 `update-portable.bat`
+- 移除 psutil 及 types-psutil 依賴
 
 ## v1.6.2 - 2026-01-31
 

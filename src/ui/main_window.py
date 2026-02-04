@@ -7,17 +7,9 @@ This module defines the main window for the Minecraft Server Manager application
 import contextlib
 import queue
 import re
-import shutil
-import subprocess as _subprocess
-from subprocess import PIPE, STDOUT, Popen
-
-CREATE_NO_WINDOW = getattr(_subprocess, "CREATE_NO_WINDOW", 0)
 import sys
-import threading
 import tkinter as tk
 import traceback
-import webbrowser
-import zipfile
 from pathlib import Path
 from tkinter import filedialog
 from typing import Any, Callable
@@ -27,19 +19,18 @@ import customtkinter as ctk
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    FontManager,
+    PathUtils,
+    RuntimePaths,
     ServerCommands,
     ServerDetectionUtils,
     ServerPropertiesHelper,
+    SubprocessUtils,
     UIUtils,
+    UpdateChecker,
     WindowManager,
-    check_and_prompt_update,
-    cleanup_fonts,
-    get_dpi_scaled_size,
-    get_font,
     get_logger,
     get_settings_manager,
-    is_portable_mode,
-    popen_checked,
 )
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
@@ -181,7 +172,7 @@ class MinecraftServerManager:
 
             # 清理字體快取，避免銷毀時的錯誤
             logger.debug("清理字體快取...", "MainWindow")
-            cleanup_fonts()
+            FontManager.cleanup_fonts()
 
             # 清理可能的子視窗
             for widget in self.root.winfo_children():
@@ -298,7 +289,7 @@ class MinecraftServerManager:
             self.loader_manager.preload_loader_versions()
             logger.debug("所有載入器版本載入完成", "MainWindow")
 
-        threading.Thread(target=fetch_all, daemon=True).start()
+        UIUtils.run_async(fetch_all)
 
     # 非同步載入資料
     def load_data_async(self) -> None:
@@ -321,7 +312,7 @@ class MinecraftServerManager:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
                 self.ui_queue.put(lambda: logger.error(error_msg))
 
-        threading.Thread(target=load_versions, daemon=True).start()
+        UIUtils.run_async(load_versions)
 
     # ====== 啟動任務與首次執行處理 ======
     # 處理啟動任務
@@ -378,14 +369,14 @@ class MinecraftServerManager:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_frame, text="🎮 歡迎使用！", font=get_font(size=18, weight="bold"))
+        title_label = ctk.CTkLabel(main_frame, text="🎮 歡迎使用！", font=FontManager.get_font(size=18, weight="bold"))
         title_label.pack(pady=(10, 15))
 
         # 說明文字
         info_label = ctk.CTkLabel(
             main_frame,
             text="是否要啟用自動檢查更新功能？\n\n啟用後，程式會在啟動時自動檢查新版本。\n您可以隨時在「關於」視窗中更改此設定。",
-            font=get_font(size=15),
+            font=FontManager.get_font(size=15),
             justify="center",
         )
         info_label.pack(pady=(0, 20))
@@ -411,7 +402,7 @@ class MinecraftServerManager:
             button_frame,
             text="啟用自動更新",
             command=_enable_auto_update,
-            font=get_font(size=12, weight="bold"),
+            font=FontManager.get_font(size=12, weight="bold"),
             width=140,
             height=35,
         )
@@ -422,7 +413,7 @@ class MinecraftServerManager:
             button_frame,
             text="暫不啟用",
             command=_disable_auto_update,
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             width=140,
             height=35,
             fg_color="gray",
@@ -440,7 +431,7 @@ class MinecraftServerManager:
         """
         try:
             # 使用版本資訊常數
-            check_and_prompt_update(
+            UpdateChecker.check_and_prompt_update(
                 APP_VERSION,
                 GITHUB_OWNER,
                 GITHUB_REPO,
@@ -544,9 +535,9 @@ class MinecraftServerManager:
         self.sidebar_toggle_btn = ctk.CTkButton(
             left_section,
             text="☰",
-            font=get_font(size=18),
-            width=get_dpi_scaled_size(40),
-            height=get_dpi_scaled_size(32),
+            font=FontManager.get_font(size=18),
+            width=FontManager.get_dpi_scaled_size(40),
+            height=FontManager.get_dpi_scaled_size(32),
             command=self.toggle_sidebar,
         )
         self.sidebar_toggle_btn.pack(side="left", padx=(0, 15))
@@ -558,7 +549,7 @@ class MinecraftServerManager:
         title_label = ctk.CTkLabel(
             title_section,
             text="Minecraft 伺服器管理器",
-            font=get_font(size=20, weight="bold"),
+            font=FontManager.get_font(size=20, weight="bold"),
         )
         title_label.pack(anchor="w")
 
@@ -574,7 +565,7 @@ class MinecraftServerManager:
 
         # 初始寬度
         self._nav_full_width = 250
-        self._nav_mini_width = get_dpi_scaled_size(70)
+        self._nav_mini_width = FontManager.get_dpi_scaled_size(70)
         # nav_container 的 grid padx=(20,20)；用 column minsize 時要把 padding 算進去，才會得到一致的實際側邊欄寬度
         self._nav_column_padding = 40
 
@@ -648,7 +639,7 @@ class MinecraftServerManager:
         sidebar_title = ctk.CTkLabel(
             self.sidebar,
             text="功能選單",
-            font=get_font(size=16, weight="bold"),
+            font=FontManager.get_font(size=16, weight="bold"),
             text_color="#000000",
         )
         sidebar_title.pack(anchor="w", padx=20, pady=(20, 15))
@@ -690,7 +681,7 @@ class MinecraftServerManager:
             version_label = ctk.CTkLabel(
                 info_frame,
                 text=f"版本 {APP_VERSION}",
-                font=get_font(size=font_size),
+                font=FontManager.get_font(size=font_size),
                 text_color=("#a0aec0", "#a0aec0"),
             )
             version_label.pack(anchor="w")
@@ -719,11 +710,11 @@ class MinecraftServerManager:
         btn = ctk.CTkButton(
             btn_frame,
             text=btn_text,
-            font=get_font(size=20),
+            font=FontManager.get_font(size=20),
             anchor="w",
-            height=get_dpi_scaled_size(55),
+            height=FontManager.get_dpi_scaled_size(55),
             corner_radius=8,
-            border_spacing=get_dpi_scaled_size(10),
+            border_spacing=FontManager.get_dpi_scaled_size(10),
             fg_color=("#3b82f6", "#3b82f6"),
             hover_color=("#1d4ed8", "#1d4ed8"),
             text_color=("#ffffff", "#ffffff"),
@@ -734,7 +725,7 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             btn_frame,
             text=description,
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             text_color=("#6b7280", "#6b7280"),
             anchor="w",
         ).pack(fill="x", padx=5, pady=(0, 5))
@@ -881,7 +872,7 @@ class MinecraftServerManager:
         mini_title = ctk.CTkLabel(
             self.mini_sidebar,
             text="功能選單",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color="#1f2937",
         )
         mini_title.pack(pady=(15, 10))
@@ -904,9 +895,9 @@ class MinecraftServerManager:
             btn = ctk.CTkButton(
                 icons_frame,
                 text=icon,
-                font=get_font(size=20),
-                width=get_dpi_scaled_size(55),
-                height=get_dpi_scaled_size(55),
+                font=FontManager.get_font(size=20),
+                width=FontManager.get_dpi_scaled_size(55),
+                height=FontManager.get_dpi_scaled_size(55),
                 corner_radius=8,
                 fg_color=("#3b82f6", "#3b82f6"),
                 hover_color=("#1d4ed8", "#1d4ed8"),
@@ -1050,8 +1041,10 @@ class MinecraftServerManager:
         content = ctk.CTkFrame(dialog)
         content.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(content, text="選擇匯入方式", font=get_font(size=18, weight="bold")).pack(pady=(10, 15))
-        ctk.CTkLabel(content, text="請選擇要匯入的伺服器類型:", font=get_font(size=14)).pack(pady=(0, 20))
+        ctk.CTkLabel(content, text="選擇匯入方式", font=FontManager.get_font(size=18, weight="bold")).pack(
+            pady=(10, 15)
+        )
+        ctk.CTkLabel(content, text="請選擇要匯入的伺服器類型:", font=FontManager.get_font(size=14)).pack(pady=(0, 20))
 
         button_frame = ctk.CTkFrame(content, fg_color="transparent")
         button_frame.pack(fill="x", padx=20)
@@ -1068,7 +1061,7 @@ class MinecraftServerManager:
                 button_frame,
                 text=label,
                 command=lambda k=key: self._set_choice(choice, k, dialog),
-                font=get_font(size=15, weight=font_weight),
+                font=FontManager.get_font(size=15, weight=font_weight),
                 height=35,
             )
             btn.pack(fill="x", pady=5)
@@ -1188,9 +1181,9 @@ class MinecraftServerManager:
         frame = ctk.CTkFrame(dialog)
         frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        ctk.CTkLabel(frame, text="請輸入伺服器名稱:", font=get_font(size=14)).pack(pady=(10, 15))
+        ctk.CTkLabel(frame, text="請輸入伺服器名稱:", font=FontManager.get_font(size=14)).pack(pady=(10, 15))
 
-        entry = ctk.CTkEntry(frame, font=get_font(size=14), width=300)
+        entry = ctk.CTkEntry(frame, font=FontManager.get_font(size=14), width=300)
         entry.pack(pady=(0, 20))
         entry.insert(0, default_name)
         entry.focus()
@@ -1243,15 +1236,14 @@ class MinecraftServerManager:
         try:
             if source_path.is_file():
                 target_path.mkdir(parents=True, exist_ok=True)
-                with zipfile.ZipFile(source_path, "r") as zip_ref:
-                    zip_ref.extractall(target_path)
+                PathUtils.safe_extract_zip(source_path, target_path)
                 items = list(target_path.iterdir())
                 if len(items) == 1 and items[0].is_dir():
                     for item in items[0].iterdir():
-                        shutil.move(str(item), str(target_path))
+                        PathUtils.move_path(item, target_path / item.name)
                     items[0].rmdir()
             else:
-                shutil.copytree(source_path, target_path)
+                PathUtils.copy_dir(source_path, target_path)
 
             if not ServerDetectionUtils.is_valid_server_folder(target_path):
                 raise Exception("找不到有效的 Minecraft 伺服器檔案")
@@ -1357,13 +1349,13 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             scrollable_frame,
             text="🎮 Minecraft 伺服器管理器",
-            font=get_font(size=27, weight="bold"),
+            font=FontManager.get_font(size=27, weight="bold"),
         ).pack(pady=(0, 5))
 
         ctk.CTkLabel(
             scrollable_frame,
             text=f"版本 {APP_VERSION}",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             text_color=("#a0aec0", "#a0aec0"),
         ).pack(pady=(0, 20))
 
@@ -1371,7 +1363,7 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             scrollable_frame,
             text="👨‍💻 開發資訊",
-            font=get_font(size=21, weight="bold"),
+            font=FontManager.get_font(size=21, weight="bold"),
         ).pack(anchor="w", pady=(0, 10))
 
         dev_info = """• 開發者: Minecraft Server Manager Team
@@ -1383,7 +1375,7 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             scrollable_frame,
             text=dev_info,
-            font=get_font(size=15),
+            font=FontManager.get_font(size=15),
             justify="left",
             wraplength=500,
         ).pack(anchor="w", pady=(0, 5))
@@ -1397,10 +1389,10 @@ class MinecraftServerManager:
             anchor="w",
         )
         github_lbl.pack(anchor="w", pady=(0, 20))
-        github_lbl.bind("<Button-1>", lambda _e, url=github_url: webbrowser.open_new(url))
+        github_lbl.bind("<Button-1>", lambda _e, url=github_url: UIUtils.open_external(url))
 
         # 授權條款
-        ctk.CTkLabel(scrollable_frame, text="📄 授權條款", font=get_font(size=24, weight="bold")).pack(
+        ctk.CTkLabel(scrollable_frame, text="📄 授權條款", font=FontManager.get_font(size=24, weight="bold")).pack(
             anchor="w",
             pady=(0, 10),
         )
@@ -1415,7 +1407,7 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             scrollable_frame,
             text=license_info,
-            font=get_font(size=15),
+            font=FontManager.get_font(size=15),
             justify="left",
             wraplength=500,
         ).pack(anchor="w", pady=(0, 30))
@@ -1427,7 +1419,7 @@ class MinecraftServerManager:
         settings = get_settings_manager()
 
         # 顯示更新設定
-        ctk.CTkLabel(settings_frame, text="🔄 更新設定", font=get_font(size=24, weight="bold")).pack(
+        ctk.CTkLabel(settings_frame, text="🔄 更新設定", font=FontManager.get_font(size=24, weight="bold")).pack(
             anchor="w",
             pady=(0, 10),
         )
@@ -1438,7 +1430,7 @@ class MinecraftServerManager:
             settings_frame,
             text="自動檢查更新",
             variable=auto_update_var,
-            font=get_font(size=15),
+            font=FontManager.get_font(size=15),
             command=lambda: self._on_auto_update_changed(auto_update_var.get(), manual_check_btn),
         )
         auto_update_checkbox.pack(anchor="w", pady=(0, 10))
@@ -1449,7 +1441,7 @@ class MinecraftServerManager:
             settings_frame,
             text="檢查更新",
             command=self._manual_check_updates,
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             width=120,
             height=30,
         )
@@ -1458,8 +1450,8 @@ class MinecraftServerManager:
             manual_check_btn.pack(anchor="w", pady=(0, 10))
 
         # 若為可攜式，額外顯示便攜提示（但不隱藏更新設定）
-        if is_portable_mode():
-            ctk.CTkLabel(settings_frame, text="📦 便攜模式", font=get_font(size=24, weight="bold")).pack(
+        if RuntimePaths.is_portable_mode():
+            ctk.CTkLabel(settings_frame, text="📦 便攜模式", font=FontManager.get_font(size=24, weight="bold")).pack(
                 anchor="w", pady=(12, 10)
             )
 
@@ -1469,7 +1461,7 @@ class MinecraftServerManager:
             ctk.CTkLabel(
                 portable_info_frame,
                 text="您正在使用便攜版本。\n如需更新，請從 Releases 下載新版 portable ZIP，或使用內建的檢查更新功能。",
-                font=get_font(size=15),
+                font=FontManager.get_font(size=15),
                 justify="left",
             ).pack(anchor="w")
 
@@ -1478,7 +1470,7 @@ class MinecraftServerManager:
             settings_frame,
             text="視窗偏好設定",
             command=self._show_window_preferences,
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             width=120,
             height=30,
         )
@@ -1489,7 +1481,7 @@ class MinecraftServerManager:
             scrollable_frame,
             text="關閉",
             command=about_dialog.destroy,
-            font=get_font(size=12, weight="bold"),
+            font=FontManager.get_font(size=12, weight="bold"),
             width=100,
             height=35,
         ).pack(pady=(10, 0))
@@ -1618,7 +1610,7 @@ class ServerInitializationDialog:
         self.completion_callback = completion_callback
 
         # 狀態變數
-        self.server_process: Popen[str] | None = None
+        self.server_process: Any | None = None
         self.done_detected = False
 
         # UI 元件
@@ -1704,7 +1696,7 @@ class ServerInitializationDialog:
         title_label = ctk.CTkLabel(
             self.init_dialog,
             text=f"正在初始化伺服器: {self.server_config.name}",
-            font=get_font(size=24, weight="bold"),
+            font=FontManager.get_font(size=24, weight="bold"),
         )
         title_label.pack(pady=10)
 
@@ -1712,7 +1704,7 @@ class ServerInitializationDialog:
         info_label = ctk.CTkLabel(
             self.init_dialog,
             text="伺服器正在首次啟動，請等待初始化完成...\n系統會自動在完成後關閉伺服器",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
         )
         info_label.pack(pady=5)
 
@@ -1725,7 +1717,7 @@ class ServerInitializationDialog:
         # 滾動文字區域
         self.console_text = ctk.CTkTextbox(
             console_frame,
-            font=get_font(family="Consolas", size=10),
+            font=FontManager.get_font(family="Consolas", size=10),
             wrap="none",
             fg_color=("#000000", "#000000"),
             text_color=("#00ff00", "#00ff00"),
@@ -1740,7 +1732,7 @@ class ServerInitializationDialog:
         self.progress_label = ctk.CTkLabel(
             self.init_dialog,
             text="狀態: 準備啟動...",
-            font=get_font(size=16, weight="bold"),
+            font=FontManager.get_font(size=16, weight="bold"),
         )
         self.progress_label.pack(pady=5)
 
@@ -1756,7 +1748,7 @@ class ServerInitializationDialog:
             button_frame,
             text="取消初始化",
             command=self._close_init_server,
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             width=120,
             height=35,
             fg_color=("#e53e3e", "#e53e3e"),
@@ -1775,7 +1767,7 @@ class ServerInitializationDialog:
 
     def _start_server_thread(self) -> None:
         """在背景執行緒中啟動伺服器"""
-        threading.Thread(target=self._run_server, daemon=True).start()
+        UIUtils.run_async(self._run_server)
 
     def _close_init_server(self) -> None:
         """關閉初始化伺服器"""
@@ -1846,16 +1838,16 @@ class ServerInitializationDialog:
             java_cmd = self._build_java_command()
 
             # 啟動伺服器程式
-            self.server_process = popen_checked(
+            self.server_process = SubprocessUtils.popen_checked(
                 java_cmd,
                 cwd=str(self.server_path),
-                stdout=PIPE,
-                stderr=STDOUT,
-                stdin=PIPE,
+                stdout=SubprocessUtils.PIPE,
+                stderr=SubprocessUtils.STDOUT,
+                stdin=SubprocessUtils.PIPE,
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
-                creationflags=CREATE_NO_WINDOW,
+                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
             )
 
             self._monitor_server_output()
@@ -1903,8 +1895,9 @@ class ServerInitializationDialog:
     def _extract_java_command_from_bat(self, start_bat: Path) -> list[str] | None:
         """從 bat 檔案提取 Java 命令"""
         try:
-            with start_bat.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
+            content = PathUtils.read_text_file(start_bat, errors="ignore")
+            if content:
+                for line in content.splitlines():
                     if re.search(r"\bjava\b.*@user_jvm_args\.txt\b", line, re.IGNORECASE):
                         # 去除尾端的 %* 或其他 shell 變數符號
                         cleaned = re.sub(r"\s*[%$]\*?$", "", line.strip())

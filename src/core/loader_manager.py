@@ -8,10 +8,6 @@ Responsible for managing and downloading versions of Fabric and Forge loaders wi
 """
 
 import re
-import subprocess as _subprocess
-from subprocess import PIPE, STDOUT
-
-CREATE_NO_WINDOW = getattr(_subprocess, "CREATE_NO_WINDOW", 0)
 from contextlib import suppress
 from pathlib import Path
 
@@ -20,15 +16,14 @@ from defusedxml import ElementTree as ET
 from src.models import LoaderVersion
 from src.utils import (
     HTTPUtils,
+    JavaUtils,
     PathUtils,
+    RuntimePaths,
     ServerDetectionUtils,
     Singleton,
+    SubprocessUtils,
     UIUtils,
-    ensure_dir,
-    get_best_java_path,
-    get_cache_dir,
     get_logger,
-    popen_checked,
 )
 
 from .version_manager import MinecraftVersionManager
@@ -54,7 +49,7 @@ class LoaderManager(Singleton):
         # 避免重複初始化
         if self._initialized:
             return
-        cache_dir = ensure_dir(get_cache_dir())
+        cache_dir = RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir())
         self.fabric_cache_file = str(cache_dir / "fabric_versions_cache.json")
         self.forge_cache_file = str(cache_dir / "forge_versions_cache.json")
         # 添加記憶體快取以避免重複讀取檔案
@@ -129,7 +124,7 @@ class LoaderManager(Singleton):
         if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
-            java_path = get_best_java_path(minecraft_version)
+            java_path = JavaUtils.get_best_java_path(minecraft_version)
         if not java_path:
             return False
 
@@ -468,15 +463,15 @@ class LoaderManager(Singleton):
 
         # 使用 Popen 讀取輸出
         try:
-            process = popen_checked(
+            process = SubprocessUtils.popen_checked(
                 cmd,
                 cwd=str(Path(download_path).parent),
-                stdout=PIPE,
-                stderr=STDOUT,
+                stdout=SubprocessUtils.PIPE,
+                stderr=SubprocessUtils.STDOUT,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                creationflags=CREATE_NO_WINDOW,
+                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
             )
 
             # 讀取輸出並更新進度
@@ -523,8 +518,9 @@ class LoaderManager(Singleton):
             # 1. 從 run.bat 擷取 java 指令行
             if run_bat_path.exists():
                 try:
-                    with run_bat_path.open("r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
+                    content = PathUtils.read_text_file(run_bat_path, errors="ignore")
+                    if content:
+                        for line in content.splitlines():
                             if re.search(r"\bjava\s+@user_jvm_args\\.txt\b", line, re.IGNORECASE):
                                 java_line = line.strip()
                                 break
@@ -538,20 +534,18 @@ class LoaderManager(Singleton):
             # 2. 修改 start_server.bat 中以 java 開頭的指令行
             if java_line and start_server_path.exists():
                 try:
-                    with start_server_path.open("r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-
-                    new_lines = []
-                    replaced = False
-                    for line in lines:
-                        if not replaced and re.match(r"^\s*java\b", line, re.IGNORECASE):
-                            new_lines.append(java_line + "\n")
-                            replaced = True
-                        else:
-                            new_lines.append(line)
-
-                    with start_server_path.open("w", encoding="utf-8") as f:
-                        f.writelines(new_lines)
+                    content = PathUtils.read_text_file(start_server_path, errors="ignore")
+                    if content:
+                        lines = content.splitlines(keepends=True)
+                        new_lines = []
+                        replaced = False
+                        for line in lines:
+                            if not replaced and re.match(r"^\s*java\b", line, re.IGNORECASE):
+                                new_lines.append(java_line + "\n")
+                                replaced = True
+                            else:
+                                new_lines.append(line)
+                        PathUtils.write_text_file(start_server_path, "".join(new_lines))
                 except Exception as e:
                     logger.exception(f"修改 start_server.bat 失敗: {e}")
                     UIUtils.show_warning(

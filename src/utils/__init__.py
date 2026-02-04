@@ -21,42 +21,27 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "DialogUtils": (".ui_utils", "DialogUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
-    "pack_main_frame": (".ui_utils", "pack_main_frame"),
     # runtime paths
-    "ensure_dir": (".runtime_paths", "ensure_dir"),
-    "get_user_data_dir": (".runtime_paths", "get_user_data_dir"),
-    "get_cache_dir": (".runtime_paths", "get_cache_dir"),
-    "is_portable_mode": (".runtime_paths", "is_portable_mode"),
-    "_get_portable_base_dir": (".runtime_paths", "_get_portable_base_dir"),
+    "RuntimePaths": (".runtime_paths", "RuntimePaths"),
     # http
     "HTTPUtils": (".http_utils", "HTTPUtils"),
-    "get_json": (".http_utils", "get_json"),
-    "get_content": (".http_utils", "get_content"),
-    "download_file": (".http_utils", "download_file"),
     # settings
     "get_settings_manager": (".settings_manager", "get_settings_manager"),
     # fonts
-    "set_ui_scale_factor": (".font_manager", "set_ui_scale_factor"),
     "FontManager": (".font_manager", "FontManager"),
-    "font_manager": (".font_manager", "font_manager"),
-    "get_font": (".font_manager", "get_font"),
-    "get_scale_factor": (".font_manager", "get_scale_factor"),
-    "get_dpi_scaled_size": (".font_manager", "get_dpi_scaled_size"),
-    "cleanup_fonts": (".font_manager", "cleanup_fonts"),
     # window
     "WindowManager": (".window_manager", "WindowManager"),
     # updates
-    "check_and_prompt_update": (".update_checker", "check_and_prompt_update"),
+    "UpdateChecker": (".update_checker", "UpdateChecker"),
     # restart
-    "can_restart": (".app_restart", "can_restart"),
-    "schedule_restart_and_exit": (".app_restart", "schedule_restart_and_exit"),
-    "install_java_with_winget": (".java_downloader", "install_java_with_winget"),
-    "get_restart_diagnostics": (".app_restart", "get_restart_diagnostics"),
+    "AppRestart": (".app_restart", "AppRestart"),
+    "JavaDownloader": (".java_downloader", "JavaDownloader"),
     # java
-    "get_best_java_path": (".java_utils", "get_best_java_path"),
-    "get_java_version": (".java_utils", "get_java_version"),
+    "JavaUtils": (".java_utils", "JavaUtils"),
     # paths
     "PathUtils": (".path_utils", "PathUtils"),
+    # system
+    "SystemUtils": (".system_utils", "SystemUtils"),
     # server utilities
     "MemoryUtils": (".server_utils", "MemoryUtils"),
     "ServerPropertiesHelper": (".server_utils", "ServerPropertiesHelper"),
@@ -66,8 +51,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # singleton
     "Singleton": (".singleton", "Singleton"),
     # subprocess
-    "popen_checked": (".subprocess_utils", "popen_checked"),
-    "run_checked": (".subprocess_utils", "run_checked"),
+    "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
 }
 
 

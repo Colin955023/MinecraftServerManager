@@ -11,7 +11,7 @@ from typing import Callable
 
 import customtkinter as ctk
 
-from ..utils import UIUtils, font_manager, get_font, get_logger
+from ..utils import FontManager, UIUtils, get_logger
 
 logger = get_logger().bind(component="CustomDropdown")
 
@@ -90,7 +90,7 @@ class CustomDropdown(ctk.CTkFrame):
             height=self.height,
             command=self._toggle_dropdown,
             anchor="w",
-            font=get_font(size=11),
+            font=FontManager.get_font(size=11),
             fg_color=("#ffffff", "#ffffff"),  # 白色背景
             text_color=("#1f2937", "#1f2937"),  # 深色文字
             border_width=1,
@@ -103,7 +103,7 @@ class CustomDropdown(ctk.CTkFrame):
         self.arrow_label = ctk.CTkLabel(
             self.button,
             text="▼",
-            font=get_font(size=10),
+            font=FontManager.get_font(size=10),
             text_color=("#6b7280", "#6b7280"),  # 灰色箭頭
             width=20,
             height=20,
@@ -155,7 +155,7 @@ class CustomDropdown(ctk.CTkFrame):
             try:
                 scale = ctk.ScalingTracker.get_widget_scaling(self.button)
             except Exception:
-                scale = font_manager.get_scale_factor()
+                scale = FontManager.get_scale_factor()
 
         button_x = self.button.winfo_rootx()
         button_y = self.button.winfo_rooty()
@@ -203,7 +203,7 @@ class CustomDropdown(ctk.CTkFrame):
         current_value = self.variable.get()
 
         # 優化：預先建立字體物件和樣式設定，避免在迴圈中重複計算
-        font_obj = get_font(size=14)
+        font_obj = FontManager.get_font(size=14)
         btn_width = logical_button_width - 20 if total_items > self.max_visible_items else logical_button_width
 
         # 樣式常數

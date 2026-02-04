@@ -25,7 +25,8 @@ class HTTPUtils:
     def _get_default_headers(
         headers: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        """獲取包含預設 User-Agent 的標頭
+        """
+        獲取包含預設 User-Agent 的標頭
         Get headers with default User-Agent
         """
         default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (colin955023@gmail.com)"}
@@ -34,18 +35,25 @@ class HTTPUtils:
         return default_headers
 
     @classmethod
-    def get_json(cls, url: str, timeout: int = 10, headers: dict[str, str] | None = None) -> dict[str, Any] | None:
-        """發送 HTTP GET 請求並解析回傳的 JSON 資料（使用連線池）
-        Send HTTP GET request and parse returned JSON data (with connection pooling)
+    def get_json(
+        cls,
+        url: str,
+        timeout: int = 10,
+        headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        發送 HTTP GET 請求並解析回傳的 JSON 資料
+        Send HTTP GET request and parse returned JSON data
 
         Args:
             url (str): 請求的目標 URL
             timeout (int): 請求超時時間（秒）
             headers (Dict[str, str] | None): 可選的 HTTP 請求標頭
+            params (Dict[str, Any] | None): 可選的 URL 查詢參數
 
         Returns:
             Dict[str, Any] | None: 成功時返回 JSON 字典，失敗時返回 None
-
         """
         if not url or not isinstance(url, str):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
@@ -54,7 +62,7 @@ class HTTPUtils:
 
         try:
             final_headers = cls._get_default_headers(headers)
-            resp = requests.get(url, headers=final_headers, timeout=timeout)
+            resp = requests.get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
         except (RequestException, ValueError) as e:
@@ -69,8 +77,8 @@ class HTTPUtils:
         stream: bool = False,
         headers: dict[str, str] | None = None,
     ) -> bytes | None:
-        """發送 HTTP GET 請求並回傳完整的回應內容（使用連線池）
-        Send HTTP GET request and return complete response content (with connection pooling)
+        """發送 HTTP GET 請求並回傳完整的回應內容
+        Send HTTP GET request and return complete response content
 
         Args:
             url (str): 請求的目標 URL
@@ -80,7 +88,6 @@ class HTTPUtils:
 
         Returns:
             bytes | None: 成功時返回回應內容位元組，失敗時返回 None
-
         """
         if not url or not isinstance(url, str):
             logger.error("HTTP GET 請求失敗: URL 參數無效")

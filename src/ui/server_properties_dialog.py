@@ -5,20 +5,16 @@
 
 import tkinter as tk
 import traceback
-import webbrowser
 from tkinter import ttk
 
 import customtkinter as ctk
 
 from ..core import ServerConfig, ServerManager
 from ..utils import (
+    FontManager,
     ServerPropertiesHelper,
     UIUtils,
-    font_manager,
-    get_dpi_scaled_size,
-    get_font,
     get_logger,
-    pack_main_frame,
 )
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
@@ -57,8 +53,8 @@ class ServerPropertiesDialog:
         UIUtils.setup_window_properties(
             window=self.dialog,
             parent=self.parent,
-            width=int(800 * font_manager.get_scale_factor()),
-            height=int(600 * font_manager.get_scale_factor()),
+            width=int(800 * FontManager.get_scale_factor()),
+            height=int(600 * FontManager.get_scale_factor()),
             bind_icon=True,
             center_on_parent=True,
             make_modal=True,
@@ -72,8 +68,8 @@ class ServerPropertiesDialog:
     def setup_dialog(self) -> None:
         """設定對話框"""
         self.dialog.title(f"伺服器設定 - {self.server_config.name}")
-        min_width = int(1000 * font_manager.get_scale_factor())  # 1000 * DPI
-        min_height = int(600 * font_manager.get_scale_factor())  # 600 * DPI
+        min_width = int(1000 * FontManager.get_scale_factor())  # 1000 * DPI
+        min_height = int(600 * FontManager.get_scale_factor())  # 600 * DPI
         self.dialog.minsize(min_width, min_height)
         self.dialog.resizable(True, True)
 
@@ -89,20 +85,20 @@ class ServerPropertiesDialog:
         """
         # 主框架
         main_frame = ttk.Frame(self.dialog)
-        pack_main_frame(main_frame)
+        UIUtils.pack_main_frame(main_frame)
 
         # 標題
         title_label = ttk.Label(
             main_frame,
             text=f"🛠️ {self.server_config.name} - server.properties",
-            font=get_font("Microsoft JhengHei", 21, "bold"),  # 21px
+            font=FontManager.get_font("Microsoft JhengHei", 21, "bold"),  # 21px
         )
-        title_label.pack(pady=(0, get_dpi_scaled_size(15)))
+        title_label.pack(pady=(0, FontManager.get_dpi_scaled_size(15)))
         style = ttk.Style()
-        style.configure("ServerProps.TNotebook.Tab", font=get_font("Microsoft JhengHei", 16, "bold"))
+        style.configure("ServerProps.TNotebook.Tab", font=FontManager.get_font("Microsoft JhengHei", 16, "bold"))
 
         self.notebook = ttk.Notebook(main_frame, style="ServerProps.TNotebook")
-        self.notebook.pack(fill="both", expand=True, pady=(0, get_dpi_scaled_size(15)))
+        self.notebook.pack(fill="both", expand=True, pady=(0, FontManager.get_dpi_scaled_size(15)))
 
         self.create_property_tabs()
 
@@ -111,9 +107,9 @@ class ServerPropertiesDialog:
         button_frame.pack(fill="x")
 
         # 按鈕
-        button_width = int(100 * font_manager.get_scale_factor())
-        button_height = int(32 * font_manager.get_scale_factor())
-        button_font_size = int(18 * font_manager.get_scale_factor())
+        button_width = int(100 * FontManager.get_scale_factor())
+        button_height = int(32 * FontManager.get_scale_factor())
+        button_font_size = int(18 * FontManager.get_scale_factor())
 
         ctk.CTkButton(
             button_frame,
@@ -124,7 +120,7 @@ class ServerPropertiesDialog:
             font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#2563eb", "#1d4ed8"),
             hover_color=("#1d4ed8", "#1e40af"),
-        ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
+        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
 
         ctk.CTkButton(
             button_frame,
@@ -135,7 +131,7 @@ class ServerPropertiesDialog:
             font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#f59e0b", "#d97706"),
             hover_color=("#d97706", "#b45309"),
-        ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
+        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
 
         ctk.CTkButton(
             button_frame,
@@ -146,13 +142,13 @@ class ServerPropertiesDialog:
             font=ctk.CTkFont(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
             fg_color=("#dc2626", "#b91c1c"),
             hover_color=("#b91c1c", "#991b1b"),
-        ).pack(side="right", padx=(get_dpi_scaled_size(8), 0))
+        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
 
         # 說明標籤
         help_label = ctk.CTkLabel(
             button_frame,
             text="💡 將滑鼠移到設定項目上可查看詳細說明",
-            font=get_font(size=16),
+            font=FontManager.get_font(size=16),
             text_color=("gray60", "gray50"),
         )
         help_label.pack(side="left")
@@ -161,14 +157,14 @@ class ServerPropertiesDialog:
         link_label = ctk.CTkLabel(
             button_frame,
             text="【官方設定說明】",
-            font=get_font(size=16, underline=True),
+            font=FontManager.get_font(size=16, underline=True),
             text_color=("blue", "#4dabf7"),
             cursor="hand2",
         )
         link_label.pack(side="left", padx=(5, 0))
 
         def open_wiki(_event):
-            webbrowser.open("https://zh.minecraft.wiki/w/Server.properties")
+            UIUtils.open_external("https://zh.minecraft.wiki/w/Server.properties")
 
         link_label.bind("<Button-1>", open_wiki)
 
@@ -270,13 +266,13 @@ class ServerPropertiesDialog:
         for _i, prop_name in enumerate(properties):
             # 建立框架
             prop_frame = ttk.Frame(parent)
-            prop_frame.pack(fill="x", padx=get_dpi_scaled_size(15), pady=get_dpi_scaled_size(8))
+            prop_frame.pack(fill="x", padx=FontManager.get_dpi_scaled_size(15), pady=FontManager.get_dpi_scaled_size(8))
 
             # 屬性標籤
             label = ttk.Label(
                 prop_frame,
                 text=f"{prop_name}:",
-                font=get_font("Microsoft JhengHei", 20, "bold"),  # 20 * DPI
+                font=FontManager.get_font("Microsoft JhengHei", 20, "bold"),  # 20 * DPI
                 cursor="hand2",
             )
             label.pack(anchor="w")
@@ -371,11 +367,11 @@ class ServerPropertiesDialog:
                 parent,
                 variable=bool_var,
                 text="啟用",
-                font=get_font(size=16),  # 統一字體
-                width=get_dpi_scaled_size(180),
-                height=get_dpi_scaled_size(36),
+                font=FontManager.get_font(size=16),  # 統一字體
+                width=FontManager.get_dpi_scaled_size(180),
+                height=FontManager.get_dpi_scaled_size(36),
             )
-            widget.pack(anchor="w", pady=get_dpi_scaled_size(3))
+            widget.pack(anchor="w", pady=FontManager.get_dpi_scaled_size(3))
 
             # 連接到字串變數
             def update_string_var(*_args, bv=bool_var, sv=var):
@@ -393,11 +389,11 @@ class ServerPropertiesDialog:
                 parent,
                 variable=var,
                 values=choice_props[prop_name],
-                font=get_font(size=16),
-                dropdown_font=get_font(size=16),
-                width=get_dpi_scaled_size(300),
+                font=FontManager.get_font(size=16),
+                dropdown_font=FontManager.get_font(size=16),
+                width=FontManager.get_dpi_scaled_size(300),
             )
-            widget.pack(fill="x", pady=get_dpi_scaled_size(3))
+            widget.pack(fill="x", pady=FontManager.get_dpi_scaled_size(3))
 
             # 套用統一下拉選單樣式
             try:
@@ -413,8 +409,8 @@ class ServerPropertiesDialog:
                 textvariable=var,
                 from_=min_val,
                 to=max_val,
-                width=get_dpi_scaled_size(30),  # 放大寬度
-                font=get_font("Microsoft JhengHei", 16),
+                width=FontManager.get_dpi_scaled_size(30),  # 放大寬度
+                font=FontManager.get_font("Microsoft JhengHei", 16),
             )
             widget.pack(anchor="w")
 
@@ -423,7 +419,7 @@ class ServerPropertiesDialog:
             widget = ttk.Entry(
                 parent,
                 textvariable=var,
-                font=get_font("Microsoft JhengHei", 16),
+                font=FontManager.get_font("Microsoft JhengHei", 16),
             )
             widget.pack(fill="x")
 
@@ -439,10 +435,10 @@ class ServerPropertiesDialog:
             description,
             bg="lightyellow",
             fg="black",
-            font=get_font("Microsoft JhengHei", 16),
+            font=FontManager.get_font("Microsoft JhengHei", 16),
             padx=8,
             pady=4,
-            wraplength=get_dpi_scaled_size(600),
+            wraplength=FontManager.get_dpi_scaled_size(600),
             justify="left",
             borderwidth=1,
             relief="solid",

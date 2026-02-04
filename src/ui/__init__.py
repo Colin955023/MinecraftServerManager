@@ -19,10 +19,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     # dialogs/windows
     "ServerMonitorWindow": (".server_monitor_window", "ServerMonitorWindow"),
     "ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
-    "WindowPreferencesDialog": (
-        ".window_preferences_dialog",
-        "WindowPreferencesDialog",
-    ),
+    "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
     # widgets
     "CustomDropdown": (".custom_dropdown", "CustomDropdown"),
 }

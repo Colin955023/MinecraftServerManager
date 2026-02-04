@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """UI 工具函數
-提供常用的界面元件和工具函數，避免重複代碼
+提供常用的界面元件和工具函數，避免重複程式碼
 """
 
 import os
 import queue
-import shutil
 import threading
 import time
 import tkinter as tk
@@ -17,12 +16,11 @@ from typing import Any, Callable
 import customtkinter as ctk
 
 from . import (
+    FontManager,
     PathUtils,
+    SubprocessUtils,
     WindowManager,
-    font_manager,
-    get_dpi_scaled_size,
     get_logger,
-    run_checked,
 )
 
 logger = get_logger().bind(component="UIUtils")
@@ -30,32 +28,6 @@ logger = get_logger().bind(component="UIUtils")
 # 設置 CustomTkinter 主題
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
 ctk.set_default_color_theme("blue")  # 淺色藍色主題
-
-
-def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
-    """統一的主框架布局方法
-    Unified main frame packing method to avoid code duplication
-
-    Args:
-        frame: 要布局的框架物件 (CTkFrame 或 ttk.Frame)
-        padx (int): 水平內邊距，默認 DPI 縮放 15px
-        pady (int): 垂直內邊距，默認 DPI 縮放 15px
-
-    Returns:
-        None
-
-    """
-    if padx is None:
-        padx = get_dpi_scaled_size(15)
-    if pady is None:
-        pady = get_dpi_scaled_size(15)
-
-    frame.pack(
-        fill="both",
-        expand=True,
-        padx=padx,
-        pady=pady,
-    )
 
 
 class DialogUtils:
@@ -160,6 +132,86 @@ class IconUtils:
 
 
 class UIUtils:
+    @staticmethod
+    def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
+        """統一的主框架布局方法
+        Unified main frame packing method to avoid code duplication
+
+        Args:
+            frame: 要布局的框架物件 (CTkFrame 或 ttk.Frame)
+            padx (int): 水平內邊距，默認 DPI 縮放 15px
+            pady (int): 垂直內邊距，默認 DPI 縮放 15px
+
+        Returns:
+            None
+
+        """
+        if padx is None:
+            padx = FontManager.get_dpi_scaled_size(15)
+        if pady is None:
+            pady = FontManager.get_dpi_scaled_size(15)
+
+        frame.pack(
+            fill="both",
+            expand=True,
+            padx=padx,
+            pady=pady,
+        )
+
+    @staticmethod
+    def call_on_ui(parent: Any, func: Callable[[], Any]) -> Any:
+        """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)
+        Execute function on UI thread (schedule and wait if not on UI thread)
+
+        Args:
+            parent: 親代 widget (需有 after/winfo_exists 方法)
+            func: 要執行的函數
+
+        Returns:
+            Any: 函數回傳值
+
+        Raises:
+            Exception: 若函數執行過程發生例外，將在呼叫端重新拋出
+        """
+        try:
+            # 檢查 parent 是否有效
+            if (
+                parent is not None
+                and hasattr(parent, "after")
+                and hasattr(parent, "winfo_exists")
+                and parent.winfo_exists()
+            ):
+                # 若已在主執行緒，直接執行
+                if threading.current_thread() is threading.main_thread():
+                    return func()
+
+                # 否則排程到 UI 執行緒並等待
+                result: dict[str, Any] = {"value": None, "exc": None}
+                done = threading.Event()
+
+                def _runner():
+                    try:
+                        result["value"] = func()
+                    except Exception as e:
+                        result["exc"] = e
+                    finally:
+                        done.set()
+
+                try:
+                    parent.after(0, _runner)
+                    done.wait()
+                except Exception as e:
+                    logger.debug(f"排程 UI 任務時發生例外 (可能視窗已關閉): {e}")
+                    # 若無法排程，嘗試直接執行 (雖然可能失敗)
+                    return func()
+
+                if isinstance(result["exc"], Exception):
+                    raise result["exc"]
+                return result["value"]
+        except Exception as e:
+            logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
+        return func()
+
     @staticmethod
     def setup_window_properties(
         window,
@@ -320,6 +372,11 @@ class UIUtils:
 
         _cancel_existing()
         _tick()
+
+    @staticmethod
+    def run_async(target: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        """簡單的非同步執行封裝Starts a daemon thread to run the target function."""
+        threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
 
     @staticmethod
     def run_in_daemon_thread(
@@ -632,6 +689,34 @@ class UIUtils:
             logger.warning(f"警告: {title} - {message}")
 
     @staticmethod
+    def reveal_in_explorer(target) -> None:
+        """在檔案總管中顯示(依賴系統功能)
+        Show in explorer (system dependent)
+        """
+        target_path = Path(target)
+        try:
+            # 正規化路徑
+            if target_path.exists():
+                target_path = target_path.resolve()
+            target_str = str(target_path)
+            # Windows: 使用 explorer /select,
+            explorer = PathUtils.find_executable("explorer") or str(
+                Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
+            )
+            try:
+                SubprocessUtils.run_checked([explorer, f"/select,{target_str}"], check=False)
+                return
+            except Exception as e:
+                logger.debug(f"使用 explorer /select 失敗: {e}")
+
+            # Fallback：開啟所在的資料夾
+            folder_path = target_path if target_path.is_dir() else target_path.parent
+            UIUtils.open_external(str(folder_path))
+
+        except Exception as e:
+            logger.exception(f"在檔案總管中顯示失敗: {e}")
+
+    @staticmethod
     def open_external(target) -> None:
         """開啟外部資源（檔案、資料夾或 URL）。
         Open external resource (file, folder, or URL).
@@ -646,27 +731,31 @@ class UIUtils:
 
             # 嘗試作為路徑開啟，先檢查路徑是否存在
             try:
-                if not os.path.exists(target_str):
+                # 確保是絕對路徑
+                target_path = Path(target_str)
+                if target_path.exists():
+                    target_str = str(target_path.resolve())
+                elif not target_str.startswith("http"):
                     logger.error(f"開啟外部資源失敗：路徑不存在 - {target_str}")
                     return
             except Exception as e:
                 logger.debug(f"檢查路徑存在性時發生例外: {e}")
 
-            # 使用安全的 subprocess helper 或系統開啟方式
+            if hasattr(os, "startfile"):
+                try:
+                    os.startfile(target_str)  # nosec: B606
+                    return
+                except Exception as e:
+                    logger.debug(f"os.startfile 失敗，嘗試 subprocess: {e}")
             try:
-                explorer = shutil.which("explorer") or str(
+                explorer = PathUtils.find_executable("explorer") or str(
                     Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
                 )
                 try:
-                    run_checked([explorer, target_str], check=True)
+                    SubprocessUtils.run_checked([explorer, target_str], check=True)
                     return
                 except Exception as e:
-                    logger.debug(f"使用 explorer 開啟失敗，改用 startfile: {e}")
-                    try:
-                        os.startfile(target_str)  # nosec: B606
-                        return
-                    except Exception as e2:
-                        logger.exception(f"開啟外部資源失敗 (startfile): {target_str} - {e2}")
+                    logger.debug(f"使用 explorer 開啟失敗: {e}")
             except Exception as e:
                 logger.exception(f"透過系統開啟外部資源失敗: {target_str} - {e}")
         except Exception as e:
@@ -796,7 +885,7 @@ class UIUtils:
 
         """
         # 從字體管理器獲取當前的DPI縮放因子
-        scale_factor = font_manager.get_scale_factor()
+        scale_factor = FontManager.get_scale_factor()
 
         # 根據按鈕類型設定樣式
         if button_type == "primary":
@@ -804,7 +893,7 @@ class UIUtils:
                 "fg_color": ("#1f4e79", "#0f2a44"),  # 更深的藍色，提高對比
                 "hover_color": ("#0f2a44", "#071925"),
                 "text_color": ("#ffffff", "#ffffff"),  # 確保文字為白色
-                "font": font_manager.get_font(family="Microsoft JhengHei", size=18, weight="bold"),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=18, weight="bold"),
                 "width": int(180 * scale_factor),
                 "height": int(60 * scale_factor),
             }
@@ -813,7 +902,7 @@ class UIUtils:
                 "fg_color": ("#2d3748", "#1a202c"),  # 深灰色背景
                 "hover_color": ("#1a202c", "#0d1117"),
                 "text_color": ("#ffffff", "#ffffff"),  # 白色文字
-                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(120 * scale_factor),
                 "height": int(42 * scale_factor),
             }
@@ -822,7 +911,7 @@ class UIUtils:
                 "fg_color": ("#4a5568", "#2d3748"),  # 灰色背景
                 "hover_color": ("#2d3748", "#1a202c"),
                 "text_color": ("#ffffff", "#ffffff"),  # 白色文字確保對比
-                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(80 * scale_factor),
                 "height": int(30 * scale_factor),
             }
@@ -831,7 +920,7 @@ class UIUtils:
                 "fg_color": ("#dc2626", "#991b1b"),  # 更深的紅色
                 "hover_color": ("#991b1b", "#7f1d1d"),
                 "text_color": ("#ffffff", "#ffffff"),  # 白色文字
-                "font": font_manager.get_font(family="Microsoft JhengHei", size=18),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
                 "width": int(120 * scale_factor),
                 "height": int(48 * scale_factor),
             }
@@ -870,7 +959,7 @@ class ProgressDialog:
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 狀態標籤
-        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=font_manager.get_font(size=12))
+        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=FontManager.get_font(size=12))
         self.status_label.pack(pady=(10, 15))
 
         # 進度條
@@ -879,7 +968,7 @@ class ProgressDialog:
         self.progress.set(0)
 
         # 百分比標籤
-        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=font_manager.get_font(size=11))
+        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=FontManager.get_font(size=11))
         self.percent_label.pack()
 
         # 取消按鈕（可選）
@@ -890,7 +979,7 @@ class ProgressDialog:
                 command=self.cancel,
                 fg_color=("#ef4444", "#dc2626"),
                 hover_color=("#dc2626", "#b91c1c"),
-                font=font_manager.get_font(size=12),
+                font=FontManager.get_font(size=12),
                 width=80,
                 height=38,
             )

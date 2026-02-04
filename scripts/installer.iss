@@ -47,6 +47,8 @@ Name: "desktopicon"; Description: "在桌面建立捷徑"; GroupDescription: "�
 [Run]
 Filename: "{app}\MinecraftServerManager.exe"; Description: "安裝後立即執行"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"
 
 [Code]
 

@@ -27,7 +27,7 @@
 提供跨模組共用的通用功能與輔助函式。
 - **JavaUtils / JavaDownloader**: Java 環境的偵測、驗證與自動下載。
 - **Logger (標準 logging)**: 統一的日誌記錄系統，提供 loguru 風格介面並自動輪替日誌檔案。
-- **SettingsManager**: 應用程式設定的持久化存儲與讀取。
+- **SettingsManager**: 應用程式設定的持久化儲存與讀取。
 - **UIUtils**: 通用的 UI 輔助函式，如對話框顯示、字體管理等。
 
 ##  專案檔案結構
@@ -155,7 +155,7 @@ uv run python -m src.main
 - **包含內容**：
    - `MinecraftServerManager.exe` - 主程式
    - 其他運行時依賴與資源
-- **優點**：無需安裝、可攜帶在 USB 上、資料獨立存儲
+- **優點**：無需安裝、可攜帶在 USB 上、資料獨立儲存
 - **檔案路徑**：GitHub Release 發布為 `MinecraftServerManager-v*.*.* -portable.zip`
 
 - **可攜式自動更新與驗證**：更新檢查器會在偵測到可攜式模式時優先尋找命名包含 `-portable.zip` 的 Release asset 並嘗試下載套用；若 Release 同時提供 checksum 檔案或在釋出說明中包含檔案雜湊，程式會嘗試驗證下載內容的完整性，驗證失敗時會在 UI 顯示錯誤並停止套用更新。

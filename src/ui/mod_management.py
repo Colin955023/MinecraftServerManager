@@ -3,14 +3,10 @@
 參考 Prism Launcher 設計，支援線上模組查詢與下載
 """
 
-import json
 import queue
 import re
-import shutil
-import threading
 import tkinter as tk
 import traceback
-import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -23,11 +19,10 @@ from src.version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 from ..core import MinecraftVersionManager, ModManager, ModStatus
 from ..utils import (
+    FontManager,
     HTTPUtils,
+    PathUtils,
     UIUtils,
-    font_manager,
-    get_dpi_scaled_size,
-    get_font,
     get_logger,
     get_settings_manager,
 )
@@ -66,13 +61,11 @@ def search_mods_online(
     params = {
         "query": query,
         "limit": 20,
-        "facets": json.dumps(facets),
+        "facets": PathUtils.to_json_str(facets),
         "index": (sort_by if sort_by in ["relevance", "downloads", "newest"] else "relevance"),
     }
     headers = {"User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"}
-    # 構建完整 URL
-    full_url = url + "?" + urllib.parse.urlencode(params)
-    response = HTTPUtils.get_json(url=full_url, headers=headers, timeout=10)
+    response = HTTPUtils.get_json(url=url, headers=headers, params=params, timeout=10)
     if not response:
         logger.error("Modrinth API request failed")
         return []
@@ -243,7 +236,7 @@ class ModManagementFrame:
         ctk.CTkLabel(
             inner_frame,
             text="📁 伺服器:",
-            font=get_font(size=15, weight="bold"),
+            font=FontManager.get_font(size=15, weight="bold"),
         ).pack(side="left")
 
         self.server_var = tk.StringVar()
@@ -252,7 +245,7 @@ class ModManagementFrame:
             variable=self.server_var,
             values=["載入中..."],
             command=self.on_server_changed,
-            width=get_dpi_scaled_size(200),
+            width=FontManager.get_dpi_scaled_size(200),
         )
         self.server_combo.pack(side="left", padx=(10, 0))
 
@@ -260,7 +253,7 @@ class ModManagementFrame:
         refresh_btn = ctk.CTkButton(
             inner_frame,
             text="🔄 重新整理",
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             command=self.load_servers,
             width=120,
             height=32,
@@ -273,13 +266,13 @@ class ModManagementFrame:
         header_frame.pack(fill="x", padx=20, pady=(20, 10))
 
         # 創建標題
-        title_label = ctk.CTkLabel(header_frame, text="🧩 模組管理", font=get_font(size=27, weight="bold"))
+        title_label = ctk.CTkLabel(header_frame, text="🧩 模組管理", font=FontManager.get_font(size=27, weight="bold"))
         title_label.pack(side="left", padx=15, pady=15)
 
         desc_label = ctk.CTkLabel(
             header_frame,
             text="參考 Prism launcher 功能設計，提供模組管理體驗",
-            font=get_font(size=15),
+            font=FontManager.get_font(size=15),
             text_color=("#64748b", "#64748b"),
         )
         desc_label.pack(side="left", padx=(15, 15), pady=15)
@@ -305,7 +298,7 @@ class ModManagementFrame:
         notice = ctk.CTkLabel(
             self.browse_tab,
             text="目前瀏覽模組功能暫停開發，請手動下載模組。",
-            font=get_font(size=24, weight="bold"),
+            font=FontManager.get_font(size=24, weight="bold"),
             text_color=("#64748b", "#64748b"),
         )
         notice.pack(expand=True, fill="both", pady=80)
@@ -317,7 +310,7 @@ class ModManagementFrame:
 
         # 設置頁籤字體使用DPI縮放
         style = ttk.Style()
-        style.configure("Tab", font=get_font("Microsoft JhengHei", 18, "bold"))
+        style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", 18, "bold"))
 
         self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
@@ -358,7 +351,7 @@ class ModManagementFrame:
         import_btn = ctk.CTkButton(
             left_frame,
             text="📁 匯入模組",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=self.import_mod_file,
             fg_color="#059669",
             hover_color=self._get_hover_color("#059669"),
@@ -366,13 +359,13 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        import_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        import_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
         # 重新整理（強制掃描）
         refresh_mod_list_btn = ctk.CTkButton(
             left_frame,
             text="🔄 重新整理",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=self.refresh_mod_list_force,
             fg_color="#3b82f6",
             hover_color=self._get_hover_color("#3b82f6"),
@@ -380,13 +373,13 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        refresh_mod_list_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        refresh_mod_list_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
         # 檢查更新
         update_btn = ctk.CTkButton(
             left_frame,
             text="🔄 檢查更新",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=lambda: UIUtils.show_info("提示", "目前檢查更新功能暫停開發，請手動檢查模組更新。", self.parent),
             fg_color="#2563eb",
             hover_color=self._get_hover_color("#2563eb"),
@@ -394,13 +387,13 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        update_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        update_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
         # 全選/取消全選
         self.select_all_btn = ctk.CTkButton(
             left_frame,
             text="☑️ 全選",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=self.toggle_select_all,
             fg_color="#f59e0b",
             hover_color=self._get_hover_color("#f59e0b"),
@@ -408,13 +401,13 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        self.select_all_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        self.select_all_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
         # 批量啟用/停用
         self.batch_toggle_btn = ctk.CTkButton(
             left_frame,
             text="🔄 批量切換",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=self.batch_toggle_selected,
             fg_color="#8b5cf6",
             hover_color=self._get_hover_color("#8b5cf6"),
@@ -422,13 +415,13 @@ class ModManagementFrame:
             width=80,
             height=36,
         )
-        self.batch_toggle_btn.pack(side="left", padx=(0, get_dpi_scaled_size(15)))
+        self.batch_toggle_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
         # 開啟模組資料夾
         folder_btn = ctk.CTkButton(
             left_frame,
             text="📂 開啟資料夾",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             command=self.open_mods_folder,
             fg_color="#7c3aed",
             hover_color=self._get_hover_color("#7c3aed"),
@@ -447,18 +440,18 @@ class ModManagementFrame:
         search_frame.pack(side="left", padx=(0, 15))
 
         # 搜尋圖示
-        search_label = ctk.CTkLabel(search_frame, text="🔍", font=get_font(size=21))
+        search_label = ctk.CTkLabel(search_frame, text="🔍", font=FontManager.get_font(size=21))
         search_label.pack(side="left")
 
         self.local_search_var = tk.StringVar()
         search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self.local_search_var,
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             width=200,
             height=32,
         )
-        search_entry.pack(side="left", padx=(get_dpi_scaled_size(8), 0))
+        search_entry.pack(side="left", padx=(FontManager.get_dpi_scaled_size(8), 0))
         self.local_search_var.trace("w", self.filter_local_mods)
 
         # 狀態篩選
@@ -509,7 +502,7 @@ class ModManagementFrame:
                     )
                     self.update_status_safe(f"強制掃描失敗: {e}")
 
-            threading.Thread(target=load_thread, daemon=True).start()
+            UIUtils.run_async(load_thread)
 
     def create_local_mod_list(self) -> None:
         """建立本地模組列表"""
@@ -520,7 +513,7 @@ class ModManagementFrame:
         export_btn = ctk.CTkButton(
             list_frame,
             text="匯出模組列表",
-            font=get_font(size=20, weight="bold"),
+            font=FontManager.get_font(size=20, weight="bold"),
             fg_color=("#2563eb", "#1d4ed8"),
             hover_color=("#1d4ed8", "#1e40af"),
             text_color=("white", "white"),
@@ -536,10 +529,10 @@ class ModManagementFrame:
         style = ttk.Style()
         style.configure(
             "ModList.Treeview",
-            font=get_font(size=16),
-            rowheight=int(25 * font_manager.get_scale_factor()),
+            font=FontManager.get_font(size=16),
+            rowheight=int(25 * FontManager.get_scale_factor()),
         )
-        style.configure("ModList.Treeview.Heading", font=get_font(size=18, weight="bold"))
+        style.configure("ModList.Treeview.Heading", font=FontManager.get_font(size=18, weight="bold"))
 
         # 建立 Treeview
         columns = (
@@ -619,7 +612,9 @@ class ModManagementFrame:
             main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
             # 標題
-            title_label = ctk.CTkLabel(main_frame, text="匯出模組列表", font=get_font(size=27, weight="bold"))
+            title_label = ctk.CTkLabel(
+                main_frame, text="匯出模組列表", font=FontManager.get_font(size=27, weight="bold")
+            )
             title_label.pack(pady=(10, 20))
 
             # 格式選擇區域
@@ -629,7 +624,7 @@ class ModManagementFrame:
             fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
             fmt_inner.pack(fill="x", padx=20, pady=15)
 
-            ctk.CTkLabel(fmt_inner, text="選擇匯出格式:", font=get_font(size=21, weight="bold")).pack(
+            ctk.CTkLabel(fmt_inner, text="選擇匯出格式:", font=FontManager.get_font(size=21, weight="bold")).pack(
                 side="left",
                 padx=(0, 15),
             )
@@ -642,7 +637,7 @@ class ModManagementFrame:
                 text="純文字",
                 variable=fmt_var,
                 value="text",
-                font=get_font(size=18),
+                font=FontManager.get_font(size=18),
             )
             text_radio.pack(side="left", padx=5)
 
@@ -651,7 +646,7 @@ class ModManagementFrame:
                 text="JSON",
                 variable=fmt_var,
                 value="json",
-                font=get_font(size=18),
+                font=FontManager.get_font(size=18),
             )
             json_radio.pack(side="left", padx=5)
 
@@ -660,7 +655,7 @@ class ModManagementFrame:
                 text="HTML",
                 variable=fmt_var,
                 value="html",
-                font=get_font(size=18),
+                font=FontManager.get_font(size=18),
             )
             html_radio.pack(side="left", padx=5)
 
@@ -668,10 +663,10 @@ class ModManagementFrame:
             preview_frame = ctk.CTkFrame(main_frame)
             preview_frame.pack(fill="both", expand=True, pady=(0, 15))
 
-            preview_label = ctk.CTkLabel(preview_frame, text="預覽:", font=get_font(size=21, weight="bold"))
+            preview_label = ctk.CTkLabel(preview_frame, text="預覽:", font=FontManager.get_font(size=21, weight="bold"))
             preview_label.pack(anchor="w", padx=15, pady=(15, 5))
 
-            text_widget = ctk.CTkTextbox(preview_frame, font=get_font(size=18), height=300, wrap="word")
+            text_widget = ctk.CTkTextbox(preview_frame, font=FontManager.get_font(size=18), height=300, wrap="word")
             text_widget.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
             def update_preview(*_):
@@ -704,8 +699,7 @@ class ModManagementFrame:
                 )
                 if file_path:
                     export_text = self.mod_manager.export_mod_list(fmt)
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(export_text)
+                    PathUtils.write_text_file(Path(file_path), export_text)
                     try:
                         result = UIUtils.ask_yes_no_cancel(
                             "匯出成功",
@@ -726,11 +720,11 @@ class ModManagementFrame:
                 btn_frame,
                 text="儲存到檔案",
                 command=do_save,
-                font=get_font(size=18, weight="bold"),
+                font=FontManager.get_font(size=18, weight="bold"),
                 fg_color=("#2563eb", "#1d4ed8"),
                 hover_color=("#1d4ed8", "#1e40af"),
-                width=get_dpi_scaled_size(180),
-                height=int(40 * font_manager.get_scale_factor()),
+                width=FontManager.get_dpi_scaled_size(180),
+                height=int(40 * FontManager.get_scale_factor()),
             )
             save_btn.pack(side="left", padx=(0, 10))
 
@@ -738,11 +732,11 @@ class ModManagementFrame:
                 btn_frame,
                 text="關閉",
                 command=dialog.destroy,
-                font=get_font(size=18),
+                font=FontManager.get_font(size=18),
                 fg_color=("#6b7280", "#4b5563"),
                 hover_color=("#4b5563", "#374151"),
-                width=get_dpi_scaled_size(150),
-                height=int(40 * font_manager.get_scale_factor()),
+                width=FontManager.get_dpi_scaled_size(150),
+                height=int(40 * FontManager.get_scale_factor()),
             )
             close_btn.pack(side="left")
             dialog.bind("<Escape>", lambda _e: dialog.destroy())
@@ -753,7 +747,7 @@ class ModManagementFrame:
 
     def create_status_bar(self) -> None:
         """建立狀態列"""
-        status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * font_manager.get_scale_factor()))
+        status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * FontManager.get_scale_factor()))
         status_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
         status_frame.pack_propagate(False)
 
@@ -761,22 +755,22 @@ class ModManagementFrame:
         self.status_label = ctk.CTkLabel(
             status_frame,
             text="請選擇伺服器開始管理模組",
-            font=get_font(size=21),
+            font=FontManager.get_font(size=21),
             text_color=("#64748b", "#64748b"),
         )
-        self.status_label.pack(side="left", padx=10, pady=int(6 * font_manager.get_scale_factor()))
+        self.status_label.pack(side="left", padx=10, pady=int(6 * FontManager.get_scale_factor()))
 
         # 進度條（亮綠色，使用 CTK）
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ctk.CTkProgressBar(
             status_frame,
             variable=self.progress_var,
-            width=get_dpi_scaled_size(300),
-            height=int(20 * font_manager.get_scale_factor()),
+            width=FontManager.get_dpi_scaled_size(300),
+            height=int(20 * FontManager.get_scale_factor()),
             progress_color=("#22d3ee", "#4ade80"),
             fg_color=("#e5e7eb", "#374151"),
         )
-        self.progress_bar.pack(side="right", padx=10, pady=int(6 * font_manager.get_scale_factor()))
+        self.progress_bar.pack(side="right", padx=10, pady=int(6 * FontManager.get_scale_factor()))
 
     def load_servers(self) -> None:
         """載入伺服器列表"""
@@ -876,7 +870,7 @@ class ModManagementFrame:
                 self.update_progress_safe(0)
                 self.update_status_safe(f"掃描失敗: {e}")
 
-        threading.Thread(target=load_thread, daemon=True).start()
+        UIUtils.run_async(load_thread)
 
     def enhance_local_mods(self) -> None:
         """本地模組資訊（同步查詢），查詢完自動刷新列表（可選）"""
@@ -902,7 +896,7 @@ class ModManagementFrame:
             # 使用佇列更新 UI Use queue to update UI
             self.ui_queue.put(self.refresh_local_list)
 
-        threading.Thread(target=enhance_thread, daemon=True).start()
+        UIUtils.run_async(enhance_thread)
 
     def _get_enhanced_attr(self, enhanced, attr: str, fallback):
         """從增強物件取得屬性的輔助方法（效能優化：減少重複的 hasattr 檢查）
@@ -1169,7 +1163,7 @@ class ModManagementFrame:
 
                 self.ui_queue.put(apply_ui_update)
 
-            threading.Thread(target=do_toggle, daemon=True).start()
+            UIUtils.run_async(do_toggle)
 
         except Exception as e:
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -1190,7 +1184,7 @@ class ModManagementFrame:
         if not selection:
             return
 
-        menu = tk.Menu(self.parent, tearoff=0, font=get_font("Microsoft JhengHei", 18))  # 動態字體縮放
+        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", 18))  # 動態字體縮放
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
@@ -1219,7 +1213,7 @@ class ModManagementFrame:
 
                 target_path = mods_dir / Path(filename).name
                 # 複製檔案（修正：之前缺少實際複製檔案的操作）
-                shutil.copy2(filename, str(target_path))
+                PathUtils.copy_file(Path(filename), target_path)
                 UIUtils.show_info("成功", f"模組已匯入: {Path(filename).name}", self.parent)
                 self.load_local_mods()
 
@@ -1296,9 +1290,8 @@ class ModManagementFrame:
                         break
 
                 if mod_file and mod_file.exists():
-                    # 在檔案總管中選中該檔案，使用 UIUtils.open_external 做統一處理
                     try:
-                        UIUtils.open_external(mod_file)
+                        UIUtils.reveal_in_explorer(mod_file)
                     except Exception as e:
                         logger.error(f"無法打開檔案總管顯示檔案: {e}")
 
@@ -1574,7 +1567,7 @@ class ModManagementFrame:
                 self.ui_queue.put(self.update_selection_status)
                 self.ui_queue.put(lambda: _set_controls_enabled(True))
 
-            threading.Thread(target=do_batch, daemon=True).start()
+            UIUtils.run_async(do_batch)
         except Exception as e:
             logger.error(f"批量操作失敗: {e}\n{traceback.format_exc()}")
             self.update_progress_safe(0)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """設定管理器模組
-提供統一的使用者設定管理功能，包含自動更新、視窗偏好、調試設定等
+提供統一的使用者設定管理功能，包含自動更新、視窗偏好、除錯設定等
 Settings Manager Module
 Provides unified user settings management including auto-update, window preferences, debug settings etc.
 """
@@ -8,7 +8,7 @@ Provides unified user settings management including auto-update, window preferen
 import sys
 from typing import Any
 
-from . import PathUtils, ensure_dir, get_logger, get_user_data_dir
+from . import PathUtils, RuntimePaths, get_logger
 
 logger = get_logger().bind(component="SettingsManager")
 
@@ -32,11 +32,11 @@ def _get_default_settings() -> dict[str, Any]:
     """取得預設設定（根據環境動態計算）
     Get default settings (dynamically calculated based on environment)
     """
-    # 透過檢查是否為打包環境來設定調試日誌預設值
+    # 透過檢查是否為打包環境來設定除錯日誌預設值
     # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
     is_nuitka = "__compiled__" in globals()
     is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
-    # 開發環境預設啟用調試日誌，打包環境預設關閉
+    # 開發環境預設啟用除錯日誌，打包環境預設關閉
     default_debug_logging = not is_packaged
 
     return {
@@ -45,7 +45,7 @@ def _get_default_settings() -> dict[str, Any]:
         "first_run_completed": False,  # 標記是否已完成首次執行提示
         "window_preferences": DEFAULT_WINDOW_PREFERENCES.copy(),
         "debug_settings": {
-            "enable_debug_logging": default_debug_logging,  # 根據環境設定調試日誌預設值
+            "enable_debug_logging": default_debug_logging,  # 根據環境設定除錯日誌預設值
             "enable_window_state_logging": False,  # 控制視窗狀態儲存日誌
         },
     }
@@ -58,7 +58,7 @@ class SettingsManager:
 
     # ====== 初始化與檔案操作 ======
     def __init__(self):
-        self.settings_path = ensure_dir(get_user_data_dir()) / "user_settings.json"
+        self.settings_path = RuntimePaths.ensure_dir(RuntimePaths.get_user_data_dir()) / "user_settings.json"
         self._settings = self._load_settings()
 
     def _load_settings(self) -> dict[str, Any]:
@@ -281,17 +281,17 @@ class SettingsManager:
         prefs["dpi_scaling"] = max(0.5, min(3.0, scaling))  # 限制在 0.5-3.0 範圍內
         self.set("window_preferences", prefs)
 
-    # ====== 調試設定管理 ======
-    # 取得調試設定
+    # ====== 除錯設定管理 ======
+    # 取得除錯設定
     def get_debug_settings(self) -> dict[str, Any]:
-        """取得所有調試相關的設定
+        """取得所有除錯相關的設定
         Get all debug-related settings
 
         Args:
             None
 
         Returns:
-            Dict[str, Any]: 調試設定字典
+            Dict[str, Any]: 除錯設定字典
 
         """
         return self._settings.get(
@@ -299,23 +299,23 @@ class SettingsManager:
             {"enable_debug_logging": False, "enable_window_state_logging": False},
         )
 
-    # 檢查是否啟用調試日誌
+    # 檢查是否啟用除錯日誌
     def is_debug_logging_enabled(self) -> bool:
-        """檢查是否啟用調試日誌輸出功能
+        """檢查是否啟用除錯日誌輸出功能
         Check if debug logging output feature is enabled
 
         Args:
             None
 
         Returns:
-            bool: 啟用調試日誌返回 True，否則返回 False
+            bool: 啟用除錯日誌返回 True，否則返回 False
 
         """
         return self.get_debug_settings().get("enable_debug_logging", False)
 
-    # 設定調試日誌開關
+    # 設定除錯日誌開關
     def set_debug_logging(self, enabled: bool) -> None:
-        """設定調試日誌輸出功能的開關
+        """設定除錯日誌輸出功能的開關
         Set debug logging output feature on/off
 
         Args:

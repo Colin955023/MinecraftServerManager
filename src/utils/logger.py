@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .runtime_paths import get_exe_dir
+from . import RuntimePaths
 
 
 def _get_log_dir() -> Path:
@@ -20,7 +20,7 @@ def _get_log_dir() -> Path:
         Path: 日誌目錄路徑
     """
     # 使用 runtime_paths 提供的 exe 目錄判斷
-    exe_dir = get_exe_dir()
+    exe_dir = RuntimePaths.get_exe_dir()
 
     portable_marker = exe_dir / ".portable"
     config_dir = exe_dir / ".config"
@@ -62,7 +62,7 @@ class LoguruShim:
                 if args:
                     _ = msg % args
             except TypeError:
-                # 這通常是原始代碼多傳了參數 (例如 component)，我們將其附加在後方顯示
+                # 這通常是原始程式碼多傳了參數 (例如 component)，我們將其附加在後方顯示
                 msg = f"{msg} " + " ".join(map(str, args))
                 args = ()
             except Exception:

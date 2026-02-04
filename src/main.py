@@ -19,7 +19,7 @@ import customtkinter as ctk
 
 from src.core import LoaderManager, MinecraftVersionManager
 from src.ui import MinecraftServerManager
-from src.utils import UIUtils, get_logger, get_settings_manager, set_ui_scale_factor
+from src.utils import FontManager, UIUtils, get_logger, get_settings_manager
 
 # 初始化 logger
 logger = get_logger().bind(component="Main")
@@ -66,7 +66,7 @@ def _setup_ui_environment():
 
     settings = get_settings_manager()
     dpi_scaling = settings.get_dpi_scaling()
-    set_ui_scale_factor(dpi_scaling)
+    FontManager.set_scale_factor(dpi_scaling)
 
 
 def _launch_main_window():

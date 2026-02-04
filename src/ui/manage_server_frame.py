@@ -4,14 +4,11 @@
 """
 
 import queue
-import shutil
-import threading
 import time
 import tkinter as tk
 import traceback
 from datetime import datetime
 from pathlib import Path
-from subprocess import STARTF_USESHOWWINDOW, STARTUPINFO, SW_HIDE
 from tkinter import filedialog, ttk
 from typing import Any, Callable
 
@@ -19,13 +16,14 @@ import customtkinter as ctk
 
 from ..core import ServerConfig, ServerManager
 from ..utils import (
+    FontManager,
     MemoryUtils,
+    PathUtils,
     ServerDetectionUtils,
     ServerOperations,
+    SubprocessUtils,
     UIUtils,
-    get_font,
     get_logger,
-    popen_checked,
 )
 from . import ServerMonitorWindow, ServerPropertiesDialog
 
@@ -120,7 +118,9 @@ class ManageServerFrame(ctk.CTkFrame):
         main_container.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_container, text="⚙️ 管理伺服器", font=get_font(size=24, weight="bold"))
+        title_label = ctk.CTkLabel(
+            main_container, text="⚙️ 管理伺服器", font=FontManager.get_font(size=24, weight="bold")
+        )
         title_label.pack(pady=(0, 20))
 
         # 上方控制區
@@ -144,17 +144,19 @@ class ManageServerFrame(ctk.CTkFrame):
         control_frame.pack(fill="x", pady=(0, 20))
 
         # 標題
-        control_title = ctk.CTkLabel(control_frame, text="偵測設定", font=get_font(size=14, weight="bold"))
+        control_title = ctk.CTkLabel(control_frame, text="偵測設定", font=FontManager.get_font(size=14, weight="bold"))
         control_title.pack(anchor="w", pady=(15, 10), padx=(15, 0))
 
         # 偵測路徑
         path_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         path_frame.pack(fill="x", padx=15, pady=(0, 10))
 
-        ctk.CTkLabel(path_frame, text="偵測路徑:", font=get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(path_frame, text="偵測路徑:", font=FontManager.get_font(size=12)).pack(side="left")
 
         self.detect_path_var = tk.StringVar(value=str(self.server_manager.servers_root))
-        self.detect_path_entry = ctk.CTkEntry(path_frame, textvariable=self.detect_path_var, font=get_font(size=11))
+        self.detect_path_entry = ctk.CTkEntry(
+            path_frame, textvariable=self.detect_path_var, font=FontManager.get_font(size=11)
+        )
         self.detect_path_entry.pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         browse_button = UIUtils.create_styled_button(
@@ -210,7 +212,7 @@ class ManageServerFrame(ctk.CTkFrame):
         style = ttk.Style()
         style.configure(
             "ServerList.TLabelframe.Label",
-            font=get_font("Microsoft JhengHei", 18, "bold"),
+            font=FontManager.get_font("Microsoft JhengHei", 18, "bold"),
         )
         list_frame.configure(style="ServerList.TLabelframe")
 
@@ -219,8 +221,8 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
 
         # 配置 Treeview 的字體大小
-        style.configure("Treeview", font=get_font("Microsoft JhengHei", 18))
-        style.configure("Treeview.Heading", font=get_font("Microsoft JhengHei", 22, "bold"))
+        style.configure("Treeview", font=FontManager.get_font("Microsoft JhengHei", 18))
+        style.configure("Treeview.Heading", font=FontManager.get_font("Microsoft JhengHei", 22, "bold"))
         # 設定欄位
         self.server_tree.heading("名稱", text="名稱")
         self.server_tree.heading("版本", text="版本")
@@ -264,7 +266,7 @@ class ManageServerFrame(ctk.CTkFrame):
         selection = self.server_tree.selection()
         if not selection:
             return
-        menu = tk.Menu(self, tearoff=0, font=get_font("Microsoft JhengHei", 18))
+        menu = tk.Menu(self, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", 18))
         menu.add_command(label="🔄 重新檢測伺服器", command=self.recheck_selected_server)
         menu.add_separator()
         menu.add_command(label="📁 重新設定備份路徑", command=self.reset_backup_path)
@@ -438,11 +440,11 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 檢查是否有設定備份路徑
         if not hasattr(config, "backup_path") or not config.backup_path:
-            return "❌ 未設定路徑"
+            return "⚠️ 未設定"
 
         # 檢查備份路徑是否存在
         if not Path(config.backup_path).exists():
-            return "❌ 路徑不存在"
+            return "⚠️ 路徑失效"
 
         try:
             # 檢查備份資料夾中的world資料夾是否存在
@@ -456,6 +458,10 @@ class ManageServerFrame(ctk.CTkFrame):
                 # 計算距離現在的時間
                 now = datetime.now()
                 time_diff = now - backup_datetime
+
+                # 處理時間差為負值的情況 (例如系統時間被調整或跨時區)
+                if time_diff.total_seconds() < 0:
+                    return "✅ 剛剛"
 
                 if time_diff.days > 0:
                     time_ago = "1天前" if time_diff.days == 1 else f"{time_diff.days}天前"
@@ -480,14 +486,16 @@ class ManageServerFrame(ctk.CTkFrame):
         action_frame.pack(fill="x")
 
         # 操作標題
-        action_title = ctk.CTkLabel(action_frame, text="操作", font=get_font(size=14, weight="bold"))
+        action_title = ctk.CTkLabel(action_frame, text="操作", font=FontManager.get_font(size=14, weight="bold"))
         action_title.pack(anchor="w", pady=(5, 0), padx=(15, 0))
 
         # 資訊顯示
         info_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
         info_frame.pack(fill="x", padx=15, pady=(5, 5))
 
-        self.info_label = ctk.CTkLabel(info_frame, text="選擇一個伺服器以查看詳細資訊", font=get_font(size=14))
+        self.info_label = ctk.CTkLabel(
+            info_frame, text="選擇一個伺服器以查看詳細資訊", font=FontManager.get_font(size=14)
+        )
         self.info_label.pack(anchor="w")
 
         # 按鈕區域（獨立一行）
@@ -586,7 +594,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 error_msg = str(error)
                 self.ui_queue.put(lambda: UIUtils.show_error("錯誤", f"偵測失敗: {error_msg}", self.winfo_toplevel()))
 
-        threading.Thread(target=task, daemon=True).start()
+        UIUtils.run_async(task)
 
     def _detect_servers_task(self, path):
         count = 0
@@ -695,14 +703,19 @@ class ManageServerFrame(ctk.CTkFrame):
                 return True
         return False
 
-    def refresh_servers(self) -> None:
+    def refresh_servers(self, reload_config: bool = True) -> None:
         """重新整理伺服器列表：只刷新 UI，不自動偵測。
         Refresh server list: only refresh UI, do not auto-detect.
+
+        Args:
+            reload_config (bool):
+            是否重新載入配置檔，預設為 True。
+            如果是剛儲存完配置，建議設為 False 以避免 race condition。
         """
 
         def task():
             try:
-                server_data = self._refresh_servers_task()
+                server_data = self._refresh_servers_task(reload_config)
                 self.ui_queue.put(lambda: self._refresh_servers_callback(server_data))
             except Exception as e:
                 logger.bind(component="").error(
@@ -711,14 +724,18 @@ class ManageServerFrame(ctk.CTkFrame):
                 )
                 # 這裡可以選擇是否要顯示錯誤，或者靜默失敗
 
-        threading.Thread(target=task, daemon=True).start()
+        UIUtils.run_async(task)
 
-    def _refresh_servers_task(self):
+    def _refresh_servers_task(self, reload_config: bool = True):
         """後台任務：載入配置並獲取伺服器狀態
         Background task: load config and get server status
+
+        Args:
+            reload_config (bool): 是否重新載入配置檔
         """
-        # 強制重載配置
-        self.server_manager.load_servers_config()
+        # 只有在需要時才強制重載配置
+        if reload_config:
+            self.server_manager.load_servers_config()
 
         server_data: list[list[Any]] = []
         if not self.server_manager.servers:
@@ -756,18 +773,12 @@ class ManageServerFrame(ctk.CTkFrame):
         if self.server_tree is None:
             return
 
-        # 檢查數據是否變更（使用簡化的簽章檢查，避免過度計算）
+        # 檢查數據是否變更
         try:
-            # 簡化簽章：使用長度 + 第一個項目 + 最後一個項目
-            if server_data:
-                first_item = str(server_data[0]) if server_data else ""
-                last_item = str(server_data[-1]) if len(server_data) > 1 else ""
-                current_data_hash = hash((len(server_data), first_item, last_item))
-            else:
-                current_data_hash = hash(0)
+            current_data_hash = hash(str(server_data))
         except (TypeError, IndexError):
-            # 如果資料無法處理，使用長度作為簽章
-            current_data_hash = hash(len(server_data))
+            # 如果資料無法處理，使用隨機值強制更新
+            current_data_hash = hash(time.time())
 
         if (
             getattr(self, "_last_server_data_hash", None) is not None
@@ -1042,7 +1053,7 @@ class ManageServerFrame(ctk.CTkFrame):
             # 如果需要刪除備份
             if delete_backup and backup_path:
                 try:
-                    shutil.rmtree(backup_path)
+                    PathUtils.delete_path(backup_path)
                     UIUtils.show_info(
                         "成功",
                         f"伺服器 {self.selected_server} 和其備份已刪除",
@@ -1098,13 +1109,15 @@ class ManageServerFrame(ctk.CTkFrame):
         is_new_backup_path = False  # 記錄是否是新設定的路徑
 
         if hasattr(config, "backup_path") and config.backup_path:
-            # 檢查儲存的路徑是否仍然存在
-            if Path(config.backup_path).exists():
-                backup_location = config.backup_path
-            else:
-                # 路徑不存在，清除配置中的路徑
-                config.backup_path = None
-                self.server_manager.save_servers_config()
+            # 嘗試確保備份路徑存在
+            try:
+                if not Path(config.backup_path).exists():
+                    Path(config.backup_path).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.warning(f"無法建立備份路徑: {e}")
+
+            # 使用設定的路徑 (即使暫時無法存取也不要清除設定)
+            backup_location = config.backup_path
 
         # 如果沒有備份路徑，詢問使用者
         if not backup_location:
@@ -1133,8 +1146,8 @@ class ManageServerFrame(ctk.CTkFrame):
             self.server_manager.save_servers_config()
             is_new_backup_path = True  # 標記為新設定的路徑
 
-            # 立即刷新一次列表以更新備份狀態
-            self.refresh_servers()
+            # 立即刷新一次列表以更新備份狀態 (不重新載入配置，因為剛剛才存檔)
+            self.refresh_servers(reload_config=False)
 
         # 建立備份檔案路徑
         backup_full_path = backup_location  # 備份路徑就是伺服器專用資料夾
@@ -1147,6 +1160,7 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 生成批次檔內容
         bat_content = f"""@echo off
+@chcp 65001 > nul
 
 REM 備份 {server_name} 伺服器世界檔案
 REM Backup {server_name} server world files
@@ -1178,8 +1192,7 @@ pause"""
         bat_file_path = str(Path(backup_full_path) / f"backup_{server_name}.bat")
 
         try:
-            with open(bat_file_path, "w", encoding="utf-8") as f:
-                f.write(bat_content)
+            PathUtils.write_text_file(Path(bat_file_path), bat_content)
 
             # 如果是新設定的備份路徑，詢問是否立即執行備份
             # 如果已有備份路徑，直接執行備份
@@ -1213,11 +1226,11 @@ pause"""
             # 執行批次檔（不顯示命令視窗）
             try:
                 # 使用 subprocess 執行，隱藏命令視窗
-                startupinfo = STARTUPINFO()
-                startupinfo.dwFlags |= STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = SW_HIDE
+                startupinfo = SubprocessUtils.STARTUPINFO()
+                startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
 
-                popen_checked([bat_file_path], startupinfo=startupinfo)
+                SubprocessUtils.popen_checked([bat_file_path], startupinfo=startupinfo)
 
                 UIUtils.show_info(
                     "備份開始",

@@ -15,15 +15,13 @@ from typing import Any, Callable
 import customtkinter as ctk
 
 from ..utils import (
+    FontManager,
     MemoryUtils,
+    PathUtils,
     ServerOperations,
     UIUtils,
     WindowManager,
-    font_manager,
-    get_dpi_scaled_size,
-    get_font,
     get_logger,
-    pack_main_frame,
 )
 
 logger = get_logger().bind(component="ServerMonitorWindow")
@@ -126,7 +124,7 @@ class ServerMonitorWindow:
         base_width = 1000
         base_height = 950
 
-        scale = font_manager.get_scale_factor()
+        scale = FontManager.get_scale_factor()
         physical_min_width = int(base_width * scale)
         physical_min_height = int(base_height * scale)
 
@@ -148,7 +146,7 @@ class ServerMonitorWindow:
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         main_frame = ctk.CTkFrame(self.window)
-        pack_main_frame(main_frame)
+        UIUtils.pack_main_frame(main_frame)
 
         self.create_control_panel(main_frame)
         self.create_console_panel(main_frame)
@@ -196,11 +194,13 @@ class ServerMonitorWindow:
         Create control panel
         """
         control_frame = ctk.CTkFrame(parent)
-        control_frame.pack(fill="x", pady=(0, int(10 * font_manager.get_scale_factor())))
+        control_frame.pack(fill="x", pady=(0, int(10 * FontManager.get_scale_factor())))
 
         # 標題標籤
-        title_label = ctk.CTkLabel(control_frame, text="🎮 伺服器控制", font=get_font(size=21, weight="bold"))  # 21px
-        title_label.pack(pady=(get_dpi_scaled_size(15), get_dpi_scaled_size(8)))
+        title_label = ctk.CTkLabel(
+            control_frame, text="🎮 伺服器控制", font=FontManager.get_font(size=21, weight="bold")
+        )  # 21px
+        title_label.pack(pady=(FontManager.get_dpi_scaled_size(15), FontManager.get_dpi_scaled_size(8)))
 
         # 伺服器狀態
         # 狀態標籤（統一用 get_status_text）
@@ -208,10 +208,10 @@ class ServerMonitorWindow:
         self.status_label = ctk.CTkLabel(
             control_frame,
             text=status_text,
-            font=get_font(size=20, weight="bold"),  # 20px
+            font=FontManager.get_font(size=20, weight="bold"),  # 20px
             text_color=status_color if status_color != "red" else "#e53e3e",
         )
-        self.status_label.pack(side="left", padx=get_dpi_scaled_size(15))
+        self.status_label.pack(side="left", padx=FontManager.get_dpi_scaled_size(15))
 
         # 控制按鈕
         button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
@@ -222,7 +222,7 @@ class ServerMonitorWindow:
             text="🚀 啟動",
             command=self.start_server,
             state="disabled",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             width=80,
         )
         self.start_button.pack(side="left", padx=(0, 5))
@@ -232,7 +232,7 @@ class ServerMonitorWindow:
             text="⏹️ 停止",
             command=self.stop_server,
             state="disabled",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             width=80,
             fg_color=("#e53e3e", "#dc2626"),
             hover_color=("#dc2626", "#b91c1c"),
@@ -243,7 +243,7 @@ class ServerMonitorWindow:
             button_frame,
             text="🔄 刷新",
             command=self.refresh_status,
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             width=80,
         )
         self.refresh_button.pack(side="left")
@@ -253,7 +253,9 @@ class ServerMonitorWindow:
         status_frame.pack(fill="x", pady=(0, 10))
 
         # 標題標籤
-        status_title_label = ctk.CTkLabel(status_frame, text="📈 系統資源", font=get_font(size=21, weight="bold"))
+        status_title_label = ctk.CTkLabel(
+            status_frame, text="📈 系統資源", font=FontManager.get_font(size=21, weight="bold")
+        )
         status_title_label.pack(pady=(10, 5))
 
         # 內容框架
@@ -267,24 +269,30 @@ class ServerMonitorWindow:
         right_frame = ctk.CTkFrame(status_content_frame, fg_color="transparent")
         right_frame.pack(side="right", fill="both", expand=True)
 
-        self.pid_label = ctk.CTkLabel(left_frame, text="🆔 PID: N/A", font=get_font(size=18), anchor="w")
+        self.pid_label = ctk.CTkLabel(left_frame, text="🆔 PID: N/A", font=FontManager.get_font(size=18), anchor="w")
         self.pid_label.pack(anchor="w", pady=2)
 
-        self.memory_label = ctk.CTkLabel(left_frame, text="🧠 記憶體使用: 0 MB", font=get_font(size=18), anchor="w")
+        self.memory_label = ctk.CTkLabel(
+            left_frame, text="🧠 記憶體使用: 0 MB", font=FontManager.get_font(size=18), anchor="w"
+        )
         self.memory_label.pack(anchor="w", pady=2)
 
         self.uptime_label = ctk.CTkLabel(
             middle_frame,
             text="⏱️ 運行時間: 00:00:00",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             anchor="w",
         )
         self.uptime_label.pack(anchor="w", pady=2)
 
-        self.players_label = ctk.CTkLabel(middle_frame, text="👥 玩家數量: 0/20", font=get_font(size=18), anchor="w")
+        self.players_label = ctk.CTkLabel(
+            middle_frame, text="👥 玩家數量: 0/20", font=FontManager.get_font(size=18), anchor="w"
+        )
         self.players_label.pack(anchor="w", pady=2)
 
-        self.version_label = ctk.CTkLabel(right_frame, text="📦 版本: N/A", font=get_font(size=18), anchor="w")
+        self.version_label = ctk.CTkLabel(
+            right_frame, text="📦 版本: N/A", font=FontManager.get_font(size=18), anchor="w"
+        )
         logger.debug("初始化 ServerMonitorWindow，預設版本顯示 N/A")
         self.version_label.pack(anchor="w", pady=2)
 
@@ -293,14 +301,16 @@ class ServerMonitorWindow:
         players_frame.pack(fill="x", pady=(0, 10))
 
         # 標題標籤
-        players_title_label = ctk.CTkLabel(players_frame, text="👥 線上玩家", font=get_font(size=21, weight="bold"))
+        players_title_label = ctk.CTkLabel(
+            players_frame, text="👥 線上玩家", font=FontManager.get_font(size=21, weight="bold")
+        )
         players_title_label.pack(pady=(10, 5))
 
         # 玩家列表
         self.players_listbox = tk.Listbox(
             players_frame,
             height=5,
-            font=get_font("Microsoft JhengHei", 18),
+            font=FontManager.get_font("Microsoft JhengHei", 18),
             bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#f8fafc",
             fg="#ffffff" if ctk.get_appearance_mode() == "Dark" else "#000000",
             selectbackground="#1f538d",
@@ -347,7 +357,7 @@ class ServerMonitorWindow:
         console_title_label = ctk.CTkLabel(
             console_frame,
             text="📜 控制台輸出",
-            font=get_font(size=21, weight="bold"),  # 21px
+            font=FontManager.get_font(size=21, weight="bold"),  # 21px
         )
         console_title_label.pack(pady=(10, 5))
 
@@ -355,25 +365,25 @@ class ServerMonitorWindow:
         self.console_text = ctk.CTkTextbox(
             console_frame,
             height=240,
-            font=get_font(family="Consolas", size=15),
+            font=FontManager.get_font(family="Consolas", size=15),
             wrap="word",
             fg_color="#000000",  # 黑色背景
             text_color="#00ff00",  # 綠色文字
             scrollbar_button_color="#333333",  # 滾動條按鈕顏色
             scrollbar_button_hover_color="#555555",  # 滾動條按鈕懸停顏色
         )
-        self.console_text.pack(fill="both", expand=True, padx=get_dpi_scaled_size(15))
+        self.console_text.pack(fill="both", expand=True, padx=FontManager.get_dpi_scaled_size(15))
 
         # 命令輸入區
         command_frame = ctk.CTkFrame(console_frame, fg_color="transparent")
-        command_frame.pack(fill="x", padx=get_dpi_scaled_size(15), pady=(5, 10))
+        command_frame.pack(fill="x", padx=FontManager.get_dpi_scaled_size(15), pady=(5, 10))
 
-        command_label = ctk.CTkLabel(command_frame, text="命令:", font=get_font(size=18))  # 18px
+        command_label = ctk.CTkLabel(command_frame, text="命令:", font=FontManager.get_font(size=18))  # 18px
         command_label.pack(side="left", padx=(0, 10))
 
         self.command_entry = ctk.CTkEntry(
             command_frame,
-            font=get_font(family="Consolas", size=14),
+            font=FontManager.get_font(family="Consolas", size=14),
             placeholder_text="輸入指令...",
         )
         self.command_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -386,7 +396,7 @@ class ServerMonitorWindow:
             text="發送",
             command=self.send_command,
             state="disabled",
-            font=get_font(size=18),
+            font=FontManager.get_font(size=18),
             width=80,
         )
         self.send_button.pack(side="right")
@@ -486,7 +496,7 @@ class ServerMonitorWindow:
         while self.is_monitoring and not self._monitor_stop_event.is_set():
             try:
                 current_time = time.monotonic()
-                # 每 1.5 秒更新一次狀態信息
+                # 每 1.5 秒更新一次狀態訊息
                 if current_time - last_status_update >= 1.5:
                     if self.window and self.window.winfo_exists():
                         self.ui_queue.put(self.update_status)
@@ -856,8 +866,8 @@ class ServerMonitorWindow:
         try:
             log_file = self.server_manager.get_server_log_file(self.server_name)
             if log_file and log_file.exists():
-                with open(log_file, encoding="utf-8", errors="ignore") as f:
-                    lines = f.readlines()
+                content = PathUtils.read_text_file(log_file, errors="ignore")
+                lines = content.splitlines(keepends=True) if content else []
 
                 out_lines = []
                 for line in lines:

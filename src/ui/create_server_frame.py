@@ -14,16 +14,15 @@ from tkinter import filedialog
 from typing import Any, Callable
 
 import customtkinter as ctk
-import psutil
 
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    FontManager,
+    JavaUtils,
     ProgressDialog,
+    SystemUtils,
     UIUtils,
-    font_manager,
-    get_best_java_path,
-    get_font,
     get_logger,
 )
 from . import CustomDropdown
@@ -43,7 +42,7 @@ class CreateServerFrame(ctk.CTkFrame):
         Get system memory capacity in MB
         """
         try:
-            return psutil.virtual_memory().total // (1024**2)
+            return SystemUtils.get_total_memory_mb()
         except Exception as e:
             logger.bind(component="").error(
                 f"無法獲取系統記憶體資訊: {e}\n{traceback.format_exc()}",
@@ -103,12 +102,14 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             parent,
             text="Java 執行檔路徑 (可選):",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         self.java_path_var = tk.StringVar(value="")
-        java_path_entry = ctk.CTkEntry(parent, textvariable=self.java_path_var, font=get_font(size=14), width=300)
+        java_path_entry = ctk.CTkEntry(
+            parent, textvariable=self.java_path_var, font=FontManager.get_font(size=14), width=300
+        )
         java_path_entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
 
         def browse_java():
@@ -129,7 +130,7 @@ class CreateServerFrame(ctk.CTkFrame):
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
                 return
-            java_path = get_best_java_path(mc_version)
+            java_path = JavaUtils.get_best_java_path(mc_version)
             if java_path:
                 java_path_win = str(Path(java_path))
                 self.java_path_var.set(java_path_win)
@@ -174,7 +175,7 @@ class CreateServerFrame(ctk.CTkFrame):
         title_label = ctk.CTkLabel(
             main_container,
             text="建立新伺服器",
-            font=get_font(size=24, weight="bold"),
+            font=FontManager.get_font(size=24, weight="bold"),
             text_color=("#111827", "#f3f4f6"),
         )
         title_label.pack(pady=(0, 15))
@@ -187,7 +188,7 @@ class CreateServerFrame(ctk.CTkFrame):
         eula_icon = ctk.CTkLabel(
             eula_frame,
             text="⚠️",
-            font=get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=18, weight="bold"),
             text_color="#d97706",
         )
         eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(8, 4), pady=6)
@@ -197,7 +198,7 @@ class CreateServerFrame(ctk.CTkFrame):
             text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
             font=ctk.CTkFont(
                 family="Microsoft JhengHei",
-                size=int(14 * font_manager.get_scale_factor()),
+                size=int(14 * FontManager.get_scale_factor()),
                 weight="bold",
                 underline=True,
             ),
@@ -236,7 +237,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             content_frame,
             text="模組載入器:",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=2, column=0, sticky="w", pady=5)
 
@@ -259,7 +260,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             content_frame,
             text="載入器版本:",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=loader_version_row, column=0, sticky="w", pady=5)
 
@@ -292,7 +293,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             version_frame,
             text="Minecraft 版本:",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).pack(anchor="w")
         # Minecraft 版本下拉選單與滑桿
@@ -325,7 +326,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             memory_frame,
             text="記憶體設定 (MB):",
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).pack(anchor="w")
 
@@ -339,7 +340,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             min_memory_frame,
             text="最小記憶體 (選填):",
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             text_color=("#4b5563", "#9ca3af"),
         ).pack(anchor="w")
 
@@ -347,7 +348,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.min_memory_entry = ctk.CTkEntry(
             min_memory_frame,
             textvariable=self.min_memory_var,
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             width=120,
         )
         self.min_memory_entry.pack(fill="x", pady=(2, 0))
@@ -359,7 +360,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             max_memory_frame,
             text="最大記憶體 (必填):",
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             text_color=("#4b5563", "#9ca3af"),
         ).pack(anchor="w")
 
@@ -367,7 +368,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.max_memory_entry = ctk.CTkEntry(
             max_memory_frame,
             textvariable=self.max_memory_var,
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             width=120,
         )
         self.max_memory_entry.pack(fill="x", pady=(2, 0))
@@ -380,7 +381,7 @@ class CreateServerFrame(ctk.CTkFrame):
         memory_tip = ctk.CTkLabel(
             memory_frame,
             text="建議：最大 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
-            font=get_font(size=14),
+            font=FontManager.get_font(size=14),
             text_color=("#4b5563", "#9ca3af"),
         )
         memory_tip.pack(anchor="w", pady=(5, 0))
@@ -389,7 +390,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.memory_warning_label = ctk.CTkLabel(
             memory_frame,
             text="",
-            font=get_font(size=13),
+            font=FontManager.get_font(size=13),
             text_color=("red", "red"),
             wraplength=400,
         )
@@ -532,14 +533,14 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             parent,
             text=label_text,
-            font=get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=14, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         var = tk.StringVar(value=default_value)
         setattr(self, f"{var_name}_var", var)
 
-        entry = ctk.CTkEntry(parent, textvariable=var, font=get_font(size=14), width=300)
+        entry = ctk.CTkEntry(parent, textvariable=var, font=FontManager.get_font(size=14), width=300)
         entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
         setattr(self, f"{var_name}_entry", entry)
         return var, entry
@@ -903,7 +904,7 @@ class CreateServerFrame(ctk.CTkFrame):
             eula_accepted=True,  # 總是自動接受 EULA
         )
         # 在背景執行緒中建立伺服器
-        threading.Thread(target=self.create_server_async, args=(config,), daemon=True).start()
+        UIUtils.run_async(self.create_server_async, config)
 
     def create_server_async(self, config: ServerConfig) -> None:
         """非同步建立伺服器 - 只負責互動與下載，所有檔案/資料夾/屬性/啟動腳本交由 server_manager

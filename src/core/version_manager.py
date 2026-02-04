@@ -12,10 +12,9 @@ from pathlib import Path
 from src.utils import (
     HTTPUtils,
     PathUtils,
+    RuntimePaths,
     Singleton,
     UIUtils,
-    ensure_dir,
-    get_cache_dir,
     get_logger,
 )
 
@@ -40,7 +39,7 @@ class MinecraftVersionManager(Singleton):
             return
 
         self.version_manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest.json"
-        self.cache_file = str(ensure_dir(get_cache_dir()) / "mc_versions_cache.json")
+        self.cache_file = str(RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir()) / "mc_versions_cache.json")
         self._lock = threading.Lock()
         self._initialized = True
 
@@ -74,7 +73,7 @@ class MinecraftVersionManager(Singleton):
         try:
             # 在寫入前確保快取目錄存在
             cache_path = Path(self.cache_file)
-            ensure_dir(cache_path.parent)
+            RuntimePaths.ensure_dir(cache_path.parent)
 
             # 檢查資料是否異動，避免不必要的寫入
             existing_data = PathUtils.load_json(cache_path)

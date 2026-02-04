@@ -24,7 +24,7 @@ try {
 
 # 驗證版本格式，確保不是意外的物件
 if (-not $version -or -not ($version -match '^\d+\.\d+\.\d+')) {
-    $version = '1.6.2'
+    $version = '1.6.3'
 }
 
 Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan

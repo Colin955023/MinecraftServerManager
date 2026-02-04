@@ -6,7 +6,6 @@ Mod Manager Module
 Responsible for managing Minecraft server mods with enabling/disabling, removing capabilities
 """
 
-import json
 import re
 import threading
 import time
@@ -19,7 +18,7 @@ from typing import Callable
 
 import toml
 
-from ..utils import HTTPUtils, ServerDetectionUtils, UIUtils, get_logger
+from ..utils import HTTPUtils, PathUtils, ServerDetectionUtils, UIUtils, get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
@@ -371,12 +370,9 @@ class ModManager:
         """
         try:
             with jar.open(file_path) as f:
-                return json.load(f)
-        except (KeyError, json.JSONDecodeError) as e:
-            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {e}")
-            return None
+                return PathUtils.from_json_str(f.read().decode("utf-8"))
         except Exception as e:
-            logger.exception(f"讀取 JAR 中的 JSON 時發生錯誤 {file_path}: {e}")
+            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {e}")
             return None
 
     def _read_toml_from_jar(self, jar, file_path: str) -> dict | None:
@@ -633,9 +629,10 @@ class ModManager:
             模組平台 ID
         """
         try:
-            with jar.open("fabric.mod.json") as f:
-                meta = json.load(f)
-            return meta.get("id", "")
+            meta = self._read_json_from_jar(jar, "fabric.mod.json")
+            if meta and isinstance(meta, dict):
+                return meta.get("id", "")
+            return ""
         except Exception as e:
             logger.exception(f"解析 fabric.mod.json 取得平台 ID 失敗: {e}")
             return ""
@@ -869,7 +866,7 @@ class ModManager:
                         "id": mod.id,
                     }
                 )
-            return json.dumps(export_data, ensure_ascii=False, indent=2)
+            return PathUtils.to_json_str(export_data, indent=2)
         if format_type == "html":
             html = [
                 "<!DOCTYPE html>",

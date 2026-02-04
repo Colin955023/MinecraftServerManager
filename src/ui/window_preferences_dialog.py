@@ -10,16 +10,13 @@ from typing import Callable
 import customtkinter as ctk
 
 from ..utils import (
+    AppRestart,
     DialogUtils,
+    FontManager,
     UIUtils,
     WindowManager,
-    can_restart,
-    get_font,
     get_logger,
-    get_restart_diagnostics,
     get_settings_manager,
-    schedule_restart_and_exit,
-    set_ui_scale_factor,
 )
 
 logger = get_logger().bind(component="WindowPreferencesDialog")
@@ -60,7 +57,7 @@ class WindowPreferencesDialog:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_frame, text="🖥️ 視窗偏好設定", font=get_font(size=18, weight="bold"))
+        title_label = ctk.CTkLabel(main_frame, text="🖥️ 視窗偏好設定", font=FontManager.get_font(size=18, weight="bold"))
         title_label.pack(pady=(0, 20))
 
         # 一般設定區域
@@ -92,7 +89,7 @@ class WindowPreferencesDialog:
         frame.pack(fill="x", pady=(0, 15))
 
         section_title = f"{emoji} {title}" if emoji else title
-        ctk.CTkLabel(frame, text=section_title, font=get_font(size=14, weight="bold")).pack(
+        ctk.CTkLabel(frame, text=section_title, font=FontManager.get_font(size=14, weight="bold")).pack(
             anchor="w",
             padx=15,
             pady=(15, 10),
@@ -113,7 +110,7 @@ class WindowPreferencesDialog:
             CTkCheckBox: 建立的複選框
 
         """
-        checkbox = ctk.CTkCheckBox(parent, text=text, variable=variable, font=get_font(size=12))
+        checkbox = ctk.CTkCheckBox(parent, text=text, variable=variable, font=FontManager.get_font(size=12))
         checkbox.pack(anchor="w", padx=25, pady=(0, 10))
         return checkbox
 
@@ -133,8 +130,8 @@ class WindowPreferencesDialog:
         self.adaptive_sizing_var = ctk.BooleanVar()
         self._create_checkbox(general_frame, "啟用自適應視窗大小調整", self.adaptive_sizing_var)
 
-        # 根據環境決定是否顯示調試選項
-        # 開發環境顯示調試選項，打包環境隱藏
+        # 根據環境決定是否顯示除錯選項
+        # 開發環境顯示除錯選項，打包環境隱藏
         # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
         is_nuitka = "__compiled__" in globals()
         is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
@@ -142,10 +139,10 @@ class WindowPreferencesDialog:
 
         if should_show_debug:
             self.debug_logging_var = ctk.BooleanVar()
-            checkbox = self._create_checkbox(general_frame, "啟用調試日誌輸出", self.debug_logging_var)
+            checkbox = self._create_checkbox(general_frame, "啟用除錯日誌輸出", self.debug_logging_var)
             checkbox.pack(anchor="w", padx=25, pady=(0, 15))  # 最後一個有額外間距
         else:
-            # 如果是打包環境，隱藏調試選項並設為 False
+            # 如果是打包環境，隱藏除錯選項並設為 False
             self.debug_logging_var = ctk.BooleanVar()
             self.debug_logging_var.set(False)
 
@@ -164,7 +161,7 @@ class WindowPreferencesDialog:
             f"目前主視窗大小: {current_settings.get('width', 1200)} × {current_settings.get('height', 800)}"
         )
 
-        ctk.CTkLabel(main_window_frame, text=info_text, font=get_font(size=12), justify="left").pack(
+        ctk.CTkLabel(main_window_frame, text=info_text, font=FontManager.get_font(size=12), justify="left").pack(
             anchor="w",
             padx=25,
             pady=(0, 15),
@@ -176,7 +173,7 @@ class WindowPreferencesDialog:
             main_window_frame,
             text="重設為預設大小",
             command=self._reset_to_default_size,
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             width=int(150 * scale_factor),
             height=int(32 * scale_factor),
         )
@@ -192,7 +189,7 @@ class WindowPreferencesDialog:
         dpi_frame = ctk.CTkFrame(display_frame, fg_color="transparent")
         dpi_frame.pack(fill="x", padx=25, pady=(0, 15))
 
-        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=FontManager.get_font(size=12)).pack(side="left")
 
         scale_factor = get_settings_manager().get_dpi_scaling()
         self.dpi_scale_var = ctk.DoubleVar()
@@ -210,7 +207,7 @@ class WindowPreferencesDialog:
         self.dpi_scale_label = ctk.CTkLabel(
             dpi_frame,
             text="1.0x",
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             width=int(40 * scale_factor),
         )
         self.dpi_scale_label.pack(side="left")
@@ -219,7 +216,7 @@ class WindowPreferencesDialog:
         ctk.CTkLabel(
             display_frame,
             text="調整此設定以適應高解析度螢幕或改善視覺效果",
-            font=get_font(size=12),
+            font=FontManager.get_font(size=12),
             text_color="gray",
         ).pack(anchor="w", padx=25, pady=(0, 15))
 
@@ -247,13 +244,13 @@ class WindowPreferencesDialog:
             btn_config = {
                 "text": text,
                 "command": command,
-                "font": get_font(size=12),
+                "font": FontManager.get_font(size=12),
                 "width": 100,
                 "height": 35,
             }
 
             if text == "套用設定":
-                btn_config["font"] = get_font(size=12, weight="bold")
+                btn_config["font"] = FontManager.get_font(size=12, weight="bold")
             if fg_color:
                 btn_config["fg_color"] = fg_color
             if hover_color:
@@ -389,14 +386,14 @@ class WindowPreferencesDialog:
                 msg += "\n\n部分設定（如 DPI、視窗記憶、自適應等）需要重新啟動程式才能完全套用。"
             UIUtils.show_info("恢復完成", msg, parent=self.dialog)
 
-            # 若需要重啟，依 can_restart() 決定提示
+            # 若需要重啟，依 AppRestart.can_restart() 決定提示
             if important_changes:
-                supported = can_restart()
+                supported = AppRestart.can_restart()
                 supported_diag = None
                 if not supported:
                     # 取得詳細診斷以便提示使用者
                     try:
-                        _, supported_diag = get_restart_diagnostics()
+                        _, supported_diag = AppRestart.get_restart_diagnostics()
                     except Exception:
                         supported_diag = None
 
@@ -409,7 +406,7 @@ class WindowPreferencesDialog:
                     ):
                         try:
                             self.dialog.destroy()
-                            schedule_restart_and_exit(self.parent, delay=0.5)
+                            AppRestart.schedule_restart_and_exit(self.parent, delay=0.5)
                             return
                         except Exception as restart_error:
                             logger.error(f"重啟失敗: {restart_error}\n{traceback.format_exc()}")
@@ -441,7 +438,7 @@ class WindowPreferencesDialog:
             # 檢查 DPI 變更並立即套用
             dpi_changed = abs(changes["old"]["dpi"] - new_settings["dpi"]) > 0.01
             if dpi_changed:
-                set_ui_scale_factor(new_settings["dpi"])
+                FontManager.set_scale_factor(new_settings["dpi"])
 
             # 執行回調函數
             if self.on_settings_changed:
@@ -456,7 +453,7 @@ class WindowPreferencesDialog:
             UIUtils.show_info("設定套用成功", success_msg, parent=self.dialog)
 
             # 處理重啟邏輯
-            if important_changes and can_restart():
+            if important_changes and AppRestart.can_restart():
                 if UIUtils.ask_yes_no_cancel(
                     "重新啟動程式",
                     "設定已成功套用！\n\n為了確保所有變更完全生效，建議重新啟動程式。\n\n是否要立即重新啟動？",
@@ -464,7 +461,7 @@ class WindowPreferencesDialog:
                     show_cancel=False,
                 ):
                     try:
-                        schedule_restart_and_exit(self.parent, delay=0.5)
+                        AppRestart.schedule_restart_and_exit(self.parent, delay=0.5)
                         return
 
                     except Exception as restart_error:
@@ -474,10 +471,10 @@ class WindowPreferencesDialog:
                             f"無法重新啟動應用程式: {restart_error}\n\n設定已儲存，請手動重新啟動程式以套用所有變更。",
                             parent=self.dialog,
                         )
-            elif important_changes and not can_restart():
+            elif important_changes and not AppRestart.can_restart():
                 # 無法重啟時提供說明並附上診斷細節
                 try:
-                    _, diag = get_restart_diagnostics()
+                    _, diag = AppRestart.get_restart_diagnostics()
                 except Exception:
                     diag = None
                 # 顯示更完整的手動重啟 dialog，包含可複製的診斷文字

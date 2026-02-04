@@ -5,12 +5,11 @@ Window Manager Module
 Provides window management functionality for dynamic sizing, positioning, and DPI support
 """
 
-import ctypes
 import time
 import tkinter as tk
 from typing import Any
 
-from . import get_logger, get_settings_manager
+from . import SystemUtils, get_logger, get_settings_manager
 
 logger = get_logger().bind(component="WindowManager")
 
@@ -47,12 +46,11 @@ class WindowManager:
                 screen_height = window.winfo_screenheight()
 
             # Windows DPI 縮放檢測和工作區域檢測
-            user32 = ctypes.windll.user32
-            user32.SetProcessDPIAware()
+            SystemUtils.set_process_dpi_aware()
 
             # 取得真實螢幕尺寸
-            actual_width = user32.GetSystemMetrics(0)
-            actual_height = user32.GetSystemMetrics(1)
+            actual_width = SystemUtils.get_system_metrics(0)
+            actual_height = SystemUtils.get_system_metrics(1)
             dpi_scale_x = actual_width / screen_width if screen_width > 0 else 1.0
             dpi_scale_y = actual_height / screen_height if screen_height > 0 else 1.0
             dpi_scaling = max(dpi_scale_x, dpi_scale_y)
@@ -60,8 +58,8 @@ class WindowManager:
             # 取得工作區域（排除工作列）
             try:
                 # 獲取工作區域尺寸
-                work_area_width = user32.GetSystemMetrics(16)  # SM_CXFULLSCREEN
-                work_area_height = user32.GetSystemMetrics(17)  # SM_CYFULLSCREEN
+                work_area_width = SystemUtils.get_system_metrics(16)  # SM_CXFULLSCREEN
+                work_area_height = SystemUtils.get_system_metrics(17)  # SM_CYFULLSCREEN
                 usable_width = min(work_area_width, int(screen_width * 0.95))
                 usable_height = min(work_area_height, int(screen_height * 0.9))
             except Exception:
@@ -219,6 +217,8 @@ class WindowManager:
             # 檢查是否最大化
             is_maximized = window.state() == "zoomed"
 
+            if window.state() == "iconic":
+                return
             if not is_maximized:
                 # 取得當前視窗大小和位置
                 width = window.winfo_width()
@@ -226,8 +226,10 @@ class WindowManager:
                 x = window.winfo_x()
                 y = window.winfo_y()
 
-                # 儲存設定
-                settings.set_main_window_settings(width, height, x, y, False)
+                # 僅在視窗有實際大小時儲存 (避免初始化時的 1x1)
+                if width > 1 and height > 1:
+                    # 儲存設定
+                    settings.set_main_window_settings(width, height, x, y, False)
             else:
                 # 如果是最大化狀態，只更新最大化標記
                 current_settings = settings.get_main_window_settings()

@@ -14,9 +14,9 @@ for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(AP
 
 if "%APP_VERSION%"=="" (
 
-    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.2
+    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.3
 
-    set APP_VERSION=1.6.2
+    set APP_VERSION=1.6.3
 ) else (
     echo [成功] 版本號: %APP_VERSION%
 )
@@ -79,7 +79,7 @@ if errorlevel 1 (
 )
 
 echo [資訊] 清理虛擬環境...
-REM 終止所有 python 進程，並特別嘗試停止使用 .venv 的進程（分開執行以降低引號解析風險）
+REM 終止所有 python 行程，並特別嘗試停止使用 .venv 的行程（分開執行以降低引號解析風險）
 powershell -NoProfile -Command "Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force" 2>nul
 powershell -NoProfile -Command "Get-Process python* -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*\\.venv\\*' } | Stop-Process -Force" 2>nul
 timeout /t 1 /nobreak >nul
@@ -103,7 +103,7 @@ REM 若 .venv 尚存會導致建立失敗，使用 --clear 以取代現有目錄
 uv venv .venv --clear
 
 echo [資訊] 安裝生產依賴（不含開發工具）...
-uv pip install --python .venv\Scripts\python.exe psutil toml customtkinter requests defusedxml markdown
+uv pip install --python .venv\Scripts\python.exe toml customtkinter requests defusedxml markdown
 if errorlevel 1 (
     echo [錯誤] 依賴安裝失敗。
 
