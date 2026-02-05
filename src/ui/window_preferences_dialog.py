@@ -23,9 +23,7 @@ logger = get_logger().bind(component="WindowPreferencesDialog")
 
 
 class WindowPreferencesDialog:
-    """視窗偏好設定對話框
-    Dialog for configuring window preferences including size, position, and behavior.
-    """
+    """視窗偏好設定對話框"""
 
     def __init__(self, parent, on_settings_changed: Callable | None = None):
         self.parent = parent
@@ -73,18 +71,7 @@ class WindowPreferencesDialog:
         self._create_button_section(main_frame)
 
     def _create_section_frame(self, parent, title: str, emoji: str = "") -> ctk.CTkFrame:
-        """建立設定區域框架
-        Create settings section frame
-
-        Args:
-            parent: 父元件
-            title: 區域標題
-            emoji: 表情符號
-
-        Returns:
-            CTkFrame: 建立的區域框架
-
-        """
+        """建立設定區域框架"""
         frame = ctk.CTkFrame(parent)
         frame.pack(fill="x", pady=(0, 15))
 
@@ -98,26 +85,13 @@ class WindowPreferencesDialog:
         return frame
 
     def _create_checkbox(self, parent, text: str, variable: ctk.BooleanVar) -> ctk.CTkCheckBox:
-        """建立複選框
-        Create checkbox widget
-
-        Args:
-            parent: 父元件
-            text: 複選框文字
-            variable: 綁定變數
-
-        Returns:
-            CTkCheckBox: 建立的複選框
-
-        """
+        """建立複選框"""
         checkbox = ctk.CTkCheckBox(parent, text=text, variable=variable, font=FontManager.get_font(size=12))
         checkbox.pack(anchor="w", padx=25, pady=(0, 10))
         return checkbox
 
     def _create_general_section(self, parent) -> None:
-        """建立一般設定區域
-        Create general settings section
-        """
+        """建立一般設定區域"""
         general_frame = self._create_section_frame(parent, "一般設定", "📋")
 
         # 建立所有複選框
@@ -147,9 +121,7 @@ class WindowPreferencesDialog:
             self.debug_logging_var.set(False)
 
     def _create_main_window_section(self, parent) -> None:
-        """建立主視窗設定區域
-        Create main window settings section
-        """
+        """建立主視窗設定區域"""
         main_window_frame = self._create_section_frame(parent, "主視窗設定", "🏠")
 
         # 當前視窗資訊
@@ -180,9 +152,7 @@ class WindowPreferencesDialog:
         reset_button.pack(anchor="w", padx=25, pady=(0, 15))
 
     def _create_display_section(self, parent) -> None:
-        """建立顯示設定區域
-        Create display settings section
-        """
+        """建立顯示設定區域"""
         display_frame = self._create_section_frame(parent, "顯示設定", "🎨")
 
         # DPI 縮放設定
@@ -221,9 +191,7 @@ class WindowPreferencesDialog:
         ).pack(anchor="w", padx=25, pady=(0, 15))
 
     def _create_button_section(self, parent) -> None:
-        """建立按鈕區域
-        Create button section
-        """
+        """建立按鈕區域"""
         button_frame = ctk.CTkFrame(parent, fg_color="transparent")
         button_frame.pack(fill="x", pady=(20, 0))
 
@@ -261,9 +229,7 @@ class WindowPreferencesDialog:
             button.pack(side=side, padx=padding)
 
     def _load_current_settings(self) -> None:
-        """載入當前設定
-        Load current settings
-        """
+        """載入當前設定"""
         self.remember_size_var.set(self.settings.is_remember_size_position_enabled())
         self.auto_center_var.set(self.settings.is_auto_center_enabled())
         self.adaptive_sizing_var.set(self.settings.is_adaptive_sizing_enabled())
@@ -275,23 +241,11 @@ class WindowPreferencesDialog:
         self.dpi_scale_label.configure(text=f"{current_dpi:.1f}x")
 
     def _on_dpi_scale_changed(self, value) -> None:
-        """DPI 縮放變更事件
-        DPI scaling change event
-
-        Args:
-            value (float): 新的 DPI 縮放因子
-
-        """
+        """DPI 縮放變更事件"""
         self.dpi_scale_label.configure(text=f"{value:.1f}x")
 
     def _get_setting_changes(self) -> dict:
-        """取得設定變更
-        Get setting changes
-
-        Returns:
-            dict: 包含舊值、新值和變更標記的字典
-
-        """
+        """取得設定變更"""
         return {
             "old": {
                 "remember": self.settings.is_remember_size_position_enabled(),
@@ -310,16 +264,7 @@ class WindowPreferencesDialog:
         }
 
     def _has_important_changes(self, changes: dict) -> bool:
-        """檢查是否有重要變更需要重啟
-        Check if there are important changes requiring restart
-
-        Args:
-            changes: 設定變更字典
-
-        Returns:
-            bool: 需要重啟返回 True
-
-        """
+        """檢查是否有重要變更需要重啟"""
         old, new = changes["old"], changes["new"]
 
         dpi_changed = abs(old["dpi"] - new["dpi"]) > 0.01
@@ -331,9 +276,7 @@ class WindowPreferencesDialog:
         )
 
     def _reset_to_default_size(self) -> None:
-        """重設主視窗為預設大小
-        Reset main window to default size
-        """
+        """重設主視窗為預設大小"""
         if UIUtils.ask_yes_no_cancel(
             "確認重設",
             "確定要將主視窗重設為預設大小嗎？\n這將立即應用變更。",
@@ -349,9 +292,7 @@ class WindowPreferencesDialog:
             UIUtils.show_info("重設完成", "主視窗大小已重設為預設值", parent=self.dialog)
 
     def _reset_all_settings(self) -> None:
-        """恢復所有設定為預設值，並比對是否有重要變更需要重啟
-        Reset all settings to defaults, and check if restart is needed
-        """
+        """恢復所有設定為預設值，並比對是否有重要變更需要重啟"""
         if UIUtils.ask_yes_no_cancel(
             "確認恢復預設",
             "確定要恢復所有視窗設定為預設值嗎？",
@@ -421,9 +362,7 @@ class WindowPreferencesDialog:
                     self._show_manual_restart_dialog(self.dialog, detail_text)
 
     def _apply_settings(self) -> None:
-        """套用設定
-        Apply settings
-        """
+        """套用設定"""
         try:
             changes = self._get_setting_changes()
             new_settings = changes["new"]
@@ -487,7 +426,5 @@ class WindowPreferencesDialog:
             UIUtils.show_error("儲存失敗", f"無法儲存設定: {e}", parent=self.dialog)
 
     def _cancel(self) -> None:
-        """取消設定
-        Cancel settings
-        """
+        """取消設定"""
         self.dialog.destroy()

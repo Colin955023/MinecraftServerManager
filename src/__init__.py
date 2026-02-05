@@ -18,11 +18,7 @@ def lazy_exports(
     module_name: str,
     exports: Mapping[str, tuple[str, str]],
 ) -> tuple[Callable[[str], Any], Callable[[], list[str]], list[str]]:
-    """Create PEP 562 module-level lazy exports.
-
-    Returns a tuple of (__getattr__, __dir__, __all__) for use inside a
-    module's __init__.py.
-    """
+    """建立 PEP 562 的模組層級延遲匯出。"""
 
     def __getattr__(name: str) -> Any:
         target = exports.get(name)

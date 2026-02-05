@@ -25,7 +25,6 @@ from . import (
 
 logger = get_logger().bind(component="UIUtils")
 
-# 設置 CustomTkinter 主題
 ctk.set_appearance_mode("light")  # 固定使用淺色主題
 ctk.set_default_color_theme("blue")  # 淺色藍色主題
 
@@ -39,31 +38,16 @@ class DialogUtils:
         resizable: bool = True,
         center: bool = True,
     ) -> ctk.CTkToplevel:
-        """創建標準模態對話框，統一視窗屬性設定
-        Create standard modal dialog with unified window properties setup
-
-        Args:
-            parent: 父視窗物件
-            title (str): 對話框標題
-            size (tuple): 視窗大小 (width, height)，None 表示自動計算
-            resizable (bool): 是否可調整大小
-            center (bool): 是否居中顯示
-
-        Returns:
-            CTkToplevel: 設定完成的對話框物件
-
-        """
+        """創建標準模態對話框，統一視窗屬性設定"""
         dialog = ctk.CTkToplevel(parent)
         dialog.title(title)
         dialog.resizable(resizable, resizable)
 
-        # 使用新的視窗管理器來設定對話框
         if size:
             WindowManager.setup_dialog_window(dialog, parent, size[0], size[1], center)
         else:
             WindowManager.setup_dialog_window(dialog, parent, center_on_parent=center)
 
-        # 設定模態視窗屬性
         if parent:
             try:
                 dialog.transient(parent)
@@ -71,7 +55,6 @@ class DialogUtils:
                 dialog.focus_set()
             except Exception as e:
                 logger.exception(f"設定模態視窗失敗: {e}")
-        # 延遲綁定圖示
         IconUtils.set_window_icon(dialog, 250)
 
         return dialog
@@ -80,21 +63,10 @@ class DialogUtils:
 class IconUtils:
     @staticmethod
     def set_window_icon(window, delay_ms=200) -> None:
-        """只設定視窗圖示，不執行任何置頂邏輯，適用於已手動設定 transient 的對話框
-        Only set window icon without any positioning logic, suitable for dialogs with manual transient setup
-
-        Args:
-            window: 要設定圖示的視窗物件
-            delay_ms (int): 延遲毫秒數，確保視窗完全初始化
-
-        Returns:
-            None
-
-        """
+        """只設定視窗圖示，不執行任何置頂邏輯，適用於已手動設定 transient 的對話框"""
 
         def _delayed_icon_bind():
             try:
-                # 檢查視窗是否仍然存在
                 if not window.winfo_exists():
                     return
 
@@ -102,7 +74,6 @@ class IconUtils:
                 if getattr(window, "_msm_icon_set", False):
                     return
 
-                # 使用統一的路徑工具
                 icon_path = PathUtils.get_assets_path() / "icon.ico"
                 if icon_path.exists():
                     window.iconbitmap(str(icon_path))
@@ -117,12 +88,9 @@ class IconUtils:
             except Exception as e:
                 logger.exception(f"設定視窗圖示失敗 - {e}")
 
-        # 延遲綁定圖示，確保視窗完全初始化完成
         try:
             if hasattr(window, "after") and hasattr(window, "winfo_exists"):
-                # 使用更長的延遲確保視窗完全載入
                 window.after(delay_ms, _delayed_icon_bind)
-                # 額外的備用嘗試，以防第一次失敗
                 window.after(delay_ms + 100, _delayed_icon_bind)
             else:
                 _delayed_icon_bind()  # 立即執行作為備選
@@ -134,18 +102,7 @@ class IconUtils:
 class UIUtils:
     @staticmethod
     def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
-        """統一的主框架布局方法
-        Unified main frame packing method to avoid code duplication
-
-        Args:
-            frame: 要布局的框架物件 (CTkFrame 或 ttk.Frame)
-            padx (int): 水平內邊距，默認 DPI 縮放 15px
-            pady (int): 垂直內邊距，默認 DPI 縮放 15px
-
-        Returns:
-            None
-
-        """
+        """統一的主框架布局方法"""
         if padx is None:
             padx = FontManager.get_dpi_scaled_size(15)
         if pady is None:
@@ -160,32 +117,17 @@ class UIUtils:
 
     @staticmethod
     def call_on_ui(parent: Any, func: Callable[[], Any]) -> Any:
-        """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)
-        Execute function on UI thread (schedule and wait if not on UI thread)
-
-        Args:
-            parent: 親代 widget (需有 after/winfo_exists 方法)
-            func: 要執行的函數
-
-        Returns:
-            Any: 函數回傳值
-
-        Raises:
-            Exception: 若函數執行過程發生例外，將在呼叫端重新拋出
-        """
+        """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)"""
         try:
-            # 檢查 parent 是否有效
             if (
                 parent is not None
                 and hasattr(parent, "after")
                 and hasattr(parent, "winfo_exists")
                 and parent.winfo_exists()
             ):
-                # 若已在主執行緒，直接執行
                 if threading.current_thread() is threading.main_thread():
                     return func()
 
-                # 否則排程到 UI 執行緒並等待
                 result: dict[str, Any] = {"value": None, "exc": None}
                 done = threading.Event()
 
@@ -202,7 +144,6 @@ class UIUtils:
                     done.wait()
                 except Exception as e:
                     logger.debug(f"排程 UI 任務時發生例外 (可能視窗已關閉): {e}")
-                    # 若無法排程，嘗試直接執行 (雖然可能失敗)
                     return func()
 
                 if isinstance(result["exc"], Exception):
@@ -223,23 +164,7 @@ class UIUtils:
         make_modal=True,
         delay_ms=200,
     ) -> None:
-        """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能
-        Unified window properties setup function that integrates icon binding, window centering, and modal setup
-
-        Args:
-            window: 要設定的視窗物件
-            parent: 父視窗物件，若為 None 則使用螢幕置中
-            width (int): 視窗寬度，用於置中計算
-            height (int): 視窗高度，用於置中計算
-            bind_icon (bool): 是否綁定圖示
-            center_on_parent (bool): 是否相對於父視窗置中，False 則螢幕置中
-            make_modal (bool): 是否設為模態視窗（transient + grab_set）
-            delay_ms (int): 圖示綁定延遲毫秒數，確保不被覆蓋
-
-        Returns:
-            None
-
-        """
+        """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能"""
         # 設定視窗大小與置中，統一呼叫 WindowManager 的 setup_dialog_window
         WindowManager.setup_dialog_window(
             window,
@@ -293,9 +218,7 @@ class UIUtils:
 
     @staticmethod
     def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
-        """安全地更新 widget，檢查 widget 是否存在
-        Safely update widget, checking if widget exists
-        """
+        """安全地更新 widget，檢查 widget 是否存在"""
         try:
             if widget and widget.winfo_exists():
                 update_func(widget, *args, **kwargs)
@@ -514,23 +437,10 @@ class UIUtils:
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中
-        Display error message dialog using tk with automatic icon and centering handling
-
-        Args:
-            title (str): 對話框標題
-            message (str): 錯誤訊息內容
-            parent: 父視窗物件，None 則使用臨時根視窗
-
-        Returns:
-            None
-
-        """
-        # 任何顯示給使用者的錯誤，都同時寫入 log，方便追蹤
+        """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中"""
         logger.error(f"{title}: {message}")
 
         try:
-            # 如果沒有父視窗，創建臨時根視窗
             if parent is None:
                 root = tk.Tk()
                 root.withdraw()  # 隱藏主視窗
@@ -538,7 +448,6 @@ class UIUtils:
                 if topmost:
                     root.attributes("-topmost", True)
 
-                # 使用 setup_window_properties 統一處理視窗屬性
                 UIUtils.setup_window_properties(
                     root,
                     parent=None,
@@ -560,9 +469,7 @@ class UIUtils:
 
     @staticmethod
     def show_manual_restart_dialog(parent, details: str | None) -> None:
-        """顯示需要手動重啟的對話框，並提供複製診斷按鈕。
-        Centralized manual-restart dialog used in multiple places to avoid duplication.
-        """
+        """顯示需要手動重啟的對話框，並提供複製診斷按鈕。"""
         try:
             dlg = UIUtils.create_toplevel_dialog(parent, "需要手動重啟", width=560, height=360, make_modal=True)
             import tkinter as _tk
@@ -599,20 +506,8 @@ class UIUtils:
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """顯示警告訊息對話框，使用 tk 並自動處理圖示和置中
-        Display warning message dialog using tk with automatic icon and centering handling
-
-        Args:
-            title (str): 對話框標題
-            message (str): 警告訊息內容
-            parent: 父視窗物件，None 則使用臨時根視窗
-
-        Returns:
-            None
-
-        """
+        """顯示警告訊息對話框，使用 tk 並自動處理圖示和置中"""
         try:
-            # 如果沒有父視窗，創建臨時根視窗
             if parent is None:
                 root = tk.Tk()
                 root.withdraw()  # 隱藏主視窗
@@ -620,7 +515,6 @@ class UIUtils:
                 if topmost:
                     root.attributes("-topmost", True)
 
-                # 使用 setup_window_properties 統一處理視窗屬性
                 UIUtils.setup_window_properties(
                     root,
                     parent=None,
@@ -647,20 +541,8 @@ class UIUtils:
         parent=None,
         topmost: bool = False,
     ) -> None:
-        """顯示資訊對話框，使用 tk 並自動處理圖示和置中
-        Display information dialog using tk with automatic icon and centering handling
-
-        Args:
-            title (str): 對話框標題
-            message (str): 資訊訊息內容
-            parent: 父視窗物件，None 則使用臨時根視窗
-
-        Returns:
-            None
-
-        """
+        """顯示資訊對話框，使用 tk 並自動處理圖示和置中"""
         try:
-            # 如果沒有父視窗，創建臨時根視窗
             if parent is None:
                 root = tk.Tk()
                 root.withdraw()  # 隱藏主視窗
@@ -668,7 +550,6 @@ class UIUtils:
                 if topmost:
                     root.attributes("-topmost", True)
 
-                # 使用 setup_window_properties 統一處理視窗屬性
                 UIUtils.setup_window_properties(
                     root,
                     parent=None,
@@ -690,16 +571,12 @@ class UIUtils:
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
-        """在檔案總管中顯示(依賴系統功能)
-        Show in explorer (system dependent)
-        """
+        """在檔案總管中顯示"""
         target_path = Path(target)
         try:
-            # 正規化路徑
             if target_path.exists():
                 target_path = target_path.resolve()
             target_str = str(target_path)
-            # Windows: 使用 explorer /select,
             explorer = PathUtils.find_executable("explorer") or str(
                 Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
             )
@@ -709,7 +586,6 @@ class UIUtils:
             except Exception as e:
                 logger.debug(f"使用 explorer /select 失敗: {e}")
 
-            # Fallback：開啟所在的資料夾
             folder_path = target_path if target_path.is_dir() else target_path.parent
             UIUtils.open_external(str(folder_path))
 
@@ -718,20 +594,14 @@ class UIUtils:
 
     @staticmethod
     def open_external(target) -> None:
-        """開啟外部資源（檔案、資料夾或 URL）。
-        Open external resource (file, folder, or URL).
-        使用系統預設程式開啟。
-        """
+        """使用系統預設程式開啟。"""
         try:
             target_str = str(target)
-            # 簡單判斷是否為 URL
             if target_str.startswith(("http://", "https://")):
                 webbrowser.open(target_str)
                 return
 
-            # 嘗試作為路徑開啟，先檢查路徑是否存在
             try:
-                # 確保是絕對路徑
                 target_path = Path(target_str)
                 if target_path.exists():
                     target_str = str(target_path.resolve())
@@ -769,22 +639,8 @@ class UIUtils:
         show_cancel: bool = True,
         topmost: bool = False,
     ) -> bool | None:
-        """顯示確認對話框，支援是/否/取消選項，使用 tk 並呼叫 setup_window_properties
-        Display confirmation dialog with Yes/No/Cancel options using tk and setup_window_properties
-
-        Args:
-            title (str): 對話框標題
-            message (str): 顯示訊息
-            parent: 父視窗物件
-            show_cancel (bool): 是否顯示取消按鈕
-            topmost (bool): 是否系統級置頂
-
-        Returns:
-            bool or None: True=點擊是, False=點擊否, None=點擊取消 (僅當 show_cancel=True 時)
-
-        """
+        """顯示確認對話框，支援是/否/取消選項，使用 tk 並呼叫 setup_window_properties"""
         try:
-            # 如果沒有父視窗，創建臨時根視窗
             if parent is None:
                 root = tk.Tk()
                 root.withdraw()  # 隱藏主視窗
@@ -792,7 +648,6 @@ class UIUtils:
                 if topmost:
                     root.attributes("-topmost", True)
 
-                # 使用 setup_window_properties 統一處理視窗屬性
                 UIUtils.setup_window_properties(
                     root,
                     parent=None,
@@ -821,33 +676,26 @@ class UIUtils:
     @staticmethod
     def apply_unified_dropdown_styling(dropdown_widget) -> None:
         try:
-            # 固定淺色模式：白色背景黑字
             style_config = {
-                "fg_color": ("#ffffff", "#ffffff"),  # 白色背景
-                "button_color": ("#e5e7eb", "#e5e7eb"),  # 淺灰色按鈕
-                "button_hover_color": ("#d1d5db", "#d1d5db"),  # 按鈕懸停
-                "dropdown_fg_color": ("#ffffff", "#ffffff"),  # 下拉清單背景
-                "dropdown_hover_color": ("#f3f4f6", "#f3f4f6"),  # 下拉清單懸停
-                "dropdown_text_color": ("#1f2937", "#1f2937"),  # 下拉清單文字
-                "text_color": ("#1f2937", "#1f2937"),  # 主文字顏色
+                "fg_color": ("#ffffff", "#ffffff"),
+                "button_color": ("#e5e7eb", "#e5e7eb"),
+                "button_hover_color": ("#d1d5db", "#d1d5db"),
+                "dropdown_fg_color": ("#ffffff", "#ffffff"),
+                "dropdown_hover_color": ("#f3f4f6", "#f3f4f6"),
+                "dropdown_text_color": ("#1f2937", "#1f2937"),
+                "text_color": ("#1f2937", "#1f2937"),
             }
 
-            # 應用樣式到下拉選單
             dropdown_widget.configure(**style_config)
 
-            # 新增：滑鼠滾輪支援
             def on_mouse_wheel(event):
-                """處理滑鼠滾輪事件"""
                 try:
-                    # 獲取當前值和選項列表
                     current_value = dropdown_widget.get()
                     values = dropdown_widget.cget("values")
 
                     if values and current_value in values:
                         current_index = values.index(current_value)
 
-                        # 向上滾動 (event.delta > 0) 選擇上一個選項
-                        # 向下滾動 (event.delta < 0) 選擇下一個選項
                         if event.delta > 0 and current_index > 0:
                             new_index = current_index - 1
                         elif event.delta < 0 and current_index < len(values) - 1:
@@ -855,17 +703,14 @@ class UIUtils:
                         else:
                             return
 
-                        # 設定新值
                         dropdown_widget.set(values[new_index])
 
-                        # 如果有 command 回調，執行它
                         if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
                             dropdown_widget._command(values[new_index])
 
                 except Exception as e:
                     logger.exception(f"滑鼠滾輪處理錯誤: {e}")
 
-            # 綁定滑鼠滾輪事件
             dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
 
         except Exception as e:
@@ -873,18 +718,7 @@ class UIUtils:
 
     @staticmethod
     def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
-        """建立統一樣式的按鈕
-        建立具有統一樣式的按鈕，自動應用全域DPI縮放因子
-
-        Args:
-            parent: 父容器
-            text: 按鈕文字
-            command: 點擊事件
-            button_type: 'primary', 'secondary', 'small', 'cancel'
-            **kwargs: 其他按鈕參數（會覆蓋預設值）
-
-        """
-        # 從字體管理器獲取當前的DPI縮放因子
+        """建立統一樣式的按鈕"""
         scale_factor = FontManager.get_scale_factor()
 
         # 根據按鈕類型設定樣式

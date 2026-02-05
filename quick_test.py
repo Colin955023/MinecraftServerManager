@@ -13,41 +13,23 @@ import traceback
 from pathlib import Path
 
 
-# ====== 測試工具函數 ======
-# 列印測試步驟標題
 def print_step(step_num, total_steps, description):
-    """
-    列印測試步驟標題
-    Print test step title
-
-    Args:
-        step_num (int): 步驟編號
-        total_steps (int): 總步驟數
-        description (str): 步驟描述
-
-    Returns:
-        None
-    """
     print(f"\n[{step_num}/{total_steps}] {description}...")
 
 
 def print_success(message):
-    """打印成功訊息"""
     print(f"✅ {message}")
 
 
 def print_error(message):
-    """打印錯誤訊息"""
     print(f"❌ {message}")
 
 
 def print_warning(message):
-    """打印警告訊息"""
     print(f"⚠️ {message}")
 
 
 def test_python_environment():
-    """[1/8] 檢查 Python 環境"""
     print_step(1, 8, "檢查 Python 環境")
 
     try:
@@ -65,7 +47,6 @@ def test_python_environment():
 
 
 def test_basic_modules():
-    """[2/8] 測試基礎模組導入"""
     print_step(2, 8, "測試基礎模組導入")
 
     basic_modules = ["tkinter", "json", "os", "sys", "pathlib"]
@@ -85,7 +66,6 @@ def test_basic_modules():
 
 
 def test_project_dependencies():
-    """[3/8] 檢查專案依賴"""
     print_step(3, 8, "檢查專案依賴")
 
     required_modules = [
@@ -117,7 +97,6 @@ def test_project_dependencies():
 
 
 def test_main_program_modules():
-    """[4/8] 測試主程式模組載入"""
     print_step(4, 8, "測試主程式模組載入")
 
     # quick_test.py 僅供「完整 repo」使用者快速測試，不做任何打包環境判斷
@@ -260,7 +239,6 @@ def test_main_program_modules():
 
 
 def test_network_connectivity():
-    """[5/8] 測試網路連線"""
     print_step(5, 8, "測試網路連線")
 
     try:
@@ -282,7 +260,6 @@ def test_network_connectivity():
 
 
 def test_file_system_permissions():
-    """[6/8] 測試檔案系統權限"""
     print_step(6, 8, "測試檔案系統權限")
 
     try:
@@ -310,7 +287,6 @@ def test_file_system_permissions():
 
 
 def test_window_management_logic():
-    """[7/8] 測試視窗管理邏輯"""
     print_step(7, 8, "測試視窗管理邏輯")
 
     try:
@@ -378,7 +354,6 @@ def test_window_management_logic():
 
 
 def test_environment_detection():
-    """[8/8] 測試環境檢測功能"""
     print_step(8, 8, "測試環境檢測功能")
 
     try:
@@ -429,7 +404,6 @@ def test_environment_detection():
 
 
 def main():
-    """主測試函數"""
     print("🚀 Minecraft 伺服器管理器 - 快速測試")
     print("=" * 48)
 

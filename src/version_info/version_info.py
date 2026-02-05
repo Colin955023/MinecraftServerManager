@@ -5,21 +5,13 @@ Version Information and Application Constants Definition
 Defines application version, name and related system constants
 """
 
-# ====== 應用程式基本資訊 ======
-
-# 應用程式版本號
-APP_VERSION = "1.6.3"
-
-# 應用程式英文名稱
+# 應用程式版本字串
+APP_VERSION = "1.6.4"
+# 應用程式顯示名稱
 APP_NAME = "Minecraft Server Manager"
-
-# 應用程式中文描述
+# 應用程式的簡要描述
 APP_DESCRIPTION = "Minecraft 伺服器管理器"
-
-# ====== 開發與發布資訊 ======
-
-# GitHub 倉庫擁有者
+# GitHub 擁有者帳號
 GITHUB_OWNER = "Colin955023"
-
-# GitHub 倉庫名稱
+# GitHub 儲存庫名稱
 GITHUB_REPO = "MinecraftServerManager"

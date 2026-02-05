@@ -16,14 +16,11 @@ logger = get_logger().bind(component="AppRestart")
 
 
 class AppRestart:
-    """應用程式重啟管理類別 (Static Class)"""
+    """應用程式重啟管理類別"""
 
     @staticmethod
     def _get_executable_info() -> tuple[list[str], bool, Path | None]:
-        """
-        取得當前應用程式的執行檔資訊，區分打包檔案與 Python 腳本
-        回傳: (執行命令列表, 是否為打包檔案, 腳本路徑)
-        """
+        """取得當前應用程式的執行檔資訊，區分打包檔案與 Python 腳本模式"""
         # 優先透過 sys.executable 判斷是否為打包執行檔
         exe_path: Path | None = None
         try:
@@ -65,10 +62,6 @@ class AppRestart:
             is_frozen = bool(getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False))
 
         if is_frozen:
-            # 有時候在打包的環境中，sys.executable 會指向名為 "python.exe" 的內嵌解譯器
-            # 這會導致後續以該路徑為打包執行檔的判斷失敗。嘗試以更合適的候選路徑取代它：
-            # 1) 如果 argv[0] 明確為 .exe 且存在，則使用之；
-            # 2) 否則嘗試使用 exe 備援搜尋 (_find_exe_fallback) 取得可執行檔。
             try:
                 if exe_path is not None and "python" in exe_path.name.lower():
                     alt = None
@@ -136,10 +129,7 @@ class AppRestart:
 
     @staticmethod
     def _find_main_in_parents(start_dir: Path | str, max_levels: int = 5) -> Path | None:
-        """
-        從起始目錄向上搜尋可能包含 main.py 的候選位置。
-        回傳找到的 Path，找不到則回傳 None。
-        """
+        """從起始目錄向上搜尋可能包含 main.py 的候選位置。"""
         try:
             p = Path(start_dir).resolve(strict=False)
             # 檢查自身及向上 max_levels 層
@@ -277,9 +267,7 @@ class AppRestart:
 
     @staticmethod
     def get_restart_diagnostics() -> tuple[bool, str]:
-        """
-        回傳是否可重啟與診斷文字說明
-        """
+        """回傳是否可重啟與診斷文字說明"""
         try:
             executable_path, is_frozen, script_path = AppRestart._get_executable_info()
 
@@ -376,9 +364,7 @@ class AppRestart:
 
     @staticmethod
     def restart_application(delay: float = 1.0) -> bool:
-        """
-        重啟應用程式，支援延遲啟動和狀態檢測
-        """
+        """重啟應用程式，支援延遲啟動和狀態檢測"""
         try:
             executable_cmd, is_frozen, script_path = AppRestart._get_executable_info()
 
@@ -405,6 +391,7 @@ class AppRestart:
                         process = SubprocessUtils.popen_checked(
                             [exe_path],
                             cwd=exe_cwd,
+                            stdin=SubprocessUtils.DEVNULL,
                             creationflags=creation_flags,
                         )
                     else:
@@ -476,7 +463,9 @@ class AppRestart:
                                     target_cwd = str(Path.cwd())
                                     logger.debug(f"以模組方式重啟: {use_cmd}, 指令={target_cwd}")
 
-                        process = SubprocessUtils.popen_checked(use_cmd, cwd=target_cwd, creationflags=creation_flags)
+                        process = SubprocessUtils.popen_checked(
+                            use_cmd, cwd=target_cwd, stdin=SubprocessUtils.DEVNULL, creationflags=creation_flags
+                        )
 
                     # 等待短暫時間以確認新程式已啟動
                     time.sleep(0.5)
@@ -507,9 +496,7 @@ class AppRestart:
 
     @staticmethod
     def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
-        """
-        安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理
-        """
+        """安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理"""
         try:
             # 首先嘗試啟動重啟程式
             restart_initiated = AppRestart.restart_application(delay)

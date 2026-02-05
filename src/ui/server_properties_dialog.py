@@ -13,6 +13,7 @@ from ..core import ServerConfig, ServerManager
 from ..utils import (
     FontManager,
     ServerPropertiesHelper,
+    ServerPropertiesValidator,
     UIUtils,
     get_logger,
 )
@@ -21,10 +22,9 @@ logger = get_logger().bind(component="ServerPropertiesDialog")
 
 
 class ServerPropertiesDialog:
-    """server.properties 設定對話框
-    Server Properties Dialog
+    """
+    server.properties 設定對話框
     提供視覺化的 server.properties 編輯介面
-    (Provides a visual interface for editing server.properties)
     """
 
     def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
@@ -80,9 +80,7 @@ class ServerPropertiesDialog:
             logger.error(f"應用對話框主題失敗: {e}\n{traceback.format_exc()}")
 
     def create_widgets(self) -> None:
-        """建立介面元件
-        Create the interface widgets
-        """
+        """建立介面元件"""
         # 主框架
         main_frame = ttk.Frame(self.dialog)
         UIUtils.pack_main_frame(main_frame)
@@ -169,9 +167,7 @@ class ServerPropertiesDialog:
         link_label.bind("<Button-1>", open_wiki)
 
     def create_property_tabs(self) -> None:
-        """建立屬性分頁，並自動補充未分類屬性到「其他」分頁
-        Create the property tabs and automatically add uncategorized properties to the "Other" tab
-        """
+        """建立屬性分頁，並自動補充未分類屬性到「其他」分頁"""
 
         def _add_scrollable_tab(tab_name: str, properties) -> None:
             tab_frame = ttk.Frame(self.notebook)
@@ -260,9 +256,7 @@ class ServerPropertiesDialog:
             _add_scrollable_tab("其他", uncategorized_keys)
 
     def create_property_controls(self, parent, properties) -> None:
-        """建立屬性控制項
-        Create the property controls for the given properties
-        """
+        """建立屬性控制項"""
         for _i, prop_name in enumerate(properties):
             # 建立框架
             prop_frame = ttk.Frame(parent)
@@ -296,9 +290,7 @@ class ServerPropertiesDialog:
             self.create_tooltip(widget, prop_name)
 
     def create_property_widget(self, parent, prop_name: str, var: tk.StringVar) -> ttk.Widget:
-        """根據屬性類型建立控制項
-        Create the appropriate widget for the property type
-        """
+        """根據屬性類型建立控制項"""
         # 布林值屬性
         boolean_props = [
             "hardcore",
@@ -426,9 +418,7 @@ class ServerPropertiesDialog:
         return widget
 
     def create_tooltip(self, widget, prop_name: str) -> None:
-        """建立工具提示
-        Create a tooltip for the given widget
-        """
+        """建立工具提示"""
         description = self.properties_helper.get_property_description(prop_name)
         UIUtils.bind_tooltip(
             widget,
@@ -448,9 +438,7 @@ class ServerPropertiesDialog:
         )
 
     def load_properties(self) -> None:
-        """載入屬性值
-        Load the property values from the server configuration or file
-        """
+        """載入屬性值"""
         # 首先嘗試從檔案載入現有屬性
         current_properties = self.server_manager.load_server_properties(self.server_config.name)
         # 如果沒有找到檔案，使用配置中的屬性
@@ -466,9 +454,7 @@ class ServerPropertiesDialog:
                 self.property_vars[prop_name].set(str(value))
 
     def save_properties(self) -> None:
-        """儲存屬性
-        Save the properties to the server configuration or file
-        """
+        """儲存屬性"""
         try:
             # 收集所有屬性值
             properties = {}
@@ -476,6 +462,13 @@ class ServerPropertiesDialog:
                 value = var.get().strip()
                 if value:  # 只儲存非空值
                     properties[prop_name] = value
+
+            # 驗證屬性值
+            is_valid, errors = ServerPropertiesValidator.validate_properties(properties)
+            if not is_valid:
+                error_message = "以下屬性值無效：\n\n" + "\n".join(errors)
+                UIUtils.show_error("驗證失敗", error_message, self.dialog)
+                return
 
             # 更新伺服器屬性
             success = self.server_manager.update_server_properties(self.server_config.name, properties)
@@ -500,9 +493,7 @@ class ServerPropertiesDialog:
         self.dialog.wait_window()
 
     def reset_properties(self) -> None:
-        """重設所有屬性為預設值
-        Reset all properties to default values
-        """
+        """重設所有屬性為預設值"""
         if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self.dialog, show_cancel=False):
             default_properties = self.server_manager.get_default_server_properties()
             for prop_name, value in default_properties.items():

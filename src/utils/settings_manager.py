@@ -29,9 +29,7 @@ DEFAULT_WINDOW_PREFERENCES = {
 
 
 def _get_default_settings() -> dict[str, Any]:
-    """取得預設設定（根據環境動態計算）
-    Get default settings (dynamically calculated based on environment)
-    """
+    """取得預設設定（根據環境動態計算）"""
     # 透過檢查是否為打包環境來設定除錯日誌預設值
     # 支援 PyInstaller (frozen/MEIPASS) 和 Nuitka (__compiled__)
     is_nuitka = "__compiled__" in globals()
@@ -52,9 +50,7 @@ def _get_default_settings() -> dict[str, Any]:
 
 
 class SettingsManager:
-    """統一管理所有使用者設定的管理器類別
-    Centralized manager class for all user settings including auto-update and window preferences
-    """
+    """統一管理所有使用者設定的管理器類別"""
 
     # ====== 初始化與檔案操作 ======
     def __init__(self):
@@ -139,16 +135,7 @@ class SettingsManager:
 
     # 取得主視窗設定
     def get_main_window_settings(self) -> dict[str, Any]:
-        """取得主視窗的大小、位置和狀態設定
-        Get main window size, position and state settings
-
-        Args:
-            None
-
-        Returns:
-            Dict[str, Any]: 主視窗設定字典
-
-        """
+        """取得主視窗的大小、位置和狀態設定"""
         default_settings = {
             "width": 1200,
             "height": 800,
@@ -167,20 +154,7 @@ class SettingsManager:
         y: int | None = None,
         maximized: bool = False,
     ) -> None:
-        """設定主視窗的大小、位置和最大化狀態
-        Set main window size, position and maximized state
-
-        Args:
-            width (int): 視窗寬度
-            height (int): 視窗高度
-            x (int): 視窗 X 座標位置，None 表示置中
-            y (int): 視窗 Y 座標位置，None 表示置中
-            maximized (bool): 是否最大化
-
-        Returns:
-            None
-
-        """
+        """設定主視窗的大小、位置和最大化狀態"""
         prefs = self.get_window_preferences()
         prefs["main_window"] = {
             "width": width,
@@ -193,90 +167,36 @@ class SettingsManager:
 
     # 檢查是否自動置中新視窗
     def is_auto_center_enabled(self) -> bool:
-        """檢查是否啟用自動置中新視窗的功能
-        Check if auto-center new windows feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用自動置中返回 True，否則返回 False
-
-        """
+        """檢查是否啟用自動置中新視窗的功能"""
         return self.get_window_preferences().get("auto_center", True)
 
     # 設定自動置中新視窗
     def set_auto_center(self, enabled: bool) -> None:
-        """設定是否自動置中新視窗的功能
-        Set whether to auto-center new windows
-
-        Args:
-            enabled (bool): True 啟用，False 停用
-
-        Returns:
-            None
-
-        """
+        """設定是否自動置中新視窗的功能"""
         prefs = self.get_window_preferences()
         prefs["auto_center"] = enabled
         self.set("window_preferences", prefs)
 
     # 檢查是否啟用自適應大小調整
     def is_adaptive_sizing_enabled(self) -> bool:
-        """檢查是否啟用根據螢幕大小自適應調整視窗的功能
-        Check if adaptive sizing based on screen size feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用自適應大小返回 True，否則返回 False
-
-        """
+        """檢查是否啟用根據螢幕大小自適應調整視窗的功能"""
         return self.get_window_preferences().get("adaptive_sizing", True)
 
     # 設定自適應大小調整
     def set_adaptive_sizing(self, enabled: bool) -> None:
-        """設定是否啟用根據螢幕大小自適應調整視窗的功能
-        Set whether to enable adaptive sizing based on screen size
-
-        Args:
-            enabled (bool): True 啟用，False 停用
-
-        Returns:
-            None
-
-        """
+        """設定是否啟用根據螢幕大小自適應調整視窗的功能"""
         prefs = self.get_window_preferences()
         prefs["adaptive_sizing"] = enabled
         self.set("window_preferences", prefs)
 
     # 取得 DPI 縮放因子
     def get_dpi_scaling(self) -> float:
-        """取得當前設定的 DPI 縮放因子
-        Get current DPI scaling factor setting
-
-        Args:
-            None
-
-        Returns:
-            float: DPI 縮放因子 (0.5-3.0)
-
-        """
+        """取得當前設定的 DPI 縮放因子，預設為 1.0"""
         return float(self.get_window_preferences().get("dpi_scaling", 1.0))
 
     # 設定 DPI 縮放因子
     def set_dpi_scaling(self, scaling: float) -> None:
-        """設定 DPI 縮放因子，會自動限制在合理範圍內
-        Set DPI scaling factor, automatically limited to reasonable range
-
-        Args:
-            scaling (float): 縮放因子，會被限制在 0.5-3.0 範圍內
-
-        Returns:
-            None
-
-        """
+        """設定 DPI 縮放因子，會自動限制在合理範圍內（0.5-3.0）"""
         prefs = self.get_window_preferences()
         prefs["dpi_scaling"] = max(0.5, min(3.0, scaling))  # 限制在 0.5-3.0 範圍內
         self.set("window_preferences", prefs)
@@ -284,16 +204,7 @@ class SettingsManager:
     # ====== 除錯設定管理 ======
     # 取得除錯設定
     def get_debug_settings(self) -> dict[str, Any]:
-        """取得所有除錯相關的設定
-        Get all debug-related settings
-
-        Args:
-            None
-
-        Returns:
-            Dict[str, Any]: 除錯設定字典
-
-        """
+        """取得所有除錯相關的設定"""
         return self._settings.get(
             "debug_settings",
             {"enable_debug_logging": False, "enable_window_state_logging": False},
@@ -301,30 +212,12 @@ class SettingsManager:
 
     # 檢查是否啟用除錯日誌
     def is_debug_logging_enabled(self) -> bool:
-        """檢查是否啟用除錯日誌輸出功能
-        Check if debug logging output feature is enabled
-
-        Args:
-            None
-
-        Returns:
-            bool: 啟用除錯日誌返回 True，否則返回 False
-
-        """
+        """檢查是否啟用除錯日誌輸出功能"""
         return self.get_debug_settings().get("enable_debug_logging", False)
 
     # 設定除錯日誌開關
     def set_debug_logging(self, enabled: bool) -> None:
-        """設定除錯日誌輸出功能的開關
-        Set debug logging output feature on/off
-
-        Args:
-            enabled (bool): True 啟用，False 停用
-
-        Returns:
-            None
-
-        """
+        """設定除錯日誌輸出功能的開關"""
         debug_settings = self.get_debug_settings()
         debug_settings["enable_debug_logging"] = enabled
         self.set("debug_settings", debug_settings)
@@ -337,16 +230,7 @@ _settings_manager = None
 
 # 取得全域設定管理器實例
 def get_settings_manager() -> SettingsManager:
-    """取得全域設定管理器的單例實例
-    Get singleton instance of global settings manager
-
-    Args:
-        None
-
-    Returns:
-        SettingsManager: 設定管理器實例
-
-    """
+    """取得全域設定管理器的單例實例"""
     global _settings_manager
     if _settings_manager is None:
         _settings_manager = SettingsManager()

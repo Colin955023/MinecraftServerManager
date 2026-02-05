@@ -17,12 +17,9 @@ logger = get_logger().bind(component="CustomDropdown")
 
 
 class CustomDropdown(ctk.CTkFrame):
-    """自定義下拉選單元件類別，使用 button 和 listbox 實現下拉選單功能
-    Custom dropdown component class implementing dropdown functionality using button and listbox
-    """
+    """自定義下拉選單元件類別，使用 button 和 listbox 實現下拉選單功能"""
 
     # ====== 初始化與設定 ======
-    # 初始化下拉選單元件
     def __init__(
         self,
         parent,
@@ -36,24 +33,6 @@ class CustomDropdown(ctk.CTkFrame):
         state: str = "normal",
         **kwargs,
     ):
-        """初始化自定義下拉選單元件
-        Initialize custom dropdown component
-
-        Args:
-            parent: 父容器物件
-            variable (tk.StringVar): 關聯的 StringVar 變數
-            values (List[str]): 選項列表
-            command (Callable): 選擇回調函數
-            width (int): 下拉選單寬度
-            height (int): 按鈕高度
-            max_dropdown_height (int): 下拉清單最大高度
-            max_visible_items (int): 最大可見項目數量
-            state (str): 元件狀態
-
-        Returns:
-            None
-
-        """
         super().__init__(parent, fg_color="transparent", **kwargs)
 
         self.variable = variable or tk.StringVar()
@@ -79,9 +58,7 @@ class CustomDropdown(ctk.CTkFrame):
         self._bind_mouse_wheel()
 
     def _create_widgets(self) -> None:
-        """建立介面元件
-        Create interface widgets
-        """
+        """建立介面元件"""
         # 主按鈕
         self.button = ctk.CTkButton(
             self,
@@ -277,9 +254,7 @@ class CustomDropdown(ctk.CTkFrame):
         self.after(150, self._delayed_bind_events)
 
     def _delayed_bind_events(self) -> None:
-        """延遲綁定事件，避免立即觸發關閉
-        delay binding events to avoid immediate closure
-        """
+        """延遲綁定事件，避免立即觸發關閉"""
         if self.dropdown_window and self.is_dropdown_open:
             self._bind_global_click()
 
@@ -299,13 +274,7 @@ class CustomDropdown(ctk.CTkFrame):
         self._unbind_global_click()
 
     def _select_option(self, value: str) -> None:
-        """選擇選項
-        Select an option
-
-        Args:
-            value (str):選擇的值
-
-        """
+        """選擇選項"""
         self.variable.set(value)
         self.button.configure(text=value)
 
@@ -425,23 +394,11 @@ class CustomDropdown(ctk.CTkFrame):
         return self.variable.get()
 
     def set(self, value: str) -> None:
-        """設定當前值
-        Set the current value
-
-        Args:
-            value (str):當前選擇的值
-
-        """
+        """設定當前值"""
         self.variable.set(value)
 
     def configure(self, **kwargs) -> None:
-        """配置元件
-        Configure the widget
-
-        Args:
-            **kwargs: 配置參數
-
-        """
+        """配置元件"""
         if "values" in kwargs:
             self.values = kwargs.pop("values")
 
@@ -462,13 +419,7 @@ class CustomDropdown(ctk.CTkFrame):
             super().configure(**kwargs)
 
     def cget(self, key: str) -> str | list[str]:
-        """獲取配置值
-        Get the configuration value
-
-        Args:
-            key (str): 配置值
-
-        """
+        """獲取配置值"""
         if key == "values":
             return self.values
         if key == "state":
@@ -476,9 +427,7 @@ class CustomDropdown(ctk.CTkFrame):
         return super().cget(key)
 
     def destroy(self) -> None:
-        """銷毀元件
-        Destroy the widget
-        """
+        """銷毀元件"""
         if self.is_dropdown_open:
             self._close_dropdown()
         super().destroy()

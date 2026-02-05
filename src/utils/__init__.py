@@ -14,43 +14,29 @@ from __future__ import annotations
 import importlib
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    # logger
     "get_logger": (".logger", "get_logger"),
-    # UI helpers
     "UIUtils": (".ui_utils", "UIUtils"),
     "DialogUtils": (".ui_utils", "DialogUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
-    # runtime paths
     "RuntimePaths": (".runtime_paths", "RuntimePaths"),
-    # http
     "HTTPUtils": (".http_utils", "HTTPUtils"),
-    # settings
     "get_settings_manager": (".settings_manager", "get_settings_manager"),
-    # fonts
     "FontManager": (".font_manager", "FontManager"),
-    # window
     "WindowManager": (".window_manager", "WindowManager"),
-    # updates
     "UpdateChecker": (".update_checker", "UpdateChecker"),
-    # restart
     "AppRestart": (".app_restart", "AppRestart"),
     "JavaDownloader": (".java_downloader", "JavaDownloader"),
-    # java
     "JavaUtils": (".java_utils", "JavaUtils"),
-    # paths
     "PathUtils": (".path_utils", "PathUtils"),
-    # system
     "SystemUtils": (".system_utils", "SystemUtils"),
-    # server utilities
     "MemoryUtils": (".server_utils", "MemoryUtils"),
     "ServerPropertiesHelper": (".server_utils", "ServerPropertiesHelper"),
+    "ServerPropertiesValidator": (".server_utils", "ServerPropertiesValidator"),
     "ServerDetectionUtils": (".server_utils", "ServerDetectionUtils"),
     "ServerOperations": (".server_utils", "ServerOperations"),
     "ServerCommands": (".server_utils", "ServerCommands"),
-    # singleton
     "Singleton": (".singleton", "Singleton"),
-    # subprocess
     "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
 }
 

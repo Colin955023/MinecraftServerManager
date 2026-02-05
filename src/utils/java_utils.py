@@ -36,19 +36,11 @@ class JavaUtils:
 
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
-        """取得指定 javaw.exe 的主要版本號
-        Get the major version of the given javaw.exe
-
-        Args:
-            java_path (str): Java 執行檔的完整路徑
-
-        Returns:
-            int or None: Java 主要版本號，失敗時返回 None
-
-        """
+        """取得指定 javaw.exe 的主要版本號"""
         try:
             res = SubprocessUtils.run_checked(
                 [java_path, "-version"],
+                stdin=SubprocessUtils.DEVNULL,
                 stdout=SubprocessUtils.PIPE,
                 text=True,
                 stderr=SubprocessUtils.STDOUT,
@@ -87,16 +79,7 @@ class JavaUtils:
 
     @staticmethod
     def get_required_java_major(mc_version: str) -> int:
-        """根據 mc_version 決定所需 Java major 版本
-        Determine required Java major version based on Minecraft version
-
-        Args:
-            mc_version (str): Minecraft 版本號
-
-        Returns:
-            int: 所需的 Java 主要版本號
-
-        """
+        """根據 mc_version 決定所需 Java major 版本"""
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
 
@@ -130,16 +113,7 @@ class JavaUtils:
 
     @staticmethod
     def get_all_local_java_candidates() -> list:
-        """返回所有可用的 javaw.exe 路徑及其主要版本
-        Return all available javaw.exe paths and their major versions
-
-        Args:
-            None
-
-        Returns:
-            list: 格式為 (路徑, 主要版本) 的列表
-
-        """
+        """返回所有可用的 javaw.exe 路徑及其主要版本號列表"""
         search_paths = set()
 
         # 1.常見路徑搜尋
@@ -179,7 +153,13 @@ class JavaUtils:
             if not where_path:
                 return candidates
 
-            result = SubprocessUtils.run_checked([where_path, "javaw"], capture_output=True, text=True, check=False)
+            result = SubprocessUtils.run_checked(
+                [where_path, "javaw"],
+                stdin=SubprocessUtils.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
             if result.returncode == 0:
                 for java_path_str in (result.stdout or "").strip().splitlines():
                     java_path = Path(java_path_str)
@@ -215,18 +195,7 @@ class JavaUtils:
 
     @staticmethod
     def get_best_java_path(mc_version: str, required_major: int | None = None, ask_download: bool = True) -> str | None:
-        """為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑，找不到時詢問自動下載
-        Select the best javaw.exe path for the given Minecraft version and loader info, ask to auto-download if not found
-
-        Args:
-            mc_version (str): Minecraft 版本號
-            required_major (int, optional): 需要的 Java 主要版本，若未指定則自動判斷
-            ask_download (bool, optional): 是否詢問自動下載，預設為 True
-
-        Returns:
-            str or None: 最佳 Java 路徑，找不到時返回 None
-
-        """
+        """為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑，找不到時詢問自動下載"""
         required_major = required_major if required_major else JavaUtils.get_required_java_major(mc_version)
         candidates = JavaUtils.get_all_local_java_candidates()
         for path, major in candidates:

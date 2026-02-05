@@ -28,23 +28,11 @@ FABRIC_MIN_MC_VERSION = (1, 14)
 
 # ====== 記憶體工具類別 ======
 class MemoryUtils:
-    """記憶體工具類別，提供記憶體相關的解析和格式化功能
-    Memory utilities class for memory-related parsing and formatting functions
-    """
+    """記憶體工具類別，提供記憶體相關的解析和格式化功能"""
 
     @staticmethod
     def parse_memory_setting(text: str, setting_type: str = "Xmx") -> int | None:
-        """解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數
-        Parse Java memory settings, handling -Xmx and -Xms parameters uniformly
-
-        Args:
-            text: 包含記憶體設定的文本 (Text containing memory settings)
-            setting_type: "Xmx" 或 "Xms" ("Xmx" or "Xms")
-
-        Returns:
-            int | None: 記憶體大小（MB），如果找不到則返回 None (Memory size in MB, or None if not found)
-
-        """
+        """解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數"""
         if not text or not isinstance(text, str):
             return None
         if not setting_type or setting_type not in ["Xmx", "Xms"]:
@@ -64,43 +52,26 @@ class MemoryUtils:
         return None
 
     @staticmethod
-    def format_memory(memory_bytes: float) -> str:
-        """格式化記憶體大小（位元組輸入）
-        Format memory size (bytes input)
-        """
-        if memory_bytes < KB:
-            return f"{memory_bytes:.1f} B"
-        if memory_bytes < MB:
-            return f"{memory_bytes / KB:.1f} KB"
-        if memory_bytes < GB:
-            return f"{memory_bytes / MB:.1f} MB"
-        return f"{memory_bytes / GB:.1f} GB"
-
-    @staticmethod
-    def format_memory_mb(memory_mb: int) -> str:
-        """格式化記憶體顯示
-        Format memory display
-        """
+    def format_memory_mb(memory_mb: int, compact: bool = True) -> str:
+        """格式化記憶體大小（MB），根據大小自動選擇單位顯示，並提供簡潔或詳細格式選項"""
+        if compact:
+            # 簡潔格式：用於配置顯示
+            if memory_mb >= 1024:
+                return f"{memory_mb // 1024}G" if memory_mb % 1024 == 0 else f"{memory_mb / 1024:.1f}G"
+            return f"{memory_mb}M"
+        # 詳細格式：用於監控顯示
         if memory_mb >= 1024:
-            return f"{memory_mb // 1024}G" if memory_mb % 1024 == 0 else f"{memory_mb / 1024:.1f}G"
-        return f"{memory_mb}M"
+            return f"{memory_mb / 1024:.1f} GB"
+        return f"{memory_mb:.1f} MB"
 
 
 # ====== Server Properties 說明助手  ======
 class ServerPropertiesHelper:
-    """server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。
-    ServerPropertiesHelper: A helper class for server.properties, providing property descriptions, categories, loading/saving functions.
-    """
+    """server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。"""
 
     @staticmethod
     def get_property_descriptions() -> dict[str, str]:
-        """取得所有 server.properties 屬性的中文說明字典 (依據官方 Wiki 更新)
-        Get detailed Chinese descriptions for all server.properties attributes
-
-        Returns:
-            Dict[str, str]: 屬性名稱對應說明的字典 (Dictionary mapping property names to descriptions)
-
-        """
+        """取得所有 server.properties 屬性的中文說明字典"""
         return {
             "accepts-transfers": "是否允許伺服器端接受以Transfer數據包作為登入請求的傳入連接。 (false/true)",
             "allow-flight": "是否允許玩家在生存模式下飛行。 (false/true) 若設為true，安裝了飛行模組的玩家可以飛行。",
@@ -135,7 +106,7 @@ class ServerPropertiesHelper:
             "max-players": "伺服器最大玩家數量 (0-2147483647)。超過此數量新玩家無法加入 (OP除外，若設定允許)。",
             "max-tick-time": "每個 tick 花費的最大毫秒數。 (0-2^63-1) 超過此值伺服器會強制關閉 (判定為崩潰)。設為 -1 可停用。",
             "max-world-size": "世界邊界的最大半徑 (1-29999984)。限制世界可探索範圍。",
-            "motd": "伺服器列表顯示的訊息 (Message of the Day)。支援樣式代碼。",
+            "motd": "伺服器列表顯示的訊息。支援樣式代碼。",
             "network-compression-threshold": "網路壓縮閾值。 (預設: 256) 封包大於此位元組時進行壓縮。-1 為停用壓縮。",
             "online-mode": "是否啟用線上驗證 (正版驗證)。 (true/false) true - 需正版帳號登入。",
             "op-permission-level": "OP 管理員的預設權限等級 (1-4)。 1:繞過重生保護 2:單人作弊指令 3:多人管理指令 4:所有指令。",
@@ -165,7 +136,7 @@ class ServerPropertiesHelper:
             "use-native-transport": "是否使用 Linux 原生封包最佳化。 (true/false) 僅在 Linux 有效。",
             "view-distance": "伺服器發送給客戶端的區塊視距 (3-32)。影響客戶端能看到的範圍。",
             "white-list": "是否啟用白名單。 (false/true) true - 只有 whitelist.json 中的玩家可加入。",
-            "management-server-enabled": "是否啟用管理伺服器協定 (Minecraft Management Protocol)。",
+            "management-server-enabled": "是否啟用管理伺服器協定。",
             "management-server-host": "管理伺服器監聽的主機 (預設 localhost)。",
             "management-server-port": "管理伺服器監聽的埠號 (預設 25585)。",
             "management-server-secret": "管理伺服器使用的密鑰。",
@@ -177,28 +148,13 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def get_property_description(property_name: str) -> str:
-        """取得指定屬性的詳細說明文字
-        Get detailed description text for a specific property
-
-        Args:
-            property_name (str): 屬性名稱 (Property name)
-
-        Returns:
-            str: 該屬性的說明文字，若屬性不存在則返回未知屬性訊息 (Description text, or unknown message if not found)
-
-        """
+        """取得指定屬性的詳細說明文字"""
         descriptions = ServerPropertiesHelper.get_property_descriptions()
         return descriptions.get(property_name, f"未知屬性: {property_name}")
 
     @staticmethod
     def get_property_categories() -> dict[str, list]:
-        """取得屬性按功能分類的組織結構，方便 UI 顯示分組
-        Get property categories organized by functionality for convenient UI grouping display
-
-        Returns:
-            Dict[str, list]: 分類名稱對應屬性列表的字典 (Dictionary mapping category names to property lists)
-
-        """
+        """取得屬性按功能分類的組織結構，方便 UI 顯示分組"""
         return {
             "基本設定": [
                 "server-port",
@@ -299,26 +255,50 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def load_properties(file_path) -> dict[str, str]:
-        """從 server.properties 檔案讀取屬性配置並解析為字典
-        Load property configuration from server.properties file and parse into dictionary
-
-        Args:
-            file_path: server.properties 檔案的路徑 (Path to server.properties file)
-
-        Returns:
-            Dict[str, str]: 屬性名稱對應值的字典 (Dictionary mapping property names to values)
-
-        """
+        """從 server.properties 檔案讀取屬性配置並解析為字典"""
         properties = {}
         try:
             properties_file = Path(file_path)
             content = PathUtils.read_text_file(properties_file)
+
+            def _unescape_property(token: str) -> str:
+                """還原 Java properties 風格的跳脫字元（鍵/值）。
+
+                處理以下跳脫序列：
+                - \\: (:), \\= (=), \\  (空格), \\\\ (\\)
+                - \\t (制表符), \\n (換行), \\r (回車), \\f (換頁)
+                """
+                if token is None:
+                    return ""
+                token = token.strip()
+                # 還原常見的跳脫字元
+                result = token
+                result = result.replace("\\t", "\t")  # 制表符
+                result = result.replace("\\n", "\n")  # 換行
+                result = result.replace("\\r", "\r")  # 回車
+                result = result.replace("\\f", "\f")  # 換頁
+                return re.sub(r"\\([:=\s\\])", lambda m: m.group(1), result)
+
             if content:
                 for line in content.splitlines():
                     line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, value = line.split("=", 1)
-                        properties[key.strip()] = value.strip()
+                    # 忽略空行和註解行（以 # 開頭）
+                    if not line or line.startswith("#"):
+                        continue
+
+                    # 使用正則表達式找到第一個未被反斜線轉義的 = 或 : 作為分隔符
+                    match = re.search(r"(?<!\\)(=|:)", line)
+                    if not match:
+                        continue
+
+                    key_part = line[: match.start()]
+                    value_part = line[match.end() :]
+
+                    key = _unescape_property(key_part)
+                    value = _unescape_property(value_part)
+
+                    if key and key.strip():
+                        properties[key] = value
         except Exception as e:
             logger.exception(f"載入 server.properties 失敗: {e}")
 
@@ -326,44 +306,255 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def save_properties(file_path, properties: dict[str, str]):
-        """將屬性字典儲存為 server.properties 檔案格式
-        Save properties dictionary as server.properties file format
-
-        Args:
-            file_path: 要儲存的檔案路徑 (Path to save the file)
-            properties (Dict[str, str]): 屬性名稱對應值的字典 (Dictionary mapping property names to values)
-
-        """
+        """將屬性字典儲存為 server.properties 檔案格式"""
         try:
             properties_file = Path(file_path)
             lines = ["# Minecraft server properties", "# Generated by Minecraft Server Manager", ""]
-            lines.extend(f"{key}={value}" for key, value in properties.items())
-            lines.append("")  # Ensure EOF newline
+
+            def _escape_property_value(raw_value: str) -> str:
+                """跳脫 Java properties 屬性值中的特殊字元。
+
+                處理以下字元：
+                - \\ -> \\\\
+                - \n -> \\n
+                - \r -> \\r
+                - \t -> \\t
+                - \f -> \\f
+                - : -> \\: (需正確處理已跳脫的反斜線)
+                - = -> \\= (前導 = 號)
+                - 前導空格 -> \\
+                """
+                if not raw_value:
+                    return raw_value
+
+                result: list[str] = []
+
+                for i, ch in enumerate(raw_value):
+                    if ch == "\\":
+                        result.append(ch)
+                        continue
+
+                    # 處理需要跳脫的字元
+                    if ch == ":" or ch == "=":
+                        backslash_count = 0
+                        j = i - 1
+                        while j >= 0 and raw_value[j] == "\\":
+                            backslash_count += 1
+                            j -= 1
+
+                        if ch == ":":
+                            # 如果前面有偶數個反斜線，需要跳脫冒號
+                            if backslash_count % 2 == 0:
+                                result.append("\\:")
+                            else:
+                                result.append(":")
+                            continue
+
+                        # ch == "="
+                        # 跳脫等號（特別是前導的）
+                        if i == 0 or backslash_count % 2 == 0:
+                            result.append("\\=")
+                        else:
+                            result.append("=")
+                        continue
+
+                    if ch == " " and i == 0:
+                        # 跳脫前導空格
+                        result.append("\\ ")
+                        continue
+                    if ch == "\n":
+                        result.append("\\n")
+                        continue
+                    if ch == "\r":
+                        result.append("\\r")
+                        continue
+                    if ch == "\t":
+                        result.append("\\t")
+                        continue
+                    if ch == "\f":
+                        result.append("\\f")
+                        continue
+
+                    result.append(ch)
+
+                return "".join(result)
+
+            for key, value in properties.items():
+                val_str = _escape_property_value(str(value))
+                lines.append(f"{key}={val_str}")
+
+            lines.append("")
 
             PathUtils.write_text_file(properties_file, "\n".join(lines))
         except Exception as e:
             logger.exception(f"儲存 server.properties 失敗: {e}")
 
 
+# ====== Server Properties 驗證器 ======
+class ServerPropertiesValidator:
+    """server.properties 屬性驗證器"""
+
+    # 屬性驗證規則：屬性名稱 -> (類型, 最小值, 最大值, 允許的值)
+    # Property validation rules: property_name -> (type, min_value, max_value, allowed_values)
+    VALIDATION_RULES = {
+        # 整數屬性
+        "max-players": ("int", 0, 2147483647, None),
+        "max-world-size": ("int", 1, 29999984, None),
+        "server-port": ("int", 1, 65535, None),
+        "query.port": ("int", 1, 65535, None),
+        "rcon.port": ("int", 1, 65535, None),
+        "entity-broadcast-range-percentage": ("int", 10, 1000, None),
+        "function-permission-level": ("int", 1, 4, None),
+        "op-permission-level": ("int", 0, 4, None),
+        "max-tick-time": ("int", -1, None, None),  # -1 為停用
+        "max-chained-neighbor-updates": ("int", None, None, None),
+        "network-compression-threshold": ("int", -1, None, None),
+        "simulation-distance": ("int", 3, 32, None),
+        "view-distance": ("int", 3, 32, None),
+        "spawn-protection": ("int", 0, None, None),
+        "player-idle-timeout": ("int", 0, None, None),
+        "pause-when-empty-seconds": ("int", -1, None, None),  # -1 為不停止
+        "rate-limit": ("int", 0, None, None),
+        "text-filtering-version": ("int", 0, None, None),
+        "status-heartbeat-interval": ("int", 0, None, None),
+        "management-server-port": ("int", 0, None, None),
+        # 布林值屬性
+        "accepts-transfers": ("bool", None, None, None),
+        "allow-flight": ("bool", None, None, None),
+        "allow-nether": ("bool", None, None, None),
+        "broadcast-console-to-ops": ("bool", None, None, None),
+        "broadcast-rcon-to-ops": ("bool", None, None, None),
+        "enable-command-block": ("bool", None, None, None),
+        "enable-jmx-monitoring": ("bool", None, None, None),
+        "enable-query": ("bool", None, None, None),
+        "enable-rcon": ("bool", None, None, None),
+        "enable-status": ("bool", None, None, None),
+        "enforce-secure-profile": ("bool", None, None, None),
+        "enforce-whitelist": ("bool", None, None, None),
+        "force-gamemode": ("bool", None, None, None),
+        "generate-structures": ("bool", None, None, None),
+        "hardcore": ("bool", None, None, None),
+        "hide-online-players": ("bool", None, None, None),
+        "log-ips": ("bool", None, None, None),
+        "online-mode": ("bool", None, None, None),
+        "prevent-proxy-connections": ("bool", None, None, None),
+        "pvp": ("bool", None, None, None),
+        "require-resource-pack": ("bool", None, None, None),
+        "spawn-monsters": ("bool", None, None, None),
+        "sync-chunk-writes": ("bool", None, None, None),
+        "use-native-transport": ("bool", None, None, None),
+        "white-list": ("bool", None, None, None),
+        # 列舉屬性
+        "gamemode": (
+            "enum",
+            None,
+            None,
+            ["survival", "creative", "adventure", "spectator", "0", "1", "2", "3"],
+        ),
+        "difficulty": (
+            "enum",
+            None,
+            None,
+            ["peaceful", "easy", "normal", "hard", "0", "1", "2", "3"],
+        ),
+        "level-type": (
+            "enum",
+            None,
+            None,
+            [
+                "minecraft:normal",
+                "minecraft:flat",
+                "minecraft:large_biomes",
+                "minecraft:amplified",
+                "minecraft:single_biome_surface",
+                "default",
+                "flat",
+                "large_biomes",
+                "amplified",
+                "buffet",
+                "customized",
+            ],
+        ),
+        "region-file-compression": ("enum", None, None, ["deflate", "none"]),
+        # 字串屬性 - 無特定限制
+        "bug-report-link": ("str", None, None, None),
+        "generator-settings": ("str", None, None, None),
+        "initial-disabled-packs": ("str", None, None, None),
+        "initial-enabled-packs": ("str", None, None, None),
+        "level-name": ("str", None, None, None),
+        "level-seed": ("str", None, None, None),
+        "motd": ("str", None, None, None),
+        "rcon.password": ("str", None, None, None),
+        "resource-pack": ("str", None, None, None),
+        "resource-pack-id": ("str", None, None, None),
+        "resource-pack-prompt": ("str", None, None, None),
+        "resource-pack-sha1": ("str", None, None, None),
+        "server-ip": ("str", None, None, None),
+        "text-filtering-config": ("str", None, None, None),
+    }
+
+    @staticmethod
+    def validate_property(prop_name: str, value: str) -> tuple[bool, str]:
+        """驗證單一屬性"""
+        if not prop_name or not value:
+            return True, ""  # 允許空值
+
+        rules = ServerPropertiesValidator.VALIDATION_RULES.get(prop_name)
+        if not rules:
+            # 未知屬性，但允許儲存
+            return True, ""
+
+        prop_type, min_val, max_val, allowed = rules
+
+        try:
+            if prop_type == "int":
+                int_val = int(value)
+                if min_val is not None and int_val < min_val:
+                    return False, f"{prop_name}: 值不能小於 {min_val}（目前：{int_val}）"
+                if max_val is not None and int_val > max_val:
+                    return False, f"{prop_name}: 值不能大於 {max_val}（目前：{int_val}）"
+                return True, ""
+
+            if prop_type == "bool":
+                if value.lower() not in ["true", "false"]:
+                    return False, f"{prop_name}: 必須為 true 或 false（目前：{value}）"
+                return True, ""
+
+            if prop_type == "enum":
+                if allowed is not None and value not in allowed:
+                    return False, f"{prop_name}: 無效的值。允許值為：{', '.join(allowed)}（目前：{value}）"
+                return True, ""
+
+            if prop_type == "str":
+                return True, ""
+
+        except ValueError:
+            return False, f"{prop_name}: 無效的 {prop_type} 值（目前：{value}）"
+
+        return True, ""
+
+    @staticmethod
+    def validate_properties(properties: dict[str, str]) -> tuple[bool, list[str]]:
+        """驗證多個屬性"""
+        errors = []
+        for prop_name, value in properties.items():
+            is_valid, error_msg = ServerPropertiesValidator.validate_property(prop_name, value)
+            if not is_valid:
+                errors.append(error_msg)
+
+        return len(errors) == 0, errors
+
+
 # ====== 伺服器檢測工具類別 ======
 class ServerDetectionUtils:
-    """伺服器檢測工具類別，提供各種伺服器相關的檢測和驗證功能
-    Server detection utility class providing various server-related detection and validation functions
-    """
+    """伺服器檢測工具類別，提供各種伺服器相關的檢測和驗證功能"""
 
     # ====== Shared Utility Methods ======
     @staticmethod
     def parse_mc_version(version_str: str) -> list[int]:
-        """解析 Minecraft 版本字串為整數列表
-        Parse Minecraft version string to list of integers
-
-        Args:
-            version_str: 版本字串，如 "1.20.1"
-
-        Returns:
-            版本數字列表，如 [1, 20, 1]
-        """
+        """版本數字列表，如 [1, 20, 1]"""
         if not version_str or not isinstance(version_str, str):
+            logger.debug(f"無效的 MC 版本字串: {version_str!r}")
             return []
         try:
             matches = re.findall(r"\d+", version_str)
@@ -374,15 +565,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def is_fabric_compatible_version(mc_version: str) -> bool:
-        """檢查 MC 版本是否與 Fabric 相容（1.14+）
-        Check if MC version is compatible with Fabric (1.14+)
-
-        Args:
-            mc_version: 要檢查的 MC 版本字串
-
-        Returns:
-            如果相容則為 True，否則為 False
-        """
+        """檢查 MC 版本是否與 Fabric 相容（1.14+）"""
         try:
             version_parts = ServerDetectionUtils.parse_mc_version(mc_version)
             if not version_parts:
@@ -399,16 +582,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def standardize_loader_type(loader_type: str, loader_version: str = "") -> str:
-        """標準化載入器類型：將輸入轉為小寫並進行基本推斷
-        Standardize loader type: convert to lowercase and make basic inferences
-
-        Args:
-            loader_type: 載入器類型
-            loader_version: 載入器版本（用於推斷）
-
-        Returns:
-            標準化後的載入器類型
-        """
+        """標準化載入器類型：將輸入轉為小寫並進行基本推斷"""
         lt_low = loader_type.lower()
         if lt_low not in ["unknown", "未知"]:
             return lt_low
@@ -422,15 +596,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def normalize_mc_version(mc_version) -> str:
-        """標準化 Minecraft 版本字串
-        Normalize Minecraft version string
-
-        Args:
-            mc_version: 要標準化的 Minecraft 版本字串
-
-        Returns:
-            標準化後的 Minecraft 版本字串
-        """
+        """標準化 Minecraft 版本字串"""
         if isinstance(mc_version, list) and mc_version:
             mc_version = str(mc_version[0])
         if isinstance(mc_version, str) and (mc_version.startswith(("[", "("))):
@@ -441,15 +607,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def clean_version(version: str) -> str:
-        """清理版本字串，移除後綴如 +, -mc, -fabric, -forge, -kotlin 等
-        Clean version string, removing suffixes
-
-        Args:
-            version: 版本字串
-
-        Returns:
-            清理後的版本字串
-        """
+        """清理後的版本字串"""
         if not version or version == "未知":
             return version
         # 移除後綴如 +、-mc、-fabric、-forge、-kotlin 等
@@ -464,15 +622,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def extract_mc_version_from_text(text: str) -> str | None:
-        """從文本中提取 Minecraft 版本
-        Extract Minecraft version from text
-
-        Args:
-            text: 要解析的文本
-
-        Returns:
-            提取的版本字串，如 "1.20.1"，找不到則返回 None
-        """
+        """從文本中提取 Minecraft 版本"""
         if not text:
             return None
         # 匹配常見的版本格式，按優先級排序
@@ -509,15 +659,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_loader_from_text(text: str) -> str:
-        """從文本中偵測載入器類型
-        Detect loader type from text
-
-        Args:
-            text: 要解析的文本（檔名或內容）
-
-        Returns:
-            偵測到的載入器類型: "fabric", "forge", "vanilla"
-        """
+        """從文本中偵測載入器類型"""
         if not text:
             return "vanilla"
         text_lower = text.lower()
@@ -530,16 +672,7 @@ class ServerDetectionUtils:
     # ====== Loader Detection Methods (formerly LoaderDetector) ======
     @staticmethod
     def detect_loader_type(server_path: Path, jar_names: list[str]) -> str:
-        """偵測載入器類型
-        Detect loader type from server path and JAR files
-
-        Args:
-            server_path: 伺服器路徑
-            jar_names: JAR 檔案名稱列表
-
-        Returns:
-            載入器類型: "fabric", "forge", "vanilla"
-        """
+        """偵測載入器類型"""
         # Check for Fabric
         for fabric_jar in FABRIC_JAR_NAMES:
             if (server_path / fabric_jar).exists():
@@ -561,29 +694,15 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_loader_from_filename(base_name: str) -> str:
-        """從檔名偵測載入器類型
-        Detect loader type from filename
-
-        Args:
-            base_name: 基礎檔案名稱
-
-        Returns:
-            偵測到的載入器類型
+        """
+        從檔名偵測載入器類型
+        偵測到的載入器類型
         """
         return ServerDetectionUtils.detect_loader_from_text(base_name)
 
     @staticmethod
     def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
-        """從 Forge 路徑字串提取版本資訊
-        Extract version info from Forge path string
-
-        Args:
-            path_str: Forge 版本資料夾名稱或 JAR 檔名
-                格式如 "1.20.1-47.3.29", "forge-1.12.2-14.23.5.2859.jar"
-
-        Returns:
-            (minecraft_version, forge_version) 或 (None, None)
-        """
+        """從 Forge 路徑字串提取版本資訊"""
         if not path_str:
             return None, None
 
@@ -619,17 +738,7 @@ class ServerDetectionUtils:
     # ====== Server JAR Location Methods (formerly ServerJarLocator) ======
     @staticmethod
     def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
-        """尋找主要 JAR 檔案
-        Find main JAR file based on loader type
-
-        Args:
-            server_path: 伺服器路徑
-            loader_type: 載入器類型
-            server_config: 伺服器配置（可選）
-
-        Returns:
-            主 JAR 檔案名稱或路徑
-        """
+        """尋找主要 JAR 檔案，根據載入器類型和伺服器配置進行優先級檢測"""
         loader_type = (loader_type or "").lower()
 
         # Forge server
@@ -671,16 +780,7 @@ class ServerDetectionUtils:
     # ====== Original Methods ======
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
-        """尋找伺服器啟動腳本
-        Find server startup script
-
-        Args:
-            server_path (Path): 伺服器路徑 (Server path)
-
-        Returns:
-            Path | None: 啟動腳本路徑，若未找到則返回 None (Startup script path, or None if not found)
-
-        """
+        """尋找伺服器啟動腳本"""
         script_candidates = [
             "start_server.bat",
             "run.bat",
@@ -698,16 +798,7 @@ class ServerDetectionUtils:
     # ====== 檔案與設定檢測  ======
     @staticmethod
     def get_missing_server_files(folder_path: Path) -> list:
-        """檢查伺服器資料夾中缺少的關鍵檔案清單
-        Check list of missing critical files in server folder
-
-        Args:
-            folder_path (Path): 伺服器資料夾路徑 (Server folder path)
-
-        Returns:
-            list: 缺少的檔案名稱清單 (List of missing file names)
-
-        """
+        """檢查伺服器資料夾中缺少的關鍵檔案清單"""
         missing = []
         # 主程式 JAR
         if not (folder_path / "server.jar").exists() and not any(
@@ -729,16 +820,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_eula_acceptance(server_path: Path) -> bool:
-        """檢測 eula.txt 檔案中是否已設定 eula=true
-        Detect if eula=true is set in eula.txt file
-
-        Args:
-            server_path (Path): 伺服器根目錄路徑 (Server root directory path)
-
-        Returns:
-            bool: 已接受 EULA 返回 True，否則返回 False (True if EULA accepted, else False)
-
-        """
+        """檢測 eula.txt 檔案中是否已設定 eula=true"""
         eula_file = server_path / "eula.txt"
         if not eula_file.exists():
             return False
@@ -762,15 +844,7 @@ class ServerDetectionUtils:
     # ====== 記憶體設定管理 ======
     @staticmethod
     def _process_startup_script(file_path: Path) -> tuple[str, bool, int | None, int | None]:
-        """處理啟動腳本：移除 pause、添加 nogui、提取記憶體設定
-        Process startup script: remove pause, add nogui, extract memory settings
-
-        Args:
-            file_path: 腳本檔案路徑 (Script file path)
-
-        Returns:
-            tuple: (script_content, modified, max_memory_mb, min_memory_mb)
-        """
+        """處理啟動腳本：移除 pause、添加 nogui、提取記憶體設定"""
         modified = False
         max_m = None
         min_m = None
@@ -806,16 +880,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def _detect_memory_from_file(file_path: Path, is_script: bool = False) -> tuple[int | None, int | None]:
-        """從單個檔案偵測記憶體設定（統一接口）
-        Detect memory settings from a single file (unified interface)
-
-        Args:
-            file_path: 要掃描的檔案路徑 (File path to scan)
-            is_script: 是否為啟動腳本 (Whether it's a startup script)
-
-        Returns:
-            tuple[int | None, int | None]: (max_memory_mb, min_memory_mb)
-        """
+        """從單個檔案偵測記憶體設定（統一接口）"""
         if not file_path.exists():
             return None, None
 
@@ -846,14 +911,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def update_forge_user_jvm_args(server_path: Path, config: ServerConfig) -> None:
-        """更新新版 Forge 的 user_jvm_args.txt 檔案，設定記憶體參數
-        Update user_jvm_args.txt file for newer Forge versions with memory parameters
-
-        Args:
-            server_path (Path): 伺服器根目錄路徑 (Server root directory path)
-            config (ServerConfig): 伺服器配置物件 (Server configuration object)
-
-        """
+        """更新新版 Forge 的 user_jvm_args.txt 檔案，設定記憶體參數"""
         user_jvm_args_path = server_path / "user_jvm_args.txt"
         lines = []
         if config.memory_min_mb:
@@ -871,13 +929,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:
-        """檢測記憶體大小 - 簡化版本
-        Detect memory size - Simplified version
-
-        Args:
-            server_path (Path): 伺服器根目錄路徑 (Server root directory path)
-            config (ServerConfig): 伺服器配置物件 (Server configuration object)
-        """
+        """檢測記憶體大小 - 簡化版本"""
         # 優先級順序掃描
         memory_sources = [
             [("user_jvm_args.txt", False), ("jvm.args", False)],
@@ -931,15 +983,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_server_type(server_path: Path, config: "ServerConfig", print_result: bool = True) -> None:
-        """檢測伺服器類型和版本 - 統一的偵測邏輯
-        Detect server type and version - Unified detection logic.
-
-        Args:
-            server_path (Path): 伺服器路徑 (Server path)
-            config (ServerConfig): 伺服器配置 (Server configuration)
-            print_result (bool): 是否列印結果 (Whether to print results)
-
-        """
+        """檢測伺服器類型和版本 - 統一的偵測邏輯"""
         try:
             jar_files = list(server_path.glob("*.jar"))
             jar_names = [f.name for f in jar_files]
@@ -1004,16 +1048,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def is_valid_server_folder(folder_path: Path) -> bool:
-        """檢查是否為有效的 Minecraft 伺服器資料夾
-        Check if the folder is a valid Minecraft server directory.
-
-        Args:
-            folder_path (Path): 伺服器資料夾路徑 (Server folder path)
-
-        Returns:
-            bool: 是否為有效的伺服器資料夾 (True if valid server folder, else False)
-
-        """
+        """檢查是否為有效的 Minecraft 伺服器資料夾"""
         if not folder_path.is_dir():
             return False
 
@@ -1036,15 +1071,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def _get_latest_log_file(server_path: Path) -> Path | None:
-        """取得最新的日誌檔，優先級: 時間戳 > 標準名稱
-        Get the latest log file with priority on timestamp
-
-        Args:
-            server_path: 伺服器路徑 (Server path)
-
-        Returns:
-            最新的日誌檔路徑，或 None (Latest log file path, or None)
-        """
+        """取得最新的日誌檔，優先級: 時間戳 > 標準名稱"""
         log_candidates = ["latest.log", "server.log", "debug.log"]
         logs_dir = server_path / "logs"
 
@@ -1077,16 +1104,7 @@ class ServerDetectionUtils:
         loader: str,
         detection_source: dict | None = None,
     ) -> None:
-        """從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版本
-        Detect Fabric/Forge loader and Minecraft version from multiple sources
-
-        Args:
-            server_path (Path): 伺服器路徑 (Server path)
-            config: 伺服器配置物件 (Server configuration object)
-            loader (str): 載入器類型 (Loader type)
-            detection_source (dict, optional): 偵測來源字典，用於記錄版本偵測來源
-
-        """
+        """從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版"""
         if detection_source is None:
             detection_source = {}
 
@@ -1106,9 +1124,7 @@ class ServerDetectionUtils:
             return None
 
         def detect_from_logs():
-            """從日誌檔偵測載入器和 Minecraft 版本 - 改進版本
-            Detect loader and Minecraft version from logs - Improved version
-            """
+            """從日誌檔偵測載入器和 Minecraft 版本 - 改進版本"""
             log_file = ServerDetectionUtils._get_latest_log_file(server_path)
 
             if not log_file or not log_file.exists():
@@ -1233,17 +1249,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def _extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
-        """從 Forge 路徑提取 MC 版本和 Forge 版本
-        Extract Minecraft and Forge versions from Forge path string
-
-        Args:
-            path_str: Forge 版本資料夾名稱，格式如 "1.20.1-47.3.29"
-                    Forge version folder name, format like "1.20.1-47.3.29"
-
-        Returns:
-            tuple[str | None, str | None]: (minecraft_version, forge_version)
-
-        """
+        """從 Forge 路徑提取 MC 版本和 Forge 版本"""
         result = ServerDetectionUtils.extract_version_from_forge_path(path_str)
         if result:
             return result
@@ -1251,16 +1257,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_forge_args_file(server_path: Path, server_config=None) -> Path | None:
-        """尋找 Forge 的 win_args.txt 啟動參數檔
-        Find Forge's win_args.txt startup argument file.
-
-        Args:
-            server_path: 伺服器根目錄
-            server_config: 伺服器配置物件 (用於精確查找)
-
-        Returns:
-            找到的 win_args.txt 路徑，否則 None
-        """
+        """尋找 Forge 的 win_args.txt 啟動參數檔"""
         forge_lib_dir = server_path / "libraries" / "net" / "minecraftforge" / "forge"
         if not forge_lib_dir.is_dir():
             return None
@@ -1287,17 +1284,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def _parse_forge_args_file(args_path: Path) -> dict[str, str | list[str] | None]:
-        """解析 Forge win_args.txt，提取關鍵啟動訊息
-        Parse Forge win_args.txt and extract key startup information.
-
-        Returns:
-            包含以下可能的鍵值對：
-            - 'jar': 直接 -jar 指定的 JAR 檔案 (Modern 1.21.11+)
-            - 'bootstraplauncher': BootstrapLauncher 類別 (1.20.1)
-            - 'forge_libraries': Forge 相關 library JAR 列表
-            - 'minecraft_version': 從路徑解析出的 MC 版本
-            - 'forge_version': 從路徑解析出的 Forge 版本
-        """
+        """包含以下可能的鍵值對："""
         result: dict[str, str | list[str] | None] = {
             "jar": None,
             "bootstraplauncher": None,
@@ -1347,18 +1334,7 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_main_jar_file(server_path: Path, loader_type: str, server_config: ServerConfig | None = None) -> str:
-        """偵測主伺服器 JAR 檔案名稱，根據載入器類型（Forge/Fabric/Vanilla）返回適當的 JAR 名稱
-        Detects the main server JAR file name based on the loader type (Forge/Fabric/Vanilla) and returns the appropriate JAR name.
-
-        Args:
-            server_path (Path): 伺服器路徑 (Server path)
-            loader_type (str): 載入器類型 (Loader type)
-            server_config (ServerConfig | None): 伺服器配置物件，用於優化查找路徑
-
-        Returns:
-            str: 主伺服器 JAR 檔案名稱 (Main server JAR file name)
-
-        """
+        """偵測主伺服器 JAR 檔案名稱，根據載入器類型（Forge/Fabric/Vanilla）返回適當的 JAR 名稱"""
         logger.debug(f"server_path={server_path}")
         logger.debug(f"loader_type={loader_type}")
 
@@ -1368,22 +1344,16 @@ class ServerDetectionUtils:
 
 # ====== 伺服器操作工具類別 Server Operations ======
 class ServerOperations:
-    """伺服器操作工具類別
-    Server operations utility class
-    """
+    """伺服器操作工具類別"""
 
     @staticmethod
     def get_status_text(is_running: bool) -> tuple:
-        """獲取狀態文字和顏色
-        Get status text and color
-        """
+        """獲取狀態文字和顏色"""
         return ("🟢 狀態: 運行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
 
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
-        """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）
-        Gracefully stop the server (try 'stop' command first, force stop if failed)
-        """
+        """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）"""
         try:
             # 先嘗試使用 stop 命令
             command_success = server_manager.send_command(server_name, "stop")
@@ -1396,22 +1366,11 @@ class ServerOperations:
 
 # ====== 伺服器指令工具類別 ======
 class ServerCommands:
-    """伺服器指令工具類別
-    Server commands utility class
-    """
+    """伺服器指令工具類別"""
 
     @staticmethod
     def build_java_command(server_config, return_list=False) -> list | str:
-        """構建 Java 啟動命令（統一邏輯）
-        Build Java launch command (unified logic)
-
-        Args:
-            server_config: 伺服器配置對象
-            return_list: 是否返回列表格式 (True) 或字符串格式 (False)
-
-        Returns:
-            list or str: Java 啟動命令 (Java launch command)
-        """
+        """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型"""
         server_path = Path(server_config.path)
         loader_type = str(server_config.loader_type or "").lower()
         memory_min = max(512, server_config.memory_min_mb) if server_config.memory_min_mb else 1024

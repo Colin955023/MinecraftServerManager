@@ -27,7 +27,6 @@ logger = get_logger().bind(component="Main")
 
 # ====== 訊息顯示工具 ======
 def show_message(title, message, message_type="error"):
-    """顯示訊息對話框；若 GUI 顯示失敗則退回主控台輸出。"""
     try:
         if message_type == "error":
             UIUtils.show_error(title, message, topmost=True)
@@ -48,20 +47,17 @@ def show_message(title, message, message_type="error"):
 
 # ====== 應用程式啟動 ======
 def start_application():
-    """啟動主應用程式，初始化管理器並設定 UI 環境。"""
     _initialize_managers()
     _setup_ui_environment()
     _launch_main_window()
 
 
 def _initialize_managers():
-    """初始化管理器"""
     LoaderManager()
     MinecraftVersionManager()
 
 
 def _setup_ui_environment():
-    """設定 UI 環境"""
     ctk.set_appearance_mode("light")
 
     settings = get_settings_manager()
@@ -70,14 +66,12 @@ def _setup_ui_environment():
 
 
 def _launch_main_window():
-    """啟動主視窗"""
     root = ctk.CTk()
     MinecraftServerManager(root)
     root.mainloop()
 
 
 def main():
-    """主程式入口點，負責整體流程控制（單一頂層錯誤處理）。"""
     try:
         start_application()
     except KeyboardInterrupt:

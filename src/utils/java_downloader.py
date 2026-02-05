@@ -16,7 +16,7 @@ logger = get_logger().bind(component="JavaDownloader")
 
 
 class JavaDownloader:
-    """Java 下載管理類別 (Static Class)"""
+    """Java 下載管理類別"""
 
     @staticmethod
     def _is_winget_available():

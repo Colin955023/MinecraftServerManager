@@ -9,6 +9,10 @@
 
 本工具參考了 [PrismLauncher](https://github.com/PrismLauncher/PrismLauncher) 的模組管理體驗，並結合了自動化的 Java 環境配置與伺服器版本管理，為使用者帶來無縫的伺服器架設體驗。
 
+##  系統支援
+
+**本專案僅支援 Microsoft Windows 與 Windows Server 作業系統。** 不支援 macOS、Linux 或其他 Unix-like 系統。
+
 ##  核心特色
 
 ###  現代化使用者介面

@@ -22,19 +22,12 @@ logger = get_logger().bind(component="VersionManager")
 
 
 class MinecraftVersionManager(Singleton):
-    """Minecraft 版本管理器類別，提供版本查詢和快取管理
-    Minecraft version manager class with version querying and cache management capabilities
-    """
+    """Minecraft 版本管理器類別，提供版本查詢和快取管理"""
 
     # ====== 初始化與快取管理 ======
     _initialized: bool = False
 
-    # 初始化版本管理器
     def __init__(self):
-        """初始化 Minecraft 版本管理器
-        Initialize Minecraft version manager
-        """
-        # 避免重複初始化
         if self._initialized:
             return
 
@@ -45,31 +38,13 @@ class MinecraftVersionManager(Singleton):
 
     @staticmethod
     def _has_valid_server_url(version: dict) -> bool:
-        """檢查版本是否有有效的伺服器下載 URL
-        Check if version has a valid server download URL
-
-        Args:
-            version (dict): 版本資料字典
-
-        Returns:
-            bool: 是否有有效的 server_url
-
-        """
+        """檢查版本是否有有效的伺服器下載 URL"""
         url = version.get("server_url")
         return url is not None and url != ""
 
     # 儲存本地快取
     def _save_local_cache(self, versions: list) -> None:
-        """儲存版本列表到本地快取檔案
-        Save version list to local cache file
-
-        Args:
-            versions (list): 版本資料列表
-
-        Returns:
-            None
-
-        """
+        """儲存版本列表到本地快取檔案"""
         try:
             # 在寫入前確保快取目錄存在
             cache_path = Path(self.cache_file)
@@ -87,18 +62,10 @@ class MinecraftVersionManager(Singleton):
     # ====== 版本資料獲取 ======
     # 從官方 API 獲取版本列表
     def fetch_versions(self, max_workers: int = 10) -> list:
-        """從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊
-        Fetch all Minecraft version list from official API with multi-threaded detail querying
-
-        Args:
-            max_workers (int): 最大執行緒數量
-
-        Returns:
-            list: 版本資料列表 (僅包含已確認有 server_url 的版本)
-        """
+        """從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊"""
         with self._lock:
             try:
-                logger.debug("正在獲取官方版本清單 (Manifest)...")
+                logger.debug("正在獲取官方版本清單...")
                 data = HTTPUtils.get_json(self.version_manifest_url, timeout=10)
                 if not data:
                     return []
@@ -179,9 +146,7 @@ class MinecraftVersionManager(Singleton):
                 return self.get_versions(force_fetch=False)
 
     def get_server_download_url(self, version_id: str) -> str | None:
-        """獲取指定版本的伺服器下載 URL
-        Get server download URL for specific version
-        """
+        """獲取指定版本的伺服器下載 URL"""
         try:
             versions = self.get_versions(force_fetch=False)
             target_ver = next((v for v in versions if v["id"] == version_id), None)
@@ -194,15 +159,7 @@ class MinecraftVersionManager(Singleton):
             return None
 
     def get_versions(self, force_fetch=False) -> list:
-        """取得 Minecraft 版本列表
-        Get Minecraft version list
-
-        Args:
-            force_fetch (bool): 是否強制從網路更新
-
-        Returns:
-            list: Minecraft 版本列表
-        """
+        """取得 Minecraft 版本列表，優先從本地快取讀取，必要時從官方 API 獲取"""
         try:
             cache_path = Path(self.cache_file)
             if force_fetch or not cache_path.exists():

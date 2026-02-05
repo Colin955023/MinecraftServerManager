@@ -13,12 +13,7 @@ from . import RuntimePaths
 
 
 def _get_log_dir() -> Path:
-    """取得日誌目錄路徑（支援便攜模式與安裝模式）
-    Get log directory path (supports both portable and installed modes)
-
-    Returns:
-        Path: 日誌目錄路徑
-    """
+    """取得日誌目錄路徑"""
     # 使用 runtime_paths 提供的 exe 目錄判斷
     exe_dir = RuntimePaths.get_exe_dir()
 
@@ -56,7 +51,7 @@ class LoguruShim:
                         formatted_msg = msg.format(*args)
                         msg = formatted_msg
                         args = ()
-                    except (IndexError, ValueError, KeyError):
+                    except Exception:
                         pass
 
                 if args:
@@ -150,10 +145,5 @@ _logger = LoggerConfig.get_logger()
 
 
 def get_logger():
-    """獲取全局 logger 實例
-    Get global logger instance
-
-    Returns:
-        LoguruShim: Logger instance
-    """
+    """獲取全局 logger 實例"""
     return _logger

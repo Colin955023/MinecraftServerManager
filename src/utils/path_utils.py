@@ -13,29 +13,33 @@ from typing import Any
 
 
 class PathUtils:
-    """路徑處理工具類別，提供專案路徑管理和安全路徑操作
-    Path utilities class for project path management and safe path operations
-    """
+    """路徑處理工具類別，提供專案路徑管理和安全路徑操作"""
+
+    @staticmethod
+    def is_path_within(base_dir: Path, target_path: Path, *, strict: bool = True) -> bool:
+        """檢查 target_path 是否位於 base_dir 之下"""
+        try:
+            base_resolved = base_dir.resolve(strict=True)
+            target_resolved = target_path.resolve(strict=strict)
+        except FileNotFoundError:
+            return False
+        except Exception:
+            return False
+
+        try:
+            target_resolved.relative_to(base_resolved)
+            return True
+        except ValueError:
+            return False
 
     @staticmethod
     def safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
-        """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞
-        Safely extract Zip file, preventing Zip Slip vulnerability
-
-        Args:
-            zip_path (Path): Zip 檔案路徑
-            dest_dir (Path): 目標資料夾路徑
-        """
+        """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞"""
         dest_dir = dest_dir.resolve()
         with zipfile.ZipFile(zip_path, "r") as zf:
             for member in zf.infolist():
-                # 取得解壓後的絕對路徑
-                # Calculate the absolute path of the extracted file
-                member_path = (dest_dir / member.filename).resolve()
-
-                # 檢查路徑是否仍在目標目錄內
-                # Check if the path is still within the destination directory
-                if not member_path.is_relative_to(dest_dir):
+                member_path = dest_dir / member.filename
+                if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
                     raise ValueError(f"Zip File attempted path traversal: {member.filename}")
 
                 # 執行解壓縮
@@ -54,9 +58,7 @@ class PathUtils:
 
     @staticmethod
     def load_json(path: Path | str, default: Any = None) -> Any:
-        """安全讀取 JSON 檔案
-        Safely load JSON file
-        """
+        """安全讀取 JSON 檔案"""
         try:
             p = Path(path)
             if not p.exists():
@@ -68,9 +70,7 @@ class PathUtils:
 
     @staticmethod
     def save_json(path: Path | str, data: Any, indent: int = 2) -> bool:
-        """安全寫入 JSON 檔案
-        Safely save JSON file
-        """
+        """安全寫入 JSON 檔案"""
         try:
             p = Path(path)
             # Ensure parent exists
@@ -83,9 +83,7 @@ class PathUtils:
 
     @staticmethod
     def read_json_from_zip(zip_path: Path | str, internal_path: str) -> Any | None:
-        """從 Zip 檔案中讀取 JSON
-        Read JSON from Zip file
-        """
+        """從 Zip 檔案中讀取 JSON"""
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 if internal_path in zf.namelist():
@@ -97,10 +95,7 @@ class PathUtils:
 
     @staticmethod
     def to_json_str(data: Any, indent: int | None = None) -> str:
-        """
-        將資料轉換為 JSON 字串
-        Convert data to JSON string
-        """
+        """將資料轉換為 JSON 字串"""
         try:
             return json.dumps(data, indent=indent, ensure_ascii=False)
         except Exception:
@@ -108,10 +103,7 @@ class PathUtils:
 
     @staticmethod
     def from_json_str(json_str: str) -> Any:
-        """
-        從 JSON 字串解析資料
-        Parse data from JSON string
-        """
+        """從 JSON 字串解析資料"""
         try:
             return json.loads(json_str)
         except Exception:
@@ -119,17 +111,7 @@ class PathUtils:
 
     @staticmethod
     def read_text_file(path: Path, encoding: str = "utf-8", errors: str = "replace") -> str | None:
-        """讀取文字檔案，統一處理編碼和錯誤
-        Read text file with unified encoding and error handling
-
-        Args:
-            path: 檔案路徑 (File path)
-            encoding: 編碼方式 (Encoding)
-            errors: 錯誤處理方式 (Error handling)
-
-        Returns:
-            str | None: 檔案內容，失敗時返回 None (File content, None on failure)
-        """
+        """讀取文字檔案，統一處理編碼和錯誤"""
         try:
             if not path.exists():
                 return None
@@ -139,18 +121,7 @@ class PathUtils:
 
     @staticmethod
     def write_text_file(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
-        """寫入文字檔案，統一處理編碼和錯誤
-        Write text file with unified encoding and error handling
-
-        Args:
-            path: 檔案路徑 (File path)
-            content: 檔案內容 (File content)
-            encoding: 編碼方式 (Encoding)
-            errors: 錯誤處理方式 (Error handling)
-
-        Returns:
-            bool: 寫入成功返回 True (True if written successfully)
-        """
+        """寫入文字檔案，統一處理編碼和錯誤"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding=encoding, errors=errors)
@@ -160,9 +131,7 @@ class PathUtils:
 
     @staticmethod
     def ensure_dir_exists(path: Path) -> bool:
-        """確保目錄存在，不存在則創建
-        Ensure directory exists, create if not exists
-        """
+        """確保目錄存在，不存在則創建"""
         try:
             path.mkdir(parents=True, exist_ok=True)
             return True
@@ -171,10 +140,7 @@ class PathUtils:
 
     @staticmethod
     def read_bytes_file(path: Path) -> bytes | None:
-        """
-        讀取二進制檔案
-        Read binary file
-        """
+        """讀取二進制檔案"""
         try:
             if not path.exists():
                 return None
@@ -184,10 +150,7 @@ class PathUtils:
 
     @staticmethod
     def write_bytes_file(path: Path, content: bytes) -> bool:
-        """
-        寫入二進制檔案
-        Write binary file
-        """
+        """寫入二進制檔案"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
@@ -197,17 +160,7 @@ class PathUtils:
 
     @staticmethod
     def calculate_checksum(path: Path, algorithm: str = "sha256") -> str | None:
-        """
-        計算檔案雜湊值 (檢查碼)
-        Calculate file checksum
-
-        Args:
-            path: 檔案路徑 (File path)
-            algorithm: 演算法名稱 (Algorithm name, e.g. "sha256", "md5")
-
-        Returns:
-            str | None: 雜湊值 (Checksum), 失敗時返回 None
-        """
+        """計算檔案雜湊值 (檢查碼)"""
         try:
             if not path.exists():
                 return None
@@ -221,10 +174,7 @@ class PathUtils:
 
     @staticmethod
     def delete_path(path: Path | str) -> bool:
-        """
-        刪除檔案或目錄
-        Delete file or directory
-        """
+        """刪除檔案或目錄"""
         try:
             if isinstance(path, str):
                 path = Path(path)
@@ -242,13 +192,7 @@ class PathUtils:
 
     @staticmethod
     def move_path(src: Path, dst: Path) -> bool:
-        """
-        移動檔案或目錄
-        Move file or directory
-        Args:
-            src: 來源路徑 (Source path)
-            dst: 目標路徑 (Destination path)
-        """
+        """移動檔案或目錄"""
         try:
             if not src.exists():
                 return False
@@ -260,13 +204,7 @@ class PathUtils:
 
     @staticmethod
     def copy_file(src: Path, dst: Path) -> bool:
-        """
-        複製檔案
-        Copy file
-        Args:
-            src: 來源路徑 (Source path)
-            dst: 目標路徑 (Destination path)
-        """
+        """複製檔案"""
         try:
             if not src.exists():
                 return False
@@ -278,14 +216,7 @@ class PathUtils:
 
     @staticmethod
     def copy_dir(src: Path, dst: Path, ignore_patterns: list[str] | None = None) -> bool:
-        """
-        複製目錄
-        Copy directory
-        Args:
-            src: 來源路徑 (Source path)
-            dst: 目標路徑 (Destination path)
-            ignore_patterns: 忽略模式列表 (List of ignore patterns)
-        """
+        """複製目錄"""
         try:
             ignore = shutil.ignore_patterns(*ignore_patterns) if ignore_patterns else None
             shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True)
@@ -295,12 +226,7 @@ class PathUtils:
 
     @staticmethod
     def find_executable(name: str) -> str | None:
-        """
-        尋找執行檔路徑 (wrapper for shutil.which)
-        Find executable path
-        Args:
-            name: 執行檔名稱 (Executable name)
-        """
+        """尋找執行檔路徑"""
         return shutil.which(name)
 
     @staticmethod
@@ -308,7 +234,6 @@ class PathUtils:
         """
         將 Windows 的短路徑（8.3 格式）展開為完整長路徑，使用 GetLongPathNameW。
         若非 Windows 平台或展開失敗，則回傳原始的 Path 物件不做修改。
-        Expand Windows short path (8.3 format) to full long path using GetLongPathNameW.
         """
         try:
             p_obj = Path(path)

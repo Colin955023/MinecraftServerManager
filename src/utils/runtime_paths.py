@@ -11,19 +11,12 @@ from pathlib import Path
 
 
 class RuntimePaths:
-    """運行時路徑管理工具類
-    Runtime Path Management Utility Class
-    """
+    """運行時路徑管理工具類"""
 
     # ====== 便攜模式檢測 ======
     @staticmethod
     def is_portable_mode() -> bool:
-        """檢測是否為便攜模式（可執行檔旁有 .portable 標記檔或 .config 資料夾）
-        Detect if running in portable mode (has .portable marker file or .config folder next to executable)
-
-        Returns:
-            bool: True 表示便攜模式，False 表示安裝模式
-        """
+        """檢測是否為便攜模式（可執行檔旁有 .portable 標記檔或 .config 資料夾）"""
         exe_dir = RuntimePaths.get_exe_dir()
 
         # 檢查是否存在 .portable 標記檔或 .config 資料夾
@@ -35,16 +28,7 @@ class RuntimePaths:
     # ====== 系統路徑檢測 ======
     @staticmethod
     def _get_localappdata() -> Path:
-        """取得 Windows 系統的本機應用程式資料目錄路徑
-        Get Windows system's local application data directory path
-
-        Args:
-            None
-
-        Returns:
-            Path: 本機應用程式資料目錄路徑
-
-        """
+        """取得 Windows 系統的本機應用程式資料目錄路徑"""
         base = os.environ.get("LOCALAPPDATA")
         if not base:
             # Fallback: %USERPROFILE%\AppData\Local
@@ -53,19 +37,12 @@ class RuntimePaths:
 
     @staticmethod
     def _get_portable_base_dir() -> Path:
-        """取得便攜模式的基礎目錄（可執行檔所在目錄）
-        Get portable mode's base directory (directory containing the executable)
-
-        Returns:
-            Path: 便攜模式基礎目錄
-        """
+        """取得便攜模式的基礎目錄（可執行檔所在目錄）"""
         return RuntimePaths.get_exe_dir()
 
     @staticmethod
     def get_exe_dir() -> Path:
-        """取得當前執行檔或專案根目錄的基礎目錄。
-        Returns executable directory when frozen, otherwise project root directory.
-        """
+        """取得當前執行檔或專案根目錄的基礎目錄。"""
         if getattr(sys, "frozen", False):
             # 打包後的可執行檔
             return Path(sys.executable).parent
@@ -75,18 +52,7 @@ class RuntimePaths:
     # ====== 應用程式專用路徑 ======
     @staticmethod
     def get_user_data_dir() -> Path:
-        """取得應用程式的使用者資料存放目錄
-        Get application's user data storage directory
-        - 便攜模式: <exe_dir>/.config
-        - 安裝模式: %LOCALAPPDATA%\\Programs\\MinecraftServerManager
-
-        Args:
-            None
-
-        Returns:
-            Path: 使用者資料目錄路徑
-
-        """
+        """取得應用程式的使用者資料存放目錄"""
         if RuntimePaths.is_portable_mode():
             # 便攜模式：使用相對於可執行檔的 .config 資料夾
             return RuntimePaths._get_portable_base_dir() / ".config"
@@ -95,35 +61,12 @@ class RuntimePaths:
 
     @staticmethod
     def get_cache_dir() -> Path:
-        """取得應用程式的快取檔案存放目錄
-        Get application's cache file storage directory (%LOCALAPPDATA%\\MinecraftServerManager\\Cache)
-
-        Args:
-            None
-
-        Returns:
-            Path: 快取目錄路徑
-
-        """
+        """取得應用程式的快取檔案存放目錄"""
         return RuntimePaths.get_user_data_dir() / "Cache"
 
     # ====== 目錄操作工具 ======
     @staticmethod
     def ensure_dir(p: Path) -> Path:
-        """確保指定路徑的目錄存在，如果不存在則建立
-        Ensure the directory at specified path exists, create if it doesn't exist
-
-        Args:
-            p (Path): 要確保存在的目錄路徑
-
-        Returns:
-            Path: 已確保存在的目錄路徑
-
-        """
+        """確保指定路徑的目錄存在，如果不存在則建立"""
         p.mkdir(parents=True, exist_ok=True)
         return p
-
-
-# Backwards compatibility / export aliases if needed during transition
-# (But user asked to clean calls, so we won't keep them unless necessary for internal temporary state, but user said "統一修改完成之後清除")
-# So I will not add aliases.

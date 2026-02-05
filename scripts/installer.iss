@@ -27,6 +27,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 AppMutex=MinecraftServerManagerMutex
 LanguageDetectionMethod=locale
+SetupLogging=yes
 
 [Languages]
 Name: "chinesetraditional"; MessagesFile: "compiler:Languages\\ChineseTraditional.isl"
@@ -103,35 +104,29 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    // 強制關閉應用程式以避免檔案被占用
-    if Exec('taskkill.exe', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-    begin
-      // 確保程式已被殺死
+    // 嘗試結束應用程式（解除安裝程式本身是 unins000.exe，不會被影響）
+    try
+      Exec('taskkill', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewNoWait, ResultCode);
+    except
     end;
-
+  end
+  else if CurUninstallStep = usPostUninstall then
+  begin
     DataRoot := GetDataRoot();
-    CacheDir := DataRoot + '\\Cache';
-    LogDir := DataRoot + '\\log';
-    SettingsPath := DataRoot + '\\user_settings.json';
+    CacheDir := DataRoot + '\Cache';
+    LogDir := DataRoot + '\log';
+    SettingsPath := DataRoot + '\user_settings.json';
 
-    // If installed as portable, do not remove user data on uninstall
-    if IsPortable() then
-    begin
-      // leave portable data intact
-    end
-    else
-    begin
-      if DirExists(CacheDir) then
-        DelTree(CacheDir, True, True, True);
+    if DirExists(CacheDir) then
+      DelTree(CacheDir, True, True, True);
 
-      if DirExists(LogDir) then
-        DelTree(LogDir, True, True, True);
+    if DirExists(LogDir) then
+      DelTree(LogDir, True, True, True);
 
-      if FileExists(SettingsPath) then
-        DeleteFile(SettingsPath);
+    if FileExists(SettingsPath) then
+      DeleteFile(SettingsPath);
 
-      if DirExists(DataRoot) then
-        DelTree(DataRoot, True, True, True);
-    end;
+    if DirExists(DataRoot) then
+      DelTree(DataRoot, True, True, True);
   end;
 end;

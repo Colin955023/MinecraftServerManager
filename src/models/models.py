@@ -10,17 +10,7 @@ from dataclasses import dataclass
 # 模組載入器版本資訊資料類別
 @dataclass
 class LoaderVersion:
-    """模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器
-    Data structure for mod loader version information supporting Forge and Fabric loaders
-
-    Attributes:
-        version (str): 載入器版本號
-        build (str | None): 構建編號
-        url (str | None): 下載連結
-        stable (bool | None): 是否為穩定版本
-        mc_version (str | None): 對應的 Minecraft 版本
-
-    """
+    """模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器"""
 
     version: str
     build: str | None = None
@@ -33,22 +23,7 @@ class LoaderVersion:
 # 伺服器完整配置資料類別
 @dataclass
 class ServerConfig:
-    """伺服器完整配置資料類別，包含所有伺服器設定和屬性
-    Complete server configuration data class containing all server settings and properties
-
-    Attributes:
-        name (str): 伺服器顯示名稱
-        minecraft_version (str): Minecraft 版本號
-        loader_type (str): 模組載入器類型 (vanilla/fabric/forge)
-        loader_version (str): 模組載入器版本號
-        memory_max_mb (int): 最大記憶體配置 (MB)
-        memory_min_mb (int | None): 最小記憶體配置 (MB)
-        path (str): 伺服器檔案存放路徑
-        eula_accepted (bool): 是否接受 Minecraft EULA 協議
-        properties (Dict[str, str] | None): server.properties 設定字典
-        backup_path (str | None): 備份檔案存放路徑
-
-    """
+    """伺服器完整配置資料類別，包含所有伺服器設定和屬性"""
 
     name: str  # 伺服器名稱
     minecraft_version: str  # Minecraft 版本
@@ -63,28 +38,10 @@ class ServerConfig:
 
     @property
     def memory_mb(self) -> int:
-        """取得伺服器最大記憶體配置，提供向後相容性
-        Get server maximum memory configuration for backward compatibility
-
-        Args:
-            None
-
-        Returns:
-            int: 最大記憶體配置 (MB)
-
-        """
+        """取得伺服器最大記憶體配置，提供向後相容性"""
         return self.memory_max_mb
 
     @memory_mb.setter
     def memory_mb(self, value: int):
-        """設定伺服器最大記憶體配置，提供向後相容性
-        Set server maximum memory configuration for backward compatibility
-
-        Args:
-            value (int): 要設定的記憶體大小 (MB)
-
-        Returns:
-            None
-
-        """
+        """設定伺服器最大記憶體配置，提供向後相容性"""
         self.memory_max_mb = value

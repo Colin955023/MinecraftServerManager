@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """系統工具模組
-提供系統資訊查詢與進程管理功能（取代 psutil 依賴）
+提供系統資訊查詢與進程管理功能，使用原生 Windows API 取代 psutil 依賴
 System Utilities Module
-Provides system information query and process management functions (replacing psutil dependency)
+Provides system information query and process management functions, using native Windows APIs to replace the psutil dependency
 """
 
 from ctypes import Structure, byref, c_size_t, c_uint64, c_void_p, sizeof, windll, wintypes
@@ -68,10 +68,7 @@ class SystemUtils:
 
     @staticmethod
     def get_total_memory_mb() -> int:
-        """
-        獲取系統總實體記憶體 (MB)
-        Get total system physical memory in MB
-        """
+        """獲取系統總實體記憶體"""
         try:
             stat = MEMORYSTATUSEX()
             stat.dwLength = sizeof(stat)
@@ -179,7 +176,7 @@ class SystemUtils:
 
     @staticmethod
     def kill_process_tree(pid: int) -> bool:
-        """強制結束進程樹 (Force kill process tree)"""
+        """強制結束進程樹"""
         try:
             cmd = ["taskkill", "/PID", str(pid), "/T", "/F"]
             SubprocessUtils.run_checked(cmd, stdout=SubprocessUtils.DEVNULL, stderr=SubprocessUtils.DEVNULL)
@@ -190,9 +187,7 @@ class SystemUtils:
 
     @staticmethod
     def is_process_running(pid: int) -> bool:
-        """檢查進程是否運行中
-        Check if process is running
-        """
+        """檢查進程是否運行中"""
         try:
             cmd = ["tasklist", "/FI", f"PID eq {pid}", "/NH"]
             result = SubprocessUtils.run_checked(cmd, capture_output=True, text=True)
@@ -202,7 +197,7 @@ class SystemUtils:
 
     @staticmethod
     def set_process_dpi_aware() -> None:
-        """設定進程 DPI 感知 (Windows Only)"""
+        """設定進程 DPI 感知"""
         try:
             if hasattr(windll, "user32"):
                 windll.user32.SetProcessDPIAware()
@@ -211,7 +206,7 @@ class SystemUtils:
 
     @staticmethod
     def get_system_metrics(index: int) -> int:
-        """獲取系統指標 (Windows Only)"""
+        """獲取系統指標"""
         try:
             if hasattr(windll, "user32"):
                 return windll.user32.GetSystemMetrics(index)

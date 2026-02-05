@@ -96,3 +96,4 @@ scripts/GetReleaseDownloadNum.py
 scripts/rebase.bat
 scripts/git_gc.bat
 docs/PLAGIARISM_DETECTION_TOOLS.md
+scripts/GetLines.bat

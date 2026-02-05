@@ -26,20 +26,14 @@ logger = get_logger().bind(component="ModManager")
 
 # ====== 模組狀態與平台定義 ======
 class ModStatus(Enum):
-    """
-    模組狀態列舉，定義模組的各種狀態
-    Mod status enumeration defining various mod states
-    """
+    """模組狀態"""
 
     ENABLED = "enabled"
     DISABLED = "disabled"
 
 
 class ModPlatform(Enum):
-    """
-    模組來源平台列舉，定義模組的來源平台
-    Mod source platform enumeration defining mod source platforms
-    """
+    """模組來源平台"""
 
     MODRINTH = "modrinth"
     LOCAL = "local"
@@ -47,10 +41,7 @@ class ModPlatform(Enum):
 
 @dataclass
 class LocalModInfo:
-    """
-    本地模組資訊資料類別
-    Data class for local mod information.
-    """
+    """本地模組資訊"""
 
     id: str
     name: str
@@ -76,25 +67,10 @@ class LocalModInfo:
 
 # ====== 模組管理器主類別 ======
 class ModManager:
-    """
-    模組管理器類別，負責伺服器模組的掃描、啟用/停用、移除等功能
-    Mod manager class responsible for scanning, enabling/disabling, removing server mods
-    """
+    """負責伺服器模組的掃描、啟用/停用、移除等功能"""
 
     # ====== 初始化與設定 ======
-    # 初始化模組管理器
     def __init__(self, server_path: str, server_config=None):
-        """
-        初始化模組管理器
-        Initialize mod manager
-
-        Args:
-            server_path (str): 伺服器路徑
-            server_config: 伺服器配置物件
-
-        Returns:
-            None
-        """
         self.server_path = Path(server_path)
         self.mods_path = self.server_path / "mods"
         self.server_config = server_config  # 儲存伺服器配置
@@ -107,16 +83,7 @@ class ModManager:
     # ====== 模組掃描與檔案管理 ======
     # 掃描 mods 目錄中的模組檔案
     def scan_mods(self) -> list[LocalModInfo]:
-        """
-        掃描 mods 目錄中的模組檔案並建立模組資訊列表（多執行緒優化，I/O 密集型任務）
-        Scan mod files in the mods directory and create mod information list (multithreaded optimization for I/O-bound tasks)
-
-        Args:
-            None
-
-        Returns:
-            List[LocalModInfo]: 模組資訊列表
-        """
+        """掃描 mods 目錄中的模組檔案並建立模組資訊列表"""
         mods = []
         files_to_scan = []
 
@@ -125,8 +92,6 @@ class ModManager:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"):
                 files_to_scan.append(file_path)
 
-        # 使用 ThreadPoolExecutor 並行處理（JAR 檔案讀取主要是 I/O 操作）
-        # 每個 worker 獨立處理檔案，避免 GIL 影響
         with ThreadPoolExecutor(max_workers=min(10, len(files_to_scan) or 1)) as executor:
             results = executor.map(self.create_mod_info_from_file, files_to_scan)
 
@@ -137,16 +102,7 @@ class ModManager:
         return mods
 
     def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
-        """
-        依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式
-        Create mod information from a file, extracting metadata and applying fallback logic
-
-        Args:
-            file_path (Path): 檔案路徑
-
-        Returns:
-            LocalModInfo | None: 本地模組資訊物件
-        """
+        """依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式"""
         try:
             # 解析基本檔案資訊
             filename, enabled, base_name = self._parse_file_info(file_path)
@@ -192,16 +148,7 @@ class ModManager:
             return None
 
     def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
-        """
-        解析基本檔案資訊與啟用/停用狀態
-        Extract basic file information and enabled/disabled status
-
-        Args:
-            file_path (Path): 檔案路徑
-
-        Returns:
-            tuple[str, bool, str]: 檔案名稱、啟用狀態、基本名稱
-        """
+        """解析基本檔案資訊與啟用/停用狀態"""
         filename = file_path.name
         # 使用 removesuffix (Python 3.9+) 更簡潔
         enabled = not filename.endswith(".jar.disabled")
@@ -209,16 +156,7 @@ class ModManager:
         return filename, enabled, base_name
 
     def _get_manifest_version(self, jar) -> str | None:
-        """
-        從 MANIFEST.MF 檔案中提取版本資訊
-        get the version information from the MANIFEST.MF file
-
-        Args:
-            jar: zipfile.ZipFile 物件
-
-        Returns:
-            str | None: 版本資訊字串
-        """
+        """從 MANIFEST.MF 檔案中提取版本資訊"""
         try:
             if "META-INF/MANIFEST.MF" in jar.namelist():
                 with jar.open("META-INF/MANIFEST.MF") as mf:
@@ -232,14 +170,7 @@ class ModManager:
         return None
 
     def _extract_metadata_from_jar(self, file_path: Path, mod_data: dict) -> None:
-        """
-        根據模組載入器類型從 jar 檔案中提取元資料（統一處理邏輯）
-        Extract metadata from jar file according to mod loader type (unified processing logic)
-
-        Args:
-            file_path (Path): 檔案路徑
-            mod_data (dict): 模組元資料字典
-        """
+        """根據模組載入器類型從 jar 檔案中提取元資料"""
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
                 # 根據檔案存在判斷模組類型並提取元資料
@@ -258,13 +189,7 @@ class ModManager:
             logger.exception(f"從 JAR 提取元資料失敗 {file_path}: {e}")
 
     def _extract_fabric_metadata(self, jar, mod_data: dict) -> None:
-        """
-        從 Fabric 模組中提取元資料
-        extract metadata from Fabric mod
-
-        Args:
-            jar: zipfile.ZipFile 物件
-        """
+        """從 Fabric 模組中提取元資料"""
         try:
             meta = self._read_json_from_jar(jar, "fabric.mod.json")
             if not meta or not isinstance(meta, dict):
@@ -284,14 +209,7 @@ class ModManager:
             logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
 
     def _extract_forge_metadata(self, jar, mod_data: dict) -> None:
-        """
-        從 Forge 模組中提取元資料
-        extract metadata from Forge mod
-
-        Args:
-            jar: zipfile.ZipFile 物件
-            mod_data (dict): 模組元資料字典
-        """
+        """從 Forge 模組中提取元資料"""
         try:
             meta = self._read_toml_from_jar(jar, "META-INF/mods.toml")
             if not meta or not isinstance(meta, dict):
@@ -323,14 +241,7 @@ class ModManager:
             logger.exception(f"解析 Forge 元資料失敗: {e}")
 
     def _extract_legacy_forge_metadata(self, jar, mod_data: dict) -> None:
-        """
-        從舊版 Forge 模組（mcmod.info）提取元資料
-        extract metadata from legacy Forge mod (mcmod.info)
-
-        Args:
-            jar: zipfile.ZipFile 物件
-            mod_data (dict): 模組元資料字典
-        """
+        """從舊版 Forge 模組（mcmod.info）提取元資料"""
         try:
             info = self._read_json_from_jar(jar, "mcmod.info")
             if not info:
@@ -358,16 +269,7 @@ class ModManager:
 
     def _read_json_from_jar(self, jar, file_path: str) -> dict | list | None:
         """
-        從 JAR 檔案中讀取 JSON
-        Read JSON from JAR file
-
-        Args:
-            jar: zipfile.ZipFile 物件
-            file_path: JAR 內的檔案路徑
-
-        Returns:
-            解析後的 JSON 資料，失敗返回 None
-        """
+        從 JAR 檔案中讀取 JSON"""
         try:
             with jar.open(file_path) as f:
                 return PathUtils.from_json_str(f.read().decode("utf-8"))
@@ -376,17 +278,7 @@ class ModManager:
             return None
 
     def _read_toml_from_jar(self, jar, file_path: str) -> dict | None:
-        """
-        從 JAR 檔案中讀取 TOML
-        Read TOML from JAR file
-
-        Args:
-            jar: zipfile.ZipFile 物件
-            file_path: JAR 內的檔案路徑
-
-        Returns:
-            解析後的 TOML 資料，失敗返回 None
-        """
+        """從 JAR 檔案中讀取 TOML"""
         try:
             with jar.open(file_path) as f:
                 toml_txt = f.read().decode(errors="ignore")
@@ -399,33 +291,14 @@ class ModManager:
             return None
 
     def _resolve_version(self, jar, version: str) -> str:
-        """
-        解析版本號，處理佔位符 ${file.jarVersion}
-        Resolve version number, handling placeholder ${file.jarVersion}
-
-        Args:
-            jar: zipfile.ZipFile 物件
-            version (str): 原始版本字串
-
-        Returns:
-            str: 解析後的版本字串
-        """
+        """解析版本號，處理佔位符 ${file.jarVersion}"""
         if version == "${file.jarVersion}":
             manifest_version = self._get_manifest_version(jar)
             return manifest_version if manifest_version else version
         return version
 
     def _process_authors(self, authors) -> str:
-        """
-        處理並清理作者資訊
-        process and clean author information
-
-        Args:
-            authors: 可能是字串或字串列表的作者資訊
-
-        Returns:
-            處理後的作者資訊字串
-        """
+        """處理並清理作者資訊"""
         if isinstance(authors, list) and authors:
             return ", ".join(
                 [
@@ -439,14 +312,7 @@ class ModManager:
         return ""
 
     def _apply_fallback_logic(self, base_name: str, mod_data: dict) -> None:
-        """
-        套用後備邏輯來填充模組資料
-        Apply fallback logic for missing mod information
-
-        Args:
-            base_name: 基礎檔案名稱
-            mod_data: 模組資料字典
-        """
+        """套用後備邏輯來填充模組資料"""
         # 清理作者資訊
         mod_data["author"] = self._clean_author(mod_data["author"])
 
@@ -470,16 +336,7 @@ class ModManager:
             mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_filename(base_name)
 
     def _extract_name_from_filename(self, base_name: str) -> str:
-        """
-        解析檔名以提取模組名稱
-        Extract mod name from filename
-
-        Args:
-            base_name: 基礎檔案名稱
-
-        Returns:
-            提取的模組名稱
-        """
+        """解析檔名以提取模組名稱"""
         clean_base = base_name
         clean_base = re.sub(
             r"(?i)[-_]?(forge|fabric|litemod|mc\d+\.\d+\.\d+|mc\d+\.\d+)",
@@ -502,16 +359,7 @@ class ModManager:
         return clean_base
 
     def _extract_version_from_filename(self, base_name: str) -> str:
-        """
-        解析檔名以提取版本
-        Extract version from filename
-
-        Args:
-            base_name: 基礎檔案名稱
-
-        Returns:
-            提取的版本
-        """
+        """解析檔名以提取版本"""
         parts = base_name.split("-")
         if len(parts) > 1:
             for i, p in enumerate(parts):
@@ -521,16 +369,7 @@ class ModManager:
         return "未知"
 
     def _extract_mc_version_from_filename(self, base_name: str) -> str:
-        """
-        解析檔名以提取 Minecraft 版本
-        Extract Minecraft version from filename
-
-        Args:
-            base_name: 基礎檔案名稱
-
-        Returns:
-            提取的 Minecraft 版本
-        """
+        """解析檔名以提取 Minecraft 版本"""
         # Try to find mc1.20.1 or 1.20.1 or 1.20
         patterns = [
             r"mc(\d+\.\d+\.\d+)",
@@ -547,13 +386,7 @@ class ModManager:
         return "未知"
 
     def _apply_server_config_overrides(self, mod_data: dict) -> None:
-        """
-        套用伺服器配置覆寫
-        Apply server configuration overrides
-
-        Args:
-            mod_data: 模組資料字典
-        """
+        """套用伺服器配置覆寫"""
         if not self.server_config:
             return
 
@@ -584,19 +417,7 @@ class ModManager:
         base_name: str,
         filename: str,
     ) -> tuple[ModPlatform, str]:
-        """
-        從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID
-        Detect platform and platform ID for the mod
-
-        Args:
-            file_path: 檔案路徑
-            name: 模組名稱
-            base_name: 基礎名稱
-            filename: 檔案名稱
-
-        Returns:
-            模組平台和平台 ID 的元組
-        """
+        """從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID"""
         platform = ModPlatform.LOCAL
         platform_id = ""
 
@@ -619,15 +440,7 @@ class ModManager:
         return platform, platform_id
 
     def _extract_platform_id_from_fabric(self, jar) -> str:
-        """
-        解析 Fabric 模組元資料以提取平台 ID
-        Extract platform ID from Fabric mod metadata
-
-        Args:
-            jar: zipfile.ZipFile 物件
-        Returns:
-            模組平台 ID
-        """
+        """解析 Fabric 模組元資料以提取平台 ID"""
         try:
             meta = self._read_json_from_jar(jar, "fabric.mod.json")
             if meta and isinstance(meta, dict):
@@ -638,16 +451,7 @@ class ModManager:
             return ""
 
     def _extract_platform_id_from_forge(self, jar) -> str:
-        """
-        解析 Forge 模組元資料以提取平台 ID
-        Extract platform ID from Forge mod metadata
-
-        Args:
-            jar: zipfile.ZipFile 物件
-
-        Returns:
-            模組平台 ID
-        """
+        """解析 Forge 模組元資料以提取平台 ID"""
         try:
             with jar.open("META-INF/mods.toml") as f:
                 toml_txt = f.read().decode(errors="ignore")
@@ -664,18 +468,7 @@ class ModManager:
         return ""
 
     def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str]:
-        """
-        在 Modrinth API 上搜索模組
-        Search for mod on Modrinth API
-
-        Args:
-            name: 模組名稱
-            base_name: 基礎名稱
-            filename: 檔案名稱
-
-        Returns:
-            模組平台和平台 ID 的元組
-        """
+        """在 Modrinth API 上搜索模組"""
         try:
             search_keywords = []
             if name and name != "未知":
@@ -701,16 +494,7 @@ class ModManager:
         return ModPlatform.LOCAL, ""
 
     def _clean_author(self, author: str) -> str:
-        """
-        清理作者字串
-        Clean author string
-
-        Args:
-            author: 作者字串
-
-        Returns:
-            清理後的作者字串
-        """
+        """清理作者字串"""
         if not author:
             return ""
         author = str(author).strip()
@@ -719,16 +503,7 @@ class ModManager:
         return author
 
     def enable_mod(self, mod_id: str) -> bool:
-        """
-        啟用模組 - 移除 .disabled 後綴
-        Enable mod by removing the .disabled suffix.
-
-        Args:
-            mod_id: 模組 ID
-
-        Returns:
-            是否成功啟用模組
-        """
+        """啟用模組 - 移除 .disabled 後綴"""
         try:
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
             enabled_file = self.mods_path / f"{mod_id}.jar"
@@ -766,16 +541,7 @@ class ModManager:
             return False
 
     def disable_mod(self, mod_id: str) -> bool:
-        """
-        停用模組 - 添加 .disabled 後綴
-        Disable mod by adding the .disabled suffix.
-
-        Args:
-            mod_id: 模組 ID
-
-        Returns:
-            是否成功停用模組
-        """
+        """停用模組 - 新增 .disabled 後綴"""
         try:
             enabled_file = self.mods_path / f"{mod_id}.jar"
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
@@ -813,16 +579,7 @@ class ModManager:
             return False
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:
-        """
-        獲取模組列表
-        Get mod list, optionally including disabled mods.
-
-        Args:
-            include_disabled: 是否包含已停用的模組
-
-        Returns:
-            模組列表
-        """
+        """獲取模組列表"""
         mods = self.scan_mods()  # 即時掃描
 
         if include_disabled:
@@ -830,18 +587,7 @@ class ModManager:
         return [mod for mod in mods if mod.status == ModStatus.ENABLED]
 
     def export_mod_list(self, format_type: str = "text") -> str:
-        """
-        匯出模組列表
-        支援 text/json/html
-        Export the mod list.
-        support text/json/html
-
-        Args:
-            format_type: 匯出格式類型
-
-        Returns:
-            匯出結果
-        """
+        """匯出模組列表，支援 text、json、html 格式"""
         mods = self.get_mod_list()
         if format_type == "text":
             lines = ["# 模組列表", ""]

@@ -28,26 +28,16 @@ class UpdateChecker:
 
     @staticmethod
     def _parse_version(version_str: str) -> tuple[int, ...] | None:
-        """解析版本字串為數字元組（使用簡單的標準方法）
-        Parse version string to tuple of integers
-
-        Args:
-            version_str: 版本字串（可能包含 'v' 或 'V' 前綴）
-
-        Returns:
-            版本數字元組，解析失敗時返回 None
-
-        Examples:
-            "v1.2.3" -> (1, 2, 3)
-            "1.2.3-beta" -> (1, 2, 3)
-        """
+        """解析版本字串為數字元組（使用簡單的標準方法）"""
         try:
-            # 移除 v/V 前綴，取數字部分
+            if not isinstance(version_str, str) or not version_str.strip():
+                logger.warning(f"無效的版本字串，version_str={version_str!r}")
+                return None
             clean = version_str.strip().lstrip("vV")
-            # 只取數字和點號部分（忽略 -beta 等後綴）
             version_part = clean.split("-")[0].split("+")[0]
             return tuple(int(x) for x in version_part.split(".") if x.isdigit())
-        except (ValueError, AttributeError):
+        except ValueError:
+            logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
             return None
 
     @staticmethod
@@ -57,9 +47,7 @@ class UpdateChecker:
         if not data:
             return {}
 
-        # GitHub API 正常會回傳 list[release]
         if isinstance(data, dict):
-            # 兼容：若 API 回傳錯誤物件
             return {}
 
         for rel in data:
@@ -86,7 +74,6 @@ class UpdateChecker:
         if not exe_assets:
             return {}
 
-        # 優先挑名字像 installer/setup 的
         for a in exe_assets:
             name = (a.get("name") or "").lower()
             if "setup" in name or "installer" in name:
@@ -97,18 +84,46 @@ class UpdateChecker:
     def _launch_installer(installer_path: Path) -> None:
         """啟動安裝程式"""
         try:
-            if installer_path.exists() and installer_path.is_file():
-                SubprocessUtils.popen_checked([str(installer_path)])
-                logger.info(f"已啟動安裝程式: {installer_path}")
+            # 確保安裝程式位於預期的暫存目錄中，以避免從任意位置執行惡意程式
+            try:
+                temp_dir = Path(tempfile.gettempdir()).resolve(strict=True)
+                resolved_path = installer_path.resolve(strict=True)
+            except FileNotFoundError as e:
+                logger.error(f"安裝程式路徑解析失敗：{installer_path}，錯誤：{e}")
+                return
+            except Exception as e:
+                logger.error(f"解析安裝程式路徑時發生未預期錯誤：{installer_path}，錯誤：{e}")
+                return
+
+            if not PathUtils.is_path_within(temp_dir, resolved_path, strict=True):
+                logger.error(f"安裝程式路徑不在允許的暫存目錄中：{resolved_path}")
+                return
+
+            if resolved_path.is_file():
+                confirm = UIUtils.call_on_ui(
+                    None,
+                    lambda: UIUtils.ask_yes_no_cancel(
+                        "執行安裝程式",
+                        f"即將執行安裝程式：\n{resolved_path}\n\n是否確定要執行？",
+                        parent=None,
+                        show_cancel=False,
+                        topmost=True,
+                    ),
+                )
+                if not confirm:
+                    logger.info(f"使用者取消執行安裝程式：{resolved_path}")
+                    return
+                SubprocessUtils.popen_checked([str(resolved_path)], stdin=SubprocessUtils.DEVNULL)
+                logger.info(f"已啟動安裝程式: {resolved_path}")
             else:
-                logger.error(f"安裝程式不存在或不是檔案：{installer_path}")
+                logger.error(f"安裝程式不存在或不是檔案：{resolved_path}")
         except Exception as e:
             logger.exception(f"安裝程式啟動失敗: {e}")
 
     @staticmethod
     def _clean_release_notes(body: str) -> str:
-        """清理並篩選釋出說明，過濾開發者資訊與過長內容
-
+        """
+        清理並篩選釋出說明，過濾開發者資訊與過長內容
         僅保留: 新增功能、修改、刪除、優化等使用者相關資訊
         濾除: 開發者資訊 (contributors, full changelog 連結, PR 作者資訊)
         """
@@ -170,6 +185,25 @@ class UpdateChecker:
         parent=None,
     ) -> None:
         def _work() -> None:
+            # 追踪所有需要清理的暫存檔案和目錄
+            temp_files_to_cleanup: list[Path] = []
+
+            def _cleanup_temp_files(temp_files: list[Path]) -> None:
+                """清理所有下載的暫存檔案"""
+                for temp_path in temp_files:
+                    try:
+                        if temp_path.exists():
+                            if temp_path.is_file():
+                                temp_path.unlink(missing_ok=True)
+                                logger.debug(f"已刪除暫存檔案: {temp_path}")
+                            elif temp_path.is_dir():
+                                import shutil
+
+                                shutil.rmtree(temp_path, ignore_errors=True)
+                                logger.debug(f"已刪除暫存目錄: {temp_path}")
+                    except Exception as e:
+                        logger.debug(f"清理暫存檔案時發生錯誤 {temp_path}: {e}")
+
             try:
                 logger.info(f"開始檢查更新... (目前版本: {current_version})")
                 latest = UpdateChecker._get_latest_release(owner, repo)
@@ -223,7 +257,7 @@ class UpdateChecker:
                 html_url = latest.get("html_url")
 
                 msg = f"發現新版本：{name}\n目前版本：{current_version}\n\n釋出說明：\n{rendered}\n\n是否下載並安裝？"
-                if not UIUtils.call_on_ui(
+                result = UIUtils.call_on_ui(
                     parent,
                     lambda: UIUtils.ask_yes_no_cancel(
                         "更新可用",
@@ -232,18 +266,8 @@ class UpdateChecker:
                         show_cancel=False,
                         topmost=True,
                     ),
-                ):
-                    if html_url and UIUtils.call_on_ui(
-                        parent,
-                        lambda: UIUtils.ask_yes_no_cancel(
-                            "查看發行頁面",
-                            "是否前往 GitHub 發行頁面查看詳情？",
-                            parent=parent,
-                            show_cancel=False,
-                            topmost=True,
-                        ),
-                    ):
-                        UIUtils.open_external(html_url)
+                )
+                if not result:
                     return
 
                 logger.info("使用者確認更新，準備下載...")
@@ -298,31 +322,84 @@ class UpdateChecker:
                     return None
 
                 def _fetch_checksum_for_asset(release: dict, asset_name: str) -> tuple[str, str] | None:
+                    """
+                    獲取 asset 的 checksum
+
+                    優先級（從最安全到次安全）：
+                    1. 優先從 release body 中讀取（純線上，不下載任何檔案）
+                    2. 其次從 assets 中下載 checksum 檔案（下載小檔案）
+                    3. 如果都沒有，返回 None（拒絕下載主檔案）
+                    """
                     try:
+                        # ===== 優先級 1: 從 release body 中查找 checksum（純線上，不下載） =====
+                        logger.debug(
+                            f"[SHA256 查詢] 方法 1/2：從 release body 中查找 {asset_name} 的 checksum（線上查詢）..."
+                        )
+                        body = release.get("body") or ""
+                        c = _parse_checksum_text(body, asset_name)
+                        if c:
+                            logger.info(
+                                f"[SHA256 查詢成功] ✓ 已從 release body 中取得 checksum（{c[0]}），無需下載額外檔案"
+                            )
+                            return c
+
+                        logger.debug(
+                            "[SHA256 查詢] release body 中未找到 checksum，嘗試從 assets 中下載 checksum 檔案..."
+                        )
+
+                        # ===== 優先級 2: 從 assets 中下載 checksum 檔案 =====
                         assets = release.get("assets") or []
-                        for a in assets:
-                            try:
-                                an = (a.get("name") or "").lower()
-                                if an.endswith((".sha256", ".sha256sum", ".sha512", ".sha512sum")):
+                        checksum_files = [
+                            a
+                            for a in assets
+                            if (a.get("name") or "")
+                            .lower()
+                            .endswith((".sha256", ".sha256sum", ".sha512", ".sha512sum"))
+                        ]
+
+                        if checksum_files:
+                            logger.debug(
+                                f"[SHA256 查詢] 方法 2/2：在 release assets 中找到 {len(checksum_files)} 個 checksum 檔案"
+                            )
+                            for a in checksum_files:
+                                try:
+                                    an = a.get("name") or ""
+                                    logger.debug(f"[SHA256 查詢] 嘗試下載 checksum 檔案: {an}")
                                     with tempfile.NamedTemporaryFile(
                                         delete=False, prefix="msm_chk_", suffix=".txt"
                                     ) as tf:
                                         tfpath = tf.name
+                                    # 記錄 checksum 檔案以便後續清理
+                                    temp_files_to_cleanup.append(Path(tfpath))
                                     if HTTPUtils.download_file(a.get("browser_download_url"), tfpath):
                                         txt = Path(tfpath).read_text(encoding="utf-8", errors="ignore")
                                         c = _parse_checksum_text(txt, asset_name)
                                         if c:
+                                            logger.info(
+                                                f"[SHA256 查詢成功] ✓ 已從 asset ({an}) 中取得 checksum（{c[0]}）"
+                                            )
                                             return c
-                            except Exception as e:
-                                logger.debug(f"檢查 checksum 檔案時發生錯誤，嘗試下一個: {e}")
-                                continue
-                        # fallback: try release body
-                        body = release.get("body") or ""
-                        c = _parse_checksum_text(body, asset_name)
-                        if c:
-                            return c
-                    except Exception:
-                        logger.debug("取得 checksum 時發生錯誤")
+                                        logger.debug(
+                                            f"[SHA256 查詢] 檔案 {an} 內容已下載，但未找到 {asset_name} 的 checksum"
+                                        )
+                                    else:
+                                        logger.debug(f"[SHA256 查詢] 下載 {an} 失敗")
+                                except Exception as e:
+                                    logger.debug(
+                                        f"[SHA256 查詢] 檢查 checksum 檔案 {a.get('name')} 時發生錯誤，嘗試下一個: {e}"
+                                    )
+                                    continue
+                        else:
+                            logger.debug("[SHA256 查詢] 在 release assets 中找不到任何 checksum 檔案")
+
+                        # ===== 所有方法都失敗 =====
+                        logger.warning(f"[SHA256 查詢失敗] 無法透過任何方式取得 {asset_name} 的 checksum")
+                        logger.warning(
+                            "[SHA256 查詢失敗] 詳情：Release body 中無 checksum，Assets 中無有效的 checksum 檔案或無法解析"
+                        )
+                        return None
+                    except Exception as e:
+                        logger.exception(f"[SHA256 查詢錯誤] 在查詢過程中發生未預期的錯誤: {e}")
                     return None
 
                 def _verify_file_checksum(path: Path, algorithm: str, hex_checksum: str) -> bool:
@@ -346,56 +423,77 @@ class UpdateChecker:
                     logger.info("使用者確認更新，開始更新流程")
                     close_delay_seconds = 3
 
-                    # 下載 zip
+                    # ===== 步驟 1: 線上確認 SHA256 是否存在（不下載主檔案） =====
+                    logger.info("[安全檢查] 正在線上查詢更新檔的 SHA256 驗證資訊...")
+                    try:
+                        chk = _fetch_checksum_for_asset(latest, asset.get("name") or "")
+                        if not chk:
+                            logger.error("[安全檢查失敗] 未找到 SHA256，拒絕下載未經驗證的檔案")
+                            UIUtils.call_on_ui(
+                                parent,
+                                lambda: UIUtils.show_error(
+                                    "缺少 SHA256 驗證資訊",
+                                    "無法從 GitHub Release 中取得此更新檔的 SHA256 驗證資訊。\n\n為了您的系統安全：\n❌ 將不會下載任何檔案\n❌ 更新已取消\n\n建議聯絡開發者確認 Release 是否包含 SHA256 資訊。",
+                                    parent=parent,
+                                    topmost=True,
+                                ),
+                            )
+                            _cleanup_temp_files(temp_files_to_cleanup)
+                            return
+                        alg, expected_checksum = chk
+                        logger.info(f"[安全檢查通過] 已取得 SHA256 驗證資訊 ({alg}: {expected_checksum[:16]}...)")
+                        logger.info("[開始下載] 確認有 SHA256 可驗證，現在開始安全下載主檔案")
+                    except Exception:
+                        logger.exception("[安全檢查錯誤] 在查詢 SHA256 時發生錯誤，為避免風險將中止更新")
+                        UIUtils.call_on_ui(
+                            parent,
+                            lambda: UIUtils.show_error(
+                                "安全驗證錯誤",
+                                "在線上查詢 SHA256 驗證資訊時發生錯誤。\n\n為了您的系統安全：\n❌ 將不會下載任何檔案\n❌ 更新已取消",
+                                parent=parent,
+                                topmost=True,
+                            ),
+                        )
+                        _cleanup_temp_files(temp_files_to_cleanup)
+                        return
+
+                    # ===== 步驟 2: 下載主檔案（已確認有 SHA256 可驗證） =====
+                    logger.info("[下載階段] 開始下載可攜式更新檔...")
                     with tempfile.NamedTemporaryFile(delete=False, prefix="msm_portable_", suffix=".zip") as tmpf:
                         tmp_zip_path = tmpf.name
+                    temp_files_to_cleanup.append(Path(tmp_zip_path))
+
                     if not HTTPUtils.download_file(download_url, tmp_zip_path):
                         UIUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error("下載失敗", "無法下載可攜式更新。", parent=parent, topmost=True),
                         )
+                        _cleanup_temp_files(temp_files_to_cleanup)
                         return
 
-                    # 嘗試取得並驗證 checksum（若有提供）
-                    try:
-                        chk = _fetch_checksum_for_asset(latest, asset.get("name") or "")
-                        if chk:
-                            alg, hexsum = chk
-                            ok = _verify_file_checksum(Path(tmp_zip_path), alg, hexsum)
-                            if not ok:
-                                logger.error(f"可攜式更新檔 checksum 驗證失敗: {asset.get('name')} ({alg})")
-                                try:
-                                    Path(tmp_zip_path).unlink(missing_ok=True)
-                                except Exception as e:
-                                    logger.error(f"刪除暫存檔案失敗: {e}")
-                                UIUtils.call_on_ui(
-                                    parent,
-                                    lambda: UIUtils.show_error(
-                                        "驗證失敗",
-                                        "可攜式更新檔的 checksum 驗證失敗，已取消下載以避免損壞。",
-                                        parent=parent,
-                                        topmost=True,
-                                    ),
-                                )
-                                return
-                            logger.info(f"可攜式更新檔 checksum 驗證通過: {asset.get('name')} ({alg})")
-                        else:
-                            logger.debug("未找到可用的 checksum，將略過驗證")
-                    except Exception:
-                        logger.exception("在 checksum 驗證流程發生錯誤，將中止更新以避免風險")
+                    # ===== 步驟 3: 立即驗證下載檔案的 SHA256 =====
+                    logger.info("[驗證階段] 正在計算並驗證下載檔案的 SHA256...")
+                    logger.info(f"[驗證階段] 預期 SHA256: {expected_checksum}")
+                    ok = _verify_file_checksum(Path(tmp_zip_path), alg, expected_checksum)
+                    if not ok:
+                        logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset.get('name')}")
                         UIUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
-                                "驗證錯誤",
-                                "在驗證更新檔時發生錯誤，停止更新以避免風險。",
+                                "SHA256 驗證失敗",
+                                "下載的檔案 SHA256 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n✓ 已立即刪除下載的檔案\n✓ 更新已取消\n\n請稍後重試，或手動從 GitHub 下載。",
                                 parent=parent,
                                 topmost=True,
                             ),
                         )
+                        _cleanup_temp_files(temp_files_to_cleanup)
                         return
+                    logger.info(f"[驗證通過] ✓ SHA256 驗證成功：{asset.get('name')}")
 
                     # 解壓到暫存資料夾
                     extracted_dir = Path(tempfile.mkdtemp(prefix="msm_portable_extracted_"))
+                    temp_files_to_cleanup.append(extracted_dir)
+
                     try:
                         PathUtils.safe_extract_zip(Path(tmp_zip_path), extracted_dir)
                     except Exception as e:
@@ -406,6 +504,7 @@ class UpdateChecker:
                                 "解壓失敗", "無法解壓下載的更新檔。", parent=parent, topmost=True
                             ),
                         )
+                        _cleanup_temp_files(temp_files_to_cleanup)
                         return
 
                     # 備份整個原始目錄與 .config/.log
@@ -461,6 +560,55 @@ class UpdateChecker:
 
                     # 建立套用更新的批次檔，等待主程式退出後執行更新
                     apply_bat = Path(tempfile.gettempdir()) / f"msm_apply_update_{int(time.time())}.bat"
+
+                    # 驗證路徑安全性：確保 extracted_dir 和 backup_root 在暫存目錄內
+                    try:
+                        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+                        extracted_dir_resolved = extracted_dir.resolve(strict=True)
+                        backup_root_resolved = backup_root.resolve(strict=True)
+                        base.resolve(strict=True)
+
+                        if not PathUtils.is_path_within(temp_root, extracted_dir_resolved, strict=True):
+                            logger.error(f"解壓目錄不在暫存目錄中，已取消更新：{extracted_dir_resolved}")
+                            UIUtils.call_on_ui(
+                                parent,
+                                lambda: UIUtils.show_error(
+                                    "安全錯誤",
+                                    "偵測到異常的解壓路徑，已取消更新以確保安全。",
+                                    parent=parent,
+                                    topmost=True,
+                                ),
+                            )
+                            _cleanup_temp_files(temp_files_to_cleanup)
+                            return
+
+                        if not PathUtils.is_path_within(temp_root, backup_root_resolved, strict=True):
+                            logger.error(f"備份目錄不在暫存目錄中，已取消更新：{backup_root_resolved}")
+                            UIUtils.call_on_ui(
+                                parent,
+                                lambda: UIUtils.show_error(
+                                    "安全錯誤",
+                                    "偵測到異常的備份路徑，已取消更新以確保安全。",
+                                    parent=parent,
+                                    topmost=True,
+                                ),
+                            )
+                            _cleanup_temp_files(temp_files_to_cleanup)
+                            return
+                    except Exception as e:
+                        logger.exception(f"驗證路徑時發生錯誤: {e}")
+                        UIUtils.call_on_ui(
+                            parent,
+                            lambda: UIUtils.show_error(
+                                "錯誤",
+                                "路徑驗證失敗，已取消更新。",
+                                parent=parent,
+                                topmost=True,
+                            ),
+                        )
+                        _cleanup_temp_files(temp_files_to_cleanup)
+                        return
+
                     src = str(extracted_dir).replace("/", "\\")
                     dst = str(base).replace("/", "\\")
                     backup_path = str(backup_root).replace("/", "\\")
@@ -540,12 +688,40 @@ class UpdateChecker:
                         return
 
                     try:
+                        # 驗證批次檔路徑必須位於系統暫存資料夾內，避免被惡意覆寫為其他位置的腳本
+                        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
+                        apply_bat_resolved = apply_bat.resolve(strict=True)
+                        if not PathUtils.is_path_within(temp_root, apply_bat_resolved, strict=True):
+                            logger.error(
+                                "套用更新批次檔的路徑不在暫存目錄中，已拒絕執行。",
+                                apply_bat=str(apply_bat_resolved),
+                                temp_root=str(temp_root),
+                            )
+                            UIUtils.call_on_ui(
+                                parent,
+                                lambda: UIUtils.show_error(
+                                    "錯誤",
+                                    "偵測到異常的更新腳本路徑，已取消自動更新以確保安全。",
+                                    parent=parent,
+                                    topmost=True,
+                                ),
+                            )
+                            return
+
                         cmd_exe = PathUtils.find_executable("cmd.exe") or "C:\\Windows\\System32\\cmd.exe"
                         # 安全修復：使用 SubprocessUtils.popen_checked 替代 subprocess.Popen
-                        SubprocessUtils.popen_checked([cmd_exe, "/c", "start", "", str(apply_bat)])
+                        SubprocessUtils.popen_checked(
+                            [cmd_exe, "/c", "start", "", str(apply_bat_resolved)],
+                            stdin=SubprocessUtils.DEVNULL,
+                        )
                     except Exception:
                         logger.exception("啟動套用批次檔失敗")
+                        _cleanup_temp_files(temp_files_to_cleanup)
+                        return
+
                     logger.info("更新批次已啟動，準備關閉程式以進行更新")
+                    # 批次檔會在程式關閉後處理更新，因此在這裡清理下載的暫存檔
+                    _cleanup_temp_files(temp_files_to_cleanup)
 
                     def _exit_current_app() -> None:
                         try:
@@ -574,57 +750,66 @@ class UpdateChecker:
                     return
 
                 # 非可攜式或找不到 portable zip，沿用原有 installer.exe 流程
-                with tempfile.NamedTemporaryFile(delete=False, prefix="msm_update_", suffix=".exe") as tmp:
-                    temp_path = tmp.name
-                dest = Path(temp_path)
 
-                UIUtils.call_on_ui(
-                    parent,
-                    lambda: UIUtils.show_info(
-                        "下載中",
-                        "正在下載安裝檔，請稍候...",
-                        parent=parent,
-                        topmost=True,
-                    ),
-                )
-                if HTTPUtils.download_file(download_url, str(dest)):
-                    # 下載完成後嘗試驗證 checksum（若有提供）
-                    try:
-                        chk = _fetch_checksum_for_asset(latest, asset.get("name") or "")
-                        if chk:
-                            alg, hexsum = chk
-                            ok = _verify_file_checksum(dest, alg, hexsum)
-                            if not ok:
-                                logger.error(f"安裝程式 checksum 驗證失敗: {asset.get('name')} ({alg})")
-                                try:
-                                    dest.unlink(missing_ok=True)
-                                except Exception as e:
-                                    logger.error(f"刪除暫存檔案失敗: {e}")
-                                UIUtils.call_on_ui(
-                                    parent,
-                                    lambda: UIUtils.show_error(
-                                        "驗證失敗",
-                                        "安裝程式的 checksum 驗證失敗，已取消下載以避免損壞系統。",
-                                        parent=parent,
-                                        topmost=True,
-                                    ),
-                                )
-                                return
-                            logger.info(f"安裝程式 checksum 驗證通過: {asset.get('name')} ({alg})")
-                        else:
-                            logger.debug("未找到安裝程式 checksum，將略過驗證")
-                    except Exception as e:
-                        logger.exception(f"在安裝程式 checksum 驗證流程發生錯誤，將中止更新以避免風險: {e}")
+                # ===== 步驟 1: 線上確認 SHA256 是否存在（不下載主檔案） =====
+                logger.info("[安全檢查] 正在線上查詢安裝程式的 SHA256 驗證資訊...")
+                try:
+                    chk = _fetch_checksum_for_asset(latest, asset.get("name") or "")
+                    if not chk:
+                        logger.error("[安全檢查失敗] 未找到 SHA256，拒絕下載未經驗證的檔案")
                         UIUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
-                                "驗證錯誤",
-                                "在驗證安裝程式時發生錯誤，停止更新以避免風險。",
+                                "缺少 SHA256 驗證資訊",
+                                "無法從 GitHub Release 中取得此安裝程式的 SHA256 驗證資訊。\n\n為了您的系統安全：\n❌ 將不會下載任何檔案\n❌ 更新已取消\n\n建議聯絡開發者確認 Release 是否包含 SHA256 資訊。",
                                 parent=parent,
                                 topmost=True,
                             ),
                         )
+                        _cleanup_temp_files(temp_files_to_cleanup)
                         return
+                    alg, expected_checksum = chk
+                    logger.info(f"[安全檢查通過] 已取得 SHA256 驗證資訊 ({alg}: {expected_checksum[:16]}...)")
+                    logger.info("[開始下載] 確認有 SHA256 可驗證，現在開始安全下載安裝程式")
+                except Exception:
+                    logger.exception("[安全檢查錯誤] 在查詢 SHA256 時發生錯誤，為避免風險將中止更新")
+                    UIUtils.call_on_ui(
+                        parent,
+                        lambda: UIUtils.show_error(
+                            "安全驗證錯誤",
+                            "在線上查詢 SHA256 驗證資訊時發生錯誤。\n\n為了您的系統安全：\n❌ 將不會下載任何檔案\n❌ 更新已取消",
+                            parent=parent,
+                            topmost=True,
+                        ),
+                    )
+                    _cleanup_temp_files(temp_files_to_cleanup)
+                    return
+
+                # ===== 步驟 2: 下載安裝程式（已確認有 SHA256 可驗證） =====
+                logger.info("[下載階段] 開始下載安裝程式...")
+                with tempfile.NamedTemporaryFile(delete=False, prefix="msm_update_", suffix=".exe") as tmp:
+                    temp_path = tmp.name
+                dest = Path(temp_path)
+                temp_files_to_cleanup.append(dest)
+                if HTTPUtils.download_file(download_url, str(dest)):
+                    # ===== 步驟 3: 立即驗證下載檔案的 SHA256 =====
+                    logger.info("[驗證階段] 正在計算並驗證下載檔案的 SHA256...")
+                    logger.info(f"[驗證階段] 預期 SHA256: {expected_checksum}")
+                    ok = _verify_file_checksum(dest, alg, expected_checksum)
+                    if not ok:
+                        logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset.get('name')}")
+                        UIUtils.call_on_ui(
+                            parent,
+                            lambda: UIUtils.show_error(
+                                "SHA256 驗證失敗",
+                                "下載的檔案 SHA256 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n✓ 已立即刪除下載的檔案\n✓ 更新已取消\n\n請稍後重試，或手動從 GitHub 下載。",
+                                parent=parent,
+                                topmost=True,
+                            ),
+                        )
+                        _cleanup_temp_files(temp_files_to_cleanup)
+                        return
+                    logger.info(f"[驗證通過] ✓ SHA256 驗證成功：{asset.get('name')}")
 
                     UIUtils.call_on_ui(
                         parent,
@@ -639,8 +824,10 @@ class UpdateChecker:
                     # 啟動安裝程式
                     UpdateChecker._launch_installer(dest)
                     logger.info("安裝程式已啟動，準備關閉當前程式")
+                    if dest in temp_files_to_cleanup:
+                        temp_files_to_cleanup.remove(dest)
+                    _cleanup_temp_files(temp_files_to_cleanup)
 
-                    # 關閉當前程式以避免檔案佔用導致安裝/解除安裝卡住
                     def _exit_for_installer() -> None:
                         try:
                             if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
@@ -673,6 +860,7 @@ class UpdateChecker:
                             topmost=True,
                         ),
                     )
+                    _cleanup_temp_files(temp_files_to_cleanup)
             except Exception as e:
                 logger.exception(f"更新檢查失敗: {e}")
                 error_msg = str(e)
@@ -685,5 +873,6 @@ class UpdateChecker:
                         topmost=True,
                     ),
                 )
+                _cleanup_temp_files(temp_files_to_cleanup)
 
         UIUtils.run_async(_work)

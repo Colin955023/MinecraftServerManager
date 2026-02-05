@@ -39,17 +39,7 @@ def search_mods_online(
     categories=None,
     sort_by="relevance",
 ):
-    """線上搜尋模組
-    Search for mods online
-
-    Args:
-        query: 搜尋關鍵字
-        minecraft_version: Minecraft 版本
-        _loader: 載入器類型
-        categories: 模組類別
-        sort_by: 排序方式
-
-    """
+    """線上搜尋模組"""
     url = "https://api.modrinth.com/v2/search"
     facets = [["project_type:mod"]]
     if minecraft_version:
@@ -95,9 +85,7 @@ def search_mods_online(
 
 
 def enhance_local_mod(filename):
-    """增強本地模組資訊，從線上查詢模組詳細資訊
-    Enhance local mod information by querying online for mod details.
-    """
+    """增強本地模組資訊，從線上查詢模組詳細資訊"""
     name = filename.replace(".jar", "").replace(".jar.disabled", "")
     for suffix in ["-fabric", "-forge", "-mc"]:
         if suffix in name.lower():
@@ -156,23 +144,15 @@ class ModManagementFrame:
         self.local_mods: list[Any] = []
         self.enhanced_mods_cache: dict[str, Any] = {}
 
-        # 初始化 UI 更新佇列 Initialize UI update queue
         self.ui_queue: queue.Queue = queue.Queue()
 
         self.create_widgets()
-        # 使用 main_frame 作為計時器宿主 Use main_frame as timer host
         host = self.main_frame if (self.main_frame and self.main_frame.winfo_exists()) else self.parent
         UIUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
     def update_status(self, message: str) -> None:
-        """安全地更新狀態標籤
-        Safely update status label
-
-        Args:
-            message (str): 狀態訊息
-
-        """
+        """安全地更新狀態標籤"""
         try:
             if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
                 if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
@@ -183,23 +163,11 @@ class ModManagementFrame:
             logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
 
     def update_status_safe(self, message: str) -> None:
-        """更安全的狀態更新，使用佇列
-        More safe status update using queue
-
-        Args:
-            message (str): 狀態訊息
-
-        """
+        """更安全的狀態更新，使用佇列"""
         self.ui_queue.put(lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
-        """更安全的進度更新，使用佇列
-        More safe progress update using queue
-
-        Args:
-            value (float): 進度值
-
-        """
+        """更安全的進度更新，使用佇列"""
 
         def _update():
             if hasattr(self, "progress_var") and self.progress_var:
@@ -821,7 +789,6 @@ class ModManagementFrame:
 
             self.current_server = selected_server
 
-            # 初始化模組管理器
             self.mod_manager = ModManager(selected_server.path)
 
             # 載入本地模組
@@ -899,18 +866,7 @@ class ModManagementFrame:
         UIUtils.run_async(enhance_thread)
 
     def _get_enhanced_attr(self, enhanced, attr: str, fallback):
-        """從增強物件取得屬性的輔助方法（效能優化：減少重複的 hasattr 檢查）
-        Helper method to get attribute from enhanced object (performance optimization)
-
-        Args:
-            enhanced: 增強資訊物件
-            attr: 屬性名稱
-            fallback: 後備值
-
-        Returns:
-            屬性值或後備值
-
-        """
+        """屬性值或後備值"""
         if enhanced:
             value = getattr(enhanced, attr, None)
             if value:
@@ -918,9 +874,7 @@ class ModManagementFrame:
         return fallback
 
     def refresh_local_list(self) -> None:
-        """重新整理本地模組列表 (使用分批載入優化)
-        Refresh local mod list (optimized with batch loading)
-        """
+        """重新整理本地模組列表 (使用分批載入優化)"""
         if not hasattr(self, "local_tree") or not self.local_tree:
             return
 

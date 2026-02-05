@@ -32,15 +32,11 @@ logger = get_logger().bind(component="CreateServerFrame")
 
 # ====== 主要 UI Frame 類別 ======
 class CreateServerFrame(ctk.CTkFrame):
-    """建立伺服器頁面
-    Create Server Page
-    """
+    """建立伺服器頁面"""
 
     @staticmethod
     def get_system_memory_mb() -> int:
-        """獲取系統記憶體容量 (MB)
-        Get system memory capacity in MB
-        """
+        """獲取系統記憶體容量"""
         try:
             return SystemUtils.get_total_memory_mb()
         except Exception as e:
@@ -52,9 +48,7 @@ class CreateServerFrame(ctk.CTkFrame):
             return 0
 
     def update_memory_warning(self) -> None:
-        """更新記憶體使用警告標籤
-        Update memory usage warning label
-        """
+        """更新記憶體使用警告標籤"""
         try:
             max_memory_str = self.max_memory_var.get().strip()
             min_memory_str = self.min_memory_var.get().strip()
@@ -91,14 +85,7 @@ class CreateServerFrame(ctk.CTkFrame):
             UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.winfo_toplevel())
 
     def create_java_path_field(self, parent, row) -> None:
-        """建立 Java 路徑欄位（可手動輸入/瀏覽）
-        Create Java path field (manual input/browse)
-
-        Args:
-            parent (ctk.CTkFrame): 父容器
-            row (int): 行號
-
-        """
+        """建立 Java 路徑欄位（可手動輸入/瀏覽）"""
         ctk.CTkLabel(
             parent,
             text="Java 執行檔路徑 (可選):",
@@ -166,9 +153,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.preload_version_data()
 
     def create_widgets(self) -> None:
-        """建立介面元件
-        Create the interface widgets.
-        """
+        """建立介面元件"""
         main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.pack(fill="both", expand=True, padx=20, pady=15)
 
@@ -222,9 +207,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.create_buttons(main_container)
 
     def create_form(self, parent) -> None:
-        """建立表單
-        Create the form.
-        """
+        """建立表單"""
         form_frame = ctk.CTkFrame(parent)
         form_frame.pack(fill="x", pady=(0, 15))
 
@@ -519,17 +502,7 @@ class CreateServerFrame(ctk.CTkFrame):
         )
 
     def create_field(self, parent, row, label_text, default_value, var_name) -> tuple:
-        """建立文字輸入欄位
-        Create a text input field.
-
-        Args:
-            parent: 父容器
-            row: 行號
-            label_text: 標籤文字
-            default_value: 預設值
-            var_name: 變數名稱
-
-        """
+        """建立文字輸入欄位"""
         ctk.CTkLabel(
             parent,
             text=label_text,
@@ -546,13 +519,7 @@ class CreateServerFrame(ctk.CTkFrame):
         return var, entry
 
     def create_buttons(self, parent) -> None:
-        """建立按鈕
-        Create buttons.
-
-        Args:
-            parent: 父容器
-
-        """
+        """建立按鈕"""
         # 按鈕容器
         button_container = ctk.CTkFrame(parent, fg_color="transparent")
         button_container.pack(fill="x", side="bottom")
@@ -583,9 +550,7 @@ class CreateServerFrame(ctk.CTkFrame):
         reset_button.pack(side="left")
 
     def reset_form(self):
-        """重設表單到預設值
-        Reset the form to default values.
-        """
+        """重設表單到預設值"""
         try:
             if hasattr(self, "release_versions") and self.release_versions:
                 latest_version = self.release_versions[0].get("id", "未知版本")
@@ -611,13 +576,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
     # === 2. 伺服器版本/載入器相關 ===
     def update_versions(self, versions: list) -> None:
-        """更新版本列表，並預設選擇最新版本
-        Update the version list and default to the latest version.
-
-        Args:
-            versions: 版本列表
-
-        """
+        """更新版本列表，並預設選擇最新版本"""
         self.versions = versions
         self.release_versions = versions
 
@@ -631,11 +590,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.server_name_var.set(latest_version)
 
     def update_version_list(self) -> None:
-        """更新版本列表顯示，並預設選擇最新版本
-        只顯示穩定版且 server_url 不為 null 的版本
-        Update the version list display and default to the latest version.
-        Only show release versions with non-null server_url.
-        """
+        """更新版本列表顯示，並預設選擇最新版本"""
         if not hasattr(self, "versions") or not self.versions:
             self.mc_version_combo.configure(values=["載入中..."])
             self.mc_version_var.set("載入中...")
@@ -661,9 +616,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.update_server_config_ui()
 
     def update_server_config_ui(self, _event=None) -> None:
-        """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單
-        Update server name and loader version combo based on loader type and Minecraft version.
-        """
+        """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單"""
         mc_version = self.mc_version_var.get()
         loader_type = self.loader_type_var.get()
         name = self.server_name_var.get()
@@ -713,15 +666,7 @@ class CreateServerFrame(ctk.CTkFrame):
             ).start()
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
-        """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）
-        Load loader versions based on the selected loader type and Minecraft version,
-        defaulting to the latest version (using pre-loaded cached data).
-
-        Args:
-            loader_type: 載入器類型
-            mc_version: Minecraft 版本
-
-        """
+        """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）"""
         try:
             # 先設定載入狀態
             def set_loading():
@@ -801,9 +746,7 @@ class CreateServerFrame(ctk.CTkFrame):
             self.ui_queue.put(handle_error)
 
     def validate_form(self) -> bool:
-        """驗證表單
-        Validate the form inputs, including server name duplication.
-        """
+        """驗證表單"""
         # 檢查伺服器名稱
         server_name = self.server_name_var.get().strip()
         if not server_name:
@@ -873,9 +816,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
     # === 4. 伺服器建立主流程 ===
     def create_server(self):
-        """建立伺服器
-        Create the server.
-        """
+        """建立伺服器"""
         if not self.validate_form():
             return
         # 準備配置
@@ -907,13 +848,7 @@ class CreateServerFrame(ctk.CTkFrame):
         UIUtils.run_async(self.create_server_async, config)
 
     def create_server_async(self, config: ServerConfig) -> None:
-        """非同步建立伺服器 - 只負責互動與下載，所有檔案/資料夾/屬性/啟動腳本交由 server_manager
-        Asynchronous server creation - only responsible for UI interaction and download, all file/folder/properties/launch handled by server_manager.
-
-        Args:
-            config: 伺服器配置
-
-        """
+        """非同步建立伺服器"""
         parent_window = self.winfo_toplevel()  # 捕獲父視窗引用
         progress_dialog = None
         progress_ready = threading.Event()
@@ -930,7 +865,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 raise Exception("建立進度對話框超時")
 
             if progress_dialog is None:
-                raise Exception("建立進度對話框失敗 (None)")
+                raise Exception("建立進度對話框失敗")
 
             # 步驟 1：建立伺服器目錄結構與初始化（含 server.properties）
             if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):
@@ -991,15 +926,7 @@ class CreateServerFrame(ctk.CTkFrame):
             self.after(0, on_error)
 
     def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
-        """下載伺服器檔案（統一呼叫 loader_manager，支援進度回呼）
-        Download server files (call loader_manager, support progress callback)
-
-        Args:
-            config: 伺服器配置
-            progress_dialog: 進度對話框
-            server_path: 伺服器路徑
-
-        """
+        """下載伺服器檔案"""
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
         parent_window = self.winfo_toplevel()  # 捕獲父視窗引用
@@ -1058,15 +985,7 @@ class CreateServerFrame(ctk.CTkFrame):
             raise Exception(msg)
 
     def _validate_download_parameters(self, loader_type: str, config) -> bool:
-        """驗證下載參數
-
-        參數:
-            loader_type: 載入器類型（forge、fabric 等）
-            config: 伺服器設定物件
-
-        回傳:
-            bool: 參數有效則回傳 True，否則回傳 False
-        """
+        """驗證下載參數"""
         # 基本參數驗證
         if not loader_type or loader_type == "unknown":
             return False

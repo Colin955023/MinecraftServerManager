@@ -30,34 +30,17 @@ logger = get_logger().bind(component="ServerManager")
 
 
 class ServerManager:
-    """伺服器管理器類別，負責建立、管理和配置 Minecraft 伺服器
-    Server Manager class responsible for creating, managing, and configuring Minecraft servers
-    """
+    """負責建立、管理和配置 Minecraft 伺服器"""
 
     # ====== 類別常數 ======
-    # 伺服器啟動檢查常數
     STARTUP_CHECK_DELAY = 0.1  # 伺服器啟動檢查延遲（秒）
-    # 伺服器停止檢查常數
     STOP_CHECK_INTERVAL = 0.1  # 停止檢查間隔（秒）
     STOP_TIMEOUT_SECONDS = 5  # 停止超時時間（秒）
     MAX_STOP_CHECKS = int(STOP_TIMEOUT_SECONDS / STOP_CHECK_INTERVAL)
-    # 輸出佇列大小限制
     OUTPUT_QUEUE_MAX_SIZE = 1000  # 輸出佇列最大容量
 
     # ====== 初始化與配置管理 ======
-    # 初始化伺服器管理器
     def __init__(self, servers_root: str | None = None):
-        """初始化伺服器管理器
-        Initialize server manager
-
-        Args:
-            servers_root (str): 伺服器根目錄路徑
-
-        Returns:
-            None
-
-        """
-        # servers_root 必須由外部明確傳入，且必須是 servers 資料夾的絕對路徑
         if not servers_root:
             raise ValueError("ServerManager 必須指定 servers_root 路徑，且不可為空。請於 UI 層先處理。")
         self.servers_root = Path(servers_root).resolve()
@@ -68,24 +51,28 @@ class ServerManager:
         self.output_queues: dict[str, tuple[deque, threading.Lock]] = {}  # server_name -> (deque, lock)
         self.output_threads: dict[str, threading.Thread] = {}  # server_name -> Thread
         self._properties_cache: dict[str, Any] = {}  # server_name -> (mtime, properties)
+        self._config_lock = threading.Lock()  # 配置檔案讀寫鎖，防止併發寫入衝突
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
-    # 建立新伺服器
     def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
-        """建立新伺服器並初始化設定
-        Create new server and initialize configuration
-
-        Args:
-            config (ServerConfig): 伺服器配置物件
-            properties (Dict[str, str], optional): 伺服器屬性設定
-
-        Returns:
-            bool: 建立成功返回 True，失敗返回 False
-
-        """
+        """建立新伺服器並初始化設定"""
         try:
-            server_path = self.servers_root / config.name
+            server_path = (self.servers_root / config.name).resolve()
+
+            is_safe = False
+            try:
+                is_safe = server_path.is_relative_to(self.servers_root)
+            except AttributeError:
+                try:
+                    server_path.relative_to(self.servers_root)
+                    is_safe = True
+                except ValueError:
+                    is_safe = False
+
+            if not is_safe:
+                raise ValueError(f"無效的伺服器名稱 (路徑遍歷偵測): {config.name}")
+
             server_path.mkdir(exist_ok=True)
             # 更新配置路徑
             config.path = str(server_path)
@@ -147,42 +134,26 @@ class ServerManager:
             return False
 
     def _create_eula_file(self, server_path: Path) -> None:
-        """建立並同意 EULA 檔案
-        Create and accept EULA file.
-
-        Args:
-            server_path (Path): 伺服器根目錄路徑
-
-        """
+        """建立並同意 EULA 檔案"""
         eula_content = """eula=true"""
         PathUtils.write_text_file(server_path / "eula.txt", eula_content)
 
     def _create_server_structure(self, path: Path, loader_type: str) -> None:
-        """建立伺服器檔案結構
-        Create server file structure.
-
-        Args:
-            path (Path): 伺服器根目錄路徑
-            loader_type (str): 伺服器載入器類型
-
-        """
+        """建立伺服器檔案結構"""
         # 建立基本目錄
         if loader_type.lower() == "vanilla":
             directories = ["world", "logs"]
         elif loader_type.lower() in ["forge", "fabric"]:
             directories = ["world", "plugins", "mods", "config", "logs"]
+        else:
+            directories = ["world", "logs"]
+            logger.warning(f"未知 loader_type: {loader_type}，使用預設目錄結構")
 
         for directory in directories:
             (path / directory).mkdir(exist_ok=True)
 
     def create_launch_script(self, config: ServerConfig) -> None:
-        """建立伺服器啟動腳本 (Windows)
-        Create server launch script (Windows).
-
-        Args:
-            config (ServerConfig): 伺服器配置物件
-
-        """
+        """建立伺服器啟動腳本"""
         server_path = Path(config.path)
 
         # 計算記憶體設定
@@ -285,17 +256,7 @@ class ServerManager:
         PathUtils.write_text_file(start_script_path, bat_content, encoding="gbk", errors="replace")
 
     def update_server_properties(self, server_name: str, properties: dict[str, str]) -> bool:
-        """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值
-        update server.properties, only overwrite changed fields, keep other fields unchanged
-
-        Args:
-            server_name (str): 伺服器名稱
-            properties (Dict[str, str]): 要更新的屬性字典
-
-        Returns:
-            bool: 更新成功返回 True，否則返回 False
-
-        """
+        """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值"""
         try:
             config = self.servers.get(server_name)
             if not config:
@@ -317,17 +278,7 @@ class ServerManager:
             return False
 
     def start_server(self, server_name: str, parent=None) -> bool:
-        """啟動伺服器
-        Start the server.
-
-        Args:
-            server_name (str): 伺服器名稱
-            parent: 父級視窗，通常是主視窗
-
-        Returns:
-            bool: 啟動成功返回 True，否則返回 False
-
-        """
+        """啟動伺服器"""
         try:
             if server_name not in self.servers:
                 UIUtils.show_error("伺服器未找到", f"找不到伺服器: {server_name}", parent=parent)
@@ -487,13 +438,7 @@ class ServerManager:
             return False
 
     def delete_server(self, server_name: str) -> bool:
-        """刪除伺服器
-        Delete the server.
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        """
+        """刪除伺服器"""
         try:
             if server_name not in self.servers:
                 return False
@@ -516,39 +461,29 @@ class ServerManager:
             return False
 
     def load_servers_config(self) -> None:
-        """載入伺服器配置
-        Load server configuration.
-
-        Args:
-            config_file (Path): 伺服器配置檔案路徑
-
-        """
-        try:
-            data = PathUtils.load_json(self.config_file)
-            if data:
-                for name, config_data in data.items():
-                    self.servers[name] = ServerConfig(**config_data)
-        except Exception as e:
-            logger.exception(f"載入配置失敗: {e}")
+        """載入伺服器配置"""
+        with self._config_lock:
+            try:
+                data = PathUtils.load_json(self.config_file)
+                if data is not None:
+                    self.servers.clear()
+                    for name, config_data in data.items():
+                        self.servers[name] = ServerConfig(**config_data)
+            except Exception as e:
+                logger.exception(f"載入配置失敗: {e}")
 
     def save_servers_config(self) -> None:
-        """儲存伺服器配置
-        Save server configuration.
-
-        Args:
-            config_file (Path): 伺服器配置檔案路徑
-
-        """
-        try:
-            data = {name: asdict(config) for name, config in self.servers.items()}
-            PathUtils.save_json(self.config_file, data)
-        except Exception as e:
-            logger.exception(f"儲存配置失敗: {e}")
+        """儲存伺服器配置"""
+        with self._config_lock:
+            try:
+                data = {name: asdict(config) for name, config in self.servers.items()}
+                PathUtils.save_json(self.config_file, data)
+                logger.debug(f"已儲存 {len(data)} 個伺服器配置")
+            except Exception as e:
+                logger.exception(f"儲存配置失敗: {e}")
 
     def get_default_server_properties(self) -> dict[str, str]:
-        """獲取預設伺服器屬性
-        Get default server properties.
-        """
+        """獲取預設伺服器屬性"""
         return {
             "accepts-transfers": "false",
             "allow-flight": "false",
@@ -614,23 +549,11 @@ class ServerManager:
         }
 
     def server_exists(self, name: str) -> bool:
-        """檢查伺服器是否已存在
-        Check if the server exists.
-
-        Args:
-            name (str): 伺服器名稱
-
-        """
+        """檢查伺服器是否已存在"""
         return name in self.servers
 
     def add_server(self, config: ServerConfig) -> bool:
-        """添加伺服器配置（用於匯入）
-        Add server configuration (for import).
-
-        Args:
-            config (ServerConfig): 伺服器配置
-
-        """
+        """添加伺服器配置（用於匯入）"""
         try:
             self.servers[config.name] = config
             self.save_servers_config()
@@ -640,16 +563,7 @@ class ServerManager:
             return False
 
     def load_server_properties(self, server_name: str) -> dict[str, str]:
-        """載入伺服器的 server.properties 檔案內容 (附帶緩存機制)
-        Load the server.properties file content for the server (with caching).
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        Returns:
-            Dict[str, str]: 伺服器屬性設定
-
-        """
+        """載入伺服器的 server.properties 檔案內容 (附帶緩存機制)"""
         try:
             if server_name not in self.servers:
                 return {}
@@ -687,16 +601,7 @@ class ServerManager:
             return {}
 
     def is_server_running(self, server_name: str) -> bool:
-        """檢查伺服器是否正在運行
-        Check if the server is running.
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        Returns:
-            bool: 如果伺服器正在運行，則為 True，否則為 False
-
-        """
+        """檢查伺服器是否正在運行"""
         if server_name not in self.running_servers:
             return False
 
@@ -708,13 +613,7 @@ class ServerManager:
         return False
 
     def stop_server(self, server_name: str) -> bool:
-        """停止伺服器
-        Stop the server.
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        """
+        """停止伺服器"""
         try:
             if server_name not in self.running_servers:
                 logger.info(f"伺服器 {server_name} 未在運行")
@@ -761,16 +660,7 @@ class ServerManager:
             return False
 
     def get_server_info(self, server_name: str) -> dict | None:
-        """獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位
-        Get server information, including running status and resource usage, fill in the fields needed by the UI.
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        Returns:
-            Dict | None: 伺服器資訊字典，如果伺服器不存在則為 None
-
-        """
+        """獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位"""
         try:
             if server_name not in self.servers:
                 return None
@@ -857,17 +747,7 @@ class ServerManager:
             return None
 
     def send_command(self, server_name: str, command: str) -> bool:
-        """向運行中的伺服器發送命令
-        Send a command to the running server.
-
-        Args:
-            server_name (str): 伺服器名稱
-            command (str): 要發送的命令
-
-        Returns:
-            bool: 如果命令發送成功則為 True，否則為 False
-
-        """
+        """向運行中的伺服器發送命令"""
         try:
             if server_name not in self.running_servers:
                 logger.info(f"伺服器 {server_name} 未在運行")
@@ -914,17 +794,7 @@ class ServerManager:
             return False
 
     def read_server_output(self, server_name: str, _timeout: float = 0.1) -> list[str]:
-        """讀取伺服器輸出（非阻塞，避免 readline 卡住）
-        Read server output (non-blocking, avoid readline blocking).
-
-        Args:
-            server_name (str): 伺服器名稱
-            _timeout (float): 讀取超時時間
-
-        Returns:
-            List[str]: 伺服器輸出行列表
-
-        """
+        """讀取伺服器輸出"""
         try:
             if server_name not in self.running_servers:
                 return []
@@ -953,16 +823,7 @@ class ServerManager:
             return []
 
     def get_server_log_file(self, server_name: str) -> Path | None:
-        """獲取伺服器日誌檔案路徑
-        Get the server log file path.
-
-        Args:
-            server_name (str): 伺服器名稱
-
-        Returns:
-            Path | None: 伺服器日誌檔案路徑，如果不存在則為 None
-
-        """
+        """獲取伺服器日誌檔案路徑"""
         try:
             if server_name not in self.servers:
                 return None

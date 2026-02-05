@@ -1,8 +1,39 @@
 # Changelog
 
-所有重要的變更都會記錄在此文件中。
+## v1.6.4 - 2026-02-06
 
-格式基於 [Keep a Changelog](https://keepachangelog.com/zh-TW/1.0.0/)。
+### 新增
+- **安全性**
+  - `PathUtils`: 新增 `is_path_within()` 方法，用於驗證路徑是否在指定目錄內，防止路徑穿越攻擊
+  - `ServerPropertiesValidator`: 新增 server.properties 屬性驗證器，支援型別檢查與範圍驗證
+
+### 優化
+- **安全性強化**
+  - UpdateChecker: 重新設計 SHA256 驗證流程
+    - 下載前先線上確認 SHA256 是否存在（拒絕下載無 SHA256 的檔案）
+    - 下載後立即驗證 SHA256（驗證失敗立即刪除檔案）
+    - 新增路徑安全性檢查（確保所有操作檔案都在合法目錄內）
+    - 自動清理所有暫存檔案，避免殘留
+  - SubprocessUtils: 所有子進程啟動統一使用 `stdin=DEVNULL`，避免進程等待輸入
+  - 安裝程式啟動前新增使用者確認對話框
+
+- **功能改進**
+  - `server.properties` 處理重大改進
+    - 支援 Java properties 格式的跳脫字元（`\:`, `\=`, `\n`, `\t` 等）
+    - 改進讀取邏輯，正確處理包含 `=` 或 `:` 的屬性值
+    - 改進寫入邏輯，自動處理特殊字元的跳脫
+  - HTTPUtils: 下載檔案時使用臨時檔案，完成後再重命名，避免下載失敗時產生損壞檔案
+  - MemoryUtils: 新增 `compact` 參數，支援簡潔/詳細兩種記憶體格式顯示
+
+- **程式碼品質提升**
+  - 全專案移除冗餘的英文註解與 docstring
+  - 統一 docstring 為簡潔的單行格式
+  - 改進異常處理機制（logger.py: 統一異常格式化邏輯）
+  - 移除所有 `(Static Class)` 等多餘標註
+
+### 修復
+- 修正 `get_json_batch()` 在傳入空列表時的處理
+- 改善錯誤日誌輸出，所有 `show_error()` 都同步寫入日誌
 
 ## v1.6.3 - 2026-02-04
 

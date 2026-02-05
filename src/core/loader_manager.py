@@ -32,21 +32,12 @@ logger = get_logger().bind(component="LoaderManager")
 
 
 class LoaderManager(Singleton):
-    """
-    模組載入器管理器類別，管理 Fabric 和 Forge 載入器版本
-    Loader Manager class for managing Fabric and Forge loader versions
-    """
+    """模組載入器管理器類別，管理 Fabric 和 Forge 載入器版本"""
 
     # ====== 初始化與快取管理 ======
     _initialized: bool = False
 
-    # 初始化載入器管理器
     def __init__(self):
-        """
-        初始化載入器管理器
-        Initialize loader manager
-        """
-        # 避免重複初始化
         if self._initialized:
             return
         cache_dir = RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir())
@@ -57,16 +48,7 @@ class LoaderManager(Singleton):
         self._initialized = True
 
     def clear_cache_file(self):
-        """
-        通用快取檔案清除方法（同時清除記憶體快取）。
-        Generic cache file clearing method.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
+        """通用快取檔案清除方法。"""
         try:
             fabric_path = Path(self.fabric_cache_file)
             forge_path = Path(self.forge_cache_file)
@@ -102,21 +84,6 @@ class LoaderManager(Singleton):
         """
         依 loader_type 下載並部署伺服器檔案。
         Vanila/Fabric → bool；Forge → 成功時回傳主 JAR 相對路徑字串。
-        Download and deploy server files based on loader_type.
-        Vanilla/Fabric → bool; Forge → returns main JAR relative path string on success.
-
-        Args:
-            loader_type (str): 載入器類型
-            minecraft_version (str): Minecraft 版本
-            loader_version (str): 載入器版本
-            download_path (str): 下載路徑
-            progress_callback (Callable[[int] | None]): 進度回調函數
-            cancel_flag (dict | None): 取消標誌
-            user_java_path (str | None): 使用者指定的 Java 路徑
-            parent_window (tk.Toplevel | None): 父視窗
-
-        Returns:
-            bool | str: 下載結果
         """
         lt = self._standardize_loader_type(loader_type, loader_version)
 
@@ -188,18 +155,12 @@ class LoaderManager(Singleton):
     def preload_loader_versions(self):
         """
         從 API 取得所有載入器版本並覆蓋寫入 json。
-        get all loader versions from API and overwrite json.
-
-        Args:
-            parent (tk.Toplevel | None): 父視窗
-
-        Returns:
-            None
         """
         self._preload_fabric_versions()
         self._preload_forge_versions()
 
     def _preload_fabric_versions(self):
+        """從 API 取得 Fabric 載入器版本並覆蓋寫入 json（只保留 stable 版本）。"""
         logger.debug("預先抓取 Fabric 載入器版本...", "LoaderManager")
         fabric_url = "https://meta.fabricmc.net/v2/versions/loader"
         try:
@@ -309,8 +270,7 @@ class LoaderManager(Singleton):
 
     def get_compatible_loader_versions(self, mc_version: str, loader_type: str) -> list[LoaderVersion]:
         """
-        只從 json 快取檔案取得相容的載入器版本列表（使用記憶體快取優化）。
-        get all compatible loader versions from cache (with memory caching optimization).
+        只從 json 快取檔案取得相容的載入器版本列表。
 
         Args:
             mc_version (str): 要檢查的 MC 版本字串
@@ -396,22 +356,7 @@ class LoaderManager(Singleton):
         need_vanilla: bool = False,
         parent_window=None,
     ) -> bool | str:
-        """Fabric 與 Forge 共用：下載安裝器 → （可選）先下載 vanilla → 執行安裝器。
-
-        Arg:
-            self: LoaderManager 實例。
-            installer_url (str): 安裝器的下載 URL。
-            installer_args (List[str]): 安裝器的啟動參數。
-            minecraft_version (str): Minecraft 版本。
-            loader_version (str): 載入器版本。
-            download_path (str): 下載路徑。
-            progress_callback: 進度回調函數。
-            cancel_flag: 取消標誌。
-            need_vanilla (bool): 是否需要下載 vanilla 伺服器。
-            parent_window: 父視窗，用於顯示錯誤對話框。
-        Returns:
-            bool | str: 成功時返回 True，失敗時返回錯誤訊息。
-        """
+        """Fabric 與 Forge 共用：下載安裝器 → （可選）先下載 vanilla → 執行安裝器。"""
         installer_path = str(Path(download_path).parent / Path(installer_url).name)
 
         # 設定進度範圍
@@ -466,6 +411,7 @@ class LoaderManager(Singleton):
             process = SubprocessUtils.popen_checked(
                 cmd,
                 cwd=str(Path(download_path).parent),
+                stdin=SubprocessUtils.DEVNULL,
                 stdout=SubprocessUtils.PIPE,
                 stderr=SubprocessUtils.STDOUT,
                 text=True,
@@ -588,18 +534,7 @@ class LoaderManager(Singleton):
         progress_callback,
         cancel_flag,
     ) -> bool:
-        """下載 Minecraft Vanilla 伺服器 JAR 檔案。
-        Download Minecraft Vanilla server JAR file.
-
-        Args:
-            minecraft_version: Minecraft 版本號
-            download_path: 下載路徑
-            progress_callback: 進度回調函數
-            cancel_flag: 取消標誌
-        Returns:
-            是否成功
-
-        """
+        """下載 Minecraft Vanilla 伺服器 JAR 檔案。"""
         if progress_callback:
             progress_callback(10, "查詢 Minecraft 版本資訊...")
 
@@ -635,22 +570,7 @@ class LoaderManager(Singleton):
         status_text: str,
         cancel_flag: dict | None,
     ) -> bool:
-        """下載檔案並顯示進度。
-        Download file and show progress.
-
-        Args:
-            url: 下載檔案的 URL
-            dest_path: 下載後儲存的路徑
-            progress_callback: 進度回調函數
-            start_percent: 開始百分比
-            end_percent: 結束百分比
-            status_text: 狀態文字
-            cancel_flag: 取消標誌
-
-        Returns:
-            是否成功
-
-        """
+        """下載檔案並顯示進度。"""
 
         def on_progress(downloaded, total):
             if total > 0 and progress_callback:
@@ -675,16 +595,7 @@ class LoaderManager(Singleton):
         return self._fail(progress_callback, "下載失敗：無法獲取檔案")
 
     def _get_minecraft_server_url(self, mc_version: str) -> str | None:
-        """根據 Minecraft 版本獲取伺服器 JAR 下載 URL。
-        According to the Minecraft version, get the server JAR download URL.
-
-        Args:
-            mc_version: Minecraft 版本號
-
-        Returns:
-            伺服器 JAR 下載 URL
-
-        """
+        """根據 Minecraft 版本獲取伺服器 JAR 下載 URL。"""
         try:
             manifest = HTTPUtils.get_json(
                 "https://launchermeta.mojang.com/mc/game/version_manifest.json",
@@ -702,32 +613,11 @@ class LoaderManager(Singleton):
             return None
 
     def _standardize_loader_type(self, lt: str, loader_version: str) -> str:
-        """標準化載入器類型：將輸入轉為小寫並進行基本推斷。
-        Standardize loader type: convert input to lowercase and make basic inferences.
-
-        Args:
-            lt: 載入器類型
-            loader_version: 載入器版本
-
-        Returns:
-            標準化後的載入器類型
-
-        """
+        """標準化載入器類型：將輸入轉為小寫並進行基本推斷。"""
         return ServerDetectionUtils.standardize_loader_type(lt, loader_version)
 
     def _fail(self, progress_callback, user_msg: str, debug: str = "") -> bool:
-        """通用失敗處理：顯示錯誤訊息並回傳 False。
-        Generic failure handler: show error message and return False.
-
-        Args:
-            progress_callback: 進度回調函數
-            user_msg: 用戶端顯示的錯誤訊息
-            debug: 除錯訊息
-
-        Returns:
-            是否成功
-
-        """
+        """通用失敗處理：顯示錯誤訊息並回傳 False。"""
         if debug:
             logger.debug(debug)
         if progress_callback:

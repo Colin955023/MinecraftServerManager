@@ -24,7 +24,7 @@ try {
 
 # 驗證版本格式，確保不是意外的物件
 if (-not $version -or -not ($version -match '^\d+\.\d+\.\d+')) {
-    $version = '1.6.3'
+    $version = '1.6.4'
 }
 
 Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan
@@ -72,6 +72,14 @@ if (Test-Path $portablePath) {
     Remove-Item $portablePath -Force
 }
 New-Item -Path $portablePath -ItemType File -Force | Out-Null
+
+# 確保移除 unins000.exe 與 unins000.dat (若存在)，可攜式版本不需要
+if (Test-Path "dist\MinecraftServerManager\unins000.exe") {
+    Remove-Item "dist\MinecraftServerManager\unins000.exe" -Force
+}
+if (Test-Path "dist\MinecraftServerManager\unins000.dat") {
+    Remove-Item "dist\MinecraftServerManager\unins000.dat" -Force
+}
 
 Write-Host "[3/3] 建立可攜式版本壓縮檔..." -ForegroundColor Yellow
 Compress-Archive -Path "dist\MinecraftServerManager" -DestinationPath $zipPath -Force
