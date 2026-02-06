@@ -11,10 +11,11 @@ import customtkinter as ctk
 
 from ..utils import (
     AppRestart,
-    DialogUtils,
     FontManager,
+    FontSize,
     UIUtils,
     WindowManager,
+    get_button_style,
     get_logger,
     get_settings_manager,
 )
@@ -31,12 +32,16 @@ class WindowPreferencesDialog:
         self.settings = get_settings_manager()
 
         # 建立對話框
-        self.dialog = DialogUtils.create_modal_dialog(
+        self.dialog = UIUtils.create_toplevel_dialog(
             parent,
             "視窗偏好設定",
-            size=(500, 600),
+            width=500,
+            height=600,
             resizable=False,
-            center=True,
+            center_on_parent=True,
+            make_modal=True,
+            bind_icon=True,
+            delay_ms=250,
         )
 
         # 建立介面
@@ -45,9 +50,6 @@ class WindowPreferencesDialog:
         # 載入當前設定
         self._load_current_settings()
 
-    def _show_manual_restart_dialog(self, parent, diag_text: str | None) -> None:
-        UIUtils.show_manual_restart_dialog(parent, diag_text)
-
     def _create_widgets(self) -> None:
         """建立介面元件"""
         # 主滾動框架
@@ -55,7 +57,11 @@ class WindowPreferencesDialog:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 標題
-        title_label = ctk.CTkLabel(main_frame, text="🖥️ 視窗偏好設定", font=FontManager.get_font(size=18, weight="bold"))
+        title_label = ctk.CTkLabel(
+            main_frame,
+            text="🖥️ 視窗偏好設定",
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+        )
         title_label.pack(pady=(0, 20))
 
         # 一般設定區域
@@ -76,7 +82,7 @@ class WindowPreferencesDialog:
         frame.pack(fill="x", pady=(0, 15))
 
         section_title = f"{emoji} {title}" if emoji else title
-        ctk.CTkLabel(frame, text=section_title, font=FontManager.get_font(size=14, weight="bold")).pack(
+        ctk.CTkLabel(frame, text=section_title, font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")).pack(
             anchor="w",
             padx=15,
             pady=(15, 10),
@@ -86,7 +92,9 @@ class WindowPreferencesDialog:
 
     def _create_checkbox(self, parent, text: str, variable: ctk.BooleanVar) -> ctk.CTkCheckBox:
         """建立複選框"""
-        checkbox = ctk.CTkCheckBox(parent, text=text, variable=variable, font=FontManager.get_font(size=12))
+        checkbox = ctk.CTkCheckBox(
+            parent, text=text, variable=variable, font=FontManager.get_font(size=FontSize.NORMAL)
+        )
         checkbox.pack(anchor="w", padx=25, pady=(0, 10))
         return checkbox
 
@@ -133,7 +141,12 @@ class WindowPreferencesDialog:
             f"目前主視窗大小: {current_settings.get('width', 1200)} × {current_settings.get('height', 800)}"
         )
 
-        ctk.CTkLabel(main_window_frame, text=info_text, font=FontManager.get_font(size=12), justify="left").pack(
+        ctk.CTkLabel(
+            main_window_frame,
+            text=info_text,
+            font=FontManager.get_font(size=FontSize.NORMAL),
+            justify="left",
+        ).pack(
             anchor="w",
             padx=25,
             pady=(0, 15),
@@ -145,7 +158,7 @@ class WindowPreferencesDialog:
             main_window_frame,
             text="重設為預設大小",
             command=self._reset_to_default_size,
-            font=FontManager.get_font(size=12),
+            font=FontManager.get_font(size=FontSize.NORMAL),
             width=int(150 * scale_factor),
             height=int(32 * scale_factor),
         )
@@ -159,7 +172,7 @@ class WindowPreferencesDialog:
         dpi_frame = ctk.CTkFrame(display_frame, fg_color="transparent")
         dpi_frame.pack(fill="x", padx=25, pady=(0, 15))
 
-        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=FontManager.get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
 
         scale_factor = get_settings_manager().get_dpi_scaling()
         self.dpi_scale_var = ctk.DoubleVar()
@@ -177,7 +190,7 @@ class WindowPreferencesDialog:
         self.dpi_scale_label = ctk.CTkLabel(
             dpi_frame,
             text="1.0x",
-            font=FontManager.get_font(size=12),
+            font=FontManager.get_font(size=FontSize.NORMAL),
             width=int(40 * scale_factor),
         )
         self.dpi_scale_label.pack(side="left")
@@ -186,7 +199,7 @@ class WindowPreferencesDialog:
         ctk.CTkLabel(
             display_frame,
             text="調整此設定以適應高解析度螢幕或改善視覺效果",
-            font=FontManager.get_font(size=12),
+            font=FontManager.get_font(size=FontSize.NORMAL),
             text_color="gray",
         ).pack(anchor="w", padx=25, pady=(0, 15))
 
@@ -201,28 +214,21 @@ class WindowPreferencesDialog:
                 "恢復預設",
                 self._reset_all_settings,
                 "left",
-                ("#dc2626", "#b91c1c"),
-                ("#b91c1c", "#991b1b"),
+                get_button_style("danger"),
             ),
-            ("套用設定", self._apply_settings, "right", None, None),  # 使用預設顏色
-            ("取消", self._cancel, "right", "gray", ("gray70", "gray30")),
+            ("套用設定", self._apply_settings, "right", get_button_style("primary")),
+            ("取消", self._cancel, "right", {"fg_color": "gray", "hover_color": ("gray70", "gray30")}),
         ]
 
-        for text, command, side, fg_color, hover_color in buttons:
+        for text, command, side, style in buttons:
             btn_config = {
                 "text": text,
                 "command": command,
-                "font": FontManager.get_font(size=12),
+                "font": FontManager.get_font(size=FontSize.NORMAL, weight="bold" if text == "套用設定" else "normal"),
                 "width": 100,
                 "height": 35,
+                **style,
             }
-
-            if text == "套用設定":
-                btn_config["font"] = FontManager.get_font(size=12, weight="bold")
-            if fg_color:
-                btn_config["fg_color"] = fg_color
-            if hover_color:
-                btn_config["hover_color"] = hover_color
 
             button = ctk.CTkButton(button_frame, **btn_config)
             padding = (10, 0) if side == "right" else (0, 0)
@@ -359,7 +365,7 @@ class WindowPreferencesDialog:
                 else:
                     # 無法自動重啟，顯示詳細診斷（若有）
                     detail_text = supported_diag if supported_diag else None
-                    self._show_manual_restart_dialog(self.dialog, detail_text)
+                    UIUtils.show_manual_restart_dialog(self.dialog, detail_text)
 
     def _apply_settings(self) -> None:
         """套用設定"""
@@ -417,7 +423,7 @@ class WindowPreferencesDialog:
                 except Exception:
                     diag = None
                 # 顯示更完整的手動重啟 dialog，包含可複製的診斷文字
-                self._show_manual_restart_dialog(self.dialog, diag)
+                UIUtils.show_manual_restart_dialog(self.dialog, diag)
             # 正常關閉對話框
             self.dialog.destroy()
 

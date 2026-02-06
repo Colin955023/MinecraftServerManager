@@ -11,12 +11,12 @@ Logger can be imported conveniently:
 
 from __future__ import annotations
 
-import importlib
+import src
 
+# 使用統一的 lazy_exports 機制（單一來源原則）
 _EXPORTS: dict[str, tuple[str, str]] = {
     "get_logger": (".logger", "get_logger"),
     "UIUtils": (".ui_utils", "UIUtils"),
-    "DialogUtils": (".ui_utils", "DialogUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
     "RuntimePaths": (".runtime_paths", "RuntimePaths"),
@@ -25,6 +25,12 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "FontManager": (".font_manager", "FontManager"),
     "WindowManager": (".window_manager", "WindowManager"),
     "UpdateChecker": (".update_checker", "UpdateChecker"),
+    "FontSize": (".ui_utils", "FontSize"),
+    "Colors": (".ui_utils", "Colors"),
+    "Spacing": (".ui_utils", "Spacing"),
+    "Sizes": (".ui_utils", "Sizes"),
+    "get_button_style": (".ui_utils", "get_button_style"),
+    "get_dropdown_style": (".ui_utils", "get_dropdown_style"),
     "AppRestart": (".app_restart", "AppRestart"),
     "JavaDownloader": (".java_downloader", "JavaDownloader"),
     "JavaUtils": (".java_utils", "JavaUtils"),
@@ -40,20 +46,4 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
 }
 
-
-def __getattr__(name: str):
-    target = _EXPORTS.get(name)
-    if not target:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute_name = target
-    module = importlib.import_module(module_name, __name__)
-    value = getattr(module, attribute_name)
-    globals()[name] = value
-    return value
-
-
-def __dir__():
-    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))
-
-
-__all__ = sorted(_EXPORTS.keys())
+__getattr__, __dir__, __all__ = src.lazy_exports(globals(), __name__, _EXPORTS)

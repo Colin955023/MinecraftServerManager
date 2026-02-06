@@ -64,6 +64,15 @@ class RuntimePaths:
         """取得應用程式的快取檔案存放目錄"""
         return RuntimePaths.get_user_data_dir() / "Cache"
 
+    @staticmethod
+    def get_log_dir() -> Path:
+        """取得應用程式的日誌存放目錄"""
+        if RuntimePaths.is_portable_mode():
+            # 便攜模式：使用相對於可執行檔的 .log 資料夾
+            return RuntimePaths._get_portable_base_dir() / ".log"
+        # 安裝模式：使用 %LOCALAPPDATA%\Programs\MinecraftServerManager\log
+        return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager" / "log"
+
     # ====== 目錄操作工具 ======
     @staticmethod
     def ensure_dir(p: Path) -> Path:

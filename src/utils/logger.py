@@ -4,28 +4,11 @@
 """
 
 import logging
-import os
 import sys
 from datetime import datetime
-from pathlib import Path
+from functools import partialmethod
 
 from . import RuntimePaths
-
-
-def _get_log_dir() -> Path:
-    """取得日誌目錄路徑"""
-    # 使用 runtime_paths 提供的 exe 目錄判斷
-    exe_dir = RuntimePaths.get_exe_dir()
-
-    portable_marker = exe_dir / ".portable"
-    config_dir = exe_dir / ".config"
-
-    if portable_marker.exists() or config_dir.exists():
-        # 便攜模式：使用相對於可執行檔的 .log 資料夾
-        return exe_dir / ".log"
-    # 安裝模式：使用 %LOCALAPPDATA%\Programs\MinecraftServerManager\log
-    localappdata = os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))
-    return Path(localappdata) / "Programs" / "MinecraftServerManager" / "log"
 
 
 class LoguruShim:
@@ -67,20 +50,12 @@ class LoguruShim:
 
         self.logger.log(level, msg, *args, **kwargs)
 
-    def debug(self, msg, *args, **kwargs):
-        self._log(logging.DEBUG, msg, *args, **kwargs)
-
-    def info(self, msg, *args, **kwargs):
-        self._log(logging.INFO, msg, *args, **kwargs)
-
-    def warning(self, msg, *args, **kwargs):
-        self._log(logging.WARNING, msg, *args, **kwargs)
-
-    def error(self, msg, *args, **kwargs):
-        self._log(logging.ERROR, msg, *args, **kwargs)
-
-    def critical(self, msg, *args, **kwargs):
-        self._log(logging.CRITICAL, msg, *args, **kwargs)
+    # 使用 partialmethod 簡化等級方法定義
+    debug = partialmethod(_log, logging.DEBUG)
+    info = partialmethod(_log, logging.INFO)
+    warning = partialmethod(_log, logging.WARNING)
+    error = partialmethod(_log, logging.ERROR)
+    critical = partialmethod(_log, logging.CRITICAL)
 
     def exception(self, msg, *args, **kwargs):
         kwargs["exc_info"] = True
@@ -105,6 +80,7 @@ class LoggerConfig:
         root.setLevel(logging.DEBUG)
 
         if root.handlers:
+            LoggerConfig._initialized = True
             return
 
         fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -115,7 +91,7 @@ class LoggerConfig:
         root.addHandler(ch)
 
         try:
-            log_dir = _get_log_dir()
+            log_dir = RuntimePaths.get_log_dir()
             log_dir.mkdir(parents=True, exist_ok=True)
 
             logs = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime)

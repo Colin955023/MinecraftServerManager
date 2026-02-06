@@ -392,6 +392,9 @@ class AppRestart:
                             [exe_path],
                             cwd=exe_cwd,
                             stdin=SubprocessUtils.DEVNULL,
+                            stdout=SubprocessUtils.DEVNULL,
+                            stderr=SubprocessUtils.DEVNULL,
+                            close_fds=True,
                             creationflags=creation_flags,
                         )
                     else:
@@ -464,7 +467,13 @@ class AppRestart:
                                     logger.debug(f"以模組方式重啟: {use_cmd}, 指令={target_cwd}")
 
                         process = SubprocessUtils.popen_checked(
-                            use_cmd, cwd=target_cwd, stdin=SubprocessUtils.DEVNULL, creationflags=creation_flags
+                            use_cmd,
+                            cwd=target_cwd,
+                            stdin=SubprocessUtils.DEVNULL,
+                            stdout=SubprocessUtils.DEVNULL,
+                            stderr=SubprocessUtils.DEVNULL,
+                            close_fds=True,
+                            creationflags=creation_flags,
                         )
 
                     # 等待短暫時間以確認新程式已啟動
@@ -540,13 +549,12 @@ class AppRestart:
                     sys.exit(0)
             else:
                 logger.error("重啟失敗，程式將繼續運行")
-                # 顯示完整診斷與手動重啟指示給使用者（在 UI 上）
+                # 顯示完整診斷與手動重啟指示給使用者
                 try:
                     _supported, details = AppRestart.get_restart_diagnostics()
                 except Exception:
                     _supported, details = False, "無法取得重啟診斷。"
-
-                    UIUtils.show_manual_restart_dialog(parent_window or None, details)
+                UIUtils.show_manual_restart_dialog(parent_window or None, details)
 
         except Exception as e:
             logger.exception(f"重啟程式失敗: {e}")

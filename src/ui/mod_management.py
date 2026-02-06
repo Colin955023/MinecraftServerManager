@@ -5,6 +5,7 @@
 
 import queue
 import re
+import time
 import tkinter as tk
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +21,7 @@ from src.version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..core import MinecraftVersionManager, ModManager, ModStatus
 from ..utils import (
     FontManager,
+    FontSize,
     HTTPUtils,
     PathUtils,
     UIUtils,
@@ -204,7 +206,7 @@ class ModManagementFrame:
         ctk.CTkLabel(
             inner_frame,
             text="📁 伺服器:",
-            font=FontManager.get_font(size=15, weight="bold"),
+            font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold"),
         ).pack(side="left")
 
         self.server_var = tk.StringVar()
@@ -221,7 +223,7 @@ class ModManagementFrame:
         refresh_btn = ctk.CTkButton(
             inner_frame,
             text="🔄 重新整理",
-            font=FontManager.get_font(size=14),
+            font=FontManager.get_font(size=FontSize.MEDIUM),
             command=self.load_servers,
             width=120,
             height=32,
@@ -234,13 +236,17 @@ class ModManagementFrame:
         header_frame.pack(fill="x", padx=20, pady=(20, 10))
 
         # 創建標題
-        title_label = ctk.CTkLabel(header_frame, text="🧩 模組管理", font=FontManager.get_font(size=27, weight="bold"))
+        title_label = ctk.CTkLabel(
+            header_frame,
+            text="🧩 模組管理",
+            font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold"),
+        )
         title_label.pack(side="left", padx=15, pady=15)
 
         desc_label = ctk.CTkLabel(
             header_frame,
             text="參考 Prism launcher 功能設計，提供模組管理體驗",
-            font=FontManager.get_font(size=15),
+            font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             text_color=("#64748b", "#64748b"),
         )
         desc_label.pack(side="left", padx=(15, 15), pady=15)
@@ -266,7 +272,7 @@ class ModManagementFrame:
         notice = ctk.CTkLabel(
             self.browse_tab,
             text="目前瀏覽模組功能暫停開發，請手動下載模組。",
-            font=FontManager.get_font(size=24, weight="bold"),
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
             text_color=("#64748b", "#64748b"),
         )
         notice.pack(expand=True, fill="both", pady=80)
@@ -278,7 +284,7 @@ class ModManagementFrame:
 
         # 設置頁籤字體使用DPI縮放
         style = ttk.Style()
-        style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", 18, "bold"))
+        style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold"))
 
         self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
@@ -319,7 +325,7 @@ class ModManagementFrame:
         import_btn = ctk.CTkButton(
             left_frame,
             text="📁 匯入模組",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.import_mod_file,
             fg_color="#059669",
             hover_color=self._get_hover_color("#059669"),
@@ -333,7 +339,7 @@ class ModManagementFrame:
         refresh_mod_list_btn = ctk.CTkButton(
             left_frame,
             text="🔄 重新整理",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.refresh_mod_list_force,
             fg_color="#3b82f6",
             hover_color=self._get_hover_color("#3b82f6"),
@@ -347,7 +353,7 @@ class ModManagementFrame:
         update_btn = ctk.CTkButton(
             left_frame,
             text="🔄 檢查更新",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=lambda: UIUtils.show_info("提示", "目前檢查更新功能暫停開發，請手動檢查模組更新。", self.parent),
             fg_color="#2563eb",
             hover_color=self._get_hover_color("#2563eb"),
@@ -361,7 +367,7 @@ class ModManagementFrame:
         self.select_all_btn = ctk.CTkButton(
             left_frame,
             text="☑️ 全選",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.toggle_select_all,
             fg_color="#f59e0b",
             hover_color=self._get_hover_color("#f59e0b"),
@@ -375,7 +381,7 @@ class ModManagementFrame:
         self.batch_toggle_btn = ctk.CTkButton(
             left_frame,
             text="🔄 批量切換",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.batch_toggle_selected,
             fg_color="#8b5cf6",
             hover_color=self._get_hover_color("#8b5cf6"),
@@ -389,7 +395,7 @@ class ModManagementFrame:
         folder_btn = ctk.CTkButton(
             left_frame,
             text="📂 開啟資料夾",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.open_mods_folder,
             fg_color="#7c3aed",
             hover_color=self._get_hover_color("#7c3aed"),
@@ -408,14 +414,18 @@ class ModManagementFrame:
         search_frame.pack(side="left", padx=(0, 15))
 
         # 搜尋圖示
-        search_label = ctk.CTkLabel(search_frame, text="🔍", font=FontManager.get_font(size=21))
+        search_label = ctk.CTkLabel(
+            search_frame,
+            text="🔍",
+            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
+        )
         search_label.pack(side="left")
 
         self.local_search_var = tk.StringVar()
         search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self.local_search_var,
-            font=FontManager.get_font(size=14),
+            font=FontManager.get_font(size=FontSize.MEDIUM),
             width=200,
             height=32,
         )
@@ -423,11 +433,11 @@ class ModManagementFrame:
         self.local_search_var.trace("w", self.filter_local_mods)
 
         # 狀態篩選
-        self.local_filter_var = tk.StringVar(value="all")
+        self.local_filter_var = tk.StringVar(value="所有")
         filter_combo = CustomDropdown(
             right_frame,
             variable=self.local_filter_var,
-            values=["all", "enabled", "disabled"],
+            values=["所有", "啟用", "停用"],
             command=self.on_filter_changed,
             width=100,
             height=32,
@@ -481,7 +491,7 @@ class ModManagementFrame:
         export_btn = ctk.CTkButton(
             list_frame,
             text="匯出模組列表",
-            font=FontManager.get_font(size=20, weight="bold"),
+            font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
             fg_color=("#2563eb", "#1d4ed8"),
             hover_color=("#1d4ed8", "#1e40af"),
             text_color=("white", "white"),
@@ -497,10 +507,13 @@ class ModManagementFrame:
         style = ttk.Style()
         style.configure(
             "ModList.Treeview",
-            font=FontManager.get_font(size=16),
+            font=FontManager.get_font(size=FontSize.INPUT),
             rowheight=int(25 * FontManager.get_scale_factor()),
         )
-        style.configure("ModList.Treeview.Heading", font=FontManager.get_font(size=18, weight="bold"))
+        style.configure(
+            "ModList.Treeview.Heading",
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+        )
 
         # 建立 Treeview
         columns = (
@@ -581,7 +594,9 @@ class ModManagementFrame:
 
             # 標題
             title_label = ctk.CTkLabel(
-                main_frame, text="匯出模組列表", font=FontManager.get_font(size=27, weight="bold")
+                main_frame,
+                text="匯出模組列表",
+                font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold"),
             )
             title_label.pack(pady=(10, 20))
 
@@ -592,7 +607,11 @@ class ModManagementFrame:
             fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
             fmt_inner.pack(fill="x", padx=20, pady=15)
 
-            ctk.CTkLabel(fmt_inner, text="選擇匯出格式:", font=FontManager.get_font(size=21, weight="bold")).pack(
+            ctk.CTkLabel(
+                fmt_inner,
+                text="選擇匯出格式:",
+                font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+            ).pack(
                 side="left",
                 padx=(0, 15),
             )
@@ -605,7 +624,7 @@ class ModManagementFrame:
                 text="純文字",
                 variable=fmt_var,
                 value="text",
-                font=FontManager.get_font(size=18),
+                font=FontManager.get_font(size=FontSize.LARGE),
             )
             text_radio.pack(side="left", padx=5)
 
@@ -614,7 +633,7 @@ class ModManagementFrame:
                 text="JSON",
                 variable=fmt_var,
                 value="json",
-                font=FontManager.get_font(size=18),
+                font=FontManager.get_font(size=FontSize.LARGE),
             )
             json_radio.pack(side="left", padx=5)
 
@@ -623,7 +642,7 @@ class ModManagementFrame:
                 text="HTML",
                 variable=fmt_var,
                 value="html",
-                font=FontManager.get_font(size=18),
+                font=FontManager.get_font(size=FontSize.LARGE),
             )
             html_radio.pack(side="left", padx=5)
 
@@ -631,10 +650,19 @@ class ModManagementFrame:
             preview_frame = ctk.CTkFrame(main_frame)
             preview_frame.pack(fill="both", expand=True, pady=(0, 15))
 
-            preview_label = ctk.CTkLabel(preview_frame, text="預覽:", font=FontManager.get_font(size=21, weight="bold"))
+            preview_label = ctk.CTkLabel(
+                preview_frame,
+                text="預覽:",
+                font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+            )
             preview_label.pack(anchor="w", padx=15, pady=(15, 5))
 
-            text_widget = ctk.CTkTextbox(preview_frame, font=FontManager.get_font(size=18), height=300, wrap="word")
+            text_widget = ctk.CTkTextbox(
+                preview_frame,
+                font=FontManager.get_font(size=FontSize.LARGE),
+                height=300,
+                wrap="word",
+            )
             text_widget.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
             def update_preview(*_):
@@ -688,7 +716,7 @@ class ModManagementFrame:
                 btn_frame,
                 text="儲存到檔案",
                 command=do_save,
-                font=FontManager.get_font(size=18, weight="bold"),
+                font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
                 fg_color=("#2563eb", "#1d4ed8"),
                 hover_color=("#1d4ed8", "#1e40af"),
                 width=FontManager.get_dpi_scaled_size(180),
@@ -700,7 +728,7 @@ class ModManagementFrame:
                 btn_frame,
                 text="關閉",
                 command=dialog.destroy,
-                font=FontManager.get_font(size=18),
+                font=FontManager.get_font(size=FontSize.LARGE),
                 fg_color=("#6b7280", "#4b5563"),
                 hover_color=("#4b5563", "#374151"),
                 width=FontManager.get_dpi_scaled_size(150),
@@ -723,7 +751,7 @@ class ModManagementFrame:
         self.status_label = ctk.CTkLabel(
             status_frame,
             text="請選擇伺服器開始管理模組",
-            font=FontManager.get_font(size=21),
+            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
             text_color=("#64748b", "#64748b"),
         )
         self.status_label.pack(side="left", padx=10, pady=int(6 * FontManager.get_scale_factor()))
@@ -840,7 +868,7 @@ class ModManagementFrame:
         UIUtils.run_async(load_thread)
 
     def enhance_local_mods(self) -> None:
-        """本地模組資訊（同步查詢），查詢完自動刷新列表（可選）"""
+        """本地模組增強資訊，查詢完自動刷新列表（可選）"""
 
         def enhance_single(mod):
             try:
@@ -850,6 +878,7 @@ class ModManagementFrame:
                 enhanced = enhance_local_mod(mod.filename)
                 if enhanced:
                     self.enhanced_mods_cache[mod.filename] = enhanced
+                    time.sleep(0.05)  # 50ms 延遲
             except Exception as e:
                 logger.bind(component="").error(
                     f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}",
@@ -857,10 +886,10 @@ class ModManagementFrame:
                 )
 
         def enhance_thread():
-            with ThreadPoolExecutor(max_workers=20) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 executor.map(enhance_single, self.local_mods)
 
-            # 使用佇列更新 UI Use queue to update UI
+            # 使用佇列更新 UI
             self.ui_queue.put(self.refresh_local_list)
 
         UIUtils.run_async(enhance_thread)
@@ -883,7 +912,7 @@ class ModManagementFrame:
 
         # 2. 準備資料 Prepare data
         search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
-        filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "all"
+        filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "所有"
         # 使用預編譯的正則表達式（效能優化）
         version_pattern = self.VERSION_PATTERN
 
@@ -893,9 +922,9 @@ class ModManagementFrame:
             # 應用篩選 Apply filters
             if search_text and search_text not in mod.name.lower():
                 continue
-            if filter_status != "all" and (
-                (filter_status == "enabled" and mod.status != ModStatus.ENABLED)
-                or (filter_status == "disabled" and mod.status != ModStatus.DISABLED)
+            if filter_status != "所有" and (
+                (filter_status == "啟用" and mod.status != ModStatus.ENABLED)
+                or (filter_status == "停用" and mod.status != ModStatus.DISABLED)
             ):
                 continue
 
@@ -996,6 +1025,24 @@ class ModManagementFrame:
 
         insert_batch(0)
 
+    def _set_bulk_controls_enabled(self, enabled: bool) -> None:
+        """設定批量操作控制元件的啟用/停用狀態
+
+        Args:
+            enabled: True 表示啟用，False 表示停用
+        """
+        state = "normal" if enabled else "disabled"
+        try:
+            if hasattr(self, "select_all_btn") and self.select_all_btn:
+                self.select_all_btn.configure(state=state)
+        except Exception as e:
+            logger.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
+        try:
+            if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
+                self.batch_toggle_btn.configure(state=state)
+        except Exception as e:
+            logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
+
     def toggle_local_mod(self, _event=None) -> None:
         """雙擊切換本地模組啟用/停用狀態 - 參考 Prism Launcher"""
         if not self.local_tree:
@@ -1041,26 +1088,12 @@ class ModManagementFrame:
                     self.update_status(f"找不到模組檔案: {mod_id}")
                 return
 
-            def _set_controls_enabled(enabled: bool) -> None:
-                state = "normal" if enabled else "disabled"
-                try:
-                    if hasattr(self, "select_all_btn") and self.select_all_btn:
-                        self.select_all_btn.configure(state=state)
-                except Exception as e:
-                    logger.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
-                try:
-                    if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
-                        self.batch_toggle_btn.configure(state=state)
-                except Exception as e:
-                    logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
-
-            # Capture variables for closure safety
             manager = self.mod_manager
             tree = self.local_tree
 
             # 切換狀態（背景執行 rename），成功後僅更新該列顯示
             def do_toggle() -> None:
-                self.ui_queue.put(lambda: _set_controls_enabled(False))
+                self.ui_queue.put(lambda: self._set_bulk_controls_enabled(False))
                 if not manager:
                     return
 
@@ -1068,11 +1101,11 @@ class ModManagementFrame:
                 old_file_path = getattr(found_mod, "file_path", "")
                 action = "停用" if found_mod.status == ModStatus.ENABLED else "啟用"
                 if found_mod.status == ModStatus.ENABLED:
-                    ok = manager.disable_mod(mod_id)
+                    ok = manager.set_mod_state(mod_id, False)
                     new_status = ModStatus.DISABLED
                     new_filename = f"{mod_id}.jar.disabled"
                 else:
-                    ok = manager.enable_mod(mod_id)
+                    ok = manager.set_mod_state(mod_id, True)
                     new_status = ModStatus.ENABLED
                     new_filename = f"{mod_id}.jar"
 
@@ -1112,7 +1145,7 @@ class ModManagementFrame:
                         elif hasattr(self, "status_label") and self.status_label.winfo_exists():
                             self.update_status(f"{action}模組失敗: {mod_name}")
                     finally:
-                        _set_controls_enabled(True)
+                        self._set_bulk_controls_enabled(True)
                         self.update_selection_status()
 
                 self.ui_queue.put(apply_ui_update)
@@ -1138,7 +1171,11 @@ class ModManagementFrame:
         if not selection:
             return
 
-        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", 18))  # 動態字體縮放
+        menu = tk.Menu(
+            self.parent,
+            tearoff=0,
+            font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
+        )
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
@@ -1410,20 +1447,6 @@ class ModManagementFrame:
                 UIUtils.show_warning("提示", "找不到對應的模組檔案", self.parent)
                 return
 
-            def _set_controls_enabled(enabled: bool) -> None:
-                state = "normal" if enabled else "disabled"
-                try:
-                    if hasattr(self, "select_all_btn") and self.select_all_btn:
-                        self.select_all_btn.configure(state=state)
-                except Exception as e:
-                    logger.debug(f"設定全選按鈕狀態失敗: {e}", "ModManagement")
-                try:
-                    if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
-                        self.batch_toggle_btn.configure(state=state)
-                except Exception as e:
-                    logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
-
-            # Capture variables for closure safety
             manager = self.mod_manager
 
             def do_batch():
@@ -1431,7 +1454,7 @@ class ModManagementFrame:
                 success_count = 0
                 last_percent: float = -1
 
-                self.ui_queue.put(lambda: _set_controls_enabled(False))
+                self.ui_queue.put(lambda: self._set_bulk_controls_enabled(False))
                 self.update_status_safe(f"正在批量切換 {total} 個模組狀態...")
 
                 for idx, (base_name, tree_item_id) in enumerate(selected_pairs, start=1):
@@ -1443,12 +1466,12 @@ class ModManagementFrame:
                     old_file_path = getattr(mod, "file_path", "")
 
                     if mod.status == ModStatus.ENABLED:
-                        ok = manager.disable_mod(base_name)
+                        ok = manager.set_mod_state(base_name, False)
                         new_status = ModStatus.DISABLED
                         new_filename = f"{base_name}.jar.disabled"
                         action = "停用"
                     else:
-                        ok = manager.enable_mod(base_name)
+                        ok = manager.set_mod_state(base_name, True)
                         new_status = ModStatus.ENABLED
                         new_filename = f"{base_name}.jar"
                         action = "啟用"
@@ -1519,7 +1542,7 @@ class ModManagementFrame:
                 self.update_progress_safe(0)
                 self.update_status_safe(f"已切換 {success_count}/{total} 個模組狀態")
                 self.ui_queue.put(self.update_selection_status)
-                self.ui_queue.put(lambda: _set_controls_enabled(True))
+                self.ui_queue.put(lambda: self._set_bulk_controls_enabled(True))
 
             UIUtils.run_async(do_batch)
         except Exception as e:

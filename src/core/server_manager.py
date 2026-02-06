@@ -6,6 +6,7 @@ Responsible for creating, managing, and configuring Minecraft servers.
 """
 
 import contextlib
+import os
 import threading
 import time
 from collections import deque
@@ -52,6 +53,10 @@ class ServerManager:
         self.output_threads: dict[str, threading.Thread] = {}  # server_name -> Thread
         self._properties_cache: dict[str, Any] = {}  # server_name -> (mtime, properties)
         self._config_lock = threading.Lock()  # 配置檔案讀寫鎖，防止併發寫入衝突
+        self._save_schedule_lock = threading.Lock()
+        self._pending_save = False
+        self._save_timer: threading.Timer | None = None
+        self._save_debounce_sec = 6.0
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
@@ -111,7 +116,7 @@ class ServerManager:
                     raise
             # 儲存配置
             self.servers[config.name] = config
-            self.save_servers_config()
+            self.write_servers_config()
             # 總是建立 EULA 檔案 (自動接受)
             self._create_eula_file(server_path)
             config.eula_accepted = True
@@ -168,7 +173,7 @@ class ServerManager:
                 f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
             )
         else:
-            memory_display = f"0-{MemoryUtils.format_memory_mb(max_memory)}"
+            memory_display = f"Java自行取用-{MemoryUtils.format_memory_mb(max_memory)}"
 
         # 使用統一的 Java 命令構建邏輯（返回列表形式便於處理）
         java_cmd_list = ServerCommands.build_java_command(config, return_list=True)
@@ -272,6 +277,9 @@ class ServerManager:
             merged = {**original, **properties}
             # 寫回
             ServerPropertiesHelper.save_properties(properties_path, merged)
+            # 同步更新記憶體中的配置並保存到 servers_config.json
+            config.properties = merged
+            self.write_servers_config()
             return True
         except Exception as e:
             logger.exception(f"update_server_properties 儲存失敗: {e}")
@@ -451,10 +459,9 @@ class ServerManager:
 
             # 從配置中移除
             del self.servers[server_name]
-            self.save_servers_config()
+            self.write_servers_config()
 
             return True
-
         except Exception as e:
             logger.exception(f"刪除伺服器失敗: {e}")
             UIUtils.show_error("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}")
@@ -468,19 +475,27 @@ class ServerManager:
                 if data is not None:
                     self.servers.clear()
                     for name, config_data in data.items():
+                        # 假設 ServerConfig 是一個資料類型，並且可以從字典初始化
                         self.servers[name] = ServerConfig(**config_data)
+                else:
+                    logger.warning("伺服器配置文件為空或無法解析")
             except Exception as e:
                 logger.exception(f"載入配置失敗: {e}")
 
-    def save_servers_config(self) -> None:
-        """儲存伺服器配置"""
+    def write_servers_config(self) -> None:
+        """實際執行保存伺服器配置到 servers_config.json"""
         with self._config_lock:
             try:
-                data = {name: asdict(config) for name, config in self.servers.items()}
-                PathUtils.save_json(self.config_file, data)
-                logger.debug(f"已儲存 {len(data)} 個伺服器配置")
+                data = {k: asdict(v) for k, v in self.servers.items()}
+                if not PathUtils.save_json(self.config_file, data):
+                    logger.error("保存伺服器配置失敗: 無法寫入文件")
+                else:
+                    logger.info("伺服器配置已保存到 servers_config.json")
+                    # 確保檔案同步到磁碟
+                    with open(self.config_file, "r+b") as f:
+                        os.fsync(f.fileno())
             except Exception as e:
-                logger.exception(f"儲存配置失敗: {e}")
+                logger.exception(f"保存伺服器配置失敗: {e}")
 
     def get_default_server_properties(self) -> dict[str, str]:
         """獲取預設伺服器屬性"""
@@ -556,7 +571,7 @@ class ServerManager:
         """添加伺服器配置（用於匯入）"""
         try:
             self.servers[config.name] = config
-            self.save_servers_config()
+            self.write_servers_config()
             return True
         except Exception as e:
             logger.exception(f"添加伺服器失敗: {e}")
@@ -592,7 +607,7 @@ class ServerManager:
 
             # 更新配置中的屬性
             config.properties = properties
-            self.save_servers_config()
+            self.write_servers_config()
 
             return properties
 
