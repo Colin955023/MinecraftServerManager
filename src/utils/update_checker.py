@@ -3,6 +3,7 @@
 """
 
 import html as _html
+import platform
 import re
 import sys
 import tempfile
@@ -81,8 +82,13 @@ class UpdateChecker:
         return exe_assets[0]
 
     @staticmethod
-    def _launch_installer(installer_path: Path) -> None:
-        """啟動安裝程式"""
+    def _launch_installer(installer_path: Path, parent=None) -> None:
+        """啟動安裝程式
+
+        Args:
+            installer_path: 安裝程式檔案路徑
+            parent: 父視窗物件，用於在主執行緒顯示 UI 對話框
+        """
         try:
             # 確保安裝程式位於預期的暫存目錄中，以避免從任意位置執行惡意程式
             try:
@@ -101,11 +107,11 @@ class UpdateChecker:
 
             if resolved_path.is_file():
                 confirm = UIUtils.call_on_ui(
-                    None,
+                    parent,
                     lambda: UIUtils.ask_yes_no_cancel(
                         "執行安裝程式",
                         f"即將執行安裝程式：\n{resolved_path}\n\n是否確定要執行？",
-                        parent=None,
+                        parent=parent,
                         show_cancel=False,
                         topmost=True,
                     ),
@@ -113,12 +119,66 @@ class UpdateChecker:
                 if not confirm:
                     logger.info(f"使用者取消執行安裝程式：{resolved_path}")
                     return
-                SubprocessUtils.popen_checked([str(resolved_path)], stdin=SubprocessUtils.DEVNULL)
-                logger.info(f"已啟動安裝程式: {resolved_path}")
+
+                # 在 Windows 上使用進程分離標誌，避免安裝程式與主程式耦合
+                # 這樣可以防止主程式退出時留下孤兒進程
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NEW_PROCESS_GROUP = 0x00000200
+                creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+                # 僅在 Windows 平台傳遞 creationflags
+                process = SubprocessUtils.popen_checked(
+                    [str(resolved_path)],
+                    stdin=SubprocessUtils.DEVNULL,
+                    stdout=SubprocessUtils.DEVNULL,
+                    stderr=SubprocessUtils.DEVNULL,
+                    close_fds=True,
+                    **({"creationflags": creation_flags} if platform.system() == "Windows" else {}),
+                )
+
+                # 確認進程已啟動
+                time.sleep(0.5)
+                returncode = process.poll()
+                if returncode is not None:
+                    # installer 可能啟動子進程後自行退出（正常行為），僅在非 0 退出碼時視為失敗
+                    if returncode != 0:
+                        logger.error(f"安裝程式啟動失敗，退出碼：{returncode}")
+                        return
+                    logger.debug(f"安裝程式進程已退出（可能啟動了子進程），退出碼：{returncode}")
+
+                logger.info(f"已啟動安裝程式（PID: {process.pid}）: {resolved_path}")
             else:
                 logger.error(f"安裝程式不存在或不是檔案：{resolved_path}")
         except Exception as e:
             logger.exception(f"安裝程式啟動失敗: {e}")
+
+    @staticmethod
+    def _graceful_exit(parent, delay_ms: int = 100) -> None:
+        """優雅地關閉應用程式
+
+        Args:
+            parent: 父視窗物件
+            delay_ms: 延遲關閉的毫秒數
+        """
+        try:
+            if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
+
+                def _close():
+                    try:
+                        if parent.winfo_exists():
+                            parent.quit()
+                            parent.destroy()
+                    except Exception as e:
+                        logger.exception(f"關閉視窗失敗: {e}")
+                    finally:
+                        sys.exit(0)
+
+                parent.after(delay_ms, _close)
+                return
+        except Exception as e:
+            logger.debug(f"安排視窗關閉時發生錯誤: {e}")
+
+        sys.exit(0)
 
     @staticmethod
     def _clean_release_notes(body: str) -> str:
@@ -279,7 +339,7 @@ class UpdateChecker:
                     for a in assets:
                         try:
                             name_l = (a.get("name") or "").lower()
-                            if name_l.endswith(".zip") and "portable" in name_l:
+                            if name_l.endswith(".zip") and "portable" in name_l and a.get("browser_download_url"):
                                 asset = a
                                 break
                         except Exception as e:
@@ -305,19 +365,34 @@ class UpdateChecker:
                     return
 
                 download_url = asset.get("browser_download_url")
+                if not download_url:
+                    UIUtils.call_on_ui(
+                        parent,
+                        lambda: UIUtils.show_error(
+                            "無下載連結",
+                            "選取的安裝檔缺少下載連結。將開啟發行頁面，請手動下載最新版本。",
+                            parent=parent,
+                            topmost=True,
+                        ),
+                    )
+                    if html_url:
+                        UIUtils.open_external(html_url)
+                    return
 
                 # Helper: 嘗試從 release 的 assets 或 body 解析出對應 asset 的 checksum
                 def _parse_checksum_text(text: str, asset_name: str) -> tuple[str, str] | None:
                     asset_base = Path(asset_name).name
+                    asset_base_lower = asset_base.lower()
                     for line in (text or "").splitlines():
                         line = line.strip()
                         if not line:
                             continue
+                        line_lower = line.lower()
                         parts = line.split()
                         for token in parts:
-                            if re.fullmatch(r"[0-9a-fA-F]{64}", token) and asset_base in line:
+                            if re.fullmatch(r"[0-9a-fA-F]{64}", token) and asset_base_lower in line_lower:
                                 return ("sha256", token.lower())
-                            if re.fullmatch(r"[0-9a-fA-F]{128}", token) and asset_base in line:
+                            if re.fullmatch(r"[0-9a-fA-F]{128}", token) and asset_base_lower in line_lower:
                                 return ("sha512", token.lower())
                     return None
 
@@ -640,9 +715,7 @@ class UpdateChecker:
                         ")\n"
                         "REM 給予額外的時間確保所有檔案都解鎖\n"
                         "timeout /t 3 /nobreak >nul\n"
-                        f"REM 刪除整個原始目錄（含重試邏輯）\n"
-                        f'set "retry_count=0"\n'
-                        f":delete_retry\n"
+                        f"REM 刪除整個原始目錄\n"
                         f'for /d %%I in ("{dst}\\*") do (\n'
                         f'    rmdir /s /q "%%I" 2>nul\n'
                         f")\n"
@@ -651,7 +724,7 @@ class UpdateChecker:
                         f")\n"
                         f"timeout /t 1 /nobreak >nul\n"
                         f"REM 複製新版本檔案（使用 PowerShell 以獲得更好的錯誤處理）\n"
-                        f'powershell -Command "try {{ Copy-Item -Path \\"{src}\\*\\" -Destination \\"{dst}\\" -Recurse -Force -ErrorAction Stop }} catch {{ exit 1 }}"\n'
+                        f'powershell -Command "try {{ Copy-Item -LiteralPath "{src}\\*" -Destination "{dst}" -Recurse -Force -ErrorAction Stop }} catch {{ exit 1 }}"\n'
                         f"if %ERRORLEVEL% neq 0 (\n"
                         f"    echo 複製失敗，嘗試使用 xcopy...\n"
                         f'    xcopy "{src}\\*" "{dst}\\" /E /Y /I /R\n'
@@ -674,6 +747,8 @@ class UpdateChecker:
                         f"REM 刪除備份（更新成功後）\n"
                         f"timeout /t 5 /nobreak >nul\n"
                         f'rmdir /s /q "{backup_path}" 2>nul\n'
+                        f"REM 自刪更新批次檔\n"
+                        f'del /f /q "%~f0" 2>nul\n'
                         "endlocal\n"
                         "exit /b 0\n"
                     )
@@ -713,6 +788,9 @@ class UpdateChecker:
                         SubprocessUtils.popen_checked(
                             [cmd_exe, "/c", "start", "", str(apply_bat_resolved)],
                             stdin=SubprocessUtils.DEVNULL,
+                            stdout=SubprocessUtils.DEVNULL,
+                            stderr=SubprocessUtils.DEVNULL,
+                            close_fds=True,
                         )
                     except Exception:
                         logger.exception("啟動套用批次檔失敗")
@@ -723,30 +801,9 @@ class UpdateChecker:
                     # 批次檔會在程式關閉後處理更新，因此在這裡清理下載的暫存檔
                     _cleanup_temp_files(temp_files_to_cleanup)
 
-                    def _exit_current_app() -> None:
-                        try:
-                            if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
-
-                                def _close():
-                                    try:
-                                        if parent.winfo_exists():
-                                            parent.quit()
-                                            parent.destroy()
-                                    except Exception as e:
-                                        logger.exception(f"關閉視窗失敗: {e}")
-                                    finally:
-                                        sys.exit(0)
-
-                                parent.after(100, _close)
-                                return
-                        except Exception as e:
-                            logger.debug(f"安排視窗關閉時發生錯誤: {e}")
-
-                        sys.exit(0)
-
                     # 可攜式更新：不要啟動內建重啟流程，直接退出，交由批次檔等待並重啟
                     time.sleep(close_delay_seconds)
-                    _exit_current_app()
+                    UpdateChecker._graceful_exit(parent)
                     return
 
                 # 非可攜式或找不到 portable zip，沿用原有 installer.exe 流程
@@ -811,45 +868,28 @@ class UpdateChecker:
                         return
                     logger.info(f"[驗證通過] ✓ SHA256 驗證成功：{asset.get('name')}")
 
+                    # 啟動安裝程式（獨立進程）
+                    UpdateChecker._launch_installer(dest, parent=parent)
+                    logger.info("安裝程式已啟動（獨立進程）")
+                    if dest in temp_files_to_cleanup:
+                        temp_files_to_cleanup.remove(dest)
+                    _cleanup_temp_files(temp_files_to_cleanup)
+
+                    # 顯示訊息並等待使用者確認
                     UIUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_info(
-                            "下載完成",
-                            "將啟動安裝程式進行更新。\n程式將在 3 秒後關閉，請依安裝程式指示操作。",
+                            "更新準備就緒",
+                            "安裝程式已啟動。\n\n程式將在關閉此訊息後結束。\n請依安裝程式指示完成更新。",
                             parent=parent,
                             topmost=True,
                         ),
                     )
 
-                    # 啟動安裝程式
-                    UpdateChecker._launch_installer(dest)
-                    logger.info("安裝程式已啟動，準備關閉當前程式")
-                    if dest in temp_files_to_cleanup:
-                        temp_files_to_cleanup.remove(dest)
-                    _cleanup_temp_files(temp_files_to_cleanup)
-
-                    def _exit_for_installer() -> None:
-                        try:
-                            if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
-
-                                def _close():
-                                    try:
-                                        if parent.winfo_exists():
-                                            parent.quit()
-                                            parent.destroy()
-                                    except Exception as e:
-                                        logger.exception(f"關閉視窗失敗: {e}")
-                                    finally:
-                                        sys.exit(0)
-
-                                parent.after(100, _close)
-                                return
-                        except Exception as e:
-                            logger.debug(f"安排視窗關閉時發生錯誤: {e}")
-                        sys.exit(0)
-
-                    time.sleep(3)
-                    _exit_for_installer()
+                    # 給予安裝程式充足的啟動時間
+                    time.sleep(2)
+                    logger.info("準備關閉當前程式以完成更新")
+                    UpdateChecker._graceful_exit(parent)
                 else:
                     UIUtils.call_on_ui(
                         parent,

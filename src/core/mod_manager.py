@@ -92,7 +92,7 @@ class ModManager:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"):
                 files_to_scan.append(file_path)
 
-        with ThreadPoolExecutor(max_workers=min(10, len(files_to_scan) or 1)) as executor:
+        with ThreadPoolExecutor(max_workers=min(6, len(files_to_scan) or 1)) as executor:
             results = executor.map(self.create_mod_info_from_file, files_to_scan)
 
         for mod_info in results:
@@ -173,18 +173,22 @@ class ModManager:
         """根據模組載入器類型從 jar 檔案中提取元資料"""
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
-                # 根據檔案存在判斷模組類型並提取元資料
                 metadata_extractors = [
                     ("fabric.mod.json", self._extract_fabric_metadata),
                     ("META-INF/mods.toml", self._extract_forge_metadata),
                     ("mcmod.info", self._extract_legacy_forge_metadata),
                 ]
 
-                jar_files = jar.namelist()
                 for metadata_file, extractor in metadata_extractors:
-                    if metadata_file in jar_files:
+                    try:
+                        jar.getinfo(metadata_file)
                         extractor(jar, mod_data)
                         break  # 找到第一個匹配的元資料檔案即停止
+                    except KeyError:
+                        continue  # 檔案不存在，繼續下一個
+                    except Exception as e:
+                        logger.debug(f"讀取 {metadata_file} 時發生錯誤: {e}")
+                        continue
         except Exception as e:
             logger.exception(f"從 JAR 提取元資料失敗 {file_path}: {e}")
 
@@ -333,7 +337,7 @@ class ModManager:
 
         # 從檔名回退偵測載入器類型
         if mod_data["loader_type"] == "未知":
-            mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_filename(base_name)
+            mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_text(base_name)
 
     def _extract_name_from_filename(self, base_name: str) -> str:
         """解析檔名以提取模組名稱"""
@@ -502,80 +506,79 @@ class ModManager:
             return ""
         return author
 
-    def enable_mod(self, mod_id: str) -> bool:
-        """啟用模組 - 移除 .disabled 後綴"""
-        try:
-            disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
-            enabled_file = self.mods_path / f"{mod_id}.jar"
+    def set_mod_state(self, mod_id: str, enable: bool) -> bool:
+        """
+        設定模組啟用或停用狀態
 
-            # 已啟用：如果同時存在 .disabled，視為衝突檔案，嘗試清理/備份
-            if enabled_file.exists() and not disabled_file.exists():
-                return True
+        Args:
+            mod_id (str):
+                模組的識別名稱（不含副檔名），實際檔案名稱將為：
+                - 啟用狀態：{mod_id}.jar
+                - 停用狀態：{mod_id}.jar.disabled
 
-            if enabled_file.exists() and disabled_file.exists():
-                try:
-                    same_size = enabled_file.stat().st_size == disabled_file.stat().st_size
-                except Exception:
-                    same_size = False
-                if same_size:
-                    disabled_file.unlink(missing_ok=True)
-                    return True
-                # 將多餘的 disabled 檔移開，避免下次掃描重複出現
-                bak = self.mods_path / f"{mod_id}.disabled.bak"
-                if bak.exists():
-                    bak = self.mods_path / f"{mod_id}.disabled.{int(time.time())}.bak"
-                disabled_file.rename(bak)
-                return True
+            enable (bool):
+                True  表示啟用模組（移除 .disabled 後綴）
+                False 表示停用模組（新增 .disabled 後綴）
 
-            if disabled_file.exists():
-                disabled_file.rename(enabled_file)
-                # UI callback 只能在主執行緒呼叫，避免背景執行緒造成 UI 卡死
-                if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
-                    self.on_mod_list_changed()
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"啟用模組失敗: {e}", "ModManager")
-            if threading.current_thread() is threading.main_thread():
-                UIUtils.show_error("啟用失敗", f"啟用模組失敗: {e}")
-            return False
+        Returns:
+            bool:
+                True  表示操作成功或模組已在目標狀態
+                False 表示操作失敗或發生例外錯誤
+        """
 
-    def disable_mod(self, mod_id: str) -> bool:
-        """停用模組 - 新增 .disabled 後綴"""
         try:
             enabled_file = self.mods_path / f"{mod_id}.jar"
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
 
-            # 已停用：如果同時存在 .jar，視為衝突檔案，嘗試清理/備份
-            if disabled_file.exists() and not enabled_file.exists():
+            # 依目標狀態決定主要 / 次要檔案
+            if enable:
+                src_file = disabled_file
+                dst_file = enabled_file
+                conflict_bak_suffix = "disabled"
+            else:
+                src_file = enabled_file
+                dst_file = disabled_file
+                conflict_bak_suffix = "enabled"
+
+            # 已在目標狀態（不存在衝突）
+            if dst_file.exists() and not src_file.exists():
                 return True
 
-            if disabled_file.exists() and enabled_file.exists():
+            # 同時存在兩個檔案，視為衝突
+            if dst_file.exists() and src_file.exists():
                 try:
-                    same_size = enabled_file.stat().st_size == disabled_file.stat().st_size
+                    same_size = dst_file.stat().st_size == src_file.stat().st_size
                 except Exception:
                     same_size = False
+
                 if same_size:
-                    enabled_file.unlink(missing_ok=True)
+                    # 檔案相同，刪除多餘的那一個
+                    src_file.unlink(missing_ok=True)
                     return True
-                # 將多餘的 enabled 檔移開，避免下次掃描重複出現
-                bak = self.mods_path / f"{mod_id}.enabled.bak"
+
+                # 檔案不同，將來源檔備份避免重複掃描
+                bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.bak"
                 if bak.exists():
-                    bak = self.mods_path / f"{mod_id}.enabled.{int(time.time())}.bak"
-                enabled_file.rename(bak)
+                    bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.{int(time.time())}.bak"
+                src_file.rename(bak)
                 return True
 
-            if enabled_file.exists():
-                enabled_file.rename(disabled_file)
-                # UI callback 只能在主執行緒呼叫，避免背景執行緒造成 UI 卡死
+            # 正常切換狀態
+            if src_file.exists():
+                src_file.rename(dst_file)
+
+                # UI callback 僅能於主執行緒呼叫
                 if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
                     self.on_mod_list_changed()
                 return True
+
             return False
+
         except Exception as e:
-            logger.error(f"停用模組失敗: {e}", "ModManager")
+            action = "啟用" if enable else "停用"
+            logger.error(f"{action}模組失敗: {e}", "ModManager")
             if threading.current_thread() is threading.main_thread():
-                UIUtils.show_error("停用失敗", f"停用模組失敗: {e}")
+                UIUtils.show_error(f"{action}失敗", f"{action}模組失敗: {e}")
             return False
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:

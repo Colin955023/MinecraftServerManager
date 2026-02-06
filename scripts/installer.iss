@@ -104,9 +104,15 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    // 嘗試結束應用程式（解除安裝程式本身是 unins000.exe，不會被影響）
     try
-      Exec('taskkill', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewNoWait, ResultCode);
+      if Exec('taskkill', '/IM MinecraftServerManager.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      begin
+        if ResultCode <> 0 then
+        begin
+          Sleep(1000);
+          Exec('taskkill', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+        end;
+      end;
     except
     end;
   end

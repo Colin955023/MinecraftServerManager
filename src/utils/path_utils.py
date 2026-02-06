@@ -6,6 +6,7 @@ Path Utilities Module
 import ctypes
 import hashlib
 import json
+import os
 import shutil
 import zipfile
 from pathlib import Path
@@ -73,10 +74,13 @@ class PathUtils:
         """安全寫入 JSON 檔案"""
         try:
             p = Path(path)
-            # Ensure parent exists
             p.parent.mkdir(parents=True, exist_ok=True)
-            with open(p, "w", encoding="utf-8") as f:
+            tmp_path = PathUtils.get_long_path(p.with_suffix(p.suffix + ".tmp"))
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=indent, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            PathUtils.move_path(tmp_path, p)
             return True
         except Exception:
             return False
@@ -109,22 +113,52 @@ class PathUtils:
         except Exception:
             return None
 
+    # ====== 文件 I/O 操作（統一的內部實現） ======
+    @staticmethod
+    def _file_io_operation(path: Path, operation: str, **kwargs) -> Any:
+        """通用的檔案 I/O 操作（內部使用）"""
+        try:
+            if operation == "read_text":
+                if not path.exists():
+                    return None
+                encoding = kwargs.get("encoding", "utf-8")
+                errors = kwargs.get("errors", "replace")
+                return path.read_text(encoding=encoding, errors=errors)
+            if operation == "write_text":
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = kwargs.get("content", "")
+                encoding = kwargs.get("encoding", "utf-8")
+                errors = kwargs.get("errors")
+                path.write_text(content, encoding=encoding, errors=errors)
+                return True
+            if operation == "read_bytes":
+                if not path.exists():
+                    return None
+                return path.read_bytes()
+            if operation == "write_bytes":
+                path.parent.mkdir(parents=True, exist_ok=True)
+                content = kwargs.get("content", b"")
+                path.write_bytes(content)
+                return True
+        except OSError:
+            return None if operation.startswith("read") else False
+        else:
+            raise ValueError(f"Unknown operation: {operation}")
+
     @staticmethod
     def read_text_file(path: Path, encoding: str = "utf-8", errors: str = "replace") -> str | None:
         """讀取文字檔案，統一處理編碼和錯誤"""
-        try:
-            if not path.exists():
-                return None
-            return path.read_text(encoding=encoding, errors=errors)
-        except OSError:
-            return None
+        return PathUtils._file_io_operation(path, "read_text", encoding=encoding, errors=errors)
 
     @staticmethod
     def write_text_file(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
         """寫入文字檔案，統一處理編碼和錯誤"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding=encoding, errors=errors)
+            with open(path, "w", encoding=encoding, errors=errors) as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
             return True
         except OSError:
             return False
@@ -141,22 +175,7 @@ class PathUtils:
     @staticmethod
     def read_bytes_file(path: Path) -> bytes | None:
         """讀取二進制檔案"""
-        try:
-            if not path.exists():
-                return None
-            return path.read_bytes()
-        except OSError:
-            return None
-
-    @staticmethod
-    def write_bytes_file(path: Path, content: bytes) -> bool:
-        """寫入二進制檔案"""
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-            return True
-        except OSError:
-            return False
+        return PathUtils._file_io_operation(path, "read_bytes")
 
     @staticmethod
     def calculate_checksum(path: Path, algorithm: str = "sha256") -> str | None:

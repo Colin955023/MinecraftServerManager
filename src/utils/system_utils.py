@@ -16,6 +16,8 @@ logger = get_logger().bind(component="SystemUtils")
 TH32CS_SNAPPROCESS = 0x00000002
 PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+STILL_ACTIVE = 259
 
 
 class MEMORYSTATUSEX(Structure):
@@ -189,9 +191,16 @@ class SystemUtils:
     def is_process_running(pid: int) -> bool:
         """檢查進程是否運行中"""
         try:
-            cmd = ["tasklist", "/FI", f"PID eq {pid}", "/NH"]
-            result = SubprocessUtils.run_checked(cmd, capture_output=True, text=True)
-            return str(pid) in (result.stdout or "")
+            h_process = windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not h_process:
+                return False
+
+            exit_code = wintypes.DWORD()
+            ok = windll.kernel32.GetExitCodeProcess(h_process, byref(exit_code))
+            windll.kernel32.CloseHandle(h_process)
+            if not ok:
+                return False
+            return exit_code.value == STILL_ACTIVE
         except Exception:
             return False
 

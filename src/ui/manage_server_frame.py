@@ -17,6 +17,7 @@ import customtkinter as ctk
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     FontManager,
+    FontSize,
     MemoryUtils,
     PathUtils,
     ServerDetectionUtils,
@@ -109,7 +110,9 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 標題
         title_label = ctk.CTkLabel(
-            main_container, text="⚙️ 管理伺服器", font=FontManager.get_font(size=24, weight="bold")
+            main_container,
+            text="⚙️ 管理伺服器",
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
         title_label.pack(pady=(0, 20))
 
@@ -128,18 +131,24 @@ class ManageServerFrame(ctk.CTkFrame):
         control_frame.pack(fill="x", pady=(0, 20))
 
         # 標題
-        control_title = ctk.CTkLabel(control_frame, text="偵測設定", font=FontManager.get_font(size=14, weight="bold"))
+        control_title = ctk.CTkLabel(
+            control_frame,
+            text="偵測設定",
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
+        )
         control_title.pack(anchor="w", pady=(15, 10), padx=(15, 0))
 
         # 偵測路徑
         path_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         path_frame.pack(fill="x", padx=15, pady=(0, 10))
 
-        ctk.CTkLabel(path_frame, text="偵測路徑:", font=FontManager.get_font(size=12)).pack(side="left")
+        ctk.CTkLabel(path_frame, text="偵測路徑:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
 
         self.detect_path_var = tk.StringVar(value=str(self.server_manager.servers_root))
         self.detect_path_entry = ctk.CTkEntry(
-            path_frame, textvariable=self.detect_path_var, font=FontManager.get_font(size=11)
+            path_frame,
+            textvariable=self.detect_path_var,
+            font=FontManager.get_font(size=FontSize.SMALL),
         )
         self.detect_path_entry.pack(side="left", fill="x", expand=True, padx=(10, 0))
 
@@ -190,7 +199,7 @@ class ManageServerFrame(ctk.CTkFrame):
         style = ttk.Style()
         style.configure(
             "ServerList.TLabelframe.Label",
-            font=FontManager.get_font("Microsoft JhengHei", 18, "bold"),
+            font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold"),
         )
         list_frame.configure(style="ServerList.TLabelframe")
 
@@ -199,8 +208,11 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
 
         # 配置 Treeview 的字體大小
-        style.configure("Treeview", font=FontManager.get_font("Microsoft JhengHei", 18))
-        style.configure("Treeview.Heading", font=FontManager.get_font("Microsoft JhengHei", 22, "bold"))
+        style.configure("Treeview", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        style.configure(
+            "Treeview.Heading",
+            font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
+        )
         # 設定欄位
         self.server_tree.heading("名稱", text="名稱")
         self.server_tree.heading("版本", text="版本")
@@ -238,7 +250,7 @@ class ManageServerFrame(ctk.CTkFrame):
         selection = self.server_tree.selection()
         if not selection:
             return
-        menu = tk.Menu(self, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", 18))
+        menu = tk.Menu(self, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="🔄 重新檢測伺服器", command=self.recheck_selected_server)
         menu.add_separator()
         menu.add_command(label="📁 重新設定備份路徑", command=self.reset_backup_path)
@@ -284,7 +296,7 @@ class ManageServerFrame(ctk.CTkFrame):
         server_name = config.name
         # 呼叫偵測
         ServerDetectionUtils.detect_server_type(Path(config.path), config)
-        self.server_manager.save_servers_config()
+        self.server_manager.write_servers_config()
         self.refresh_servers()
         UIUtils.show_info("完成", f"已重新檢測伺服器：{server_name}", self.winfo_toplevel())
 
@@ -319,7 +331,16 @@ class ManageServerFrame(ctk.CTkFrame):
 
             # 更新配置
             config.backup_path = new_backup_path
-            self.server_manager.save_servers_config()
+            self.server_manager.write_servers_config()
+            # 紀錄備份路徑寫入的詳細訊息
+            logger.bind(component="BackupServer").info(
+                f"伺服器 {server_name} 的備份路徑已更新為: {new_backup_path}",
+                extra={
+                    "server_name": server_name,
+                    "backup_path": new_backup_path,
+                    "operation": "write_servers_config",
+                },
+            )
             UIUtils.show_info(
                 "成功",
                 f"已將伺服器 {server_name} 的備份路徑設定為：\n{new_backup_path}",
@@ -431,7 +452,11 @@ class ManageServerFrame(ctk.CTkFrame):
         action_frame.pack(fill="x")
 
         # 操作標題
-        action_title = ctk.CTkLabel(action_frame, text="操作", font=FontManager.get_font(size=14, weight="bold"))
+        action_title = ctk.CTkLabel(
+            action_frame,
+            text="操作",
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
+        )
         action_title.pack(anchor="w", pady=(5, 0), padx=(15, 0))
 
         # 資訊顯示
@@ -439,7 +464,9 @@ class ManageServerFrame(ctk.CTkFrame):
         info_frame.pack(fill="x", padx=15, pady=(5, 5))
 
         self.info_label = ctk.CTkLabel(
-            info_frame, text="選擇一個伺服器以查看詳細資訊", font=FontManager.get_font(size=14)
+            info_frame,
+            text="選擇一個伺服器以查看詳細資訊",
+            font=FontManager.get_font(size=FontSize.MEDIUM),
         )
         self.info_label.pack(anchor="w")
 
@@ -448,16 +475,16 @@ class ManageServerFrame(ctk.CTkFrame):
         button_frame.pack(fill="x", padx=15, pady=(0, 15))
 
         buttons = [
-            ("🚀", "啟動", self.start_server),
-            ("📊", "監控", self.monitor_server),
-            ("⚙️", "設定", self.configure_server),
-            ("📂", "開啟資料夾", self.open_server_folder),
-            ("💾", "備份地圖檔", self.backup_server),
-            ("🗑️", "刪除", self.delete_server),
+            ("🚀", "啟動", self.start_server, "start_stop"),
+            ("📊", "監控", self.monitor_server, "monitor"),
+            ("⚙️", "設定", self.configure_server, "configure"),
+            ("📂", "開啟資料夾", self.open_server_folder, "open_folder"),
+            ("💾", "備份地圖檔", self.backup_server, "backup"),
+            ("🗑️", "刪除", self.delete_server, "delete"),
         ]
 
         self.action_buttons = {}
-        for emoji, text, command in buttons:
+        for emoji, text, command, fixed_key in buttons:
             # 使用簡單的 emoji 文字按鈕
             btn_text = f"{emoji} {text}"
             btn = UIUtils.create_styled_button(
@@ -468,7 +495,9 @@ class ManageServerFrame(ctk.CTkFrame):
                 state="disabled",
             )
             btn.pack(side="left", padx=(0, 5))
-            self.action_buttons[f"{emoji} {text}"] = btn
+            # 使用固定 key 或動態 key
+            key = fixed_key if fixed_key else f"{emoji} {text}"
+            self.action_buttons[key] = btn
 
     def browse_path(self) -> None:
         """瀏覽路徑，並自動正規化、寫入設定、建立 servers 子資料夾、刷新列表"""
@@ -559,7 +588,7 @@ class ManageServerFrame(ctk.CTkFrame):
                     # 強制呼叫偵測
                     ServerDetectionUtils.detect_server_type(item_path_obj, config)
                     if item in self.server_manager.servers:
-                        self.server_manager.save_servers_config()
+                        self.server_manager.write_servers_config()
                         count += 1
                     elif self.server_manager.create_server(config):
                         count += 1
@@ -591,12 +620,10 @@ class ManageServerFrame(ctk.CTkFrame):
             if current_time - cache_time < self._jar_cache_timeout:
                 server_jar_exists = cached_result
             else:
-                # 快取過期，重新搜尋並直接覆寫（無需先刪除）
-                server_jar_exists = self._check_server_jar_exists(config.path)
+                server_jar_exists = self._check_server_jar_exists(config.path, config.loader_type)
                 self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
         else:
-            # 無快取，執行搜尋
-            server_jar_exists = self._check_server_jar_exists(config.path)
+            server_jar_exists = self._check_server_jar_exists(config.path, config.loader_type)
             self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
 
         eula_exists = (Path(config.path) / "eula.txt").exists()
@@ -613,21 +640,29 @@ class ManageServerFrame(ctk.CTkFrame):
             return f"❌ 未就緒 (缺少: {', '.join(missing)})"
         return "❌ 未就緒"
 
-    def _check_server_jar_exists(self, server_path: str) -> bool:
-        """檢查伺服器 JAR 檔案是否存在（輔助方法）"""
-        jar_patterns = [
-            "server.jar",
-            "minecraft_server*.jar",
-            "fabric-server*.jar",
-            "forge-*.jar",
-        ]
-        for jar_pattern in jar_patterns:
-            if "*" in jar_pattern:
-                if list(Path(server_path).glob(jar_pattern)):
-                    return True
-            elif (Path(server_path) / jar_pattern).exists():
-                return True
-        return False
+    def _check_server_jar_exists(self, server_path: str, loader_type: str = "vanilla") -> bool:
+        """檢查伺服器 JAR 檔案是否存在（使用 ServerDetectionUtils）
+
+        Args:
+            server_path: 伺服器路徑
+            loader_type: 載入器類型 (vanilla/forge/fabric)，用於正確判斷啟動檔案
+        """
+        try:
+            server_path_obj = Path(server_path)
+            # 使用實際的 loader_type 進行檢測
+            result = ServerDetectionUtils.find_main_jar(server_path_obj, loader_type or "vanilla")
+
+            # Forge 可能返回 @win_args.txt 或 @libraries/...，這類檔案存在即表示可啟動
+            if result.startswith("@"):
+                args_file_path = result[1:]  # 移除 @ 符號
+                return (server_path_obj / args_file_path).exists()
+
+            jar_path = server_path_obj / result
+            return jar_path.exists()
+        except Exception as e:
+            logger.debug(f"檢查 JAR 檔案存在失敗: {e}")
+            # 退回到簡單的檢查
+            return (Path(server_path) / "server.jar").exists()
 
     def refresh_servers(self, reload_config: bool = True) -> None:
         """重新整理伺服器列表：只刷新 UI，不自動偵測。"""
@@ -667,7 +702,6 @@ class ManageServerFrame(ctk.CTkFrame):
                 loader_col = loader_type.capitalize()
                 if loader_version and loader_version != "unknown":
                     loader_col = f"{loader_col} v{config.loader_version}"
-
             mc_version = (
                 config.minecraft_version
                 if config.minecraft_version and config.minecraft_version.lower() != "unknown"
@@ -754,13 +788,13 @@ class ManageServerFrame(ctk.CTkFrame):
             # 檢查伺服器是否正在運行
             is_running = self.server_manager.is_server_running(self.selected_server)
 
-            # 根據運行狀態設定按鈕
-            start_stop_key = "🟢 啟動"
+            # 根據運行狀態設定啟動/停止按鈕（使用固定 key）
+            start_stop_key = "start_stop"
             if is_running:
                 if start_stop_key in self.action_buttons:
                     self.action_buttons[start_stop_key].configure(text="🛑 停止", state="normal")
             elif start_stop_key in self.action_buttons:
-                self.action_buttons[start_stop_key].configure(text="🟢 啟動", state="normal")
+                self.action_buttons[start_stop_key].configure(text="🚀 啟動", state="normal")
 
             # 其他按鈕
             for key, btn in self.action_buttons.items():
@@ -770,9 +804,9 @@ class ManageServerFrame(ctk.CTkFrame):
             # 沒有選擇時禁用所有按鈕
             for btn in self.action_buttons.values():
                 btn.configure(state="disabled")
-            start_stop_key = "🟢 啟動"
+            start_stop_key = "start_stop"
             if start_stop_key in self.action_buttons:
-                self.action_buttons[start_stop_key].configure(text="🟢 啟動")
+                self.action_buttons[start_stop_key].configure(text="🚀 啟動")
 
         # 更新資訊標籤
         if has_selection and self.selected_server in self.server_manager.servers:
@@ -881,7 +915,7 @@ class ManageServerFrame(ctk.CTkFrame):
         if dialog.result:
             # 更新配置
             self.server_manager.servers[self.selected_server] = dialog.result
-            self.server_manager.save_servers_config()
+            self.server_manager.write_servers_config()
             self.refresh_servers()
             UIUtils.show_info("成功", "伺服器設定已更新", self.winfo_toplevel())
 
@@ -1031,7 +1065,7 @@ class ManageServerFrame(ctk.CTkFrame):
 
             # 儲存備份路徑到配置檔案（儲存的是伺服器專用資料夾）
             config.backup_path = backup_location
-            self.server_manager.save_servers_config()
+            self.server_manager.write_servers_config()
             is_new_backup_path = True  # 標記為新設定的路徑
 
             # 立即刷新一次列表以更新備份狀態 (不重新載入配置，因為剛剛才存檔)
@@ -1118,7 +1152,14 @@ pause"""
                 startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
 
-                SubprocessUtils.popen_checked([bat_file_path], stdin=SubprocessUtils.DEVNULL, startupinfo=startupinfo)
+                SubprocessUtils.popen_checked(
+                    [bat_file_path],
+                    stdin=SubprocessUtils.DEVNULL,
+                    stdout=SubprocessUtils.DEVNULL,
+                    stderr=SubprocessUtils.DEVNULL,
+                    close_fds=True,
+                    startupinfo=startupinfo,
+                )
 
                 UIUtils.show_info(
                     "備份開始",

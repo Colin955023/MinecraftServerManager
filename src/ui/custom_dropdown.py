@@ -11,7 +11,7 @@ from typing import Callable
 
 import customtkinter as ctk
 
-from ..utils import FontManager, UIUtils, get_logger
+from ..utils import Colors, FontManager, FontSize, Sizes, UIUtils, get_logger
 
 logger = get_logger().bind(component="CustomDropdown")
 
@@ -26,9 +26,9 @@ class CustomDropdown(ctk.CTkFrame):
         variable: tk.StringVar | None = None,
         values: list[str] | None = None,
         command: Callable | None = None,
-        width: int = 280,
-        height: int = 30,
-        max_dropdown_height: int = 200,
+        width: int = Sizes.DROPDOWN_WIDTH,
+        height: int = Sizes.DROPDOWN_HEIGHT,
+        max_dropdown_height: int = Sizes.DROPDOWN_MAX_HEIGHT,
         max_visible_items: int = 8,
         state: str = "normal",
         **kwargs,
@@ -67,12 +67,12 @@ class CustomDropdown(ctk.CTkFrame):
             height=self.height,
             command=self._toggle_dropdown,
             anchor="w",
-            font=FontManager.get_font(size=11),
-            fg_color=("#ffffff", "#ffffff"),  # 白色背景
-            text_color=("#1f2937", "#1f2937"),  # 深色文字
+            font=FontManager.get_font(size=FontSize.SMALL),
+            fg_color=Colors.DROPDOWN_BG,
+            text_color=Colors.TEXT_PRIMARY,
             border_width=1,
-            border_color=("#d1d5db", "#d1d5db"),  # 淺灰色邊框
-            hover_color=("#f3f4f6", "#f3f4f6"),  # 懸停時稍微變暗
+            border_color=Colors.BORDER_LIGHT,
+            hover_color=Colors.DROPDOWN_HOVER,
         )
         self.button.pack(fill="x")
 
@@ -80,8 +80,8 @@ class CustomDropdown(ctk.CTkFrame):
         self.arrow_label = ctk.CTkLabel(
             self.button,
             text="▼",
-            font=FontManager.get_font(size=10),
-            text_color=("#6b7280", "#6b7280"),  # 灰色箭頭
+            font=FontManager.get_font(size=FontSize.TINY),
+            text_color=Colors.TEXT_SECONDARY,
             width=20,
             height=20,
         )
@@ -143,7 +143,7 @@ class CustomDropdown(ctk.CTkFrame):
         logical_button_width = int(button_width / scale)
 
         # 計算下拉清單高度
-        item_height = 30  # 增加項目高度以容納較大字體
+        item_height = Sizes.DROPDOWN_ITEM_HEIGHT
         total_items = len(self.values)
         visible_items = min(total_items, self.max_visible_items)
 
@@ -164,15 +164,15 @@ class CustomDropdown(ctk.CTkFrame):
                 window,
                 width=logical_button_width,  # 寬度與視窗一致
                 height=dropdown_height,
-                fg_color=("#ffffff", "#ffffff"),
-                scrollbar_button_color=("#d1d5db", "#d1d5db"),
-                scrollbar_button_hover_color=("#9ca3af", "#9ca3af"),
+                fg_color=Colors.DROPDOWN_BG,
+                scrollbar_button_color=Colors.BORDER_LIGHT,
+                scrollbar_button_hover_color=Colors.BORDER_MEDIUM,
             )
             self.scroll_frame.pack(fill="both", expand=True, padx=0, pady=0)
             container = self.scroll_frame
         else:
             # 不需要滾動條
-            container = ctk.CTkFrame(window, fg_color=("#ffffff", "#ffffff"), corner_radius=0)
+            container = ctk.CTkFrame(window, fg_color=Colors.DROPDOWN_BG, corner_radius=0)
             container.pack(fill="both", expand=True, padx=0, pady=0)
 
         # 建立選項按鈕
@@ -180,7 +180,7 @@ class CustomDropdown(ctk.CTkFrame):
         current_value = self.variable.get()
 
         # 優化：預先建立字體物件和樣式設定，避免在迴圈中重複計算
-        font_obj = FontManager.get_font(size=14)
+        font_obj = FontManager.get_font(size=FontSize.MEDIUM)
         btn_width = logical_button_width - 20 if total_items > self.max_visible_items else logical_button_width
 
         # 樣式常數

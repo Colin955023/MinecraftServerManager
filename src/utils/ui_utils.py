@@ -3,15 +3,15 @@
 提供常用的界面元件和工具函數，避免重複程式碼
 """
 
+import contextlib
 import os
 import queue
 import threading
-import time
 import tkinter as tk
 import tkinter.messagebox
 import webbrowser
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Final
 
 import customtkinter as ctk
 
@@ -29,35 +29,158 @@ ctk.set_appearance_mode("light")  # 固定使用淺色主題
 ctk.set_default_color_theme("blue")  # 淺色藍色主題
 
 
-class DialogUtils:
-    @staticmethod
-    def create_modal_dialog(
-        parent,
-        title: str,
-        size: tuple | None = None,
-        resizable: bool = True,
-        center: bool = True,
-    ) -> ctk.CTkToplevel:
-        """創建標準模態對話框，統一視窗屬性設定"""
-        dialog = ctk.CTkToplevel(parent)
-        dialog.title(title)
-        dialog.resizable(resizable, resizable)
+# ====== UI 設計 Token 系統 ======
+class FontSize:
+    """字型大小常數"""
 
-        if size:
-            WindowManager.setup_dialog_window(dialog, parent, size[0], size[1], center)
-        else:
-            WindowManager.setup_dialog_window(dialog, parent, center_on_parent=center)
+    # 文字大小
+    TINY: Final[int] = 10  # 極小文字（小圖示、提示）
+    SMALL: Final[int] = 11  # 小文字（下拉選單、次要資訊）
+    NORMAL: Final[int] = 12  # 一般文字（說明文字、選項）
+    SMALL_PLUS: Final[int] = 13  # 小一點的中等文字
+    MEDIUM: Final[int] = 14  # 中等文字（次要標籤、輸入提示）
+    NORMAL_PLUS: Final[int] = 15  # 稍大的一般文字
+    INPUT: Final[int] = 16  # 輸入欄位（表單輸入）
+    LARGE: Final[int] = 18  # 大文字（重要資訊、表格標題、按鈕）
 
-        if parent:
-            try:
-                dialog.transient(parent)
-                dialog.grab_set()
-                dialog.focus_set()
-            except Exception as e:
-                logger.exception(f"設定模態視窗失敗: {e}")
-        IconUtils.set_window_icon(dialog, 250)
+    # 標題大小
+    HEADING_SMALL: Final[int] = 20  # 小標題（區段標題）
+    HEADING_MEDIUM: Final[int] = 21  # 中標題（主要區段）
+    HEADING_SMALL_PLUS: Final[int] = 22  # 小標題加強
+    HEADING_LARGE: Final[int] = 24  # 大標題（頁面副標題）
+    HEADING_XLARGE: Final[int] = 27  # 超大標題（頁面主標題）
 
-        return dialog
+    # 特殊用途
+    CONSOLE: Final[int] = 11  # 終端機輸出
+    ICON: Final[int] = 21  # 圖示符號
+
+
+class Colors:
+    """顏色常數（支援 light/dark 模式）"""
+
+    # 主要按鈕顏色（藍色系）
+    BUTTON_PRIMARY: Final[tuple[str, str]] = ("#2563eb", "#1d4ed8")
+    BUTTON_PRIMARY_HOVER: Final[tuple[str, str]] = ("#1d4ed8", "#1e40af")
+
+    # 警告按鈕顏色（橙色系）
+    BUTTON_WARNING: Final[tuple[str, str]] = ("#f59e0b", "#d97706")
+    BUTTON_WARNING_HOVER: Final[tuple[str, str]] = ("#d97706", "#b45309")
+
+    # 危險按鈕顏色（紅色系）
+    BUTTON_DANGER: Final[tuple[str, str]] = ("#dc2626", "#b91c1c")
+    BUTTON_DANGER_HOVER: Final[tuple[str, str]] = ("#b91c1c", "#991b1b")
+
+    # 文字顏色
+    TEXT_PRIMARY: Final[tuple[str, str]] = ("#1f2937", "#1f2937")  # 主要文字
+    TEXT_SECONDARY: Final[tuple[str, str]] = ("#6b7280", "#6b7280")  # 次要文字
+    TEXT_LINK: Final[tuple[str, str]] = ("blue", "#4dabf7")  # 連結文字
+    TEXT_SUCCESS: Final[tuple[str, str]] = ("green", "#10b981")  # 成功文字
+    TEXT_ERROR: Final[tuple[str, str]] = ("#e53e3e", "#e53e3e")  # 錯誤文字
+
+    # 背景顏色
+    BG_PRIMARY: Final[tuple[str, str]] = ("#ffffff", "#ffffff")  # 主要背景（白色）
+    BG_SECONDARY: Final[tuple[str, str]] = ("#f3f4f6", "#f3f4f6")  # 次要背景
+    BG_CONSOLE: Final[str] = "#000000"  # 終端機背景
+    BG_LISTBOX_LIGHT: Final[str] = "#f8fafc"  # 清單背景（淺色）
+    BG_LISTBOX_DARK: Final[str] = "#2b2b2b"  # 清單背景（深色）
+
+    # 邊框顏色
+    BORDER_LIGHT: Final[tuple[str, str]] = ("#d1d5db", "#d1d5db")  # 淺色邊框
+    BORDER_MEDIUM: Final[tuple[str, str]] = ("#9ca3af", "#9ca3af")  # 中等邊框
+
+    # 下拉選單顏色
+    DROPDOWN_BG: Final[tuple[str, str]] = ("#ffffff", "#ffffff")
+    DROPDOWN_HOVER: Final[tuple[str, str]] = ("#f3f4f6", "#f3f4f6")
+    DROPDOWN_BUTTON: Final[tuple[str, str]] = ("#e5e7eb", "#e5e7eb")
+    DROPDOWN_BUTTON_HOVER: Final[tuple[str, str]] = ("#d1d5db", "#d1d5db")
+
+    # 特殊顏色
+    CONSOLE_TEXT: Final[str] = "#00ff00"  # 終端機文字（綠色）
+    SCROLLBAR_BUTTON: Final[tuple[str, str]] = ("#333333", "#333333")  # 滾動條按鈕
+    SELECT_BG: Final[str] = "#1f538d"  # 選擇背景
+
+
+class Spacing:
+    """間距常數（像素）"""
+
+    XS: Final[int] = 4  # 極小間距
+    SMALL: Final[int] = 8  # 小間距
+    MEDIUM: Final[int] = 12  # 中等間距
+    LARGE: Final[int] = 16  # 大間距
+    XL: Final[int] = 20  # 超大間距
+    XXL: Final[int] = 24  # 特大間距
+
+
+class Sizes:
+    """尺寸常數"""
+
+    # 按鈕尺寸
+    BUTTON_HEIGHT: Final[int] = 36  # 標準按鈕高度
+    BUTTON_HEIGHT_SMALL: Final[int] = 28  # 小按鈕高度
+
+    # 輸入欄位尺寸
+    INPUT_HEIGHT: Final[int] = 32  # 標準輸入欄位高度
+    INPUT_WIDTH: Final[int] = 300  # 標準輸入欄位寬度
+
+    # 下拉選單尺寸
+    DROPDOWN_HEIGHT: Final[int] = 30  # 下拉選單高度
+    DROPDOWN_WIDTH: Final[int] = 280  # 下拉選單寬度
+    DROPDOWN_MAX_HEIGHT: Final[int] = 200  # 下拉選單最大高度
+    DROPDOWN_ITEM_HEIGHT: Final[int] = 30  # 下拉選單項目高度
+
+    # 對話框尺寸
+    DIALOG_SMALL_WIDTH: Final[int] = 400
+    DIALOG_SMALL_HEIGHT: Final[int] = 200
+    DIALOG_MEDIUM_WIDTH: Final[int] = 600
+    DIALOG_MEDIUM_HEIGHT: Final[int] = 400
+    DIALOG_LARGE_WIDTH: Final[int] = 800
+    DIALOG_LARGE_HEIGHT: Final[int] = 600
+
+
+def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]:
+    """取得按鈕樣式配置
+
+    Args:
+        button_type: 按鈕類型 ("primary", "warning", "danger")
+
+    Returns:
+        包含 fg_color 和 hover_color 的字典
+    """
+    styles = {
+        "primary": {
+            "fg_color": Colors.BUTTON_PRIMARY,
+            "hover_color": Colors.BUTTON_PRIMARY_HOVER,
+        },
+        "warning": {
+            "fg_color": Colors.BUTTON_WARNING,
+            "hover_color": Colors.BUTTON_WARNING_HOVER,
+        },
+        "danger": {
+            "fg_color": Colors.BUTTON_DANGER,
+            "hover_color": Colors.BUTTON_DANGER_HOVER,
+        },
+    }
+    return styles.get(button_type, styles["primary"])
+
+
+def get_dropdown_style() -> dict[str, tuple[str, str]]:
+    """取得下拉選單樣式配置
+
+    Returns:
+        包含所有下拉選單顏色的字典
+    """
+    return {
+        "fg_color": Colors.DROPDOWN_BG,
+        "button_color": Colors.DROPDOWN_BUTTON,
+        "button_hover_color": Colors.DROPDOWN_BUTTON_HOVER,
+        "dropdown_fg_color": Colors.DROPDOWN_BG,
+        "dropdown_hover_color": Colors.DROPDOWN_HOVER,
+        "dropdown_text_color": Colors.TEXT_PRIMARY,
+        "text_color": Colors.TEXT_PRIMARY,
+    }
+
+
+# ====== UI 輔助類別 ======
 
 
 class IconUtils:
@@ -116,8 +239,17 @@ class UIUtils:
         )
 
     @staticmethod
-    def call_on_ui(parent: Any, func: Callable[[], Any]) -> Any:
-        """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)"""
+    def call_on_ui(parent: Any, func: Callable[[], Any], timeout: float | None = None) -> Any:
+        """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)
+
+        Args:
+            parent: 父視窗物件
+            func: 要執行的函數
+            timeout: 等待逾時秒數 (None = 不限時，等待直到完成)
+
+        Returns:
+            func 的回傳值
+        """
         try:
             if (
                 parent is not None
@@ -128,10 +260,15 @@ class UIUtils:
                 if threading.current_thread() is threading.main_thread():
                     return func()
 
-                result: dict[str, Any] = {"value": None, "exc": None}
+                result: dict[str, Any] = {"value": None, "exc": None, "cancelled": False}
                 done = threading.Event()
+                after_id = None
 
                 def _runner():
+                    # 檢查是否已被取消（執行前）
+                    if result["cancelled"]:
+                        done.set()
+                        return
                     try:
                         result["value"] = func()
                     except Exception as e:
@@ -140,15 +277,40 @@ class UIUtils:
                         done.set()
 
                 try:
-                    parent.after(0, _runner)
-                    done.wait()
+                    after_id = parent.after(0, _runner)
+
+                    # 根據是否有設定 timeout 分別處理等待邏輯
+                    if timeout is None:
+                        # 無限等待直到任務完成
+                        done.wait()
+                    else:
+                        # 設定了逾時秒數：等待並檢查是否超時
+                        if not done.wait(timeout=timeout):
+                            # Timeout 發生：設定 cancelled 旗標並嘗試取消排程
+                            result["cancelled"] = True
+                            if after_id is not None:
+                                with contextlib.suppress(Exception):
+                                    # 可能已經執行完畢或正在執行中
+                                    parent.after_cancel(after_id)
+
+                            # 明確設定逾時：拋出例外
+                            logger.warning(f"UI 任務等待逾時 ({timeout}秒)")
+                            if not parent.winfo_exists():
+                                logger.debug("視窗已關閉")
+                            raise TimeoutError(f"UI 任務等待逾時 ({timeout}秒)")
+                except TimeoutError:
+                    raise  # 重新拋出 TimeoutError 不回退
                 except Exception as e:
+                    result["cancelled"] = True
                     logger.debug(f"排程 UI 任務時發生例外 (可能視窗已關閉): {e}")
+                    # 回退到直接呼叫
                     return func()
 
                 if isinstance(result["exc"], Exception):
                     raise result["exc"]
                 return result["value"]
+        except TimeoutError:
+            raise  # 重新拋出 TimeoutError 不回退
         except Exception as e:
             logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {e}")
         return func()
@@ -226,10 +388,6 @@ class UIUtils:
             logger.exception(f"更新 widget 失敗: {e}")
 
     @staticmethod
-    def safe_config_widget(widget, **config) -> None:
-        UIUtils.safe_update_widget(widget, lambda w, **cfg: w.configure(**cfg), **config)
-
-    @staticmethod
     def start_ui_queue_pump(
         widget,
         task_queue: "queue.Queue",
@@ -298,7 +456,7 @@ class UIUtils:
 
     @staticmethod
     def run_async(target: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
-        """簡單的非同步執行封裝Starts a daemon thread to run the target function."""
+        """簡單的非同步執行封裝，適用於不需要回傳值的任務"""
         threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
 
     @staticmethod
@@ -431,14 +589,23 @@ class UIUtils:
             logger.exception(f"綁定 tooltip 事件失敗: {e}")
 
     @staticmethod
-    def show_error(
-        title: str = "錯誤",
-        message: str = "發生未知錯誤",
+    def _show_messagebox(
+        message_func: Callable,
+        title: str,
+        message: str,
         parent=None,
         topmost: bool = False,
+        log_level: str = "error",
     ) -> None:
-        """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中"""
-        logger.error(f"{title}: {message}")
+        """統一的訊息對話框顯示方法"""
+        # 記錄訊息
+        log_msg = f"{title}: {message}"
+        if log_level == "error":
+            logger.error(log_msg)
+        elif log_level == "warning":
+            logger.warning(log_msg)
+        else:
+            logger.info(log_msg)
 
         try:
             if parent is None:
@@ -459,13 +626,26 @@ class UIUtils:
                     delay_ms=50,
                 )
 
-                tk.messagebox.showerror(title, message, parent=root)
+                message_func(title, message, parent=root)
                 root.destroy()
             else:
-                tk.messagebox.showerror(title, message, parent=parent)
+                message_func(title, message, parent=parent)
         except Exception as e:
-            logger.exception(f"顯示錯誤對話框失敗: {e}")
-            logger.error(f"錯誤: {title} - {message}")
+            logger.exception(f"顯示訊息對話框失敗: {e}")
+            if log_level == "error":
+                logger.error(f"錯誤: {title} - {message}")
+            elif log_level == "warning":
+                logger.warning(f"警告: {title} - {message}")
+
+    @staticmethod
+    def show_error(
+        title: str = "錯誤",
+        message: str = "發生未知錯誤",
+        parent=None,
+        topmost: bool = False,
+    ) -> None:
+        """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中"""
+        UIUtils._show_messagebox(tk.messagebox.showerror, title, message, parent, topmost, "error")
 
     @staticmethod
     def show_manual_restart_dialog(parent, details: str | None) -> None:
@@ -507,32 +687,7 @@ class UIUtils:
         topmost: bool = False,
     ) -> None:
         """顯示警告訊息對話框，使用 tk 並自動處理圖示和置中"""
-        try:
-            if parent is None:
-                root = tk.Tk()
-                root.withdraw()  # 隱藏主視窗
-
-                if topmost:
-                    root.attributes("-topmost", True)
-
-                UIUtils.setup_window_properties(
-                    root,
-                    parent=None,
-                    width=300,
-                    height=150,
-                    bind_icon=True,
-                    center_on_parent=True,  # 螢幕置中
-                    make_modal=True,
-                    delay_ms=50,
-                )
-
-                tk.messagebox.showwarning(title, message, parent=root)
-                root.destroy()
-            else:
-                tk.messagebox.showwarning(title, message, parent=parent)
-        except Exception as e:
-            logger.exception(f"顯示警告對話框失敗: {e}")
-            logger.warning(f"警告: {title} - {message}")
+        UIUtils._show_messagebox(tk.messagebox.showwarning, title, message, parent, topmost, "warning")
 
     @staticmethod
     def show_info(
@@ -542,32 +697,7 @@ class UIUtils:
         topmost: bool = False,
     ) -> None:
         """顯示資訊對話框，使用 tk 並自動處理圖示和置中"""
-        try:
-            if parent is None:
-                root = tk.Tk()
-                root.withdraw()  # 隱藏主視窗
-
-                if topmost:
-                    root.attributes("-topmost", True)
-
-                UIUtils.setup_window_properties(
-                    root,
-                    parent=None,
-                    width=300,
-                    height=150,
-                    bind_icon=True,
-                    center_on_parent=True,  # 螢幕置中
-                    make_modal=True,
-                    delay_ms=50,
-                )
-
-                tk.messagebox.showinfo(title, message, parent=root)
-                root.destroy()
-            else:
-                tk.messagebox.showinfo(title, message, parent=parent)
-        except Exception as e:
-            logger.exception(f"顯示資訊對話框失敗: {e}")
-            logger.warning(f"警告: {title} - {message}")
+        UIUtils._show_messagebox(tk.messagebox.showinfo, title, message, parent, topmost, "info")
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
@@ -670,51 +800,93 @@ class UIUtils:
             return tk.messagebox.askyesno(title, message, parent=parent)
         except Exception as e:
             logger.exception(f"顯示確認對話框失敗: {e}")
-            logger.warning(f"確認: {title} - {message}")
             return False if not show_cancel else None
 
     @staticmethod
     def apply_unified_dropdown_styling(dropdown_widget) -> None:
-        try:
-            style_config = {
-                "fg_color": ("#ffffff", "#ffffff"),
-                "button_color": ("#e5e7eb", "#e5e7eb"),
-                "button_hover_color": ("#d1d5db", "#d1d5db"),
-                "dropdown_fg_color": ("#ffffff", "#ffffff"),
-                "dropdown_hover_color": ("#f3f4f6", "#f3f4f6"),
-                "dropdown_text_color": ("#1f2937", "#1f2937"),
-                "text_color": ("#1f2937", "#1f2937"),
-            }
+        """套用統一的下拉選單樣式"""
+        style_config = get_dropdown_style()
+        dropdown_widget.configure(**style_config)
 
-            dropdown_widget.configure(**style_config)
+        def on_mouse_wheel(event):
+            try:
+                current_value = dropdown_widget.get()
+                values = dropdown_widget.cget("values")
 
-            def on_mouse_wheel(event):
-                try:
-                    current_value = dropdown_widget.get()
-                    values = dropdown_widget.cget("values")
+                if values and current_value in values:
+                    current_index = values.index(current_value)
 
-                    if values and current_value in values:
-                        current_index = values.index(current_value)
+                    if event.delta > 0 and current_index > 0:
+                        new_index = current_index - 1
+                    elif event.delta < 0 and current_index < len(values) - 1:
+                        new_index = current_index + 1
+                    else:
+                        return
 
-                        if event.delta > 0 and current_index > 0:
-                            new_index = current_index - 1
-                        elif event.delta < 0 and current_index < len(values) - 1:
-                            new_index = current_index + 1
-                        else:
-                            return
+                    dropdown_widget.set(values[new_index])
 
-                        dropdown_widget.set(values[new_index])
+                    if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
+                        dropdown_widget._command(values[new_index])
 
-                        if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
-                            dropdown_widget._command(values[new_index])
+            except Exception as e:
+                logger.exception(f"滑鼠滾輪處理錯誤: {e}")
 
-                except Exception as e:
-                    logger.exception(f"滑鼠滾輪處理錯誤: {e}")
+        dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
 
-            dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
+    @staticmethod
+    def bind_bool_string_var(bool_var, string_var) -> None:
+        """建立 BooleanVar 與 StringVar 的雙向綁定（用於 server.properties 等場景）
 
-        except Exception as e:
-            logger.exception(f"應用下拉選單樣式失敗: {e}")
+        Args:
+            bool_var: tkinter.BooleanVar 布林變數
+            string_var: tkinter.StringVar 字串變數（"true"/"false"）
+        """
+
+        # 使用閉包內的旗標避免 trace 互相觸發造成遞迴
+        in_sync = False
+
+        def update_string_var(*_args):
+            """當布林變數改變時，更新字串變數"""
+            nonlocal in_sync
+            if in_sync:
+                return
+            in_sync = True
+            try:
+                new_value = "true" if bool_var.get() else "false"
+                # 僅在值實際變更時才更新，避免多餘 trace
+                if string_var.get() != new_value:
+                    string_var.set(new_value)
+            finally:
+                in_sync = False
+
+        def update_bool_var(*_args):
+            """當字串變數改變時，更新布林變數"""
+            nonlocal in_sync
+            if in_sync:
+                return
+            in_sync = True
+            try:
+                # 規範化為標準布林字串（確保 server.properties 一致性）
+                current = string_var.get().strip().lower()
+                # 容錯：將常見的真值映射為 "true"，其餘一律為 "false"
+                if current in ("true", "1", "yes", "on"):
+                    normalized = "true"
+                    new_bool = True
+                else:
+                    normalized = "false"
+                    new_bool = False
+
+                # 更新字串為規範值
+                if string_var.get() != normalized:
+                    string_var.set(normalized)
+                # 同步布林值
+                if bool_var.get() != new_bool:
+                    bool_var.set(new_bool)
+            finally:
+                in_sync = False
+
+        bool_var.trace_add("write", update_string_var)
+        string_var.trace_add("write", update_bool_var)
 
     @staticmethod
     def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
@@ -821,10 +993,23 @@ class ProgressDialog:
 
         self.cancelled = False
         self._last_ui_pump = 0.0
+        self._pending_update = False
+        self._last_percent = -1
+        self._last_status = ""
 
     def update_progress(self, percent, status_text) -> bool:
         if self.cancelled:
             return False
+
+        # 避免重複更新相同值
+        current_percent = getattr(self, "_last_percent", -1)
+        current_status = getattr(self, "_last_status", "")
+
+        if current_percent == percent and current_status == status_text:
+            return True  # 值未變，跳過更新
+
+        self._last_percent = percent
+        self._last_status = status_text
 
         def _update():
             if self.cancelled:
@@ -839,17 +1024,24 @@ class ProgressDialog:
         # 確保在主線程執行
         if threading.current_thread() is threading.main_thread():
             _update()
-            # 避免過於頻繁的 event loop pump 造成閃爍；仍保留可處理取消按鈕點擊的能力
-            now = time.monotonic()
-            if now - self._last_ui_pump >= 0.05:
-                self._last_ui_pump = now
-                self.dialog.update()
-            else:
-                self.dialog.update_idletasks()
+            if not getattr(self, "_pending_update", False):
+                self._pending_update = True
+                self.dialog.after_idle(self._do_idle_update)
         else:
             self.dialog.after(0, _update)
 
         return True
+
+    def _do_idle_update(self) -> None:
+        """在 idle 時執行完整更新，批次處理widget變更"""
+        try:
+            if self.cancelled or not self.dialog.winfo_exists():
+                return
+            self.dialog.update_idletasks()
+        except Exception as e:
+            logger.exception(f"進度對話框 idle 更新失敗: {e}")
+        finally:
+            self._pending_update = False
 
     def cancel(self) -> None:
         self.cancelled = True

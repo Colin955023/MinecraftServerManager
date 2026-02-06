@@ -27,6 +27,20 @@ DEFAULT_WINDOW_PREFERENCES = {
     "dpi_scaling": 1.0,  # DPI 縮放因子
 }
 
+# 布林設定映射（資料驅動）
+_BOOL_SETTINGS = {
+    "auto_update_enabled": True,
+    "first_run_completed": False,
+}
+
+# 視窗偏好設定映射
+_WINDOW_PREF_KEYS = {
+    "remember_size_position": "remember_size_position",
+    "auto_center": "auto_center",
+    "adaptive_sizing": "adaptive_sizing",
+    "dpi_scaling": "dpi_scaling",
+}
+
 
 def _get_default_settings() -> dict[str, Any]:
     """取得預設設定（根據環境動態計算）"""
@@ -70,10 +84,9 @@ class SettingsManager:
             return _get_default_settings()
 
         # 確保所有必要的鍵值都存在（向後相容性）
-        if "auto_update_enabled" not in settings:
-            settings["auto_update_enabled"] = True
-        if "first_run_completed" not in settings:
-            settings["first_run_completed"] = False
+        for key, default in _BOOL_SETTINGS.items():
+            settings.setdefault(key, default)
+
         if "window_preferences" not in settings:
             settings["window_preferences"] = DEFAULT_WINDOW_PREFERENCES.copy()
 
@@ -99,6 +112,22 @@ class SettingsManager:
         self._settings.update(updates)
         self._save_settings(self._settings)
 
+    # ====== 資料驅動的通用 Helper ======
+    def _get_bool_setting(self, key: str) -> bool:
+        """通用的布林設定取得方法（內部使用）"""
+        default = _BOOL_SETTINGS.get(key, False)
+        return bool(self._settings.get(key, default))
+
+    def _set_bool_setting(self, key: str, value: bool) -> None:
+        """通用的布林設定設定方法（內部使用）"""
+        self.set(key, value)
+
+    def _update_window_pref(self, key: str, value: Any) -> None:
+        """通用的視窗偏好設定更新方法（內部使用）"""
+        prefs = self.get_window_preferences()
+        prefs[key] = value
+        self.set("window_preferences", prefs)
+
     # ====== 伺服器根目錄管理 ======
     def get_servers_root(self) -> str:
         """取得使用者設定的伺服器根目錄路徑"""
@@ -109,29 +138,28 @@ class SettingsManager:
 
     # ====== 自動更新設定管理 ======
     def is_auto_update_enabled(self) -> bool:
-        return bool(self._settings.get("auto_update_enabled", True))
+        return self._get_bool_setting("auto_update_enabled")
 
     def set_auto_update_enabled(self, enabled: bool) -> None:
-        self.set("auto_update_enabled", enabled)
+        self._set_bool_setting("auto_update_enabled", enabled)
 
     # ====== 首次執行狀態管理 ======
     def is_first_run_completed(self) -> bool:
-        return bool(self._settings.get("first_run_completed", False))
+        return self._get_bool_setting("first_run_completed")
 
     def mark_first_run_completed(self) -> None:
-        self.set("first_run_completed", True)
+        self._set_bool_setting("first_run_completed", True)
 
     # ====== 視窗偏好設定管理 ======
     def get_window_preferences(self) -> dict[str, Any]:
         return self._settings.get("window_preferences", {})
 
     def is_remember_size_position_enabled(self) -> bool:
-        return self.get_window_preferences().get("remember_size_position", True)
+        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["remember_size_position"], True))
 
     def set_remember_size_position(self, enabled: bool) -> None:
-        prefs = self.get_window_preferences()
-        prefs["remember_size_position"] = enabled
-        self.set("window_preferences", prefs)
+        key = _WINDOW_PREF_KEYS["remember_size_position"]
+        self._update_window_pref(key, enabled)
 
     # 取得主視窗設定
     def get_main_window_settings(self) -> dict[str, Any]:
@@ -168,38 +196,36 @@ class SettingsManager:
     # 檢查是否自動置中新視窗
     def is_auto_center_enabled(self) -> bool:
         """檢查是否啟用自動置中新視窗的功能"""
-        return self.get_window_preferences().get("auto_center", True)
+        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["auto_center"], True))
 
     # 設定自動置中新視窗
     def set_auto_center(self, enabled: bool) -> None:
         """設定是否自動置中新視窗的功能"""
-        prefs = self.get_window_preferences()
-        prefs["auto_center"] = enabled
-        self.set("window_preferences", prefs)
+        key = _WINDOW_PREF_KEYS["auto_center"]
+        self._update_window_pref(key, enabled)
 
     # 檢查是否啟用自適應大小調整
     def is_adaptive_sizing_enabled(self) -> bool:
         """檢查是否啟用根據螢幕大小自適應調整視窗的功能"""
-        return self.get_window_preferences().get("adaptive_sizing", True)
+        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["adaptive_sizing"], True))
 
     # 設定自適應大小調整
     def set_adaptive_sizing(self, enabled: bool) -> None:
         """設定是否啟用根據螢幕大小自適應調整視窗的功能"""
-        prefs = self.get_window_preferences()
-        prefs["adaptive_sizing"] = enabled
-        self.set("window_preferences", prefs)
+        key = _WINDOW_PREF_KEYS["adaptive_sizing"]
+        self._update_window_pref(key, enabled)
 
     # 取得 DPI 縮放因子
     def get_dpi_scaling(self) -> float:
         """取得當前設定的 DPI 縮放因子，預設為 1.0"""
-        return float(self.get_window_preferences().get("dpi_scaling", 1.0))
+        return float(self.get_window_preferences().get(_WINDOW_PREF_KEYS["dpi_scaling"], 1.0))
 
     # 設定 DPI 縮放因子
     def set_dpi_scaling(self, scaling: float) -> None:
         """設定 DPI 縮放因子，會自動限制在合理範圍內（0.5-3.0）"""
-        prefs = self.get_window_preferences()
-        prefs["dpi_scaling"] = max(0.5, min(3.0, scaling))  # 限制在 0.5-3.0 範圍內
-        self.set("window_preferences", prefs)
+        validated_scaling = max(0.5, min(3.0, scaling))  # 限制在 0.5-3.0 範圍內
+        key = _WINDOW_PREF_KEYS["dpi_scaling"]
+        self._update_window_pref(key, validated_scaling)
 
     # ====== 除錯設定管理 ======
     # 取得除錯設定

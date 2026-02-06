@@ -166,11 +166,3 @@ class HTTPUtils:
         except Exception as e:
             logger.exception(f"批次 HTTP 請求失敗: {e}")
             return [None] * len(urls)
-
-
-# ====== 向後相容性函數別名 ======
-# 提供向後相容的模組級別函數別名
-get_json = HTTPUtils.get_json
-get_content = HTTPUtils.get_content
-download_file = HTTPUtils.download_file
-get_json_batch = HTTPUtils.get_json_batch

@@ -19,8 +19,10 @@ from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
     FontManager,
+    FontSize,
     JavaUtils,
     ProgressDialog,
+    Sizes,
     SystemUtils,
     UIUtils,
     get_logger,
@@ -70,9 +72,6 @@ class CreateServerFrame(ctk.CTkFrame):
             elif min_memory > max_memory:
                 warning_text = "⚠️ 警告：最小記憶體必須小於最大記憶體"
                 self.memory_warning_label.configure(text=warning_text, text_color=("red", "red"))
-            elif min_memory < 1024:
-                warning_text = "⚠️ 警告：最小記憶體不能少於 1024MB"
-                self.memory_warning_label.configure(text=warning_text, text_color=("#b45309", "#d97706"))
             else:
                 self.memory_warning_label.configure(text="")
         except ValueError:
@@ -89,13 +88,16 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             parent,
             text="Java 執行檔路徑 (可選):",
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         self.java_path_var = tk.StringVar(value="")
         java_path_entry = ctk.CTkEntry(
-            parent, textvariable=self.java_path_var, font=FontManager.get_font(size=14), width=300
+            parent,
+            textvariable=self.java_path_var,
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            width=Sizes.INPUT_WIDTH,
         )
         java_path_entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
 
@@ -160,7 +162,7 @@ class CreateServerFrame(ctk.CTkFrame):
         title_label = ctk.CTkLabel(
             main_container,
             text="建立新伺服器",
-            font=FontManager.get_font(size=24, weight="bold"),
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
             text_color=("#111827", "#f3f4f6"),
         )
         title_label.pack(pady=(0, 15))
@@ -173,7 +175,7 @@ class CreateServerFrame(ctk.CTkFrame):
         eula_icon = ctk.CTkLabel(
             eula_frame,
             text="⚠️",
-            font=FontManager.get_font(size=18, weight="bold"),
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             text_color="#d97706",
         )
         eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(8, 4), pady=6)
@@ -220,7 +222,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             content_frame,
             text="模組載入器:",
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=2, column=0, sticky="w", pady=5)
 
@@ -230,7 +232,7 @@ class CreateServerFrame(ctk.CTkFrame):
             variable=self.loader_type_var,
             values=["Vanilla", "Fabric", "Forge"],
             # 移除 command 參數，避免與 trace_add 重複觸發
-            width=280,
+            width=Sizes.DROPDOWN_WIDTH,
             state="readonly",
         )
         self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(15, 0), pady=5)
@@ -243,7 +245,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             content_frame,
             text="載入器版本:",
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=loader_version_row, column=0, sticky="w", pady=5)
 
@@ -256,7 +258,7 @@ class CreateServerFrame(ctk.CTkFrame):
             loader_version_frame,
             variable=self.loader_version_var,
             values=["無"],
-            width=280,
+            width=Sizes.DROPDOWN_WIDTH,
             state="disabled",
         )
         self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -276,7 +278,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             version_frame,
             text="Minecraft 版本:",
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).pack(anchor="w")
         # Minecraft 版本下拉選單與滑桿
@@ -309,7 +311,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             memory_frame,
             text="記憶體設定 (MB):",
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).pack(anchor="w")
 
@@ -318,12 +320,12 @@ class CreateServerFrame(ctk.CTkFrame):
 
         # 最小記憶體
         min_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         ctk.CTkLabel(
             min_memory_frame,
-            text="最小記憶體 (選填):",
-            font=FontManager.get_font(size=14),
+            text="最小記憶體:",
+            font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=("#4b5563", "#9ca3af"),
         ).pack(anchor="w")
 
@@ -331,19 +333,18 @@ class CreateServerFrame(ctk.CTkFrame):
         self.min_memory_entry = ctk.CTkEntry(
             min_memory_frame,
             textvariable=self.min_memory_var,
-            font=FontManager.get_font(size=14),
-            width=120,
+            font=FontManager.get_font(size=FontSize.MEDIUM),
         )
         self.min_memory_entry.pack(fill="x", pady=(2, 0))
 
         # 最大記憶體
         max_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        max_memory_frame.pack(side="left", fill="x", expand=True)
+        max_memory_frame.pack(side="left", fill="x", expand=True, padx=(5, 0))
 
         ctk.CTkLabel(
             max_memory_frame,
-            text="最大記憶體 (必填):",
-            font=FontManager.get_font(size=14),
+            text="最大記憶體:",
+            font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=("#4b5563", "#9ca3af"),
         ).pack(anchor="w")
 
@@ -351,8 +352,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.max_memory_entry = ctk.CTkEntry(
             max_memory_frame,
             textvariable=self.max_memory_var,
-            font=FontManager.get_font(size=14),
-            width=120,
+            font=FontManager.get_font(size=FontSize.MEDIUM),
         )
         self.max_memory_entry.pack(fill="x", pady=(2, 0))
 
@@ -363,9 +363,11 @@ class CreateServerFrame(ctk.CTkFrame):
         # 記憶體提示
         memory_tip = ctk.CTkLabel(
             memory_frame,
-            text="建議：最大 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
-            font=FontManager.get_font(size=14),
+            text="最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
+            font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=("#4b5563", "#9ca3af"),
+            wraplength=900,
+            justify="left",
         )
         memory_tip.pack(anchor="w", pady=(5, 0))
 
@@ -373,7 +375,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self.memory_warning_label = ctk.CTkLabel(
             memory_frame,
             text="",
-            font=FontManager.get_font(size=13),
+            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
             text_color=("red", "red"),
             wraplength=400,
         )
@@ -506,14 +508,19 @@ class CreateServerFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             parent,
             text=label_text,
-            font=FontManager.get_font(size=14, weight="bold"),
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=("#1f2937", "#e5e7eb"),
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         var = tk.StringVar(value=default_value)
         setattr(self, f"{var_name}_var", var)
 
-        entry = ctk.CTkEntry(parent, textvariable=var, font=FontManager.get_font(size=14), width=300)
+        entry = ctk.CTkEntry(
+            parent,
+            textvariable=var,
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            width=Sizes.INPUT_WIDTH,
+        )
         entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
         setattr(self, f"{var_name}_entry", entry)
         return var, entry
@@ -803,9 +810,6 @@ class CreateServerFrame(ctk.CTkFrame):
         if min_memory:
             try:
                 min_mem_int = int(min_memory)
-                if min_mem_int < 1024:
-                    UIUtils.show_error("錯誤", "最小記憶體不能少於 1024MB", self.winfo_toplevel())
-                    return False
                 if min_mem_int >= max_mem_int:
                     UIUtils.show_error("錯誤", "最小記憶體必須小於最大記憶體", self.winfo_toplevel())
                     return False

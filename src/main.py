@@ -27,9 +27,12 @@ logger = get_logger().bind(component="Main")
 
 # ====== 訊息顯示工具 ======
 def show_message(title, message, message_type="error"):
+    """統一的訊息提示入口，提供 UI 與 logger fallback 機制"""
     try:
         if message_type == "error":
             UIUtils.show_error(title, message, topmost=True)
+        elif message_type == "warning":
+            UIUtils.show_warning(title, message, topmost=True)
         else:
             UIUtils.show_info(title, message, topmost=True)
         return True
@@ -39,6 +42,8 @@ def show_message(title, message, message_type="error"):
             log_message = f"{title}: {message}"
             if message_type == "error":
                 logger.error(log_message)
+            elif message_type == "warning":
+                logger.warning(log_message)
             else:
                 logger.info(log_message)
             logger.debug(f"UI 提示失敗，改用 logger。原因: {ui_error}")

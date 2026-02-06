@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """伺服器工具模組
 整合了記憶體管理、屬性設定、伺服器檢測與操作等功能
 Server Utilities Module
@@ -6,6 +5,7 @@ Integrates memory management, property settings, server detection, and operation
 """
 
 import re
+import types
 from pathlib import Path
 
 from ..models import ServerConfig
@@ -69,10 +69,20 @@ class MemoryUtils:
 class ServerPropertiesHelper:
     """server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。"""
 
-    @staticmethod
-    def get_property_descriptions() -> dict[str, str]:
-        """取得所有 server.properties 屬性的中文說明字典"""
-        return {
+    # 類別級別的屬性描述緩存，避免重複構建
+    _property_descriptions_cache: dict[str, str] | None = None
+
+    @classmethod
+    def get_property_descriptions(cls) -> types.MappingProxyType:
+        """取得所有屬性說明的不可修改視圖（帶快取）
+
+        Returns:
+            types.MappingProxyType: 屬性名稱對應說明文字的不可修改視圖
+        """
+        if cls._property_descriptions_cache is not None:
+            return types.MappingProxyType(cls._property_descriptions_cache)
+
+        cls._property_descriptions_cache = {
             "accepts-transfers": "是否允許伺服器端接受以Transfer數據包作為登入請求的傳入連接。 (false/true)",
             "allow-flight": "是否允許玩家在生存模式下飛行。 (false/true) 若設為true，安裝了飛行模組的玩家可以飛行。",
             "allow-nether": "是否允許玩家進入地獄 (下界)。 (true/false) false - 玩家將無法通過地獄傳送門。",
@@ -145,10 +155,18 @@ class ServerPropertiesHelper:
             "management-server-tls-keystore-password": "TLS 金鑰庫密碼。",
             "management-server-allowed-origins": "管理伺服器允許的來源。",
         }
+        return types.MappingProxyType(cls._property_descriptions_cache)
 
     @staticmethod
     def get_property_description(property_name: str) -> str:
-        """取得指定屬性的詳細說明文字"""
+        """取得指定屬性的詳細說明文字
+
+        Args:
+            property_name: 屬性名稱
+
+        Returns:
+            str: 屬性說明文字，若屬性未知則返回提示訊息
+        """
         descriptions = ServerPropertiesHelper.get_property_descriptions()
         return descriptions.get(property_name, f"未知屬性: {property_name}")
 
@@ -350,7 +368,6 @@ class ServerPropertiesHelper:
                                 result.append(":")
                             continue
 
-                        # ch == "="
                         # 跳脫等號（特別是前導的）
                         if i == 0 or backslash_count % 2 == 0:
                             result.append("\\=")
@@ -384,8 +401,11 @@ class ServerPropertiesHelper:
                 lines.append(f"{key}={val_str}")
 
             lines.append("")
-
-            PathUtils.write_text_file(properties_file, "\n".join(lines))
+            payload = "\n".join(lines)
+            temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
+            if not PathUtils.write_text_file(temp_path, payload):
+                raise OSError("write temp server.properties failed")
+            PathUtils.move_path(temp_path, properties_file)
         except Exception as e:
             logger.exception(f"儲存 server.properties 失敗: {e}")
 
@@ -693,14 +713,6 @@ class ServerDetectionUtils:
         return "vanilla"
 
     @staticmethod
-    def detect_loader_from_filename(base_name: str) -> str:
-        """
-        從檔名偵測載入器類型
-        偵測到的載入器類型
-        """
-        return ServerDetectionUtils.detect_loader_from_text(base_name)
-
-    @staticmethod
     def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
         """從 Forge 路徑字串提取版本資訊"""
         if not path_str:
@@ -972,7 +984,8 @@ class ServerDetectionUtils:
         # 應用到配置
         if max_mem is not None:
             config.memory_max_mb = max_mem
-            config.memory_min_mb = min_mem if min_mem is not None else max_mem
+            # 若未設定最小記憶體則交由Java自行決定取用的記憶體量
+            config.memory_min_mb = min_mem if min_mem is not None else None
         elif min_mem is not None:
             config.memory_max_mb = min_mem
             config.memory_min_mb = min_mem
@@ -1021,7 +1034,7 @@ class ServerDetectionUtils:
 
             ServerDetectionUtils.detect_memory_from_sources(server_path, config)
 
-            detected_main_jar = ServerDetectionUtils.detect_main_jar_file(server_path, config.loader_type, config)
+            detected_main_jar = ServerDetectionUtils.find_main_jar(server_path, config.loader_type, config)
             config.eula_accepted = ServerDetectionUtils.detect_eula_acceptance(server_path)
 
             if print_result:
@@ -1184,7 +1197,7 @@ class ServerDetectionUtils:
                 return
 
             folder = subdirs[0].name
-            mc, forge_ver = ServerDetectionUtils._extract_version_from_forge_path(folder)
+            mc, forge_ver = ServerDetectionUtils.extract_version_from_forge_path(folder)
             if mc and forge_ver:
                 set_if_unknown("minecraft_version", mc)
                 set_if_unknown("loader_version", forge_ver)
@@ -1246,14 +1259,6 @@ class ServerDetectionUtils:
 
         if is_unknown(config.loader_type) and is_unknown(config.loader_version):
             config.loader_type = "vanilla"
-
-    @staticmethod
-    def _extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
-        """從 Forge 路徑提取 MC 版本和 Forge 版本"""
-        result = ServerDetectionUtils.extract_version_from_forge_path(path_str)
-        if result:
-            return result
-        return None, None
 
     @staticmethod
     def find_forge_args_file(server_path: Path, server_config=None) -> Path | None:
@@ -1321,7 +1326,7 @@ class ServerDetectionUtils:
             # ✨ 新增: 從路徑提取版本號
             # win_args.txt 路徑格式: libraries/net/minecraftforge/forge/{mc_version}-{forge_version}/win_args.txt
             parent_dir = args_path.parent.name  # e.g., "1.20.1-47.3.29"
-            mc_ver, forge_ver = ServerDetectionUtils._extract_version_from_forge_path(parent_dir)
+            mc_ver, forge_ver = ServerDetectionUtils.extract_version_from_forge_path(parent_dir)
             if mc_ver and forge_ver:
                 result["minecraft_version"] = mc_ver
                 result["forge_version"] = forge_ver
@@ -1331,15 +1336,6 @@ class ServerDetectionUtils:
             logger.warning(f"解析 win_args.txt 失敗: {e}")
 
         return result
-
-    @staticmethod
-    def detect_main_jar_file(server_path: Path, loader_type: str, server_config: ServerConfig | None = None) -> str:
-        """偵測主伺服器 JAR 檔案名稱，根據載入器類型（Forge/Fabric/Vanilla）返回適當的 JAR 名稱"""
-        logger.debug(f"server_path={server_path}")
-        logger.debug(f"loader_type={loader_type}")
-
-        # 使用 ServerDetectionUtils.find_main_jar 進行統一偵測
-        return ServerDetectionUtils.find_main_jar(server_path, loader_type, server_config)
 
 
 # ====== 伺服器操作工具類別 Server Operations ======
@@ -1373,14 +1369,18 @@ class ServerCommands:
         """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型"""
         server_path = Path(server_config.path)
         loader_type = str(server_config.loader_type or "").lower()
-        memory_min = max(512, server_config.memory_min_mb) if server_config.memory_min_mb else 1024
-        memory_max = max(memory_min, server_config.memory_max_mb) if server_config.memory_max_mb else 2048
+        memory_min = server_config.memory_min_mb if server_config.memory_min_mb else None
+        memory_max = server_config.memory_max_mb if server_config.memory_max_mb else 2048
+
+        # 確保 JVM 記憶體參數有效：當設定了最小記憶體時，最大記憶體至少要大於等於最小值
+        if memory_min is not None and (memory_max is None or memory_max < memory_min):
+            memory_max = memory_min
 
         java_exe = JavaUtils.get_best_java_path(str(getattr(server_config, "minecraft_version", ""))) or "java"
         java_exe = java_exe.replace("javaw.exe", "java.exe")
 
         # 偵測主要 JAR/參數檔
-        main_jar = ServerDetectionUtils.detect_main_jar_file(server_path, loader_type, server_config)
+        main_jar = ServerDetectionUtils.find_main_jar(server_path, loader_type, server_config)
 
         # ============ 根據 loader_type 構建命令 ============
 
@@ -1392,14 +1392,18 @@ class ServerCommands:
 
         # Vanilla 或 Fabric 伺服器 / 或 Forge Modern 版本
         else:
-            cmd_list = [
-                java_exe,
-                f"-Xms{memory_min}M",
-                f"-Xmx{memory_max}M",
-                "-jar",
-                main_jar,
-                "nogui",
-            ]
+            # 構建命令列表
+            cmd_list = [java_exe]
+            if memory_min:
+                cmd_list.append(f"-Xms{memory_min}M")
+            cmd_list.extend(
+                [
+                    f"-Xmx{memory_max}M",
+                    "-jar",
+                    main_jar,
+                    "nogui",
+                ]
+            )
 
             # 構建字符串版本，處理路徑中有空格的情況
             if " " in java_exe and not (java_exe.startswith('"') and java_exe.endswith('"')):
@@ -1412,7 +1416,8 @@ class ServerCommands:
             else:
                 main_jar_quoted = main_jar
 
-            result_cmd = f"{java_exe_quoted} -Xms{memory_min}M -Xmx{memory_max}M -jar {main_jar_quoted} nogui"
+            memory_args = f"-Xms{memory_min}M -Xmx{memory_max}M" if memory_min else f"-Xmx{memory_max}M"
+            result_cmd = f"{java_exe_quoted} {memory_args} -jar {main_jar_quoted} nogui"
 
         if return_list:
             return cmd_list

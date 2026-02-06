@@ -17,9 +17,9 @@ for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(AP
 
 if "%APP_VERSION%"=="" (
 
-    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.4
+    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.5
 
-    set APP_VERSION=1.6.4
+    set APP_VERSION=1.6.5
 ) else (
     echo [成功] 版本號: %APP_VERSION%
 )
@@ -192,8 +192,6 @@ echo [3/5] 執行 Nuitka 編譯（Standalone 模式）...
     --file-version=%APP_VERSION% ^
     --product-version=%APP_VERSION% ^
     --msvc=latest ^
-    --nofollow-import-to=tests ^
-    --nofollow-import-to=pytest ^
     --nofollow-import-to=test ^
     --nofollow-import-to=tests ^
     --nofollow-import-to=pytest ^
@@ -208,7 +206,6 @@ echo [3/5] 執行 Nuitka 編譯（Standalone 模式）...
     --nofollow-import-to=timeit ^
     --nofollow-import-to=optparse ^
     --nofollow-import-to=lib2to3 ^
-    --nofollow-import-to=calendar ^
     --nofollow-import-to=fractions ^
     --nofollow-import-to=statistics ^
     --nofollow-import-to=pickletools ^
