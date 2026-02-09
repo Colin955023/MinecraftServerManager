@@ -1,0 +1,13 @@
+name: "Python 嚴格掃描配置"
+
+# 排除非生產環境程式碼
+paths-ignore:
+  - '**/.venv/**'
+
+# 在這裡定義進階查詢包與嚴格程度
+queries:
+  - uses: security-and-quality
+
+packs:
+  - codeql/python-queries
+  - codeql/python-upgrades

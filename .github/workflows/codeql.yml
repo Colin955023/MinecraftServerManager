@@ -1,0 +1,56 @@
+name: "CodeQL 進階安全掃描"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+  merge_group:
+    types: [checks_requested]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # 每週一定時掃描
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: 分析 (Python)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    steps:
+    - name: 檢出儲存庫
+      uses: actions/checkout@v4
+
+    # --- 針對 uv 的設定區塊 ---
+    - name: 安裝 uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: 設定 Python 環境 (使用 uv)
+      run: uv python install
+
+    - name: 安裝專案依賴 (增強 CodeQL 分析準確度)
+      run: uv sync
+    # -----------------------
+
+    - name: 初始化 CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: python
+        build-mode: none
+        # 僅保留設定檔引用，細節交給 config-file 處理
+        config-file: .github/codeql/codeql-config.yml
+
+    - name: 執行 CodeQL 分析
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:python"

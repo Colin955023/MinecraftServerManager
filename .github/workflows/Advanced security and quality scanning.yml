@@ -1,0 +1,40 @@
+name: "進階安全性與品質掃描"
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # 每週一自動執行
+
+jobs:
+  security-check:
+    name: 多層次安全掃描
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # 必備：用於將掃描結果上傳至 GitHub Security 面板
+
+    steps:
+      - name: 檢出儲存庫
+        uses: actions/checkout@v4
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # 執行 Bandit 並確保包含 SARIF 格式化工具
+      - name: 執行 Bandit 靜態安全掃描
+        run: |
+          uv tool run --with bandit-sarif-formatter bandit -r src/ -f sarif -o bandit-results.sarif --exit-zero
+
+      # 執行 Pylint (重複程式碼與品質)
+      - name: 執行 Pylint 品質檢查
+        run: |
+          uv tool run pylint --disable=all --enable=duplicate-code src/
+
+      # 關鍵：將 Bandit 發現的漏洞「視覺化」到 GitHub 介面
+      - name: 上傳安全結果至 GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: bandit-results.sarif
