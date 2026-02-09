@@ -34,8 +34,8 @@ class LoguruShim:
                         formatted_msg = msg.format(*args)
                         msg = formatted_msg
                         args = ()
-                    except Exception:
-                        pass
+                    except Exception as format_error:
+                        msg = f"{msg} (format_error: {format_error})"
 
                 if args:
                     _ = msg % args
