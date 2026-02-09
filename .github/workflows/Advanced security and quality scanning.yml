@@ -1,0 +1,49 @@
+name: "進階安全性與品質掃描"
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # 每週一自動執行
+
+permissions:
+  contents: read
+
+jobs:
+  security-check:
+    name: 多層次安全掃描
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # 必備：上傳 SARIF 報告至 Security 面板
+      actions: read          # 讓上傳工具能讀取 Workflow 狀態
+      contents: read         # 讓 Action 能檢出代碼
+
+    steps:
+      - name: 檢出儲存庫
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: 安裝 uv
+        uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
+        with:
+          enable-cache: true
+
+      # 修正重點：整合範本的 exit_zero 邏輯
+      - name: 執行 Bandit 靜態安全掃描
+        run: |
+          uv tool run --with bandit-sarif-formatter bandit -r src/ -f sarif -o bandit-results.sarif --exit-zero
+        # --exit-zero 確保發現漏洞時不會中斷 Action，讓後續的上傳步驟能執行
+
+      - name: 執行 Pylint 品質檢查
+        run: |
+          uv tool run pylint --disable=all --enable=duplicate-code src/
+
+      # 修正重點：明確標註來源類別，解決您面板空白或混淆的問題
+      - name: 上傳 Bandit 結果至 GitHub
+        uses: github/codeql-action/upload-sarif@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d # v3.28.10
+        if: always()
+        with:
+          sarif_file: bandit-results.sarif
+          category: bandit # 在 Security 面板中明確標示為 Bandit 的結果

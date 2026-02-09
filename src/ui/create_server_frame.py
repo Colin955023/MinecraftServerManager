@@ -75,7 +75,12 @@ class CreateServerFrame(ctk.CTkFrame):
             else:
                 self.memory_warning_label.configure(text="")
         except ValueError:
-            self.memory_warning_label.configure(text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=("red", "red"))
+            if not min_memory_str:
+                self.memory_warning_label.configure(text="")
+            else:
+                self.memory_warning_label.configure(
+                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=("red", "red")
+                )
         except Exception as e:
             logger.bind(component="").error(
                 f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}",

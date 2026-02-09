@@ -8,9 +8,9 @@ import os
 import queue
 import threading
 import tkinter as tk
-import tkinter.messagebox
 import webbrowser
 from pathlib import Path
+from tkinter import messagebox, scrolledtext
 from typing import Any, Callable, Final
 
 import customtkinter as ctk
@@ -645,20 +645,18 @@ class UIUtils:
         topmost: bool = False,
     ) -> None:
         """顯示錯誤訊息對話框，使用 tk 並自動處理圖示和置中"""
-        UIUtils._show_messagebox(tk.messagebox.showerror, title, message, parent, topmost, "error")
+        UIUtils._show_messagebox(messagebox.showerror, title, message, parent, topmost, "error")
 
     @staticmethod
     def show_manual_restart_dialog(parent, details: str | None) -> None:
         """顯示需要手動重啟的對話框，並提供複製診斷按鈕。"""
         try:
             dlg = UIUtils.create_toplevel_dialog(parent, "需要手動重啟", width=560, height=360, make_modal=True)
-            import tkinter as _tk
-            from tkinter import scrolledtext as _st
 
-            _tk.Label(dlg, text="設定已變更，但需要手動重新啟動應用程式。", anchor="w").pack(
+            tk.Label(dlg, text="設定已變更，但需要手動重新啟動應用程式。", anchor="w").pack(
                 fill="x", padx=12, pady=(12, 6)
             )
-            txt = _st.ScrolledText(dlg, wrap="word", height=12)
+            txt = scrolledtext.ScrolledText(dlg, wrap="word", height=12)
             txt.pack(fill="both", expand=True, padx=12, pady=(0, 8))
             txt.insert("1.0", details or "")
             txt.configure(state="disabled")
@@ -670,7 +668,7 @@ class UIUtils:
                 except Exception as e:
                     logger.debug("copy to clipboard failed: %s", e)
 
-            btn_frame = _tk.Frame(dlg)
+            btn_frame = tk.Frame(dlg)
             btn_frame.pack(fill="x", padx=12, pady=(0, 12))
             from tkinter import Button as _Button
 
@@ -687,7 +685,7 @@ class UIUtils:
         topmost: bool = False,
     ) -> None:
         """顯示警告訊息對話框，使用 tk 並自動處理圖示和置中"""
-        UIUtils._show_messagebox(tk.messagebox.showwarning, title, message, parent, topmost, "warning")
+        UIUtils._show_messagebox(messagebox.showwarning, title, message, parent, topmost, "warning")
 
     @staticmethod
     def show_info(
@@ -697,7 +695,7 @@ class UIUtils:
         topmost: bool = False,
     ) -> None:
         """顯示資訊對話框，使用 tk 並自動處理圖示和置中"""
-        UIUtils._show_messagebox(tk.messagebox.showinfo, title, message, parent, topmost, "info")
+        UIUtils._show_messagebox(messagebox.showinfo, title, message, parent, topmost, "info")
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
@@ -790,14 +788,14 @@ class UIUtils:
                 )
 
                 if show_cancel:
-                    result = tk.messagebox.askyesnocancel(title, message, parent=root)
+                    result = messagebox.askyesnocancel(title, message, parent=root)
                 else:
-                    result = tk.messagebox.askyesno(title, message, parent=root)
+                    result = messagebox.askyesno(title, message, parent=root)
                 root.destroy()
                 return result
             if show_cancel:
-                return tk.messagebox.askyesnocancel(title, message, parent=parent)
-            return tk.messagebox.askyesno(title, message, parent=parent)
+                return messagebox.askyesnocancel(title, message, parent=parent)
+            return messagebox.askyesno(title, message, parent=parent)
         except Exception as e:
             logger.exception(f"顯示確認對話框失敗: {e}")
             return False if not show_cancel else None

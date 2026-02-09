@@ -10,11 +10,11 @@ import re
 import threading
 import time
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 import toml
 

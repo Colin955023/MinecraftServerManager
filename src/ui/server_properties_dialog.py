@@ -335,15 +335,15 @@ class ServerPropertiesDialog:
 
         # 數字範圍屬性
         range_props = {
-            "server-port": (1, 65535),
+            "server-port": (1, 65534),
             "max-players": (1, 1000),
             "spawn-protection": (0, 100),
             "view-distance": (3, 32),
             "simulation-distance": (3, 32),
             "op-permission-level": (1, 4),
             "function-permission-level": (1, 4),
-            "rcon.port": (1, 65535),
-            "query.port": (1, 65535),
+            "rcon.port": (1, 65534),
+            "query.port": (1, 65534),
             "entity-broadcast-range-percentage": (10, 1000),
             "network-compression-threshold": (-1, 10000),
             "max-tick-time": (1000, 600000),

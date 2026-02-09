@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    # 確保漏洞修補 PR 被標記
+    labels:
+      - "security"
+      - "dependencies"

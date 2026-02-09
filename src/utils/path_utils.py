@@ -12,6 +12,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+_windll = getattr(ctypes, "windll", None)
+
 
 class PathUtils:
     """路徑處理工具類別，提供專案路徑管理和安全路徑操作"""
@@ -43,9 +45,13 @@ class PathUtils:
                 if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
                     raise ValueError(f"Zip File attempted path traversal: {member.filename}")
 
-                # 執行解壓縮
-                # Perform extraction
-                zf.extract(member, dest_dir)
+                if member.is_dir():
+                    member_path.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                member_path.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member, "r") as source, open(member_path, "wb") as target:
+                    shutil.copyfileobj(source, target)
 
     @staticmethod
     def get_project_root() -> Path:
@@ -80,7 +86,7 @@ class PathUtils:
                 json.dump(data, f, indent=indent, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
-            PathUtils.move_path(tmp_path, p)
+            os.replace(tmp_path, p)
             return True
         except Exception:
             return False
@@ -256,9 +262,12 @@ class PathUtils:
         """
         try:
             p_obj = Path(path)
+            if _windll is None:
+                return p_obj
+
             p_str = str(p_obj)
 
-            GetLongPathNameW = ctypes.windll.kernel32.GetLongPathNameW
+            GetLongPathNameW = _windll.kernel32.GetLongPathNameW
             GetLongPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
             GetLongPathNameW.restype = ctypes.c_uint
 

@@ -3,7 +3,7 @@ name = "minecraft-server-manager"
 dynamic = ["version"]
 description = "Minecraft 伺服器管理器"
 readme = "README.md"
-requires-python = ">=3.9, <3.13"
+requires-python = ">=3.10, <3.13"
 license = { file = "LICENSE" }
 
 dependencies = [
@@ -34,7 +34,7 @@ check_untyped_defs = true
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 src = ["src"]
 extend-exclude = ["report", "assets"]
 
