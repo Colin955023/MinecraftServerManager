@@ -38,6 +38,7 @@ jobs:
 
       # 關鍵：將 Bandit 發現的漏洞「視覺化」到 GitHub 介面
       - name: 上傳安全結果至 GitHub
+        if: always()
         uses: github/codeql-action/upload-sarif@a65a038433a26f4363cf9f029e3b9ceac831ad5d
         with:
           sarif_file: bandit-results.sarif
