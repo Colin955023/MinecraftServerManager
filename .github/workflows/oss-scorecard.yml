@@ -20,6 +20,7 @@ jobs:
     permissions:
       security-events: write # 用於上傳結果到 Security 面板
       id-token: write        # 用於與 OpenSSF 進行身分驗證
+      contents: read
 
     steps:
       - name: "檢出儲存庫"
