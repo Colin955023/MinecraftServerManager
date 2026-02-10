@@ -4,7 +4,6 @@
 [![Python](https://img.shields.io/badge/Python-3.9%2B-green)](https://python.org)
 [![License](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![GUI](https://img.shields.io/badge/GUI-CustomTkinter-orange)](https://github.com/TomSchimansky/CustomTkinter)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/USER/REPO/badge)](https://securityscorecards.dev/viewer/?uri=github.com/USER/REPO)
 
 **Minecraft 伺服器管理器** 是一款專為 Windows 平台設計的現代化伺服器管理工具。本專案旨在提供一個直觀、高效且功能強大的圖形化介面，讓使用者能夠輕鬆建立、配置與監控 Minecraft 伺服器。
 
