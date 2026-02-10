@@ -6,12 +6,16 @@ on:
       - '*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build and Release
     runs-on: windows-latest
+
+    permissions:
+      contents: write    # 用於建立 Release 與上傳檔案
+      actions: read      # 保持基本的讀取
     
     steps:
       - name: Checkout repository

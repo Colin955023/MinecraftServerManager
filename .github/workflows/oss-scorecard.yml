@@ -1,0 +1,43 @@
+name: "Google OSS 安全性打分"
+
+on:
+  # 按照您的要求設定觸發條件
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch: # 支援手動執行
+  schedule:
+    - cron: '0 0 * * 1' # 每週一 00:00 執行
+
+# 嚴格限制權限，僅允許寫入安全結果
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard 分析
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write # 用於上傳結果到 Security 面板
+      id-token: write        # 用於與 OpenSSF 進行身分驗證
+      contents: read
+
+    steps:
+      - name: "檢出儲存庫"
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: "執行 Scorecard 分析"
+        uses: ossf/scorecard-action@v2.4.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          # 建議發布結果到 OpenSSF REST API，這能讓您獲得專屬徽章
+          publish_results: true
+
+      # 將結果「視覺化」到 GitHub 的 Security 面板
+      - name: "上傳至 GitHub Security Tab"
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
