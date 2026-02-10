@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: '0 0 * * 1' # 每週一自動執行
 
+permissions:
+  contents: read
+
 jobs:
   security-check:
     name: 多層次安全掃描
