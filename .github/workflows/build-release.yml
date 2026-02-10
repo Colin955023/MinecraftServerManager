@@ -6,19 +6,23 @@ on:
       - '*'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build and Release
     runs-on: windows-latest
+
+    permissions:
+      contents: write    # 用於建立 Release 與上傳檔案
+      actions: read      # 保持基本的讀取
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
 
@@ -160,7 +164,7 @@ jobs:
 
       - name: Upload build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: build-artifacts
           path: |
