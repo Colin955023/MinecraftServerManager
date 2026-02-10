@@ -142,25 +142,49 @@ jobs:
               notes = "See commits for details"
           
           # Write to GITHUB_OUTPUT with explicit utf-8 encoding
+          # Use a unique delimiter to avoid accidental early termination
+          # when release notes contain a standalone "EOF" line.
           if "GITHUB_OUTPUT" in os.environ:
+              import uuid
+
+              delimiter = f"NOTES_{uuid.uuid4().hex}"
               with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-                  f.write(f"notes<<EOF\n{notes}\nEOF\n")
+                  f.write(f"notes<<{delimiter}\n{notes}\n{delimiter}\n")
 
       - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          name: Minecraft Server Manager ${{ github.ref_name }}
-          files: |
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 修正重點：將輸出的內容對應至環境變數，避免指令注入漏洞
+          RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          tag="${GITHUB_REF_NAME}"
+          title="Minecraft Server Manager ${tag}"
+
+          assets=(
             dist/MinecraftServerManager-Setup-*.exe
             dist/MinecraftServerManager-Setup-*.exe.sha256
             dist/MinecraftServerManager-v*-portable.zip
             dist/MinecraftServerManager-v*-portable.zip.sha256
-          body: ${{ steps.release_notes.outputs.notes }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          )
+
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No release assets were found."
+            exit 1
+          fi
+
+          notes_file="$(mktemp)"
+          # 使用環境變數 "$RELEASE_NOTES"
+          printf '%s\n' "$RELEASE_NOTES" > "${notes_file}"
+
+          gh release create "${tag}" "${assets[@]}" \
+            --title "${title}" \
+            --notes-file "${notes_file}" \
+            --verify-tag
 
       - name: Upload build artifacts
         if: always()
