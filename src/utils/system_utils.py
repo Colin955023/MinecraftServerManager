@@ -6,6 +6,7 @@ Provides system information query and process management functions, using native
 """
 
 import ctypes
+from ctypes import wintypes
 
 from . import SubprocessUtils, get_logger
 
@@ -30,7 +31,6 @@ c_size_t = ctypes.c_size_t
 c_uint64 = ctypes.c_uint64
 c_void_p = ctypes.c_void_p
 sizeof = ctypes.sizeof
-wintypes = ctypes.wintypes
 
 
 class MEMORYSTATUSEX(Structure):
