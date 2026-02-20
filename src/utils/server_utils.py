@@ -420,9 +420,9 @@ class ServerPropertiesValidator:
         # 整數屬性
         "max-players": ("int", 0, 2147483647, None),
         "max-world-size": ("int", 1, 29999984, None),
-        "server-port": ("int", 1, 65535, None),
-        "query.port": ("int", 1, 65535, None),
-        "rcon.port": ("int", 1, 65535, None),
+        "server-port": ("int", 1, 65534, None),
+        "query.port": ("int", 1, 65534, None),
+        "rcon.port": ("int", 1, 65534, None),
         "entity-broadcast-range-percentage": ("int", 10, 1000, None),
         "function-permission-level": ("int", 1, 4, None),
         "op-permission-level": ("int", 0, 4, None),

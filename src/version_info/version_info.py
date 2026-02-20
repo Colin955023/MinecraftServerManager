@@ -6,7 +6,7 @@ Defines application version, name and related system constants
 """
 
 # 應用程式版本字串
-APP_VERSION = "1.6.5"
+APP_VERSION = "1.6.6"
 # 應用程式顯示名稱
 APP_NAME = "Minecraft Server Manager"
 # 應用程式的簡要描述

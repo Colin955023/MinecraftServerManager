@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.6.6 - 2026-02-20
+
+### 修復
+- 修正建立伺服器時最小記憶體欄位為空仍顯示整數警告的問題
+- 修正 `server.properties` 連接埠範圍上限，避免使用保留埠 `65535`
+- 修正首次切換 servers 目錄時可能缺少 `servers_config.json` 的初始化問題
+- 修正 `SystemUtils` 在非 Windows 或 API 呼叫失敗時的相容性問題
+
+### 優化
+- `HTTPUtils` 新增 URL 驗證、重用 Session，並強化下載時的目錄建立與原子替換流程
+- `PathUtils` 強化 ZIP 解壓安全流程，並將 JSON 寫入改為 `os.replace` 原子更新
+- `SystemUtils` 重構進程快照與記憶體查詢流程，降低重複呼叫與資源洩漏風險
+
+### 介面調整
+- 關於視窗連結文字改用主題色 token，並統一對話框 icon 綁定行為
+
 ## v1.6.5 - 2026-02-07
 
 ### 修復

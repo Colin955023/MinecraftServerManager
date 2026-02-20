@@ -10,6 +10,7 @@ import contextlib
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import requests
 from requests import RequestException
@@ -23,6 +24,17 @@ logger = get_logger().bind(component="HTTPUtils")
 
 class HTTPUtils:
     """HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面"""
+
+    _session = requests.Session()
+
+    @staticmethod
+    def _is_valid_url(url: str) -> bool:
+        """僅接受具備主機名稱的 http/https URL。"""
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
     @staticmethod
     def _get_default_headers(
@@ -43,14 +55,14 @@ class HTTPUtils:
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """發送 HTTP GET 請求並解析回傳的 JSON 資料"""
-        if not url or not isinstance(url, str):
+        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
         timeout = max(10, timeout)
 
         try:
             final_headers = cls._get_default_headers(headers)
-            resp = requests.get(url, headers=final_headers, params=params, timeout=timeout)
+            resp = cls._session.get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
         except (RequestException, ValueError) as e:
@@ -66,14 +78,14 @@ class HTTPUtils:
         headers: dict[str, str] | None = None,
     ) -> bytes | None:
         """發送 HTTP GET 請求並回傳完整的回應內容"""
-        if not url or not isinstance(url, str):
+        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
         timeout = max(30, timeout)
 
         try:
             final_headers = cls._get_default_headers(headers)
-            resp = requests.get(url, headers=final_headers, timeout=timeout, stream=stream)
+            resp = cls._session.get(url, headers=final_headers, timeout=timeout, stream=stream)
             resp.raise_for_status()
             return resp.content
         except RequestException as e:
@@ -91,7 +103,7 @@ class HTTPUtils:
         cancel_check: Callable[[], bool] | None = None,
     ) -> bool:
         """下載檔案並儲存到本機路徑"""
-        if not url or not isinstance(url, str):
+        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             logger.error("檔案下載失敗: URL 參數無效")
             return False
         if not local_path or not isinstance(local_path, str):
@@ -99,8 +111,10 @@ class HTTPUtils:
             return False
 
         timeout = max(60, timeout)
+        chunk_size = max(1024, chunk_size)
 
         local_path_obj = Path(local_path)
+        local_path_obj.parent.mkdir(parents=True, exist_ok=True)
         try:
             with tempfile.NamedTemporaryFile(
                 delete=False,
@@ -114,7 +128,7 @@ class HTTPUtils:
 
         try:
             final_headers = cls._get_default_headers()
-            with requests.get(
+            with cls._session.get(
                 url,
                 headers=final_headers,
                 timeout=timeout,
@@ -140,9 +154,9 @@ class HTTPUtils:
 
             with contextlib.suppress(OSError):
                 local_path_obj.unlink(missing_ok=True)
-            temp_path_obj.rename(local_path_obj)
+            temp_path_obj.replace(local_path_obj)
             return True
-        except RequestException as e:
+        except (RequestException, OSError) as e:
             logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")
             if temp_path_obj.exists():
                 with contextlib.suppress(OSError):

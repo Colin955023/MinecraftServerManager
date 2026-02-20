@@ -17,9 +17,9 @@ for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(AP
 
 if "%APP_VERSION%"=="" (
 
-    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.5
+    echo [警告] 無法讀取 APP_VERSION，使用預設值 1.6.6
 
-    set APP_VERSION=1.6.5
+    set APP_VERSION=1.6.6
 ) else (
     echo [成功] 版本號: %APP_VERSION%
 )
