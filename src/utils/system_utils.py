@@ -6,7 +6,6 @@ Provides system information query and process management functions, using native
 """
 
 import ctypes
-from ctypes import Structure, byref, c_size_t, c_uint64, c_void_p, sizeof, wintypes
 
 from . import SubprocessUtils, get_logger
 
@@ -24,6 +23,14 @@ _windll = getattr(ctypes, "windll", None)
 _kernel32 = _windll.kernel32 if _windll else None
 _user32 = _windll.user32 if _windll and hasattr(_windll, "user32") else None
 _psapi = _windll.psapi if _windll and hasattr(_windll, "psapi") else None
+
+Structure = ctypes.Structure
+byref = ctypes.byref
+c_size_t = ctypes.c_size_t
+c_uint64 = ctypes.c_uint64
+c_void_p = ctypes.c_void_p
+sizeof = ctypes.sizeof
+wintypes = ctypes.wintypes
 
 
 class MEMORYSTATUSEX(Structure):
