@@ -7,9 +7,10 @@
 - 修正 `server.properties` 連接埠範圍上限，避免使用保留埠 `65535`
 - 修正首次切換 servers 目錄時可能缺少 `servers_config.json` 的初始化問題
 - 修正 `SystemUtils` 在非 Windows 或 API 呼叫失敗時的相容性問題
+- 修正 `HTTPUtils` 在批次請求中跨執行緒共用 `Session` 可能造成競態的問題
 
 ### 優化
-- `HTTPUtils` 新增 URL 驗證、重用 Session，並強化下載時的目錄建立與原子替換流程
+- `HTTPUtils` 新增 URL 驗證、每執行緒 Session 重用，並強化下載時的目錄建立與原子替換流程
 - `PathUtils` 強化 ZIP 解壓安全流程，並將 JSON 寫入改為 `os.replace` 原子更新
 - `SystemUtils` 重構進程快照與記憶體查詢流程，降低重複呼叫與資源洩漏風險
 

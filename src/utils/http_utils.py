@@ -8,6 +8,7 @@ Provides standardized HTTP request functionality including JSON retrieval, file 
 import concurrent.futures
 import contextlib
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -25,7 +26,16 @@ logger = get_logger().bind(component="HTTPUtils")
 class HTTPUtils:
     """HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面"""
 
-    _session = requests.Session()
+    _thread_local = threading.local()
+
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        """取得目前執行緒專屬的 Session，避免跨執行緒共用。"""
+        session = getattr(cls._thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            cls._thread_local.session = session
+        return session
 
     @staticmethod
     def _is_valid_url(url: str) -> bool:
@@ -62,7 +72,7 @@ class HTTPUtils:
 
         try:
             final_headers = cls._get_default_headers(headers)
-            resp = cls._session.get(url, headers=final_headers, params=params, timeout=timeout)
+            resp = cls._get_session().get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
         except (RequestException, ValueError) as e:
@@ -85,7 +95,7 @@ class HTTPUtils:
 
         try:
             final_headers = cls._get_default_headers(headers)
-            resp = cls._session.get(url, headers=final_headers, timeout=timeout, stream=stream)
+            resp = cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=stream)
             resp.raise_for_status()
             return resp.content
         except RequestException as e:
@@ -128,7 +138,7 @@ class HTTPUtils:
 
         try:
             final_headers = cls._get_default_headers()
-            with cls._session.get(
+            with cls._get_session().get(
                 url,
                 headers=final_headers,
                 timeout=timeout,
