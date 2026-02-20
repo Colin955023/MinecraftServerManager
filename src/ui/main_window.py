@@ -19,6 +19,7 @@ import customtkinter as ctk
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    Colors,
     FontManager,
     FontSize,
     PathUtils,
@@ -67,6 +68,14 @@ class MinecraftServerManager:
                 except Exception as e:
                     logger.error(f"無法建立資料夾: {e}\n{traceback.format_exc()}")
                     _fail_exit(f"無法建立資料夾: {e}")
+
+        def _ensure_servers_config_file(path: Path) -> None:
+            """在選定 servers 目錄後預先建立空設定檔，避免首次建立伺服器時才初始化。"""
+            config_file = path / "servers_config.json"
+            if config_file.exists():
+                return
+            if not PathUtils.save_json(config_file, {}):
+                logger.warning(f"預先建立 servers_config.json 失敗: {config_file}")
 
         def _normalize_base_dir(path_str: str) -> str:
             """將輸入路徑正規化成『使用者選擇的主資料夾』。。"""
@@ -135,6 +144,7 @@ class MinecraftServerManager:
         # 建立資料夾並更新屬性
         path_obj = Path(servers_root)
         _ensure_directory_exists(path_obj)
+        _ensure_servers_config_file(path_obj)
         self.servers_root = str(path_obj.resolve())
         return self.servers_root
 
@@ -1138,6 +1148,7 @@ class MinecraftServerManager:
             width=600,
             height=650,
             resizable=True,
+            bind_icon=True,
             delay_ms=0,
         )
 
@@ -1184,7 +1195,7 @@ class MinecraftServerManager:
             scrollable_frame,
             text="GitHub-MinecraftServerManager",
             font=FontManager.get_font(family="Microsoft JhengHei", size=FontSize.MEDIUM, underline=True),
-            text_color="black",
+            text_color=Colors.TEXT_LINK,
             cursor="hand2",
             anchor="w",
         )

@@ -6,9 +6,11 @@ concurrency:
 
 on:
   push:
+    branches: [ "master" ]
   merge_group:
     types: [checks_requested]
   pull_request:
+    branches: [ "master" ]
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1' # 每週一定時掃描

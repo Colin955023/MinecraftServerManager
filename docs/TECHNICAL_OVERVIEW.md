@@ -133,7 +133,7 @@ MinecraftServerManger/
 
 ### 開發模式
 ```bash
-# 需要 Python 3.9+ 和 Git
+# 需要 Python 3.10+ 和 Git
 git clone https://github.com/Colin955023/MinecraftServerManager.git
 cd MinecraftServerManager
 py -m pip install --user -U uv
@@ -170,7 +170,7 @@ uv run python -m src.main
 ##  技術堆疊 (Tech Stack)
 
 ### 核心語言與框架
-- **Python 3.9+**: 專案開發語言。
+- **Python 3.10+**: 專案開發語言。
 - **CustomTkinter**: 基於 Tkinter 的現代化 UI 擴充庫，提供深色模式與圓角設計。
 - **Nuitka**: 將 Python 程式編譯為高效能的可執行檔與依賴資料夾（standalone/onedir）。
 

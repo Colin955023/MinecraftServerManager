@@ -5,7 +5,8 @@ System Utilities Module
 Provides system information query and process management functions, using native Windows APIs to replace the psutil dependency
 """
 
-from ctypes import Structure, byref, c_size_t, c_uint64, c_void_p, sizeof, windll, wintypes
+import ctypes
+from ctypes import wintypes
 
 from . import SubprocessUtils, get_logger
 
@@ -18,6 +19,18 @@ PROCESS_QUERY_INFORMATION = 0x0400
 PROCESS_VM_READ = 0x0010
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 STILL_ACTIVE = 259
+
+_windll = getattr(ctypes, "windll", None)
+_kernel32 = _windll.kernel32 if _windll else None
+_user32 = _windll.user32 if _windll and hasattr(_windll, "user32") else None
+_psapi = _windll.psapi if _windll and hasattr(_windll, "psapi") else None
+
+Structure = ctypes.Structure
+byref = ctypes.byref
+c_size_t = ctypes.c_size_t
+c_uint64 = ctypes.c_uint64
+c_void_p = ctypes.c_void_p
+sizeof = ctypes.sizeof
 
 
 class MEMORYSTATUSEX(Structure):
@@ -69,12 +82,50 @@ class SystemUtils:
     """系統工具類別"""
 
     @staticmethod
+    def _iterate_process_snapshot() -> list[PROCESSENTRY32]:
+        """回傳當前系統進程快照"""
+        if _kernel32 is None:
+            return []
+
+        snapshot: list[PROCESSENTRY32] = []
+        h_snap = _kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if h_snap == -1:
+            return snapshot
+
+        try:
+            pe32 = PROCESSENTRY32()
+            pe32.dwSize = sizeof(PROCESSENTRY32)
+
+            if _kernel32.Process32First(h_snap, byref(pe32)):
+                while True:
+                    current = PROCESSENTRY32()
+                    ctypes.memmove(byref(current), byref(pe32), sizeof(PROCESSENTRY32))
+                    snapshot.append(current)
+                    if not _kernel32.Process32Next(h_snap, byref(pe32)):
+                        break
+        finally:
+            _kernel32.CloseHandle(h_snap)
+
+        return snapshot
+
+    @staticmethod
+    def _decode_process_name(entry: PROCESSENTRY32) -> str:
+        try:
+            return entry.szExeFile.decode("mbcs")
+        except Exception:
+            return str(entry.szExeFile)
+
+    @staticmethod
     def get_total_memory_mb() -> int:
         """獲取系統總實體記憶體"""
         try:
+            if _kernel32 is None:
+                return 4096
+
             stat = MEMORYSTATUSEX()
             stat.dwLength = sizeof(stat)
-            windll.kernel32.GlobalMemoryStatusEx(byref(stat))
+            if not _kernel32.GlobalMemoryStatusEx(byref(stat)):
+                return 4096
             return int(stat.ullTotalPhys / (1024 * 1024))
         except Exception as e:
             logger.error(f"獲取記憶體資訊失敗: {e}")
@@ -84,25 +135,9 @@ class SystemUtils:
     def get_process_name(pid: int) -> str:
         """獲取指定 PID 的進程名稱"""
         try:
-            h_snap = windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-            if h_snap == -1:
-                return ""
-
-            pe32 = PROCESSENTRY32()
-            pe32.dwSize = sizeof(PROCESSENTRY32)
-
-            if windll.kernel32.Process32First(h_snap, byref(pe32)):
-                while True:
-                    if pe32.th32ProcessID == pid:
-                        try:
-                            name = pe32.szExeFile.decode("mbcs")
-                        except Exception:
-                            name = str(pe32.szExeFile)
-                        windll.kernel32.CloseHandle(h_snap)
-                        return name
-                    if not windll.kernel32.Process32Next(h_snap, byref(pe32)):
-                        break
-            windll.kernel32.CloseHandle(h_snap)
+            for entry in SystemUtils._iterate_process_snapshot():
+                if entry.th32ProcessID == pid:
+                    return SystemUtils._decode_process_name(entry)
         except Exception as e:
             logger.error(f"獲取進程名稱失敗: {e}")
         return ""
@@ -112,28 +147,21 @@ class SystemUtils:
         """獲取子進程列表 [(pid, name), ...]"""
         children: list[tuple[int, str]] = []
         try:
-            h_snap = windll.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-            if h_snap == -1:
+            snapshot = SystemUtils._iterate_process_snapshot()
+            if not snapshot:
                 return children
 
-            pe32 = PROCESSENTRY32()
-            pe32.dwSize = sizeof(PROCESSENTRY32)
+            by_parent: dict[int, list[PROCESSENTRY32]] = {}
+            for entry in snapshot:
+                by_parent.setdefault(int(entry.th32ParentProcessID), []).append(entry)
 
-            if windll.kernel32.Process32First(h_snap, byref(pe32)):
-                while True:
-                    if pe32.th32ParentProcessID == pid_root:
-                        child_pid = pe32.th32ProcessID
-                        try:
-                            exe_name = pe32.szExeFile.decode("mbcs")
-                        except Exception:
-                            exe_name = str(pe32.szExeFile)
-                        children.append((child_pid, exe_name))
-                        # 遞迴查找子進程
-                        children.extend(SystemUtils.get_process_children(child_pid))
-                    if not windll.kernel32.Process32Next(h_snap, byref(pe32)):
-                        break
-
-            windll.kernel32.CloseHandle(h_snap)
+            queue = [pid_root]
+            while queue:
+                parent_pid = queue.pop()
+                for child in by_parent.get(parent_pid, []):
+                    child_pid = int(child.th32ProcessID)
+                    children.append((child_pid, SystemUtils._decode_process_name(child)))
+                    queue.append(child_pid)
         except Exception as e:
             logger.error(f"獲取子進程失敗: {e}")
         return children
@@ -141,23 +169,26 @@ class SystemUtils:
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
         """獲取進程記憶體使用量 (bytes)"""
+        if _kernel32 is None or _psapi is None:
+            return 0
+
+        h_process = 0
         try:
-            h_process = windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
+            h_process = _kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
             if not h_process:
                 return 0
 
             mem_counters = PROCESS_MEMORY_COUNTERS_EX()
             mem_counters.cb = sizeof(PROCESS_MEMORY_COUNTERS_EX)
-
-            mem = 0
-            if windll.psapi.GetProcessMemoryInfo(h_process, byref(mem_counters), sizeof(mem_counters)):
-                mem = mem_counters.WorkingSetSize
-
-            windll.kernel32.CloseHandle(h_process)
-            return mem
+            if _psapi.GetProcessMemoryInfo(h_process, byref(mem_counters), sizeof(mem_counters)):
+                return int(mem_counters.WorkingSetSize)
+            return 0
         except Exception as e:
             logger.error(f"獲取進程 {pid} 記憶體失敗: {e}")
             return 0
+        finally:
+            if h_process:
+                _kernel32.CloseHandle(h_process)
 
     @staticmethod
     def find_java_process(parent_pid: int) -> int | None:
@@ -190,26 +221,32 @@ class SystemUtils:
     @staticmethod
     def is_process_running(pid: int) -> bool:
         """檢查進程是否運行中"""
+        if _kernel32 is None:
+            return False
+
+        h_process = 0
         try:
-            h_process = windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            h_process = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h_process:
                 return False
 
             exit_code = wintypes.DWORD()
-            ok = windll.kernel32.GetExitCodeProcess(h_process, byref(exit_code))
-            windll.kernel32.CloseHandle(h_process)
+            ok = _kernel32.GetExitCodeProcess(h_process, byref(exit_code))
             if not ok:
                 return False
             return exit_code.value == STILL_ACTIVE
         except Exception:
             return False
+        finally:
+            if h_process:
+                _kernel32.CloseHandle(h_process)
 
     @staticmethod
     def set_process_dpi_aware() -> None:
         """設定進程 DPI 感知"""
         try:
-            if hasattr(windll, "user32"):
-                windll.user32.SetProcessDPIAware()
+            if _user32 is not None:
+                _user32.SetProcessDPIAware()
         except Exception as e:
             logger.error(f"設定進程 DPI 感知失敗: {e}")
 
@@ -217,8 +254,8 @@ class SystemUtils:
     def get_system_metrics(index: int) -> int:
         """獲取系統指標"""
         try:
-            if hasattr(windll, "user32"):
-                return windll.user32.GetSystemMetrics(index)
+            if _user32 is not None:
+                return _user32.GetSystemMetrics(index)
             return 0
         except Exception:
             return 0

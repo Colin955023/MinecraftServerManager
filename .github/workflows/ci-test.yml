@@ -1,0 +1,73 @@
+name: CI Test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} Test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Compile source files
+        run: uv run python -m compileall -q src
+
+      - name: Smoke import key modules
+        run: |
+          uv run python - <<'PY'
+          import importlib
+
+          modules = [
+              "src.version_info",
+              "src.models",
+              "src.utils.http_utils",
+              "src.utils.path_utils",
+              "src.utils.system_utils",
+              "src.core.version_manager",
+              "src.core.loader_manager",
+              "src.core.server_manager",
+          ]
+
+          for module_name in modules:
+              importlib.import_module(module_name)
+              print(f"import ok: {module_name}")
+          PY
+
+      - name: Run unit tests (if exists)
+        run: |
+          if [ -d tests ]; then
+            uv run python -m unittest discover -s tests -p "test_*.py" -v
+          else
+            echo "No tests directory found; skipping unittest step."
+          fi

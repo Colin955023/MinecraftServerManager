@@ -1,7 +1,7 @@
 #  Minecraft 伺服器管理器 (Minecraft Server Manager)
 
 [![Platform](https://img.shields.io/badge/Platform-Windows-blue)](https://github.com/)
-[![Python](https://img.shields.io/badge/Python-3.9%2B-green)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-green)](https://python.org)
 [![License](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![GUI](https://img.shields.io/badge/GUI-CustomTkinter-orange)](https://github.com/TomSchimansky/CustomTkinter)
 
@@ -78,7 +78,7 @@
 用於開發者或需要修改程式碼的情況。
 
 **需求**：
-- Python 3.9 或更新版本
+- Python 3.10 或更新版本
 - Git
 
 **安裝步驟**：
@@ -108,7 +108,7 @@ uv tree
 本專案提供自動化建置腳本，可將 Python 原始碼編譯為可攜式版本或安裝程式。
 
 **需求**：
-- Python 3.9 或更新版本
+- Python 3.10 或更新版本
 - Visual Studio C++ 編譯工具（需要預先安裝）
 
 **編譯與打包步驟**：
