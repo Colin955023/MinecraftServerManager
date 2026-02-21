@@ -18,6 +18,7 @@ from . import (
     RuntimePaths,
     SubprocessUtils,
     UIUtils,
+    UpdateParsing,
     get_logger,
 )
 
@@ -25,61 +26,29 @@ logger = get_logger().bind(component="UpdateChecker")
 
 
 class UpdateChecker:
-    _GITHUB_API = "https://api.github.com"
-
     @staticmethod
     def _parse_version(version_str: str) -> tuple[int, ...] | None:
-        """解析版本字串為數字元組（使用簡單的標準方法）"""
-        try:
-            if not isinstance(version_str, str) or not version_str.strip():
-                logger.warning(f"無效的版本字串，version_str={version_str!r}")
-                return None
-            clean = version_str.strip().lstrip("vV")
-            version_part = clean.split("-")[0].split("+")[0]
-            return tuple(int(x) for x in version_part.split(".") if x.isdigit())
-        except ValueError:
-            logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
-            return None
+        """解析版本字串為數字元組。"""
+        return UpdateParsing.parse_version(version_str)
 
     @staticmethod
-    def _get_latest_release(owner: str, repo: str) -> dict:
-        url = f"{UpdateChecker._GITHUB_API}/repos/{owner}/{repo}/releases"
-        data = HTTPUtils.get_json(url, timeout=15)
-        if not data:
-            return {}
+    def _get_latest_release(owner: str, repo: str, include_prerelease: bool = False) -> dict | None:
+        return UpdateParsing.get_latest_release(owner, repo, include_prerelease=include_prerelease)
 
-        if isinstance(data, dict):
-            return {}
-
-        for rel in data:
-            try:
-                if rel and not rel.get("draft") and not rel.get("prerelease"):
-                    return rel
-            except Exception as e:
-                logger.debug(f"檢查 release 資料時發生錯誤: {e}")
-                continue
-        return {}
+    @staticmethod
+    def _is_development_environment() -> bool:
+        """僅在開發環境允許偵測 prerelease。"""
+        is_nuitka = "__compiled__" in globals()
+        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
+        return not is_packaged
 
     @staticmethod
     def _choose_installer_asset(release: dict) -> dict:
-        assets = release.get("assets") or []
-        exe_assets = []
-        for a in assets:
-            try:
-                name = (a.get("name") or "").lower()
-                if name.endswith(".exe") and a.get("browser_download_url"):
-                    exe_assets.append(a)
-            except Exception as e:
-                logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
-                continue
-        if not exe_assets:
-            return {}
+        return UpdateParsing.choose_installer_asset(release)
 
-        for a in exe_assets:
-            name = (a.get("name") or "").lower()
-            if "setup" in name or "installer" in name:
-                return a
-        return exe_assets[0]
+    @staticmethod
+    def _select_update_asset(release: dict, portable_mode: bool) -> tuple[dict, str]:
+        return UpdateParsing.select_update_asset(release, portable_mode)
 
     @staticmethod
     def _launch_installer(installer_path: Path, parent=None) -> None:
@@ -266,7 +235,12 @@ class UpdateChecker:
 
             try:
                 logger.info(f"開始檢查更新... (目前版本: {current_version})")
-                latest = UpdateChecker._get_latest_release(owner, repo)
+                include_prerelease = UpdateChecker._is_development_environment()
+                latest = UpdateChecker._get_latest_release(
+                    owner,
+                    repo,
+                    include_prerelease=include_prerelease,
+                )
                 if not latest:
                     logger.info("無法從 GitHub 取得最新版本資訊")
                     if show_up_to_date_message:
@@ -331,24 +305,10 @@ class UpdateChecker:
                     return
 
                 logger.info("使用者確認更新，準備下載...")
-
-                # 若為可攜式，優先尋找 portable zip asset
-                asset = None
-                if RuntimePaths.is_portable_mode():
-                    assets = latest.get("assets") or []
-                    for a in assets:
-                        try:
-                            name_l = (a.get("name") or "").lower()
-                            if name_l.endswith(".zip") and "portable" in name_l and a.get("browser_download_url"):
-                                asset = a
-                                break
-                        except Exception as e:
-                            logger.debug(f"檢查可攜式資源時發生錯誤，跳過此資源: {e}")
-                            continue
-
-                # 若尚未選到，使用原有的 exe 選擇邏輯
-                if not asset:
-                    asset = UpdateChecker._choose_installer_asset(latest)
+                portable_mode = RuntimePaths.is_portable_mode()
+                asset, asset_mode = UpdateChecker._select_update_asset(latest, portable_mode)
+                if asset_mode == "installer_fallback":
+                    logger.info("可攜式更新資源不存在，回退使用 installer 資源")
 
                 if not asset:
                     UIUtils.call_on_ui(
@@ -381,20 +341,7 @@ class UpdateChecker:
 
                 # Helper: 嘗試從 release 的 assets 或 body 解析出對應 asset 的 checksum
                 def _parse_checksum_text(text: str, asset_name: str) -> tuple[str, str] | None:
-                    asset_base = Path(asset_name).name
-                    asset_base_lower = asset_base.lower()
-                    for line in (text or "").splitlines():
-                        line = line.strip()
-                        if not line:
-                            continue
-                        line_lower = line.lower()
-                        parts = line.split()
-                        for token in parts:
-                            if re.fullmatch(r"[0-9a-fA-F]{64}", token) and asset_base_lower in line_lower:
-                                return ("sha256", token.lower())
-                            if re.fullmatch(r"[0-9a-fA-F]{128}", token) and asset_base_lower in line_lower:
-                                return ("sha512", token.lower())
-                    return None
+                    return UpdateParsing.parse_checksum_text(text, asset_name)
 
                 def _fetch_checksum_for_asset(release: dict, asset_name: str) -> tuple[str, str] | None:
                     """
@@ -482,7 +429,7 @@ class UpdateChecker:
                     return checksum == hex_checksum.lower() if checksum else False
 
                 # 如果是可攜式更新（asset 為 portable zip），採用 ZIP 解壓套用流程
-                if RuntimePaths.is_portable_mode() and download_url and str(download_url).lower().endswith(".zip"):
+                if asset_mode == "portable" and download_url and str(download_url).lower().endswith(".zip"):
                     if not UIUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.ask_yes_no_cancel(

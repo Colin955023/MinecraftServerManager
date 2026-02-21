@@ -9,8 +9,8 @@ Main package module providing Minecraft server creation, management and monitori
 from __future__ import annotations
 
 import importlib
-from collections.abc import Mapping
-from typing import Any, Callable
+from collections.abc import Callable, Mapping
+from typing import Any
 
 
 def lazy_exports(

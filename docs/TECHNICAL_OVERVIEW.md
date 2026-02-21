@@ -33,7 +33,7 @@
 ##  專案檔案結構
 
 ```text
-MinecraftServerManger/
+MinecraftServerManager/
    .gitignore
    COPYING.md
    LICENSE
@@ -45,8 +45,13 @@ MinecraftServerManger/
       icon.ico
       version_info.txt
    docs/
+      PORTABLE_INSTALLER_MATRIX.md
       TECHNICAL_OVERVIEW.md
       USER_GUIDE.md
+   tests/
+      test_settings_io_smoke.py
+      test_update_parsing_fallback_smoke.py
+      test_version_parsing_smoke.py
    scripts/
       build_installer_nuitka.bat
       format_lint_check.bat
@@ -105,6 +110,25 @@ MinecraftServerManger/
 - **UI 模組**：`ui/main_window.py` 掛載各 Frame；`manage_server_frame.py` 支援偵測既有伺服器、右鍵重新檢測、設定備份路徑與打開備份資料夾；`server_monitor_window.py` 提供資源監控與即時控制台。
 - **Lazy Re-export**：core、ui、utils 皆採 lazy 匯出策略，透過 package `__init__.py` 延遲載入實際模組以降低啟動開銷並減少循環 import。
 
+## HTTP timeout/retry policy
+
+網路層 policy 已集中在 `src/utils/http_utils.py`，所有 JSON 讀取、內容抓取、檔案下載都共用同一套設定：
+
+- 最小 timeout：
+  - JSON：`10s`
+  - 一般內容：`30s`
+  - 檔案下載：`60s`
+- Retry：
+  - `total/connect/read/status = 3`
+  - `backoff_factor = 0.6`
+  - `status_forcelist = [429, 500, 502, 503, 504]`
+  - 僅允許 `GET/HEAD/OPTIONS` 自動重試
+- Session：
+  - 每執行緒獨立 Session（thread-local），避免跨執行緒共用造成競態
+  - HTTP/HTTPS 均掛載同一 retry adapter
+
+如需查看目前程式實際 policy，可讀取 `HTTPUtils.get_timeout_retry_policy()`。
+
 ##  模組匯出策略（re-export）
 
 為了讓 import 更一致、降低跨模組耦合，本專案在多個 package 使用「lazy re-export」：
@@ -159,6 +183,7 @@ uv run python -m src.main
 - **檔案路徑**：GitHub Release 發布為 `MinecraftServerManager-v*.*.* -portable.zip`
 
 - **可攜式自動更新與驗證**：更新檢查器會在偵測到可攜式模式時優先尋找命名包含 `-portable.zip` 的 Release asset 並嘗試下載套用；若 Release 同時提供 checksum 檔案或在釋出說明中包含檔案雜湊，程式會嘗試驗證下載內容的完整性，驗證失敗時會在 UI 顯示錯誤並停止套用更新。
+- **差異矩陣**：詳細比較請見 `docs/PORTABLE_INSTALLER_MATRIX.md`
 
 ### 安裝版本
 - **生成方式**：執行 `scripts/build_installer_nuitka.bat` 生成可執行檔，再透過 Inno Setup 打包

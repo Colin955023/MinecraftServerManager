@@ -9,9 +9,10 @@ import queue
 import threading
 import tkinter as tk
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import messagebox, scrolledtext
-from typing import Any, Callable, Final
+from typing import Any, Final
 
 import customtkinter as ctk
 

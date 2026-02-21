@@ -7,7 +7,7 @@ Implements dropdown functionality using button and listbox with wheel selection 
 
 import tkinter as tk
 import traceback
-from typing import Callable
+from collections.abc import Callable
 
 import customtkinter as ctk
 

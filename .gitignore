@@ -86,14 +86,5 @@ cache/
 # 自訂忽略項目 (Custom ignore items)
 # =====================
 removed_code.txt
-file_version_info.txt
-INSTALLER_CONFIG.md
 report/
 *.xml
-scripts/cleanup.bat
-scripts/black.bat
-scripts/GetReleaseDownloadNum.py
-scripts/rebase.bat
-scripts/git_gc.bat
-docs/PLAGIARISM_DETECTION_TOOLS.md
-scripts/GetLines.bat
