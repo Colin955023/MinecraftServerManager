@@ -1,0 +1,47 @@
+# 強制文本檔案的換行符一致性（跨平台開發）
+
+# Auto detect text files and normalize line endings to LF
+* text=auto
+
+# Python：LF（Unix 標準）
+*.py text eol=lf
+*.pyw text eol=lf
+
+# Batch / PowerShell：CRLF（Windows 標準）
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.ps1xml text eol=crlf
+
+# Shell：LF
+*.sh text eol=lf
+*.bash text eol=lf
+
+# 配置：LF
+*.toml text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+*.xml text eol=lf
+
+# 文件：LF
+*.md text eol=lf
+*.txt text eol=lf
+*.rst text eol=lf
+*.changelog text eol=lf
+
+# 二進制檔案（不進行轉換）
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdb binary
+*.pyo binary
+*.pyc binary

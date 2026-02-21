@@ -1,6 +1,7 @@
-﻿# Minecraft Server Manager - Portable Package Builder
+﻿param(
+    [string]$Version = ""
+)
 
-# 強制 PowerShell 與主控台使用 UTF-8 輸出，避免在由 cmd 呼叫時出現亂碼/重複/跑版
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding = [Console]::OutputEncoding
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
@@ -11,20 +12,23 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
 
 # 取得版本號：從 src/version_info.py 的 APP_VERSION 取得
-[string]$version = ''
+[string]$version = "$Version".Trim()
 
-try {
-    $pythonOut = & py -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
-    if ($LASTEXITCODE -eq 0 -and $pythonOut) {
-        $version = "$pythonOut".Trim()
+if (-not $version) {
+    try {
+        $pythonOut = & py -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $pythonOut) {
+            $version = "$pythonOut".Trim()
+        }
+    } catch {
+        Write-Host "[警告] 無法從 Python 讀取版本" -ForegroundColor Yellow
     }
-} catch {
-    Write-Host "[警告] 無法從 Python 讀取版本" -ForegroundColor Yellow
 }
 
 # 驗證版本格式，確保不是意外的物件
 if (-not $version -or -not ($version -match '^\d+\.\d+\.\d+')) {
-    $version = '1.6.6'
+    Write-Host "[錯誤] 版本號無效，請確認 src.version_info.APP_VERSION 或傳入 -Version 參數" -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan
@@ -32,7 +36,6 @@ Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan
 if (-not (Test-Path "dist\MinecraftServerManager")) {
     Write-Host "錯誤: 找不到 dist\MinecraftServerManager 資料夾。" -ForegroundColor Red
     Write-Host "請先執行 build_installer_nuitka.bat 來生成可攜式版本。" -ForegroundColor Yellow
-    pause
     exit 1
 }
 
@@ -54,7 +57,6 @@ if (Test-Path "README.md") {
 # 檢查必要執行檔是否存在，避免建立空或不完整的壓縮檔
 if (-not (Test-Path "dist\MinecraftServerManager\MinecraftServerManager.exe")) {
     Write-Host "[錯誤] 找不到 dist\\MinecraftServerManager\\MinecraftServerManager.exe，請先完成 Nuitka 打包。" -ForegroundColor Red
-    pause
     exit 1
 }
 
@@ -81,12 +83,17 @@ if (Test-Path "dist\MinecraftServerManager\unins000.dat") {
     Remove-Item "dist\MinecraftServerManager\unins000.dat" -Force
 }
 
-Write-Host "[3/3] 建立可攜式版本壓縮檔..." -ForegroundColor Yellow
-Compress-Archive -Path "dist\MinecraftServerManager" -DestinationPath $zipPath -Force
+Write-Host "[3/3] 建立可攜式版本壓縮檔 (使用高效能 ZipFile)..." -ForegroundColor Yellow
+
+# 使用 .NET 原生 ZipFile 以提升壓縮效能與避免 Compress-Archive 的路徑長度限制
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$sourceDir = "dist\MinecraftServerManager"
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory($sourceDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
 if (-not (Test-Path $zipPath)) {
     Write-Host "[錯誤] 壓縮檔建立失敗" -ForegroundColor Red
-    pause
     exit 1
 }
 
@@ -97,6 +104,5 @@ Write-Host "  打包完成！" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "可攜式版本檔案：dist\$zipFile" -ForegroundColor White
-Write-Host "SHA256 檔案由 GitHub Actions 自動產生" -ForegroundColor Yellow
-Write-Host "解壓後即可在任何地方使用。" -ForegroundColor White
+Write-Host "SHA256 將由 GitHub Release asset 的 digest 提供" -ForegroundColor Yellow
 Write-Host ""

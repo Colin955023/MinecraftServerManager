@@ -13,44 +13,50 @@ on:
     branches: [ "master" ]
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1' # 每週一定時掃描
-
-permissions: {}
+    - cron: '0 0 * * 1'
+permissions:
+  contents: read
 
 jobs:
   analyze:
-    name: 分析 (Python)
+    name: CodeQL (Python)
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       security-events: write
-      packages: read
-      actions: read
       contents: read
 
     steps:
     - name: 檢出儲存庫
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        persist-credentials: false
+        fetch-depth: 0
 
-    # --- 針對 uv 的設定區塊 ---
     - name: 安裝 uv
-      uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
+      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+      with:
+        enable-cache: ${{ github.ref == 'refs/heads/master' }}
 
     - name: 設定 Python 環境 (使用 uv)
       run: uv python install
 
     - name: 安裝專案依賴 (增強 CodeQL 分析準確度)
-      run: uv sync
-    # -----------------------
+      if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      run: uv sync --all-groups --frozen
 
     - name: 初始化 CodeQL
-      uses: github/codeql-action/init@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d
+      uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13
       with:
         languages: python
         build-mode: none
         # 僅保留設定檔引用，細節交給 config-file 處理
         config-file: .github/codeql/codeql-config.yml
+        dependency-caching: ${{ github.ref == 'refs/heads/master' }}
+        trap-caching: ${{ github.ref == 'refs/heads/master' }}
 
     - name: 執行 CodeQL 分析
-      uses: github/codeql-action/analyze@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d
+      uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13
       with:
         category: "/language:python"

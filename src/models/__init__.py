@@ -1,12 +1,15 @@
-"""資料模型定義 (package)
-
-此資料夾用於分類資料模型；對外維持舊版匯入相容：
-from src.models import LoaderVersion, ServerConfig
+"""
+資料模型套件
+提供 Minecraft 伺服器管理器的資料模型定義與相關類別。
 """
 
-from .models import LoaderVersion, ServerConfig
+from __future__ import annotations
 
-__all__ = [
-    "LoaderVersion",
-    "ServerConfig",
-]
+from .. import lazy_exports
+
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "LoaderVersion": (".models", "LoaderVersion"),
+    "ServerConfig": (".models", "ServerConfig"),
+}
+
+__getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

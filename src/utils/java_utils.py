@@ -1,38 +1,32 @@
-#!/usr/bin/env python3
 """在 Windows 上偵測與管理 Java 安裝的工具函式。
 本模組提供從 Windows 常見安裝路徑與環境變數中尋找 Java 安裝的功能。
-Utility functions for detecting and managing Java installations on Windows.
-This module provides functions to find Java installations in the Windows registry,
-common installation paths, and environment variables.
 """
 
+from __future__ import annotations
+
+import contextlib
+import concurrent.futures
 import os
 import re
+import threading
 from pathlib import Path
-
-from src.core import MinecraftVersionManager
-
-from . import (
-    HTTPUtils,
-    JavaDownloader,
-    PathUtils,
-    RuntimePaths,
-    SubprocessUtils,
-    UIUtils,
-    get_logger,
-)
+from typing import ClassVar
+from ..core import MinecraftVersionManager
+from . import HTTPUtils, JavaDownloader, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="JavaUtils")
 
 
 class JavaUtils:
-    COMMON_JAVA_PATHS = [
-        r"C:\\Program Files\\Java",
-        r"C:\\Program Files (x86)\\Java",
-        r"C:\\Program Files\\Microsoft",
+    COMMON_JAVA_PATHS: ClassVar[list[str]] = [
+        "C:\\\\Program Files\\\\Java",
+        "C:\\\\Program Files (x86)\\\\Java",
+        "C:\\\\Program Files\\\\Microsoft",
     ]
-    # 只偵測 JAVA_HOME，Path 另外處理
-    ENV_VARS = ["JAVA_HOME"]
+    ENV_VARS: ClassVar[list[str]] = ["JAVA_HOME"]
+    JAVA_CACHE_FILE_NAME: ClassVar[str] = "java_candidates_cache.json"
+    _java_cache_lock: ClassVar[threading.Lock] = threading.Lock()
+    _cached_java_candidates: ClassVar[list[tuple[str, int]] | None] = None
 
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
@@ -47,22 +41,134 @@ class JavaUtils:
                 check=True,
             )
             out = res.stdout or ""
-            m = re.search(r'version "(\d+)\.(\d+)', out)
+            m = re.search('version "(\\d+)\\.(\\d+)', out)
             if m:
                 major = int(m.group(1))
-                # Java 8 及以前版本格式為 "1.8"，需要取第二個數字
                 if major == 1:
                     return int(m.group(2))
-                # Java 9+ 格式為 "9.x", "11.x" 等，直接取第一個數字
                 return major
-
-            # 備用模式：直接匹配 "version \"X" 格式
-            m = re.search(r'version "(\d+)"', out)
+            m = re.search('version "(\\d+)"', out)
             if m:
                 return int(m.group(1))
         except Exception as e:
             logger.exception(f"取得 Java 版本失敗 {java_path}: {e}")
         return None
+
+    @staticmethod
+    def _get_java_cache_path() -> Path:
+        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir()) / JavaUtils.JAVA_CACHE_FILE_NAME
+
+    @staticmethod
+    def _load_java_candidates_from_cache() -> list[tuple[str, int]] | None:
+        cache_path = JavaUtils._get_java_cache_path()
+        cache_data = PathUtils.load_json(cache_path)
+        if not isinstance(cache_data, dict):
+            return None
+        candidates: list[tuple[str, int]] = []
+        cached_items = cache_data.get("candidates", [])
+        if not isinstance(cached_items, list):
+            return None
+        for item in cached_items:
+            if not isinstance(item, dict):
+                continue
+            candidate_path = item.get("path")
+            candidate_major = item.get("major")
+            if not isinstance(candidate_path, str) or not isinstance(candidate_major, int):
+                continue
+            javaw_exe = Path(str(candidate_path))
+            if not javaw_exe.is_file():
+                continue
+            try:
+                candidates.append((str(javaw_exe.resolve()), candidate_major))
+            except OSError:
+                continue
+        if not candidates:
+            return None
+        return candidates
+
+    @staticmethod
+    def _resolve_java_candidate(javaw_exe: Path) -> tuple[str, int] | None:
+        major = JavaUtils.get_java_version(str(javaw_exe))
+        if not major:
+            return None
+        try:
+            resolved_javaw_exe = javaw_exe.resolve()
+            return str(resolved_javaw_exe), major
+        except OSError:
+            return str(javaw_exe), major
+
+    @staticmethod
+    def _scan_and_cache_local_java_candidates() -> list[tuple[str, int]]:
+        search_paths = set()
+        for base_str in JavaUtils.COMMON_JAVA_PATHS:
+            base = Path(base_str)
+            if base.exists():
+                for subdir in base.iterdir():
+                    if subdir.is_dir():
+                        search_paths.add(str(subdir / "bin"))
+        for var in JavaUtils.ENV_VARS:
+            val = os.environ.get(var)
+            if val:
+                for p in val.split(";"):
+                    java_bin = Path(p) / "bin"
+                    search_paths.add(str(java_bin))
+        candidates: list[tuple[str, int]] = []
+        candidate_paths: set[Path] = set()
+        try:
+            where_path = PathUtils.find_executable("where")
+            if where_path:
+                result = SubprocessUtils.run_checked(
+                    [where_path, "javaw"], stdin=SubprocessUtils.DEVNULL, capture_output=True, text=True, check=False
+                )
+                if result.returncode == 0:
+                    for java_path_str in (result.stdout or "").strip().splitlines():
+                        java_path_obj = Path(java_path_str)
+                        if java_path_obj.name.lower() == "javaw.exe":
+                            candidate_paths.add(java_path_obj)
+        except Exception as e:
+            logger.exception(f"搜尋 Java 失敗: {e}")
+        for p_str in search_paths:
+            search_path_obj = Path(p_str)
+            javaw_exe = search_path_obj / "javaw.exe"
+            if javaw_exe.exists():
+                candidate_paths.add(javaw_exe)
+        if not candidate_paths:
+            return candidates
+        max_workers = min(8, max(2, os.cpu_count() or 4))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(JavaUtils._resolve_java_candidate, javaw_exe) for javaw_exe in sorted(candidate_paths)
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                if result:
+                    candidates.append(result)
+        seen = set()
+        final_results = []
+        for c_path, c_major in candidates:
+            if (c_path, c_major) not in seen:
+                seen.add((c_path, c_major))
+                final_results.append((c_path, c_major))
+        final_results.sort(key=lambda x: x[1])
+        cache_path = JavaUtils._get_java_cache_path()
+        if final_results:
+            cached_items: list[dict[str, object]] = []
+            for java_path_str, major in final_results:
+                cached_items.append({"path": java_path_str, "major": major})
+            PathUtils.save_json_if_changed(cache_path, {"candidates": cached_items})
+        else:
+            with contextlib.suppress(OSError):
+                if cache_path.exists():
+                    cache_path.unlink()
+        return final_results
+
+    @staticmethod
+    def refresh_java_candidates_cache() -> list[tuple[str, int]]:
+        """重新掃描本機 Java 並更新 JSON 快取。"""
+        final_results = JavaUtils._scan_and_cache_local_java_candidates()
+        with JavaUtils._java_cache_lock:
+            JavaUtils._cached_java_candidates = list(final_results)
+        return final_results
 
     @staticmethod
     def _ensure_cache_exists(cache_path: Path):
@@ -73,7 +179,6 @@ class JavaUtils:
                 vm.fetch_versions()
             except Exception as e:
                 raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}") from e
-            # 再次檢查
             if not cache_path.exists() or cache_path.stat().st_size == 0:
                 raise FileNotFoundError(f"找不到 {cache_path} 或檔案為空")
 
@@ -82,14 +187,11 @@ class JavaUtils:
         """根據 mc_version 決定所需 Java major 版本"""
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
-
         cache_path = RuntimePaths.get_cache_dir() / "mc_versions_cache.json"
         JavaUtils._ensure_cache_exists(cache_path)
-
         data = PathUtils.load_json(cache_path)
         if data is None:
             raise ValueError(f"無法解析 {cache_path} 內容")
-
         if isinstance(data, dict):
             data = [data]
         for v in data:
@@ -97,7 +199,6 @@ class JavaUtils:
                 url = v["url"]
                 ver_json = HTTPUtils.get_json(url, timeout=8)
                 if ver_json:
-                    # 優先檢查 javaVersion 結構
                     java_info = ver_json.get("javaVersion")
                     if java_info and "majorVersion" in java_info:
                         return int(java_info["majorVersion"])
@@ -105,7 +206,7 @@ class JavaUtils:
                     if java_info2 and "major" in java_info2:
                         return int(java_info2["major"])
                     json_str = PathUtils.to_json_str(ver_json)
-                    m = re.search(r'"major(?:Version)?"\s*:\s*(\d+)', json_str)
+                    m = re.search('"major(?:Version)?"\\s*:\\s*(\\d+)', json_str)
                     if m:
                         return int(m.group(1))
                 raise ValueError(f"找不到 majorVersion，url: {url}")
@@ -114,80 +215,21 @@ class JavaUtils:
     @staticmethod
     def get_all_local_java_candidates() -> list:
         """返回所有可用的 javaw.exe 路徑及其主要版本號列表"""
-        search_paths = set()
+        with JavaUtils._java_cache_lock:
+            if JavaUtils._cached_java_candidates:
+                return list(JavaUtils._cached_java_candidates)
 
-        # 1.常見路徑搜尋
-        for base_str in JavaUtils.COMMON_JAVA_PATHS:
-            base = Path(base_str)
-            if base.exists():
-                for subdir in base.iterdir():
-                    if subdir.is_dir():
-                        search_paths.add(str(subdir / "bin"))
+        cached_candidates = JavaUtils._load_java_candidates_from_cache()
+        if cached_candidates:
+            with JavaUtils._java_cache_lock:
+                JavaUtils._cached_java_candidates = list(cached_candidates)
+            logger.debug(f"使用快取的 Java 偵測結果：{len(cached_candidates)} 筆")
+            return cached_candidates
 
-        # 2.JAVA_HOME 環境變數
-        for var in JavaUtils.ENV_VARS:
-            val = os.environ.get(var)
-            if val:
-                for p in val.split(";"):
-                    java_bin = Path(p) / "bin"
-                    search_paths.add(str(java_bin))
-
-        # 3.PATH 環境變數中的 Java 路徑（優化：只掃描 PATH 而非所有環境變數）
-        try:
-            path_env = os.environ.get("PATH", "")
-            if path_env:
-                for path_str in path_env.split(os.pathsep):
-                    if "java" in path_str.lower():
-                        path = Path(path_str)
-                        # 判斷是否已經在 bin 目錄
-                        javaw_path = path / "javaw.exe" if path.name == "bin" else path / "bin" / "javaw.exe"
-                        if javaw_path.is_file():
-                            search_paths.add(str(javaw_path.parent))
-        except Exception as e:
-            logger.exception(f"PATH 環境變數尋找 java 失敗：{e}")
-
-        # 4.where javaw 檢查
-        candidates: list[tuple[str, int]] = []
-        try:
-            where_path = PathUtils.find_executable("where")
-            if not where_path:
-                return candidates
-
-            result = SubprocessUtils.run_checked(
-                [where_path, "javaw"],
-                stdin=SubprocessUtils.DEVNULL,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                for java_path_str in (result.stdout or "").strip().splitlines():
-                    java_path = Path(java_path_str)
-                    if java_path.name.lower() == "javaw.exe":
-                        major = JavaUtils.get_java_version(str(java_path))
-                        if major:
-                            candidates.append((str(java_path.resolve()), major))
-        except Exception as e:
-            logger.exception(f"搜尋 Java 失敗: {e}")
-
-        # 5.搜尋所有目錄下的 javaw.exe
-        for p_str in search_paths:
-            search_path_obj = Path(p_str)
-            javaw_exe = search_path_obj / "javaw.exe"
-            if javaw_exe.exists():
-                major = JavaUtils.get_java_version(str(javaw_exe))
-                if major:
-                    candidates.append((str(javaw_exe.resolve()), major))
-
-        # 去重並按版本排序
-        seen = set()
-        final_results = []
-        for c_path, c_major in candidates:
-            if (c_path, c_major) not in seen:
-                seen.add((c_path, c_major))
-                final_results.append((c_path, c_major))
-
-        final_results.sort(key=lambda x: x[1])
+        final_results = JavaUtils._scan_and_cache_local_java_candidates()
+        if final_results:
+            with JavaUtils._java_cache_lock:
+                JavaUtils._cached_java_candidates = list(final_results)
         logger.debug(f"找到 {len(final_results)} 個 Java 執行檔選擇：")
         for r_path, r_major in final_results:
             logger.debug(f"  {r_path} -> {r_major}")
@@ -202,7 +244,6 @@ class JavaUtils:
             if major == required_major:
                 return path
         if ask_download:
-            # 找不到則詢問是否自動下載
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
             res = UIUtils.ask_yes_no_cancel(
                 "Java 未找到",
@@ -213,7 +254,7 @@ class JavaUtils:
             if res:
                 try:
                     JavaDownloader.install_java_with_winget(required_major)
-                    # 重新搜尋
+                    JavaUtils.refresh_java_candidates_cache()
                     candidates = JavaUtils.get_all_local_java_candidates()
                     for path, major in candidates:
                         if major == required_major:
@@ -233,7 +274,7 @@ class JavaUtils:
             else:
                 UIUtils.show_info(
                     "請手動下載 Java",
-                    "請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK 17/21 等。",
+                    f"請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等。",
                     topmost=True,
                 )
         return None

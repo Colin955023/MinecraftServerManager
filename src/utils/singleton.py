@@ -5,14 +5,33 @@
 
 from __future__ import annotations
 
+import threading
 from typing import ClassVar, cast
 
 
 class Singleton:
     _instance: ClassVar[object | None] = None
     _initialized: ClassVar[bool] = False
+    _instance_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        cls._instance = None
+        cls._initialized = False
+        cls._instance_lock = threading.Lock()
+        original_init = cls.__init__
+
+        def guarded_init(self, *args: object, **kwargs: object) -> None:
+            with cls._instance_lock:
+                if getattr(self, "_initialized", False):
+                    return
+                original_init(self, *args, **kwargs)
+                self._initialized = True
+
+        cls.__init__ = guarded_init  # type: ignore[assignment]
 
     def __new__(cls, *_args: object, **_kwargs: object) -> Singleton:
-        if getattr(cls, "_instance", None) is None:
-            cls._instance = super().__new__(cls)
+        with cls._instance_lock:
+            if getattr(cls, "_instance", None) is None:
+                cls._instance = super().__new__(cls)
         return cast("Singleton", cls._instance)

@@ -1,23 +1,23 @@
-#!/usr/bin/env python3
 """建立伺服器頁面
-負責建立新 Minecraft 伺服器的使用者介面
-Create Server Page
-Responsible for the user interface to create a new Minecraft server
+負責建立新 Minecraft 伺服器的使用者介面。
 """
 
+import concurrent.futures
 import queue
 import threading
 import tkinter as tk
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
-from typing import Any, Callable
-
+from typing import Any
 import customtkinter as ctk
-
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    get_shared_manager,
+    CancellationToken,
+    Colors,
     FontManager,
     FontSize,
     JavaUtils,
@@ -25,6 +25,7 @@ from ..utils import (
     Sizes,
     SystemUtils,
     UIUtils,
+    record_and_mark,
     get_logger,
 )
 from . import CustomDropdown
@@ -32,7 +33,6 @@ from . import CustomDropdown
 logger = get_logger().bind(component="CreateServerFrame")
 
 
-# ====== 主要 UI Frame 類別 ======
 class CreateServerFrame(ctk.CTkFrame):
     """建立伺服器頁面"""
 
@@ -42,9 +42,10 @@ class CreateServerFrame(ctk.CTkFrame):
         try:
             return SystemUtils.get_total_memory_mb()
         except Exception as e:
+            with __import__("contextlib").suppress(Exception):
+                record_and_mark(e, marker_path=Path(__file__), reason="get_system_memory_failed")
             logger.bind(component="").error(
-                f"無法獲取系統記憶體資訊: {e}\n{traceback.format_exc()}",
-                "CreateServerFrame",
+                f"無法獲取系統記憶體資訊: {e}\n{traceback.format_exc()}", "CreateServerFrame"
             )
             UIUtils.show_error("錯誤", f"無法獲取系統記憶體資訊: {e}", topmost=True)
             return 0
@@ -57,21 +58,19 @@ class CreateServerFrame(ctk.CTkFrame):
             if not max_memory_str:
                 self.memory_warning_label.configure(text="")
                 return
-
             max_memory = int(max_memory_str)
             min_memory = int(min_memory_str)
             system_memory = self.get_system_memory_mb()
             half_system_memory = system_memory // 2
-
             if (max_memory > system_memory or min_memory > system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=("red", "red"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
             elif (max_memory > half_system_memory or min_memory > half_system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統記憶體的一半 ({half_system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=("#b45309", "#d97706"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_WARNING)
             elif min_memory > max_memory:
                 warning_text = "⚠️ 警告：最小記憶體必須小於最大記憶體"
-                self.memory_warning_label.configure(text=warning_text, text_color=("red", "red"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
             else:
                 self.memory_warning_label.configure(text="")
         except ValueError:
@@ -79,13 +78,12 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.memory_warning_label.configure(text="")
             else:
                 self.memory_warning_label.configure(
-                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=("red", "red")
+                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=Colors.TEXT_ERROR
                 )
         except Exception as e:
-            logger.bind(component="").error(
-                f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}",
-                "CreateServerFrame",
-            )
+            with __import__("contextlib").suppress(Exception):
+                record_and_mark(e, marker_path=Path(__file__), reason="update_memory_warning_failed")
+            logger.bind(component="").error(f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame")
             UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.winfo_toplevel())
 
     def create_java_path_field(self, parent, row) -> None:
@@ -94,9 +92,8 @@ class CreateServerFrame(ctk.CTkFrame):
             parent,
             text="Java 執行檔路徑 (可選):",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=row, column=0, sticky="w", pady=5)
-
         self.java_path_var = tk.StringVar(value="")
         java_path_entry = ctk.CTkEntry(
             parent,
@@ -108,8 +105,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
         def browse_java():
             path = filedialog.askopenfilename(
-                title="選擇 javaw.exe",
-                filetypes=[("Java 執行檔", "javaw.exe"), ("所有檔案", "*")],
+                title="選擇 javaw.exe", filetypes=[("Java 執行檔", "javaw.exe"), ("所有檔案", "*")]
             )
             if path:
                 self.java_path_var.set(path)
@@ -117,9 +113,7 @@ class CreateServerFrame(ctk.CTkFrame):
         browse_btn = UIUtils.create_styled_button(parent, "瀏覽...", browse_java, "small")
         browse_btn.grid(row=row, column=2, padx=(8, 0), pady=5)
 
-        # 自動偵測按鈕
         def auto_detect():
-            # 取得目前 UI 選擇的 mc_version、loader_type、loader_version
             mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
@@ -132,7 +126,6 @@ class CreateServerFrame(ctk.CTkFrame):
         auto_btn = UIUtils.create_styled_button(parent, "自動偵測", auto_detect, "small")
         auto_btn.grid(row=row, column=3, padx=(8, 0), pady=5)
 
-    # === 1. 初始化與 UI 建立 ===
     def __init__(
         self,
         parent,
@@ -149,245 +142,198 @@ class CreateServerFrame(ctk.CTkFrame):
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
-
-        # 初始化 UI 更新佇列
+        self._create_server_progress_job = None
+        self._create_server_success_job = None
+        self._create_server_error_job = None
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
+        self.bg_tasks = get_shared_manager()
         UIUtils.start_ui_queue_pump(self, self.ui_queue)
-
         self.create_widgets()
-
-        # 建立元件後立即開始預載入版本資訊並顯示載入狀態
         self.preload_version_data()
+
+    def _schedule_ui_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
+        """透過主執行緒佇列建立 debounce 排程。"""
+
+        def _schedule() -> None:
+            if not self.winfo_exists():
+                return
+            UIUtils.schedule_debounce(self, job_attr, delay_ms, callback, owner=self)
+
+        self.ui_queue.put(_schedule)
+
+    def _cancel_create_server_jobs(self) -> None:
+        """取消建立伺服器流程相關的待執行 UI 工作。"""
+        for job_attr in ("_create_server_progress_job", "_create_server_success_job", "_create_server_error_job"):
+            UIUtils.cancel_scheduled_job(self, job_attr, owner=self)
 
     def create_widgets(self) -> None:
         """建立介面元件"""
         main_container = ctk.CTkFrame(self, fg_color="transparent")
         main_container.pack(fill="both", expand=True, padx=20, pady=15)
-
         title_label = ctk.CTkLabel(
             main_container,
             text="建立新伺服器",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-            text_color=("#111827", "#f3f4f6"),
+            text_color=Colors.TEXT_HEADING,
         )
         title_label.pack(pady=(0, 15))
-
-        # EULA 警告框架
-        eula_frame = ctk.CTkFrame(main_container, fg_color=("#fffbe6", "#2d2a1f"))
+        eula_frame = ctk.CTkFrame(main_container, fg_color=Colors.BG_ALERT)
         eula_frame.pack(pady=(0, 12), fill="x")
         eula_frame.grid_columnconfigure(1, weight=1)
-
         eula_icon = ctk.CTkLabel(
             eula_frame,
             text="⚠️",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            text_color="#d97706",
+            text_color=Colors.BUTTON_WARNING_HOVER,
         )
         eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(8, 4), pady=6)
-
         eula_link = ctk.CTkLabel(
             eula_frame,
             text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
-            font=ctk.CTkFont(
-                family="Microsoft JhengHei",
-                size=int(14 * FontManager.get_scale_factor()),
-                weight="bold",
-                underline=True,
-            ),
-            text_color="#b45309",
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True),
+            text_color=Colors.TEXT_WARNING,
             cursor="hand2",
         )
         eula_link.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=6)
-        eula_link.bind(
-            "<Button-1>",
-            lambda _e: UIUtils.open_external("https://aka.ms/MinecraftEULA"),
-        )
-
-        # 內容容器
+        eula_link.bind("<Button-1>", lambda _e: UIUtils.open_external("https://aka.ms/MinecraftEULA"))
         content_container = ctk.CTkFrame(main_container, fg_color="transparent")
         content_container.pack(fill="x", expand=False, pady=(0, 8))
-
-        # 建立表單
         self.create_form(content_container)
-
-        # 建立按鈕
         self.create_buttons(main_container)
 
     def create_form(self, parent) -> None:
         """建立表單"""
         form_frame = ctk.CTkFrame(parent)
         form_frame.pack(fill="x", pady=(0, 15))
-
         content_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
-
         self.create_field(content_frame, 0, "伺服器名稱:", "我的伺服器", "server_name")
         self.create_java_path_field(content_frame, 1)
-        # 建立模組載入器下拉選單並添加變更事件
         ctk.CTkLabel(
             content_frame,
             text="模組載入器:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=2, column=0, sticky="w", pady=5)
-
         self.loader_type_var = tk.StringVar(value="Vanilla")
         self.loader_type_combo = CustomDropdown(
             content_frame,
             variable=self.loader_type_var,
             values=["Vanilla", "Fabric", "Forge"],
-            # 移除 command 參數，避免與 trace_add 重複觸發
             width=Sizes.DROPDOWN_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
         self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(15, 0), pady=5)
-
-        # 添加變更事件處理器，當載入器類型改變時更新載入器版本選單
         self.loader_type_var.trace_add("write", lambda *_args: self.update_server_config_ui())
-
-        # 載入器版本下拉選單與 reload 按鈕
         loader_version_row = 3
         ctk.CTkLabel(
             content_frame,
             text="載入器版本:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=loader_version_row, column=0, sticky="w", pady=5)
-
-        # 載入器版本下拉選單容器
         loader_version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         loader_version_frame.grid(row=loader_version_row, column=1, sticky="ew", padx=(15, 0), pady=5)
-
         self.loader_version_var = tk.StringVar(value="無")
         self.loader_version_combo = CustomDropdown(
             loader_version_frame,
             variable=self.loader_version_var,
             values=["無"],
             width=Sizes.DROPDOWN_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="disabled",
         )
         self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        # 載入器 reload 按鈕
         loader_reload_btn = UIUtils.create_styled_button(
-            loader_version_frame,
-            text="⟳",
-            command=self.reload_loader_versions,
-            button_type="small",
+            loader_version_frame, text="⟳", command=self.reload_loader_versions, button_type="small"
         )
         loader_reload_btn.pack(side="left")
-
         version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         version_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
-
         ctk.CTkLabel(
             version_frame,
             text="Minecraft 版本:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).pack(anchor="w")
-        # Minecraft 版本下拉選單與滑桿
         mc_version_frame = ctk.CTkFrame(version_frame, fg_color="transparent")
         mc_version_frame.pack(fill="x")
-
-        # 版本下拉選單
         self.mc_version_var = tk.StringVar()
         self.mc_version_combo = CustomDropdown(
             mc_version_frame,
             variable=self.mc_version_var,
             values=["載入中..."],
             command=self.update_server_config_ui,
-            width=200,
+            width=Sizes.DROPDOWN_COMPACT_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
         self.mc_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
         mc_reload_btn = UIUtils.create_styled_button(
-            mc_version_frame,
-            text="⟳",
-            command=self.reload_mc_versions,
-            button_type="small",
+            mc_version_frame, text="⟳", command=self.reload_mc_versions, button_type="small"
         )
         mc_reload_btn.pack(side="left")
-        # 記憶體設定區域
         memory_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
         memory_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=10)
-
         ctk.CTkLabel(
             memory_frame,
             text="記憶體設定 (MB):",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).pack(anchor="w")
-
         memory_input_frame = ctk.CTkFrame(memory_frame, fg_color="transparent")
         memory_input_frame.pack(fill="x", pady=(5, 0))
-
-        # 最小記憶體
         min_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
         min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, 5))
-
         ctk.CTkLabel(
             min_memory_frame,
             text="最小記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
+            text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
-
         self.min_memory_var = tk.StringVar(value="1024")
         self.min_memory_entry = ctk.CTkEntry(
-            min_memory_frame,
-            textvariable=self.min_memory_var,
-            font=FontManager.get_font(size=FontSize.MEDIUM),
+            min_memory_frame, textvariable=self.min_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
         )
         self.min_memory_entry.pack(fill="x", pady=(2, 0))
-
-        # 最大記憶體
         max_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
         max_memory_frame.pack(side="left", fill="x", expand=True, padx=(5, 0))
-
         ctk.CTkLabel(
             max_memory_frame,
             text="最大記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
+            text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
-
         self.max_memory_var = tk.StringVar(value="2048")
         self.max_memory_entry = ctk.CTkEntry(
-            max_memory_frame,
-            textvariable=self.max_memory_var,
-            font=FontManager.get_font(size=FontSize.MEDIUM),
+            max_memory_frame, textvariable=self.max_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
         )
         self.max_memory_entry.pack(fill="x", pady=(2, 0))
-
-        # 綁定記憶體輸入變更事件
         self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
         self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-
-        # 記憶體提示
         memory_tip = ctk.CTkLabel(
             memory_frame,
             text="最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
-            wraplength=900,
+            text_color=Colors.TEXT_MUTED,
+            wraplength=Sizes.WRAP_LENGTH_WIDE,
             justify="left",
         )
         memory_tip.pack(anchor="w", pady=(5, 0))
-
-        # 記憶體警告標籤
         self.memory_warning_label = ctk.CTkLabel(
             memory_frame,
             text="",
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
-            text_color=("red", "red"),
-            wraplength=400,
+            text_color=Colors.TEXT_ERROR,
+            wraplength=Sizes.WRAP_LENGTH_MEDIUM,
         )
         self.memory_warning_label.pack(anchor="w", pady=(3, 0))
         content_frame.columnconfigure(1, weight=1)
 
-    # === 載入狀態管理 ===
     def _update_combo_state(self, combo, var=None, message="載入中...", state="disabled") -> None:
         """統一更新下拉選單狀態"""
         combo.configure(values=[message])
@@ -396,12 +342,7 @@ class CreateServerFrame(ctk.CTkFrame):
             var.set(message)
         combo.configure(state=state)
 
-    def _run_background_task(
-        self,
-        task_func: Callable,
-        error_msg: str,
-        error_callback: Callable | None = None,
-    ) -> None:
+    def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:
         """執行背景任務並處理錯誤"""
         UIUtils.run_in_daemon_thread(
             task_func,
@@ -418,26 +359,20 @@ class CreateServerFrame(ctk.CTkFrame):
         self._update_combo_state(self.loader_version_combo, self.loader_version_var, "等待 MC 版本選擇...")
 
         def task():
-            # 載入 Minecraft 版本
             versions = self.version_manager.get_versions()
 
             def update_mc():
                 self.update_versions(versions)
-                self._update_combo_state(
-                    self.loader_version_combo,
-                    self.loader_version_var,
-                    "請先選擇載入器類型...",
-                )
+                self._update_combo_state(self.loader_version_combo, self.loader_version_var, "請先選擇載入器類型...")
 
             self.ui_queue.put(update_mc)
-
-            # 預載入載入器版本
             try:
                 self.loader_manager.preload_loader_versions()
             except Exception as e:
+                with __import__("contextlib").suppress(Exception):
+                    record_and_mark(e, marker_path=Path(__file__), reason="preload_loader_versions_failed")
                 logger.bind(component="").error(
-                    f"預載入載入器版本失敗: {e}\n{traceback.format_exc()}",
-                    "CreateServerFrame",
+                    f"預載入載入器版本失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
                 )
 
         def on_error():
@@ -452,14 +387,11 @@ class CreateServerFrame(ctk.CTkFrame):
 
         def task():
             versions = self.version_manager.fetch_versions()
-
             self.ui_queue.put(lambda: self.update_versions(versions))
             self.ui_queue.put(lambda: self.mc_version_combo.configure(state="readonly"))
 
         self._run_background_task(
-            task,
-            "載入 MC 版本失敗",
-            lambda: self._update_combo_state(self.mc_version_combo, message="載入失敗"),
+            task, "載入 MC 版本失敗", lambda: self._update_combo_state(self.mc_version_combo, message="載入失敗")
         )
 
     def reload_loader_versions(self) -> None:
@@ -468,13 +400,11 @@ class CreateServerFrame(ctk.CTkFrame):
         mc_version = self.mc_version_var.get()
         if not loader_type or not mc_version or loader_type == "Vanilla":
             return
-
         self._update_combo_state(self.loader_version_combo, self.loader_version_var)
 
         def task():
             self.loader_manager.clear_cache_file()
             self.loader_manager.preload_loader_versions()
-
             versions = []
             if loader_type.lower():
                 versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
@@ -491,7 +421,6 @@ class CreateServerFrame(ctk.CTkFrame):
                             v_names.append(v)
                         else:
                             v_names.append(str(v))
-
                     self.loader_version_combo.configure(values=v_names)
                     if v_names:
                         self.loader_version_combo.set(v_names[0])
@@ -514,50 +443,39 @@ class CreateServerFrame(ctk.CTkFrame):
             parent,
             text=label_text,
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=row, column=0, sticky="w", pady=5)
-
         var = tk.StringVar(value=default_value)
         setattr(self, f"{var_name}_var", var)
-
         entry = ctk.CTkEntry(
-            parent,
-            textvariable=var,
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=Sizes.INPUT_WIDTH,
+            parent, textvariable=var, font=FontManager.get_font(size=FontSize.MEDIUM), width=Sizes.INPUT_WIDTH
         )
         entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
         setattr(self, f"{var_name}_entry", entry)
-        return var, entry
+        return (var, entry)
 
     def create_buttons(self, parent) -> None:
         """建立按鈕"""
-        # 按鈕容器
         button_container = ctk.CTkFrame(parent, fg_color="transparent")
         button_container.pack(fill="x", side="bottom")
-
-        # 按鈕框架
         button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
         button_frame.pack(anchor="e")
-
-        # 使用統一的按鈕建立方法
         self.create_button = UIUtils.create_styled_button(
             button_frame,
             text="建立伺服器",
             command=self.create_server,
             button_type="primary",
-            width=140,
-            height=40,
+            width=Sizes.BUTTON_WIDTH_PRIMARY,
+            height=Sizes.BUTTON_HEIGHT_LARGE,
         )
         self.create_button.pack(side="left", padx=(0, 15))
-
         reset_button = UIUtils.create_styled_button(
             button_frame,
             text="重設表單",
             command=self.reset_form,
             button_type="secondary",
-            width=120,
-            height=40,
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.BUTTON_HEIGHT_LARGE,
         )
         reset_button.pack(side="left")
 
@@ -569,11 +487,10 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.server_name_var.set(latest_version)
             else:
                 self.server_name_var.set("我的伺服器")
-            self.java_path_var.set("")  # 清空 Java 路徑
+            self.java_path_var.set("")
             self.loader_type_var.set("Vanilla")
             self.loader_version_var.set("無")
             self.loader_version_combo.configure(values=["無"])
-            # CustomDropdown 在設定 "無" 時會自動處理狀態
             if hasattr(self, "mc_version_combo") and self.mc_version_combo.cget("values"):
                 version_list = list(self.mc_version_combo.cget("values"))
                 if version_list:
@@ -583,21 +500,18 @@ class CreateServerFrame(ctk.CTkFrame):
             self.max_memory_var.set("2048")
             UIUtils.show_info("重設完成", "表單已重設為預設值", self.winfo_toplevel())
         except Exception as e:
+            with __import__("contextlib").suppress(Exception):
+                record_and_mark(e, marker_path=Path(__file__), reason="reset_form_failed")
             logger.error(f"重設表單失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.winfo_toplevel())
 
-    # === 2. 伺服器版本/載入器相關 ===
     def update_versions(self, versions: list) -> None:
         """更新版本列表，並預設選擇最新版本"""
         self.versions = versions
         self.release_versions = versions
-
-        # 更新版本選項
         self.update_version_list()
-        # 設定預設伺服器名稱為最新版本號
         if self.release_versions:
             latest_version = self.release_versions[0].get("id")
-            # 只有在當前名稱是預設值時才更新
             if self.server_name_var.get() in ["我的伺服器", ""]:
                 self.server_name_var.set(latest_version)
 
@@ -607,25 +521,40 @@ class CreateServerFrame(ctk.CTkFrame):
             self.mc_version_combo.configure(values=["載入中..."])
             self.mc_version_var.set("載入中...")
             return
-
-        # 只顯示穩定版且 server_url 不為 null 的版本
         display_versions = [v for v in self.release_versions if v.get("server_url")]
-
         if not display_versions:
             self.mc_version_combo.configure(values=["無可用版本"], state="disabled")
             self.mc_version_var.set("無可用版本")
             return
-
         version_names = [v.get("id") for v in display_versions]
-
-        self.mc_version_combo.configure(values=version_names, state="readonly")  # 啟用下拉選單
-
-        # 從第一項下拉選單開始，而非最新版本
+        self.mc_version_combo.configure(values=version_names, state="readonly")
         if display_versions:
             first_version = display_versions[0].get("id")
             self.mc_version_var.set(first_version)
-
         self.update_server_config_ui()
+
+    @staticmethod
+    def _compose_server_name(loader_type: str, mc_version: str, suffix: str = "") -> str:
+        """依載入器類型與版本組合標準伺服器名稱。"""
+        base_name = f"{mc_version}{suffix}"
+        if loader_type in ("Fabric", "Forge"):
+            return f"{loader_type} {base_name}"
+        return base_name
+
+    @staticmethod
+    def _extract_server_name_suffix(name: str, version_candidates: tuple[str, ...]) -> str | None:
+        """解析「[載入器前綴] + 版本 + 自訂尾字」中的尾字。"""
+        normalized = name.strip()
+        if not normalized:
+            return None
+        for prefix in ("Fabric ", "Forge "):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix) :]
+                break
+        for version in version_candidates:
+            if version and normalized.startswith(version):
+                return normalized[len(version) :]
+        return None
 
     def update_server_config_ui(self, _event=None) -> None:
         """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單"""
@@ -635,52 +564,39 @@ class CreateServerFrame(ctk.CTkFrame):
         auto_names = [
             "我的伺服器",
             "",
-            f"Fabric {mc_version}",
-            f"Forge {mc_version}",
-            f"{mc_version}",
+            self._compose_server_name("Fabric", mc_version),
+            self._compose_server_name("Forge", mc_version),
+            self._compose_server_name("Vanilla", mc_version),
         ]
-        # 取得舊的 Minecraft 版本（用於自動更新伺服器名稱）
         old_version = getattr(self, "old_mc_version", None)
-        # 記錄目前選擇的版本，供下次變更時使用
         self.old_mc_version = mc_version
-        # 自動命名伺服器名稱
         if name in auto_names:
-            if loader_type == "Vanilla":
-                self.server_name_var.set(f"{mc_version}")
-            elif loader_type == "Fabric":
-                self.server_name_var.set(f"Fabric {mc_version}")
-            elif loader_type == "Forge":
-                self.server_name_var.set(f"Forge {mc_version}")
-        # 若 server_name 包含 old_version，則自動替換為 mc_version
-        elif old_version and (old_version in name):
+            self.server_name_var.set(self._compose_server_name(loader_type, mc_version))
+        else:
+            version_candidates = tuple(v for v in (old_version, mc_version) if v)
+            suffix = self._extract_server_name_suffix(name, version_candidates)
+            if suffix is not None:
+                self.server_name_var.set(self._compose_server_name(loader_type, mc_version, suffix))
+        if old_version and old_version in name and (name == self.server_name_var.get()):
             self.server_name_var.set(name.replace(old_version, mc_version))
-        # 載入器版本選單狀態與載入
         if loader_type == "Vanilla":
             self.loader_version_combo.configure(values=["無"], state="disabled")
             self.loader_version_combo.set("無")
-            self.loader_version_var.set("無")  # 同時更新變數
-        else:
-            # 確保 fabric/forge 切換時載入器版本選單變成可用狀態
-            # 先設定為可用狀態，讓使用者看到載入中的訊息
-            self.loader_version_combo.configure(state="readonly")
-            # 防止重複載入
-            if not mc_version:
-                return
-            current_key = f"{loader_type}_{mc_version}"
-            if hasattr(self, "_loading_key") and self._loading_key == current_key:
-                return
-            self._loading_key = current_key
-            # 在背景執行緒中載入載入器版本
-            threading.Thread(
-                target=self.load_loader_versions,
-                args=(loader_type, mc_version),
-                daemon=True,
-            ).start()
+            self.loader_version_var.set("無")
+            return
+        self.loader_version_combo.configure(state="readonly")
+        if not mc_version:
+            return
+        current_key = f"{loader_type}_{mc_version}"
+        if hasattr(self, "_loading_key") and self._loading_key == current_key:
+            return
+        self._loading_key = current_key
+        threading.Thread(target=self.load_loader_versions, args=(loader_type, mc_version), daemon=True).start()
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
         """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）"""
         try:
-            # 先設定載入狀態
+
             def set_loading():
                 if self.loader_version_combo.winfo_exists():
                     self._update_combo_state(
@@ -691,64 +607,50 @@ class CreateServerFrame(ctk.CTkFrame):
                     )
 
             self.ui_queue.put(set_loading)
-
             versions = []
             versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
 
-            # 更新 UI
             def update_ui():
                 try:
                     if not self.loader_version_combo.winfo_exists():
                         return
-                    # 僅當 loader_type 和 mc_version 沒被快速切換時才更新
                     current_type = self.loader_type_var.get()
                     current_version = self.mc_version_var.get()
                     if loader_type != current_type or mc_version != current_version:
-                        # 已被快速切換，這次結果不套用
                         return
-
                     if versions:
                         version_names = [v.version for v in versions]
                         self.loader_version_combo.configure(values=version_names)
                         self.loader_version_combo.configure(state="readonly")
-                        # 預設選擇最新版本（第一個）
                         if version_names:
                             self.loader_version_combo.set(version_names[0])
-                            self.loader_version_var.set(version_names[0])  # 同時更新變數
+                            self.loader_version_var.set(version_names[0])
                     else:
                         self._update_combo_state(
-                            self.loader_version_combo,
-                            self.loader_version_var,
-                            "無可用版本",
-                            "disabled",
+                            self.loader_version_combo, self.loader_version_var, "無可用版本", "disabled"
                         )
-
-                    # 清除載入標記
                     if hasattr(self, "_loading_key"):
                         delattr(self, "_loading_key")
                 except Exception as e:
+                    with __import__("contextlib").suppress(Exception):
+                        record_and_mark(e, marker_path=Path(__file__), reason="update_loader_versions_ui_failed")
                     logger.bind(component="").error(
-                        f"更新載入器版本 UI 失敗: {e}\n{traceback.format_exc()}",
-                        "CreateServerFrame",
+                        f"更新載入器版本 UI 失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
                     )
                     if hasattr(self, "_loading_key"):
                         delattr(self, "_loading_key")
 
             self.ui_queue.put(update_ui)
         except Exception as e:
-            logger.bind(component="").error(
-                f"載入載入器版本失敗: {e}\n{traceback.format_exc()}",
-                "CreateServerFrame",
-            )
+            with __import__("contextlib").suppress(Exception):
+                record_and_mark(e, marker_path=Path(__file__), reason="load_loader_versions_failed")
+            logger.bind(component="").error(f"載入載入器版本失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame")
 
             def handle_error():
                 try:
                     if self.loader_version_combo.winfo_exists():
                         self._update_combo_state(
-                            self.loader_version_combo,
-                            self.loader_version_var,
-                            "載入失敗",
-                            "disabled",
+                            self.loader_version_combo, self.loader_version_var, "載入失敗", "disabled"
                         )
                 except Exception as e2:
                     logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e2}")
@@ -759,33 +661,28 @@ class CreateServerFrame(ctk.CTkFrame):
 
     def validate_form(self) -> bool:
         """驗證表單"""
-        # 檢查伺服器名稱
         server_name = self.server_name_var.get().strip()
         if not server_name:
             UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.winfo_toplevel())
             return False
-        # 驗證名稱不可重複（對比 servers 目錄下所有資料夾名稱）
         servers_root = self.server_manager.servers_root
         if (servers_root / server_name).exists():
             UIUtils.show_error(
-                "名稱重複",
-                f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。",
-                self.winfo_toplevel(),
+                "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.winfo_toplevel()
             )
             return False
-        # 檢查名稱是否已存在於 config
-        if self.server_manager.server_exists(server_name) and not UIUtils.ask_yes_no_cancel(
-            "名稱衝突",
-            f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
-            self.winfo_toplevel(),
-            show_cancel=False,
+        if self.server_manager.server_exists(server_name) and (
+            not UIUtils.ask_yes_no_cancel(
+                "名稱衝突",
+                f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
+                self.winfo_toplevel(),
+                show_cancel=False,
+            )
         ):
             return False
-        # 檢查 Minecraft 版本
         if not self.mc_version_var.get():
             UIUtils.show_error("錯誤", "請選擇 Minecraft 版本", self.winfo_toplevel())
             return False
-        # 檢查最大記憶體
         max_memory = self.max_memory_var.get().strip()
         if not max_memory:
             UIUtils.show_error("錯誤", "請輸入最大記憶體", self.winfo_toplevel())
@@ -795,22 +692,18 @@ class CreateServerFrame(ctk.CTkFrame):
             if max_mem_int < 1024:
                 UIUtils.show_error("錯誤", "最大記憶體不能少於 1024MB", self.winfo_toplevel())
                 return False
-            # 檢查最大記憶體是否超過系統記憶體容量
             system_memory = self.get_system_memory_mb()
             if max_mem_int >= system_memory:
                 UIUtils.show_error(
                     "記憶體超出限制",
-                    f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n"
-                    f"已自動調整為 {system_memory - 1}MB",
+                    f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n已自動調整為 {system_memory - 1}MB",
                     self.winfo_toplevel(),
                 )
-                # 自動調整記憶體設定到 system_memory-1
                 self.max_memory_var.set(str(system_memory - 1))
                 return False
         except ValueError:
             UIUtils.show_error("錯誤", "最大記憶體必須是數字", self.winfo_toplevel())
             return False
-        # 檢查最小記憶體（如果有設定）
         min_memory = self.min_memory_var.get().strip()
         if min_memory:
             try:
@@ -823,15 +716,12 @@ class CreateServerFrame(ctk.CTkFrame):
                 return False
         return True
 
-    # === 4. 伺服器建立主流程 ===
     def create_server(self):
         """建立伺服器"""
         if not self.validate_form():
             return
-        # 準備配置
         min_memory = self.min_memory_var.get().strip()
         max_memory = self.max_memory_var.get().strip()
-        # 自動命名伺服器名稱
         name = self.server_name_var.get().strip()
         loader_type = self.loader_type_var.get()
         mc_version = self.mc_version_var.get()
@@ -847,36 +737,31 @@ class CreateServerFrame(ctk.CTkFrame):
             name=name,
             minecraft_version=mc_version,
             loader_type=loader_type,
-            loader_version=(self.loader_version_var.get() if loader_type != "Vanilla" else ""),
+            loader_version=self.loader_version_var.get() if loader_type != "Vanilla" else "",
             memory_max_mb=int(max_memory),
             memory_min_mb=int(min_memory) if min_memory else None,
-            path="",  # 會在 ServerManager 中設定
-            eula_accepted=True,  # 總是自動接受 EULA
+            path="",
+            eula_accepted=True,
         )
-        # 在背景執行緒中建立伺服器
         UIUtils.run_async(self.create_server_async, config)
 
     def create_server_async(self, config: ServerConfig) -> None:
         """非同步建立伺服器"""
-        parent_window = self.winfo_toplevel()  # 捕獲父視窗引用
+        parent_window = self.winfo_toplevel()
         progress_dialog = None
         progress_ready = threading.Event()
         try:
-            # 建立進度對話框
+
             def create_progress():
                 nonlocal progress_dialog
                 progress_dialog = ProgressDialog(parent_window, "正在建立伺服器")
                 progress_ready.set()
 
-            self.after(0, create_progress)
-            # 等待進度對話框建立（避免 busy-wait）
+            self._schedule_ui_job("_create_server_progress_job", 0, create_progress)
             if not progress_ready.wait(timeout=10):
                 raise Exception("建立進度對話框超時")
-
             if progress_dialog is None:
                 raise Exception("建立進度對話框失敗")
-
-            # 步驟 1：建立伺服器目錄結構與初始化（含 server.properties）
             if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):
                 return
             success = self.server_manager.create_server(config)
@@ -884,7 +769,6 @@ class CreateServerFrame(ctk.CTkFrame):
                 logger.error(f"建立伺服器基礎結構失敗 config: {config}")
                 progress_dialog.close()
                 raise Exception("建立伺服器基礎結構失敗")
-            # 檢查 config 欄位
             if not config.loader_type or config.loader_type == "unknown":
                 progress_dialog.close()
                 raise Exception(f"偵測失敗：loader_type 無法判斷，config={config}")
@@ -897,21 +781,29 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_dialog.close()
                 raise Exception(f"偵測失敗：loader_version 無法判斷，config={config}")
             server_path = Path(config.path)
-            # 步驟 2：下載伺服器核心檔案與載入器（統一處理）
             if not progress_dialog.update_progress(15, "下載伺服器核心檔案..."):
                 return
             try:
                 self.download_server_files(config, progress_dialog, server_path)
-                # 下載成功後重建啟動腳本，確保 server.jar 存在
                 self.server_manager.create_launch_script(config)
             except Exception as e:
+                with __import__("contextlib").suppress(Exception):
+                    record_and_mark(
+                        e,
+                        marker_path=Path(__file__),
+                        reason="download_server_files_failed",
+                        details={"config": repr(config)},
+                    )
                 logger.bind(component="").error(
-                    f"下載伺服器檔案失敗: {e}\n{traceback.format_exc()}",
-                    "CreateServerFrame",
+                    f"下載伺服器檔案失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
                 )
-                UIUtils.show_error("錯誤", f"下載伺服器檔案失敗: {e}", self.winfo_toplevel())
+                error_message = str(e)
+
+                def _show_download_error() -> None:
+                    UIUtils.show_error("錯誤", f"下載伺服器檔案失敗: {error_message}", self.winfo_toplevel())
+
+                self.ui_queue.put(_show_download_error)
                 raise
-            # 完成
             if not progress_dialog.update_progress(100, "伺服器建立完成！"):
                 return
 
@@ -919,12 +811,14 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_dialog.close()
                 self.callback(config)
 
-            # 給使用者短暫時間看到 100% 再關閉（不阻塞背景執行緒）
-            self.after(1000, on_success)
+            self._schedule_ui_job("_create_server_success_job", 1000, on_success)
         except Exception as error:
+            with __import__("contextlib").suppress(Exception):
+                record_and_mark(
+                    error, marker_path=Path(__file__), reason="create_server_failed", details={"config": repr(config)}
+                )
             logger.bind(component="").error(
-                f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}",
-                "CreateServerFrame",
+                f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}", "CreateServerFrame"
             )
 
             def on_error(error=error):
@@ -932,30 +826,30 @@ class CreateServerFrame(ctk.CTkFrame):
                     progress_dialog.close()
                 UIUtils.show_error("建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window)
 
-            self.after(0, on_error)
+            self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
     def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
         """下載伺服器檔案"""
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
-        parent_window = self.winfo_toplevel()  # 捕獲父視窗引用
+        parent_window = self.winfo_toplevel()
 
         def progress_callback(percent, status):
             progress_dialog.update_progress(percent, status)
 
-        # 在背景執行緒呼叫 loader_manager 下載
         result: list[bool | None] = [None]
-        cancel_flag = {"cancelled": False}
+        shared_cancel_token = CancellationToken()
 
-        def do_download():
+        def do_download(cancel_token: CancellationToken | None = None):
+            token = cancel_token or shared_cancel_token
             user_java_path = self.java_path_var.get().strip() or None
-
-            # 檢查參數 - 分解複雜條件以提高可讀性
             if not self._validate_download_parameters(loader_type, config):
-                UIUtils.show_error(
-                    "下載流程參數異常",
-                    f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
-                    topmost=True,
+                self.ui_queue.put(
+                    lambda: UIUtils.show_error(
+                        "下載流程參數異常",
+                        f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
+                        topmost=True,
+                    )
                 )
                 result[0] = False
                 return
@@ -965,43 +859,43 @@ class CreateServerFrame(ctk.CTkFrame):
                 config.loader_version,
                 download_path,
                 progress_callback,
-                cancel_flag,
+                token,
                 user_java_path,
                 parent_window,
             )
             result[0] = ok
 
-        t = threading.Thread(target=do_download)
-        t.start()
-        while t.is_alive():
+        future = self.bg_tasks.run(do_download, cancel_token=shared_cancel_token)
+        while not future.done():
             if progress_dialog.cancelled:
-                cancel_flag["cancelled"] = True
-            t.join(timeout=0.1)
+                with __import__("contextlib").suppress(Exception):
+                    shared_cancel_token.cancel()
+            try:
+                future.result(timeout=0.1)
+            except concurrent.futures.TimeoutError:
+                continue
         if result[0] is False:
-            msg = (
-                "伺服器下載失敗，參數如下：\n"
-                f"loader_type: {loader_type}\n"
-                f"minecraft_version: {config.minecraft_version}\n"
-                f"loader_version: {config.loader_version}\n"
-                f"download_path: {download_path}\n"
-                f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
-            )
-            UIUtils.show_error("下載失敗", msg, topmost=True)
+            msg = f"伺服器下載失敗，參數如下：\nloader_type: {loader_type}\nminecraft_version: {config.minecraft_version}\nloader_version: {config.loader_version}\ndownload_path: {download_path}\nuser_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
+
+            def _show_download_failed_message() -> None:
+                UIUtils.show_error("下載失敗", msg, topmost=True)
+
+            self.ui_queue.put(_show_download_failed_message)
             logger.bind(component="").error(
-                f"server_path: {server_path}\nconfig: {config}\n{traceback.format_exc()}",
-                "CreateServerFrame",
+                f"server_path: {server_path}\nconfig: {config}\n{traceback.format_exc()}", "CreateServerFrame"
             )
             raise Exception(msg)
 
     def _validate_download_parameters(self, loader_type: str, config) -> bool:
         """驗證下載參數"""
-        # 基本參數驗證
         if not loader_type or loader_type == "unknown":
             return False
-
         if not config.minecraft_version or config.minecraft_version == "unknown":
             return False
-
-        # 對於需要載入器版本的類型進行額外驗證
         requires_loader_version = loader_type in ["forge", "fabric"]
         return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
+
+    def destroy(self) -> None:
+        """銷毀頁面前先清理待執行排程工作。"""
+        self._cancel_create_server_jobs()
+        super().destroy()

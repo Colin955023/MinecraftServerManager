@@ -2,7 +2,7 @@
 ; 必須由 build_installer_nuitka.bat 傳入 /DAppVersion、/DAppName 與 /DAppId
 
 [Setup]
-AppId={{B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}}
+AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
@@ -15,7 +15,7 @@ DefaultDirName={localappdata}\Programs\MinecraftServerManager
 DefaultGroupName=Minecraft 伺服器管理器
 DisableProgramGroupPage=yes
 OutputDir=..\dist
-OutputBaseFilename={#AppId}-Setup-{#AppVersion}
+OutputBaseFilename={#AppName}-Setup-{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
@@ -26,15 +26,19 @@ UninstallDisplayIcon={app}\assets\icon.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 AppMutex=MinecraftServerManagerMutex
+CloseApplications=yes
+CloseApplicationsFilter=MinecraftServerManager.exe
+RestartApplications=no
+RestartIfNeededByRun=no
 LanguageDetectionMethod=locale
 SetupLogging=yes
 
 [Languages]
-Name: "chinesetraditional"; MessagesFile: "compiler:Languages\\ChineseTraditional.isl"
+Name: "chinesetraditional"; MessagesFile: "compiler:Default.isl,inno\\ChineseTraditional.isl"
 
 
 [Files]
-; 打包 Nuitka standalone (資料夾模式) 的輸出並排除常見開發檔案，並排除 user_settings.json（實際上不會有這個檔案）
+; 打包 Nuitka standalone (資料夾模式) 的輸出並排除常見開發檔案
 Source: "..\dist\MinecraftServerManager\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; \
 Excludes: "user_settings.json;__pycache__\*;*.pyc;*.pyo;*.pdb;*.map;*.log;.DS_Store;Thumbs.db;*.tmp;*.temp;.git*;.vs*;node_modules\*"
 
@@ -47,9 +51,6 @@ Name: "desktopicon"; Description: "在桌面建立捷徑"; GroupDescription: "�
 
 [Run]
 Filename: "{app}\MinecraftServerManager.exe"; Description: "安裝後立即執行"; Flags: nowait postinstall skipifsilent runasoriginaluser
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}"
 
 [Code]
 
@@ -64,14 +65,12 @@ begin
     P := ExpandConstant(TryPath + '\\.portable');
     if FileExists(P) then
     begin
-      Result := StartPath; // portable marker applies to the folder containing .portable
+      Result := TryPath;
       Exit;
     end;
-    // move up one directory
     if (TryPath = '\\') or (TryPath = '') then
       Break;
     TryPath := ExtractFileDir(TryPath);
-    // stop if we reached a drive root
     if (TryPath = ExtractFileDrive(TryPath) + ':') then
       Break;
   end;
@@ -100,24 +99,10 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   DataRoot, CacheDir, LogDir, SettingsPath: string;
-  ResultCode: Integer;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    try
-      if Exec('taskkill', '/IM MinecraftServerManager.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      begin
-        if ResultCode <> 0 then
-        begin
-          Sleep(1000);
-          Exec('taskkill', '/F /IM MinecraftServerManager.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-        end;
-      end;
-    except
-    end;
-  end
-  else if CurUninstallStep = usPostUninstall then
-  begin
+    { 在解除安裝階段清理使用者資料（而非 PostUninstall）}
     DataRoot := GetDataRoot();
     CacheDir := DataRoot + '\Cache';
     LogDir := DataRoot + '\log';
@@ -131,8 +116,5 @@ begin
 
     if FileExists(SettingsPath) then
       DeleteFile(SettingsPath);
-
-    if DirExists(DataRoot) then
-      DelTree(DataRoot, True, True, True);
   end;
 end;
