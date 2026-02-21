@@ -7,10 +7,11 @@ import queue
 import time
 import tkinter as tk
 import traceback
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any, Callable
+from typing import Any
 
 import customtkinter as ctk
 

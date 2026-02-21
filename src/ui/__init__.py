@@ -22,6 +22,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
     # widgets
     "CustomDropdown": (".custom_dropdown", "CustomDropdown"),
+    # services
+    "search_mods_online": (".mod_search_service", "search_mods_online"),
+    "enhance_local_mod": (".mod_search_service", "enhance_local_mod"),
 }
 
 

@@ -46,6 +46,7 @@
 
 - [ 使用指南 (User Guide)](docs/USER_GUIDE.md)：詳細的操作說明與功能介紹。
 - [ 技術概覽 (Technical Overview)](docs/TECHNICAL_OVERVIEW.md)：系統架構、技術堆疊與開發資訊。
+- [ Portable/Installer 差異矩陣](docs/PORTABLE_INSTALLER_MATRIX.md)：路徑、更新、權限、回滾行為比較。
 
 ##  快速開始
 
@@ -97,6 +98,12 @@ uv sync
 uv run python -m src.main
 ```
 
+**開發檢查（型別 + smoke tests）**：
+```bash
+uv run mypy src
+uv run pytest -m smoke -q
+```
+
 **查看已安裝的套件**：
 ```bash
 uv pip list
@@ -117,7 +124,7 @@ uv tree
 scripts/build_installer_nuitka.bat
 
 # 2. 執行打包腳本（將便攜版打包成 ZIP，並包含更新工具）
-scripts/package-portable.bat
+scripts/package-portable.ps1
 ```
 
 編譯完成後，會在 `dist/` 資料夾中產生：

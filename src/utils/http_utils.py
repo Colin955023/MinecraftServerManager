@@ -9,12 +9,15 @@ import concurrent.futures
 import contextlib
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from requests import RequestException
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src.version_info import APP_NAME, APP_VERSION
 
@@ -26,7 +29,71 @@ logger = get_logger().bind(component="HTTPUtils")
 class HTTPUtils:
     """HTTP 網路請求工具類別，提供各種 HTTP 操作的統一介面"""
 
+    JSON_TIMEOUT_MIN_SECONDS = 10
+    CONTENT_TIMEOUT_MIN_SECONDS = 30
+    DOWNLOAD_TIMEOUT_MIN_SECONDS = 60
+    MIN_CHUNK_SIZE = 1024
+
+    RETRY_TOTAL = 3
+    RETRY_CONNECT = 3
+    RETRY_READ = 3
+    RETRY_STATUS = 3
+    RETRY_BACKOFF_FACTOR = 0.6
+    RETRY_STATUS_FORCELIST = (429, 500, 502, 503, 504)
+    RETRY_ALLOWED_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+    CONNECTION_POOL_SIZE = 16
+
     _thread_local = threading.local()
+
+    @classmethod
+    def get_timeout_retry_policy(cls) -> dict[str, Any]:
+        """回傳目前 HTTP timeout/retry policy（供文件與診斷使用）。"""
+        return {
+            "json_timeout_min_seconds": cls.JSON_TIMEOUT_MIN_SECONDS,
+            "content_timeout_min_seconds": cls.CONTENT_TIMEOUT_MIN_SECONDS,
+            "download_timeout_min_seconds": cls.DOWNLOAD_TIMEOUT_MIN_SECONDS,
+            "retry_total": cls.RETRY_TOTAL,
+            "retry_connect": cls.RETRY_CONNECT,
+            "retry_read": cls.RETRY_READ,
+            "retry_status": cls.RETRY_STATUS,
+            "retry_backoff_factor": cls.RETRY_BACKOFF_FACTOR,
+            "retry_status_forcelist": list(cls.RETRY_STATUS_FORCELIST),
+            "retry_allowed_methods": sorted(cls.RETRY_ALLOWED_METHODS),
+        }
+
+    @staticmethod
+    def _normalize_int_value(value: int, minimum: int) -> int:
+        """確保輸入為有效正整數，且不低於指定下限。"""
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            normalized = minimum
+        return max(minimum, normalized)
+
+    @classmethod
+    def _build_retry(cls) -> Retry:
+        """建立統一的 retry 設定。"""
+        return Retry(
+            total=cls.RETRY_TOTAL,
+            connect=cls.RETRY_CONNECT,
+            read=cls.RETRY_READ,
+            status=cls.RETRY_STATUS,
+            backoff_factor=cls.RETRY_BACKOFF_FACTOR,
+            status_forcelist=cls.RETRY_STATUS_FORCELIST,
+            allowed_methods=cls.RETRY_ALLOWED_METHODS,
+            respect_retry_after_header=True,
+        )
+
+    @classmethod
+    def _configure_session(cls, session: requests.Session) -> None:
+        """套用統一的 adapter/retry policy。"""
+        adapter = HTTPAdapter(
+            max_retries=cls._build_retry(),
+            pool_connections=cls.CONNECTION_POOL_SIZE,
+            pool_maxsize=cls.CONNECTION_POOL_SIZE,
+        )
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
 
     @classmethod
     def _get_session(cls) -> requests.Session:
@@ -34,6 +101,7 @@ class HTTPUtils:
         session = getattr(cls._thread_local, "session", None)
         if session is None:
             session = requests.Session()
+            cls._configure_session(session)
             cls._thread_local.session = session
         return session
 
@@ -68,7 +136,7 @@ class HTTPUtils:
         if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
-        timeout = max(10, timeout)
+        timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
 
         try:
             final_headers = cls._get_default_headers(headers)
@@ -91,7 +159,7 @@ class HTTPUtils:
         if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
-        timeout = max(30, timeout)
+        timeout = cls._normalize_int_value(timeout, cls.CONTENT_TIMEOUT_MIN_SECONDS)
 
         try:
             final_headers = cls._get_default_headers(headers)
@@ -120,8 +188,8 @@ class HTTPUtils:
             logger.error("檔案下載失敗: 本地路徑參數無效")
             return False
 
-        timeout = max(60, timeout)
-        chunk_size = max(1024, chunk_size)
+        timeout = cls._normalize_int_value(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
+        chunk_size = cls._normalize_int_value(chunk_size, cls.MIN_CHUNK_SIZE)
 
         local_path_obj = Path(local_path)
         local_path_obj.parent.mkdir(parents=True, exist_ok=True)

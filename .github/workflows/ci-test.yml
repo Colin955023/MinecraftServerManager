@@ -6,9 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: ["master"]
   pull_request:
-    branches: ["master"]
   workflow_dispatch:
 
 permissions:
@@ -43,6 +41,9 @@ jobs:
       - name: Compile source files
         run: uv run python -m compileall -q src
 
+      - name: Run mypy
+        run: uv run mypy src
+
       - name: Smoke import key modules
         run: |
           uv run python - <<'PY'
@@ -64,10 +65,5 @@ jobs:
               print(f"import ok: {module_name}")
           PY
 
-      - name: Run unit tests (if exists)
-        run: |
-          if [ -d tests ]; then
-            uv run python -m unittest discover -s tests -p "test_*.py" -v
-          else
-            echo "No tests directory found; skipping unittest step."
-          fi
+      - name: Run smoke tests (pytest)
+        run: uv run pytest -m smoke -q

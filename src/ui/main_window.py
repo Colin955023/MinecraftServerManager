@@ -10,9 +10,10 @@ import re
 import sys
 import tkinter as tk
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
-from typing import Any, Callable
+from typing import Any
 
 import customtkinter as ctk
 

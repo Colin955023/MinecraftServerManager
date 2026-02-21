@@ -23,14 +23,24 @@ dev = [
   "uv>=0.6.0",
   "ruff>=0.14.0",
   "types-markdown>=3.10.0.20251106",
+  "pytest>=8.4.2",
 ]
 
 [project.scripts]
 minecraft-server-manager = "src.main:main"
 
 [tool.mypy]
-ignore_missing_imports = true
+# 預設採用嚴格模式；若新增無型別第三方套件，請在 overrides 逐一放行。
+ignore_missing_imports = false
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["customtkinter", "customtkinter.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["defusedxml", "defusedxml.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 120
@@ -56,3 +66,9 @@ version = {attr = "src.version_info.version_info.APP_VERSION"}
 
 [tool.uv]
 managed = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "smoke: minimal smoke coverage for core flows",
+]

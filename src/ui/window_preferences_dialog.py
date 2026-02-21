@@ -5,7 +5,7 @@ Window preferences dialog for configuring window behavior and appearance.
 
 import sys
 import traceback
-from typing import Callable
+from collections.abc import Callable
 
 import customtkinter as ctk
 

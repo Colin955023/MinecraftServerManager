@@ -14,7 +14,7 @@ if not exist "pyproject.toml" (
     exit /b 1
 )
 
-echo [1/2] 執行 Ruff 全能優化 (Imports、格式化、靜態檢查)...
+echo [1/3] 執行 Ruff 全能優化 (Imports、格式化、靜態檢查)...
 echo   - 步驟 1: 排序 Imports
 uv run ruff check --select I --fix src
 echo   - 步驟 2: 程式碼格式化
@@ -23,8 +23,12 @@ echo   - 步驟 3: 靜態程式碼檢查與清理
 uv run ruff check --fix --unsafe-fixes --select E,F,W,UP,B,C4,SIM,PIE,T20,RET,ARG,ERA,RUF100 --ignore E402,B023,E501 src
 echo.
 
-echo [2/2] 執行 Mypy 型別檢查...
+echo [2/3] 執行 Mypy 型別檢查...
 uv run mypy src
+echo.
+
+echo [3/3] 執行 Pytest Smoke 測試...
+uv run pytest -m smoke -q
 echo.
 
 echo ========================================================
