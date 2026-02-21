@@ -28,11 +28,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
-
-      - name: Install Inno Setup 6
-        shell: powershell
-        run: |
-          choco install innosetup -y
+        with:
+          enable-cache: true
 
       - name: Download Inno Setup Chinese Traditional Language File
         shell: powershell
@@ -221,4 +218,4 @@ jobs:
           path: |
             dist/MinecraftServerManager-Setup-*
             dist/MinecraftServerManager-v*-portable.zip*
-          retention-days: 7
+          retention-days: 2

@@ -32,7 +32,6 @@ Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan
 if (-not (Test-Path "dist\MinecraftServerManager")) {
     Write-Host "錯誤: 找不到 dist\MinecraftServerManager 資料夾。" -ForegroundColor Red
     Write-Host "請先執行 build_installer_nuitka.bat 來生成可攜式版本。" -ForegroundColor Yellow
-    pause
     exit 1
 }
 
@@ -54,7 +53,6 @@ if (Test-Path "README.md") {
 # 檢查必要執行檔是否存在，避免建立空或不完整的壓縮檔
 if (-not (Test-Path "dist\MinecraftServerManager\MinecraftServerManager.exe")) {
     Write-Host "[錯誤] 找不到 dist\\MinecraftServerManager\\MinecraftServerManager.exe，請先完成 Nuitka 打包。" -ForegroundColor Red
-    pause
     exit 1
 }
 
@@ -86,7 +84,6 @@ Compress-Archive -Path "dist\MinecraftServerManager" -DestinationPath $zipPath -
 
 if (-not (Test-Path $zipPath)) {
     Write-Host "[錯誤] 壓縮檔建立失敗" -ForegroundColor Red
-    pause
     exit 1
 }
 
@@ -98,5 +95,4 @@ Write-Host "========================================================" -Foregroun
 Write-Host ""
 Write-Host "可攜式版本檔案：dist\$zipFile" -ForegroundColor White
 Write-Host "SHA256 檔案由 GitHub Actions 自動產生" -ForegroundColor Yellow
-Write-Host "解壓後即可在任何地方使用。" -ForegroundColor White
 Write-Host ""
