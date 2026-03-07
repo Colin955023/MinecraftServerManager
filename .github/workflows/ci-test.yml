@@ -9,14 +9,15 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
+permissions: {}
 
 jobs:
   test:
     name: Python ${{ matrix.python-version }} Test
     runs-on: windows-latest
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
