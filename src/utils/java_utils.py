@@ -9,6 +9,7 @@ common installation paths, and environment variables.
 import os
 import re
 from pathlib import Path
+from typing import ClassVar
 
 from src.core import MinecraftVersionManager
 
@@ -26,13 +27,13 @@ logger = get_logger().bind(component="JavaUtils")
 
 
 class JavaUtils:
-    COMMON_JAVA_PATHS = [
+    COMMON_JAVA_PATHS: ClassVar[list[str]] = [
         r"C:\\Program Files\\Java",
         r"C:\\Program Files (x86)\\Java",
         r"C:\\Program Files\\Microsoft",
     ]
     # 只偵測 JAVA_HOME，Path 另外處理
-    ENV_VARS = ["JAVA_HOME"]
+    ENV_VARS: ClassVar[list[str]] = ["JAVA_HOME"]
 
     @staticmethod
     def get_java_version(java_path: str) -> int | None:

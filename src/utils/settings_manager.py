@@ -90,10 +90,17 @@ class SettingsManager:
         if "window_preferences" not in settings:
             settings["window_preferences"] = DEFAULT_WINDOW_PREFERENCES.copy()
 
+        default_debug = _get_default_settings().get("debug_settings", {})
+        if not isinstance(settings.get("debug_settings"), dict):
+            settings["debug_settings"] = dict(default_debug)
+        else:
+            for key, value in default_debug.items():
+                settings["debug_settings"].setdefault(key, value)
+
         return settings
 
     def _save_settings(self, settings: dict[str, Any]) -> None:
-        if not PathUtils.save_json(self.settings_path, settings):
+        if not PathUtils.save_json_if_changed(self.settings_path, settings):
             logger.error("無法寫入 user_settings.json")
 
     # ====== 基本設定操作 ======
@@ -233,7 +240,10 @@ class SettingsManager:
         """取得所有除錯相關的設定"""
         return self._settings.get(
             "debug_settings",
-            {"enable_debug_logging": False, "enable_window_state_logging": False},
+            {
+                "enable_debug_logging": False,
+                "enable_window_state_logging": False,
+            },
         )
 
     # 檢查是否啟用除錯日誌

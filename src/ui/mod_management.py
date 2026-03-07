@@ -3,6 +3,7 @@
 參考 Prism Launcher 設計，支援線上模組查詢與下載
 """
 
+import contextlib
 import queue
 import re
 import time
@@ -19,12 +20,15 @@ import customtkinter as ctk
 
 from ..core import MinecraftVersionManager, ModManager, ModStatus
 from ..utils import (
+    Colors,
     FontManager,
     FontSize,
     PathUtils,
+    Sizes,
     UIUtils,
+    compute_adaptive_pool_limit,
+    compute_exponential_moving_average,
     get_logger,
-    get_settings_manager,
 )
 from . import CustomDropdown, enhance_local_mod
 
@@ -43,9 +47,6 @@ class ModManagementFrame:
         self.server_manager = server_manager
         self.on_server_selected = on_server_selected_callback
         self.version_manager = version_manager
-
-        # 獲取設定管理器和動態縮放因子
-        self.settings = get_settings_manager()
 
         # 目前選中的伺服器
         self.current_server = None
@@ -70,10 +71,37 @@ class ModManagementFrame:
 
         # 本地模組頁面
         self.local_tree: ttk.Treeview | None = None
+        self.local_v_scrollbar: ttk.Scrollbar | None = None
+        self.local_h_scrollbar: ttk.Scrollbar | None = None
+        self._local_refresh_job: str | None = None
+        self._local_refresh_token = 0
+        self._local_filter_job = None
+        self._local_tree_render_locked = False
+        self._local_item_by_mod_id: dict[str, str] = {}
+        self._local_rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
+        self._local_recycled_item_ids: list[str] = []
+        self._local_recycle_pool_max = 500
+        # 重用池觀測指標（debug）：用於調整 pool 上限與命中率。
+        self._local_recycle_hits = 0
+        self._local_recycle_misses = 0
+        self._local_recycle_drops = 0
+        self._local_recycle_log_every = 200
+        self._local_recycle_pool_min = 250
+        self._local_recycle_pool_cap = 1600
+        self._local_recycle_tune_step = 80
+        self._local_recycle_hit_rate_ema: float | None = None
+        self._local_recycle_ema_alpha = 0.35
+        self._local_insert_batch_base = 60
+        self._local_insert_batch_max = 180
+        self._local_insert_batch_divisor = 8
 
         # 狀態
         self.local_mods: list[Any] = []
         self.enhanced_mods_cache: dict[str, Any] = {}
+        self._last_mods_dir: str | None = None
+        self._last_mods_dir_mtime: float | None = None
+        self._status_update_job = None
+        self._pending_status_message: str = ""
 
         self.ui_queue: queue.Queue = queue.Queue()
 
@@ -83,15 +111,27 @@ class ModManagementFrame:
         self.load_servers()
 
     def update_status(self, message: str) -> None:
-        """安全地更新狀態標籤"""
+        """安全地更新狀態標籤（合併 idle 更新，避免高頻重繪）。"""
+        self._pending_status_message = str(message)
         try:
             if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
                 if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
-                    self.parent.after(0, lambda: self.status_label.configure(text=message))
+                    UIUtils.schedule_coalesced_idle(
+                        self.parent,
+                        "_status_update_job",
+                        self._apply_status_label_update,
+                        owner=self,
+                    )
                 else:
-                    self.status_label.configure(text=message)
+                    self._apply_status_label_update()
         except Exception as e:
             logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
+
+    def _apply_status_label_update(self) -> None:
+        """套用合併後的狀態文字。"""
+        self._status_update_job = None
+        if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+            self.status_label.configure(text=self._pending_status_message)
 
     def update_status_safe(self, message: str) -> None:
         """更安全的狀態更新，使用佇列"""
@@ -154,8 +194,8 @@ class ModManagementFrame:
             text="🔄 重新整理",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             command=self.load_servers,
-            width=120,
-            height=32,
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.INPUT_HEIGHT,
         )
         refresh_btn.pack(side="left", padx=(10, 0))
 
@@ -176,7 +216,7 @@ class ModManagementFrame:
             header_frame,
             text="參考 Prism launcher 功能設計，提供模組管理體驗",
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
-            text_color=("#64748b", "#64748b"),
+            text_color=Colors.TEXT_SECONDARY,
         )
         desc_label.pack(side="left", padx=(15, 15), pady=15)
 
@@ -202,7 +242,7 @@ class ModManagementFrame:
             self.browse_tab,
             text="目前瀏覽模組功能暫停開發，請手動下載模組。",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-            text_color=("#64748b", "#64748b"),
+            text_color=Colors.TEXT_SECONDARY,
         )
         notice.pack(expand=True, fill="both", pady=80)
 
@@ -256,11 +296,11 @@ class ModManagementFrame:
             text="📁 匯入模組",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.import_mod_file,
-            fg_color="#059669",
-            hover_color=self._get_hover_color("#059669"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_SUCCESS,
+            hover_color=Colors.BUTTON_SUCCESS_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         import_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
@@ -270,11 +310,11 @@ class ModManagementFrame:
             text="🔄 重新整理",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.refresh_mod_list_force,
-            fg_color="#3b82f6",
-            hover_color=self._get_hover_color("#3b82f6"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_INFO,
+            hover_color=Colors.BUTTON_INFO_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         refresh_mod_list_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
@@ -284,11 +324,11 @@ class ModManagementFrame:
             text="🔄 檢查更新",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=lambda: UIUtils.show_info("提示", "目前檢查更新功能暫停開發，請手動檢查模組更新。", self.parent),
-            fg_color="#2563eb",
-            hover_color=self._get_hover_color("#2563eb"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_PRIMARY,
+            hover_color=Colors.BUTTON_PRIMARY_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         update_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
@@ -298,11 +338,11 @@ class ModManagementFrame:
             text="☑️ 全選",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.toggle_select_all,
-            fg_color="#f59e0b",
-            hover_color=self._get_hover_color("#f59e0b"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_WARNING,
+            hover_color=Colors.BUTTON_WARNING_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         self.select_all_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
@@ -312,11 +352,11 @@ class ModManagementFrame:
             text="🔄 批量切換",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.batch_toggle_selected,
-            fg_color="#8b5cf6",
-            hover_color=self._get_hover_color("#8b5cf6"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_PURPLE,
+            hover_color=Colors.BUTTON_PURPLE_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         self.batch_toggle_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
 
@@ -326,11 +366,11 @@ class ModManagementFrame:
             text="📂 開啟資料夾",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.open_mods_folder,
-            fg_color="#7c3aed",
-            hover_color=self._get_hover_color("#7c3aed"),
-            text_color="white",
-            width=80,
-            height=36,
+            fg_color=Colors.BUTTON_PURPLE_DARK,
+            hover_color=Colors.BUTTON_PURPLE_DARK_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT,
         )
         folder_btn.pack(side="left")
 
@@ -355,8 +395,8 @@ class ModManagementFrame:
             search_frame,
             textvariable=self.local_search_var,
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=200,
-            height=32,
+            width=Sizes.DROPDOWN_COMPACT_WIDTH,
+            height=Sizes.INPUT_HEIGHT,
         )
         search_entry.pack(side="left", padx=(FontManager.get_dpi_scaled_size(8), 0))
         self.local_search_var.trace("w", self.filter_local_mods)
@@ -368,22 +408,10 @@ class ModManagementFrame:
             variable=self.local_filter_var,
             values=["所有", "啟用", "停用"],
             command=self.on_filter_changed,
-            width=100,
-            height=32,
+            width=Sizes.DROPDOWN_FILTER_WIDTH,
+            height=Sizes.INPUT_HEIGHT,
         )
         filter_combo.pack(side="left")
-
-    def _get_hover_color(self, base_color: str) -> str:
-        """根據基礎顏色生成懸停顏色"""
-        color_map = {
-            "#059669": "#047857",  # 綠色 -> 深綠色
-            "#3b82f6": "#2563eb",  # 藍色 -> 深藍色
-            "#2563eb": "#1d4ed8",  # 深藍色 -> 更深藍色
-            "#f59e0b": "#d97706",  # 黃色 -> 深黃色
-            "#8b5cf6": "#7c3aed",  # 紫色 -> 深紫色
-            "#7c3aed": "#6d28d9",  # 深紫色 -> 更深紫色
-        }
-        return color_map.get(base_color, "#1a202c")  # 預設深灰色
 
     def on_filter_changed(self, _value: str) -> None:
         """篩選變更回調"""
@@ -421,12 +449,12 @@ class ModManagementFrame:
             list_frame,
             text="匯出模組列表",
             font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
-            fg_color=("#2563eb", "#1d4ed8"),
-            hover_color=("#1d4ed8", "#1e40af"),
-            text_color=("white", "white"),
+            fg_color=Colors.BUTTON_PRIMARY,
+            hover_color=Colors.BUTTON_PRIMARY_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
             command=self.export_mod_list_dialog,
-            width=80,
-            height=25,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_EXPORT,
         )
         export_btn.pack(anchor="ne", pady=(10, 5), padx=10)
 
@@ -459,7 +487,7 @@ class ModManagementFrame:
             tree_container,
             columns=columns,
             show="headings",
-            height=15,
+            height=Sizes.TREEVIEW_VISIBLE_ROWS,
             selectmode="extended",  # 支援多選
             style="ModList.Treeview",
         )
@@ -482,14 +510,16 @@ class ModManagementFrame:
         v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
         h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
         self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        self.local_v_scrollbar = v_scrollbar
+        self.local_h_scrollbar = h_scrollbar
 
         # 使用 grid 佈局確保滾動條在正確位置
         self.local_tree.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
         is_dark = ctk.get_appearance_mode() == "Dark"
-        bg_odd = "#2b2b2b" if is_dark else "#ffffff"
-        bg_even = "#3a3a3a" if is_dark else "#f1f5f9"
+        bg_odd = Colors.BG_LISTBOX_DARK if is_dark else Colors.BG_PRIMARY[0]
+        bg_even = Colors.BG_LISTBOX_ALT_DARK if is_dark else Colors.BG_ROW_SOFT_LIGHT
 
         self.local_tree.tag_configure("odd", background=bg_odd)
         self.local_tree.tag_configure("even", background=bg_even)
@@ -512,8 +542,8 @@ class ModManagementFrame:
             dialog = UIUtils.create_toplevel_dialog(
                 self.parent,
                 "匯出模組列表",
-                width=800,
-                height=600,
+                width=Sizes.DIALOG_LARGE_WIDTH,
+                height=Sizes.DIALOG_LARGE_HEIGHT,
                 delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
             )
 
@@ -589,7 +619,7 @@ class ModManagementFrame:
             text_widget = ctk.CTkTextbox(
                 preview_frame,
                 font=FontManager.get_font(size=FontSize.LARGE),
-                height=300,
+                height=Sizes.PREVIEW_TEXTBOX_HEIGHT,
                 wrap="word",
             )
             text_widget.pack(fill="both", expand=True, padx=15, pady=(0, 15))
@@ -646,8 +676,8 @@ class ModManagementFrame:
                 text="儲存到檔案",
                 command=do_save,
                 font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-                fg_color=("#2563eb", "#1d4ed8"),
-                hover_color=("#1d4ed8", "#1e40af"),
+                fg_color=Colors.BUTTON_PRIMARY,
+                hover_color=Colors.BUTTON_PRIMARY_HOVER,
                 width=FontManager.get_dpi_scaled_size(180),
                 height=int(40 * FontManager.get_scale_factor()),
             )
@@ -658,8 +688,8 @@ class ModManagementFrame:
                 text="關閉",
                 command=dialog.destroy,
                 font=FontManager.get_font(size=FontSize.LARGE),
-                fg_color=("#6b7280", "#4b5563"),
-                hover_color=("#4b5563", "#374151"),
+                fg_color=Colors.BUTTON_SECONDARY,
+                hover_color=Colors.BUTTON_SECONDARY_HOVER,
                 width=FontManager.get_dpi_scaled_size(150),
                 height=int(40 * FontManager.get_scale_factor()),
             )
@@ -681,7 +711,7 @@ class ModManagementFrame:
             status_frame,
             text="請選擇伺服器開始管理模組",
             font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
-            text_color=("#64748b", "#64748b"),
+            text_color=Colors.TEXT_SECONDARY,
         )
         self.status_label.pack(side="left", padx=10, pady=int(6 * FontManager.get_scale_factor()))
 
@@ -692,8 +722,8 @@ class ModManagementFrame:
             variable=self.progress_var,
             width=FontManager.get_dpi_scaled_size(300),
             height=int(20 * FontManager.get_scale_factor()),
-            progress_color=("#22d3ee", "#4ade80"),
-            fg_color=("#e5e7eb", "#374151"),
+            progress_color=Colors.PROGRESS_ACCENT,
+            fg_color=Colors.PROGRESS_TRACK,
         )
         self.progress_bar.pack(side="right", padx=10, pady=int(6 * FontManager.get_scale_factor()))
 
@@ -765,6 +795,23 @@ class ModManagementFrame:
             return
 
         manager = self.mod_manager
+        mods_dir = Path(self.current_server.path) / "mods" if self.current_server else None
+        mods_dir_key = str(mods_dir.resolve()) if mods_dir else ""
+        mods_dir_mtime: float | None
+        try:
+            mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
+        except Exception:
+            mods_dir_mtime = None
+
+        if (
+            mods_dir_key
+            and mods_dir_key == getattr(self, "_last_mods_dir", None)
+            and mods_dir_mtime == getattr(self, "_last_mods_dir_mtime", None)
+            and self.local_mods
+        ):
+            self.update_status_safe(f"找到 {len(self.local_mods)} 個本地模組")
+            self.ui_queue.put(self.refresh_local_list)
+            return
 
         def load_thread():
             try:
@@ -783,10 +830,27 @@ class ModManagementFrame:
                 total = len(mods)
                 self.local_mods = []
                 self.enhanced_mods_cache = {}
+                last_percent = -1
                 for idx, mod in enumerate(mods):
+                    # 預先在背景執行緒計算 mtime，避免 UI 執行緒大量 stat() 卡頓
+                    try:
+                        mod._cached_mtime = Path(mod.file_path).stat().st_mtime
+                    except Exception:
+                        mod._cached_mtime = None
                     self.local_mods.append(mod)
                     percent = (idx + 1) / total * 100 if total else 0
-                    self.update_progress_safe(percent)
+                    rounded_percent = int(percent)
+                    if rounded_percent != last_percent:
+                        last_percent = rounded_percent
+                        self.update_progress_safe(percent)
+
+                # 更新快取快照
+                self._last_mods_dir = mods_dir_key
+                try:
+                    self._last_mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
+                except Exception:
+                    self._last_mods_dir_mtime = mods_dir_mtime
+
                 self.enhance_local_mods()
                 self.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
@@ -831,25 +895,324 @@ class ModManagementFrame:
                 return value
         return fallback
 
+    def _cancel_local_refresh_job(self) -> None:
+        """取消尚未完成的本地模組列表批次插入（共用排程 helper）。"""
+        tree = self.local_tree
+        if not tree:
+            self._local_refresh_job = None
+            return
+        UIUtils.cancel_scheduled_job(tree, "_local_refresh_job", owner=self)
+
+    def _recycle_local_item(self, item_id: str) -> None:
+        """回收不再顯示的 local Tree item，後續可重用。"""
+        if not self.local_tree or not item_id:
+            return
+        try:
+            if not self.local_tree.exists(item_id):
+                return
+            self.local_tree.detach(item_id)
+            pool = self._local_recycled_item_ids
+            pool.append(item_id)
+            max_size = max(0, int(getattr(self, "_local_recycle_pool_max", 500)))
+            if len(pool) > max_size:
+                stale_id = pool.pop(0)
+                self._local_recycle_drops += 1
+                with contextlib.suppress(Exception):
+                    if self.local_tree.exists(stale_id):
+                        self.local_tree.delete(stale_id)
+                self._maybe_log_local_recycle_stats()
+        except Exception as e:
+            logger.debug(f"回收 local tree item 失敗 item_id={item_id}: {e}", "ModManagement")
+
+    def _acquire_recycled_local_item(self) -> str | None:
+        """從 local 重用池取回可用 item。"""
+        tree = self.local_tree
+        if not tree:
+            return None
+        pool = self._local_recycled_item_ids
+        while pool:
+            candidate = pool.pop()
+            with contextlib.suppress(Exception):
+                if tree.exists(candidate):
+                    self._local_recycle_hits += 1
+                    self._maybe_log_local_recycle_stats()
+                    return candidate
+        self._local_recycle_misses += 1
+        self._maybe_log_local_recycle_stats()
+        return None
+
+    def _maybe_log_local_recycle_stats(self) -> None:
+        """定期輸出 local 重用池命中統計（debug），用於調整池大小。"""
+        interval = max(1, int(getattr(self, "_local_recycle_log_every", 200)))
+        total = int(getattr(self, "_local_recycle_hits", 0)) + int(getattr(self, "_local_recycle_misses", 0))
+        if total <= 0 or (total % interval) != 0:
+            return
+        raw_hit_rate = (self._local_recycle_hits / total) * 100.0
+        smoothed_hit_rate = compute_exponential_moving_average(
+            previous=getattr(self, "_local_recycle_hit_rate_ema", None),
+            current=raw_hit_rate,
+            alpha=float(getattr(self, "_local_recycle_ema_alpha", 0.35)),
+        )
+        self._local_recycle_hit_rate_ema = smoothed_hit_rate
+        self._auto_tune_local_recycle_pool(smoothed_hit_rate)
+        message = (
+            f"local recycle stats pool={len(self._local_recycled_item_ids)} "
+            f"hits={self._local_recycle_hits} misses={self._local_recycle_misses} "
+            f"drops={self._local_recycle_drops} hit_rate={raw_hit_rate:.1f}% ema={smoothed_hit_rate:.1f}%"
+        )
+        logger.debug(message, "ModManagement")
+
+    def _auto_tune_local_recycle_pool(self, hit_rate: float) -> None:
+        """依命中率自動微調 local recycle pool 上限。"""
+        current = max(1, int(getattr(self, "_local_recycle_pool_max", 500)))
+        min_size = max(1, int(getattr(self, "_local_recycle_pool_min", 250)))
+        cap_size = max(min_size, int(getattr(self, "_local_recycle_pool_cap", 1600)))
+        step = max(1, int(getattr(self, "_local_recycle_tune_step", 80)))
+        pool_len = len(self._local_recycled_item_ids)
+        tune_args = {
+            "current": current,
+            "min_size": min_size,
+            "cap_size": cap_size,
+            "step": step,
+            "pool_len": pool_len,
+            "hit_rate": hit_rate,
+        }
+        new_size = compute_adaptive_pool_limit(**tune_args)
+        if new_size == current:
+            return
+
+        self._local_recycle_pool_max = new_size
+        logger.debug(
+            f"自動調整 local recycle pool 上限: {current} -> {new_size} (hit_rate={hit_rate:.1f}%)",
+            "ModManagement",
+        )
+
+    def _set_local_tree_render_lock(self, locked: bool) -> None:
+        """大量刷新前後鎖住 Treeview 父容器幾何，減少 layout 抖動。"""
+        if not self.local_tree:
+            return
+
+        parent = self.local_tree.master
+        if locked:
+            if getattr(self, "_local_tree_render_locked", False):
+                return
+            try:
+                parent.grid_propagate(False)
+                self._local_tree_render_locked = True
+            except Exception as e:
+                logger.debug(f"鎖定 local tree 渲染失敗: {e}", "ModManagement")
+            return
+
+        if not getattr(self, "_local_tree_render_locked", False):
+            return
+        try:
+            parent.grid_propagate(True)
+        except Exception as e:
+            logger.debug(f"解除 local tree 渲染鎖失敗: {e}", "ModManagement")
+        finally:
+            self._local_tree_render_locked = False
+
+    def _get_local_insert_batch_size(self, pending_count: int) -> int:
+        """依待插入筆數動態計算 local list 批次大小。"""
+        if pending_count <= 0:
+            return 1
+        base = max(1, int(getattr(self, "_local_insert_batch_base", 60)))
+        max_size = max(base, int(getattr(self, "_local_insert_batch_max", 180)))
+        divisor = max(1, int(getattr(self, "_local_insert_batch_divisor", 8)))
+        dynamic_size = max(base, pending_count // divisor)
+        dynamic_size = min(dynamic_size, max_size)
+        return min(dynamic_size, pending_count)
+
+    def _capture_selected_mod_ids(self) -> set[str]:
+        """擷取目前選取列對應的 mod id（Treeview tag[0]）。"""
+        if not self.local_tree:
+            return set()
+
+        selected_mod_ids: set[str] = set()
+        for item_id in self.local_tree.selection():
+            tags = self.local_tree.item(item_id, "tags")
+            if tags:
+                selected_mod_ids.add(str(tags[0]))
+        return selected_mod_ids
+
+    def _restore_local_selection(self, selected_mod_ids: set[str]) -> None:
+        """刷新後回復多選狀態。"""
+        if not self.local_tree:
+            return
+
+        selected_items = [
+            item_id for mod_id in selected_mod_ids for item_id in [self._local_item_by_mod_id.get(mod_id)] if item_id
+        ]
+        if selected_items:
+            with contextlib.suppress(Exception):
+                self.local_tree.selection_set(selected_items)
+                self.local_tree.see(selected_items[0])
+
+    def _finalize_local_refresh(
+        self,
+        *,
+        refresh_token: int,
+        rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]],
+        selected_mod_ids: set[str],
+    ) -> None:
+        """刷新收尾：只接受最新 token，避免舊任務覆蓋。"""
+        if refresh_token != self._local_refresh_token:
+            return
+        self._local_refresh_job = None
+        self._local_rows_snapshot = rows_snapshot
+        self._restore_local_selection(selected_mod_ids)
+        self.on_tree_selection_changed()
+        self._set_local_tree_render_lock(False)
+
+    def _apply_local_tree_diff(
+        self,
+        *,
+        mod_order: list[str],
+        mod_rows: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]],
+        refresh_token: int,
+        selected_mod_ids: set[str],
+    ) -> None:
+        """以差異更新本地模組 Treeview，避免整棵重建。"""
+        tree = self.local_tree
+        if not tree or not tree.winfo_exists():
+            self._set_local_tree_render_lock(False)
+            return
+
+        # 先刪除不存在的 row
+        for mod_id, stale_item_id in list(self._local_item_by_mod_id.items()):
+            if mod_id in mod_rows:
+                continue
+            self._recycle_local_item(stale_item_id)
+            self._local_item_by_mod_id.pop(mod_id, None)
+
+        rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
+        pending_insert: list[tuple[str, tuple[Any, ...], tuple[str, ...]]] = []
+        previous_snapshot = getattr(self, "_local_rows_snapshot", {})
+
+        for mod_id in mod_order:
+            values, tags = mod_rows[mod_id]
+            item_id = self._local_item_by_mod_id.get(mod_id)
+            if item_id:
+                try:
+                    if previous_snapshot.get(mod_id) != (values, tags):
+                        tree.item(item_id, values=values, tags=tags)
+                    rows_snapshot[mod_id] = (values, tags)
+                    continue
+                except Exception as e:
+                    logger.debug(f"更新 local row 失敗 mod_id={mod_id}: {e}", "ModManagement")
+                    self._recycle_local_item(item_id)
+                    self._local_item_by_mod_id.pop(mod_id, None)
+            pending_insert.append((mod_id, values, tags))
+
+        if not mod_order:
+            self._local_item_by_mod_id.clear()
+            self._finalize_local_refresh(
+                refresh_token=refresh_token,
+                rows_snapshot={},
+                selected_mod_ids=set(),
+            )
+            return
+
+        batch_size = self._get_local_insert_batch_size(len(pending_insert))
+
+        def insert_batch(start_index: int, current_job_id: str | None = None) -> None:
+            if current_job_id and self._local_refresh_job == current_job_id:
+                self._local_refresh_job = None
+            if refresh_token != self._local_refresh_token:
+                if current_job_id and self._local_refresh_job == current_job_id:
+                    self._local_refresh_job = None
+                return
+            if not self.local_tree or not self.local_tree.winfo_exists():
+                if current_job_id and self._local_refresh_job == current_job_id:
+                    self._local_refresh_job = None
+                return
+
+            try:
+                end_index = min(start_index + batch_size, len(pending_insert))
+                for idx in range(start_index, end_index):
+                    mod_id, values, tags = pending_insert[idx]
+                    recycled_item_id = self._acquire_recycled_local_item()
+                    if recycled_item_id:
+                        self.local_tree.item(recycled_item_id, values=values, tags=tags)
+                        self.local_tree.reattach(recycled_item_id, "", "end")
+                        inserted_item_id = recycled_item_id
+                    else:
+                        inserted_item_id = self.local_tree.insert("", "end", values=values, tags=tags)
+                    self._local_item_by_mod_id[mod_id] = inserted_item_id
+                    rows_snapshot[mod_id] = (values, tags)
+
+                if end_index < len(pending_insert):
+                    next_job_id: str | None = None
+
+                    def _run_next() -> None:
+                        insert_batch(end_index, current_job_id=next_job_id)
+
+                    next_job_id = self.local_tree.after(1, _run_next)
+                    self._local_refresh_job = next_job_id
+                    return
+
+                for order_index, mod_id in enumerate(mod_order):
+                    item_id = self._local_item_by_mod_id.get(mod_id)
+                    if item_id:
+                        self.local_tree.move(item_id, "", order_index)
+                        if mod_id not in rows_snapshot:
+                            rows_snapshot[mod_id] = mod_rows[mod_id]
+
+                self._finalize_local_refresh(
+                    refresh_token=refresh_token,
+                    rows_snapshot=rows_snapshot,
+                    selected_mod_ids=selected_mod_ids,
+                )
+            except Exception as e:
+                logger.debug(f"差異插入 local mods 批次失敗: {e}", "ModManagement")
+                self._local_refresh_job = None
+                self._set_local_tree_render_lock(False)
+
+        if pending_insert:
+            insert_batch(0)
+            return
+
+        try:
+            for order_index, mod_id in enumerate(mod_order):
+                item_id = self._local_item_by_mod_id.get(mod_id)
+                if item_id:
+                    tree.move(item_id, "", order_index)
+                    rows_snapshot[mod_id] = mod_rows[mod_id]
+        except Exception as e:
+            logger.debug(f"重排 local mods 失敗: {e}", "ModManagement")
+
+        self._finalize_local_refresh(
+            refresh_token=refresh_token,
+            rows_snapshot=rows_snapshot,
+            selected_mod_ids=selected_mod_ids,
+        )
+
     def refresh_local_list(self) -> None:
-        """重新整理本地模組列表 (使用分批載入優化)"""
+        """重新整理本地模組列表（差異更新，避免整棵重建）。"""
         if not hasattr(self, "local_tree") or not self.local_tree:
             return
 
-        # 1. 清空列表 Clear list
-        self.local_tree.delete(*self.local_tree.get_children())
+        self._cancel_local_refresh_job()
+        self._local_refresh_token += 1
+        refresh_token = self._local_refresh_token
+        selected_mod_ids = self._capture_selected_mod_ids()
 
-        # 2. 準備資料 Prepare data
+        # 鎖住幾何，避免刷新期間多次 re-layout
+        self._set_local_tree_render_lock(True)
+
+        # 準備資料
         search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
         filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "所有"
         # 使用預編譯的正則表達式（效能優化）
         version_pattern = self.VERSION_PATTERN
 
-        items_to_insert: list[Any] = []
+        mod_order: list[str] = []
+        mod_rows: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
 
         for mod in self.local_mods:
             # 應用篩選 Apply filters
-            if search_text and search_text not in mod.name.lower():
+            mod_name_lower = str(getattr(mod, "name", "") or "").lower()
+            if search_text and search_text not in mod_name_lower:
                 continue
             if filter_status != "所有" and (
                 (filter_status == "啟用" and mod.status != ModStatus.ENABLED)
@@ -908,51 +1271,36 @@ class ModManagementFrame:
                 display_size = f"{size_val} B"
 
             # 修改時間顯示 Modification time display
-            mtime_val = None
-            try:
-                mtime_val = Path(mod.file_path).stat().st_mtime
-            except Exception:
-                mtime_val = None
+            mtime_val = getattr(mod, "_cached_mtime", None)
+            if mtime_val is None:
+                try:
+                    mtime_val = Path(mod.file_path).stat().st_mtime
+                    mod._cached_mtime = mtime_val
+                except Exception:
+                    mtime_val = None
 
             display_mtime = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M") if mtime_val else "未知"
-            parity_tag = "odd" if len(items_to_insert) % 2 == 0 else "even"
-
-            items_to_insert.append(
-                {
-                    "values": (
-                        status_text,
-                        display_name,
-                        display_version,
-                        display_author,
-                        mod.loader_type,
-                        display_size,
-                        display_mtime,
-                        (display_description[:50] + "..." if len(display_description) > 50 else display_description),
-                    ),
-                    "tags": (mod_base_name, parity_tag),
-                },
+            parity_tag = "odd" if len(mod_order) % 2 == 0 else "even"
+            values: tuple[Any, ...] = (
+                status_text,
+                display_name,
+                display_version,
+                display_author,
+                mod.loader_type,
+                display_size,
+                display_mtime,
+                (display_description[:50] + "..." if len(display_description) > 50 else display_description),
             )
+            tags = (mod_base_name, parity_tag)
+            mod_order.append(mod_base_name)
+            mod_rows[mod_base_name] = (values, tags)
 
-        # 3. 分批插入 Batch insertion
-        batch_size = 20
-        total_items = len(items_to_insert)
-
-        def insert_batch(start_index):
-            if not self.local_tree or not self.local_tree.winfo_exists():
-                return
-
-            end_index = min(start_index + batch_size, total_items)
-            for i in range(start_index, end_index):
-                item = items_to_insert[i]
-                self.local_tree.insert("", "end", values=item["values"], tags=item["tags"])
-
-            if end_index < total_items:
-                self.local_tree.after(5, lambda: insert_batch(end_index))
-            else:
-                # 更新選擇狀態 Update selection status
-                self.update_selection_status()
-
-        insert_batch(0)
+        self._apply_local_tree_diff(
+            mod_order=mod_order,
+            mod_rows=mod_rows,
+            refresh_token=refresh_token,
+            selected_mod_ids=selected_mod_ids,
+        )
 
     def _set_bulk_controls_enabled(self, enabled: bool) -> None:
         """設定批量操作控制元件的啟用/停用狀態
@@ -1045,6 +1393,10 @@ class ModManagementFrame:
                             found_mod.filename = new_filename
                             if old_file_path:
                                 found_mod.file_path = old_file_path.replace(old_filename, new_filename)
+                            try:
+                                found_mod._cached_mtime = Path(found_mod.file_path).stat().st_mtime
+                            except Exception:
+                                found_mod._cached_mtime = None
 
                             # 移動 enhanced cache key，避免切換後顯示資訊消失
                             if (
@@ -1062,11 +1414,12 @@ class ModManagementFrame:
                             row_values = list(tree.item(item, "values") or [])
                             if row_values:
                                 row_values[0] = "✅ 已啟用" if new_status == ModStatus.ENABLED else "❌ 已停用"
-                                try:
-                                    mtime_val = Path(found_mod.file_path).stat().st_mtime
-                                    row_values[6] = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
-                                except Exception:
-                                    row_values[6] = "未知"
+                                mtime_val = getattr(found_mod, "_cached_mtime", None)
+                                row_values[6] = (
+                                    datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
+                                    if mtime_val
+                                    else "未知"
+                                )
                                 tree.item(item, values=tuple(row_values), tags=(mod_id,))
 
                             if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -1087,7 +1440,17 @@ class ModManagementFrame:
             logger.error(f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}")
 
     def filter_local_mods(self, *_args) -> None:
-        """篩選本地模組"""
+        """篩選本地模組（debounce，避免連續重建 Treeview）。"""
+        UIUtils.schedule_debounce(
+            self.parent,
+            "_local_filter_job",
+            120,
+            self._run_debounced_local_filter_refresh,
+            owner=self,
+        )
+
+    def _run_debounced_local_filter_refresh(self) -> None:
+        self._local_filter_job = None
         self.refresh_local_list()
 
     def show_local_context_menu(self, event) -> None:
@@ -1416,6 +1779,10 @@ class ModManagementFrame:
                                 mod.file_path = str(Path(old_file_path).with_name(new_filename))
                             except Exception:
                                 mod.file_path = old_file_path.replace(old_filename, new_filename)
+                        try:
+                            mod._cached_mtime = Path(mod.file_path).stat().st_mtime
+                        except Exception:
+                            mod._cached_mtime = None
 
                         if (
                             hasattr(self, "enhanced_mods_cache")
@@ -1432,7 +1799,6 @@ class ModManagementFrame:
                             mod_obj=mod,
                             mod_id=base_name,
                         ) -> None:
-                            file_path = getattr(mod_obj, "file_path", "")
                             try:
                                 if not (
                                     hasattr(self, "local_tree") and self.local_tree and self.local_tree.winfo_exists()
@@ -1441,12 +1807,12 @@ class ModManagementFrame:
                                 row_values = list(self.local_tree.item(item_id, "values") or [])
                                 if row_values:
                                     row_values[0] = "✅ 已啟用" if status == ModStatus.ENABLED else "❌ 已停用"
-                                    try:
-                                        mtime_val = Path(file_path).stat().st_mtime if file_path else None
-                                        if mtime_val:
-                                            row_values[6] = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
-                                    except Exception:
-                                        row_values[6] = "未知"
+                                    mtime_val = getattr(mod_obj, "_cached_mtime", None)
+                                    row_values[6] = (
+                                        datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M")
+                                        if mtime_val
+                                        else "未知"
+                                    )
                                     self.local_tree.item(
                                         item_id,
                                         values=tuple(row_values),

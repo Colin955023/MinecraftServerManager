@@ -6,6 +6,7 @@ Provides unified font management functionality with DPI scaling and font caching
 """
 
 import collections
+from typing import ClassVar
 
 # typing imports removed - using | syntax instead
 import customtkinter as ctk
@@ -18,7 +19,7 @@ logger = get_logger().bind(component="FontManager")
 class FontManager:
     """字體管理器類別 - 靜態類別模式，支援 UI 縮放和字體快取管理"""
 
-    _fonts: collections.OrderedDict = collections.OrderedDict()
+    _fonts: ClassVar[collections.OrderedDict] = collections.OrderedDict()
     _default_family = "Microsoft JhengHei"
     _scale_factor = 1.0
     MAX_CACHE_SIZE = 128

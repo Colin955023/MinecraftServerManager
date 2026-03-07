@@ -8,15 +8,111 @@ import hashlib
 import json
 import os
 import shutil
+import threading
+import time
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from .logger import get_logger
 
 _windll = getattr(ctypes, "windll", None)
+logger = get_logger().bind(component="PathUtils")
 
 
 class PathUtils:
     """路徑處理工具類別，提供專案路徑管理和安全路徑操作"""
+
+    _json_lock_registry_lock = threading.Lock()
+    _json_path_locks: ClassVar[dict[str, threading.Lock]] = {}
+    _json_write_retry_count = 3
+    _json_write_retry_delay_sec = 0.03
+
+    @staticmethod
+    def _best_effort_fsync(file_obj: Any) -> None:
+        """盡力同步檔案內容到磁碟；不支援時忽略錯誤。"""
+        try:
+            os.fsync(file_obj.fileno())
+        except (AttributeError, OSError, ValueError):
+            return
+
+    @staticmethod
+    def _best_effort_sync_dir(path: Path) -> None:
+        """盡力同步目錄 metadata；不支援時忽略錯誤。"""
+        try:
+            fd = os.open(str(path), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            return
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def _normalize_lock_key(path: Path | str) -> str:
+        """將路徑正規化為鎖的 key，確保同一路徑共用同一把鎖。"""
+        p = Path(path)
+        try:
+            return str(p.resolve())
+        except Exception:
+            return str(p.absolute())
+
+    @staticmethod
+    def _get_json_path_lock(path: Path | str) -> threading.Lock:
+        """取得 JSON 路徑專用鎖，避免同進程併發覆寫。"""
+        key = PathUtils._normalize_lock_key(path)
+        with PathUtils._json_lock_registry_lock:
+            lock = PathUtils._json_path_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                PathUtils._json_path_locks[key] = lock
+            return lock
+
+    @staticmethod
+    def _save_json_internal(path: Path | str, data: Any, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
+        """JSON 寫入核心：序列化、路徑鎖、原子替換與重試。"""
+        try:
+            payload = json.dumps(data, indent=indent, ensure_ascii=False)
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            lock = PathUtils._get_json_path_lock(p)
+
+            with lock:
+                if skip_if_unchanged and p.exists():
+                    try:
+                        if p.read_text(encoding="utf-8") == payload:
+                            return True
+                    except OSError as e:
+                        logger.debug(f"讀取既有 JSON 失敗，將改為覆寫流程: {p} | {e}")
+
+                for attempt in range(PathUtils._json_write_retry_count):
+                    tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{attempt}.tmp"
+                    tmp_path = PathUtils.get_long_path(p.with_name(tmp_name))
+                    try:
+                        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+                            f.write(payload)
+                            f.flush()
+                            PathUtils._best_effort_fsync(f)
+
+                        os.replace(tmp_path, p)
+                        PathUtils._best_effort_sync_dir(p.parent)
+                        return True
+                    except OSError:
+                        if attempt + 1 >= PathUtils._json_write_retry_count:
+                            return False
+                        time.sleep(PathUtils._json_write_retry_delay_sec * (attempt + 1))
+                    finally:
+                        try:
+                            if tmp_path.exists():
+                                tmp_path.unlink()
+                        except OSError as e:
+                            logger.debug(f"清理臨時 JSON 檔失敗: {tmp_path} | {e}")
+
+            return False
+        except Exception:
+            return False
 
     @staticmethod
     def is_path_within(base_dir: Path, target_path: Path, *, strict: bool = True) -> bool:
@@ -78,18 +174,12 @@ class PathUtils:
     @staticmethod
     def save_json(path: Path | str, data: Any, indent: int = 2) -> bool:
         """安全寫入 JSON 檔案"""
-        try:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = PathUtils.get_long_path(p.with_suffix(p.suffix + ".tmp"))
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=indent, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, p)
-            return True
-        except Exception:
-            return False
+        return PathUtils._save_json_internal(path, data, indent=indent, skip_if_unchanged=False)
+
+    @staticmethod
+    def save_json_if_changed(path: Path | str, data: Any, indent: int = 2) -> bool:
+        """僅在內容異動時才寫入 JSON（同樣使用原子寫入流程）。"""
+        return PathUtils._save_json_internal(path, data, indent=indent, skip_if_unchanged=True)
 
     @staticmethod
     def read_json_from_zip(zip_path: Path | str, internal_path: str) -> Any | None:
@@ -164,7 +254,7 @@ class PathUtils:
             with open(path, "w", encoding=encoding, errors=errors) as f:
                 f.write(content)
                 f.flush()
-                os.fsync(f.fileno())
+                PathUtils._best_effort_fsync(f)
             return True
         except OSError:
             return False
@@ -258,14 +348,14 @@ class PathUtils:
     def get_long_path(path: Path | str) -> Path:
         """
         將 Windows 的短路徑（8.3 格式）展開為完整長路徑，使用 GetLongPathNameW。
-        若非 Windows 平台或展開失敗，則回傳原始的 Path 物件不做修改。
+        展開失敗時回傳原始 Path。
         """
         try:
             p_obj = Path(path)
+            p_str = str(p_obj)
+
             if _windll is None:
                 return p_obj
-
-            p_str = str(p_obj)
 
             GetLongPathNameW = _windll.kernel32.GetLongPathNameW
             GetLongPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]

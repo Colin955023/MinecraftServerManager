@@ -170,15 +170,9 @@ class LoaderManager(Singleton):
                 stable_versions = [v for v in data if v.get("stable", False)]
                 logger.debug(f"Fabric 版本過濾: {len(data)} -> {len(stable_versions)} (只保留 stable)")
 
-                # 比較現有快取，減少磁碟寫入
-                write_needed = True
                 fabric_path = Path(self.fabric_cache_file)
-                existing = PathUtils.load_json(fabric_path)
-                if existing == stable_versions:
-                    write_needed = False
-
-                if write_needed:
-                    PathUtils.save_json(fabric_path, stable_versions)
+                if not PathUtils.save_json_if_changed(fabric_path, stable_versions):
+                    logger.warning("寫入 Fabric 版本快取失敗")
         except Exception as e:
             logger.exception(f"載入 Fabric 版本失敗: {e}")
             UIUtils.show_error(
@@ -246,16 +240,9 @@ class LoaderManager(Singleton):
                         # 限制每個版本最多10個 Forge 版本，避免數據過多
                         version_dict[mc_version] = version_dict[mc_version][:10]
 
-                    # 比較現有快取，減少磁碟寫入
-                    write_needed = True
                     forge_path = Path(self.forge_cache_file)
-                    existing = PathUtils.load_json(forge_path)
-                    if existing == version_dict:
-                        write_needed = False
-
-                    if write_needed:
-                        # 寫入快取檔案
-                        PathUtils.save_json(forge_path, version_dict)
+                    if not PathUtils.save_json_if_changed(forge_path, version_dict):
+                        logger.warning("寫入 Forge 版本快取失敗")
                     return
             return
 

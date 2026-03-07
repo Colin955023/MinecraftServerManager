@@ -11,7 +11,13 @@
 
 ##  系統支援
 
-**本專案僅支援 Microsoft Windows 與 Windows Server 作業系統。** 不支援 macOS、Linux 或其他 Unix-like 系統。
+**本專案完全僅支援 Microsoft Windows**
+**macOS、Linux 與其他任何作業系統皆不提供安裝、執行、除錯與相容性支援。**
+
+### 支援政策（請務必閱讀）
+- 本專案只保證在 Windows 環境可用，其他系統一律視為不支援範圍。
+- 非 Windows 平台的 Issue / PR（包含相容性修正、環境判斷、平台分支邏輯）不在維護範圍內，原則上不受理。
+- 開發與重構以 Windows 單一平台為前提，不要求加入跨平台偵測、fallback、或額外系統相容層。
 
 ##  核心特色
 
@@ -19,11 +25,13 @@
 - **CustomTkinter 框架**：採用現代化的 GUI 設計語言，提供流暢且美觀的操作體驗。
 - **響應式佈局**：介面可自適應視窗大小，確保在不同解析度下均能完美呈現。
 - **繁體中文支援**：全介面繁體中文在地化，降低使用門檻。
+- **欄位快速調寬**：在管理伺服器清單可雙擊欄位標題/分隔線，自動貼齊目前內容寬度。
 
 ###  智慧型伺服器管理
 - **多載入器支援**：完整支援 Vanilla (原版)、Fabric 與 Forge 等主流載入器。
 - **自動化版本獲取**：即時同步 Minecraft 官方與載入器社群的最新版本資訊。
 - **一鍵建立與部署**：簡化繁瑣的伺服器架設流程，僅需數次點擊即可完成部署。
+- **名稱智慧同步**：建立伺服器時切換 MC 版本/載入器，會保留使用者手動補上的名稱尾字。
 - **偵測與匯入**：可掃描指定資料夾的既有伺服器，並將其設定、路徑與備份資訊納入管理。
 
 ###  智慧 Java 環境配置
@@ -98,10 +106,13 @@ uv sync
 uv run python -m src.main
 ```
 
-**開發檢查（型別 + smoke tests）**：
+**開發檢查（建議優先用腳本）**：
 ```bash
-uv run mypy src
-uv run pytest -m smoke -q
+# 快速檢查（只跑 smoke）
+uv run quick_test.py
+
+# 完整檢查（Ruff + Mypy + smoke + integration）
+scripts/format_lint_check.bat
 ```
 
 **查看已安裝的套件**：
@@ -118,13 +129,10 @@ uv tree
 - Python 3.10 或更新版本
 - Visual Studio C++ 編譯工具（需要預先安裝）
 
-**編譯與打包步驟**：
+**編譯步驟**：
 ```bash
-# 1. 執行編譯腳本（生成可執行檔）
+# 執行編譯腳本（生成可執行檔與可攜式版本）
 scripts/build_installer_nuitka.bat
-
-# 2. 執行打包腳本（將便攜版打包成 ZIP，並包含更新工具）
-scripts/package-portable.ps1
 ```
 
 編譯完成後，會在 `dist/` 資料夾中產生：

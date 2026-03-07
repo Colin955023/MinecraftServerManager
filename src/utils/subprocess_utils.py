@@ -74,3 +74,34 @@ class SubprocessUtils:
 
         cmd_list = SubprocessUtils._validate_cmd(cmd)
         return subprocess.Popen(cmd_list, **kwargs)  # nosec: B603
+
+    @staticmethod
+    def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
+        """
+        啟動分離的子進程，隔離 I/O 和生命周期，不顯示控制台視窗。
+
+        用於重啟/更新等場景，避免主進程退出時留下孤兒進程。
+        Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗。
+        自動配置 DEVNULL、close_fds 和平台相關的分離旗標。
+
+        Args:
+            cmd: 命令列表
+            cwd: 工作目錄（可選）
+
+        Returns:
+            Popen 物件
+        """
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_NO_WINDOW = 0x08000000
+        creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+
+        return SubprocessUtils.popen_checked(
+            cmd,
+            cwd=cwd,
+            stdin=SubprocessUtils.DEVNULL,
+            stdout=SubprocessUtils.DEVNULL,
+            stderr=SubprocessUtils.DEVNULL,
+            close_fds=True,
+            creationflags=creation_flags,
+        )

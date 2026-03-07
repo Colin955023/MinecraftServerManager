@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from . import get_logger
 
@@ -112,6 +113,7 @@ class ServerDetectionVersionUtils:
         return None
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def detect_loader_from_text(text: str) -> str:
         """從文本中偵測載入器類型。"""
         if not text:
@@ -125,6 +127,7 @@ class ServerDetectionVersionUtils:
         return "vanilla"
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
         """從 Forge 路徑字串提取 (minecraft_version, forge_version)。"""
         if not path_str:

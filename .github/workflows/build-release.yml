@@ -31,6 +31,13 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Cache Nuitka compilation
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: .nuitka-cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('src/**/*.py') }}
+          restore-keys: nuitka-${{ runner.os }}-
+
       - name: Download Inno Setup Chinese Traditional Language File
         shell: powershell
         run: |
@@ -38,11 +45,8 @@ jobs:
           if (-not (Test-Path $langDir)) {
             New-Item -ItemType Directory -Path $langDir -Force | Out-Null
           }
-
-          # Download Chinese Traditional language file from Inno Setup official GitHub
           $url = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl'
           $output = Join-Path $langDir 'ChineseTraditional.isl'
-
           Invoke-WebRequest -Uri $url -OutFile $output
           Write-Host ("Downloaded Chinese Traditional language file to {0}" -f $output)
           

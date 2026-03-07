@@ -14,16 +14,7 @@ on:
 permissions: read-all
 
 jobs:
-  diagnostic:
-      runs-on: ubuntu-latest
-      steps:
-        - name: "顯示驗證資訊"
-          run: |
-            echo "Target Hash: ${{ github.sha }}"
-            echo "Branch: ${{ github.ref_name }}"
-
   analysis:
-    needs: diagnostic
     name: Scorecard 分析
     runs-on: ubuntu-latest
     permissions:

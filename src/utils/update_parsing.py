@@ -3,8 +3,11 @@
 集中處理版本字串、Release 資訊與更新資產選擇邏輯。
 """
 
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+
+from packaging.version import InvalidVersion, Version
 
 from .http_utils import HTTPUtils
 from .logger import get_logger
@@ -16,22 +19,21 @@ class UpdateParsing:
     """更新資訊解析與更新資源選擇邏輯。"""
 
     _GITHUB_API = "https://api.github.com"
+    _HEX_CHARS: ClassVar[frozenset[str]] = frozenset("0123456789abcdefABCDEF")
 
     @staticmethod
-    def parse_version(version_str: str) -> tuple[int, ...] | None:
-        """解析版本字串為數字元組，例如 v1.6.6 -> (1, 6, 6)。"""
+    @lru_cache(maxsize=256)
+    def parse_version(version_str: str | None) -> Version | None:
+        """解析版本字串為 PEP 440 Version 物件。"""
         try:
             if not isinstance(version_str, str) or not version_str.strip():
                 logger.warning(f"無效的版本字串，version_str={version_str!r}")
                 return None
+
+            # GitHub tag 常見前綴: v1.2.3
             clean = version_str.strip().lstrip("vV")
-            version_part = clean.split("-")[0].split("+")[0]
-            parsed = tuple(int(x) for x in version_part.split(".") if x.isdigit())
-            if not parsed:
-                logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
-                return None
-            return parsed
-        except ValueError:
+            return Version(clean)
+        except InvalidVersion:
             logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
             return None
 
@@ -116,6 +118,13 @@ class UpdateParsing:
         return {}, "none"
 
     @staticmethod
+    def _is_hex_hash(token: str, expected_length: int) -> bool:
+        """檢查 token 是否為指定長度的十六進位雜湊字串。"""
+        if len(token) != expected_length:
+            return False
+        return all(ch in UpdateParsing._HEX_CHARS for ch in token)
+
+    @staticmethod
     def parse_checksum_text(text: str, asset_name: str) -> tuple[str, str] | None:
         """從 release body 或 checksum 檔內容解析指定資產的 checksum。"""
         asset_base = Path(asset_name).name
@@ -127,8 +136,8 @@ class UpdateParsing:
             line_lower = line.lower()
             parts = line.split()
             for token in parts:
-                if len(token) == 64 and all(ch in "0123456789abcdefABCDEF" for ch in token) and asset_base_lower in line_lower:
+                if UpdateParsing._is_hex_hash(token, 64) and asset_base_lower in line_lower:
                     return ("sha256", token.lower())
-                if len(token) == 128 and all(ch in "0123456789abcdefABCDEF" for ch in token) and asset_base_lower in line_lower:
+                if UpdateParsing._is_hex_hash(token, 128) and asset_base_lower in line_lower:
                     return ("sha512", token.lower())
         return None

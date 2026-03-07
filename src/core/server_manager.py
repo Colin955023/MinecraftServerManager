@@ -6,11 +6,10 @@ Responsible for creating, managing, and configuring Minecraft servers.
 """
 
 import contextlib
-import os
 import threading
 import time
 from collections import deque
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +52,6 @@ class ServerManager:
         self.output_threads: dict[str, threading.Thread] = {}  # server_name -> Thread
         self._properties_cache: dict[str, Any] = {}  # server_name -> (mtime, properties)
         self._config_lock = threading.Lock()  # 配置檔案讀寫鎖，防止併發寫入衝突
-        self._save_schedule_lock = threading.Lock()
-        self._pending_save = False
-        self._save_timer: threading.Timer | None = None
-        self._save_debounce_sec = 6.0
         self.load_servers_config()
 
     # ====== 伺服器建立與設定 ======
@@ -482,20 +477,30 @@ class ServerManager:
             except Exception as e:
                 logger.exception(f"載入配置失敗: {e}")
 
-    def write_servers_config(self) -> None:
+    def write_servers_config(self) -> bool:
         """實際執行保存伺服器配置到 servers_config.json"""
         with self._config_lock:
             try:
-                data = {k: asdict(v) for k, v in self.servers.items()}
-                if not PathUtils.save_json(self.config_file, data):
+                data: dict[str, dict[str, Any]] = {}
+                for name, config in self.servers.items():
+                    if is_dataclass(config):
+                        data[name] = asdict(config)
+                    elif isinstance(config, dict):
+                        # 兼容舊流程：若上層誤傳 dict，仍可寫入避免整體失敗
+                        data[name] = config
+                    else:
+                        logger.error(f"保存伺服器配置失敗: 無法序列化類型 {type(config).__name__} ({name})")
+                        return False
+
+                if not PathUtils.save_json_if_changed(self.config_file, data):
                     logger.error("保存伺服器配置失敗: 無法寫入文件")
-                else:
-                    logger.info("伺服器配置已保存到 servers_config.json")
-                    # 確保檔案同步到磁碟
-                    with open(self.config_file, "r+b") as f:
-                        os.fsync(f.fileno())
+                    return False
+
+                logger.info("伺服器配置已保存到 servers_config.json")
+                return True
             except Exception as e:
                 logger.exception(f"保存伺服器配置失敗: {e}")
+                return False
 
     def get_default_server_properties(self) -> dict[str, str]:
         """獲取預設伺服器屬性"""

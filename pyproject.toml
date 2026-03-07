@@ -12,6 +12,8 @@ dependencies = [
   "requests>=2.32.5",
   "defusedxml>=0.7.1",
   "markdown>=3.9",
+  "packaging>=25.0",
+  "javaproperties>=0.8.2",
 ]
 
 [dependency-groups]
@@ -53,8 +55,22 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B"]
-ignore = ["E402", "B023", "E501"]
+select = [
+  "E",
+  "F",
+  "W",
+  "UP",
+  "B",
+  "C4",
+  "SIM",
+  "PIE",
+  "T20",
+  "RET",
+  "ARG",
+  "ERA",
+  "RUF",
+]
+ignore = ["E402", "B023", "E501", "RUF001", "RUF002", "RUF003"]
 fixable = ["ALL"]
 unfixable = []
 
@@ -71,4 +87,5 @@ managed = true
 testpaths = ["tests"]
 markers = [
   "smoke: minimal smoke coverage for core flows",
+  "integration: focused integration coverage for key UI/business flows",
 ]

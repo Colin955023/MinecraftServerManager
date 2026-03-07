@@ -36,7 +36,10 @@ def test_select_update_asset_prefers_portable_zip() -> None:
     release = {
         "assets": [
             {"name": "MinecraftServerManager-Setup-1.6.7.exe", "browser_download_url": "https://example/installer.exe"},
-            {"name": "MinecraftServerManager-v1.6.7-portable.zip", "browser_download_url": "https://example/portable.zip"},
+            {
+                "name": "MinecraftServerManager-v1.6.7-portable.zip",
+                "browser_download_url": "https://example/portable.zip",
+            },
         ]
     }
 

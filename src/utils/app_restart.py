@@ -19,6 +19,17 @@ class AppRestart:
     """應用程式重啟管理類別"""
 
     @staticmethod
+    def _extract_exe_candidate(executable_path: list[str]) -> str | None:
+        """從執行檔路徑列表中提取第一個候選執行檔路徑"""
+        try:
+            if isinstance(executable_path, list) and len(executable_path) > 0:
+                return executable_path[0]
+        except (IndexError, TypeError, AttributeError):
+            # 預期的異常：列表為空或類型不符
+            return None
+        return None
+
+    @staticmethod
     def _get_executable_info() -> tuple[list[str], bool, Path | None]:
         """取得當前應用程式的執行檔資訊，區分打包檔案與 Python 腳本模式"""
         # 優先透過 sys.executable 判斷是否為打包執行檔
@@ -197,12 +208,7 @@ class AppRestart:
             executable_path, is_frozen, script_path = AppRestart._get_executable_info()
             if is_frozen:
                 # executable_path 是 list，取第一個（執行檔路徑）
-                exe_candidate = None
-                try:
-                    if isinstance(executable_path, list) and len(executable_path) > 0:
-                        exe_candidate = executable_path[0]
-                except Exception:
-                    exe_candidate = None
+                exe_candidate = AppRestart._extract_exe_candidate(executable_path)
 
                 exe_exists = False
                 exe_is_file = False
@@ -272,12 +278,7 @@ class AppRestart:
             executable_path, is_frozen, script_path = AppRestart._get_executable_info()
 
             if is_frozen:
-                exe_candidate = None
-                try:
-                    if isinstance(executable_path, list) and len(executable_path) > 0:
-                        exe_candidate = executable_path[0]
-                except Exception:
-                    exe_candidate = None
+                exe_candidate = AppRestart._extract_exe_candidate(executable_path)
 
                 exe_resolved = None
                 exists = False
@@ -380,23 +381,12 @@ class AppRestart:
                 """延遲重啟函式（會在背景執行緒啟動新程式）。"""
                 try:
                     time.sleep(delay)
-                    # Windows 平台隱藏命令提示字元視窗（若不可用則回退為 0）
-                    creation_flags = SubprocessUtils.CREATE_NO_WINDOW
-
                     if is_frozen:
                         # 對於打包檔案，直接執行可執行檔，並把工作目錄設為執行檔所在資料夾
                         exe_path = executable_cmd[0]
                         exe_cwd = str(Path(exe_path).parent) if exe_path else None
                         logger.debug(f"啟動執行檔: {exe_path}, cwd={exe_cwd}")
-                        process = SubprocessUtils.popen_checked(
-                            [exe_path],
-                            cwd=exe_cwd,
-                            stdin=SubprocessUtils.DEVNULL,
-                            stdout=SubprocessUtils.DEVNULL,
-                            stderr=SubprocessUtils.DEVNULL,
-                            close_fds=True,
-                            creationflags=creation_flags,
-                        )
+                        process = SubprocessUtils.popen_detached([exe_path], cwd=exe_cwd)
                     else:
                         # 非打包（腳本）模式：建立安全的命令列表（所有元素皆為字串）
                         target_cwd = None
@@ -466,15 +456,7 @@ class AppRestart:
                                     target_cwd = str(Path.cwd())
                                     logger.debug(f"以模組方式重啟: {use_cmd}, 指令={target_cwd}")
 
-                        process = SubprocessUtils.popen_checked(
-                            use_cmd,
-                            cwd=target_cwd,
-                            stdin=SubprocessUtils.DEVNULL,
-                            stdout=SubprocessUtils.DEVNULL,
-                            stderr=SubprocessUtils.DEVNULL,
-                            close_fds=True,
-                            creationflags=creation_flags,
-                        )
+                        process = SubprocessUtils.popen_detached(use_cmd, cwd=target_cwd)
 
                     # 等待短暫時間以確認新程式已啟動
                     time.sleep(0.5)
@@ -531,7 +513,13 @@ class AppRestart:
                             sys.exit(0)
 
                         # 在主線程中安排延遲關閉
-                        parent_window.after(100, delayed_close)
+                        UIUtils.schedule_debounce(
+                            parent_window,
+                            "_restart_close_job",
+                            100,
+                            delayed_close,
+                            owner=parent_window,
+                        )
 
                     except Exception as e:
                         logger.exception(f"安排視窗關閉時發生錯誤: {e}")

@@ -19,6 +19,7 @@ import customtkinter as ctk
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    Colors,
     FontManager,
     FontSize,
     JavaUtils,
@@ -66,13 +67,13 @@ class CreateServerFrame(ctk.CTkFrame):
 
             if (max_memory > system_memory or min_memory > system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=("red", "red"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
             elif (max_memory > half_system_memory or min_memory > half_system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統記憶體的一半 ({half_system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=("#b45309", "#d97706"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_WARNING)
             elif min_memory > max_memory:
                 warning_text = "⚠️ 警告：最小記憶體必須小於最大記憶體"
-                self.memory_warning_label.configure(text=warning_text, text_color=("red", "red"))
+                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
             else:
                 self.memory_warning_label.configure(text="")
         except ValueError:
@@ -80,7 +81,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.memory_warning_label.configure(text="")
             else:
                 self.memory_warning_label.configure(
-                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=("red", "red")
+                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=Colors.TEXT_ERROR
                 )
         except Exception as e:
             logger.bind(component="").error(
@@ -95,7 +96,7 @@ class CreateServerFrame(ctk.CTkFrame):
             parent,
             text="Java 執行檔路徑 (可選):",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         self.java_path_var = tk.StringVar(value="")
@@ -150,6 +151,10 @@ class CreateServerFrame(ctk.CTkFrame):
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
+        # 高頻 UI 排程工作識別：統一 `_..._job` 命名，便於集中取消。
+        self._create_server_progress_job = None
+        self._create_server_success_job = None
+        self._create_server_error_job = None
 
         # 初始化 UI 更新佇列
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
@@ -160,6 +165,31 @@ class CreateServerFrame(ctk.CTkFrame):
         # 建立元件後立即開始預載入版本資訊並顯示載入狀態
         self.preload_version_data()
 
+    def _schedule_ui_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
+        """透過主執行緒佇列建立 debounce 排程。"""
+
+        def _schedule() -> None:
+            if not self.winfo_exists():
+                return
+            UIUtils.schedule_debounce(
+                self,
+                job_attr,
+                delay_ms,
+                callback,
+                owner=self,
+            )
+
+        self.ui_queue.put(_schedule)
+
+    def _cancel_create_server_jobs(self) -> None:
+        """取消建立伺服器流程相關的待執行 UI 工作。"""
+        for job_attr in (
+            "_create_server_progress_job",
+            "_create_server_success_job",
+            "_create_server_error_job",
+        ):
+            UIUtils.cancel_scheduled_job(self, job_attr, owner=self)
+
     def create_widgets(self) -> None:
         """建立介面元件"""
         main_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -169,12 +199,12 @@ class CreateServerFrame(ctk.CTkFrame):
             main_container,
             text="建立新伺服器",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-            text_color=("#111827", "#f3f4f6"),
+            text_color=Colors.TEXT_HEADING,
         )
         title_label.pack(pady=(0, 15))
 
         # EULA 警告框架
-        eula_frame = ctk.CTkFrame(main_container, fg_color=("#fffbe6", "#2d2a1f"))
+        eula_frame = ctk.CTkFrame(main_container, fg_color=Colors.BG_ALERT)
         eula_frame.pack(pady=(0, 12), fill="x")
         eula_frame.grid_columnconfigure(1, weight=1)
 
@@ -182,20 +212,15 @@ class CreateServerFrame(ctk.CTkFrame):
             eula_frame,
             text="⚠️",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            text_color="#d97706",
+            text_color=Colors.BUTTON_WARNING_HOVER,
         )
         eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(8, 4), pady=6)
 
         eula_link = ctk.CTkLabel(
             eula_frame,
             text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
-            font=ctk.CTkFont(
-                family="Microsoft JhengHei",
-                size=int(14 * FontManager.get_scale_factor()),
-                weight="bold",
-                underline=True,
-            ),
-            text_color="#b45309",
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True),
+            text_color=Colors.TEXT_WARNING,
             cursor="hand2",
         )
         eula_link.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=6)
@@ -229,7 +254,7 @@ class CreateServerFrame(ctk.CTkFrame):
             content_frame,
             text="模組載入器:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=2, column=0, sticky="w", pady=5)
 
         self.loader_type_var = tk.StringVar(value="Vanilla")
@@ -239,6 +264,8 @@ class CreateServerFrame(ctk.CTkFrame):
             values=["Vanilla", "Fabric", "Forge"],
             # 移除 command 參數，避免與 trace_add 重複觸發
             width=Sizes.DROPDOWN_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
         self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(15, 0), pady=5)
@@ -252,7 +279,7 @@ class CreateServerFrame(ctk.CTkFrame):
             content_frame,
             text="載入器版本:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=loader_version_row, column=0, sticky="w", pady=5)
 
         # 載入器版本下拉選單容器
@@ -265,6 +292,8 @@ class CreateServerFrame(ctk.CTkFrame):
             variable=self.loader_version_var,
             values=["無"],
             width=Sizes.DROPDOWN_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="disabled",
         )
         self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -285,7 +314,7 @@ class CreateServerFrame(ctk.CTkFrame):
             version_frame,
             text="Minecraft 版本:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).pack(anchor="w")
         # Minecraft 版本下拉選單與滑桿
         mc_version_frame = ctk.CTkFrame(version_frame, fg_color="transparent")
@@ -298,7 +327,9 @@ class CreateServerFrame(ctk.CTkFrame):
             variable=self.mc_version_var,
             values=["載入中..."],
             command=self.update_server_config_ui,
-            width=200,
+            width=Sizes.DROPDOWN_COMPACT_WIDTH,
+            font_size=FontSize.MEDIUM,
+            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
         self.mc_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -318,7 +349,7 @@ class CreateServerFrame(ctk.CTkFrame):
             memory_frame,
             text="記憶體設定 (MB):",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).pack(anchor="w")
 
         memory_input_frame = ctk.CTkFrame(memory_frame, fg_color="transparent")
@@ -332,7 +363,7 @@ class CreateServerFrame(ctk.CTkFrame):
             min_memory_frame,
             text="最小記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
+            text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
 
         self.min_memory_var = tk.StringVar(value="1024")
@@ -351,7 +382,7 @@ class CreateServerFrame(ctk.CTkFrame):
             max_memory_frame,
             text="最大記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
+            text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
 
         self.max_memory_var = tk.StringVar(value="2048")
@@ -371,8 +402,8 @@ class CreateServerFrame(ctk.CTkFrame):
             memory_frame,
             text="最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#4b5563", "#9ca3af"),
-            wraplength=900,
+            text_color=Colors.TEXT_MUTED,
+            wraplength=Sizes.WRAP_LENGTH_WIDE,
             justify="left",
         )
         memory_tip.pack(anchor="w", pady=(5, 0))
@@ -382,8 +413,8 @@ class CreateServerFrame(ctk.CTkFrame):
             memory_frame,
             text="",
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
-            text_color=("red", "red"),
-            wraplength=400,
+            text_color=Colors.TEXT_ERROR,
+            wraplength=Sizes.WRAP_LENGTH_MEDIUM,
         )
         self.memory_warning_label.pack(anchor="w", pady=(3, 0))
         content_frame.columnconfigure(1, weight=1)
@@ -515,7 +546,7 @@ class CreateServerFrame(ctk.CTkFrame):
             parent,
             text=label_text,
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=("#1f2937", "#e5e7eb"),
+            text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).grid(row=row, column=0, sticky="w", pady=5)
 
         var = tk.StringVar(value=default_value)
@@ -547,8 +578,8 @@ class CreateServerFrame(ctk.CTkFrame):
             text="建立伺服器",
             command=self.create_server,
             button_type="primary",
-            width=140,
-            height=40,
+            width=Sizes.BUTTON_WIDTH_PRIMARY,
+            height=Sizes.BUTTON_HEIGHT_LARGE,
         )
         self.create_button.pack(side="left", padx=(0, 15))
 
@@ -557,8 +588,8 @@ class CreateServerFrame(ctk.CTkFrame):
             text="重設表單",
             command=self.reset_form,
             button_type="secondary",
-            width=120,
-            height=40,
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.BUTTON_HEIGHT_LARGE,
         )
         reset_button.pack(side="left")
 
@@ -628,6 +659,31 @@ class CreateServerFrame(ctk.CTkFrame):
 
         self.update_server_config_ui()
 
+    @staticmethod
+    def _compose_server_name(loader_type: str, mc_version: str, suffix: str = "") -> str:
+        """依載入器類型與版本組合標準伺服器名稱。"""
+        base_name = f"{mc_version}{suffix}"
+        if loader_type in ("Fabric", "Forge"):
+            return f"{loader_type} {base_name}"
+        return base_name
+
+    @staticmethod
+    def _extract_server_name_suffix(name: str, version_candidates: tuple[str, ...]) -> str | None:
+        """解析「[載入器前綴] + 版本 + 自訂尾字」中的尾字。"""
+        normalized = name.strip()
+        if not normalized:
+            return None
+
+        for prefix in ("Fabric ", "Forge "):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix) :]
+                break
+
+        for version in version_candidates:
+            if version and normalized.startswith(version):
+                return normalized[len(version) :]
+        return None
+
     def update_server_config_ui(self, _event=None) -> None:
         """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單"""
         mc_version = self.mc_version_var.get()
@@ -636,9 +692,9 @@ class CreateServerFrame(ctk.CTkFrame):
         auto_names = [
             "我的伺服器",
             "",
-            f"Fabric {mc_version}",
-            f"Forge {mc_version}",
-            f"{mc_version}",
+            self._compose_server_name("Fabric", mc_version),
+            self._compose_server_name("Forge", mc_version),
+            self._compose_server_name("Vanilla", mc_version),
         ]
         # 取得舊的 Minecraft 版本（用於自動更新伺服器名稱）
         old_version = getattr(self, "old_mc_version", None)
@@ -646,14 +702,15 @@ class CreateServerFrame(ctk.CTkFrame):
         self.old_mc_version = mc_version
         # 自動命名伺服器名稱
         if name in auto_names:
-            if loader_type == "Vanilla":
-                self.server_name_var.set(f"{mc_version}")
-            elif loader_type == "Fabric":
-                self.server_name_var.set(f"Fabric {mc_version}")
-            elif loader_type == "Forge":
-                self.server_name_var.set(f"Forge {mc_version}")
+            self.server_name_var.set(self._compose_server_name(loader_type, mc_version))
+        else:
+            version_candidates = tuple(v for v in (old_version, mc_version) if v)
+            suffix = self._extract_server_name_suffix(name, version_candidates)
+            # 保留使用者手動補上的尾字，並同步更新載入器前綴與 MC 版本。
+            if suffix is not None:
+                self.server_name_var.set(self._compose_server_name(loader_type, mc_version, suffix))
         # 若 server_name 包含 old_version，則自動替換為 mc_version
-        elif old_version and (old_version in name):
+        if old_version and (old_version in name) and (name == self.server_name_var.get()):
             self.server_name_var.set(name.replace(old_version, mc_version))
         # 載入器版本選單狀態與載入
         if loader_type == "Vanilla":
@@ -869,7 +926,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_dialog = ProgressDialog(parent_window, "正在建立伺服器")
                 progress_ready.set()
 
-            self.after(0, create_progress)
+            self._schedule_ui_job("_create_server_progress_job", 0, create_progress)
             # 等待進度對話框建立（避免 busy-wait）
             if not progress_ready.wait(timeout=10):
                 raise Exception("建立進度對話框超時")
@@ -921,7 +978,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.callback(config)
 
             # 給使用者短暫時間看到 100% 再關閉（不阻塞背景執行緒）
-            self.after(1000, on_success)
+            self._schedule_ui_job("_create_server_success_job", 1000, on_success)
         except Exception as error:
             logger.bind(component="").error(
                 f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}",
@@ -933,7 +990,7 @@ class CreateServerFrame(ctk.CTkFrame):
                     progress_dialog.close()
                 UIUtils.show_error("建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window)
 
-            self.after(0, on_error)
+            self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
     def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
         """下載伺服器檔案"""
@@ -1006,3 +1063,8 @@ class CreateServerFrame(ctk.CTkFrame):
         # 對於需要載入器版本的類型進行額外驗證
         requires_loader_version = loader_type in ["forge", "fabric"]
         return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
+
+    def destroy(self) -> None:
+        """銷毀頁面前先清理待執行排程工作。"""
+        self._cancel_create_server_jobs()
+        super().destroy()

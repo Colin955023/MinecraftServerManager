@@ -3,9 +3,11 @@
 負責管理現有 Minecraft 伺服器的使用者介面
 """
 
+import contextlib
 import queue
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 import traceback
 from collections.abc import Callable
 from datetime import datetime
@@ -23,8 +25,11 @@ from ..utils import (
     PathUtils,
     ServerDetectionUtils,
     ServerOperations,
+    Sizes,
     SubprocessUtils,
     UIUtils,
+    compute_adaptive_pool_limit,
+    compute_exponential_moving_average,
     get_logger,
 )
 from . import ServerMonitorWindow, ServerPropertiesDialog
@@ -59,6 +64,31 @@ class ManageServerFrame(ctk.CTkFrame):
         self._widgets_created = False
         self.server_tree: ttk.Treeview | None = None
         self.action_buttons: dict[str, Any] = {}
+        self._server_refresh_job: str | None = None
+        # Treeview 差異重新整理的競態保護：啟動新輪次先取消舊 `_server_refresh_job`，
+        # 並以 `_server_refresh_token` 驗證分批插入/收尾，只允許最新輪次提交結果。
+        # `_server_item_by_name` 與 `_server_rows_snapshot` 用於就地更新、重排與變更判斷。
+        self._server_refresh_token = 0
+        self._server_tree_render_locked = False
+        self._server_item_by_name: dict[str, str] = {}
+        self._server_rows_snapshot: dict[str, tuple[Any, ...]] = {}
+        self._server_recycled_item_ids: list[str] = []
+        self._server_recycle_pool_max = 300
+        # 重用池觀測指標（debug）：用於調整 pool 上限與命中率。
+        self._server_recycle_hits = 0
+        self._server_recycle_misses = 0
+        self._server_recycle_drops = 0
+        self._server_recycle_log_every = 200
+        self._server_recycle_pool_min = 150
+        self._server_recycle_pool_cap = 1200
+        self._server_recycle_tune_step = 50
+        self._server_recycle_hit_rate_ema: float | None = None
+        self._server_recycle_ema_alpha = 0.35
+        # 可調整的批次插入參數：可依實際 UI 反應微調。
+        self._server_insert_batch_base = 30
+        self._server_insert_batch_max = 100
+        # 動態批次分母：使用待插入筆數的 1/divisor 作為動態批次估算。
+        self._server_insert_batch_divisor = 8
 
         self.ui_queue: queue.Queue = queue.Queue()
 
@@ -68,36 +98,72 @@ class ManageServerFrame(ctk.CTkFrame):
         self._post_action_immediate_job = None
         self._post_action_delayed_job = None
         self._delayed_refresh_job = None
+        self._auto_refresh_enabled = True
+        self._auto_refresh_interval_ms = 10000
         self._auto_refresh_job = None
         self._auto_refresh_loop()
 
     def _auto_refresh_loop(self) -> None:
-        """自動刷新循環"""
+        """自動重新整理循環"""
         if self.winfo_exists():
+            if getattr(self, "_auto_refresh_enabled", True):
+                self.refresh_servers()
+            self._auto_refresh_job = self.after(self._auto_refresh_interval_ms, self._auto_refresh_loop)
+
+    def set_auto_refresh_enabled(self, enabled: bool, *, refresh_now: bool = False) -> None:
+        """啟用或停用此管理頁面的背景自動重新整理。
+
+        此方法主要供外層 UI（例如分頁/頁籤容器）在切換顯示狀態時呼叫，用途如下：
+        - 本頁不在前景時停用自動重新整理，降低 CPU 與 I/O 負擔。
+        - 避免使用者瀏覽其他頁籤時，背景 TreeView 持續更新造成 UI 抖動。
+        - 回到本頁時再啟用自動重新整理，必要時可立即重新整理一次。
+
+        Args:
+            enabled: True 啟用自動重新整理（允許 `_auto_refresh_loop` 週期性呼叫
+                :meth:`refresh_servers`）；False 停用背景自動重新整理。
+            refresh_now: 當 `enabled=True` 時，若此值也為 True，會立刻呼叫
+                :meth:`refresh_servers`，確保頁面重新顯示時狀態立即更新。
+
+        範例（與 ttk.Notebook 整合）::
+
+            def on_tab_changed(event):
+                notebook = event.widget
+                current = notebook.select()
+
+                # 假設 manage_frame 是 ManageServerFrame 的實例
+                is_manage_tab = current == manage_tab_id
+
+                # 進入管理頁時啟用背景自動重新整理，並立即重新整理一次
+                manage_frame.set_auto_refresh_enabled(
+                    is_manage_tab,
+                    refresh_now=is_manage_tab,
+                )
+        """
+        self._auto_refresh_enabled = bool(enabled)
+        if refresh_now and self._auto_refresh_enabled:
             self.refresh_servers()
-            self._auto_refresh_job = self.after(10000, self._auto_refresh_loop)
 
     def _schedule_post_action_updates(self, immediate_delay_ms: int, delayed_delay_ms: int) -> None:
-        for attr_name in ("_post_action_immediate_job", "_post_action_delayed_job"):
-            job_id = getattr(self, attr_name, None)
-            if job_id:
-                try:
-                    self.after_cancel(job_id)
-                except Exception as e:
-                    logger.exception(f"取消排程失敗 {attr_name}={job_id}: {e}")
-                setattr(self, attr_name, None)
-
-        self._post_action_immediate_job = self.after(immediate_delay_ms, self._immediate_update)
-        self._post_action_delayed_job = self.after(delayed_delay_ms, self._delayed_update)
+        UIUtils.schedule_debounce(
+            self,
+            "_post_action_immediate_job",
+            immediate_delay_ms,
+            self._immediate_update,
+        )
+        UIUtils.schedule_debounce(
+            self,
+            "_post_action_delayed_job",
+            delayed_delay_ms,
+            self._delayed_update,
+        )
 
     def _schedule_refresh(self, delay_ms: int) -> None:
-        job_id = getattr(self, "_delayed_refresh_job", None)
-        if job_id:
-            try:
-                self.after_cancel(job_id)
-            except Exception as e:
-                logger.exception(f"取消刷新排程失敗 job={job_id}: {e}")
-        self._delayed_refresh_job = self.after(delay_ms, self.refresh_servers)
+        UIUtils.schedule_debounce(
+            self,
+            "_delayed_refresh_job",
+            delay_ms,
+            self.refresh_servers,
+        )
 
     def create_widgets(self) -> None:
         """建立介面元件"""
@@ -222,17 +288,11 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_tree.heading("備份狀態", text="備份狀態")
         self.server_tree.heading("路徑", text="路徑")
 
-        # 設定欄位寬度
-        self.server_tree.column("名稱", width=150)
-        self.server_tree.column("版本", width=100)
-        self.server_tree.column("載入器", width=120)
-        self.server_tree.column("狀態", width=100)
-        self.server_tree.column("備份狀態", width=50)
-        self.server_tree.column("路徑", width=200)
+        self._apply_server_tree_columns_layout()
 
         # 綁定事件
         self.server_tree.bind("<<TreeviewSelect>>", self.on_server_select)
-        self.server_tree.bind("<Double-1>", self.on_server_double_click)
+        self.server_tree.bind("<Double-1>", self.on_server_tree_double_click)
         self.server_tree.bind("<Button-3>", self.show_server_context_menu)
 
         # 加入滾動條
@@ -242,6 +302,109 @@ class ManageServerFrame(ctk.CTkFrame):
         # 佈局
         self.server_tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+    def _server_tree_display_columns(self) -> tuple[str, ...]:
+        return ("名稱", "版本", "載入器", "狀態", "備份狀態", "路徑")
+
+    def _apply_server_tree_columns_layout(self) -> None:
+        """套用伺服器 Tree 欄位配置（除路徑欄外皆固定寬，並依 DPI 縮放）。"""
+        if not self.server_tree:
+            return
+
+        tree = self.server_tree
+        tree.configure(displaycolumns=self._server_tree_display_columns())
+        name_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_NAME)
+        version_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_VERSION)
+        loader_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_LOADER)
+        status_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_STATUS)
+        backup_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_BACKUP)
+        path_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_PATH)
+        path_min_width = max(FontManager.get_dpi_scaled_size(180), path_width // 2)
+
+        tree.column("名稱", width=name_width, minwidth=name_width, stretch=False, anchor="w")
+        tree.column("版本", width=version_width, minwidth=version_width, stretch=False, anchor="w")
+        tree.column("載入器", width=loader_width, minwidth=loader_width, stretch=False, anchor="w")
+        tree.column("狀態", width=status_width, minwidth=status_width, stretch=False, anchor="w")
+        tree.column("備份狀態", width=backup_width, minwidth=backup_width, stretch=False, anchor="w")
+        tree.column("路徑", width=path_width, minwidth=path_min_width, stretch=True, anchor="w")
+
+    def _get_server_tree_column_from_x(self, x: int) -> str | None:
+        """依滑鼠 x 座標回傳對應欄位名稱。"""
+        tree = self.server_tree
+        if not tree:
+            return None
+        col_ref = tree.identify_column(x)
+        if not col_ref or col_ref == "#0":
+            return None
+        try:
+            column_idx = int(str(col_ref).lstrip("#")) - 1
+        except (TypeError, ValueError):
+            return None
+        columns = self._server_tree_display_columns()
+        if column_idx < 0 or column_idx >= len(columns):
+            return None
+        return columns[column_idx]
+
+    def _get_server_tree_separator_column_from_x(self, x: int) -> str | None:
+        """依滑鼠 x 座標偵測是否靠近欄位分隔線，並回傳左側欄位。"""
+        tree = self.server_tree
+        if not tree:
+            return None
+        columns = self._server_tree_display_columns()
+        if not columns:
+            return None
+
+        widths = [int(tree.column(col, "width")) for col in columns]
+        total_width = sum(widths)
+        xview_start = 0.0
+        try:
+            xview = tree.xview()
+            if xview and len(xview) >= 1:
+                xview_start = float(xview[0])
+        except Exception:
+            xview_start = 0.0
+
+        logical_x = int(x + (xview_start * total_width))
+        threshold = FontManager.get_dpi_scaled_size(6)
+        boundary = 0
+        for idx, width in enumerate(widths):
+            boundary += width
+            if abs(logical_x - boundary) <= threshold:
+                return columns[idx]
+        return None
+
+    def _auto_fit_server_tree_column(self, column_id: str) -> None:
+        """將指定欄位寬度調整為目前內容最寬值。"""
+        tree = self.server_tree
+        if not tree:
+            return
+
+        heading_font = tkfont.Font(font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"))
+        body_font = tkfont.Font(font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        padding = FontManager.get_dpi_scaled_size(14)
+        # auto-fit 時覆寫欄位最小寬，避免被初始固定欄位下限卡住。
+        safety_min_width = FontManager.get_dpi_scaled_size(12)
+
+        heading_text = str(tree.heading(column_id, "text") or column_id)
+        max_width = heading_font.measure(heading_text)
+        try:
+            column_index = self._server_tree_display_columns().index(column_id)
+        except ValueError:
+            return
+        for item_id in tree.get_children():
+            values = tree.item(item_id, "values") or ()
+            if column_index >= len(values):
+                continue
+            max_width = max(max_width, body_font.measure(str(values[column_index])))
+
+        computed_width = max(safety_min_width, int(max_width + padding))
+        tree.column(
+            column_id,
+            width=computed_width,
+            minwidth=safety_min_width,
+            stretch=(column_id == "路徑"),
+            anchor="w",
+        )
 
     def show_server_context_menu(self, event) -> None:
         """顯示右鍵選單"""
@@ -347,7 +510,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 f"已將伺服器 {server_name} 的備份路徑設定為：\n{new_backup_path}",
                 self.winfo_toplevel(),
             )
-            # 刷新列表以更新備份狀態顯示
+            # 重新整理清單以更新備份狀態顯示
             self.refresh_servers()
         else:
             UIUtils.show_info("取消", "未更改備份路徑設定", self.winfo_toplevel())
@@ -501,7 +664,7 @@ class ManageServerFrame(ctk.CTkFrame):
             self.action_buttons[key] = btn
 
     def browse_path(self) -> None:
-        """瀏覽路徑，並自動正規化、寫入設定、建立 servers 子資料夾、刷新列表"""
+        """瀏覽路徑，並自動正規化、寫入設定、建立 servers 子資料夾、重新整理清單"""
         path = filedialog.askdirectory(title="選擇伺服器目錄")
         if path:
             # 強制正規化分隔符與絕對路徑
@@ -543,7 +706,7 @@ class ManageServerFrame(ctk.CTkFrame):
 
             # 同步 server_manager 的 root
             self.server_manager.servers_root = Path(servers_root)
-            # 變更後自動刷新伺服器列表
+            # 變更後自動重新整理伺服器清單
             self.refresh_servers()
 
     def detect_servers(self, show_message: bool = True) -> None:
@@ -665,8 +828,326 @@ class ManageServerFrame(ctk.CTkFrame):
             # 退回到簡單的檢查
             return (Path(server_path) / "server.jar").exists()
 
+    def _cancel_server_refresh_job(self) -> None:
+        """取消尚未完成的列表插入工作（共用排程 helper）。
+
+        在新一輪重新整理開始前呼叫，立即終止舊輪次尚未執行的 after 批次工作。
+        """
+        tree = self.server_tree
+        if not tree:
+            self._server_refresh_job = None
+            return
+        UIUtils.cancel_scheduled_job(tree, "_server_refresh_job", owner=self)
+
+    def _set_server_tree_render_lock(self, locked: bool) -> None:
+        """大量重新整理 Treeview 前後鎖住父容器幾何，減少重排閃爍。"""
+        if not self.server_tree:
+            return
+
+        parent = self.server_tree.master
+        if locked:
+            if getattr(self, "_server_tree_render_locked", False):
+                return
+            try:
+                parent.pack_propagate(False)
+                self._server_tree_render_locked = True
+            except Exception as e:
+                logger.debug(f"鎖定 server tree 佈局失敗: {e}", "ManageServerFrame")
+            return
+
+        if not getattr(self, "_server_tree_render_locked", False):
+            logger.warning("收到解除 server tree 佈局鎖要求，但目前未鎖定。")
+            return
+        try:
+            parent.pack_propagate(True)
+        except Exception as e:
+            logger.debug(f"解除 server tree 佈局鎖失敗: {e}", "ManageServerFrame")
+        finally:
+            self._server_tree_render_locked = False
+
+    @staticmethod
+    def _normalize_server_row(row: list[Any]) -> tuple[Any, ...]:
+        """標準化 Treeview 列資料，便於比對差異。"""
+        return tuple(row)
+
+    @staticmethod
+    def _make_server_data_signature(server_data: list[list[Any]]) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+        """建立可比較簽章，避免每次都重建整個列表。"""
+        signature: list[tuple[str, tuple[Any, ...]]] = []
+        for row in server_data:
+            if not row:
+                continue
+            name = str(row[0])
+            signature.append((name, tuple(row)))
+        return tuple(signature)
+
+    def _recycle_server_item(self, item_id: str) -> None:
+        """將不再顯示的 Tree item 先 detach 進重用池，降低後續 insert 成本。"""
+        if not self.server_tree or not item_id:
+            return
+        try:
+            if not self.server_tree.exists(item_id):
+                return
+            self.server_tree.detach(item_id)
+            pool = self._server_recycled_item_ids
+            pool.append(item_id)
+            max_size = max(0, int(getattr(self, "_server_recycle_pool_max", 300)))
+            if len(pool) > max_size:
+                stale_id = pool.pop(0)
+                self._server_recycle_drops += 1
+                with contextlib.suppress(Exception):
+                    if self.server_tree.exists(stale_id):
+                        self.server_tree.delete(stale_id)
+                self._maybe_log_server_recycle_stats()
+        except Exception as e:
+            logger.debug(f"回收 server tree item 失敗 item_id={item_id}: {e}", "ManageServerFrame")
+
+    def _acquire_recycled_server_item(self) -> str | None:
+        """從重用池取回可用的 Tree item。"""
+        tree = self.server_tree
+        if not tree:
+            return None
+        pool = self._server_recycled_item_ids
+        while pool:
+            candidate = pool.pop()
+            with contextlib.suppress(Exception):
+                if tree.exists(candidate):
+                    self._server_recycle_hits += 1
+                    self._maybe_log_server_recycle_stats()
+                    return candidate
+        self._server_recycle_misses += 1
+        self._maybe_log_server_recycle_stats()
+        return None
+
+    def _maybe_log_server_recycle_stats(self) -> None:
+        """定期輸出重用池命中統計（debug），用於調整池大小。"""
+        interval = max(1, int(getattr(self, "_server_recycle_log_every", 200)))
+        total = int(getattr(self, "_server_recycle_hits", 0)) + int(getattr(self, "_server_recycle_misses", 0))
+        if total <= 0 or (total % interval) != 0:
+            return
+        raw_hit_rate = (self._server_recycle_hits / total) * 100.0
+        smoothed_hit_rate = compute_exponential_moving_average(
+            previous=getattr(self, "_server_recycle_hit_rate_ema", None),
+            current=raw_hit_rate,
+            alpha=float(getattr(self, "_server_recycle_ema_alpha", 0.35)),
+        )
+        self._server_recycle_hit_rate_ema = smoothed_hit_rate
+        self._auto_tune_server_recycle_pool(smoothed_hit_rate)
+        message = (
+            f"server recycle stats pool={len(self._server_recycled_item_ids)} "
+            f"hits={self._server_recycle_hits} misses={self._server_recycle_misses} "
+            f"drops={self._server_recycle_drops} hit_rate={raw_hit_rate:.1f}% ema={smoothed_hit_rate:.1f}%"
+        )
+        logger.debug(message, "ManageServerFrame")
+
+    def _auto_tune_server_recycle_pool(self, hit_rate: float) -> None:
+        """依命中率自動微調 recycle pool 上限。"""
+        current = max(1, int(getattr(self, "_server_recycle_pool_max", 300)))
+        min_size = max(1, int(getattr(self, "_server_recycle_pool_min", 150)))
+        cap_size = max(min_size, int(getattr(self, "_server_recycle_pool_cap", 1200)))
+        step = max(1, int(getattr(self, "_server_recycle_tune_step", 50)))
+        pool_len = len(self._server_recycled_item_ids)
+        new_size = compute_adaptive_pool_limit(
+            current=current,
+            min_size=min_size,
+            cap_size=cap_size,
+            step=step,
+            pool_len=pool_len,
+            hit_rate=hit_rate,
+        )
+
+        if new_size != current:
+            self._server_recycle_pool_max = new_size
+            logger.debug(
+                f"自動調整 server recycle pool 上限: {current} -> {new_size} (hit_rate={hit_rate:.1f}%)",
+                "ManageServerFrame",
+            )
+
+    def _get_server_insert_batch_size(self, pending_count: int) -> int:
+        """依待插入筆數動態計算批次大小，兼顧小清單與大清單流暢度。"""
+        if pending_count <= 0:
+            return 1
+
+        base = max(1, int(getattr(self, "_server_insert_batch_base", 30)))
+        max_size = max(base, int(getattr(self, "_server_insert_batch_max", 100)))
+
+        # 使用約剩餘筆數的 1/divisor 作為動態批次大小，避免一次插入過多造成 UI 僵直。
+        divisor = max(1, int(getattr(self, "_server_insert_batch_divisor", 8)))
+        dynamic_size = max(base, pending_count // divisor)
+        dynamic_size = min(dynamic_size, max_size)
+        return min(dynamic_size, pending_count)
+
+    def _restore_server_selection(self, previous_selection: str | None) -> None:
+        """盡量還原重新整理前選取列。"""
+        if not self.server_tree:
+            return
+
+        self.selected_server = None
+        if previous_selection:
+            item_id = self._server_item_by_name.get(previous_selection)
+            if item_id:
+                try:
+                    self.server_tree.selection_set(item_id)
+                    self.server_tree.see(item_id)
+                    self.selected_server = previous_selection
+                except Exception as e:
+                    logger.debug(f"還原伺服器選取失敗: {e}", "ManageServerFrame")
+
+    def _finalize_server_refresh(
+        self,
+        *,
+        refresh_token: int,
+        previous_selection: str | None,
+        rows_snapshot: dict[str, tuple[Any, ...]],
+    ) -> None:
+        """重新整理收尾：避免過期任務覆寫新狀態。"""
+        if refresh_token != self._server_refresh_token:
+            return
+        self._server_refresh_job = None
+        self._server_rows_snapshot = rows_snapshot
+        self._restore_server_selection(previous_selection)
+        self.update_selection()
+        self._set_server_tree_render_lock(False)
+
+    def _apply_server_tree_diff(
+        self,
+        *,
+        server_order: list[str],
+        server_rows: dict[str, tuple[Any, ...]],
+        refresh_token: int,
+        previous_selection: str | None,
+    ) -> None:
+        """以差異更新 Treeview，減少 delete/insert 造成的卡頓。
+
+        `refresh_token` 是本輪重新整理的輪次編號。這個方法可能透過 `after` 分批插入資料，
+        因此它的執行生命週期可能跨越多次重新整理請求；每個批次都要先檢查 token。
+        一旦偵測到 token 落後，代表已有較新的重新整理接手，舊批次必須立刻退出，
+        以避免「慢的舊結果」晚到並覆寫「新的正確結果」。
+        """
+        tree = self.server_tree
+        if not tree or not tree.winfo_exists():
+            self._set_server_tree_render_lock(False)
+            return
+
+        # 刪除已不存在的伺服器列
+        for name, stale_item_id in list(self._server_item_by_name.items()):
+            if name in server_rows:
+                continue
+            self._recycle_server_item(stale_item_id)
+            self._server_item_by_name.pop(name, None)
+
+        # 更新既有列，並收集新增列
+        rows_snapshot: dict[str, tuple[Any, ...]] = {}
+        pending_insert: list[tuple[str, tuple[Any, ...]]] = []
+        previous_snapshot = getattr(self, "_server_rows_snapshot", {})
+        for name in server_order:
+            values = server_rows[name]
+            item_id = self._server_item_by_name.get(name)
+            if item_id:
+                try:
+                    if previous_snapshot.get(name) != values:
+                        tree.item(item_id, values=values)
+                    rows_snapshot[name] = values
+                    continue
+                except Exception as e:
+                    logger.debug(f"更新伺服器列失敗 name={name}: {e}", "ManageServerFrame")
+                    self._recycle_server_item(item_id)
+                    self._server_item_by_name.pop(name, None)
+            pending_insert.append((name, values))
+
+        # 沒有資料時直接收尾
+        if not server_order:
+            self._server_item_by_name.clear()
+            self._finalize_server_refresh(
+                refresh_token=refresh_token,
+                previous_selection=previous_selection,
+                rows_snapshot={},
+            )
+            return
+
+        batch_size = self._get_server_insert_batch_size(len(pending_insert))
+
+        def insert_batch(start_index: int, current_job_id: str | None = None) -> None:
+            # 若本 callback 是由 after 排程進來，且仍持有相同 job id，先清掉工作標記。
+            # 這可避免舊 callback 結束時誤清除較新輪次的 job id。
+            if current_job_id and self._server_refresh_job == current_job_id:
+                self._server_refresh_job = None
+
+            # 每個分批插入都要驗證輪次，避免舊重新整理任務與新重新整理並行時互相覆寫。
+            if refresh_token != self._server_refresh_token:
+                # 舊輪次的批次插入；不應再繼續，並重置工作狀態。
+                if current_job_id and self._server_refresh_job == current_job_id:
+                    self._server_refresh_job = None
+                return
+            if not self.server_tree or not self.server_tree.winfo_exists():
+                # 關聯的 Tree 已不存在；中止並重置工作狀態。
+                if current_job_id and self._server_refresh_job == current_job_id:
+                    self._server_refresh_job = None
+                return
+            try:
+                end_index = min(start_index + batch_size, len(pending_insert))
+                for idx in range(start_index, end_index):
+                    name, values = pending_insert[idx]
+                    recycled_item_id = self._acquire_recycled_server_item()
+                    if recycled_item_id:
+                        self.server_tree.item(recycled_item_id, values=values)
+                        self.server_tree.reattach(recycled_item_id, "", "end")
+                        inserted_item_id = recycled_item_id
+                    else:
+                        inserted_item_id = self.server_tree.insert("", "end", values=values)
+                    self._server_item_by_name[name] = inserted_item_id
+                    rows_snapshot[name] = values
+
+                if end_index < len(pending_insert):
+                    next_job_id: str | None = None
+
+                    def _run_next() -> None:
+                        insert_batch(end_index, current_job_id=next_job_id)
+
+                    next_job_id = self.server_tree.after(1, _run_next)
+                    self._server_refresh_job = next_job_id
+                    return
+
+                # 重新排序到最新順序；使用 move 不重建 row。
+                for order_index, name in enumerate(server_order):
+                    item_id = self._server_item_by_name.get(name)
+                    if item_id:
+                        self.server_tree.move(item_id, "", order_index)
+                        if name not in rows_snapshot:
+                            rows_snapshot[name] = server_rows[name]
+
+                self._finalize_server_refresh(
+                    refresh_token=refresh_token,
+                    previous_selection=previous_selection,
+                    rows_snapshot=rows_snapshot,
+                )
+            except Exception as e:
+                logger.debug(f"差異插入伺服器列表失敗: {e}", "ManageServerFrame")
+                self._server_refresh_job = None
+                self._set_server_tree_render_lock(False)
+
+        if pending_insert:
+            insert_batch(0)
+            return
+
+        # 無新增列時，仍需排序並收尾
+        try:
+            for order_index, name in enumerate(server_order):
+                item_id = self._server_item_by_name.get(name)
+                if item_id:
+                    tree.move(item_id, "", order_index)
+                    rows_snapshot[name] = server_rows[name]
+        except Exception as e:
+            logger.debug(f"重排伺服器列表失敗: {e}", "ManageServerFrame")
+
+        self._finalize_server_refresh(
+            refresh_token=refresh_token,
+            previous_selection=previous_selection,
+            rows_snapshot=rows_snapshot,
+        )
+
     def refresh_servers(self, reload_config: bool = True) -> None:
-        """重新整理伺服器列表：只刷新 UI，不自動偵測。"""
+        """重新整理伺服器列表：只更新 UI，不自動偵測。"""
 
         def task():
             try:
@@ -709,55 +1190,75 @@ class ManageServerFrame(ctk.CTkFrame):
                 else "未知"
             )
             backup_status = self.get_backup_status(name)
-
-            server_data.append([name, mc_version, loader_col, status, backup_status, config.path])
+            display_path = self._format_server_path_for_display(config.path)
+            server_data.append([name, mc_version, loader_col, status, backup_status, display_path])
 
         return server_data
+
+    def _format_server_path_for_display(self, raw_path: str) -> str:
+        r"""將絕對路徑轉為易讀的 `servers\<name>` 形式。"""
+        try:
+            servers_root = Path(self.server_manager.servers_root).resolve()
+            resolved = Path(raw_path).resolve()
+            relative = resolved.relative_to(servers_root)
+            return f"servers\\{relative}"
+        except Exception:
+            return str(raw_path)
 
     def _refresh_servers_callback(self, server_data: list[list[Any]]):
         """UI 更新回調"""
         if self.server_tree is None:
             return
 
-        # 檢查數據是否變更
+        signature = self._make_server_data_signature(server_data)
+
+        # 檢查資料是否變更（變更才進行差異更新）
         try:
-            current_data_hash = hash(str(server_data))
+            current_data_hash = hash(signature)
         except Exception:
-            # 如果資料無法處理，使用隨機值強制更新
             current_data_hash = hash(time.time())
 
         if (
             getattr(self, "_last_server_data_hash", None) is not None
-            and self._last_server_data_hash == current_data_hash  # type: ignore
+            and getattr(self, "_last_server_data_hash", None) == current_data_hash
         ):
-            # 如果數據沒變，只更新選擇狀態
+            # 如果資料沒變，只更新選擇狀態
             self.update_selection()
             return
 
         self._last_server_data_hash = current_data_hash
+        # 新一輪重新整理啟動時先取消舊批次工作，避免等待舊批次下次 token 檢查才停止。
+        self._cancel_server_refresh_job()
+        # 每次啟動新一輪重新整理都遞增 token，使舊輪次排程任務自動失效。
+        self._server_refresh_token += 1
+        refresh_token = self._server_refresh_token
+        previous_selection = self.selected_server
 
-        # 清空現有項目（優化：單次操作而非迴圈）
-        children = self.server_tree.get_children()
-        if children:
-            self.server_tree.delete(*children)
+        self._set_server_tree_render_lock(True)
+        lock_handed_off = False
+        try:
+            server_order: list[str] = []
+            server_rows: dict[str, tuple[Any, ...]] = {}
+            for row in server_data:
+                if not row:
+                    continue
+                name = str(row[0])
+                normalized = self._normalize_server_row(row)
+                server_order.append(name)
+                server_rows[name] = normalized
 
-        if not server_data:
-            self.selected_server = None
-            self.update_selection()
-            return
-
-        # 重新載入伺服器（批次插入以提升大列表效能）
-        batch_size = 15
-        for i in range(0, len(server_data), batch_size):
-            batch = server_data[i : i + batch_size]
-            for item in batch:
-                self.server_tree.insert("", "end", values=item)
-            # 每批次後讓出 UI 執行緒
-            if i + batch_size < len(server_data):
-                self.server_tree.update_idletasks()
-
-        self.selected_server = None
-        self.update_selection()
+            self._apply_server_tree_diff(
+                server_order=server_order,
+                server_rows=server_rows,
+                refresh_token=refresh_token,
+                previous_selection=previous_selection,
+            )
+            # _apply_server_tree_diff 會在同步收尾或非同步收尾時自行解鎖。
+            lock_handed_off = True
+        finally:
+            # 例外中斷時保底解鎖，避免後續 UI 佈局持續被鎖住。
+            if not lock_handed_off:
+                self._set_server_tree_render_lock(False)
 
     def on_server_select(self, _event) -> None:
         """伺服器選擇事件"""
@@ -773,6 +1274,29 @@ class ManageServerFrame(ctk.CTkFrame):
             self.selected_server = None
 
         self.update_selection()
+
+    def on_server_tree_double_click(self, event) -> str | None:
+        """Treeview 雙擊事件：欄位分隔線自動調寬，列雙擊開啟設定。"""
+        tree = self.server_tree
+        if not tree:
+            return None
+
+        region = tree.identify_region(event.x, event.y)
+        if region in ("separator", "heading"):
+            if region == "heading":
+                # 標題列雙擊任一位置都可 auto-fit 該欄，提升可用性。
+                column_id = self._get_server_tree_column_from_x(event.x)
+            else:
+                column_id = self._get_server_tree_separator_column_from_x(event.x)
+                if not column_id:
+                    column_id = self._get_server_tree_column_from_x(event.x)
+            if column_id:
+                self._auto_fit_server_tree_column(column_id)
+                return "break"
+            return None
+
+        self.on_server_double_click(event)
+        return None
 
     def on_server_double_click(self, event) -> None:
         """伺服器雙擊事件"""
@@ -1017,7 +1541,7 @@ class ManageServerFrame(ctk.CTkFrame):
         if not self.selected_server:
             return
 
-        # 保存伺服器名稱，避免在列表刷新時被清除
+        # 保存伺服器名稱，避免在清單重新整理時被清除
         server_name = self.selected_server
         config = self.server_manager.servers[server_name]
         server_path = config.path
@@ -1069,7 +1593,7 @@ class ManageServerFrame(ctk.CTkFrame):
             self.server_manager.write_servers_config()
             is_new_backup_path = True  # 標記為新設定的路徑
 
-            # 立即刷新一次列表以更新備份狀態 (不重新載入配置，因為剛剛才存檔)
+            # 立即重新整理一次清單以更新備份狀態（不重新載入配置，因為剛剛才存檔）
             self.refresh_servers(reload_config=False)
 
         # 建立備份檔案路徑
@@ -1141,7 +1665,7 @@ pause"""
                         f"備份批次檔已儲存至：\n{bat_file_path}\n\n您可以稍後手動執行此檔案來進行備份。",
                         self.winfo_toplevel(),
                     )
-                    # 即使不立即執行備份，也要刷新列表以更新備份狀態（因為建立了備份資料夾）
+                    # 即使不立即執行備份，也要重新整理清單以更新備份狀態（因為建立了備份資料夾）
                     self.refresh_servers()
                     return
 
@@ -1168,10 +1692,10 @@ pause"""
                     self.winfo_toplevel(),
                 )
 
-                # 立即刷新一次列表
+                # 立即重新整理一次清單
                 self.refresh_servers()
 
-                # 再次延遲刷新確保狀態正確
+                # 再次延遲重新整理，確保狀態正確
                 self._schedule_refresh(5000)
 
             except Exception as e:

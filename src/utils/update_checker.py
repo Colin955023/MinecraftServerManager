@@ -3,7 +3,6 @@
 """
 
 import html as _html
-import platform
 import re
 import sys
 import tempfile
@@ -11,6 +10,7 @@ import time
 from pathlib import Path
 
 import markdown as _markdown
+from packaging.version import Version
 
 from . import (
     HTTPUtils,
@@ -27,8 +27,8 @@ logger = get_logger().bind(component="UpdateChecker")
 
 class UpdateChecker:
     @staticmethod
-    def _parse_version(version_str: str) -> tuple[int, ...] | None:
-        """解析版本字串為數字元組。"""
+    def _parse_version(version_str: str | None) -> Version | None:
+        """解析版本字串為 PEP 440 Version 物件。"""
         return UpdateParsing.parse_version(version_str)
 
     @staticmethod
@@ -89,21 +89,8 @@ class UpdateChecker:
                     logger.info(f"使用者取消執行安裝程式：{resolved_path}")
                     return
 
-                # 在 Windows 上使用進程分離標誌，避免安裝程式與主程式耦合
-                # 這樣可以防止主程式退出時留下孤兒進程
-                DETACHED_PROCESS = 0x00000008
-                CREATE_NEW_PROCESS_GROUP = 0x00000200
-                creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-
-                # 僅在 Windows 平台傳遞 creationflags
-                process = SubprocessUtils.popen_checked(
-                    [str(resolved_path)],
-                    stdin=SubprocessUtils.DEVNULL,
-                    stdout=SubprocessUtils.DEVNULL,
-                    stderr=SubprocessUtils.DEVNULL,
-                    close_fds=True,
-                    **({"creationflags": creation_flags} if platform.system() == "Windows" else {}),
-                )
+                # 啟動分離的安裝程式進程，避免與主程式耦合
+                process = SubprocessUtils.popen_detached([str(resolved_path)])
 
                 # 確認進程已啟動
                 time.sleep(0.5)
@@ -142,7 +129,13 @@ class UpdateChecker:
                     finally:
                         sys.exit(0)
 
-                parent.after(delay_ms, _close)
+                UIUtils.schedule_debounce(
+                    parent,
+                    "_update_graceful_exit_job",
+                    max(0, int(delay_ms)),
+                    _close,
+                    owner=parent,
+                )
                 return
         except Exception as e:
             logger.debug(f"安排視窗關閉時發生錯誤: {e}")
@@ -232,6 +225,20 @@ class UpdateChecker:
                                 logger.debug(f"已刪除暫存目錄: {temp_path}")
                     except Exception as e:
                         logger.debug(f"清理暫存檔案時發生錯誤 {temp_path}: {e}")
+
+            def _handle_checksum_mismatch(asset_name: str) -> None:
+                """統一處理下載檔案 SHA256 驗證失敗。"""
+                logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset_name}")
+                UIUtils.call_on_ui(
+                    parent,
+                    lambda: UIUtils.show_error(
+                        "SHA256 驗證失敗",
+                        "下載的檔案 SHA256 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n✓ 已立即刪除下載的檔案\n✓ 更新已取消\n\n請稍後重試，或手動從 GitHub 下載。",
+                        parent=parent,
+                        topmost=True,
+                    ),
+                )
+                _cleanup_temp_files(temp_files_to_cleanup)
 
             try:
                 logger.info(f"開始檢查更新... (目前版本: {current_version})")
@@ -498,17 +505,7 @@ class UpdateChecker:
                     logger.info(f"[驗證階段] 預期 SHA256: {expected_checksum}")
                     ok = _verify_file_checksum(Path(tmp_zip_path), alg, expected_checksum)
                     if not ok:
-                        logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset.get('name')}")
-                        UIUtils.call_on_ui(
-                            parent,
-                            lambda: UIUtils.show_error(
-                                "SHA256 驗證失敗",
-                                "下載的檔案 SHA256 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n✓ 已立即刪除下載的檔案\n✓ 更新已取消\n\n請稍後重試，或手動從 GitHub 下載。",
-                                parent=parent,
-                                topmost=True,
-                            ),
-                        )
-                        _cleanup_temp_files(temp_files_to_cleanup)
+                        _handle_checksum_mismatch(asset.get("name") or "unknown")
                         return
                     logger.info(f"[驗證通過] ✓ SHA256 驗證成功：{asset.get('name')}")
 
@@ -801,17 +798,7 @@ class UpdateChecker:
                     logger.info(f"[驗證階段] 預期 SHA256: {expected_checksum}")
                     ok = _verify_file_checksum(dest, alg, expected_checksum)
                     if not ok:
-                        logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset.get('name')}")
-                        UIUtils.call_on_ui(
-                            parent,
-                            lambda: UIUtils.show_error(
-                                "SHA256 驗證失敗",
-                                "下載的檔案 SHA256 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n✓ 已立即刪除下載的檔案\n✓ 更新已取消\n\n請稍後重試，或手動從 GitHub 下載。",
-                                parent=parent,
-                                topmost=True,
-                            ),
-                        )
-                        _cleanup_temp_files(temp_files_to_cleanup)
+                        _handle_checksum_mismatch(asset.get("name") or "unknown")
                         return
                     logger.info(f"[驗證通過] ✓ SHA256 驗證成功：{asset.get('name')}")
 

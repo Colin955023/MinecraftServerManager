@@ -11,7 +11,7 @@ from . import JavaUtils, get_logger
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
 
-__all__ = ["MemoryUtils", "ServerOperations", "ServerCommands"]
+__all__ = ["MemoryUtils", "ServerCommands", "ServerOperations"]
 
 
 class MemoryUtils:

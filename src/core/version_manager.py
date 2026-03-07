@@ -46,16 +46,9 @@ class MinecraftVersionManager(Singleton):
     def _save_local_cache(self, versions: list) -> None:
         """儲存版本列表到本地快取檔案"""
         try:
-            # 在寫入前確保快取目錄存在
             cache_path = Path(self.cache_file)
-            RuntimePaths.ensure_dir(cache_path.parent)
-
-            # 檢查資料是否異動，避免不必要的寫入
-            existing_data = PathUtils.load_json(cache_path)
-            if existing_data == versions:
-                return
-
-            PathUtils.save_json(cache_path, versions)
+            if not PathUtils.save_json_if_changed(cache_path, versions):
+                logger.warning("寫入版本快取失敗: mc_versions_cache.json")
         except Exception as e:
             logger.exception(f"寫入版本快取失敗: {e}")
 

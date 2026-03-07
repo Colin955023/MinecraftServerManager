@@ -163,7 +163,15 @@ class WindowManager:
             window.minsize(1000, 700)  # 設定最小尺寸
 
             if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
-                window.after(100, lambda: window.state("zoomed"))
+                from .ui_utils import UIUtils
+
+                UIUtils.schedule_debounce(
+                    window,
+                    "_window_zoom_job",
+                    100,
+                    lambda: window.state("zoomed"),
+                    owner=window,
+                )
 
             get_logger().bind(component="WindowState").debug(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
@@ -264,12 +272,17 @@ class WindowManager:
     @staticmethod
     def bind_window_state_tracking(window) -> None:
         """綁定視窗狀態追蹤事件"""
+        from .ui_utils import UIUtils
 
         def on_configure(event):
             if event.widget == window:
-                if hasattr(window, "_save_timer"):
-                    window.after_cancel(window._save_timer)
-                window._save_timer = window.after(1000, lambda: WindowManager.save_main_window_state(window))
+                UIUtils.schedule_debounce(
+                    window,
+                    "_save_timer",
+                    1000,
+                    lambda: WindowManager.save_main_window_state(window),
+                    owner=window,
+                )
 
         def on_state_change(_event):
             WindowManager.save_main_window_state(window)

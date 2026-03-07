@@ -32,6 +32,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "Sizes": (".ui_utils", "Sizes"),
     "get_button_style": (".ui_utils", "get_button_style"),
     "get_dropdown_style": (".ui_utils", "get_dropdown_style"),
+    "compute_adaptive_pool_limit": (".ui_utils", "compute_adaptive_pool_limit"),
+    "compute_exponential_moving_average": (".ui_utils", "compute_exponential_moving_average"),
     "AppRestart": (".app_restart", "AppRestart"),
     "JavaDownloader": (".java_downloader", "JavaDownloader"),
     "JavaUtils": (".java_utils", "JavaUtils"),
@@ -46,6 +48,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerCommands": (".server_runtime_utils", "ServerCommands"),
     "Singleton": (".singleton", "Singleton"),
     "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
+    "ModIndexManager": (".mod_index_manager", "ModIndexManager"),
+    "UITestFramework": (".ui_test_framework", "UITestFramework"),
+    "UITestConfig": (".ui_test_framework", "UITestConfig"),
+    "WindowsUITestEngine": (".ui_test_framework", "WindowsUITestEngine"),
 }
 
 __getattr__, __dir__, __all__ = src.lazy_exports(globals(), __name__, _EXPORTS)

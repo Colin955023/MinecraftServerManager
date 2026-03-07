@@ -1,4 +1,4 @@
-name: CI Test
+name: github-actions CI Test
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +15,7 @@ permissions:
 jobs:
   test:
     name: Python ${{ matrix.python-version }} Test
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
@@ -41,29 +41,23 @@ jobs:
       - name: Compile source files
         run: uv run python -m compileall -q src
 
+      - name: Check formatting
+        run: uv run ruff format --check src tests quick_test.py
+
+      - name: Run Ruff lint
+        run: uv run ruff check src tests quick_test.py
+
       - name: Run mypy
         run: uv run mypy src
 
-      - name: Smoke import key modules
-        run: |
-          uv run python - <<'PY'
-          import importlib
+      - name: Run Bandit security scan
+        run: uv tool run bandit -r src
 
-          modules = [
-              "src.version_info",
-              "src.models",
-              "src.utils.http_utils",
-              "src.utils.path_utils",
-              "src.utils.system_utils",
-              "src.core.version_manager",
-              "src.core.loader_manager",
-              "src.core.server_manager",
-          ]
-
-          for module_name in modules:
-              importlib.import_module(module_name)
-              print(f"import ok: {module_name}")
-          PY
+      - name: Run detect-secrets privacy scan
+        run: uv tool run detect-secrets scan --only-verified --all-files
 
       - name: Run smoke tests (pytest)
-        run: uv run pytest -m smoke -q
+        run: uv run --isolated pytest -m smoke -q
+
+      - name: Run integration tests (pytest)
+        run: uv run --isolated pytest -m integration -q

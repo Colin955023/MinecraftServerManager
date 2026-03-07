@@ -108,6 +108,7 @@ MinecraftServerManager/
   - **便攜模式**：日誌 `.log/`、快取 `.config/Cache/`（相對於可執行檔目錄）
   - **安裝模式**：日誌與快取位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager\` 下（`log/`、`Cache/`）
 - **UI 模組**：`ui/main_window.py` 掛載各 Frame；`manage_server_frame.py` 支援偵測既有伺服器、右鍵重新檢測、設定備份路徑與打開備份資料夾；`server_monitor_window.py` 提供資源監控與即時控制台。
+- **列表效能策略**：管理伺服器與本地模組列表採用差異更新、分批插入與 row recycle pool；recycle pool 以 EMA 命中率做自動參數調整，降低短期波動造成的誤判。
 - **Lazy Re-export**：core、ui、utils 皆採 lazy 匯出策略，透過 package `__init__.py` 延遲載入實際模組以降低啟動開銷並減少循環 import。
 
 ## HTTP timeout/retry policy

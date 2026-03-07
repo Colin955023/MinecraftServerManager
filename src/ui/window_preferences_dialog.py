@@ -13,6 +13,7 @@ from ..utils import (
     AppRestart,
     FontManager,
     FontSize,
+    Sizes,
     UIUtils,
     WindowManager,
     get_button_style,
@@ -35,8 +36,8 @@ class WindowPreferencesDialog:
         self.dialog = UIUtils.create_toplevel_dialog(
             parent,
             "視窗偏好設定",
-            width=500,
-            height=600,
+            width=Sizes.DIALOG_PREFERENCES_WIDTH,
+            height=Sizes.DIALOG_PREFERENCES_HEIGHT,
             resizable=False,
             center_on_parent=True,
             make_modal=True,

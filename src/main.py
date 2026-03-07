@@ -36,7 +36,7 @@ def show_message(title, message, message_type="error"):
         else:
             UIUtils.show_info(title, message, topmost=True)
         return True
-    except Exception as ui_error:
+    except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as ui_error:
         # 退回到 logger 輸出
         with suppress(Exception):
             log_message = f"{title}: {message}"
@@ -52,17 +52,20 @@ def show_message(title, message, message_type="error"):
 
 # ====== 應用程式啟動 ======
 def start_application():
+    """初始化應用程式並啟動主視窗"""
     _initialize_managers()
     _setup_ui_environment()
     _launch_main_window()
 
 
 def _initialize_managers():
+    """初始化全域管理器實例"""
     LoaderManager()
     MinecraftVersionManager()
 
 
 def _setup_ui_environment():
+    """設定 UI 環境和主題"""
     ctk.set_appearance_mode("light")
 
     settings = get_settings_manager()
@@ -71,17 +74,19 @@ def _setup_ui_environment():
 
 
 def _launch_main_window():
+    """建立並啟動主應用程式視窗"""
     root = ctk.CTk()
     MinecraftServerManager(root)
     root.mainloop()
 
 
 def main():
+    """應用程式入口點，處理啟動過程中的例外"""
     try:
         start_application()
     except KeyboardInterrupt:
         show_message("程式中斷", "程式被使用者中斷\n感謝使用 Minecraft 伺服器管理器！", "info")
-    except Exception:
+    except (RuntimeError, OSError, ValueError, TypeError, AttributeError):
         error_message = f"程式執行錯誤：\n\n{traceback.format_exc()}"
         show_message("執行錯誤", error_message, "error")
         sys.exit(1)

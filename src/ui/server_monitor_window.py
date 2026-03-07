@@ -17,11 +17,12 @@ from typing import Any
 import customtkinter as ctk
 
 from ..utils import (
+    Colors,
     FontManager,
     FontSize,
     MemoryUtils,
-    PathUtils,
     ServerOperations,
+    Sizes,
     UIUtils,
     WindowManager,
     get_logger,
@@ -53,6 +54,9 @@ class ServerMonitorWindow:
         # 控制台訊息緩衝區
         self._console_buffer: list[str] = []
         self._console_flush_job: str | None = None
+        self._console_flush_interval_ms = 100
+        self._refresh_log_max_lines = 2500
+        self._refresh_log_max_bytes = 2 * 1024 * 1024
 
         # 指令歷史紀錄
         self._command_history: list[str] = []
@@ -65,31 +69,67 @@ class ServerMonitorWindow:
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
 
     def start_auto_refresh(self) -> None:
-        """啟動每秒自動刷新狀態"""
+        """啟動每秒自動刷新狀態（共用排程 helper）。"""
         if self._auto_refresh_id:
-            return  # 已經有定時器
+            return
+        self._schedule_auto_refresh_tick(delay_ms=1000)
 
-        if not self.window:
+    def _schedule_auto_refresh_tick(self, delay_ms: int = 1000) -> None:
+        """排程下一次狀態刷新；只保留一個待執行工作。"""
+        if not self.window or not self.window.winfo_exists():
+            self._auto_refresh_id = None
             return
 
-        def _refresh() -> None:
-            if self.window and self.window.winfo_exists():
-                self.update_status()
-                self._auto_refresh_id = self.window.after(1000, _refresh)
-            else:
-                self._auto_refresh_id = None
+        def _refresh_once() -> None:
+            self._auto_refresh_id = None
+            if not self.window or not self.window.winfo_exists():
+                return
+            self.update_status()
+            self._schedule_auto_refresh_tick(delay_ms=1000)
 
-        self._auto_refresh_id = self.window.after(1000, _refresh)
+        UIUtils.schedule_debounce(
+            self.window,
+            "_auto_refresh_id",
+            max(1, int(delay_ms)),
+            _refresh_once,
+            owner=self,
+        )
 
     def stop_auto_refresh(self) -> None:
-        """停止自動刷新狀態"""
-        if self._auto_refresh_id:
-            try:
-                if self.window:
-                    self.window.after_cancel(self._auto_refresh_id)
-            except Exception as e:
-                logger.exception(f"停止自動刷新時取消 after 失敗（視窗可能已關閉）: {e}")
+        """停止自動刷新狀態。"""
+        if self.window and self.window.winfo_exists():
+            UIUtils.cancel_scheduled_job(self.window, "_auto_refresh_id", owner=self)
+        else:
             self._auto_refresh_id = None
+
+    def _schedule_window_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
+        """統一視窗 after 排程，避免同類任務重複排入。"""
+        if not self.window or not self.window.winfo_exists():
+            setattr(self, job_attr, None)
+            return
+        UIUtils.schedule_debounce(
+            self.window,
+            job_attr,
+            max(0, int(delay_ms)),
+            callback,
+            owner=self,
+        )
+
+    def _cancel_window_jobs(self) -> None:
+        """取消 monitor window 內部短延遲排程。"""
+        job_attrs = (
+            "_monitor_start_refresh_job",
+            "_start_status_job",
+            "_stop_status_job",
+            "_stop_refresh_after_job",
+            "_command_status_job",
+        )
+        if not self.window or not self.window.winfo_exists():
+            for job_attr in job_attrs:
+                setattr(self, job_attr, None)
+            return
+        for job_attr in job_attrs:
+            UIUtils.cancel_scheduled_job(self.window, job_attr, owner=self)
 
     def safe_update_widget(self, widget_name: str, update_func: Callable, *args, **kwargs) -> None:
         """安全地更新 widget，檢查 widget 是否存在"""
@@ -199,7 +239,7 @@ class ServerMonitorWindow:
             control_frame,
             text=status_text,
             font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
-            text_color=status_color if status_color != "red" else "#e53e3e",
+            text_color=status_color if status_color != "red" else Colors.TEXT_ERROR,
         )
         self.status_label.pack(side="left", padx=FontManager.get_dpi_scaled_size(15))
 
@@ -213,7 +253,7 @@ class ServerMonitorWindow:
             command=self.start_server,
             state="disabled",
             font=FontManager.get_font(size=FontSize.LARGE),
-            width=80,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
         )
         self.start_button.pack(side="left", padx=(0, 5))
 
@@ -223,9 +263,9 @@ class ServerMonitorWindow:
             command=self.stop_server,
             state="disabled",
             font=FontManager.get_font(size=FontSize.LARGE),
-            width=80,
-            fg_color=("#e53e3e", "#dc2626"),
-            hover_color=("#dc2626", "#b91c1c"),
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            fg_color=Colors.BUTTON_DANGER,
+            hover_color=Colors.BUTTON_DANGER_HOVER,
         )
         self.stop_button.pack(side="left", padx=(0, 5))
 
@@ -234,7 +274,7 @@ class ServerMonitorWindow:
             text="🔄 刷新",
             command=self.refresh_status,
             font=FontManager.get_font(size=FontSize.LARGE),
-            width=80,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
         )
         self.refresh_button.pack(side="left")
 
@@ -319,10 +359,10 @@ class ServerMonitorWindow:
             players_frame,
             height=5,
             font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
-            bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#f8fafc",
-            fg="#ffffff" if ctk.get_appearance_mode() == "Dark" else "#000000",
-            selectbackground="#1f538d",
-            selectforeground="white",
+            bg=Colors.BG_LISTBOX_DARK if ctk.get_appearance_mode() == "Dark" else Colors.BG_LISTBOX_LIGHT,
+            fg=Colors.TEXT_ON_DARK if ctk.get_appearance_mode() == "Dark" else Colors.TEXT_ON_LIGHT,
+            selectbackground=Colors.SELECT_BG,
+            selectforeground=Colors.TEXT_ON_DARK,
             borderwidth=0,
             highlightthickness=0,
         )
@@ -349,7 +389,8 @@ class ServerMonitorWindow:
             if self.window:
                 self.window.clipboard_clear()
                 self.window.clipboard_append(name)
-                self.window.update()  # 確保剪貼簿更新生效
+                # update_idletasks() 只處理閒置任務（如重繪/幾何），不處理使用者輸入事件
+                self.window.update_idletasks()
             logger.info(f"已複製玩家名稱: {name}")
         except Exception as e:
             logger.error(f"複製玩家名稱失敗: {e}")
@@ -370,13 +411,13 @@ class ServerMonitorWindow:
         # 控制台文字區域
         self.console_text = ctk.CTkTextbox(
             console_frame,
-            height=240,
+            height=Sizes.CONSOLE_PANEL_HEIGHT,
             font=FontManager.get_font(family="Consolas", size=FontSize.NORMAL_PLUS),
             wrap="word",
-            fg_color="#000000",  # 黑色背景
-            text_color="#00ff00",  # 綠色文字
-            scrollbar_button_color="#333333",  # 滾動條按鈕顏色
-            scrollbar_button_hover_color="#555555",  # 滾動條按鈕懸停顏色
+            fg_color=Colors.BG_CONSOLE,
+            text_color=Colors.CONSOLE_TEXT,
+            scrollbar_button_color=Colors.SCROLLBAR_BUTTON,
+            scrollbar_button_hover_color=Colors.SCROLLBAR_BUTTON_HOVER,
         )
         self.console_text.pack(fill="both", expand=True, padx=FontManager.get_dpi_scaled_size(15))
 
@@ -407,41 +448,59 @@ class ServerMonitorWindow:
             command=self.send_command,
             state="disabled",
             font=FontManager.get_font(size=FontSize.LARGE),
-            width=80,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
         )
         self.send_button.pack(side="right")
 
     def start_console_flusher(self) -> None:
-        """啟動控制台訊息緩衝區刷新器"""
+        """啟動控制台訊息緩衝區刷新器（節流 + 合併）。"""
+        self._schedule_console_flush(force=True)
 
-        def _flush():
-            if self._console_buffer:
-                try:
-                    if (
-                        self.window
-                        and self.window.winfo_exists()
-                        and hasattr(self, "console_text")
-                        and self.console_text.winfo_exists()
-                    ):
-                        # 合併訊息
-                        text = "".join(self._console_buffer)
-                        self._console_buffer = []
+    def _flush_console_buffer(self) -> None:
+        """將緩衝區訊息批次寫入控制台。"""
+        if not self._console_buffer:
+            return
+        try:
+            if (
+                self.window
+                and self.window.winfo_exists()
+                and hasattr(self, "console_text")
+                and self.console_text.winfo_exists()
+            ):
+                text = "".join(self._console_buffer)
+                self._console_buffer = []
+                self.console_text.insert("end", text)
+                self.console_text.see("end")
+        except Exception as e:
+            logger.error(
+                f"刷新控制台失敗: {e}\n{traceback.format_exc()}",
+                "ServerMonitorWindow",
+            )
 
-                        self.console_text.insert("end", text)
-                        self.console_text.see("end")
-                except Exception as e:
-                    logger.error(
-                        f"刷新控制台失敗: {e}\n{traceback.format_exc()}",
-                        "ServerMonitorWindow",
-                    )
+    def _schedule_console_flush(self, *, force: bool = False) -> None:
+        """排程控制台刷新；高頻輸入時以 throttle 合併更新。"""
+        if not self.window or not self.window.winfo_exists():
+            return
+        interval = max(1, int(getattr(self, "_console_flush_interval_ms", 100)))
+        if force:
+            UIUtils.schedule_debounce(
+                self.window,
+                "_console_flush_job",
+                0,
+                self._flush_console_buffer,
+                owner=self,
+            )
+            return
 
-            if self.window and self.window.winfo_exists():
-                job_id: str = self.window.after(100, _flush)
-                self._console_flush_job = job_id
-            else:
-                self._console_flush_job = None
-
-        _flush()
+        UIUtils.schedule_throttle(
+            self.window,
+            "_console_flush_job",
+            interval,
+            self._flush_console_buffer,
+            owner=self,
+            trailing=True,
+            last_run_attr="_console_flush_last_run_ms",
+        )
 
     def start_monitoring(self) -> None:
         """開始監控，啟動時自動讀取現有日誌內容，避免橫幅遺漏"""
@@ -449,8 +508,7 @@ class ServerMonitorWindow:
             self._monitor_stop_event.clear()
             self.is_monitoring = True
             # 啟動時先讀取現有日誌內容
-            if self.window:
-                self.window.after(0, self.refresh_status)
+            self._schedule_window_job("_monitor_start_refresh_job", 0, self.refresh_status)
             # 啟動每秒自動刷新
             self.start_auto_refresh()
             # 使用線程池執行監控任務
@@ -462,17 +520,9 @@ class ServerMonitorWindow:
         self._monitor_stop_event.set()
         self.stop_auto_refresh()
 
-        if self._console_flush_job:
-            try:
-                if self.window:
-                    self.window.after_cancel(self._console_flush_job)
-            except Exception as e:
-                logger.exception(
-                    f"停止監控時取消 console flush job 失敗（視窗可能已關閉）: {e}",
-                    "ServerMonitorWindow",
-                    e,
-                )
-            self._console_flush_job = None
+        if self.window:
+            UIUtils.cancel_scheduled_job(self.window, "_console_flush_job", owner=self)
+        self._cancel_window_jobs()
 
         # 關閉線程池
         if hasattr(self, "executor"):
@@ -749,8 +799,8 @@ class ServerMonitorWindow:
 
             self.players_listbox.delete(0, tk.END)
             is_dark = ctk.get_appearance_mode() == "Dark"
-            bg_odd = "#2b2b2b" if is_dark else "#f8fafc"
-            bg_even = "#363636" if is_dark else "#e2e8f0"
+            bg_odd = Colors.BG_LISTBOX_DARK if is_dark else Colors.BG_LISTBOX_LIGHT
+            bg_even = Colors.BG_LISTBOX_ALT_DARK if is_dark else Colors.BG_LISTBOX_ALT_LIGHT
 
             if players:
                 for i, player in enumerate(players):
@@ -789,9 +839,7 @@ class ServerMonitorWindow:
         success = self.server_manager.start_server(self.server_name, parent=self.window)
         if success:
             self.add_console_message(f"✅ 伺服器 {self.server_name} 啟動中...")
-            # 立即更新狀態
-            if self.window:
-                self.window.after(500, self.update_status)
+            self._schedule_window_job("_start_status_job", 500, self.update_status)
             # 開始監控伺服器輸出
             if not self.is_monitoring:
                 self.start_monitoring()
@@ -803,35 +851,65 @@ class ServerMonitorWindow:
         success = ServerOperations.graceful_stop_server(self.server_manager, self.server_name)
         if success:
             self.add_console_message(f"⏹️ 伺服器 {self.server_name} 停止命令已發送")
-            if self.window:
-                self.window.after(0, self.update_status)
-            # 延遲檢查停止狀態
-            if self.window:
-                # 延遲檢查停止狀態
-                self.window.after(2000, self.refresh_after_stop)
+            self._schedule_window_job("_stop_refresh_after_job", 2000, self.refresh_after_stop)
         else:
             self.add_console_message(f"❌ 停止伺服器 {self.server_name} 失敗")
 
-        # 立即更新狀態
-        try:
-            if self.window and self.window.winfo_exists():
-                self.window.after(100, self.update_status)
-        except Exception as e:
-            logger.error(
-                f"安全 after 調用錯誤: {e}\n{traceback.format_exc()}",
-                "ServerMonitorWindow",
-            )
+        self._schedule_window_job("_stop_status_job", 100, self.update_status)
 
     def refresh_after_stop(self) -> None:
         """停止後刷新狀態，直到伺服器完全結束才停止輪詢"""
         if self.server_manager.is_server_running(self.server_name):
-            if self.window:
-                self.window.after(500, self.refresh_after_stop)
+            self._schedule_window_job("_stop_refresh_after_job", 500, self.refresh_after_stop)
         else:
             self.refresh_status()
             self.update_status()  # 強制刷新按鈕與標籤
             self.add_console_message("✅ 伺服器已確認停止")
             self.update_player_list([])
+
+    def _read_recent_log_lines(self, log_file) -> tuple[list[str], bool]:
+        """讀取日誌尾端內容，限制載入量以避免大檔案阻塞 UI。"""
+        max_bytes = max(64 * 1024, int(getattr(self, "_refresh_log_max_bytes", 2 * 1024 * 1024)))
+        max_lines = max(200, int(getattr(self, "_refresh_log_max_lines", 2500)))
+        try:
+            with log_file.open("rb") as fh:
+                fh.seek(0, 2)
+                file_size = fh.tell()
+                read_size = min(file_size, max_bytes)
+                fh.seek(max(0, file_size - read_size))
+                tail_bytes = fh.read(read_size)
+
+            tail_text = tail_bytes.decode("utf-8", errors="ignore")
+            lines = tail_text.splitlines()
+
+            # 不是從檔案開頭讀取時，第一行可能是截斷行，直接捨棄。
+            if read_size < file_size and lines:
+                lines = lines[1:]
+
+            compact_lines = [line.rstrip("\n").rstrip("\r") for line in lines if line.strip()]
+            truncated = read_size < file_size or len(compact_lines) > max_lines
+            if len(compact_lines) > max_lines:
+                compact_lines = compact_lines[-max_lines:]
+            return compact_lines, truncated
+        except Exception as e:
+            logger.debug(f"尾端讀取日誌失敗，改走完整讀取: {e}", "ServerMonitorWindow")
+            try:
+                with log_file.open("r", encoding="utf-8", errors="ignore") as fh:
+                    full_lines = [line.rstrip("\n").rstrip("\r") for line in fh if line.strip()]
+                truncated = len(full_lines) > max_lines
+                if truncated:
+                    full_lines = full_lines[-max_lines:]
+                return full_lines, truncated
+            except Exception:
+                raise
+
+    def _find_latest_player_line(self, lines: list[str]) -> str | None:
+        """從日誌片段找到最後一條玩家數量行。"""
+        for line in reversed(lines):
+            idx = line.find("There are ")
+            if idx != -1:
+                return line[idx:]
+        return None
 
     def refresh_status(self) -> None:
         """手動刷新狀態和控制台輸出"""
@@ -845,26 +923,18 @@ class ServerMonitorWindow:
         try:
             log_file = self.server_manager.get_server_log_file(self.server_name)
             if log_file and log_file.exists():
-                content = PathUtils.read_text_file(log_file, errors="ignore")
-                lines = content.splitlines(keepends=True) if content else []
-
-                out_lines = []
-                for line in lines:
-                    if not line.strip():
-                        continue
-
-                    # 若遇到玩家列表行，暫存
-                    idx = line.find("There are ")
-                    if idx != -1:
-                        last_player_line = line[idx:]
-
-                    out_lines.append(line.rstrip("\n").rstrip("\r"))
+                out_lines, truncated = self._read_recent_log_lines(log_file)
+                last_player_line = self._find_latest_player_line(out_lines)
 
                 if out_lines:
                     self.console_text.insert("end", "\n".join(out_lines) + "\n")
                 self.console_text.see(tk.END)
 
                 self.add_console_message("✅ 日誌載入完成")
+                if truncated:
+                    self.add_console_message(
+                        f"ℹ️ 日誌過大，僅顯示最新 {len(out_lines)} 行（上限 {self._refresh_log_max_lines} 行）",
+                    )
                 # 若有玩家列表行，主動解析並更新玩家數量/名單
                 if last_player_line:
                     self.read_player_list(line=last_player_line)
@@ -933,8 +1003,8 @@ class ServerMonitorWindow:
             self.add_console_message(f"✅ 命令已發送: {command}")
 
             # 如果是停止命令，立即更新一次狀態
-            if command.lower() in ["stop", "end", "exit"] and self.window:
-                self.window.after(1000, self.update_status)  # 1秒後更新狀態
+            if command.lower() in ["stop", "end", "exit"]:
+                self._schedule_window_job("_command_status_job", 1000, self.update_status)
 
         else:
             self.add_console_message(f"❌ 命令發送失敗: {command}")
@@ -942,6 +1012,7 @@ class ServerMonitorWindow:
     def add_console_message(self, message: str) -> None:
         """添加控制台訊息 (緩衝處理)"""
         self._console_buffer.append(message + "\n")
+        self._schedule_console_flush()
 
     def on_closing(self) -> None:
         """視窗關閉時的處理"""

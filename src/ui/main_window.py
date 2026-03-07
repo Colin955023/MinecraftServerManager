@@ -191,6 +191,10 @@ class MinecraftServerManager:
         self.mini_sidebar: Any | None = None
         self.active_nav_title: str | None = None
         self.nav_buttons: dict[str, ctk.CTkButton] = {}
+        self._sidebar_toggle_job = None
+        self._sidebar_unlock_job = None
+        self._sidebar_layout_unlock_delay_ms = 70
+        self._content_layout_locked = False
         self._console_queue: queue.Queue[Any] = queue.Queue()
 
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
@@ -218,14 +222,20 @@ class MinecraftServerManager:
         WindowManager.bind_window_state_tracking(self.root)
 
         # 首次執行提示和自動更新檢查
-        self.root.after(1000, self._handle_startup_tasks)  # 延遲執行以確保界面完全載入
+        UIUtils.schedule_debounce(
+            self.root,
+            "_startup_tasks_job",
+            1000,
+            self._handle_startup_tasks,
+            owner=self,
+        )  # 延遲執行以確保界面完全載入
 
         # 載入資料
         self.preload_all_versions()
         self.load_data_async()
 
     def _ensure_manage_server_frame(self) -> None:
-        """延後建立管理伺服器頁面，降低啟動時卡頓與撕裂。"""
+        """確保管理伺服器頁面已建立並放置於內容堆疊層。"""
         if getattr(self, "manage_server_frame", None) is not None:
             return
         self.manage_server_frame = ManageServerFrame(
@@ -235,9 +245,13 @@ class MinecraftServerManager:
             self.show_create_server,
             set_servers_root=self.set_servers_root,
         )
+        try:
+            self.manage_server_frame.grid(row=0, column=0, sticky="nsew")
+        except Exception as e:
+            logger.debug(f"ManageServerFrame grid 設置失敗: {e}", "MainWindow")
 
     def _ensure_mod_management_frame(self) -> None:
-        """延後建立模組管理頁面，降低啟動時卡頓與撕裂。"""
+        """確保模組管理頁面已建立並放置於內容堆疊層。"""
         if getattr(self, "mod_frame", None) is not None:
             return
         self.mod_frame = ModManagementFrame(
@@ -246,6 +260,11 @@ class MinecraftServerManager:
             self.on_server_selected,
             self.version_manager,
         )
+        try:
+            frame = self.mod_frame.get_frame()
+            frame.grid(row=0, column=0, sticky="nsew")
+        except Exception as e:
+            logger.debug(f"ModManagementFrame grid 設置失敗: {e}", "MainWindow")
 
     # ====== 資料載入與版本管理 ======
     # 預載所有版本資訊
@@ -298,8 +317,8 @@ class MinecraftServerManager:
         first_run_dialog = UIUtils.create_toplevel_dialog(
             parent=self.root,
             title="歡迎使用 Minecraft 伺服器管理器",
-            width=480,
-            height=250,
+            width=Sizes.DIALOG_FIRST_RUN_WIDTH,
+            height=Sizes.DIALOG_FIRST_RUN_HEIGHT,
             resizable=False,
             delay_ms=0,
         )
@@ -347,8 +366,8 @@ class MinecraftServerManager:
             text="啟用自動更新",
             command=_enable_auto_update,
             font=FontManager.get_font(size=FontSize.NORMAL, weight="bold"),
-            width=140,
-            height=35,
+            width=Sizes.BUTTON_WIDTH_PRIMARY,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
         )
         enable_btn.pack(side="left", padx=(20, 10))
 
@@ -358,8 +377,8 @@ class MinecraftServerManager:
             text="暫不啟用",
             command=_disable_auto_update,
             font=FontManager.get_font(size=FontSize.NORMAL),
-            width=140,
-            height=35,
+            width=Sizes.BUTTON_WIDTH_PRIMARY,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
             fg_color="gray",
             hover_color=("gray70", "gray30"),
         )
@@ -404,17 +423,17 @@ class MinecraftServerManager:
         """設定淺色主題配置"""
         # 淺色主題色彩配置
         self.colors = {
-            "primary": "#2563eb",  # 主要藍色
-            "secondary": "#64748b",  # 次要灰色
-            "success": "#059669",  # 成功綠色
-            "warning": "#d97706",  # 警告橙色
-            "danger": "#dc2626",  # 危險紅色
-            "background": "#ffffff",  # 白色背景
-            "surface": "#f8fafc",  # 表面顏色
-            "text": "#1f2937",  # 深色文字 (高對比)
-            "text_secondary": "#6b7280",  # 次要文字
-            "border": "#e5e7eb",  # 邊框顏色
-            "menu_bg": "#ffffff",  # 功能選單背景
+            "primary": Colors.BUTTON_PRIMARY[0],
+            "secondary": Colors.TEXT_SECONDARY[0],
+            "success": Colors.BUTTON_SUCCESS[0],
+            "warning": Colors.TEXT_WARNING[1],
+            "danger": Colors.BUTTON_DANGER[0],
+            "background": Colors.BG_PRIMARY[0],
+            "surface": Colors.BG_LISTBOX_LIGHT,
+            "text": Colors.TEXT_PRIMARY[0],
+            "text_secondary": Colors.TEXT_SECONDARY[0],
+            "border": Colors.DROPDOWN_BUTTON[0],
+            "menu_bg": Colors.BG_PRIMARY,
         }
 
     # ====== 介面元件創建 ======
@@ -434,7 +453,7 @@ class MinecraftServerManager:
 
     def create_header(self) -> None:
         """建立現代化標題區域"""
-        header_frame = ctk.CTkFrame(self.root, height=60, corner_radius=0)
+        header_frame = ctk.CTkFrame(self.root, height=Sizes.APP_HEADER_HEIGHT, corner_radius=0)
         header_frame.pack(fill="x", padx=0, pady=0)
         header_frame.pack_propagate(False)
 
@@ -507,14 +526,20 @@ class MinecraftServerManager:
 
         self.content_frame = ctk.CTkFrame(self.content_container)
         self.content_frame.grid(row=0, column=0, sticky="nsew")
-        # 內容區使用 stack grid：所有頁面都放在 (0,0)，切換只做 grid_remove + tkraise
+        # 內容區使用 stack grid：所有頁面都放在 (0,0)，切換只做 tkraise
         self.content_frame.grid_rowconfigure(0, weight=1)
         self.content_frame.grid_columnconfigure(0, weight=1)
 
         # 側邊欄
         self.create_sidebar(self.nav_container)
+        # 迷你側邊欄也預先建立（同一個 grid cell），切換時只做 tkraise，避免 grid_remove 重排
+        self.create_mini_sidebar()
+        try:
+            self.sidebar.tkraise()
+        except Exception as e:
+            logger.debug(f"初始化側邊欄疊層失敗: {e}", "MainWindow")
 
-        # 建立預設頁面：建立伺服器（其他頁面延後建立，以降低啟動時的 UI 卡頓/撕裂）
+        # 建立預設頁面：建立伺服器
         self.create_server_frame = CreateServerFrame(
             self.content_frame,
             self.version_manager,
@@ -522,13 +547,14 @@ class MinecraftServerManager:
             self.on_server_created,
             self.server_manager,  # 傳入正確的 server_manager 實例
         )
-        # 預先 grid，切換時只需 tkraise，不用重複 pack/reflow
+        # 預先 grid，切換時只需 tkraise，不用重複 reflow
         try:
             self.create_server_frame.grid(row=0, column=0, sticky="nsew")
         except Exception as e:
             logger.debug(f"CreateServerFrame grid 設置失敗: {e}", "MainWindow")
 
-        # 延後建立，首次切換頁面時才初始化
+        # 預載所有主要頁面，固定在同一個 grid cell；切換時僅 tkraise
+        # 管理頁與模組頁改成按需建立，降低啟動瞬間的 widget 建立成本
         self.manage_server_frame = None
         self.mod_frame = None
 
@@ -547,7 +573,7 @@ class MinecraftServerManager:
             self.sidebar,
             text="功能選單",
             font=FontManager.get_font(size=FontSize.INPUT, weight="bold"),
-            text_color="#000000",
+            text_color=Colors.TEXT_ON_LIGHT,
         )
         sidebar_title.pack(anchor="w", padx=20, pady=(20, 15))
 
@@ -589,7 +615,7 @@ class MinecraftServerManager:
                 info_frame,
                 text=f"版本 {APP_VERSION}",
                 font=FontManager.get_font(size=font_size),
-                text_color=("#a0aec0", "#a0aec0"),
+                text_color=Colors.TEXT_TERTIARY,
             )
             version_label.pack(anchor="w")
         except Exception as e:
@@ -609,9 +635,9 @@ class MinecraftServerManager:
             height=FontManager.get_dpi_scaled_size(55),
             corner_radius=8,
             border_spacing=FontManager.get_dpi_scaled_size(10),
-            fg_color=("#3b82f6", "#3b82f6"),
-            hover_color=("#1d4ed8", "#1d4ed8"),
-            text_color=("#ffffff", "#ffffff"),
+            fg_color=Colors.BUTTON_INFO,
+            hover_color=Colors.BUTTON_INFO_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
         )
         btn.pack(fill="x", padx=2, pady=2)
 
@@ -620,7 +646,7 @@ class MinecraftServerManager:
             btn_frame,
             text=description,
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=("#6b7280", "#6b7280"),
+            text_color=Colors.TEXT_SECONDARY,
             anchor="w",
         ).pack(fill="x", padx=5, pady=(0, 5))
 
@@ -645,8 +671,8 @@ class MinecraftServerManager:
             return
 
         # 顏色配置
-        default_colors = {"fg": ("#3b82f6", "#3b82f6"), "hover": ("#1d4ed8", "#1d4ed8")}
-        active_colors = {"fg": ("#1d4ed8", "#1d4ed8"), "hover": ("#1e40af", "#1e40af")}
+        default_colors = {"fg": Colors.BUTTON_INFO, "hover": Colors.BUTTON_INFO_HOVER}
+        active_colors = {"fg": Colors.BUTTON_PRIMARY_ACTIVE, "hover": Colors.BUTTON_PRIMARY_ACTIVE_HOVER}
 
         def configure_button_colors(btn_widget: ctk.CTkButton, colors) -> None:
             """安全地設定按鈕顏色 / Safely configure button colors"""
@@ -672,18 +698,31 @@ class MinecraftServerManager:
         """乾淨利索地切換側邊欄顯示/隱藏，無動畫"""
         self.sidebar_visible = not bool(getattr(self, "sidebar_visible", True))
         try:
-            job = getattr(self, "_sidebar_toggle_job", None)
-            if job:
-                try:
-                    self.root.after_cancel(job)
-                except Exception as e:
-                    logger.debug(f"取消 toggle_sidebar job 失敗: {e}", "MainWindow")
+            UIUtils.cancel_scheduled_job(self.root, "_sidebar_toggle_job", owner=self)
+            UIUtils.cancel_scheduled_job(self.root, "_sidebar_unlock_job", owner=self)
         except Exception as e:
             logger.debug(f"toggle_sidebar 發生錯誤: {e}", "MainWindow")
-        self._sidebar_toggle_job = self.root.after_idle(self._apply_sidebar_visibility)
+        UIUtils.schedule_coalesced_idle(
+            self.root,
+            "_sidebar_toggle_job",
+            self._apply_sidebar_visibility,
+            owner=self,
+        )
+
+    def _schedule_content_layout_unlock_for_sidebar_toggle(self) -> None:
+        """側邊欄切換結束後延遲解鎖內容佈局（debounce）。"""
+        delay_ms = max(0, int(getattr(self, "_sidebar_layout_unlock_delay_ms", 70)))
+        UIUtils.schedule_debounce(
+            self.root,
+            "_sidebar_unlock_job",
+            delay_ms,
+            self._unlock_content_layout_for_sidebar_toggle,
+            owner=self,
+        )
 
     def _apply_sidebar_visibility(self) -> None:
         """實際套用側邊欄顯示狀態（由 after_idle 觸發）。"""
+        self._lock_content_layout_for_sidebar_toggle()
         try:
             if not getattr(self, "sidebar_visible", True):
                 # 顯示迷你側邊欄：改 nav_container 寬度 + 只切換內部 frame（不重建）
@@ -698,14 +737,14 @@ class MinecraftServerManager:
                 except Exception as e:
                     logger.debug(f"設定 Nav 寬度 失敗: {e}", "MainWindow")
 
-                if hasattr(self, "sidebar") and self.sidebar:
-                    try:
-                        self.sidebar.grid_remove()
-                    except Exception as e:
-                        logger.debug(f"隱藏 sidebar 失敗: {e}", "MainWindow")
                 self.create_mini_sidebar()
+                if hasattr(self, "mini_sidebar") and self.mini_sidebar:
+                    try:
+                        self.mini_sidebar.tkraise()
+                    except Exception as e:
+                        logger.debug(f"提升 mini_sidebar 失敗: {e}", "MainWindow")
             else:
-                # 顯示完整側邊欄，隱藏迷你側邊欄
+                # 顯示完整側邊欄（同位切換）
                 try:
                     container = getattr(self, "main_container", None)
                     if container is not None:
@@ -717,22 +756,19 @@ class MinecraftServerManager:
                 except Exception as e:
                     logger.debug(f"設定 Nav 寬度 失敗: {e}", "MainWindow")
 
-                if hasattr(self, "mini_sidebar") and self.mini_sidebar:
-                    try:
-                        self.mini_sidebar.grid_remove()
-                    except Exception as e:
-                        logger.debug(f"隱藏 mini_sidebar 失敗: {e}", "MainWindow")
                 if hasattr(self, "sidebar") and self.sidebar:
                     try:
-                        self.sidebar.grid()
+                        self.sidebar.tkraise()
                     except Exception as e:
-                        logger.debug(f"顯示 sidebar 失敗: {e}", "MainWindow")
+                        logger.debug(f"提升 sidebar 失敗: {e}", "MainWindow")
         except Exception as e:
             logger.error(f"切換側邊欄失敗: {e}\n{traceback.format_exc()}")
+        finally:
+            self._schedule_content_layout_unlock_for_sidebar_toggle()
 
     def create_mini_sidebar(self) -> None:
         """創建迷你側邊欄（只顯示圖示）"""
-        # 只建立一次；之後切換僅 grid/grid_remove，避免重建大量元件造成撕裂
+        # 只建立一次；之後切換僅 tkraise，避免重建大量元件造成撕裂
         if hasattr(self, "mini_sidebar"):
             try:
                 if self.mini_sidebar and self.mini_sidebar.winfo_exists():
@@ -755,7 +791,7 @@ class MinecraftServerManager:
             self.mini_sidebar,
             text="功能選單",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color="#1f2937",
+            text_color=Colors.TEXT_PRIMARY[0],
         )
         mini_title.pack(pady=(15, 10))
 
@@ -781,9 +817,9 @@ class MinecraftServerManager:
                 width=FontManager.get_dpi_scaled_size(55),
                 height=FontManager.get_dpi_scaled_size(55),
                 corner_radius=8,
-                fg_color=("#3b82f6", "#3b82f6"),
-                hover_color=("#1d4ed8", "#1d4ed8"),
-                text_color=("#ffffff", "#ffffff"),
+                fg_color=Colors.BUTTON_INFO,
+                hover_color=Colors.BUTTON_INFO_HOVER,
+                text_color=Colors.TEXT_ON_DARK,
                 command=command,
             )
             btn.pack(pady=3)
@@ -797,8 +833,8 @@ class MinecraftServerManager:
         UIUtils.bind_tooltip(
             widget,
             text,
-            bg="#2b2b2b",
-            fg="white",
+            bg=Colors.BG_TOOLTIP,
+            fg=Colors.TEXT_ON_DARK,
             font=FontManager.get_font(family="Microsoft JhengHei", size=FontSize.TINY),
             padx=8,
             pady=4,
@@ -807,14 +843,64 @@ class MinecraftServerManager:
             auto_hide_ms=None,
         )
 
+    def _show_page_frame(self, frame) -> None:
+        """使用 stack-grid + tkraise 切換頁面，避免反覆隱藏/重排。"""
+        if frame is None:
+            return
+        try:
+            if frame.winfo_manager() != "grid":
+                frame.grid(row=0, column=0, sticky="nsew")
+            frame.tkraise()
+        except Exception:
+            frame.pack(fill="both", expand=True)
+
+    def _lock_content_layout_for_sidebar_toggle(self) -> None:
+        """側邊欄切換期間暫時鎖住主內容區，降低 resize 撕裂。"""
+        if getattr(self, "_content_layout_locked", False):
+            return
+
+        container = getattr(self, "content_container", None)
+        content = getattr(self, "content_frame", None)
+        if not container or not content:
+            return
+
+        try:
+            width = int(container.winfo_width())
+            height = int(container.winfo_height())
+            if width <= 1 or height <= 1:
+                # 尚未完成初始 layout 時不強制鎖定，避免多餘同步重排
+                return
+            container.grid_propagate(False)
+            content.grid_propagate(False)
+            container.configure(width=width, height=height)
+            self._content_layout_locked = True
+        except Exception as e:
+            logger.debug(f"鎖定內容區佈局失敗: {e}", "MainWindow")
+
+    def _unlock_content_layout_for_sidebar_toggle(self) -> None:
+        """解除側邊欄切換期間的內容區佈局鎖。"""
+        self._sidebar_unlock_job = None
+        if not getattr(self, "_content_layout_locked", False):
+            return
+
+        container = getattr(self, "content_container", None)
+        content = getattr(self, "content_frame", None)
+        try:
+            if container:
+                container.grid_propagate(True)
+            if content:
+                content.grid_propagate(True)
+        except Exception as e:
+            logger.debug(f"解除內容區佈局鎖失敗: {e}", "MainWindow")
+        finally:
+            self._content_layout_locked = False
+
     def show_create_server(self) -> None:
         """顯示建立伺服器頁面"""
-        self.hide_all_frames()
-        try:
-            self.create_server_frame.grid(row=0, column=0, sticky="nsew")
-            self.create_server_frame.tkraise()
-        except Exception:
-            self.create_server_frame.pack(fill="both", expand=True)
+        if getattr(self, "manage_server_frame", None) is not None:
+            with contextlib.suppress(Exception):
+                self.manage_server_frame.set_auto_refresh_enabled(False)
+        self._show_page_frame(self.create_server_frame)
         self.set_active_nav_button("create")
 
     def show_manage_server(self, auto_select=None) -> None:
@@ -822,13 +908,10 @@ class MinecraftServerManager:
         顯示管理伺服器頁面
         每次都強制刷新伺服器列表
         """
-        self.hide_all_frames()
         self._ensure_manage_server_frame()
-        try:
-            self.manage_server_frame.grid(row=0, column=0, sticky="nsew")
-            self.manage_server_frame.tkraise()
-        except Exception:
-            self.manage_server_frame.pack(fill="both", expand=True)
+        with contextlib.suppress(Exception):
+            self.manage_server_frame.set_auto_refresh_enabled(True)
+        self._show_page_frame(self.manage_server_frame)
         self.set_active_nav_button("manage")
 
         def _refresh_and_optionally_select() -> None:
@@ -850,26 +933,24 @@ class MinecraftServerManager:
             except Exception as e:
                 logger.error(f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}")
 
-        try:
-            old_job = getattr(self, "_nav_refresh_job", None)
-            if old_job:
-                self.root.after_cancel(old_job)
-        except Exception as e:
-            logger.debug(f"取消 _nav_refresh_job 失敗: {e}", "MainWindow")
-        self._nav_refresh_job = self.root.after(0, _refresh_and_optionally_select)
+        UIUtils.schedule_debounce(
+            self.root,
+            "_nav_refresh_job",
+            0,
+            _refresh_and_optionally_select,
+            owner=self,
+        )
 
     def show_mod_management(self) -> None:
         """顯示模組管理頁面"""
-        self.hide_all_frames()
+        if getattr(self, "manage_server_frame", None) is not None:
+            with contextlib.suppress(Exception):
+                self.manage_server_frame.set_auto_refresh_enabled(False)
         self._ensure_mod_management_frame()
         # 每次顯示頁面時，重新載入伺服器列表並預設選擇第一個
         self.mod_frame.load_servers()
         frame = self.mod_frame.get_frame()
-        try:
-            frame.grid(row=0, column=0, sticky="nsew")
-            frame.tkraise()
-        except Exception:
-            frame.pack(fill="both", expand=True)
+        self._show_page_frame(frame)
         self.set_active_nav_button("mods")
 
     def import_server(self) -> None:
@@ -881,8 +962,8 @@ class MinecraftServerManager:
         dialog = UIUtils.create_toplevel_dialog(
             parent=self.root,
             title="匯入伺服器",
-            width=450,
-            height=280,
+            width=Sizes.DIALOG_IMPORT_WIDTH,
+            height=Sizes.DIALOG_IMPORT_HEIGHT,
             resizable=False,
             delay_ms=0,
         )
@@ -920,7 +1001,7 @@ class MinecraftServerManager:
                 text=label,
                 command=lambda k=key: self._set_choice(choice, k, dialog),
                 font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight=font_weight),
-                height=35,
+                height=Sizes.BUTTON_HEIGHT_MEDIUM,
             )
             btn.pack(fill="x", pady=5)
 
@@ -994,8 +1075,8 @@ class MinecraftServerManager:
         dialog = UIUtils.create_toplevel_dialog(
             parent=self.root,
             title="輸入伺服器名稱",
-            width=400,
-            height=200,
+            width=Sizes.DIALOG_SMALL_WIDTH,
+            height=Sizes.DIALOG_SMALL_HEIGHT,
             resizable=False,
             delay_ms=0,
         )
@@ -1046,8 +1127,20 @@ class MinecraftServerManager:
         def _cancel():
             dialog.destroy()
 
-        ctk.CTkButton(btn_frame, text="確定", command=_ok, width=80, height=35).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(btn_frame, text="取消", command=_cancel, width=80, height=35).pack(side="left")
+        ctk.CTkButton(
+            btn_frame,
+            text="確定",
+            command=_ok,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(
+            btn_frame,
+            text="取消",
+            command=_cancel,
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
+        ).pack(side="left")
 
         entry.bind("<Return>", lambda _e: _ok())
         dialog.bind("<Escape>", lambda _e: _cancel())
@@ -1099,34 +1192,8 @@ class MinecraftServerManager:
             raise e
 
     def hide_all_frames(self) -> None:
-        """隱藏所有頁面"""
-        try:
-            self.create_server_frame.grid_remove()
-        except Exception:
-            try:
-                self.create_server_frame.pack_forget()
-            except Exception as e:
-                logger.debug(f"隱藏 create_server_frame 失敗: {e}", "MainWindow")
-
-        if getattr(self, "manage_server_frame", None) is not None:
-            try:
-                self.manage_server_frame.grid_remove()
-            except Exception:
-                try:
-                    self.manage_server_frame.pack_forget()
-                except Exception as e:
-                    logger.debug(f"隱藏 manage_server_frame 失敗: {e}", "MainWindow")
-
-        # 隱藏模組管理頁面
-        if getattr(self, "mod_frame", None) is not None:
-            try:
-                frame = self.mod_frame.get_frame()
-                try:
-                    frame.grid_remove()
-                except Exception:
-                    frame.pack_forget()
-            except Exception as e:
-                logger.debug(f"隱藏 mod_frame 失敗: {e}", "MainWindow")
+        """相容舊流程：頁面切換已改用 tkraise，不再逐一隱藏 frame。"""
+        return
 
     def open_servers_folder(self) -> None:
         """開啟伺服器資料夾"""
@@ -1146,8 +1213,8 @@ class MinecraftServerManager:
         about_dialog = UIUtils.create_toplevel_dialog(
             parent=self.root,
             title="關於 Minecraft 伺服器管理器",
-            width=600,
-            height=650,
+            width=Sizes.DIALOG_ABOUT_WIDTH,
+            height=Sizes.DIALOG_ABOUT_HEIGHT,
             resizable=True,
             bind_icon=True,
             delay_ms=0,
@@ -1168,7 +1235,7 @@ class MinecraftServerManager:
             scrollable_frame,
             text=f"版本 {APP_VERSION}",
             font=FontManager.get_font(size=FontSize.LARGE),
-            text_color=("#a0aec0", "#a0aec0"),
+            text_color=Colors.TEXT_TERTIARY,
         ).pack(pady=(0, 20))
 
         # 開發資訊
@@ -1189,7 +1256,7 @@ class MinecraftServerManager:
             text=dev_info,
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             justify="left",
-            wraplength=500,
+            wraplength=Sizes.DIALOG_PREFERENCES_WIDTH,
         ).pack(anchor="w", pady=(0, 5))
         github_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
         github_lbl = ctk.CTkLabel(
@@ -1225,7 +1292,7 @@ class MinecraftServerManager:
             text=license_info,
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             justify="left",
-            wraplength=500,
+            wraplength=Sizes.DIALOG_PREFERENCES_WIDTH,
         ).pack(anchor="w", pady=(0, 30))
 
         # 建立通用的設定區塊
@@ -1262,8 +1329,8 @@ class MinecraftServerManager:
             text="檢查更新",
             command=self._manual_check_updates,
             font=FontManager.get_font(size=FontSize.NORMAL),
-            width=120,
-            height=30,
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.DROPDOWN_HEIGHT,
         )
 
         if not settings.is_auto_update_enabled():
@@ -1293,8 +1360,8 @@ class MinecraftServerManager:
             text="視窗偏好設定",
             command=self._show_window_preferences,
             font=FontManager.get_font(size=FontSize.NORMAL),
-            width=120,
-            height=30,
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.DROPDOWN_HEIGHT,
         )
         window_prefs_btn.pack(anchor="w", pady=(0, 10))
 
@@ -1304,8 +1371,8 @@ class MinecraftServerManager:
             text="關閉",
             command=about_dialog.destroy,
             font=FontManager.get_font(size=FontSize.NORMAL, weight="bold"),
-            width=100,
-            height=35,
+            width=Sizes.BUTTON_WIDTH_SMALL,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
         ).pack(pady=(10, 0))
 
         # Escape 鍵關閉
@@ -1409,8 +1476,21 @@ class ServerInitializationDialog:
             get_logger().bind(component="InitServerDialog").exception(f"加入 console queue 失敗: {e}")
 
     def _start_console_pump(self) -> None:
+        """啟動初始化 console 批次刷新（debounce 迴圈）。"""
         if self._console_pump_job is not None:
             return
+
+        def _schedule_next(delay_ms: int) -> None:
+            if not self.init_dialog or not self.init_dialog.winfo_exists():
+                self._console_pump_job = None
+                return
+            UIUtils.schedule_debounce(
+                self.init_dialog,
+                "_console_pump_job",
+                delay_ms,
+                _tick,
+                owner=self,
+            )
 
         def _tick() -> None:
             self._console_pump_job = None
@@ -1436,14 +1516,40 @@ class ServerInitializationDialog:
                 self._update_console("".join(chunks))
 
             delay = 25 if not self._console_queue.empty() else 100
-            try:
-                if self.init_dialog:
-                    self._console_pump_job = self.init_dialog.after(delay, _tick)
-            except tk.TclError:
-                return
+            _schedule_next(delay)
 
-        if self.init_dialog:
-            self._console_pump_job = self.init_dialog.after(50, _tick)
+        _schedule_next(50)
+
+    def _schedule_dialog_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
+        """統一對初始化對話框排程 UI 工作（debounce）。"""
+        dialog = self.init_dialog
+        if not dialog or not dialog.winfo_exists():
+            return
+        UIUtils.schedule_debounce(
+            dialog,
+            job_attr,
+            delay_ms,
+            callback,
+            owner=self,
+        )
+
+    def _cancel_dialog_jobs(self) -> None:
+        """關閉初始化對話框前，集中取消待執行排程。"""
+        dialog = self.init_dialog
+        if not dialog or not dialog.winfo_exists():
+            return
+        for job_attr in (
+            "_console_pump_job",
+            "_init_timeout_job",
+            "_init_progress_job",
+            "_init_world_prep_job",
+            "_init_world_load_job",
+            "_init_closing_job",
+            "_init_complete_job",
+            "_init_error_job",
+            "_init_transition_job",
+        ):
+            UIUtils.cancel_scheduled_job(dialog, job_attr, owner=self)
 
     def start_initialization(self) -> None:
         self._create_dialog()
@@ -1455,8 +1561,8 @@ class ServerInitializationDialog:
         self.init_dialog = UIUtils.create_toplevel_dialog(
             self.parent,
             f"初始化伺服器 - {self.server_config.name}",
-            width=800,
-            height=600,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
             delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
         )
 
@@ -1497,8 +1603,8 @@ class ServerInitializationDialog:
             console_frame,
             font=FontManager.get_font(family="Consolas", size=FontSize.TINY),
             wrap="none",
-            fg_color=("#000000", "#000000"),
-            text_color=("#00ff00", "#00ff00"),
+            fg_color=(Colors.BG_CONSOLE, Colors.BG_CONSOLE),
+            text_color=(Colors.CONSOLE_TEXT, Colors.CONSOLE_TEXT),
         )
         self.console_text.pack(fill="both", expand=True, padx=5, pady=5)
         self._start_console_pump()
@@ -1527,12 +1633,12 @@ class ServerInitializationDialog:
             text="取消初始化",
             command=self._close_init_server,
             font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=120,
-            height=35,
-            fg_color=("#e53e3e", "#e53e3e"),
-            hover_color=("#dc2626", "#dc2626"),
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
+            fg_color=Colors.TEXT_ERROR,
+            hover_color=Colors.BUTTON_DANGER,
             border_width=2,
-            border_color=("#b91c1c", "#b91c1c"),
+            border_color=Colors.BUTTON_DANGER_HOVER,
             corner_radius=6,
         )
         self.close_button.pack(side="right", padx=5)
@@ -1541,23 +1647,25 @@ class ServerInitializationDialog:
         """設定超時自動關閉"""
         # 2分鐘超時自動強制關閉
         if self.init_dialog:
-            self.init_dialog.after(120000, self._timeout_force_close)
+            self._schedule_dialog_job("_init_timeout_job", 120000, self._timeout_force_close)
 
     def _start_server_thread(self) -> None:
         """在背景執行緒中啟動伺服器"""
         UIUtils.run_async(self._run_server)
 
     def _close_init_server(self) -> None:
-        """關閉初始化伺服器"""
+        """關閉初始化伺服器。"""
         if self.done_detected:
             # 正常關閉
             if self.init_dialog and self.init_dialog.winfo_exists():
+                self._cancel_dialog_jobs()
                 UIUtils.show_info("初始化完成", "伺服器已成功初始化並安全關閉。", parent=self.parent)
                 self.init_dialog.destroy()
         else:
             # 強制關閉
             self._terminate_server_process()
             if self.init_dialog and self.init_dialog.winfo_exists():
+                self._cancel_dialog_jobs()
                 UIUtils.show_warning(
                     "強制關閉",
                     "伺服器初始化未完成，已強制關閉。請檢查伺服器日誌。",
@@ -1599,7 +1707,8 @@ class ServerInitializationDialog:
         try:
             # 更新狀態
             if self.init_dialog:
-                self.init_dialog.after(
+                self._schedule_dialog_job(
+                    "_init_progress_job",
                     0,
                     lambda: (
                         self.progress_label.configure(text="狀態: 正在啟動伺服器...")
@@ -1712,7 +1821,8 @@ class ServerInitializationDialog:
 
         if "Loading dimension" in output or "Preparing spawn area" in output:
             with contextlib.suppress(tk.TclError):
-                self.init_dialog.after(
+                self._schedule_dialog_job(
+                    "_init_world_prep_job",
                     0,
                     lambda: (
                         self.progress_label.configure(text="狀態: 準備世界...")
@@ -1722,7 +1832,8 @@ class ServerInitializationDialog:
                 )
         elif "Preparing level" in output:
             with contextlib.suppress(tk.TclError):
-                self.init_dialog.after(
+                self._schedule_dialog_job(
+                    "_init_world_load_job",
                     0,
                     lambda: (
                         self.progress_label.configure(text="狀態: 載入世界...")
@@ -1738,7 +1849,7 @@ class ServerInitializationDialog:
                 self.close_button.configure(
                     text="關閉伺服器",
                     command=self._close_init_server,
-                    fg_color="#059669",
+                    fg_color=Colors.BUTTON_SUCCESS,
                 )
 
     def _handle_server_ready(self, output: str) -> None:
@@ -1757,7 +1868,7 @@ class ServerInitializationDialog:
                 self._enqueue_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
 
         if self.init_dialog:
-            self.init_dialog.after(0, update_closing_status)
+            self._schedule_dialog_job("_init_closing_job", 0, update_closing_status)
 
         # 發送 stop 命令
         if self.server_process and self.server_process.stdin:
@@ -1777,11 +1888,12 @@ class ServerInitializationDialog:
                     if self.progress_label and self.progress_label.winfo_exists():
                         self.progress_label.configure(text="狀態: 初始化完成")
 
-            self.init_dialog.after(0, complete_init)
+            self._schedule_dialog_job("_init_complete_job", 0, complete_init)
 
             # 延遲後自動進入設定頁面
             if self.completion_callback:
-                self.init_dialog.after(
+                self._schedule_dialog_job(
+                    "_init_transition_job",
                     2000,
                     lambda: self.completion_callback(  # type: ignore
                         self.server_config,
@@ -1796,7 +1908,7 @@ class ServerInitializationDialog:
                     if self.progress_label and self.progress_label.winfo_exists():
                         self.progress_label.configure(text="狀態: 啟動異常")
 
-            self.init_dialog.after(0, show_error)
+            self._schedule_dialog_job("_init_error_job", 0, show_error)
 
     def _handle_server_error(self, err_msg: str) -> None:
         """處理伺服器錯誤"""
@@ -1809,4 +1921,4 @@ class ServerInitializationDialog:
                 if self.progress_label and self.progress_label.winfo_exists():
                     self.progress_label.configure(text="狀態: 啟動失敗")
 
-        self.init_dialog.after(0, show_error)
+        self._schedule_dialog_job("_init_error_job", 0, show_error)

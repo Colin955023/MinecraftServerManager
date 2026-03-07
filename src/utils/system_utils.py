@@ -6,7 +6,9 @@ Provides system information query and process management functions, using native
 """
 
 import ctypes
-from ctypes import wintypes
+import ctypes.wintypes as wintypes
+from typing import Any, ClassVar
+from collections.abc import Sequence
 
 from . import SubprocessUtils, get_logger
 
@@ -20,10 +22,10 @@ PROCESS_VM_READ = 0x0010
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 STILL_ACTIVE = 259
 
-_windll = getattr(ctypes, "windll", None)
-_kernel32 = _windll.kernel32 if _windll else None
-_user32 = _windll.user32 if _windll and hasattr(_windll, "user32") else None
-_psapi = _windll.psapi if _windll and hasattr(_windll, "psapi") else None
+_windll: Any = getattr(ctypes, "windll", None)
+_kernel32: Any = getattr(_windll, "kernel32", None)
+_user32: Any = getattr(_windll, "user32", None)
+_psapi: Any = getattr(_windll, "psapi", None)
 
 Structure = ctypes.Structure
 byref = ctypes.byref
@@ -34,7 +36,7 @@ sizeof = ctypes.sizeof
 
 
 class MEMORYSTATUSEX(Structure):
-    _fields_ = [
+    _fields_: ClassVar[Sequence[tuple[str, Any] | tuple[str, Any, int]]] = [
         ("dwLength", wintypes.DWORD),
         ("dwMemoryLoad", wintypes.DWORD),
         ("ullTotalPhys", c_uint64),
@@ -48,7 +50,7 @@ class MEMORYSTATUSEX(Structure):
 
 
 class PROCESSENTRY32(Structure):
-    _fields_ = [
+    _fields_: ClassVar[Sequence[tuple[str, Any] | tuple[str, Any, int]]] = [
         ("dwSize", wintypes.DWORD),
         ("cntUsage", wintypes.DWORD),
         ("th32ProcessID", wintypes.DWORD),
@@ -63,7 +65,7 @@ class PROCESSENTRY32(Structure):
 
 
 class PROCESS_MEMORY_COUNTERS_EX(Structure):
-    _fields_ = [
+    _fields_: ClassVar[Sequence[tuple[str, Any] | tuple[str, Any, int]]] = [
         ("cb", wintypes.DWORD),
         ("PageFaultCount", wintypes.DWORD),
         ("PeakWorkingSetSize", c_size_t),
@@ -84,9 +86,6 @@ class SystemUtils:
     @staticmethod
     def _iterate_process_snapshot() -> list[PROCESSENTRY32]:
         """回傳當前系統進程快照"""
-        if _kernel32 is None:
-            return []
-
         snapshot: list[PROCESSENTRY32] = []
         h_snap = _kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if h_snap == -1:
@@ -119,9 +118,6 @@ class SystemUtils:
     def get_total_memory_mb() -> int:
         """獲取系統總實體記憶體"""
         try:
-            if _kernel32 is None:
-                return 4096
-
             stat = MEMORYSTATUSEX()
             stat.dwLength = sizeof(stat)
             if not _kernel32.GlobalMemoryStatusEx(byref(stat)):
@@ -169,9 +165,6 @@ class SystemUtils:
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
         """獲取進程記憶體使用量 (bytes)"""
-        if _kernel32 is None or _psapi is None:
-            return 0
-
         h_process = 0
         try:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
@@ -221,9 +214,6 @@ class SystemUtils:
     @staticmethod
     def is_process_running(pid: int) -> bool:
         """檢查進程是否運行中"""
-        if _kernel32 is None:
-            return False
-
         h_process = 0
         try:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -245,8 +235,7 @@ class SystemUtils:
     def set_process_dpi_aware() -> None:
         """設定進程 DPI 感知"""
         try:
-            if _user32 is not None:
-                _user32.SetProcessDPIAware()
+            _user32.SetProcessDPIAware()
         except Exception as e:
             logger.error(f"設定進程 DPI 感知失敗: {e}")
 
@@ -254,8 +243,6 @@ class SystemUtils:
     def get_system_metrics(index: int) -> int:
         """獲取系統指標"""
         try:
-            if _user32 is not None:
-                return _user32.GetSystemMetrics(index)
-            return 0
+            return _user32.GetSystemMetrics(index)
         except Exception:
             return 0

@@ -25,6 +25,7 @@ dist/
 *.build/
 *.onefile-build/
 *.onefile-dist/
+.nuitka/
 .nuitka-cache/
 *.spec
 *.manifest
@@ -82,9 +83,14 @@ cache/
 *.msm
 *.msp
 !scripts/update_portable.exe
+
 # =====================
 # 自訂忽略項目 (Custom ignore items)
 # =====================
 removed_code.txt
-report/
+
+# Report directory - ignore all except specific files
+report/*
+!report/comprehensive_report.py
+!report/comprehensive_report.html
 *.xml

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import toml
 
-from ..utils import HTTPUtils, PathUtils, ServerDetectionUtils, UIUtils, get_logger
+from ..utils import HTTPUtils, ModIndexManager, PathUtils, ServerDetectionUtils, UIUtils, get_logger
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
@@ -69,14 +69,19 @@ class LocalModInfo:
 class ModManager:
     """負責伺服器模組的掃描、啟用/停用、移除等功能"""
 
+    # 類型聲明
+    index_manager: ModIndexManager
+
     # ====== 初始化與設定 ======
-    def __init__(self, server_path: str, server_config=None):
+    def __init__(self, server_path: str, server_config=None) -> None:
         self.server_path = Path(server_path)
         self.mods_path = self.server_path / "mods"
         self.server_config = server_config  # 儲存伺服器配置
 
         # 確保目錄存在
         self.mods_path.mkdir(exist_ok=True)
+        self.index_manager: ModIndexManager = ModIndexManager(server_path)
+
         # 回調函數
         self.on_mod_list_changed: Callable | None = None
 
@@ -117,11 +122,27 @@ class ModManager:
                 "mc_version": "未知",
             }
 
-            # 從 jar 檔案提取元資料
-            self._extract_metadata_from_jar(file_path, mod_data)
+            cached_metadata = self.index_manager.get_cached_metadata(file_path)
+            if cached_metadata:
+                mod_data.update(cached_metadata)
+            else:
+                # 從 jar 檔案提取元資料
+                self._extract_metadata_from_jar(file_path, mod_data)
 
-            # 套用後備邏輯與清理
-            self._apply_fallback_logic(base_name, mod_data)
+                # 套用後備邏輯與清理
+                self._apply_fallback_logic(base_name, mod_data)
+
+                # 快取提取的元資料供下次使用
+                self.index_manager.cache_metadata(
+                    file_path,
+                    {
+                        "version": mod_data["version"],
+                        "author": mod_data["author"],
+                        "description": mod_data["description"],
+                        "loader_type": mod_data["loader_type"],
+                        "mc_version": mod_data["mc_version"],
+                    },
+                )
 
             # 套用伺服器設定覆寫
             self._apply_server_config_overrides(mod_data)
@@ -621,7 +642,7 @@ class ModManager:
                 "<!DOCTYPE html>",
                 '<html lang="zh-TW">',
                 '<head><meta charset="UTF-8"><title>模組列表</title>',
-                "<style>table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:6px;}th{background:#f1f5f9;}</style>",
+                "<style>table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:6px;}th{background:#f1f5f9;}</style>",  # token-check: ignore (模組清單匯出為單檔 HTML，需保留內嵌樣式)
                 "</head><body>",
                 "<h2>模組列表</h2>",
                 "<table>",
