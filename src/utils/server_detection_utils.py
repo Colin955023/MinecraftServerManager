@@ -118,7 +118,7 @@ class ServerDetectionUtils:
                 if (server_path / fabric_jar).exists():
                     return fabric_jar
 
-        # Vanilla or fallback
+        # Fallback: any recognizable server jar
         for jar_name in ["server.jar", "minecraft_server.jar"]:
             if (server_path / jar_name).exists():
                 return jar_name
@@ -561,7 +561,7 @@ class ServerDetectionUtils:
                         config.loader_type = "fabric"
                     elif "forge" in name_lower:
                         config.loader_type = "forge"
-                    else:
+                    elif name_lower in {"server.jar", "minecraft_server.jar"}:
                         config.loader_type = "vanilla"
 
                 m = re.search(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\.jar", jar.name)
@@ -599,7 +599,7 @@ class ServerDetectionUtils:
         detect_from_version_json()
 
         if is_unknown(config.loader_type) and is_unknown(config.loader_version):
-            config.loader_type = "vanilla"
+            config.loader_type = "unknown"
 
     @staticmethod
     def find_forge_args_file(server_path: Path, server_config=None) -> Path | None:

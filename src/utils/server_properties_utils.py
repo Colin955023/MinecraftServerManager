@@ -316,7 +316,7 @@ class ServerPropertiesHelper:
         return properties
 
     @staticmethod
-    def save_properties(file_path, properties: dict[str, str]):
+    def save_properties(file_path, properties: dict[str, str]) -> bool:
         """將屬性字典儲存為 server.properties 檔案格式"""
         try:
             properties_file = Path(file_path)
@@ -341,7 +341,10 @@ class ServerPropertiesHelper:
                     if not PathUtils.write_text_file(temp_path, payload):
                         raise OSError("write temp server.properties failed")
                     PathUtils.move_path(temp_path, properties_file)
-                    return
+                    logger.debug(
+                        f"已使用 javaproperties 儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
+                    )
+                    return True
                 except Exception as e:
                     logger.debug(f"使用 javaproperties 儲存失敗，回退手動序列化: {e}")
 
@@ -424,8 +427,13 @@ class ServerPropertiesHelper:
             if not PathUtils.write_text_file(temp_path, payload):
                 raise OSError("write temp server.properties failed")
             PathUtils.move_path(temp_path, properties_file)
+            logger.debug(
+                f"已手動儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
+            )
+            return True
         except Exception as e:
             logger.exception(f"儲存 server.properties 失敗: {e}")
+            return False
 
 
 # ====== Server Properties 驗證器 ======

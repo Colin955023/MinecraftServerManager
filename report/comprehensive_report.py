@@ -26,26 +26,27 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = REPO_ROOT / "report"
 HTML_REPORT_PATH = REPORT_DIR / "comprehensive_report.html"
+PYTHON_EXECUTABLE = Path(sys.executable)
+SCRIPTS_DIR = PYTHON_EXECUTABLE.parent
 
 MAX_DETAIL_ITEMS = 250
 TOOL_TIMEOUT_SECONDS = 180
+DETECT_SECRETS_BATCH_SIZE = 120
+CLI_VERBOSE_LOGS = False
 
-UV_RESOLUTION_ERROR_MARKERS = (
-    "not found in the package registry",
-    "no solution found",
-    "no matching distribution",
-    "failed to resolve",
-)
+IGNORED_SCAN_DIRS = {".git", ".venv", "build", "dist", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
+T = TypeVar("T")
 
 @dataclass(slots=True)
 class ToolResult:
@@ -83,18 +84,48 @@ def sanitize_tool_output(text: str) -> str:
 
 
 def command_exists(cmd: str) -> bool:
+    if any(separator in cmd for separator in ("/", "\\")):
+        return Path(cmd).exists()
     return shutil.which(cmd) is not None
 
 
+def resolve_tool_command(tool_name: str, args: list[str], module_name: str | None = None) -> list[str]:
+    executable_candidates = [
+        SCRIPTS_DIR / tool_name,
+        SCRIPTS_DIR / f"{tool_name}.exe",
+        SCRIPTS_DIR / f"{tool_name}.cmd",
+    ]
+    for candidate in executable_candidates:
+        if candidate.exists():
+            return [str(candidate), *args]
+    if module_name:
+        return [str(PYTHON_EXECUTABLE), "-m", module_name, *args]
+    return [tool_name, *args]
+
+
+def format_duration(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def log_verbose(message: str) -> None:
+    if CLI_VERBOSE_LOGS:
+        print(message)
+
+
 def run_command(name: str, command: list[str]) -> ToolResult:
-    if not command_exists("uv"):
+    command_text = " ".join(command)
+    log_verbose(f"  [Tool:{name}] start | command={command_text}")
+    executable_name = command[0] if command else ""
+    if not executable_name or not command_exists(executable_name):
+        reason = Path(executable_name).name if executable_name else "missing-command"
+        log_verbose(f"  [Tool:{name}] skipped | reason={reason}-not-found | elapsed=0.00s")
         return ToolResult(
             name=name,
             status="unavailable",
-            command=" ".join(command),
+            command=command_text,
             return_code=None,
             duration_seconds=0.0,
-            output="uv not found in PATH.",
+            output=f"Required tool is not available: {executable_name or '(empty command)'}.",
         )
 
     started = time.perf_counter()
@@ -117,90 +148,80 @@ def run_command(name: str, command: list[str]) -> ToolResult:
         merged = sanitize_tool_output("\n".join(part for part in [stdout, stderr] if part))
         timeout_msg = f"Command timed out after {TOOL_TIMEOUT_SECONDS}s."
         output = f"{timeout_msg}\n{merged}".strip()
+        elapsed = ended - started
+        log_verbose(
+            f"  [Tool:{name}] done | status=failed | code=-1 | elapsed={format_duration(elapsed)} | reason=timeout"
+        )
         return ToolResult(
             name=name,
             status="failed",
-            command=" ".join(command),
+            command=command_text,
             return_code=-1,
-            duration_seconds=ended - started,
+            duration_seconds=elapsed,
             output=output,
         )
 
     ended = time.perf_counter()
+    elapsed = ended - started
     stdout = completed.stdout.strip()
     stderr = completed.stderr.strip()
     merged = sanitize_tool_output("\n".join(part for part in [stdout, stderr] if part))
+    status = "passed" if completed.returncode == 0 else "failed"
+    log_verbose(
+        f"  [Tool:{name}] done | status={status} | code={completed.returncode} | elapsed={format_duration(elapsed)}"
+    )
 
     return ToolResult(
         name=name,
-        status="passed" if completed.returncode == 0 else "failed",
-        command=" ".join(command),
+        status=status,
+        command=command_text,
         return_code=completed.returncode,
-        duration_seconds=ended - started,
+        duration_seconds=elapsed,
         output=merged,
     )
 
 
-def is_uv_resolution_error(result: ToolResult) -> bool:
-    if result.status == "passed":
-        return False
-    lowered = result.output.lower()
-    return any(marker in lowered for marker in UV_RESOLUTION_ERROR_MARKERS)
+def run_timed_operation(name: str, operation: Callable[[], T]) -> tuple[T, float]:
+    log_verbose(f"  [Task:{name}] start")
+    started = time.perf_counter()
+    result: T = operation()
+    elapsed = time.perf_counter() - started
+    log_verbose(f"  [Task:{name}] done | elapsed={format_duration(elapsed)}")
+    return result, elapsed
 
 
-def run_uv_tool_with_fallback(name: str, package_name: str, tool_args: list[str]) -> ToolResult:
-    isolated_command = ["uv", "run", "--isolated", "--with", package_name, *tool_args]
-    isolated_result = run_command(name, isolated_command)
-    if not is_uv_resolution_error(isolated_result):
-        return isolated_result
+def run_project_tool(name: str, tool_name: str, args: list[str], module_name: str | None = None) -> ToolResult:
+    return run_command(name, resolve_tool_command(tool_name, args, module_name=module_name))
 
-    install_command = ["uv", "pip", "install", package_name]
-    install_result = run_command(f"{name}:install", install_command)
-    if install_result.status != "passed":
-        return ToolResult(
-            name=name,
-            status="failed",
-            command=" ; ".join([" ".join(isolated_command), " ".join(install_command)]),
-            return_code=install_result.return_code,
-            duration_seconds=isolated_result.duration_seconds + install_result.duration_seconds,
-            output=(
-                "[isolated mode unavailable, fallback install failed]\n"
-                + f"[isolated]\n{isolated_result.output}\n\n"
-                + f"[install]\n{install_result.output}"
-            ).strip(),
+
+def render_category_overview() -> str:
+    categories = [
+        ("程式碼品質", "ruff、mypy、bandit、vulture、compileall", "靜態分析、型別、安全、死代碼與語法檢查"),
+        ("重複程式碼", "內建 duplicate scanner", "掃描 src 內高相似度且連續重複的程式碼區塊"),
+        ("UI 硬編碼", "內建 ui hardcode scanner", "檢查色碼、尺寸與字型大小是否直接寫死"),
+        ("註解整潔", "ruff ERA、eradicate", "找出已註解掉但仍殘留在專案中的舊程式碼"),
+        ("隱私資訊", "detect-secrets、內建 privacy regex", "檢查疑似密鑰、token、帳密與敏感字串"),
+    ]
+    items = "".join(
+        (
+            '<div class="category-card">'
+            f'<div class="category-title">{html.escape(name)}</div>'
+            f'<div class="category-tools">工具：{html.escape(tools)}</div>'
+            f'<div class="category-purpose">用途：{html.escape(purpose)}</div>'
+            "</div>"
         )
-
-    direct_command = ["uv", "run", *tool_args]
-    direct_result = run_command(name, direct_command)
-    return ToolResult(
-        name=name,
-        status=direct_result.status,
-        command=" ; ".join([" ".join(isolated_command), " ".join(install_command), " ".join(direct_command)]),
-        return_code=direct_result.return_code,
-        duration_seconds=(
-            isolated_result.duration_seconds + install_result.duration_seconds + direct_result.duration_seconds
-        ),
-        output=(
-            "[isolated mode unavailable, used fallback install + direct run]\n"
-            + f"[isolated]\n{isolated_result.output}\n\n"
-            + f"[install]\n{install_result.output}\n\n"
-            + f"[direct]\n{direct_result.output}"
-        ).strip(),
+        for name, tools, purpose in categories
     )
-
-
-def run_uv_isolated_without_package(name: str, tool_args: list[str]) -> ToolResult:
-    command = ["uv", "run", "--isolated", *tool_args]
-    return run_command(name, command)
+    return f'<div class="category-grid">{items}</div>'
 
 
 def collect_code_quality_results() -> list[ToolResult]:
-    checks: list[tuple[str, str | None, list[str]]] = [
+    checks: list[tuple[str, str, str | None, list[str]]] = [
         (
             "ruff",
             "ruff",
+            "ruff",
             [
-                "ruff",
                 "check",
                 "src",
                 "tests",
@@ -210,16 +231,16 @@ def collect_code_quality_results() -> list[ToolResult]:
         (
             "mypy",
             "mypy",
+            "mypy",
             [
-                "mypy",
                 "src",
             ],
         ),
         (
             "bandit",
             "bandit",
+            "bandit",
             [
-                "bandit",
                 "-r",
                 "src",
             ],
@@ -227,30 +248,42 @@ def collect_code_quality_results() -> list[ToolResult]:
         (
             "vulture",
             "vulture",
+            "vulture",
             [
-                "vulture",
                 "src",
                 "--min-confidence=80",
             ],
         ),
         (
             "compileall",
+            "python",
             None,
-            ["python", "-m", "compileall", "-q", "src"],
+            ["-m", "compileall", "-q", "src"],
         ),
     ]
 
     results: list[ToolResult] = []
-    for name, package_name, tool_args in checks:
-        if package_name is None:
-            results.append(run_uv_isolated_without_package(name, tool_args))
+    for name, tool_name, module_name, tool_args in checks:
+        if tool_name == "python":
+            results.append(run_command(name, [str(PYTHON_EXECUTABLE), *tool_args]))
             continue
-        results.append(run_uv_tool_with_fallback(name, package_name, tool_args))
+        results.append(run_project_tool(name, tool_name, tool_args, module_name=module_name))
     return results
 
 
 def gather_python_files(base_dir: Path) -> list[Path]:
     return sorted(path for path in base_dir.rglob("*.py") if path.is_file())
+
+
+def gather_repo_files(base_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in base_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in IGNORED_SCAN_DIRS for part in path.parts):
+            continue
+        files.append(path)
+    return sorted(files)
 
 
 def normalize_code_line(line: str) -> str:
@@ -389,12 +422,12 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
 
 
 def collect_comment_tool_results() -> list[ToolResult]:
-    checks: list[tuple[str, str, list[str]]] = [
+    checks: list[tuple[str, str, str | None, list[str]]] = [
         (
             "ruff-era",
             "ruff",
+            "ruff",
             [
-                "ruff",
                 "check",
                 "--select",
                 "ERA",
@@ -406,8 +439,8 @@ def collect_comment_tool_results() -> list[ToolResult]:
         (
             "eradicate",
             "eradicate",
+            "eradicate",
             [
-                "eradicate",
                 "--recursive",
                 "--aggressive",
                 "src",
@@ -416,29 +449,111 @@ def collect_comment_tool_results() -> list[ToolResult]:
             ],
         ),
     ]
-    return [run_uv_tool_with_fallback(name, package_name, tool_args) for name, package_name, tool_args in checks]
+    return [
+        run_project_tool(name, tool_name, tool_args, module_name=module_name)
+        for name, tool_name, module_name, tool_args in checks
+    ]
+
+
+def merge_detect_secrets_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    merged_results: dict[str, list[Any]] = {}
+    plugin_names: set[str] = set()
+    plugins_used: list[dict[str, Any]] = []
+    filters_used: list[str] = []
+    seen_filters: set[str] = set()
+    version = ""
+
+    for payload in payloads:
+        if not version:
+            version = str(payload.get("version", "") or "")
+
+        for plugin in payload.get("plugins_used", []) if isinstance(payload.get("plugins_used"), list) else []:
+            if not isinstance(plugin, dict):
+                continue
+            plugin_name = str(plugin.get("name", "") or "")
+            if not plugin_name or plugin_name in plugin_names:
+                continue
+            plugin_names.add(plugin_name)
+            plugins_used.append(plugin)
+
+        for filter_name in payload.get("filters_used", []) if isinstance(payload.get("filters_used"), list) else []:
+            normalized_filter = str(filter_name or "")
+            if not normalized_filter or normalized_filter in seen_filters:
+                continue
+            seen_filters.add(normalized_filter)
+            filters_used.append(normalized_filter)
+
+        results = payload.get("results")
+        if not isinstance(results, dict):
+            continue
+        for file_name, findings in results.items():
+            if not isinstance(findings, list):
+                continue
+            merged_results.setdefault(str(file_name), []).extend(findings)
+
+    return {
+        "version": version,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "plugins_used": plugins_used,
+        "filters_used": filters_used,
+        "results": merged_results,
+    }
 
 
 def collect_privacy_tool_results() -> list[ToolResult]:
-    checks: list[tuple[str, str, list[str]]] = [
-        (
-            "detect-secrets",
-            "detect-secrets",
-            [
-                "detect-secrets",
-                "scan",
-                "--only-verified",
-                "--all-files",
-            ],
-        ),
+    scannable_files = gather_repo_files(REPO_ROOT)
+    if not scannable_files:
+        return [
+            ToolResult(
+                name="detect-secrets",
+                status="unavailable",
+                command="detect-secrets scan (no files)",
+                return_code=None,
+                duration_seconds=0.0,
+                output="No scannable repository files found.",
+            )
+        ]
+
+    payloads: list[dict[str, Any]] = []
+    total_duration = 0.0
+    overall_status = "passed"
+    failure_code = 0
+    command_summary = f"detect-secrets scan --only-verified <repo-files> (batched x{(len(scannable_files) + DETECT_SECRETS_BATCH_SIZE - 1) // DETECT_SECRETS_BATCH_SIZE})"
+    failure_outputs: list[str] = []
+
+    for batch_index in range(0, len(scannable_files), DETECT_SECRETS_BATCH_SIZE):
+        batch = scannable_files[batch_index : batch_index + DETECT_SECRETS_BATCH_SIZE]
+        relative_batch = [str(path.relative_to(REPO_ROOT)) for path in batch]
+        result = run_project_tool(
+            name=f"detect-secrets[{(batch_index // DETECT_SECRETS_BATCH_SIZE) + 1}]",
+            tool_name="detect-secrets",
+            args=["scan", "--only-verified", *relative_batch],
+        )
+        total_duration += result.duration_seconds
+        if result.status != "passed":
+            overall_status = "failed"
+            failure_code = result.return_code or 1
+            failure_outputs.append(result.output)
+            continue
+
+        parsed = parse_json_output(result.output)
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+
+    merged_output = json.dumps(merge_detect_secrets_payloads(payloads), ensure_ascii=False, indent=2)
+    if failure_outputs:
+        merged_output = (merged_output + "\n\n" + "\n\n".join(output for output in failure_outputs if output)).strip()
+
+    return [
+        ToolResult(
+            name="detect-secrets",
+            status=overall_status,
+            command=command_summary,
+            return_code=0 if overall_status == "passed" else failure_code,
+            duration_seconds=total_duration,
+            output=merged_output,
+        )
     ]
-
-    results: list[ToolResult] = []
-    for name, package_name, tool_args in checks:
-        result = run_uv_tool_with_fallback(name, package_name, tool_args)
-        results.append(result)
-
-    return results
 
 
 def is_text_like(path: Path) -> bool:
@@ -478,13 +593,12 @@ def collect_privacy_regex_findings(repo_root: Path) -> SectionResult:
         ),
     ]
 
-    ignore_dirs = {".git", ".venv", "build", "dist", "__pycache__", ".mypy_cache", ".ruff_cache", ".pytest_cache"}
     findings: list[Finding] = []
 
     for path in repo_root.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in ignore_dirs for part in path.parts):
+        if any(part in IGNORED_SCAN_DIRS for part in path.parts):
             continue
         if not is_text_like(path):
             continue
@@ -783,32 +897,43 @@ def render_tool_output(output: str) -> str:
     )
 
 
+def render_tool_detail(result: ToolResult) -> str:
+    command_html = html.escape(result.command or "(unavailable)")
+    output_html = render_tool_output(result.output)
+    return (
+        "<details><summary>命令與輸出</summary>"
+        + f"<div class=\"tool-detail-meta\"><div><strong>命令</strong></div><code>{command_html}</code></div>"
+        + output_html
+        + "</details>"
+    )
+
+
 def render_tool_table(results: list[ToolResult]) -> str:
     rows: list[str] = []
     for result in results:
-        output_html = render_tool_output(result.output)
         highlights = extract_tool_highlights(result)
         highlight_html = ""
         if highlights:
             highlight_items = "".join(f"<li>{html.escape(item)}</li>" for item in highlights)
             highlight_html = f"<div class=\"highlight-box\"><div class=\"highlight-title\">重點摘要</div><ul>{highlight_items}</ul></div>"
+        else:
+            highlight_html = '<div class="tool-summary-empty">此工具本輪沒有額外摘要。</div>'
         rows.append(
             """
             <tr>
               <td>{name}</td>
               <td><span class=\"badge {status_class}\">{status}</span></td>
-              <td><code>{command}</code></td>
               <td>{duration:.2f}s</td>
-              <td>{highlight}{output}</td>
+              <td>{highlight}</td>
+              <td>{detail}</td>
             </tr>
             """.format(
                 name=html.escape(result.name),
                 status_class=f"status-{result.status}",
                 status=html.escape(result.status),
-                command=html.escape(result.command or "(unavailable)"),
                 duration=result.duration_seconds,
                 highlight=highlight_html,
-                output=output_html,
+                detail=render_tool_detail(result),
             )
         )
     return "\n".join(rows)
@@ -917,452 +1042,312 @@ def build_html_report(
     privacy_tool_results: list[ToolResult],
     privacy_regex_result: SectionResult,
     max_details: int,
+    total_runtime_seconds: float,
 ) -> str:
-    code_quality_visible, code_quality_omitted = truncate_findings(code_quality_findings.findings, max_details)
-    duplicate_visible, duplicate_omitted = truncate_findings(duplicate_result.findings, max_details)
-    hardcode_visible, hardcode_omitted = truncate_findings(hardcode_result.findings, max_details)
-    comment_visible, comment_omitted = truncate_findings(comment_result.findings, max_details)
+        code_quality_visible, code_quality_omitted = truncate_findings(code_quality_findings.findings, max_details)
+        duplicate_visible, duplicate_omitted = truncate_findings(duplicate_result.findings, max_details)
+        hardcode_visible, hardcode_omitted = truncate_findings(hardcode_result.findings, max_details)
+        comment_visible, comment_omitted = truncate_findings(comment_result.findings, max_details)
 
-    merged_privacy_findings = summarize_tool_findings(privacy_tool_results, "privacy_tools").findings + privacy_regex_result.findings
-    privacy_visible, privacy_omitted = truncate_findings(merged_privacy_findings, max_details)
+        merged_privacy_findings = summarize_tool_findings(privacy_tool_results, "privacy_tools").findings + privacy_regex_result.findings
+        privacy_visible, privacy_omitted = truncate_findings(merged_privacy_findings, max_details)
 
-    summary_cards = [
-        ("程式碼品質", len(code_quality_findings.findings)),
-        ("重複程式碼", len(duplicate_result.findings)),
-        ("UI 硬編碼", len(hardcode_result.findings)),
-        ("註解整潔", len(comment_result.findings)),
-        ("隱私資訊", len(merged_privacy_findings)),
-    ]
-    overall = overall_status_from_counts(summary_cards)
+        summary_cards = [
+                ("程式碼品質", len(code_quality_findings.findings)),
+                ("重複程式碼", len(duplicate_result.findings)),
+                ("UI 硬編碼", len(hardcode_result.findings)),
+                ("註解整潔", len(comment_result.findings)),
+                ("隱私資訊", len(merged_privacy_findings)),
+        ]
+        overall = overall_status_from_counts(summary_cards)
 
-    cards_html = "\n".join(
-        "<div class=\"card {}\"><h3>{}</h3><p class=\"count\">{}</p><p class=\"card-note\">{}</p></div>".format(
-            "is-ok" if count == 0 else "is-warning",
-            html.escape(title),
-            count,
-            "狀態正常" if count == 0 else "需要優先處理",
+        cards_html = "\n".join(
+                "<div class=\"card {}\"><h3>{}</h3><p class=\"count\">{}</p><p class=\"card-note\">{}</p></div>".format(
+                        "is-ok" if count == 0 else "is-warning",
+                        html.escape(title),
+                        count,
+                        "狀態正常" if count == 0 else "需要優先處理",
+                )
+                for title, count in summary_cards
         )
-        for title, count in summary_cards
-    )
-    action_items = build_quality_action_items(code_quality_tools, duplicate_result)
-    action_html = "".join(f"<li>{html.escape(item)}</li>" for item in action_items)
+        action_items = build_quality_action_items(code_quality_tools, duplicate_result)
+        action_html = "".join(f"<li>{html.escape(item)}</li>" for item in action_items)
+        category_overview_html = render_category_overview()
+        summary_meta_html = "".join(
+                (
+                        '<div class="meta-card">'
+                        f'<div class="meta-label">{html.escape(label)}</div>'
+                        f'<div class="meta-value">{html.escape(value)}</div>'
+                        "</div>"
+                )
+                for label, value in [
+                        ("執行模式", "專案開發環境直跑（非 isolated）"),
+                        ("detect-secrets 範圍", "專案檔案，排除 .venv / build / dist / cache"),
+                        ("總耗時", format_duration(total_runtime_seconds)),
+                        ("明細上限", str(max_details)),
+                ]
+        )
 
-    duplicate_rule = f"偵測規則：連續 {duplicate_result.meta.get('window_size', 8)} 行、正規化後最少 {duplicate_result.meta.get('min_chars', 220)} 字元。"
+        duplicate_rule = f"偵測規則：連續 {duplicate_result.meta.get('window_size', 8)} 行、正規化後最少 {duplicate_result.meta.get('min_chars', 220)} 字元。"
 
-    return f"""<!DOCTYPE html>
+        return f"""<!DOCTYPE html>
 <html lang=\"zh-Hant\">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>Comprehensive Report</title>
-  <style>
-    :root {{
-      --bg: #f5fbff;
-      --panel: #ffffff;
-      --ink: #0f172a;
-      --muted: #475569;
-      --line: #dbeafe;
-      --accent: #0284c7;
-      --accent-soft: #e0f2fe;
-      --ok: #16a34a;
-      --warn: #d97706;
-      --fail: #dc2626;
-      --shadow: 0 10px 28px rgba(2, 132, 199, 0.14);
-    }}
-
-    * {{ box-sizing: border-box; }}
-
-    body {{
-      margin: 0;
-      font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 15% -10%, #bae6fd 0, transparent 40%),
-        radial-gradient(circle at 90% 0%, #bbf7d0 0, transparent 36%),
-        var(--bg);
-      min-height: 100vh;
-    }}
-
-    .wrap {{
-      max-width: 1160px;
-      margin: 0 auto;
-      padding: 20px;
-      animation: fade-in 380ms ease-out;
-    }}
-
-    .hero {{
-      background: linear-gradient(120deg, #075985 0%, #0369a1 55%, #0f766e 100%);
-      border-radius: 18px;
-      color: #f0f9ff;
-      padding: 22px;
-      box-shadow: var(--shadow);
-    }}
-
-    .hero h1 {{
-      margin: 0;
-      font-size: clamp(1.45rem, 2vw, 1.95rem);
-    }}
-
-    .hero p {{
-      margin: 6px 0 0;
-      color: #dbeafe;
-    }}
-
-    .overall {{
-      display: inline-block;
-      margin-top: 12px;
-      padding: 6px 12px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.16);
-      font-size: 0.82rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }}
-
-    .tabs {{
-      margin-top: 14px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }}
-
-    .tab-btn {{
-      border: 1px solid rgba(255, 255, 255, 0.4);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.14);
-      color: #f8fafc;
-      padding: 8px 13px;
-      cursor: pointer;
-      font-weight: 700;
-    }}
-
-    .tab-btn.active {{
-      background: #ffffff;
-      color: #0c4a6e;
-    }}
-
-    .tab-panel {{
-      display: none;
-      margin-top: 14px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 16px;
-      box-shadow: 0 6px 18px rgba(2, 132, 199, 0.08);
-      animation: rise 240ms ease-out;
-    }}
-
-    .tab-panel.active {{
-      display: block;
-    }}
-
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-    }}
-
-    .card {{
-      border: 1px solid #bfdbfe;
-      border-radius: 12px;
-      padding: 12px;
-      background: linear-gradient(160deg, #eff6ff 0%, #ffffff 100%);
-    }}
-
-        .card.is-warning {{
-            border-color: #fdba74;
-            background: linear-gradient(160deg, #fff7ed 0%, #ffffff 100%);
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>綜合檢查報告</title>
+    <style>
+        :root {{
+            --bg: #f5fbff;
+            --panel: #ffffff;
+            --ink: #0f172a;
+            --muted: #475569;
+            --line: #dbeafe;
+            --accent: #0284c7;
+            --ok: #16a34a;
+            --warn: #d97706;
+            --fail: #dc2626;
+            --shadow: 0 10px 28px rgba(2, 132, 199, 0.14);
         }}
 
-        .card.is-ok {{
-            border-color: #86efac;
-            background: linear-gradient(160deg, #f0fdf4 0%, #ffffff 100%);
+        * {{ box-sizing: border-box; }}
+
+        body {{
+            margin: 0;
+            font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at 15% -10%, #bae6fd 0, transparent 40%),
+                radial-gradient(circle at 90% 0%, #bbf7d0 0, transparent 36%),
+                var(--bg);
+            min-height: 100vh;
         }}
 
-    .card h3 {{
-      margin: 0;
-      font-size: 0.95rem;
-      color: #1e3a8a;
-    }}
-
-    .count {{
-      margin: 8px 0 0;
-      font-size: 1.6rem;
-      font-weight: 800;
-      color: var(--accent);
-    }}
-
-        .card-note {{
-            margin: 6px 0 0;
-            font-size: 0.83rem;
-            color: #334155;
+        .wrap {{
+            max-width: 1160px;
+            margin: 0 auto;
+            padding: 20px;
         }}
 
-    .hint {{
-      margin-top: 12px;
-      border: 1px solid #bae6fd;
-      background: #f0f9ff;
-      border-radius: 10px;
-      padding: 10px;
-      color: var(--muted);
-      font-size: 0.92rem;
-    }}
+        .hero {{
+            background: linear-gradient(120deg, #075985 0%, #0369a1 55%, #0f766e 100%);
+            border-radius: 18px;
+            color: #f0f9ff;
+            padding: 22px;
+            box-shadow: var(--shadow);
+        }}
 
-        .action-box {{
+        .hero h1 {{ margin: 0; font-size: clamp(1.45rem, 2vw, 1.95rem); }}
+        .hero p {{ margin: 6px 0 0; color: #dbeafe; }}
+
+        .overall {{
+            display: inline-block;
             margin-top: 12px;
-            border: 1px solid #fdba74;
-            background: #fff7ed;
-            border-radius: 10px;
-            padding: 12px;
-        }}
-
-        .action-box h3 {{
-            margin: 0 0 6px;
-            color: #9a3412;
-            font-size: 0.96rem;
-        }}
-
-        .action-box ul {{
-            margin: 0;
-            padding-left: 18px;
-            color: #7c2d12;
-            font-size: 0.9rem;
-        }}
-
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-      font-size: 0.92rem;
-            table-layout: fixed;
-    }}
-
-    th, td {{
-      border: 1px solid #dbeafe;
-      padding: 8px;
-      text-align: left;
-      vertical-align: top;
-            overflow-wrap: anywhere;
-            word-break: break-word;
-    }}
-
-    thead th {{
-      background: #e0f2fe;
-      color: #0f172a;
-      font-weight: 700;
-    }}
-
-    tbody tr:nth-child(even) {{
-      background: #f8fbff;
-    }}
-
-    pre {{
-      white-space: pre-wrap;
-      margin: 8px 0 0;
-      max-height: 260px;
-      overflow: auto;
-      border: 1px solid #dbeafe;
-      border-radius: 8px;
-      padding: 8px;
-      background: #f8fbff;
-    }}
-
-        .json-pre {{
-            max-height: 340px;
-            background: #f0f9ff;
-            border: 1px solid #bae6fd;
-        }}
-
-        .json-meta {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 8px;
-            color: #0f4c81;
-            font-size: 0.82rem;
-            align-items: center;
-        }}
-
-        .tag {{
-            border: 1px solid #93c5fd;
+            padding: 6px 12px;
             border-radius: 999px;
-            padding: 2px 8px;
-            background: #eff6ff;
-            font-size: 0.78rem;
-            color: #1e3a8a;
-        }}
-
-        .highlight-box {{
-            border: 1px solid #bae6fd;
-            border-radius: 8px;
-            background: #f0f9ff;
-            padding: 8px;
-            margin-bottom: 8px;
-        }}
-
-        .highlight-title {{
+            background: rgba(255, 255, 255, 0.16);
+            font-size: 0.82rem;
             font-weight: 700;
-            color: #0f4c81;
-            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }}
 
-        .highlight-box ul {{
-            margin: 0;
-            padding-left: 18px;
-            color: #0f4c81;
-            font-size: 0.85rem;
+        .tabs {{ margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }}
+
+        .tab-btn {{
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.14);
+            color: #f8fafc;
+            padding: 8px 13px;
+            cursor: pointer;
+            font-weight: 700;
         }}
 
-    code {{
-      font-family: "Cascadia Code", "Consolas", monospace;
-      font-size: 0.84rem;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-    }}
+        .tab-btn.active {{ background: #ffffff; color: #0c4a6e; }}
 
-    .badge {{
-      display: inline-flex;
-      border-radius: 999px;
-      font-size: 0.78rem;
-      padding: 3px 9px;
-      font-weight: 700;
-      border: 1px solid transparent;
-    }}
+        .tab-panel {{
+            display: none;
+            margin-top: 14px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 16px;
+            box-shadow: 0 6px 18px rgba(2, 132, 199, 0.08);
+        }}
 
-    .status-passed {{ color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }}
-    .status-failed {{ color: var(--fail); border-color: #fecaca; background: #fef2f2; }}
-    .status-unavailable {{ color: var(--warn); border-color: #fed7aa; background: #fff7ed; }}
+        .tab-panel.active {{ display: block; }}
 
-    .empty {{
-      margin-top: 10px;
-      border: 1px dashed #93c5fd;
-      border-radius: 10px;
-      padding: 10px;
-      background: #f8fbff;
-      color: #1e3a8a;
-    }}
+        .summary-layout {{ display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 14px; align-items: start; }}
+        .summary-sidebar {{ position: sticky; top: 14px; display: grid; gap: 12px; }}
+        .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }}
+        .meta-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }}
+        .category-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }}
 
-    .omitted {{
-      margin: 8px 0;
-      border: 1px solid #fdba74;
-      border-radius: 10px;
-      background: #fff7ed;
-      color: #7c2d12;
-      padding: 8px;
-      font-size: 0.9rem;
-    }}
+        .card, .meta-card, .category-card {{
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 12px;
+            background: #ffffff;
+        }}
 
-    @keyframes fade-in {{
-      from {{ opacity: 0; transform: translateY(6px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
+        .card {{ background: linear-gradient(160deg, #eff6ff 0%, #ffffff 100%); }}
+        .card.is-warning {{ border-color: #fdba74; background: linear-gradient(160deg, #fff7ed 0%, #ffffff 100%); }}
+        .card.is-ok {{ border-color: #86efac; background: linear-gradient(160deg, #f0fdf4 0%, #ffffff 100%); }}
+        .card h3 {{ margin: 0; font-size: 0.95rem; color: #1e3a8a; }}
+        .count {{ margin: 8px 0 0; font-size: 1.6rem; font-weight: 800; color: var(--accent); }}
+        .card-note {{ margin: 6px 0 0; font-size: 0.83rem; color: #334155; }}
 
-    @keyframes rise {{
-      from {{ opacity: 0; transform: translateY(6px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
+        .meta-label {{ font-size: 0.8rem; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }}
+        .meta-value {{ margin-top: 6px; font-size: 0.95rem; color: #0f172a; line-height: 1.45; font-weight: 700; }}
+        .category-title {{ font-size: 0.92rem; font-weight: 700; color: #0f4c81; }}
+        .category-tools, .category-purpose {{ margin-top: 6px; font-size: 0.84rem; color: #334155; line-height: 1.45; }}
 
-    @media (max-width: 720px) {{
-      .wrap {{ padding: 12px; }}
-      th, td {{ font-size: 0.84rem; }}
-    }}
-  </style>
+        .hint {{ margin-top: 12px; border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 10px; padding: 10px; color: var(--muted); font-size: 0.92rem; }}
+        .action-box {{ border: 1px solid #fdba74; background: #fff7ed; border-radius: 10px; padding: 12px; }}
+        .action-box h3 {{ margin: 0 0 6px; color: #9a3412; font-size: 0.96rem; }}
+        .action-box ul {{ margin: 0; padding-left: 18px; color: #7c2d12; font-size: 0.9rem; }}
+        .section-lead {{ margin: 0 0 10px; color: #475569; line-height: 1.6; }}
+
+        .table-wrap {{ margin-top: 10px; overflow-x: auto; border: 1px solid #dbeafe; border-radius: 12px; background: #ffffff; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 0.92rem; table-layout: fixed; }}
+        th, td {{ border: 1px solid #dbeafe; padding: 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }}
+        thead th {{ background: #e0f2fe; color: #0f172a; font-weight: 700; position: sticky; top: 0; z-index: 1; }}
+        tbody tr:nth-child(even) {{ background: #f8fbff; }}
+
+        pre {{ white-space: pre-wrap; margin: 8px 0 0; max-height: 260px; overflow: auto; border: 1px solid #dbeafe; border-radius: 8px; padding: 8px; background: #f8fbff; }}
+        .json-pre {{ max-height: 340px; background: #f0f9ff; border: 1px solid #bae6fd; }}
+        .json-meta {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; color: #0f4c81; font-size: 0.82rem; align-items: center; }}
+        .tag {{ border: 1px solid #93c5fd; border-radius: 999px; padding: 2px 8px; background: #eff6ff; font-size: 0.78rem; color: #1e3a8a; }}
+        .highlight-box {{ border: 1px solid #bae6fd; border-radius: 8px; background: #f0f9ff; padding: 8px; margin-bottom: 8px; }}
+        .highlight-title {{ font-weight: 700; color: #0f4c81; margin-bottom: 4px; }}
+        .highlight-box ul {{ margin: 0; padding-left: 18px; color: #0f4c81; font-size: 0.85rem; }}
+        .tool-summary-empty {{ color: #64748b; font-size: 0.84rem; }}
+        .tool-detail-meta {{ margin-bottom: 8px; padding: 8px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }}
+        details > summary {{ cursor: pointer; font-weight: 600; color: #0f4c81; }}
+
+        code {{ font-family: "Cascadia Code", "Consolas", monospace; font-size: 0.84rem; white-space: pre-wrap; overflow-wrap: anywhere; }}
+        .badge {{ display: inline-flex; border-radius: 999px; font-size: 0.78rem; padding: 3px 9px; font-weight: 700; border: 1px solid transparent; }}
+        .status-passed {{ color: var(--ok); border-color: #bbf7d0; background: #f0fdf4; }}
+        .status-failed {{ color: var(--fail); border-color: #fecaca; background: #fef2f2; }}
+        .status-unavailable {{ color: var(--warn); border-color: #fed7aa; background: #fff7ed; }}
+        .empty {{ margin-top: 10px; border: 1px dashed #93c5fd; border-radius: 10px; padding: 10px; background: #f8fbff; color: #1e3a8a; }}
+        .omitted {{ margin: 8px 0; border: 1px solid #fdba74; border-radius: 10px; background: #fff7ed; color: #7c2d12; padding: 8px; font-size: 0.9rem; }}
+
+        @media (max-width: 720px) {{
+            .wrap {{ padding: 12px; }}
+            th, td {{ font-size: 0.84rem; }}
+            .summary-layout {{ grid-template-columns: 1fr; }}
+            .summary-sidebar {{ position: static; }}
+        }}
+    </style>
 </head>
 <body>
-  <div class=\"wrap\">
-    <section class=\"hero\">
-      <h1>綜合檢查報告</h1>
-      <p>generated_at: {html.escape(generated_at)}</p>
-      <span class=\"overall\">overall: {html.escape(overall)}</span>
-      <div class=\"tabs\" id=\"tabs\">
-        <button class=\"tab-btn active\" data-target=\"summary\">概要</button>
-        <button class=\"tab-btn\" data-target=\"code-quality\">程式碼品質</button>
-        <button class=\"tab-btn\" data-target=\"duplicate\">重複程式碼</button>
-        <button class=\"tab-btn\" data-target=\"hardcode\">UI 硬編碼</button>
+    <div class=\"wrap\">
+        <section class=\"hero\">
+            <h1>綜合檢查報告</h1>
+            <p>generated_at: {html.escape(generated_at)}</p>
+            <span class=\"overall\">overall: {html.escape(overall)}</span>
+            <div class=\"tabs\" id=\"tabs\">
+                <button class=\"tab-btn active\" data-target=\"summary\">概要</button>
+                <button class=\"tab-btn\" data-target=\"code-quality\">程式碼品質</button>
+                <button class=\"tab-btn\" data-target=\"duplicate\">重複程式碼</button>
+                <button class=\"tab-btn\" data-target=\"hardcode\">UI 硬編碼</button>
                 <button class=\"tab-btn\" data-target=\"comment\">註解整潔</button>
-        <button class=\"tab-btn\" data-target=\"privacy\">隱私資訊</button>
-      </div>
-    </section>
-
-    <section id=\"summary\" class=\"tab-panel active\">
-      <h2>概要資訊</h2>
-      <div class=\"cards\">{cards_html}</div>
-      <div class=\"hint\">快速判讀：數字越大代表該項目需要處理的內容越多。先看「程式碼品質」與「隱私資訊」，再看其餘項目。</div>
-            <div class=\"action-box\">
-                <h3>下一步建議（依優先度）</h3>
-                <ul>{action_html}</ul>
+                <button class=\"tab-btn\" data-target=\"privacy\">隱私資訊</button>
             </div>
-    </section>
+        </section>
 
-    <section id=\"code-quality\" class=\"tab-panel\">
-    <h2>程式碼品質（ruff / mypy / bandit / vulture / compileall）</h2>
-      {render_findings_table(code_quality_visible, code_quality_omitted)}
-      <h3>工具執行明細</h3>
-      <table>
-        <thead><tr><th>工具</th><th>狀態</th><th>命令</th><th>耗時</th><th>輸出</th></tr></thead>
-        <tbody>{render_tool_table(code_quality_tools)}</tbody>
-      </table>
-    </section>
+        <section id=\"summary\" class=\"tab-panel active\">
+            <h2>概要資訊</h2>
+            <div class=\"summary-layout\">
+                <div>
+                    <div class=\"cards\">{cards_html}</div>
+                    <div class=\"hint\">快速判讀：數字越大代表該項目需要處理的內容越多。先看程式碼品質與隱私資訊，再看其餘項目。</div>
+                    {category_overview_html}
+                </div>
+                <div class=\"summary-sidebar\">
+                    <div class=\"meta-grid\">{summary_meta_html}</div>
+                    <div class=\"action-box\">
+                        <h3>下一步建議</h3>
+                        <ul>{action_html}</ul>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-    <section id=\"duplicate\" class=\"tab-panel\">
-      <h2>重複程式碼（src）</h2>
-      <p>{html.escape(duplicate_rule)}</p>
-      {render_findings_table(duplicate_visible, duplicate_omitted)}
-    </section>
+        <section id=\"code-quality\" class=\"tab-panel\">
+            <h2>程式碼品質（ruff / mypy / bandit / vulture / compileall）</h2>
+            <p class=\"section-lead\">先看偵測出的問題，再視需要展開個別工具的命令與完整輸出。</p>
+            {render_findings_table(code_quality_visible, code_quality_omitted)}
+            <h3>工具執行明細</h3>
+            <div class=\"table-wrap\"><table>
+                <thead><tr><th>工具</th><th>狀態</th><th>耗時</th><th>摘要</th><th>詳情</th></tr></thead>
+                <tbody>{render_tool_table(code_quality_tools)}</tbody>
+            </table></div>
+        </section>
 
-    <section id=\"hardcode\" class=\"tab-panel\">
-      <h2>UI 硬編碼檢查</h2>
-      <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_utils.py</code> 的 token。</p>
-      {render_findings_table(hardcode_visible, hardcode_omitted)}
-    </section>
+        <section id=\"duplicate\" class=\"tab-panel\">
+            <h2>重複程式碼（src）</h2>
+            <p class=\"section-lead\">只保留需要處理的重複片段，避免整頁被長片段淹沒。</p>
+            <p>{html.escape(duplicate_rule)}</p>
+            {render_findings_table(duplicate_visible, duplicate_omitted)}
+        </section>
+
+        <section id=\"hardcode\" class=\"tab-panel\">
+            <h2>UI 硬編碼檢查</h2>
+            <p class=\"section-lead\">重點是找出直接寫死的尺寸、顏色或字體設定，優先收斂到共用 token。</p>
+            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_utils.py</code> 的 token。</p>
+            {render_findings_table(hardcode_visible, hardcode_omitted)}
+        </section>
 
         <section id=\"comment\" class=\"tab-panel\">
             <h2>無用註解檢查</h2>
-                        <p>採用公信力工具：ruff (ERA) + eradicate。</p>
+            <p class=\"section-lead\">只保留值得處理的殘留註解與被註解掉的舊程式碼，細節放在展開區。</p>
+            <p>採用公信力工具：ruff (ERA) + eradicate。</p>
             {render_findings_table(comment_visible, comment_omitted)}
-                        <h3>工具執行明細</h3>
-                        <table>
-                            <thead><tr><th>工具</th><th>狀態</th><th>命令</th><th>耗時</th><th>輸出</th></tr></thead>
-                            <tbody>{render_tool_table(comment_tool_results)}</tbody>
-                        </table>
+            <h3>工具執行明細</h3>
+            <div class=\"table-wrap\"><table>
+                <thead><tr><th>工具</th><th>狀態</th><th>耗時</th><th>摘要</th><th>詳情</th></tr></thead>
+                <tbody>{render_tool_table(comment_tool_results)}</tbody>
+            </table></div>
         </section>
 
-    <section id=\"privacy\" class=\"tab-panel\">
-    <h2>隱私與安全檢查（detect-secrets）</h2>
-      {render_findings_table(privacy_visible, privacy_omitted)}
-      <h3>工具執行明細</h3>
-      <table>
-        <thead><tr><th>工具</th><th>狀態</th><th>命令</th><th>耗時</th><th>輸出</th></tr></thead>
-        <tbody>{render_tool_table(privacy_tool_results)}</tbody>
-      </table>
-    </section>
-  </div>
+        <section id=\"privacy\" class=\"tab-panel\">
+            <h2>隱私與安全檢查（detect-secrets）</h2>
+            <p class=\"section-lead\">優先看候選 secrets 與 regex 掃描結論，只有需要追查時再展開原始輸出。</p>
+            {render_findings_table(privacy_visible, privacy_omitted)}
+            <h3>工具執行明細</h3>
+            <div class=\"table-wrap\"><table>
+                <thead><tr><th>工具</th><th>狀態</th><th>耗時</th><th>摘要</th><th>詳情</th></tr></thead>
+                <tbody>{render_tool_table(privacy_tool_results)}</tbody>
+            </table></div>
+        </section>
+    </div>
 
-  <script>
-    const buttons = Array.from(document.querySelectorAll('.tab-btn'));
-    const panels = Array.from(document.querySelectorAll('.tab-panel'));
+    <script>
+        const buttons = Array.from(document.querySelectorAll('.tab-btn'));
+        const panels = Array.from(document.querySelectorAll('.tab-panel'));
 
-    function activate(targetId) {{
-      buttons.forEach((btn) => btn.classList.toggle('active', btn.dataset.target === targetId));
-      panels.forEach((panel) => panel.classList.toggle('active', panel.id === targetId));
-    }}
+        function activate(targetId) {{
+            buttons.forEach((btn) => btn.classList.toggle('active', btn.dataset.target === targetId));
+            panels.forEach((panel) => panel.classList.toggle('active', panel.id === targetId));
+        }}
 
-    buttons.forEach((btn) => btn.addEventListener('click', () => activate(btn.dataset.target)));
-  </script>
+        buttons.forEach((btn) => btn.addEventListener('click', () => activate(btn.dataset.target)));
+    </script>
 </body>
 </html>
 """
-
 
 def main() -> int:
     max_details = MAX_DETAIL_ITEMS
     generated_at = datetime.now().isoformat(timespec="seconds")
     src_dir = REPO_ROOT / "src"
-
-    total_steps = 8
+    operation_timings: list[tuple[str, float]] = []
+    started_at = time.perf_counter()
     step_index = 0
-
+    total_steps = 8
     def begin_step(title: str) -> tuple[int, float]:
         nonlocal step_index
         step_index += 1
@@ -1374,31 +1359,51 @@ def main() -> int:
         suffix = f" | {detail}" if detail else ""
         print(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
 
+    def remember_timing(name: str, duration_seconds: float) -> None:
+        operation_timings.append((name, duration_seconds))
+
     idx, started = begin_step("程式碼品質檢查 (ruff/mypy/bandit/vulture/compileall)")
     code_quality_tools = collect_code_quality_results()
+    for tool_result in code_quality_tools:
+        remember_timing(f"tool:{tool_result.name}", tool_result.duration_seconds)
     code_quality_findings = summarize_tool_findings(code_quality_tools, "code_quality_tools")
     end_step(idx, started, f"issues={len(code_quality_findings.findings)}")
 
     idx, started = begin_step("重複程式碼檢查 (src)")
-    duplicate_result = collect_duplicate_code_findings(src_dir)
+    duplicate_result, duplicate_elapsed = run_timed_operation(
+        "duplicate-code-scan", lambda: collect_duplicate_code_findings(src_dir)
+    )
+    remember_timing("task:duplicate-code-scan", duplicate_elapsed)
     end_step(idx, started, f"findings={len(duplicate_result.findings)}")
 
     idx, started = begin_step("UI 硬編碼檢查")
-    hardcode_result = collect_ui_hardcode_findings(src_dir)
+    hardcode_result, hardcode_elapsed = run_timed_operation(
+        "ui-hardcode-scan", lambda: collect_ui_hardcode_findings(src_dir)
+    )
+    remember_timing("task:ui-hardcode-scan", hardcode_elapsed)
     end_step(idx, started, f"findings={len(hardcode_result.findings)}")
 
     idx, started = begin_step("無用註解檢查 (ruff ERA + eradicate)")
     comment_tool_results = collect_comment_tool_results()
+    for tool_result in comment_tool_results:
+        remember_timing(f"tool:{tool_result.name}", tool_result.duration_seconds)
     comment_result = summarize_tool_findings(comment_tool_results, "comment_tools")
 
     end_step(idx, started, f"findings={len(comment_result.findings)}")
 
     idx, started = begin_step("隱私與安全工具檢查 (detect-secrets)")
     privacy_tool_results = collect_privacy_tool_results()
+    for tool_result in privacy_tool_results:
+        remember_timing(f"tool:{tool_result.name}", tool_result.duration_seconds)
     end_step(idx, started, f"tool_runs={len(privacy_tool_results)}")
 
+    privacy_tool_findings = summarize_tool_findings(privacy_tool_results, "privacy_tools")
+
     idx, started = begin_step("隱私規則掃描")
-    privacy_regex_result = collect_privacy_regex_findings(REPO_ROOT)
+    privacy_regex_result, privacy_regex_elapsed = run_timed_operation(
+        "privacy-regex-scan", lambda: collect_privacy_regex_findings(REPO_ROOT)
+    )
+    remember_timing("task:privacy-regex-scan", privacy_regex_elapsed)
     end_step(idx, started, f"findings={len(privacy_regex_result.findings)}")
 
     output_html_path = HTML_REPORT_PATH
@@ -1409,34 +1414,44 @@ def main() -> int:
         "duplicate_code": len(duplicate_result.findings),
         "ui_hardcode": len(hardcode_result.findings),
         "comment_hygiene": len(comment_result.findings),
-        "privacy": len(summarize_tool_findings(privacy_tool_results, "privacy_tools").findings)
-        + len(privacy_regex_result.findings),
+        "privacy": len(privacy_tool_findings.findings) + len(privacy_regex_result.findings),
     }
 
     idx, started = begin_step("產生並輸出 HTML 報告")
-    html_text = build_html_report(
-        generated_at=generated_at,
-        code_quality_tools=code_quality_tools,
-        code_quality_findings=code_quality_findings,
-        duplicate_result=duplicate_result,
-        hardcode_result=hardcode_result,
-        comment_result=comment_result,
-        comment_tool_results=comment_tool_results,
-        privacy_tool_results=privacy_tool_results,
-        privacy_regex_result=privacy_regex_result,
-        max_details=max_details,
+    html_text, html_elapsed = run_timed_operation(
+        "build-html-report",
+        lambda: build_html_report(
+            generated_at=generated_at,
+            code_quality_tools=code_quality_tools,
+            code_quality_findings=code_quality_findings,
+            duplicate_result=duplicate_result,
+            hardcode_result=hardcode_result,
+            comment_result=comment_result,
+            comment_tool_results=comment_tool_results,
+            privacy_tool_results=privacy_tool_results,
+            privacy_regex_result=privacy_regex_result,
+            max_details=max_details,
+            total_runtime_seconds=time.perf_counter() - started_at,
+        ),
     )
+    remember_timing("task:build-html-report", html_elapsed)
     output_html_path.write_text(html_text, encoding="utf-8")
     end_step(idx, started, f"path={output_html_path}")
 
+    total_elapsed = time.perf_counter() - started_at
     print("== 綜合檢查完成 ==")
+    print(f"total_duration={format_duration(total_elapsed)}")
     print(f"html={output_html_path}")
     print(f"summary={summary}")
+    print("slowest_operations=")
+    for name, duration_seconds in sorted(operation_timings, key=lambda item: item[1], reverse=True)[:8]:
+        print(f"  - {name}: {format_duration(duration_seconds)}")
 
     webbrowser.open(output_html_path.resolve().as_uri())
 
     idx, started = begin_step("回復開發環境套件 (uv sync --all-groups)")
     sync_result = run_command("uv-sync", ["uv", "sync", "--all-groups"])
+    remember_timing(f"tool:{sync_result.name}", sync_result.duration_seconds)
     if sync_result.status == "passed":
         end_step(idx, started, "status=passed")
     else:

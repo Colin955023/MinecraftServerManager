@@ -5,6 +5,7 @@
 """
 
 import contextlib
+import os
 import sys
 import threading
 import time
@@ -17,6 +18,25 @@ logger = get_logger().bind(component="AppRestart")
 
 class AppRestart:
     """應用程式重啟管理類別"""
+
+    @staticmethod
+    def _prefer_windowless_python(interpreter: str | None) -> str | None:
+        """在 Windows 腳本模式下，若可用則優先改用 pythonw.exe 以避免跳出 console。"""
+        if os.name != "nt" or not interpreter:
+            return interpreter
+
+        try:
+            interpreter_path = Path(interpreter)
+            if interpreter_path.name.lower() != "python.exe":
+                return interpreter
+
+            pythonw_path = interpreter_path.with_name("pythonw.exe")
+            if pythonw_path.exists() and pythonw_path.is_file():
+                return str(pythonw_path)
+        except Exception as e:
+            logger.debug(f"選擇 pythonw.exe 失敗，保留原解譯器: {e}")
+
+        return interpreter
 
     @staticmethod
     def _extract_exe_candidate(executable_path: list[str]) -> str | None:
@@ -394,12 +414,12 @@ class AppRestart:
                         # 決定要使用的 Python 解譯器字串，優先使用 sys.executable，否則嘗試 PATH 中的常見名稱
                         interpreter_str: str | None = None
                         if sys.executable:
-                            interpreter_str = str(sys.executable)
+                            interpreter_str = AppRestart._prefer_windowless_python(str(sys.executable))
                         else:
                             for cand in ("python3", "python", "py"):
                                 which_found = PathUtils.find_executable(cand)
                                 if which_found:
-                                    interpreter_str = which_found
+                                    interpreter_str = AppRestart._prefer_windowless_python(which_found)
                                     break
 
                             # 若有有效的 script_path，優先直接以解譯器執行該檔案
@@ -438,7 +458,10 @@ class AppRestart:
 
                             if found is not None:
                                 # 若存在 interpreter_str 則使用，否則回退到 sys.executable 或 'python'
-                                runner = interpreter_str or (str(sys.executable) if sys.executable else "python")
+                                runner = interpreter_str or AppRestart._prefer_windowless_python(
+                                    str(sys.executable) if sys.executable else "python"
+                                )
+                                runner = runner or "python"
                                 use_cmd = [runner, str(found)]
                                 target_cwd = str(found.parent)
                                 logger.debug(f"在父層找到 main.py，使用檔案重啟: {use_cmd}, 指令={target_cwd}")
@@ -451,7 +474,10 @@ class AppRestart:
                                     logger.debug(f"使用 exe fallback 重啟: {use_cmd}, 指令={target_cwd}")
                                 else:
                                     # 最後備援：透過解譯器以模組方式啟動
-                                    runner = interpreter_str or (str(sys.executable) if sys.executable else "python")
+                                    runner = interpreter_str or AppRestart._prefer_windowless_python(
+                                        str(sys.executable) if sys.executable else "python"
+                                    )
+                                    runner = runner or "python"
                                     use_cmd = [runner, "-m", "src.main"]
                                     target_cwd = str(Path.cwd())
                                     logger.debug(f"以模組方式重啟: {use_cmd}, 指令={target_cwd}")

@@ -17,7 +17,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from ..core import LoaderManager, MinecraftVersionManager, ServerManager
+from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
     Colors,
@@ -78,21 +78,6 @@ class MinecraftServerManager:
             if not PathUtils.save_json(config_file, {}):
                 logger.warning(f"預先建立 servers_config.json 失敗: {config_file}")
 
-        def _normalize_base_dir(path_str: str) -> str:
-            """將輸入路徑正規化成『使用者選擇的主資料夾』。。"""
-            norm = str(Path(path_str).resolve())
-            try:
-                if Path(norm).name.lower() == "servers":
-                    parent = str(Path(norm).parent)
-                    if parent:
-                        return parent
-            except Exception as e:
-                logger.debug(f"路徑正規化輕微錯誤 (base dir check): {e}", "MainWindow")
-            return norm
-
-        def _servers_dir_from_base(base_dir: str) -> str:
-            return str((Path(base_dir) / "servers").resolve())
-
         def _prompt_for_directory() -> str:
             """提示選擇目錄"""
             UIUtils.show_info(
@@ -115,15 +100,14 @@ class MinecraftServerManager:
 
         # === 執行主邏輯 ===
         if new_root:
-            base_dir = _normalize_base_dir(new_root)
             try:
-                settings.set_servers_root(base_dir)
+                settings.set_servers_root(new_root)
             except Exception as e:
                 logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
         else:
             stored = settings.get_servers_root()
-            base_dir = _normalize_base_dir(stored) if stored else ""
+            base_dir = stored if stored else ""
             while not base_dir:
                 base_dir = _prompt_for_directory()
                 if base_dir:
@@ -136,14 +120,15 @@ class MinecraftServerManager:
             # 向後相容：若舊設定直接存的是 ...\servers，這裡會自動轉成 base_dir 並回寫
             try:
                 if stored and Path(stored).name.lower() == "servers":
-                    settings.set_servers_root(base_dir)
+                    settings.set_servers_root(stored)
             except Exception as e:
                 logger.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
 
-        servers_root = _servers_dir_from_base(base_dir)
-
-        # 建立資料夾並更新屬性
-        path_obj = Path(servers_root)
+        try:
+            path_obj = settings.get_validated_servers_root_path(create=True)
+        except ConfigurationError as exc:
+            _fail_exit(str(exc))
+            return ""
         _ensure_directory_exists(path_obj)
         _ensure_servers_config_file(path_obj)
         self.servers_root = str(path_obj.resolve())
@@ -165,7 +150,7 @@ class MinecraftServerManager:
 
             # 關閉前同步寫入伺服器配置
             if getattr(self, "server_manager", None) is not None:
-                self.server_manager.flush_servers_config()
+                self.server_manager.write_servers_config()
 
             # 清理可能的子視窗
             for widget in self.root.winfo_children():
@@ -218,8 +203,18 @@ class MinecraftServerManager:
         # 使用新的視窗管理器設定視窗大小和位置
         WindowManager.setup_main_window(self.root)
 
-        # 綁定視窗狀態追蹤，用於記住視窗大小和位置
+        # 主視窗直接顯示，僅保留狀態追蹤與最大化回復
         WindowManager.bind_window_state_tracking(self.root)
+        if self.settings.is_remember_size_position_enabled() and self.settings.get_main_window_settings().get(
+            "maximized", False
+        ):
+            UIUtils.schedule_debounce(
+                self.root,
+                "_post_reveal_zoom_job",
+                160,
+                lambda: UIUtils.maximize_window(self.root),
+                owner=self,
+            )
 
         # 首次執行提示和自動更新檢查
         UIUtils.schedule_debounce(
@@ -271,15 +266,12 @@ class MinecraftServerManager:
     def preload_all_versions(self) -> None:
         """啟動時預先抓取版本資訊"""
 
-        def fetch_all():
-            logger.debug("預先抓取 Minecraft 所有版本...", "MainWindow")
-            self.version_manager.fetch_versions()
-            logger.debug("Minecraft 所有版本載入完成", "MainWindow")
+        def fetch_loader_versions_only():
             logger.debug("預先抓取所有載入器版本...", "MainWindow")
             self.loader_manager.preload_loader_versions()
             logger.debug("所有載入器版本載入完成", "MainWindow")
 
-        UIUtils.run_async(fetch_all)
+        UIUtils.run_async(fetch_loader_versions_only)
 
     # 非同步載入資料
     def load_data_async(self) -> None:
@@ -287,7 +279,7 @@ class MinecraftServerManager:
 
         def load_versions():
             try:
-                versions = self.version_manager.get_versions()
+                versions = self.version_manager.fetch_versions()
                 self.ui_queue.put(lambda: self.create_server_frame.update_versions(versions))
             except Exception as e:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
@@ -413,10 +405,13 @@ class MinecraftServerManager:
         UIUtils.setup_window_properties(
             window=self.root,
             parent=None,
+            width=1200,
+            height=800,
             bind_icon=True,
             center_on_parent=False,
             make_modal=False,
             delay_ms=300,
+            reveal_after_setup=False,
         )
 
     def setup_light_theme(self) -> None:
@@ -966,6 +961,7 @@ class MinecraftServerManager:
             height=Sizes.DIALOG_IMPORT_HEIGHT,
             resizable=False,
             delay_ms=0,
+            reveal_after_setup=False,
         )
 
         choice = {"value": None}
@@ -1079,6 +1075,7 @@ class MinecraftServerManager:
             height=Sizes.DIALOG_SMALL_HEIGHT,
             resizable=False,
             delay_ms=0,
+            reveal_after_setup=False,
         )
 
         result = {"name": None}
@@ -1151,45 +1148,131 @@ class MinecraftServerManager:
         """完成伺服器匯入流程"""
         target_path = self.server_manager.servers_root / server_name
 
-        try:
-            if source_path.is_file():
-                target_path.mkdir(parents=True, exist_ok=True)
-                PathUtils.safe_extract_zip(source_path, target_path)
-                items = list(target_path.iterdir())
-                if len(items) == 1 and items[0].is_dir():
-                    for item in items[0].iterdir():
-                        PathUtils.move_path(item, target_path / item.name)
-                    items[0].rmdir()
-            else:
-                PathUtils.copy_dir(source_path, target_path)
+        progress_dialog = UIUtils.create_toplevel_dialog(
+            parent=self.root,
+            title="正在匯入伺服器",
+            width=420,
+            height=180,
+            resizable=False,
+            make_modal=True,
+            delay_ms=0,
+            reveal_after_setup=False,
+        )
 
-            if not ServerDetectionUtils.is_valid_server_folder(target_path):
-                raise Exception("找不到有效的 Minecraft 伺服器檔案")
+        content = ctk.CTkFrame(progress_dialog)
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        ctk.CTkLabel(
+            content,
+            text=f"正在匯入 {server_name}...",
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+        ).pack(pady=(5, 10))
+        ctk.CTkLabel(
+            content,
+            text="大型匯入可能需要較長時間，請稍候。",
+            font=FontManager.get_font(size=FontSize.NORMAL),
+            text_color=Colors.TEXT_SECONDARY,
+        ).pack(pady=(0, 10))
+        progress_text = ctk.CTkLabel(
+            content,
+            text="進度: 0%",
+            font=FontManager.get_font(size=FontSize.NORMAL),
+            text_color=Colors.TEXT_SECONDARY,
+        )
+        progress_text.pack(pady=(0, 8))
 
-            server_config = ServerConfig(
-                name=server_name,
-                minecraft_version="unknown",
-                loader_type="unknown",
-                loader_version="unknown",
-                memory_max_mb=2048,
-                path=str(target_path),
-                eula_accepted=False,
-            )
-            ServerDetectionUtils.detect_server_type(target_path, server_config)
-            self.server_manager.add_server(server_config)
+        progress_bar = ctk.CTkProgressBar(content, mode="determinate")
+        progress_bar.pack(fill="x", padx=10, pady=(0, 5))
+        progress_bar.set(0)
+        progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)
 
-            UIUtils.show_info(
-                "匯入成功",
-                f"伺服器 '{server_name}' 匯入成功!\n\n類型: {server_config.loader_type}\n版本: {server_config.minecraft_version}",
-                self.root,
-            )
-            # 跳轉到管理伺服器頁面並自動選擇剛匯入的伺服器
-            self.show_manage_server(auto_select=server_name)
+        def _close_progress_dialog() -> None:
+            with contextlib.suppress(Exception):
+                progress_bar.stop()
+            with contextlib.suppress(Exception):
+                if progress_dialog.winfo_exists():
+                    progress_dialog.destroy()
 
-        except Exception as e:
-            logger.error(f"匯入失敗: {e}\n{traceback.format_exc()}", "MainWindow")
-            UIUtils.show_error("匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {e}", self.root)
-            raise e
+        def _import_task() -> None:
+            try:
+                last_percent = -1
+
+                def _on_import_progress(done_units: int, total_units: int) -> None:
+                    nonlocal last_percent
+                    if total_units <= 0:
+                        return
+                    percent = max(0, min(100, int(done_units * 100 / total_units)))
+                    if percent == last_percent:
+                        return
+                    last_percent = percent
+
+                    def _update_progress_ui(progress_value: int = percent) -> None:
+                        with contextlib.suppress(Exception):
+                            progress_bar.set(progress_value / 100)
+                        with contextlib.suppress(Exception):
+                            progress_text.configure(text=f"進度: {progress_value}%")
+
+                    self.ui_queue.put(_update_progress_ui)
+
+                if source_path.is_file():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    PathUtils.safe_extract_zip(source_path, target_path, progress_callback=_on_import_progress)
+
+                    if last_percent < 100:
+                        self.ui_queue.put(lambda: progress_bar.set(1.0))
+                        self.ui_queue.put(lambda: progress_text.configure(text="進度: 100%"))
+
+                    items = list(target_path.iterdir())
+                    if len(items) == 1 and items[0].is_dir():
+                        for item in items[0].iterdir():
+                            PathUtils.move_path(item, target_path / item.name)
+                        items[0].rmdir()
+                else:
+                    if not PathUtils.copy_dir(source_path, target_path, progress_callback=_on_import_progress):
+                        raise Exception("複製伺服器資料夾失敗")
+
+                    if last_percent < 100:
+                        self.ui_queue.put(lambda: progress_bar.set(1.0))
+                        self.ui_queue.put(lambda: progress_text.configure(text="進度: 100%"))
+
+                if not ServerDetectionUtils.is_valid_server_folder(target_path):
+                    raise Exception("找不到有效的 Minecraft 伺服器檔案")
+
+                server_config = ServerConfig(
+                    name=server_name,
+                    minecraft_version="unknown",
+                    loader_type="unknown",
+                    loader_version="unknown",
+                    memory_max_mb=2048,
+                    path=str(target_path),
+                    eula_accepted=False,
+                )
+                ServerDetectionUtils.detect_server_type(target_path, server_config)
+
+                def _on_import_success() -> None:
+                    _close_progress_dialog()
+                    self.server_manager.add_server(server_config)
+                    UIUtils.show_info(
+                        "匯入成功",
+                        (
+                            f"伺服器 '{server_name}' 匯入成功!\n\n"
+                            f"類型: {server_config.loader_type}\n版本: {server_config.minecraft_version}"
+                        ),
+                        self.root,
+                    )
+                    self.show_manage_server(auto_select=server_name)
+
+                self.ui_queue.put(_on_import_success)
+
+            except Exception as e:
+                logger.error(f"匯入失敗: {e}\n{traceback.format_exc()}", "MainWindow")
+
+                def _on_import_error(msg: str = str(e)) -> None:
+                    _close_progress_dialog()
+                    UIUtils.show_error("匯入失敗", f"伺服器 '{server_name}' 匯入失敗: {msg}", self.root)
+
+                self.ui_queue.put(_on_import_error)
+
+        UIUtils.run_async(_import_task)
 
     def hide_all_frames(self) -> None:
         """相容舊流程：頁面切換已改用 tkraise，不再逐一隱藏 frame。"""
@@ -1218,6 +1301,7 @@ class MinecraftServerManager:
             resizable=True,
             bind_icon=True,
             delay_ms=0,
+            reveal_after_setup=False,
         )
 
         # 創建滾動框架

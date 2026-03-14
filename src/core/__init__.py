@@ -18,6 +18,11 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ModManager": (".mod_manager", "ModManager"),
     "ModStatus": (".mod_manager", "ModStatus"),
     "ModPlatform": (".mod_manager", "ModPlatform"),
+    "AppException": (".exceptions", "AppException"),
+    "ConfigurationError": (".exceptions", "ConfigurationError"),
+    "NetworkOperationError": (".exceptions", "NetworkOperationError"),
+    "MetadataResolutionError": (".exceptions", "MetadataResolutionError"),
+    "ServerOperationError": (".exceptions", "ServerOperationError"),
 }
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

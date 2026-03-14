@@ -25,6 +25,21 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "VirtualList": (".virtual_list", "VirtualList"),
     # services
     "search_mods_online": (".mod_search_service", "search_mods_online"),
+    "get_mod_versions": (".mod_search_service", "get_mod_versions"),
+    "get_recommended_mod_version": (".mod_search_service", "get_recommended_mod_version"),
+    "analyze_mod_version_compatibility": (".mod_search_service", "analyze_mod_version_compatibility"),
+    "analyze_local_mod_file_compatibility": (".mod_search_service", "analyze_local_mod_file_compatibility"),
+    "build_required_dependency_install_plan": (".mod_search_service", "build_required_dependency_install_plan"),
+    "build_local_mod_update_plan": (".mod_search_service", "build_local_mod_update_plan"),
+    "normalize_mod_search_query": (".mod_search_service", "normalize_mod_search_query"),
+    "resolve_modrinth_project_names": (".mod_search_service", "resolve_modrinth_project_names"),
+    "OnlineModInfo": (".mod_search_service", "OnlineModInfo"),
+    "OnlineModVersion": (".mod_search_service", "OnlineModVersion"),
+    "OnlineModCompatibilityReport": (".mod_search_service", "OnlineModCompatibilityReport"),
+    "OnlineDependencyInstallItem": (".mod_search_service", "OnlineDependencyInstallItem"),
+    "OnlineDependencyInstallPlan": (".mod_search_service", "OnlineDependencyInstallPlan"),
+    "LocalModUpdateCandidate": (".mod_search_service", "LocalModUpdateCandidate"),
+    "LocalModUpdatePlan": (".mod_search_service", "LocalModUpdatePlan"),
     "enhance_local_mod": (".mod_search_service", "enhance_local_mod"),
 }
 

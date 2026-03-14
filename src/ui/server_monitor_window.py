@@ -170,8 +170,8 @@ class ServerMonitorWindow:
             center_on_parent=False,
             make_modal=False,
             delay_ms=250,
+            reveal_after_setup=False,
         )
-        self.window.deiconify()  # 顯示
 
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -218,6 +218,13 @@ class ServerMonitorWindow:
 
         except Exception as e:
             logger.error(f"視窗置中失敗: {e}\n{traceback.format_exc()}")
+        finally:
+            try:
+                self.window.deiconify()
+                self.window.lift()
+                self.window.focus_set()
+            except Exception as e:
+                logger.debug(f"顯示監控視窗失敗: {e}", "ServerMonitorWindow")
 
     def create_control_panel(self, parent) -> None:
         """創建控制面板"""
@@ -370,6 +377,7 @@ class ServerMonitorWindow:
 
         # 添加一個空的佔位項目
         self.players_listbox.insert(tk.END, "無玩家在線")
+        UIUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=1)
         self.players_listbox.bind("<ButtonRelease-1>", self._on_player_click)
 
     def _on_player_click(self, _event) -> None:
@@ -694,7 +702,11 @@ class ServerMonitorWindow:
                     self.safe_config_widget("players_label", text=players_text)
                     self.safe_update_widget(
                         "players_listbox",
-                        lambda w: [w.delete(0, tk.END), w.insert(tk.END, "無玩家在線")],
+                        lambda w: [
+                            w.delete(0, tk.END),
+                            w.insert(tk.END, "無玩家在線"),
+                            UIUtils.apply_listbox_alternating_rows(w, item_count=1),
+                        ],
                     )
                     self._last_ui_state["players_text"] = players_text
             else:
@@ -798,19 +810,14 @@ class ServerMonitorWindow:
             self._last_player_names = players_tuple
 
             self.players_listbox.delete(0, tk.END)
-            is_dark = ctk.get_appearance_mode() == "Dark"
-            bg_odd = Colors.BG_LISTBOX_DARK if is_dark else Colors.BG_LISTBOX_LIGHT
-            bg_even = Colors.BG_LISTBOX_ALT_DARK if is_dark else Colors.BG_LISTBOX_ALT_LIGHT
 
             if players:
-                for i, player in enumerate(players):
+                for player in players:
                     if player:  # 確保玩家名稱不為空
                         self.players_listbox.insert(tk.END, player)
-                        bg_color = bg_odd if i % 2 == 0 else bg_even
-                        self.players_listbox.itemconfigure(i, {"bg": bg_color})
             else:
                 self.players_listbox.insert(tk.END, "無玩家在線")
-                self.players_listbox.itemconfigure(0, {"bg": bg_odd})
+            UIUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=self.players_listbox.size())
         except Exception as e:
             logger.error(
                 f"更新玩家列表錯誤: {e}\n{traceback.format_exc()}",

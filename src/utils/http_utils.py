@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import requests
 from requests import RequestException
+from requests import HTTPError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -131,6 +132,7 @@ class HTTPUtils:
         timeout: int = 10,
         headers: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
+        suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | None:
         """發送 HTTP GET 請求並解析回傳的 JSON 資料"""
         if not url or not isinstance(url, str) or not cls._is_valid_url(url):
@@ -143,8 +145,56 @@ class HTTPUtils:
             resp = cls._get_session().get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
+        except HTTPError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            if status_code is not None and status_code in (suppress_status_codes or set()):
+                return None
+            logger.exception(f"HTTP GET JSON 請求失敗 ({url}): {e}")
+            return None
         except (RequestException, ValueError) as e:
             logger.exception(f"HTTP GET JSON 請求失敗 ({url}): {e}")
+            return None
+
+    @classmethod
+    def post_json(
+        cls,
+        url: str,
+        json_body: dict[str, Any],
+        timeout: int = 10,
+        headers: dict[str, str] | None = None,
+        suppress_status_codes: set[int] | None = None,
+    ) -> dict[str, Any] | list[Any] | None:
+        """發送 HTTP POST 請求並解析回傳的 JSON 資料。
+
+        Args:
+            url: 目標 URL，必須為有效的 http/https 位址。
+            json_body: 要送出的 JSON request body。
+            timeout: 請求逾時秒數，會自動正規化為允許的最小值以上。
+            headers: 額外 HTTP headers，會與預設 User-Agent 合併。
+            suppress_status_codes: 指定需靜默處理的 HTTP 狀態碼集合。
+                當回應狀態碼在此集合中時，函式回傳 None 並不記錄錯誤堆疊。
+
+        Returns:
+            成功時回傳 dict 或 list 型別的 JSON 內容；失敗或被 suppress 時回傳 None。
+        """
+        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
+            logger.error("HTTP POST JSON 請求失敗: URL 參數無效")
+            return None
+        timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
+
+        try:
+            final_headers = cls._get_default_headers(headers)
+            resp = cls._get_session().post(url, headers=final_headers, json=json_body, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except HTTPError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            if status_code is not None and status_code in (suppress_status_codes or set()):
+                return None
+            logger.exception(f"HTTP POST JSON 請求失敗 ({url}): {e}")
+            return None
+        except (RequestException, ValueError) as e:
+            logger.exception(f"HTTP POST JSON 請求失敗 ({url}): {e}")
             return None
 
     @classmethod

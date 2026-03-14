@@ -9,10 +9,11 @@ import queue
 import threading
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox, scrolledtext, ttk
 from typing import Any, Final
 
 import customtkinter as ctk
@@ -379,6 +380,320 @@ class UIUtils:
         )
 
     @staticmethod
+    def configure_treeview_list_style(
+        style_name: str,
+        *,
+        body_font=None,
+        heading_font=None,
+        rowheight: int | None = None,
+    ) -> str:
+        """建立統一的 Treeview 清單樣式並回傳樣式名稱。"""
+        style = ttk.Style()
+        treeview_style = f"{style_name}.Treeview"
+        heading_style = f"{treeview_style}.Heading"
+        scaled_rowheight = int(rowheight or FontManager.get_dpi_scaled_size(25))
+        body_font = body_font or FontManager.get_font(size=FontSize.INPUT)
+        heading_font = heading_font or FontManager.get_font(size=FontSize.LARGE, weight="bold")
+
+        style.configure(
+            treeview_style,
+            font=body_font,
+            rowheight=scaled_rowheight,
+            background=Colors.BG_LISTBOX_LIGHT,
+            fieldbackground=Colors.BG_LISTBOX_LIGHT,
+            foreground=Colors.TEXT_PRIMARY[0],
+            bordercolor=Colors.BORDER_LIGHT[0],
+            lightcolor=Colors.BORDER_LIGHT[0],
+            darkcolor=Colors.BORDER_LIGHT[0],
+        )
+        style.configure(
+            heading_style,
+            font=heading_font,
+            background=Colors.BG_SECONDARY[0],
+            foreground=Colors.TEXT_HEADING[0],
+            relief="flat",
+        )
+        style.map(
+            treeview_style,
+            background=[("selected", Colors.SELECT_BG)],
+            foreground=[("selected", Colors.TEXT_ON_DARK)],
+        )
+        style.map(
+            heading_style,
+            background=[("active", Colors.BG_SECONDARY[0])],
+            foreground=[("active", Colors.TEXT_HEADING[0])],
+        )
+        return treeview_style
+
+    @staticmethod
+    def _iter_treeview_items(treeview, parent: str = ""):
+        for item_id in treeview.get_children(parent):
+            yield item_id
+            yield from UIUtils._iter_treeview_items(treeview, item_id)
+
+    @staticmethod
+    def _get_treeview_item_depth(treeview, item_id: str) -> int:
+        depth = 0
+        current_item = str(item_id or "").strip()
+        while current_item:
+            parent_item = str(treeview.parent(current_item) or "").strip()
+            if not parent_item:
+                break
+            depth += 1
+            current_item = parent_item
+        return depth
+
+    @staticmethod
+    def _get_treeview_columns(treeview, *, include_tree_column: bool = False) -> tuple[str, ...]:
+        columns = tuple(str(column).strip() for column in tuple(treeview.cget("columns") or ()) if str(column).strip())
+        displaycolumns = treeview.cget("displaycolumns")
+        show = {part.strip() for part in str(treeview.cget("show") or "").split() if part.strip()}
+
+        if isinstance(displaycolumns, (tuple, list)):
+            normalized_displaycolumns = tuple(str(column).strip() for column in displaycolumns if str(column).strip())
+        else:
+            normalized_value = str(displaycolumns or "").strip()
+            if normalized_value.startswith("(") and normalized_value.endswith(")"):
+                normalized_displaycolumns = tuple(
+                    part.strip().strip("'\"") for part in normalized_value[1:-1].split() if part.strip().strip("'\"")
+                )
+            elif normalized_value:
+                normalized_displaycolumns = (normalized_value,)
+            else:
+                normalized_displaycolumns = ()
+
+        visible_columns: list[str] = []
+        if include_tree_column and "tree" in show:
+            visible_columns.append("#0")
+
+        if not normalized_displaycolumns or any(column == "#all" for column in normalized_displaycolumns):
+            visible_columns.extend(str(column) for column in columns)
+        else:
+            visible_columns.extend(column for column in normalized_displaycolumns if column in columns)
+        return tuple(visible_columns)
+
+    @staticmethod
+    def _get_treeview_column_from_x(treeview, x: int, *, include_tree_column: bool = False) -> str | None:
+        column_ref = str(treeview.identify_column(x) or "").strip()
+        if not column_ref:
+            return None
+        if column_ref == "#0":
+            return "#0" if include_tree_column else None
+
+        try:
+            column_index = int(column_ref.removeprefix("#")) - 1
+        except ValueError:
+            return None
+
+        visible_columns = UIUtils._get_treeview_columns(treeview, include_tree_column=include_tree_column)
+        if column_index < 0 or column_index >= len(visible_columns):
+            return None
+        return visible_columns[column_index]
+
+    @staticmethod
+    def _get_treeview_separator_column_from_x(treeview, x: int, *, include_tree_column: bool = False) -> str | None:
+        if not hasattr(treeview, "identify_column"):
+            candidate_columns = UIUtils._get_treeview_columns(treeview, include_tree_column=include_tree_column)
+            if not candidate_columns:
+                return None
+
+            columns: list[str] = []
+            widths: list[int] = []
+            for column_id in candidate_columns:
+                try:
+                    width = int(treeview.column(column_id, "width"))
+                except (tk.TclError, TypeError, ValueError):
+                    continue
+                columns.append(column_id)
+                widths.append(width)
+            if not columns:
+                return None
+
+            total_width = sum(widths)
+            xview_start = 0.0
+            try:
+                xview = treeview.xview()
+                if xview and len(xview) >= 1:
+                    xview_start = float(xview[0])
+            except (tk.TclError, TypeError, ValueError):
+                xview_start = 0.0
+
+            logical_x = int(x + (xview_start * total_width))
+            threshold = FontManager.get_dpi_scaled_size(6)
+            boundary = 0
+            for index, width in enumerate(widths):
+                boundary += width
+                if abs(logical_x - boundary) <= threshold:
+                    return columns[index]
+            return None
+
+        # 分隔線位置可能剛好落在兩欄邊界，改用左右取樣避免抓錯欄位。
+        threshold = FontManager.get_dpi_scaled_size(4)
+        left_column = UIUtils._get_treeview_column_from_x(
+            treeview, max(0, int(x) - threshold), include_tree_column=include_tree_column
+        )
+        right_column = UIUtils._get_treeview_column_from_x(
+            treeview, int(x) + threshold, include_tree_column=include_tree_column
+        )
+
+        if left_column:
+            return left_column
+        return right_column
+
+    @staticmethod
+    def auto_fit_treeview_column(
+        treeview,
+        column_id: str,
+        *,
+        heading_font=None,
+        body_font=None,
+        stretch_columns: set[str] | None = None,
+    ) -> None:
+        if not treeview or not column_id:
+            return
+
+        normalized_column_id = str(column_id).strip()
+        if not normalized_column_id:
+            return
+
+        heading_font_obj = tkfont.Font(font=heading_font or FontManager.get_font(size=FontSize.LARGE, weight="bold"))
+        body_font_obj = tkfont.Font(font=body_font or FontManager.get_font(size=FontSize.INPUT))
+        base_padding = FontManager.get_dpi_scaled_size(10)
+        tree_extra_padding = FontManager.get_dpi_scaled_size(4)
+        safety_min_width = FontManager.get_dpi_scaled_size(12)
+        configured_stretch_columns = set(stretch_columns or set())
+
+        heading_text = str(treeview.heading(normalized_column_id, "text") or normalized_column_id)
+        max_width = heading_font_obj.measure(heading_text)
+        all_columns = tuple(str(column) for column in tuple(treeview.cget("columns") or ()))
+        value_column_index = -1 if normalized_column_id == "#0" else all_columns.index(normalized_column_id)
+
+        for item_id in UIUtils._iter_treeview_items(treeview):
+            if normalized_column_id == "#0":
+                cell_value = treeview.item(item_id, "text") or ""
+                depth_padding = (
+                    UIUtils._get_treeview_item_depth(treeview, item_id) * FontManager.get_dpi_scaled_size(16)
+                ) + FontManager.get_dpi_scaled_size(16)
+                measured_width = body_font_obj.measure(str(cell_value or "")) + depth_padding
+            else:
+                values = treeview.item(item_id, "values") or ()
+                if value_column_index >= len(values):
+                    continue
+                cell_value = values[value_column_index]
+                measured_width = body_font_obj.measure(str(cell_value or ""))
+            max_width = max(max_width, measured_width)
+
+        computed_width = max(
+            safety_min_width,
+            int(max_width + base_padding + (tree_extra_padding if normalized_column_id == "#0" else 0)),
+        )
+        current_stretch = treeview.column(normalized_column_id, "stretch")
+        treeview.column(
+            normalized_column_id,
+            width=computed_width,
+            minwidth=computed_width,
+            stretch=bool(normalized_column_id in configured_stretch_columns)
+            if configured_stretch_columns
+            else current_stretch,
+        )
+
+    @staticmethod
+    def bind_treeview_header_auto_fit(
+        treeview,
+        *,
+        on_row_double_click: Callable[[Any], Any] | None = None,
+        include_tree_column: bool = False,
+        heading_font=None,
+        body_font=None,
+        stretch_columns: set[str] | None = None,
+    ) -> None:
+        if not treeview:
+            return
+
+        def _handle_double_click(event):
+            region = treeview.identify_region(event.x, event.y)
+            if region in ("separator", "heading"):
+                if region == "separator":
+                    column_id = UIUtils._get_treeview_separator_column_from_x(
+                        treeview, event.x, include_tree_column=include_tree_column
+                    )
+                    if not column_id:
+                        column_id = UIUtils._get_treeview_column_from_x(
+                            treeview, event.x, include_tree_column=include_tree_column
+                        )
+                else:
+                    column_id = UIUtils._get_treeview_column_from_x(
+                        treeview, event.x, include_tree_column=include_tree_column
+                    )
+
+                if column_id:
+                    UIUtils.auto_fit_treeview_column(
+                        treeview,
+                        column_id,
+                        heading_font=heading_font,
+                        body_font=body_font,
+                        stretch_columns=stretch_columns,
+                    )
+                    return "break"
+                return None
+
+            if on_row_double_click is not None:
+                return on_row_double_click(event)
+            return None
+
+        treeview.bind("<Double-1>", _handle_double_click)
+
+    @staticmethod
+    def refresh_treeview_alternating_rows(treeview) -> None:
+        """重新套用 Treeview 交錯列背景，保留既有非 odd/even tag。"""
+        if not treeview:
+            return
+
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        odd_bg = Colors.BG_ROW_SOFT_LIGHT if not is_dark else Colors.BG_LISTBOX_DARK
+        even_bg = Colors.BG_LISTBOX_ALT_LIGHT if not is_dark else Colors.BG_LISTBOX_ALT_DARK
+
+        try:
+            treeview.tag_configure("odd", background=odd_bg)
+            treeview.tag_configure("even", background=even_bg)
+        except Exception as e:
+            logger.debug(f"設定 Treeview 交錯列樣式失敗: {e}", "UIUtils")
+            return
+
+        for index, item_id in enumerate(treeview.get_children("")):
+            try:
+                existing_tags = tuple(tag for tag in treeview.item(item_id, "tags") if tag not in {"odd", "even"})
+                parity_tag = "odd" if index % 2 == 0 else "even"
+                treeview.item(item_id, tags=(*existing_tags, parity_tag))
+            except Exception as e:
+                logger.debug(f"更新 Treeview 交錯列失敗 item={item_id}: {e}", "UIUtils")
+
+    @staticmethod
+    def apply_listbox_alternating_rows(listbox, *, item_count: int | None = None) -> None:
+        """套用 Listbox 交錯列背景。"""
+        if not listbox:
+            return
+
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        odd_bg = Colors.BG_LISTBOX_LIGHT if not is_dark else Colors.BG_LISTBOX_DARK
+        even_bg = Colors.BG_LISTBOX_ALT_LIGHT if not is_dark else Colors.BG_LISTBOX_ALT_DARK
+        fg_color = Colors.TEXT_PRIMARY[0] if not is_dark else Colors.TEXT_ON_DARK
+        total_items = int(item_count if item_count is not None else listbox.size())
+
+        for index in range(max(0, total_items)):
+            try:
+                listbox.itemconfig(
+                    index,
+                    bg=odd_bg if index % 2 == 0 else even_bg,
+                    fg=fg_color,
+                    selectbackground=Colors.SELECT_BG,
+                    selectforeground=Colors.TEXT_ON_DARK,
+                )
+            except Exception as e:
+                logger.debug(f"設定 Listbox 交錯列失敗 index={index}: {e}", "UIUtils")
+                break
+
+    @staticmethod
     def call_on_ui(parent: Any, func: Callable[[], Any], timeout: float | None = None) -> Any:
         """在 UI 執行緒執行函數 (若當前非 UI 執行緒則排程執行並等待結果)
 
@@ -465,6 +780,16 @@ class UIUtils:
         center_on_parent=True,
         make_modal=True,
         delay_ms=200,
+        topmost: bool = False,
+        autosize_to_content: bool = False,
+        min_width: int | None = None,
+        min_height: int | None = None,
+        max_width: int | None = None,
+        max_height: int | None = None,
+        start_maximized: bool = False,
+        use_transient_for_modal: bool = True,
+        reveal_after_setup: bool = True,
+        enforce_max_size_limits: bool = False,
     ) -> None:
         """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能"""
         # 設定視窗大小與置中，統一呼叫 WindowManager 的 setup_dialog_window
@@ -475,18 +800,100 @@ class UIUtils:
             height=height,
             center_on_parent=center_on_parent,
         )
-        # 設定模態視窗屬性
-        if make_modal and parent:
+        scaled_min_width = FontManager.get_dpi_scaled_size(int(min_width)) if min_width else 0
+        scaled_min_height = FontManager.get_dpi_scaled_size(int(min_height)) if min_height else 0
+        scaled_max_width = FontManager.get_dpi_scaled_size(int(max_width)) if max_width else 0
+        scaled_max_height = FontManager.get_dpi_scaled_size(int(max_height)) if max_height else 0
+
+        if scaled_min_width or scaled_min_height:
             try:
-                window.transient(parent)
-                window.grab_set()
-                window.focus_set()
+                window.minsize(max(1, scaled_min_width), max(1, scaled_min_height))
             except Exception as e:
-                logger.exception(f"設定模態視窗失敗: {e}")
+                logger.debug(f"設定對話框最小尺寸失敗: {e}", "UIUtils")
+
+        if enforce_max_size_limits and (scaled_max_width or scaled_max_height):
+            try:
+                max_width_value = max(1, scaled_max_width or window.winfo_screenwidth())
+                max_height_value = max(1, scaled_max_height or window.winfo_screenheight())
+                window.maxsize(max_width_value, max_height_value)
+            except Exception as e:
+                logger.debug(f"設定對話框最大尺寸失敗: {e}", "UIUtils")
+
+        def finalize_dialog_visibility() -> None:
+            if make_modal and parent:
+                try:
+                    if use_transient_for_modal:
+                        window.transient(parent)
+                    window.grab_set()
+                    window.focus_set()
+                except Exception as e:
+                    logger.exception(f"設定模態視窗失敗: {e}")
+
+            if topmost:
+                try:
+                    window.attributes("-topmost", True)
+                except Exception as e:
+                    logger.debug(f"設定視窗置頂失敗: {e}", "UIUtils")
+
+            if reveal_after_setup:
+                try:
+                    window.deiconify()
+                    window.lift()
+                    window.update_idletasks()
+                except Exception as e:
+                    logger.debug(f"顯示對話框失敗: {e}", "UIUtils")
 
         # 延遲綁定圖示，確保不會被覆蓋，使用更長的延遲
         if bind_icon:
             IconUtils.set_window_icon(window, delay_ms)
+
+        if autosize_to_content:
+            try:
+                window.after_idle(
+                    lambda: UIUtils.autosize_toplevel_to_content(
+                        window,
+                        min_width=int(min_width or width or 0),
+                        min_height=int(min_height or height or 0),
+                        max_width=max_width,
+                        max_height=max_height,
+                        parent=parent,
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"排程自動調整視窗大小失敗: {e}", "UIUtils")
+
+        if start_maximized:
+            try:
+                window.after(max(0, int(delay_ms)), lambda: UIUtils.maximize_window(window))
+            except Exception as e:
+                logger.debug(f"排程視窗最大化失敗: {e}", "UIUtils")
+
+        try:
+            window.after_idle(finalize_dialog_visibility)
+        except Exception as e:
+            logger.debug(f"排程顯示對話框失敗: {e}", "UIUtils")
+            finalize_dialog_visibility()
+
+    @staticmethod
+    def maximize_window(window) -> None:
+        if not window:
+            return
+
+        with contextlib.suppress(Exception):
+            # 先重設為螢幕可用上限，避免先前 maxsize 限制住原生最大化。
+            window.maxsize(window.winfo_screenwidth(), window.winfo_screenheight())
+
+        try:
+            if hasattr(window, "state"):
+                window.state("zoomed")
+                return
+        except Exception as e:
+            logger.debug(f"使用 state('zoomed') 最大化失敗: {e}", "UIUtils")
+
+        try:
+            window.attributes("-zoomed", True)
+        except Exception as e:
+            logger.debug(f"使用 -zoomed 最大化失敗: {e}", "UIUtils")
 
     @staticmethod
     def create_toplevel_dialog(
@@ -500,9 +907,25 @@ class UIUtils:
         center_on_parent: bool = True,
         make_modal: bool = True,
         delay_ms: int = 200,
-    ) -> ctk.CTkToplevel:
+        topmost: bool = False,
+        autosize_to_content: bool = False,
+        min_width: int | None = None,
+        min_height: int | None = None,
+        max_width: int | None = None,
+        max_height: int | None = None,
+        start_maximized: bool = False,
+        native_window: bool = False,
+        use_transient_for_modal: bool = True,
+        reveal_after_setup: bool = True,
+        enforce_max_size_limits: bool = False,
+    ) -> tk.Toplevel | ctk.CTkToplevel:
         """建立並套用專案一致的 dialog 視窗屬性。"""
-        dialog = ctk.CTkToplevel(parent)
+        dialog = tk.Toplevel(parent) if native_window else ctk.CTkToplevel(parent)
+        if reveal_after_setup:
+            try:
+                dialog.withdraw()
+            except Exception as e:
+                logger.debug(f"建立對話框時預先隱藏失敗: {e}", "UIUtils")
         dialog.title(title)
         dialog.resizable(resizable, resizable)
 
@@ -515,8 +938,101 @@ class UIUtils:
             center_on_parent=center_on_parent,
             make_modal=make_modal,
             delay_ms=delay_ms,
+            topmost=topmost,
+            autosize_to_content=autosize_to_content,
+            min_width=min_width,
+            min_height=min_height,
+            max_width=max_width,
+            max_height=max_height,
+            start_maximized=start_maximized,
+            use_transient_for_modal=use_transient_for_modal,
+            reveal_after_setup=reveal_after_setup,
+            enforce_max_size_limits=enforce_max_size_limits,
         )
         return dialog
+
+    @staticmethod
+    def schedule_toplevel_layout_refresh(
+        dialog,
+        *,
+        min_width: int = 0,
+        min_height: int = 0,
+        max_width: int | None = None,
+        max_height: int | None = None,
+        parent=None,
+        delays_ms: tuple[int, ...] = (0, 120),
+        preserve_current_size: bool = True,
+    ) -> None:
+        """在內容建構完成後重新整理對話框尺寸，降低初次開啟時被裁切的機率。"""
+        if not dialog:
+            return
+
+        for delay_ms in delays_ms:
+            try:
+                dialog.after(
+                    max(0, int(delay_ms)),
+                    lambda: UIUtils.autosize_toplevel_to_content(
+                        dialog,
+                        min_width=min_width,
+                        min_height=min_height,
+                        max_width=max_width,
+                        max_height=max_height,
+                        parent=parent,
+                        preserve_current_size=preserve_current_size,
+                    ),
+                )
+            except Exception as e:
+                logger.debug(f"排程對話框尺寸刷新失敗: {e}", "UIUtils")
+                break
+
+    @staticmethod
+    def autosize_toplevel_to_content(
+        dialog,
+        *,
+        min_width: int = 0,
+        min_height: int = 0,
+        max_width: int | None = None,
+        max_height: int | None = None,
+        parent=None,
+        preserve_current_size: bool = True,
+    ) -> None:
+        """依內容實際需求調整對話框大小，避免初次開啟時過小。"""
+        if not dialog:
+            return
+
+        try:
+            dialog.update_idletasks()
+            requested_width = int(dialog.winfo_reqwidth())
+            requested_height = int(dialog.winfo_reqheight())
+            current_width = int(dialog.winfo_width())
+            current_height = int(dialog.winfo_height())
+            target_width = max(int(min_width), requested_width)
+            target_height = max(int(min_height), requested_height)
+            if preserve_current_size:
+                if current_width > 1:
+                    target_width = max(target_width, current_width)
+                if current_height > 1:
+                    target_height = max(target_height, current_height)
+            if max_width is not None:
+                target_width = min(target_width, int(max_width))
+            if max_height is not None:
+                target_height = min(target_height, int(max_height))
+
+            logger.debug(
+                "依內容調整對話框大小: "
+                f"req={requested_width}x{requested_height}, current={current_width}x{current_height}, "
+                f"target={target_width}x{target_height}",
+                "UIUtils",
+            )
+            WindowManager.setup_dialog_window(
+                dialog,
+                parent=parent,
+                width=target_width,
+                height=target_height,
+                center_on_parent=True,
+            )
+        except Exception as e:
+            logger.debug(f"依內容調整對話框大小失敗: {e}", "UIUtils")
 
     @staticmethod
     def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
@@ -1028,11 +1544,16 @@ class UIUtils:
             if target_path.exists():
                 target_path = target_path.resolve()
             target_str = str(target_path)
+            if os.name == "nt":
+                target_str = target_str.replace("/", "\\")
+                if not UIUtils._is_safe_windows_path_argument(target_str):
+                    logger.error("在檔案總管中顯示失敗：路徑包含不安全字元")
+                    return
             explorer = PathUtils.find_executable("explorer") or str(
                 Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
             )
             try:
-                SubprocessUtils.run_checked([explorer, f"/select,{target_str}"], check=False)
+                SubprocessUtils.run_checked([explorer, "/select,", target_str], check=False)
                 return
             except Exception as e:
                 logger.debug(f"使用 explorer /select 失敗: {e}")
@@ -1042,6 +1563,13 @@ class UIUtils:
 
         except Exception as e:
             logger.exception(f"在檔案總管中顯示失敗: {e}")
+
+    @staticmethod
+    def _is_safe_windows_path_argument(path_text: str) -> bool:
+        """檢查 Windows 指令列參數是否含有危險控制字元。"""
+        if not path_text:
+            return False
+        return all(ch not in path_text for ch in ('"', "\x00", "\r", "\n"))
 
     @staticmethod
     def open_external(target) -> None:
@@ -1065,7 +1593,7 @@ class UIUtils:
             try:
                 startfile = getattr(os, "startfile", None)
                 if callable(startfile):
-                    startfile(target_str)  # nosec: B606
+                    startfile(target_str)
                     return
             except Exception as e:
                 logger.debug(f"os.startfile 失敗，嘗試 subprocess: {e}")
@@ -1263,35 +1791,32 @@ class UIUtils:
 
 class ProgressDialog:
     def __init__(self, parent, title="進度", show_cancel=True):
-        self.dialog = ctk.CTkToplevel(parent)
-        self.dialog.title(title)
-        self.dialog.resizable(False, False)
-
-        # 使用新的視窗管理器設定對話框
-        WindowManager.setup_dialog_window(self.dialog, parent, 450, 200, True)
-
-        # 設定模態視窗屬性
-        if parent:
-            try:
-                self.dialog.transient(parent)
-                self.dialog.grab_set()
-                self.dialog.focus_set()
-            except Exception as e:
-                logger.exception(f"設定模態視窗失敗: {e}")
-
-        # 延遲綁定圖示
-        IconUtils.set_window_icon(self.dialog, 250)
+        self.dialog = UIUtils.create_toplevel_dialog(
+            parent,
+            title,
+            width=300,
+            height=120,
+            resizable=False,
+            bind_icon=True,
+            center_on_parent=True,
+            make_modal=True,
+            delay_ms=250,
+            autosize_to_content=True,
+            min_width=300,
+            min_height=120,
+            reveal_after_setup=False,
+        )
 
         # 內容框架
         content_frame = ctk.CTkFrame(self.dialog)
-        content_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        content_frame.pack(fill="both", expand=True, padx=16, pady=16)
 
         # 狀態標籤
         self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=FontManager.get_font(size=12))
         self.status_label.pack(pady=(10, 15))
 
         # 進度條
-        self.progress = ctk.CTkProgressBar(content_frame, width=410, height=20)  # 調整寬度以配合新的視窗大小
+        self.progress = ctk.CTkProgressBar(content_frame, width=350, height=20)  # 調整寬度以配合新的視窗大小
         self.progress.pack(pady=(0, 15))
         self.progress.set(0)
 

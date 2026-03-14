@@ -28,6 +28,9 @@ dev = [
   "pytest>=8.4.2",
   "bandit>=1.8.0",
   "bandit-sarif-formatter>=1.0.0",
+  "vulture>=2.14",
+  "eradicate>=3.0.0",
+  "detect-secrets>=1.5.0",
 ]
 
 [project.scripts]

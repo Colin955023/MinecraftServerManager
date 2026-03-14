@@ -10,6 +10,8 @@ Responsible for managing and downloading versions of Fabric and Forge loaders wi
 import re
 from contextlib import suppress
 from pathlib import Path
+import threading
+import time
 
 from defusedxml import ElementTree as ET
 
@@ -36,6 +38,7 @@ class LoaderManager(Singleton):
 
     # ====== 初始化與快取管理 ======
     _initialized: bool = False
+    LOADER_CACHE_TTL_SECONDS: int = 12 * 60 * 60
 
     def __init__(self):
         if self._initialized:
@@ -45,6 +48,8 @@ class LoaderManager(Singleton):
         self.forge_cache_file = str(cache_dir / "forge_versions_cache.json")
         # 添加記憶體快取以避免重複讀取檔案
         self._version_cache = {}
+        self._preload_lock = threading.Lock()
+        self._preloaded_once = False
         self._initialized = True
 
     def clear_cache_file(self):
@@ -58,6 +63,8 @@ class LoaderManager(Singleton):
 
             # 清除記憶體快取
             self._version_cache.clear()
+            # 快取檔已清除，允許同一 session 重新預抓
+            self._preloaded_once = False
         except PermissionError as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             UIUtils.show_error(
@@ -83,7 +90,7 @@ class LoaderManager(Singleton):
     ) -> bool | str:
         """
         依 loader_type 下載並部署伺服器檔案。
-        Vanila/Fabric → bool；Forge → 成功時回傳主 JAR 相對路徑字串。
+        Vanilla/Fabric → bool；Forge → 成功時回傳主 JAR 相對路徑字串。
         """
         lt = self._standardize_loader_type(loader_type, loader_version)
 
@@ -91,7 +98,7 @@ class LoaderManager(Singleton):
         if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
-            java_path = JavaUtils.get_best_java_path(minecraft_version)
+            java_path = JavaUtils.get_best_java_path(minecraft_version, ask_download=False)
         if not java_path:
             return False
 
@@ -148,16 +155,66 @@ class LoaderManager(Singleton):
 
         return self._fail(
             progress_callback,
-            f"未知的載入器類型: {loader_type}",
-            debug=f"[DEBUG] Unknown loader_type={loader_type}",
+            f"目前僅支援 Vanilla / Fabric / Forge，無法下載載入器類型: {loader_type}",
+            debug=f"[DEBUG] Unsupported loader_type={loader_type}",
         )
 
     def preload_loader_versions(self):
         """
         從 API 取得所有載入器版本並覆蓋寫入 json。
         """
-        self._preload_fabric_versions()
-        self._preload_forge_versions()
+        with self._preload_lock:
+            cache_exists = self._loader_cache_files_exist()
+            cache_fresh = self._loader_cache_is_fresh()
+
+            # 本輪尚未預抓，若快取仍在有效期內則可直接沿用，避免重複打 API。
+            if not self._preloaded_once and cache_fresh:
+                logger.debug("載入器快取仍在有效期內，本輪略過預抓")
+                self._preloaded_once = True
+                return
+
+            # 已預抓過且快取仍有效，直接略過。
+            if self._preloaded_once and cache_exists and cache_fresh:
+                logger.debug("載入器版本已預抓且快取有效，略過重複預抓")
+                return
+
+            if not cache_exists:
+                logger.debug("偵測到載入器快取缺失，執行重新預抓")
+            elif not cache_fresh:
+                logger.debug("載入器快取已過期，執行重新預抓")
+
+            self._preload_fabric_versions()
+            self._preload_forge_versions()
+            self._preloaded_once = True
+
+    def _loader_cache_files_exist(self) -> bool:
+        return Path(self.fabric_cache_file).exists() and Path(self.forge_cache_file).exists()
+
+    def _loader_cache_is_fresh(self) -> bool:
+        if not self._loader_cache_files_exist():
+            return False
+
+        now = time.time()
+        ttl_seconds = max(1, int(self.LOADER_CACHE_TTL_SECONDS))
+        newest_allowed_age = ttl_seconds
+        try:
+            fabric_age = now - Path(self.fabric_cache_file).stat().st_mtime
+            forge_age = now - Path(self.forge_cache_file).stat().st_mtime
+        except OSError:
+            return False
+        return fabric_age <= newest_allowed_age and forge_age <= newest_allowed_age
+
+    @staticmethod
+    def _parse_forge_version_tuple(version_text: str) -> tuple[int, ...]:
+        """將 Forge 版本字串轉成可比較的數值 tuple。
+
+        目前採用純數字段拆解並逐段整數比較，適合常見 `x.y.z` 版本。
+        對包含複雜 pre-release metadata 的語意版本規則，僅提供近似排序能力。
+        """
+        numeric_parts = re.findall(r"\d+", str(version_text or ""))
+        if not numeric_parts:
+            return (0,)
+        return tuple(int(part) for part in numeric_parts)
 
     def _preload_fabric_versions(self):
         """從 API 取得 Fabric 載入器版本並覆蓋寫入 json（只保留 stable 版本）。"""
@@ -236,7 +293,15 @@ class LoaderManager(Singleton):
 
                     # 對每個 MC 版本的 Forge 版本進行排序（最新在前）
                     for mc_version in version_dict:
-                        version_dict[mc_version].sort(reverse=True)
+                        version_dict[mc_version].sort(
+                            key=lambda full_version: (
+                                self._parse_forge_version_tuple(full_version.split("-", 1)[1])
+                                if "-" in full_version
+                                else (0,),
+                                full_version,
+                            ),
+                            reverse=True,
+                        )
                         # 限制每個版本最多10個 Forge 版本，避免數據過多
                         version_dict[mc_version] = version_dict[mc_version][:10]
 
@@ -343,12 +408,12 @@ class LoaderManager(Singleton):
         need_vanilla: bool = False,
         parent_window=None,
     ) -> bool | str:
-        """Fabric 與 Forge 共用：下載安裝器 → （可選）先下載 vanilla → 執行安裝器。"""
+        """Fabric 與 Forge 共用：下載安裝器 → （Fabric 需先下載官方伺服器）→ 執行安裝器。"""
         installer_path = str(Path(download_path).parent / Path(installer_url).name)
 
         # 設定進度範圍
         if need_vanilla:
-            # Fabric: 安裝器下載 (10-15%) -> Vanilla 下載 (15-90%) -> 安裝 (90-100%)
+            # Fabric: 安裝器下載 (10-15%) -> 官方伺服器下載 (15-90%) -> 安裝 (90-100%)
             dl_start, dl_end = 10, 15
             vanilla_start, vanilla_end = 15, 90
             install_start = 90
@@ -370,7 +435,7 @@ class LoaderManager(Singleton):
         ):
             return False
 
-        # 需要 vanilla 伺服器？（Fabric）
+        # Fabric 安裝器仍需要先下載官方伺服器 JAR。
         if need_vanilla and not self._download_vanilla_server(
             minecraft_version,
             download_path,
@@ -513,7 +578,6 @@ class LoaderManager(Singleton):
 
         return True
 
-    # === Vanilla ===
     def _download_vanilla_server(
         self,
         minecraft_version: str,
@@ -521,7 +585,7 @@ class LoaderManager(Singleton):
         progress_callback,
         cancel_flag,
     ) -> bool:
-        """下載 Minecraft Vanilla 伺服器 JAR 檔案。"""
+        """下載 Minecraft 官方伺服器 JAR 檔案，供 Fabric 安裝流程使用。"""
         if progress_callback:
             progress_callback(10, "查詢 Minecraft 版本資訊...")
 

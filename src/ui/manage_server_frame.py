@@ -10,10 +10,11 @@ import tkinter as tk
 import tkinter.font as tkfont
 import traceback
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, ttk
-from typing import Any
+from typing import Any, Protocol
 
 import customtkinter as ctk
 
@@ -35,6 +36,45 @@ from ..utils import (
 from . import ServerMonitorWindow, ServerPropertiesDialog
 
 logger = get_logger().bind(component="ManageServerFrame")
+
+
+@dataclass(frozen=True)
+class ServerRefreshPayload:
+    """背景刷新完成後交給 UI callback 的列表資料載體。"""
+
+    signature: tuple[tuple[str, tuple[Any, ...]], ...]
+    server_order: list[str]
+    server_rows: dict[str, tuple[Any, ...]]
+
+
+@dataclass(frozen=True)
+class ServerRefreshContext:
+    """開始新一輪 UI refresh 時使用的上下文。"""
+
+    refresh_token: int
+    previous_selection: str | None
+
+
+@dataclass(frozen=True)
+class ServerRefreshExecutionPlan:
+    """refresh callback 決策結果：是否套用與對應輪次上下文。"""
+
+    should_apply: bool
+    refresh_context: ServerRefreshContext | None = None
+
+
+class _ServerTreeItemUpdater(Protocol):
+    """供 diff 準備階段更新既有列時使用的最小 Tree 介面。"""
+
+    def item(self, item_id: str, *, values: tuple[Any, ...]) -> object: ...
+
+
+@dataclass(frozen=True)
+class ServerTreeDiffPreparation:
+    """套用 Treeview diff 前的既有列更新結果。"""
+
+    rows_snapshot: dict[str, tuple[Any, ...]]
+    pending_insert: list[tuple[str, tuple[Any, ...]]]
 
 
 class ManageServerFrame(ctk.CTkFrame):
@@ -272,13 +312,17 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 建立 Treeview
         columns = ("名稱", "版本", "載入器", "狀態", "備份狀態", "路徑")
-        self.server_tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="browse")
-
-        # 配置 Treeview 的字體大小
-        style.configure("Treeview", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
-        style.configure(
-            "Treeview.Heading",
-            font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
+        tree_style = UIUtils.configure_treeview_list_style(
+            "ServerList",
+            body_font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
+            heading_font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
+        )
+        self.server_tree = ttk.Treeview(
+            list_frame,
+            columns=columns,
+            show="headings",
+            selectmode="browse",
+            style=tree_style,
         )
         # 設定欄位
         self.server_tree.heading("名稱", text="名稱")
@@ -292,7 +336,13 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 綁定事件
         self.server_tree.bind("<<TreeviewSelect>>", self.on_server_select)
-        self.server_tree.bind("<Double-1>", self.on_server_tree_double_click)
+        UIUtils.bind_treeview_header_auto_fit(
+            self.server_tree,
+            on_row_double_click=self.on_server_double_click,
+            heading_font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
+            body_font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
+            stretch_columns={"路徑"},
+        )
         self.server_tree.bind("<Button-3>", self.show_server_context_menu)
 
         # 加入滾動條
@@ -881,6 +931,116 @@ class ManageServerFrame(ctk.CTkFrame):
             signature.append((name, tuple(row)))
         return tuple(signature)
 
+    @classmethod
+    def _build_server_tree_payload(cls, server_data: list[list[Any]]) -> tuple[list[str], dict[str, tuple[Any, ...]]]:
+        """將原始 server_data 轉成 Treeview 套用所需的順序與列資料。"""
+        server_order: list[str] = []
+        server_rows: dict[str, tuple[Any, ...]] = {}
+        for row in server_data:
+            if not row:
+                continue
+            name = str(row[0])
+            normalized = cls._normalize_server_row(row)
+            server_order.append(name)
+            server_rows[name] = normalized
+        return server_order, server_rows
+
+    @classmethod
+    def _build_server_refresh_payload(cls, server_data: list[list[Any]]) -> ServerRefreshPayload:
+        """建立刷新流程使用的簽章、順序與列資料。"""
+        signature = cls._make_server_data_signature(server_data)
+        server_order, server_rows = cls._build_server_tree_payload(server_data)
+        return ServerRefreshPayload(
+            signature=signature,
+            server_order=server_order,
+            server_rows=server_rows,
+        )
+
+    @staticmethod
+    def _compute_server_payload_hash(payload: ServerRefreshPayload) -> int:
+        """計算 payload hash，供 refresh callback 判斷是否需要套用。"""
+        try:
+            return hash(payload.signature)
+        except Exception:
+            return hash(time.time())
+
+    def _should_apply_server_refresh(self, payload: ServerRefreshPayload) -> bool:
+        """判斷 payload 是否與上次不同，並在變更時更新快取 hash。"""
+        current_data_hash = self._compute_server_payload_hash(payload)
+        if getattr(self, "_last_server_data_hash", None) == current_data_hash:
+            return False
+        self._last_server_data_hash = current_data_hash
+        return True
+
+    def _begin_server_refresh_cycle(self) -> ServerRefreshContext:
+        """建立新一輪 refresh 狀態，並使舊輪次失效。"""
+        self._cancel_server_refresh_job()
+        self._server_refresh_token += 1
+        return ServerRefreshContext(
+            refresh_token=self._server_refresh_token,
+            previous_selection=self.selected_server,
+        )
+
+    @staticmethod
+    def _format_loader_display(loader_type: str, loader_version: str) -> str:
+        """將 loader 資訊轉成列表顯示文字。"""
+        normalized_type = (loader_type or "").lower()
+        normalized_version = (loader_version or "").lower()
+        if normalized_type == "vanilla":
+            return "原版"
+        if normalized_type == "unknown" or not normalized_type:
+            return "未知"
+
+        display = normalized_type.capitalize()
+        if normalized_version and normalized_version != "unknown":
+            return f"{display} v{loader_version}"
+        return display
+
+    @staticmethod
+    def _format_minecraft_version_display(minecraft_version: str) -> str:
+        """將 Minecraft 版本轉成列表顯示文字。"""
+        if minecraft_version and minecraft_version.lower() != "unknown":
+            return minecraft_version
+        return "未知"
+
+    @classmethod
+    def _build_server_display_row(
+        cls,
+        *,
+        name: str,
+        config: ServerConfig,
+        status: str,
+        backup_status: str,
+        display_path: str,
+    ) -> list[Any]:
+        """將伺服器設定與動態狀態整合成列表顯示列。"""
+        return [
+            name,
+            cls._format_minecraft_version_display(config.minecraft_version),
+            cls._format_loader_display(config.loader_type, config.loader_version),
+            status,
+            backup_status,
+            display_path,
+        ]
+
+    def _build_server_display_data(self) -> list[list[Any]]:
+        """從目前 server_manager 狀態建立顯示用列表資料。"""
+        server_data: list[list[Any]] = []
+        for name, config in self.server_manager.servers.items():
+            status = self._get_server_status_text(name, config)
+            backup_status = self.get_backup_status(name)
+            display_path = self._format_server_path_for_display(config.path)
+            server_data.append(
+                self._build_server_display_row(
+                    name=name,
+                    config=config,
+                    status=status,
+                    backup_status=backup_status,
+                    display_path=display_path,
+                )
+            )
+        return server_data
+
     def _recycle_server_item(self, item_id: str) -> None:
         """將不再顯示的 Tree item 先 detach 進重用池，降低後續 insert 成本。"""
         if not self.server_tree or not item_id:
@@ -1005,9 +1165,47 @@ class ManageServerFrame(ctk.CTkFrame):
             return
         self._server_refresh_job = None
         self._server_rows_snapshot = rows_snapshot
+        if self.server_tree and self.server_tree.winfo_exists():
+            UIUtils.refresh_treeview_alternating_rows(self.server_tree)
         self._restore_server_selection(previous_selection)
         self.update_selection()
         self._set_server_tree_render_lock(False)
+
+    def _remove_stale_server_items(self, server_rows: dict[str, tuple[Any, ...]]) -> None:
+        """移除本輪資料中已不存在的舊 Tree item 對應。"""
+        for name, stale_item_id in list(self._server_item_by_name.items()):
+            if name in server_rows:
+                continue
+            self._recycle_server_item(stale_item_id)
+            self._server_item_by_name.pop(name, None)
+
+    def _prepare_server_tree_diff(
+        self,
+        *,
+        tree: _ServerTreeItemUpdater,
+        server_order: list[str],
+        server_rows: dict[str, tuple[Any, ...]],
+    ) -> ServerTreeDiffPreparation:
+        """更新既有列並回傳待插入資料與最新 snapshot。"""
+        rows_snapshot: dict[str, tuple[Any, ...]] = {}
+        pending_insert: list[tuple[str, tuple[Any, ...]]] = []
+        previous_snapshot = getattr(self, "_server_rows_snapshot", {})
+        for name in server_order:
+            values = server_rows[name]
+            item_id = self._server_item_by_name.get(name)
+            if item_id:
+                try:
+                    if previous_snapshot.get(name) != values:
+                        tree.item(item_id, values=values)
+                    rows_snapshot[name] = values
+                    continue
+                except Exception as e:
+                    logger.debug(f"更新伺服器列失敗 name={name}: {e}", "ManageServerFrame")
+                    self._recycle_server_item(item_id)
+                    self._server_item_by_name.pop(name, None)
+            pending_insert.append((name, values))
+
+        return ServerTreeDiffPreparation(rows_snapshot=rows_snapshot, pending_insert=pending_insert)
 
     def _apply_server_tree_diff(
         self,
@@ -1029,31 +1227,14 @@ class ManageServerFrame(ctk.CTkFrame):
             self._set_server_tree_render_lock(False)
             return
 
-        # 刪除已不存在的伺服器列
-        for name, stale_item_id in list(self._server_item_by_name.items()):
-            if name in server_rows:
-                continue
-            self._recycle_server_item(stale_item_id)
-            self._server_item_by_name.pop(name, None)
-
-        # 更新既有列，並收集新增列
-        rows_snapshot: dict[str, tuple[Any, ...]] = {}
-        pending_insert: list[tuple[str, tuple[Any, ...]]] = []
-        previous_snapshot = getattr(self, "_server_rows_snapshot", {})
-        for name in server_order:
-            values = server_rows[name]
-            item_id = self._server_item_by_name.get(name)
-            if item_id:
-                try:
-                    if previous_snapshot.get(name) != values:
-                        tree.item(item_id, values=values)
-                    rows_snapshot[name] = values
-                    continue
-                except Exception as e:
-                    logger.debug(f"更新伺服器列失敗 name={name}: {e}", "ManageServerFrame")
-                    self._recycle_server_item(item_id)
-                    self._server_item_by_name.pop(name, None)
-            pending_insert.append((name, values))
+        self._remove_stale_server_items(server_rows)
+        diff_preparation = self._prepare_server_tree_diff(
+            tree=tree,
+            server_order=server_order,
+            server_rows=server_rows,
+        )
+        rows_snapshot = diff_preparation.rows_snapshot
+        pending_insert = diff_preparation.pending_insert
 
         # 沒有資料時直接收尾
         if not server_order:
@@ -1161,39 +1342,16 @@ class ManageServerFrame(ctk.CTkFrame):
 
         UIUtils.run_async(task)
 
-    def _refresh_servers_task(self, reload_config: bool = True):
+    def _refresh_servers_task(self, reload_config: bool = True) -> ServerRefreshPayload:
         """後台任務：載入配置並獲取伺服器狀態"""
         # 只有在需要時才強制重載配置
         if reload_config:
             self.server_manager.load_servers_config()
 
-        server_data: list[list[Any]] = []
         if not self.server_manager.servers:
-            return server_data
+            return self._build_server_refresh_payload([])
 
-        for name, config in self.server_manager.servers.items():
-            status = self._get_server_status_text(name, config)
-
-            loader_type = (config.loader_type or "").lower()
-            loader_version = (config.loader_version or "").lower()
-            if loader_type == "vanilla":
-                loader_col = "原版"
-            elif loader_type == "unknown" or not loader_type:
-                loader_col = "未知"
-            else:
-                loader_col = loader_type.capitalize()
-                if loader_version and loader_version != "unknown":
-                    loader_col = f"{loader_col} v{config.loader_version}"
-            mc_version = (
-                config.minecraft_version
-                if config.minecraft_version and config.minecraft_version.lower() != "unknown"
-                else "未知"
-            )
-            backup_status = self.get_backup_status(name)
-            display_path = self._format_server_path_for_display(config.path)
-            server_data.append([name, mc_version, loader_col, status, backup_status, display_path])
-
-        return server_data
+        return self._build_server_refresh_payload(self._build_server_display_data())
 
     def _format_server_path_for_display(self, raw_path: str) -> str:
         r"""將絕對路徑轉為易讀的 `servers\<name>` 形式。"""
@@ -1205,53 +1363,40 @@ class ManageServerFrame(ctk.CTkFrame):
         except Exception:
             return str(raw_path)
 
-    def _refresh_servers_callback(self, server_data: list[list[Any]]):
+    def _refresh_servers_callback(self, payload: ServerRefreshPayload):
         """UI 更新回調"""
         if self.server_tree is None:
             return
 
-        signature = self._make_server_data_signature(server_data)
-
-        # 檢查資料是否變更（變更才進行差異更新）
-        try:
-            current_data_hash = hash(signature)
-        except Exception:
-            current_data_hash = hash(time.time())
-
-        if (
-            getattr(self, "_last_server_data_hash", None) is not None
-            and getattr(self, "_last_server_data_hash", None) == current_data_hash
-        ):
+        execution_plan = self._build_server_refresh_execution_plan(payload)
+        if not execution_plan.should_apply or execution_plan.refresh_context is None:
             # 如果資料沒變，只更新選擇狀態
             self.update_selection()
             return
 
-        self._last_server_data_hash = current_data_hash
-        # 新一輪重新整理啟動時先取消舊批次工作，避免等待舊批次下次 token 檢查才停止。
-        self._cancel_server_refresh_job()
-        # 每次啟動新一輪重新整理都遞增 token，使舊輪次排程任務自動失效。
-        self._server_refresh_token += 1
-        refresh_token = self._server_refresh_token
-        previous_selection = self.selected_server
+        self._apply_server_refresh_payload(payload, execution_plan.refresh_context)
+
+    def _build_server_refresh_execution_plan(self, payload: ServerRefreshPayload) -> ServerRefreshExecutionPlan:
+        """決定本次 refresh callback 是否需要進入 UI 套用階段。"""
+        if not self._should_apply_server_refresh(payload):
+            return ServerRefreshExecutionPlan(should_apply=False)
+
+        refresh_context = self._begin_server_refresh_cycle()
+        return ServerRefreshExecutionPlan(should_apply=True, refresh_context=refresh_context)
+
+    def _apply_server_refresh_payload(
+        self, payload: ServerRefreshPayload, refresh_context: ServerRefreshContext
+    ) -> None:
+        """將 payload 套用到 UI Treeview。"""
 
         self._set_server_tree_render_lock(True)
         lock_handed_off = False
         try:
-            server_order: list[str] = []
-            server_rows: dict[str, tuple[Any, ...]] = {}
-            for row in server_data:
-                if not row:
-                    continue
-                name = str(row[0])
-                normalized = self._normalize_server_row(row)
-                server_order.append(name)
-                server_rows[name] = normalized
-
             self._apply_server_tree_diff(
-                server_order=server_order,
-                server_rows=server_rows,
-                refresh_token=refresh_token,
-                previous_selection=previous_selection,
+                server_order=payload.server_order,
+                server_rows=payload.server_rows,
+                refresh_token=refresh_context.refresh_token,
+                previous_selection=refresh_context.previous_selection,
             )
             # _apply_server_tree_diff 會在同步收尾或非同步收尾時自行解鎖。
             lock_handed_off = True
@@ -1568,10 +1713,26 @@ class ManageServerFrame(ctk.CTkFrame):
 
         # 如果沒有備份路徑，詢問使用者
         if not backup_location:
-            parent_backup_location = filedialog.askdirectory(title="選擇備份儲存位置", initialdir=str(Path.home()))
+            was_auto_refresh_enabled = bool(getattr(self, "_auto_refresh_enabled", True))
+            if was_auto_refresh_enabled:
+                self.set_auto_refresh_enabled(False)
+            try:
+                parent_backup_location = filedialog.askdirectory(
+                    title="選擇備份儲存位置",
+                    initialdir=str(Path.home()),
+                )
+            finally:
+                if was_auto_refresh_enabled:
+                    self.set_auto_refresh_enabled(True)
 
             if not parent_backup_location:
                 return  # 使用者取消選擇
+
+            # 重新取得最新 config，避免備份對話框期間 refresh 造成舊物件被替換
+            config = self.server_manager.servers.get(server_name)
+            if not config:
+                UIUtils.show_error("錯誤", f"找不到伺服器設定: {server_name}", self.winfo_toplevel())
+                return
 
             # 建立伺服器專用的備份資料夾
             backup_folder_name = f"{server_name}_backup"
@@ -1590,7 +1751,13 @@ class ManageServerFrame(ctk.CTkFrame):
 
             # 儲存備份路徑到配置檔案（儲存的是伺服器專用資料夾）
             config.backup_path = backup_location
-            self.server_manager.write_servers_config()
+            if not self.server_manager.write_servers_config():
+                UIUtils.show_error(
+                    "錯誤",
+                    "寫入備份路徑失敗，請稍後再試。",
+                    self.winfo_toplevel(),
+                )
+                return
             is_new_backup_path = True  # 標記為新設定的路徑
 
             # 立即重新整理一次清單以更新備份狀態（不重新載入配置，因為剛剛才存檔）

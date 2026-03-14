@@ -6,7 +6,7 @@
 import tkinter as tk
 import traceback
 from tkinter import ttk
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import customtkinter as ctk
 
@@ -86,7 +86,7 @@ class ServerPropertiesDialog:
         "query.port": (1, 65534),
         "entity-broadcast-range-percentage": (10, 1000),
         "network-compression-threshold": (-1, 10000),
-        "max-tick-time": (1000, 600000),
+        "max-tick-time": (-1, 600000),
         "rate-limit": (0, 1000),
         "player-idle-timeout": (0, 1440),
     }
@@ -267,6 +267,41 @@ class ServerPropertiesDialog:
         except Exception as e:
             logger.exception(f"排程 scrollregion 更新失敗: {e}")
 
+    @staticmethod
+    def _get_mousewheel_units(delta: int) -> int:
+        if delta == 0:
+            return 0
+        units = int(-delta / 120)
+        if units == 0:
+            return -1 if delta > 0 else 1
+        return units
+
+    def _scroll_canvas_with_mousewheel(self, event, target_canvas: tk.Canvas):
+        units = self._get_mousewheel_units(int(getattr(event, "delta", 0)))
+        if units == 0:
+            return None
+        target_canvas.yview_scroll(units, "units")
+        return "break"
+
+    def _bind_widget_mousewheel_to_canvas(self, widget: Any, target_canvas: tk.Canvas) -> None:
+        try:
+            if not widget.winfo_exists():
+                return
+        except Exception:
+            return
+
+        try:
+            widget.bind(
+                "<MouseWheel>",
+                lambda event, canvas=target_canvas: self._scroll_canvas_with_mousewheel(event, canvas),
+                add="+",
+            )
+        except Exception:
+            return
+
+        for child in widget.winfo_children():
+            self._bind_widget_mousewheel_to_canvas(child, target_canvas)
+
     def _compute_property_render_batch_size(self, total_props: int) -> int:
         """計算屬性控制項分段建構的批次大小。"""
         scale = max(1.0, float(FontManager.get_scale_factor()))
@@ -332,6 +367,7 @@ class ServerPropertiesDialog:
 
         canvas = self._tab_canvases.get(tab_name)
         if canvas is not None:
+            self._bind_widget_mousewheel_to_canvas(content_frame, canvas)
             self._schedule_scrollregion_update(canvas)
 
         if end_index < total_props:
@@ -416,16 +452,11 @@ class ServerPropertiesDialog:
             scrollbar.pack(side="right", fill="y")
 
             def _on_mousewheel(event, target_canvas=canvas):
-                delta = int(getattr(event, "delta", 0))
-                if delta == 0:
-                    return
-                units = int(-delta / 120)
-                if units == 0:
-                    units = -1 if delta > 0 else 1
-                target_canvas.yview_scroll(units, "units")
+                return self._scroll_canvas_with_mousewheel(event, target_canvas)
 
             canvas.bind("<MouseWheel>", _on_mousewheel)
             scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+            self._bind_widget_mousewheel_to_canvas(tab_frame, canvas)
 
             self._tab_content_frames[tab_name] = scrollable_frame
             self._tab_canvases[tab_name] = canvas
@@ -622,18 +653,16 @@ class ServerPropertiesDialog:
         """收集所有屬性值（含尚未建構的分頁）。"""
         properties: dict[str, str] = {}
         for prop_name, value in self._property_value_cache.items():
-            cleaned = str(value).strip()
-            if cleaned:
-                properties[prop_name] = cleaned
+            properties[prop_name] = "" if value is None else str(value)
 
         for prop_name, var in self.property_vars.items():
-            value = var.get().strip()
-            if value:
-                properties[prop_name] = value
-                self._property_value_cache[prop_name] = value
-            else:
-                properties.pop(prop_name, None)
-                self._property_value_cache.pop(prop_name, None)
+            value = var.get()
+            properties[prop_name] = value
+            self._property_value_cache[prop_name] = value
+
+        logger.debug(
+            f"收集 server.properties 表單值完成: server={self.server_config.name}, property_count={len(properties)}"
+        )
 
         return properties
 
@@ -650,6 +679,7 @@ class ServerPropertiesDialog:
                 return
 
             # 更新伺服器屬性
+            logger.info(f"開始儲存 server.properties 對話框內容: server={self.server_config.name}")
             success = self.server_manager.update_server_properties(self.server_config.name, properties)
 
             if success:

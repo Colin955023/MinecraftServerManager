@@ -160,10 +160,7 @@ class ServerManager:
         max_memory = config.memory_max_mb
         min_memory = config.memory_min_mb
 
-        # 構建 Java 記憶體參數
-        memory_args = f"-Xmx{max_memory}M"
         if min_memory:
-            memory_args = f"-Xmx{max_memory}M -Xms{min_memory}M"
             memory_display = (
                 f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
             )
@@ -175,7 +172,6 @@ class ServerManager:
 
         # 除錯訊息
         logger.debug(f"Java 命令列表: {java_cmd_list}")
-        logger.debug(f"記憶體參數: {memory_args}")
 
         # 處理命令列表，轉換為批次檔相容格式
         # 確保路徑使用絕對路徑並加上引號
@@ -260,6 +256,7 @@ class ServerManager:
         try:
             config = self.servers.get(server_name)
             if not config:
+                logger.error(f"update_server_properties 找不到伺服器設定: {server_name}")
                 return False
             # 取得 server_path
             server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
@@ -270,11 +267,30 @@ class ServerManager:
             original = ServerPropertiesHelper.load_properties(properties_path)
             # 合併：只覆蓋有變動的欄位
             merged = {**original, **properties}
+            changed_keys = sorted(key for key, value in merged.items() if original.get(key) != value)
+            logger.info(
+                f"準備儲存 server.properties: server={server_name}, path={properties_path}, changed_keys={len(changed_keys)}"
+            )
             # 寫回
-            ServerPropertiesHelper.save_properties(properties_path, merged)
+            if not ServerPropertiesHelper.save_properties(properties_path, merged):
+                logger.error(f"儲存 server.properties 失敗: server={server_name}, path={properties_path}")
+                return False
+
+            try:
+                mtime = properties_path.stat().st_mtime
+            except OSError:
+                mtime = time.time()
+            self._properties_cache[server_name] = (mtime, dict(merged))
+
             # 同步更新記憶體中的配置並保存到 servers_config.json
             config.properties = merged
-            self.write_servers_config()
+            if not self.write_servers_config():
+                logger.error(f"儲存 servers_config.json 失敗: server={server_name}")
+                return False
+
+            logger.info(
+                f"server.properties 與 servers_config.json 已同步保存: server={server_name}, changed_keys={changed_keys}"
+            )
             return True
         except Exception as e:
             logger.exception(f"update_server_properties 儲存失敗: {e}")
@@ -492,6 +508,7 @@ class ServerManager:
                         logger.error(f"保存伺服器配置失敗: 無法序列化類型 {type(config).__name__} ({name})")
                         return False
 
+                logger.debug(f"寫入 servers_config.json: path={self.config_file}, server_count={len(data)}")
                 if not PathUtils.save_json_if_changed(self.config_file, data):
                     logger.error("保存伺服器配置失敗: 無法寫入文件")
                     return False
@@ -604,21 +621,37 @@ class ServerManager:
 
             cached_mtime, cached_props = self._properties_cache.get(server_name, (0, None))
             if cached_props is not None and mtime == cached_mtime:
+                logger.debug(f"使用 server.properties 快取: server={server_name}, path={properties_file}")
                 return cached_props
 
             # 使用統一的載入方法
             properties = ServerPropertiesHelper.load_properties(properties_file)
             self._properties_cache[server_name] = (mtime, properties)
+            logger.debug(
+                f"重新載入 server.properties: server={server_name}, path={properties_file}, property_count={len(properties)}"
+            )
 
-            # 更新配置中的屬性
-            config.properties = properties
-            self.write_servers_config()
+            # 僅在屬性內容變更時同步回寫設定檔，避免高頻查詢造成不必要磁碟寫入。
+            existing_properties = dict(getattr(config, "properties", {}) or {})
+            if existing_properties != properties:
+                config.properties = dict(properties)
+                self.write_servers_config()
 
             return properties
 
         except Exception as e:
             logger.exception(f"讀取 server.properties 失敗: {e}")
             return {}
+
+    def invalidate_server_properties_cache(self, server_name: str | None = None) -> None:
+        """清除 server.properties 快取。
+
+        傳入 server_name 時僅清除單一伺服器，否則清除全部。
+        """
+        if server_name is None:
+            self._properties_cache.clear()
+            return
+        self._properties_cache.pop(server_name, None)
 
     def is_server_running(self, server_name: str) -> bool:
         """檢查伺服器是否正在運行"""

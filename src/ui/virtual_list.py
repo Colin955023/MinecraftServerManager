@@ -11,7 +11,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from ..utils import Colors, FontManager, FontSize
+from ..utils import Colors, FontManager, FontSize, UIUtils
 
 
 def _resolve_token_color(color: str | tuple[str, str]) -> str:
@@ -110,6 +110,7 @@ class VirtualList(tk.Frame):
         self.listbox.delete(0, "end")
         if self._items:
             self.listbox.insert("end", *self._items)
+        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=len(self._items))
 
     def _rebuild_view(self, *, preserve_selection: bool) -> None:
         previous_value = self.get_selected_value() if preserve_selection else None
@@ -220,6 +221,7 @@ class VirtualList(tk.Frame):
         self._all_items = []
         self._items = []
         self.listbox.delete(0, "end")
+        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=0)
 
     def item_count(self) -> int:
         return len(self._items)

@@ -30,6 +30,20 @@ class SubprocessUtils:
     CREATE_NO_WINDOW = 0x08000000
 
     @staticmethod
+    def get_hidden_windows_kwargs() -> dict:
+        """回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict。"""
+        if os.name != "nt":
+            return {}
+
+        hidden_kwargs: dict = {"creationflags": SubprocessUtils.CREATE_NO_WINDOW}
+        if SubprocessUtils.STARTUPINFO is not None:
+            startupinfo = SubprocessUtils.STARTUPINFO()
+            startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
+            hidden_kwargs["startupinfo"] = startupinfo
+        return hidden_kwargs
+
+    @staticmethod
     def _validate_cmd(cmd: Iterable[str]) -> list[str]:
         if not isinstance(cmd, (list, tuple)):
             raise TypeError("cmd 必須是由字串組成的 list 或 tuple")
@@ -93,8 +107,8 @@ class SubprocessUtils:
         """
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_NO_WINDOW = 0x08000000
-        creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
+        creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | hidden_kwargs.pop("creationflags", 0)
 
         return SubprocessUtils.popen_checked(
             cmd,
@@ -104,4 +118,5 @@ class SubprocessUtils:
             stderr=SubprocessUtils.DEVNULL,
             close_fds=True,
             creationflags=creation_flags,
+            **hidden_kwargs,
         )

@@ -11,6 +11,7 @@ import shutil
 import threading
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -132,11 +133,25 @@ class PathUtils:
             return False
 
     @staticmethod
-    def safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
-        """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞"""
+    def safe_extract_zip(
+        zip_path: Path,
+        dest_dir: Path,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> None:
+        """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞。
+
+        progress_callback 會收到 (已解壓位元組數, 總位元組數)。
+        """
         dest_dir = dest_dir.resolve()
         with zipfile.ZipFile(zip_path, "r") as zf:
-            for member in zf.infolist():
+            members = zf.infolist()
+            total_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
+            extracted_bytes = 0
+
+            if progress_callback is not None:
+                progress_callback(0, total_bytes)
+
+            for member in members:
                 member_path = dest_dir / member.filename
                 if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
                     raise ValueError(f"Zip File attempted path traversal: {member.filename}")
@@ -147,7 +162,17 @@ class PathUtils:
 
                 member_path.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member, "r") as source, open(member_path, "wb") as target:
-                    shutil.copyfileobj(source, target)
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+                        extracted_bytes += len(chunk)
+                        if progress_callback is not None and total_bytes > 0:
+                            progress_callback(extracted_bytes, total_bytes)
+
+            if progress_callback is not None:
+                progress_callback(total_bytes if total_bytes > 0 else extracted_bytes, total_bytes)
 
     @staticmethod
     def get_project_root() -> Path:
@@ -330,11 +355,59 @@ class PathUtils:
             return False
 
     @staticmethod
-    def copy_dir(src: Path, dst: Path, ignore_patterns: list[str] | None = None) -> bool:
-        """複製目錄"""
+    def copy_dir(
+        src: Path,
+        dst: Path,
+        ignore_patterns: list[str] | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> bool:
+        """複製目錄。
+
+        progress_callback 會收到 (已複製檔案數, 總檔案數)。
+        """
         try:
+            if not src.exists() or not src.is_dir():
+                return False
+
             ignore = shutil.ignore_patterns(*ignore_patterns) if ignore_patterns else None
-            shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True)
+
+            def _walk_entries() -> list[tuple[Path, list[str], list[str]]]:
+                entries: list[tuple[Path, list[str], list[str]]] = []
+                for root, dirs, files in os.walk(src, topdown=True):
+                    root_path = Path(root)
+                    if ignore is not None:
+                        ignored = set(ignore(str(root_path), [*dirs, *files]))
+                        dirs[:] = [name for name in dirs if name not in ignored]
+                        files = [name for name in files if name not in ignored]
+                    entries.append((root_path, list(dirs), list(files)))
+                return entries
+
+            entries = _walk_entries()
+            total_files = sum(len(files) for _root, _dirs, files in entries)
+            copied_files = 0
+
+            dst.mkdir(parents=True, exist_ok=True)
+
+            if progress_callback is not None:
+                progress_callback(0, total_files)
+
+            for root_path, dirs, files in entries:
+                relative_root = root_path.relative_to(src)
+                target_root = dst if relative_root == Path(".") else dst / relative_root
+                target_root.mkdir(parents=True, exist_ok=True)
+
+                for dir_name in dirs:
+                    (target_root / dir_name).mkdir(parents=True, exist_ok=True)
+
+                for file_name in files:
+                    shutil.copy2(root_path / file_name, target_root / file_name)
+                    copied_files += 1
+                    if progress_callback is not None and total_files > 0:
+                        progress_callback(copied_files, total_files)
+
+            if progress_callback is not None:
+                progress_callback(copied_files, total_files)
+
             return True
         except OSError:
             return False

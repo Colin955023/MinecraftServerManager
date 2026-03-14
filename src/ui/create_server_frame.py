@@ -716,24 +716,23 @@ class CreateServerFrame(ctk.CTkFrame):
         if loader_type == "Vanilla":
             self.loader_version_combo.configure(values=["無"], state="disabled")
             self.loader_version_combo.set("無")
-            self.loader_version_var.set("無")  # 同時更新變數
-        else:
-            # 確保 fabric/forge 切換時載入器版本選單變成可用狀態
-            # 先設定為可用狀態，讓使用者看到載入中的訊息
-            self.loader_version_combo.configure(state="readonly")
-            # 防止重複載入
-            if not mc_version:
-                return
-            current_key = f"{loader_type}_{mc_version}"
-            if hasattr(self, "_loading_key") and self._loading_key == current_key:
-                return
-            self._loading_key = current_key
-            # 在背景執行緒中載入載入器版本
-            threading.Thread(
-                target=self.load_loader_versions,
-                args=(loader_type, mc_version),
-                daemon=True,
-            ).start()
+            self.loader_version_var.set("無")
+            return
+
+        self.loader_version_combo.configure(state="readonly")
+        # 防止重複載入
+        if not mc_version:
+            return
+        current_key = f"{loader_type}_{mc_version}"
+        if hasattr(self, "_loading_key") and self._loading_key == current_key:
+            return
+        self._loading_key = current_key
+        # 在背景執行緒中載入載入器版本
+        threading.Thread(
+            target=self.load_loader_versions,
+            args=(loader_type, mc_version),
+            daemon=True,
+        ).start()
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
         """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）"""
@@ -967,7 +966,12 @@ class CreateServerFrame(ctk.CTkFrame):
                     f"下載伺服器檔案失敗: {e}\n{traceback.format_exc()}",
                     "CreateServerFrame",
                 )
-                UIUtils.show_error("錯誤", f"下載伺服器檔案失敗: {e}", self.winfo_toplevel())
+                error_message = str(e)
+
+                def _show_download_error() -> None:
+                    UIUtils.show_error("錯誤", f"下載伺服器檔案失敗: {error_message}", self.winfo_toplevel())
+
+                self.ui_queue.put(_show_download_error)
                 raise
             # 完成
             if not progress_dialog.update_progress(100, "伺服器建立完成！"):
@@ -1010,10 +1014,16 @@ class CreateServerFrame(ctk.CTkFrame):
 
             # 檢查參數 - 分解複雜條件以提高可讀性
             if not self._validate_download_parameters(loader_type, config):
-                UIUtils.show_error(
-                    "下載流程參數異常",
-                    f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
-                    topmost=True,
+                self.ui_queue.put(
+                    lambda: UIUtils.show_error(
+                        "下載流程參數異常",
+                        (
+                            f"loader_type={loader_type}\n"
+                            f"mc={config.minecraft_version}\n"
+                            f"loader_ver={config.loader_version}"
+                        ),
+                        topmost=True,
+                    )
                 )
                 result[0] = False
                 return
@@ -1044,7 +1054,11 @@ class CreateServerFrame(ctk.CTkFrame):
                 f"download_path: {download_path}\n"
                 f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
             )
-            UIUtils.show_error("下載失敗", msg, topmost=True)
+
+            def _show_download_failed_message() -> None:
+                UIUtils.show_error("下載失敗", msg, topmost=True)
+
+            self.ui_queue.put(_show_download_failed_message)
             logger.bind(component="").error(
                 f"server_path: {server_path}\nconfig: {config}\n{traceback.format_exc()}",
                 "CreateServerFrame",

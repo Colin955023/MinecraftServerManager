@@ -51,14 +51,20 @@ class ServerDetectionVersionUtils:
     def standardize_loader_type(loader_type: str, loader_version: str = "") -> str:
         """標準化載入器類型：將輸入轉為小寫並進行基本推斷。"""
         lt_low = loader_type.lower()
-        if lt_low not in ["unknown", "未知"]:
-            return lt_low
+        if lt_low in ["fabric", "forge", "vanilla", "原版"]:
+            return "vanilla" if lt_low in ["vanilla", "原版"] else lt_low
+        if lt_low in ["unknown", "未知"]:
+            if loader_version and loader_version.replace(".", "").isdigit():
+                return "forge"
+            if loader_version and "fabric" in loader_version.lower():
+                return "fabric"
+            return "unknown"
 
-        if loader_version and loader_version.replace(".", "").isdigit():
-            return "forge"
-        if loader_version and "fabric" in loader_version.lower():
-            return "fabric"
-        return "vanilla"
+        if "vanilla" in lt_low or "official" in lt_low:
+            return "vanilla"
+        if lt_low in ["fabric", "forge"]:
+            return lt_low
+        return "unknown"
 
     @staticmethod
     def normalize_mc_version(mc_version) -> str:
@@ -117,14 +123,16 @@ class ServerDetectionVersionUtils:
     def detect_loader_from_text(text: str) -> str:
         """從文本中偵測載入器類型。"""
         if not text:
-            return "vanilla"
+            return "unknown"
 
         text_lower = text.lower()
-        if "fabric" in text_lower:
+        if re.search(r"\bvanilla\b|\bofficial\b|\bminecraft server\b", text_lower):
+            return "vanilla"
+        if re.search(r"\bfabric\b", text_lower):
             return "fabric"
-        if "forge" in text_lower:
+        if re.search(r"\bforge\b", text_lower):
             return "forge"
-        return "vanilla"
+        return "unknown"
 
     @staticmethod
     @lru_cache(maxsize=128)

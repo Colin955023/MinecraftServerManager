@@ -23,6 +23,10 @@ from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
 logger = get_logger().bind(component="ModManager")
 
+MODRINTH_HASH_ALGORITHM = "sha512"
+MODRINTH_PROJECT_DETAIL_URL_TEMPLATE = "https://api.modrinth.com/v2/project/{project_id}"
+MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
+
 
 # ====== 模組狀態與平台定義 ======
 class ModStatus(Enum):
@@ -53,12 +57,15 @@ class LocalModInfo:
     author: str = ""
     platform: ModPlatform = ModPlatform.LOCAL
     platform_id: str = ""
+    platform_slug: str = ""
     status: ModStatus = ModStatus.ENABLED
     file_path: str = ""
     download_url: str = ""
     homepage_url: str = ""
     dependencies: list[str] | None = None
     file_size: int = 0
+    current_hash: str = ""
+    hash_algorithm: str = ""
 
     def __post_init__(self):
         if self.dependencies is None:
@@ -77,6 +84,7 @@ class ModManager:
         self.server_path = Path(server_path)
         self.mods_path = self.server_path / "mods"
         self.server_config = server_config  # 儲存伺服器配置
+        self._modrinth_identity_cache: dict[str, tuple[str, str]] = {}
 
         # 確保目錄存在
         self.mods_path.mkdir(exist_ok=True)
@@ -89,6 +97,7 @@ class ModManager:
     # 掃描 mods 目錄中的模組檔案
     def scan_mods(self) -> list[LocalModInfo]:
         """掃描 mods 目錄中的模組檔案並建立模組資訊列表"""
+        self.index_manager.cleanup_stale_entries()
         mods = []
         files_to_scan = []
 
@@ -97,12 +106,16 @@ class ModManager:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"):
                 files_to_scan.append(file_path)
 
+        files_to_scan.sort(key=lambda path: path.name.lower())
+
         with ThreadPoolExecutor(max_workers=min(6, len(files_to_scan) or 1)) as executor:
             results = executor.map(self.create_mod_info_from_file, files_to_scan)
 
         for mod_info in results:
             if mod_info:
                 mods.append(mod_info)
+
+        self.index_manager.flush()
 
         return mods
 
@@ -111,6 +124,7 @@ class ModManager:
         try:
             # 解析基本檔案資訊
             filename, enabled, base_name = self._parse_file_info(file_path)
+            cached_provider = self.index_manager.get_cached_provider_metadata(file_path) or {}
 
             # 初始化模組資料字典
             mod_data = {
@@ -148,7 +162,19 @@ class ModManager:
             self._apply_server_config_overrides(mod_data)
 
             # 偵測平台資訊
-            platform, platform_id = self._detect_platform_info(file_path, mod_data["name"], base_name, filename)
+            platform, platform_id, platform_slug = self._resolve_platform_info(
+                file_path,
+                mod_data["name"],
+                base_name,
+                filename,
+                cached_provider,
+            )
+            current_hash = ""
+            hash_algorithm = ""
+            if platform == ModPlatform.MODRINTH and platform_id:
+                current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_HASH_ALGORITHM)
+                hash_algorithm = MODRINTH_HASH_ALGORITHM if current_hash else ""
+
             return LocalModInfo(
                 id=base_name,
                 name=mod_data["name"],
@@ -160,13 +186,96 @@ class ModManager:
                 author=mod_data["author"],
                 platform=platform,
                 platform_id=platform_id,
+                platform_slug=platform_slug,
                 status=ModStatus.ENABLED if enabled else ModStatus.DISABLED,
                 file_path=str(file_path),
                 file_size=file_path.stat().st_size,
+                current_hash=current_hash,
+                hash_algorithm=hash_algorithm,
             )
         except Exception as e:
             logger.error(f"解析模組檔案失敗 {file_path}: {e}", "ModManager")
             return None
+
+    def _resolve_platform_info(
+        self,
+        file_path: Path,
+        name: str,
+        base_name: str,
+        filename: str,
+        cached_provider: dict[str, object] | None = None,
+    ) -> tuple[ModPlatform, str, str]:
+        """優先使用索引中的 provider metadata，必要時才重新偵測。"""
+        provider_data = dict(cached_provider or {})
+        cached_platform = self._normalize_cached_platform(provider_data.get("platform"))
+        cached_project_id = str(provider_data.get("project_id", "") or "").strip()
+        cached_slug = str(provider_data.get("slug", "") or "").strip()
+
+        if cached_platform == ModPlatform.MODRINTH or cached_project_id:
+            return ModPlatform.MODRINTH, cached_project_id, cached_slug
+        if cached_platform == ModPlatform.LOCAL:
+            return ModPlatform.LOCAL, "", cached_slug
+
+        platform, platform_id, platform_slug = self._detect_platform_info(file_path, name, base_name, filename)
+        self.index_manager.cache_provider_metadata(
+            file_path,
+            {
+                "platform": ModPlatform.MODRINTH.value if platform_id else platform.value,
+                "project_id": platform_id,
+                "slug": platform_slug,
+                "project_name": str(name or "").strip(),
+            },
+        )
+        return platform, platform_id, platform_slug
+
+    def _normalize_cached_platform(self, value: object) -> ModPlatform | None:
+        normalized = str(value or "").strip().lower()
+        if normalized == ModPlatform.MODRINTH.value:
+            return ModPlatform.MODRINTH
+        if normalized == ModPlatform.LOCAL.value:
+            return ModPlatform.LOCAL
+        return None
+
+    def _resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
+        """將 slug 或 project id 轉為 canonical Modrinth project id 與 slug。"""
+        clean_identifier = str(identifier or "").strip()
+        if not clean_identifier:
+            return "", ""
+
+        cache_key = clean_identifier.lower()
+        cached_identity = self._modrinth_identity_cache.get(cache_key)
+        if cached_identity is not None:
+            return cached_identity
+
+        headers = {
+            "User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})",
+        }
+        response = HTTPUtils.get_json(
+            MODRINTH_PROJECT_DETAIL_URL_TEMPLATE.format(project_id=clean_identifier),
+            timeout=8,
+            headers=headers,
+            suppress_status_codes={404},
+        )
+        if isinstance(response, dict):
+            project_id = str(response.get("id", "") or clean_identifier).strip()
+            slug = str(response.get("slug", "") or clean_identifier).strip()
+            resolved = (project_id, slug)
+            self._modrinth_identity_cache[cache_key] = resolved
+            return resolved
+
+        platform, project_id, slug = self._search_on_modrinth(clean_identifier, clean_identifier, clean_identifier)
+        if platform == ModPlatform.MODRINTH and project_id:
+            resolved = (project_id, slug or clean_identifier)
+            self._modrinth_identity_cache[cache_key] = resolved
+            return resolved
+
+        resolved = ("", clean_identifier)
+        self._modrinth_identity_cache[cache_key] = resolved
+        return resolved
+
+    def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
+        """公開封裝：將使用者輸入的 Modrinth project id / slug 正規化。"""
+        return self._resolve_modrinth_project_identity(identifier)
 
     def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
         """解析基本檔案資訊與啟用/停用狀態"""
@@ -441,18 +550,23 @@ class ModManager:
         name: str,
         base_name: str,
         filename: str,
-    ) -> tuple[ModPlatform, str]:
+    ) -> tuple[ModPlatform, str, str]:
         """從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID"""
         platform = ModPlatform.LOCAL
         platform_id = ""
+        platform_slug = ""
 
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
                 if "fabric.mod.json" in jar.namelist():
-                    platform_id = self._extract_platform_id_from_fabric(jar)
+                    platform_slug = self._extract_platform_id_from_fabric(jar)
                 elif "META-INF/mods.toml" in jar.namelist():
-                    platform_id = self._extract_platform_id_from_forge(jar)
+                    platform_slug = self._extract_platform_id_from_forge(jar)
 
+                if platform_slug:
+                    resolved_project_id, resolved_slug = self._resolve_modrinth_project_identity(platform_slug)
+                    platform_id = resolved_project_id
+                    platform_slug = resolved_slug or platform_slug
                 if platform_id:
                     platform = ModPlatform.MODRINTH
         except Exception as e:
@@ -460,9 +574,10 @@ class ModManager:
 
         # Fallback: search on Modrinth API
         if platform == ModPlatform.LOCAL or not platform_id:
-            platform, platform_id = self._search_on_modrinth(name, base_name, filename)
+            platform, platform_id, searched_slug = self._search_on_modrinth(name, base_name, filename)
+            platform_slug = searched_slug or platform_slug
 
-        return platform, platform_id
+        return platform, platform_id, platform_slug
 
     def _extract_platform_id_from_fabric(self, jar) -> str:
         """解析 Fabric 模組元資料以提取平台 ID"""
@@ -492,7 +607,7 @@ class ModManager:
             logger.exception(f"解析 mods.toml 取得平台 ID 失敗: {e}")
         return ""
 
-    def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str]:
+    def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
         """在 Modrinth API 上搜索模組"""
         try:
             search_keywords = []
@@ -504,19 +619,25 @@ class ModManager:
                 search_keywords.append(filename)
 
             for keyword in search_keywords:
-                search_url = f"https://api.modrinth.com/v2/search?query={keyword}"
                 headers = {
                     "User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})",
                 }
-                data = HTTPUtils.get_json(search_url, timeout=8, headers=headers)
+                data = HTTPUtils.get_json(
+                    MODRINTH_SEARCH_URL,
+                    timeout=8,
+                    headers=headers,
+                    params={"query": keyword},
+                )
 
                 if data and data.get("hits"):
                     hit = data["hits"][0]
-                    return ModPlatform.MODRINTH, hit.get("slug", "")
+                    project_id = str(hit.get("project_id", "") or "").strip()
+                    slug = str(hit.get("slug", "") or project_id).strip()
+                    return ModPlatform.MODRINTH, project_id or slug, slug
         except Exception as e:
             logger.exception(f"Modrinth 搜尋失敗: {e}")
 
-        return ModPlatform.LOCAL, ""
+        return ModPlatform.LOCAL, "", ""
 
     def _clean_author(self, author: str) -> str:
         """清理作者字串"""
@@ -609,6 +730,81 @@ class ModManager:
         if include_disabled:
             return mods
         return [mod for mod in mods if mod.status == ModStatus.ENABLED]
+
+    def install_remote_mod_file(
+        self,
+        download_url: str,
+        filename: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> Path | None:
+        """下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。"""
+        normalized_url = str(download_url or "").strip()
+        normalized_filename = str(filename or "").strip()
+        if not normalized_url or not normalized_filename:
+            logger.error("安裝遠端模組失敗：download_url 或 filename 為空", "ModManager")
+            return None
+
+        safe_filename = Path(normalized_filename).name
+        if not safe_filename.lower().endswith(".jar"):
+            logger.error(f"安裝遠端模組失敗：不支援的檔案類型 {safe_filename}", "ModManager")
+            return None
+
+        try:
+            self.mods_path.mkdir(parents=True, exist_ok=True)
+            target_path = self.mods_path / safe_filename
+            logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}", "ModManager")
+            downloaded = HTTPUtils.download_file(
+                normalized_url,
+                str(target_path),
+                progress_callback=progress_callback,
+            )
+            if not downloaded:
+                logger.warning(f"遠端模組下載未完成: {safe_filename}", "ModManager")
+                return None
+
+            if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
+                self.on_mod_list_changed()
+            logger.info(f"遠端模組安裝完成: {safe_filename}", "ModManager")
+            return target_path
+        except Exception as e:
+            logger.exception(f"安裝遠端模組失敗 {safe_filename}: {e}")
+            return None
+
+    def replace_local_mod_file(
+        self,
+        local_mod: LocalModInfo,
+        download_url: str,
+        filename: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> Path | None:
+        """以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。"""
+        if local_mod is None:
+            logger.error("更新本地模組失敗：local_mod 為空", "ModManager")
+            return None
+
+        installed_path = self.install_remote_mod_file(download_url, filename, progress_callback=progress_callback)
+        if installed_path is None:
+            return None
+
+        final_path = installed_path
+        try:
+            if local_mod.status == ModStatus.DISABLED and installed_path.suffix == ".jar":
+                disabled_path = installed_path.with_name(installed_path.name + ".disabled")
+                disabled_path.unlink(missing_ok=True)
+                installed_path.rename(disabled_path)
+                final_path = disabled_path
+
+            old_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
+            old_path = Path(old_path_raw).resolve(strict=False) if old_path_raw else None
+            if old_path and old_path != final_path.resolve(strict=False) and old_path.exists():
+                old_path.unlink(missing_ok=True)
+
+            if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
+                self.on_mod_list_changed()
+            return final_path
+        except Exception as e:
+            logger.exception(f"更新本地模組失敗 {getattr(local_mod, 'filename', 'unknown')}: {e}")
+            return None
 
     def export_mod_list(self, format_type: str = "text") -> str:
         """匯出模組列表，支援 text、json、html 格式"""

@@ -27,6 +27,22 @@ logger = get_logger().bind(component="WindowPreferencesDialog")
 class WindowPreferencesDialog:
     """視窗偏好設定對話框"""
 
+    def _get_live_main_window_size(self) -> tuple[int, int] | None:
+        """優先取得目前主視窗真實尺寸；若視窗尚未完成佈局則回傳 None。"""
+        if not self.parent:
+            return None
+
+        try:
+            self.parent.update_idletasks()
+            width = self.parent.winfo_width()
+            height = self.parent.winfo_height()
+            if WindowManager._is_valid_main_window_size(width, height):
+                return width, height
+        except Exception as e:
+            logger.debug(f"讀取目前主視窗大小失敗，將回退到已儲存設定: {e}")
+
+        return None
+
     def __init__(self, parent, on_settings_changed: Callable | None = None):
         self.parent = parent
         self.on_settings_changed = on_settings_changed
@@ -136,10 +152,15 @@ class WindowPreferencesDialog:
         # 當前視窗資訊
         screen_info = WindowManager.get_screen_info(self.dialog)
         current_settings = self.settings.get_main_window_settings()
+        live_size = self._get_live_main_window_size()
+        current_width, current_height = live_size or (
+            current_settings.get("width", 1200),
+            current_settings.get("height", 800),
+        )
 
         info_text = (
             f"目前螢幕解析度: {screen_info['width']} × {screen_info['height']}\n"
-            f"目前主視窗大小: {current_settings.get('width', 1200)} × {current_settings.get('height', 800)}"
+            f"目前主視窗大小: {current_width} × {current_height}"
         )
 
         ctk.CTkLabel(

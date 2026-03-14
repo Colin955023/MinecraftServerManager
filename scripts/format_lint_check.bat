@@ -21,7 +21,7 @@ uv run ruff format src tests quick_test.py
 if errorlevel 1 exit /b 1
 
 echo === Ruff Lint ===
-uv run ruff check src tests quick_test.py
+uv run ruff check src tests quick_test.py --unsafe-fixes --fix
 if errorlevel 1 exit /b 1
 echo.
 
@@ -36,11 +36,11 @@ if errorlevel 1 exit /b 1
 echo.
 
 echo === Run Tests (smoke) ===
-uv run --isolated pytest -m smoke -q
+uv run pytest -m smoke -q
 if errorlevel 1 exit /b 1
 
 echo === Run Tests (integration) ===
-uv run --isolated pytest -m integration -q
+uv run pytest -m integration -q
 if errorlevel 1 exit /b 1
 echo.
 echo ========================================================

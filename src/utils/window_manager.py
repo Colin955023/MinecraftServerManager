@@ -5,6 +5,7 @@ Window Manager Module
 Provides window management functionality for dynamic sizing, positioning, and DPI support
 """
 
+import contextlib
 import time
 import tkinter as tk
 from typing import Any
@@ -18,6 +19,41 @@ class WindowManager:
     """Windows 專用視窗管理器類別，處理動態大小調整、位置管理和 DPI 縮放"""
 
     _last_debug_time: float = 0.0
+    _last_invalid_size_log_time: float = 0.0
+    _suppressed_invalid_size_logs: int = 0
+    # 主視窗最小可追蹤尺寸門檻：
+    # save_main_window_state 會先透過 _is_valid_main_window_size 驗證，
+    # 驗證失敗時由 _log_invalid_main_window_size 控制節流紀錄。
+    _min_tracked_width: int = 1000
+    _min_tracked_height: int = 700
+
+    @staticmethod
+    def _log_invalid_main_window_size(width: int, height: int) -> None:
+        """記錄未通過 `_is_valid_main_window_size` 的主視窗尺寸。
+
+        此方法僅負責節流記錄，避免視窗連續觸發 configure 事件時刷爆日誌。
+        """
+        now = time.time()
+        if now - WindowManager._last_invalid_size_log_time < 2.0:
+            WindowManager._suppressed_invalid_size_logs += 1
+            return
+
+        logger_instance = get_logger().bind(component="WindowState")
+        if WindowManager._suppressed_invalid_size_logs > 0:
+            logger_instance.debug(f"已省略 {WindowManager._suppressed_invalid_size_logs} 筆無效主視窗尺寸訊息")
+            WindowManager._suppressed_invalid_size_logs = 0
+
+        logger_instance.debug(f"略過儲存無效主視窗尺寸: {width}x{height}")
+        WindowManager._last_invalid_size_log_time = now
+
+    @staticmethod
+    def _is_valid_main_window_size(width: int, height: int) -> bool:
+        """檢查主視窗尺寸是否為可持久化的有效值。
+
+        判斷依據為 `_min_tracked_width` / `_min_tracked_height`，
+        用來排除初始化與佈局過程中的暫態尺寸。
+        """
+        return width >= WindowManager._min_tracked_width and height >= WindowManager._min_tracked_height
 
     @staticmethod
     def get_screen_info(window=None) -> dict[str, Any]:
@@ -160,7 +196,7 @@ class WindowManager:
 
         try:
             window.geometry(f"{width}x{height}+{x}+{y}")
-            window.minsize(1000, 700)  # 設定最小尺寸
+            window.minsize(WindowManager._min_tracked_width, WindowManager._min_tracked_height)
 
             if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
                 from .ui_utils import UIUtils
@@ -177,7 +213,7 @@ class WindowManager:
         except Exception as e:
             logger.exception(f"設定主視窗失敗: {e}")
             window.geometry("1200x800")
-            window.minsize(1000, 700)
+            window.minsize(WindowManager._min_tracked_width, WindowManager._min_tracked_height)
 
     @staticmethod
     def save_main_window_state(window) -> None:
@@ -188,6 +224,7 @@ class WindowManager:
             return
 
         try:
+            window.update_idletasks()
             is_maximized = window.state() == "zoomed"
 
             if window.state() == "iconic":
@@ -198,9 +235,10 @@ class WindowManager:
                 x = window.winfo_x()
                 y = window.winfo_y()
 
-                # 僅在視窗有實際大小時儲存
-                if width > 1 and height > 1:
+                if WindowManager._is_valid_main_window_size(width, height):
                     settings.set_main_window_settings(width, height, x, y, False)
+                else:
+                    WindowManager._log_invalid_main_window_size(width, height)
             else:
                 current_settings = settings.get_main_window_settings()
                 settings.set_main_window_settings(
@@ -240,8 +278,8 @@ class WindowManager:
         width = int(width * dpi_scale)
         height = int(height * dpi_scale)
 
-        max_width = int(screen_info["usable_width"] * 0.8)
-        max_height = int(screen_info["usable_height"] * 0.8)
+        max_width = max(320, int(screen_info["usable_width"] - 32))
+        max_height = max(240, int(screen_info["usable_height"] - 32))
         width = min(width, max_width)
         height = min(height, max_height)
 
@@ -276,6 +314,9 @@ class WindowManager:
 
         def on_configure(event):
             if event.widget == window:
+                with contextlib.suppress(Exception):
+                    if not window.winfo_viewable():
+                        return
                 UIUtils.schedule_debounce(
                     window,
                     "_save_timer",
@@ -285,6 +326,9 @@ class WindowManager:
                 )
 
         def on_state_change(_event):
+            with contextlib.suppress(Exception):
+                if not window.winfo_viewable():
+                    return
             WindowManager.save_main_window_state(window)
 
         window.bind("<Configure>", on_configure)
