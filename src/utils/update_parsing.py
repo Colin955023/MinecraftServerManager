@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """更新資訊解析工具
 集中處理版本字串、Release 資訊與更新資產選擇邏輯。
 """
@@ -6,11 +5,8 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar
-
 from packaging.version import InvalidVersion, Version
-
-from .http_utils import HTTPUtils
-from .logger import get_logger
+from . import HTTPUtils, get_logger
 
 logger = get_logger().bind(component="UpdateParsing")
 
@@ -29,8 +25,6 @@ class UpdateParsing:
             if not isinstance(version_str, str) or not version_str.strip():
                 logger.warning(f"無效的版本字串，version_str={version_str!r}")
                 return None
-
-            # GitHub tag 常見前綴: v1.2.3
             clean = version_str.strip().lstrip("vV")
             return Version(clean)
         except InvalidVersion:
@@ -44,10 +38,9 @@ class UpdateParsing:
         data = HTTPUtils.get_json(url, timeout=15)
         if not data or isinstance(data, dict):
             return None
-
         for rel in data:
             try:
-                if rel and not rel.get("draft") and (include_prerelease or not rel.get("prerelease")):
+                if rel and (not rel.get("draft")) and (include_prerelease or not rel.get("prerelease")):
                     return rel
             except Exception as e:
                 logger.debug(f"檢查 release 資料時發生錯誤: {e}")
@@ -69,7 +62,6 @@ class UpdateParsing:
                 continue
         if not exe_assets:
             return {}
-
         for asset in exe_assets:
             name = (asset.get("name") or "").lower()
             if "setup" in name or "installer" in name:
@@ -105,17 +97,15 @@ class UpdateParsing:
         if portable_mode:
             portable_asset = UpdateParsing.choose_portable_asset(release)
             if portable_asset:
-                return portable_asset, "portable"
-
+                return (portable_asset, "portable")
             installer_asset = UpdateParsing.choose_installer_asset(release)
             if installer_asset:
-                return installer_asset, "installer_fallback"
-            return {}, "none"
-
+                return (installer_asset, "installer_fallback")
+            return ({}, "none")
         installer_asset = UpdateParsing.choose_installer_asset(release)
         if installer_asset:
-            return installer_asset, "installer"
-        return {}, "none"
+            return (installer_asset, "installer")
+        return ({}, "none")
 
     @staticmethod
     def _is_hex_hash(token: str, expected_length: int) -> bool:

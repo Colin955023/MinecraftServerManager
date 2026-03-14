@@ -3,14 +3,11 @@
 """
 
 from __future__ import annotations
-
 import re
 from pathlib import Path
-
 from . import JavaUtils, get_logger
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
-
 __all__ = ["MemoryUtils", "ServerCommands", "ServerOperations"]
 
 
@@ -24,8 +21,7 @@ class MemoryUtils:
             return None
         if not setting_type or setting_type not in ["Xmx", "Xms"]:
             return None
-
-        pattern = rf"-{setting_type}(\d+)([mMgG]?)"
+        pattern = f"-{setting_type}(\\d+)([mMgG]?)"
         match = re.search(pattern, text)
         if match:
             val, unit = match.groups()
@@ -75,22 +71,17 @@ class ServerCommands:
     @staticmethod
     def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
         """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。"""
-        # 延遲匯入以避免模組載入循環
         from . import ServerDetectionUtils
 
         server_path = Path(server_config.path)
         loader_type = str(server_config.loader_type or "").lower()
         memory_min = server_config.memory_min_mb if server_config.memory_min_mb else None
         memory_max = server_config.memory_max_mb if server_config.memory_max_mb else 2048
-
         if memory_min is not None and (memory_max is None or memory_max < memory_min):
             memory_max = memory_min
-
         java_exe = JavaUtils.get_best_java_path(str(getattr(server_config, "minecraft_version", ""))) or "java"
         java_exe = java_exe.replace("javaw.exe", "java.exe")
-
         main_jar = ServerDetectionUtils.find_main_jar(server_path, loader_type, server_config)
-
         if loader_type == "forge" and main_jar.startswith("@"):
             cmd_list = [java_exe, main_jar, "nogui"]
             result_cmd = f"{java_exe} {main_jar} nogui"
@@ -98,28 +89,17 @@ class ServerCommands:
             cmd_list = [java_exe]
             if memory_min:
                 cmd_list.append(f"-Xms{memory_min}M")
-            cmd_list.extend(
-                [
-                    f"-Xmx{memory_max}M",
-                    "-jar",
-                    main_jar,
-                    "nogui",
-                ]
-            )
-
-            if " " in java_exe and not (java_exe.startswith('"') and java_exe.endswith('"')):
+            cmd_list.extend([f"-Xmx{memory_max}M", "-jar", main_jar, "nogui"])
+            if " " in java_exe and (not (java_exe.startswith('"') and java_exe.endswith('"'))):
                 java_exe_quoted = f'"{java_exe}"'
             else:
                 java_exe_quoted = java_exe
-
-            if " " in main_jar and not (main_jar.startswith('"') and main_jar.endswith('"')):
+            if " " in main_jar and (not (main_jar.startswith('"') and main_jar.endswith('"'))):
                 main_jar_quoted = f'"{main_jar}"'
             else:
                 main_jar_quoted = main_jar
-
             memory_args = f"-Xms{memory_min}M -Xmx{memory_max}M" if memory_min else f"-Xmx{memory_max}M"
             result_cmd = f"{java_exe_quoted} {memory_args} -jar {main_jar_quoted} nogui"
-
         if return_list:
             return cmd_list
         return result_cmd

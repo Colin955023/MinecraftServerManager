@@ -3,6 +3,7 @@ setlocal EnableDelayedExpansion
 chcp 65001 >nul
 set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
+set "UV_VENV_CLEAR=1"
 title Minecraft Server Manager - Nuitka Packaging and Installer Build
 cd /d %~dp0..
 
@@ -14,8 +15,8 @@ for /f "delims=" %%A in ('py -c "from src.version_info import APP_VERSION; print
 for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(APP_NAME)" 2^>nul') do set APP_NAME=%%A
 
 if "%APP_VERSION%"=="" (
-    echo [WARN] Could not read APP_VERSION, using default value 1.6.6
-    set APP_VERSION=1.6.6
+    echo [WARN] Could not read APP_VERSION, using default value 1.7.0
+    set APP_VERSION=1.7.0
 ) else (
     echo [SUCCESS] Version: %APP_VERSION%
 )
@@ -33,7 +34,7 @@ if "%CURRENT_DIR%"=="" (
     exit /b 1
 )
 echo [SUCCESS] Current path: !CURRENT_DIR!
-set APP_ID=MinecraftServerManager
+set APP_ID={B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}
 echo [SUCCESS] File ID: %APP_ID%
 echo.
 echo ========================================================
@@ -70,6 +71,12 @@ if errorlevel 1 (
         echo [ERROR] uv installation failed, please install uv manually
         exit /b 1
     )
+    uv --version >nul 2>nul
+    if errorlevel 1 (
+        echo [ERROR] uv installed but command is unavailable in PATH
+        echo [TIP] Add uv to PATH or preinstall uv in the CI environment
+        exit /b 1
+    )
     echo [SUCCESS] uv installation completed
 ) else (
     echo [SUCCESS] uv is ready
@@ -77,10 +84,10 @@ if errorlevel 1 (
 REM Virtual environment handling logic
 REM CI (GitHub Actions) is always a fresh environment; create directly
 REM Local environments should clean old venv manually to ensure a clean state
-if "%CI%"=="true" (
+if /I "%CI%"=="true" (
     echo [CI] Skipping virtual environment cleanup (fresh environment)
-    echo [INFO] Creating virtual environment...
-    uv venv .venv
+    echo [INFO] Creating virtual environment (non-interactive clear mode)...
+    uv venv .venv --clear
 ) else (
     if exist ".venv" (
         echo [INFO] Cleaning old virtual environment...
@@ -89,7 +96,7 @@ if "%CI%"=="true" (
         echo [SUCCESS] Old virtual environment cleaned
     )
     echo [INFO] Creating a fresh virtual environment...
-uv venv .venv --clear
+    uv venv .venv --clear
 )
 
 if errorlevel 1 (
@@ -206,7 +213,7 @@ REM Step 3.5: Organize Nuitka output
 REM ============================================================
 echo [INFO] Organizing build output...
 REM Wait for file locks to release in local environments
-if not "%CI%"=="true" (
+if /I not "%CI%"=="true" (
     timeout /t 2 /nobreak >nul
 )
 
@@ -240,22 +247,44 @@ REM Step 4: Build installer (Inno Setup)
 REM ============================================================
 echo [4/5] Building installer...
 REM Prefer ISCC in PATH; otherwise use default path
-set "ISCC=iscc"
+set "ISCC_PATH="
 where iscc >nul 2>nul
-if %errorlevel% neq 0 (
-    set "ISCC=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-)
+if not errorlevel 1 set "ISCC_PATH=iscc"
 
-if not exist "%ISCC%" (
-    where "%ISCC%" >nul 2>nul
-    if %errorlevel% neq 0 (
-        echo [ERROR] Inno Setup 6 compiler (ISCC.exe) not found
-        echo [TIP] Ensure Inno Setup 6 is installed and added to PATH
-        exit /b 1
-    )
-)
+if defined ISCC_PATH goto ISCC_READY
+if exist "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" set "ISCC_PATH=C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+if defined ISCC_PATH goto ISCC_READY
 
-"%ISCC%" /DAppVersion="%APP_VERSION%" /DAppName="%APP_NAME%" /DAppId="%APP_ID%" "scripts\installer.iss"
+echo [ERROR] Inno Setup 6 compiler (ISCC.exe) not found
+echo [TIP] Ensure Inno Setup 6 is installed and added to PATH
+exit /b 1
+
+:ISCC_READY
+
+REM Ensure Inno Setup Traditional Chinese language file exists (workspace-local)
+set "INNO_LANG_DIR=scripts\inno"
+set "INNO_LANG_FILE=%INNO_LANG_DIR%\ChineseTraditional.isl"
+if exist "%INNO_LANG_FILE%" goto INNO_LANG_READY
+
+echo [INFO] ChineseTraditional.isl not found, downloading...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$langDir = 'scripts\\inno'; if (-not (Test-Path $langDir)) { New-Item -ItemType Directory -Path $langDir -Force | Out-Null }; $url = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl'; $output = Join-Path $langDir 'ChineseTraditional.isl'; Invoke-WebRequest -Uri $url -OutFile $output"
+if errorlevel 1 goto INNO_LANG_DOWNLOAD_FAILED
+if not exist "%INNO_LANG_FILE%" goto INNO_LANG_MISSING
+goto INNO_LANG_READY
+
+:INNO_LANG_DOWNLOAD_FAILED
+echo [ERROR] Failed to download ChineseTraditional.isl
+echo [TIP] Download manually and place it at: scripts\inno\ChineseTraditional.isl
+exit /b 1
+
+:INNO_LANG_MISSING
+echo [ERROR] Missing Inno language file: %INNO_LANG_FILE%
+exit /b 1
+
+:INNO_LANG_READY
+
+echo [INFO] Using ISCC: %ISCC_PATH%
+"%ISCC_PATH%" /DAppVersion="%APP_VERSION%" /DAppName="%APP_NAME%" /DAppId="%APP_ID%" "scripts\installer.iss"
 if errorlevel 1 (
     echo [ERROR] Inno Setup compilation failed
     exit /b 1
@@ -269,11 +298,14 @@ REM ============================================================
 echo [5/5] Building portable package...
 REM Prefer PowerShell Core (pwsh), otherwise use Windows PowerShell
 where pwsh >nul 2>nul
-if not errorlevel 1 (
-    pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
-) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
-)
+if not errorlevel 1 goto RUN_PWSH
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
+goto PORTABLE_DONE
+
+:RUN_PWSH
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
+
+:PORTABLE_DONE
 
 if errorlevel 1 (
     echo [ERROR] Portable package build failed
@@ -288,7 +320,7 @@ echo ========================================================
 echo               Build completed successfully!
 echo ========================================================
 echo.
-echo Installer: dist\%APP_ID%-Setup-%APP_VERSION%.exe
+echo Installer: dist\%APP_NAME%-Setup-%APP_VERSION%.exe
 echo Portable: dist\MinecraftServerManager-v%APP_VERSION%-portable.zip
 echo.
 echo TIP: SHA256 checksum is generated automatically by GitHub Actions

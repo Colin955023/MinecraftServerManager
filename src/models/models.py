@@ -7,7 +7,6 @@ Defines core data structures and configuration classes used in the application
 from dataclasses import dataclass
 
 
-# 模組載入器版本資訊資料類別
 @dataclass
 class LoaderVersion:
     """模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器"""
@@ -19,22 +18,20 @@ class LoaderVersion:
     mc_version: str | None = None
 
 
-# ====== 伺服器配置模型 ======
-# 伺服器完整配置資料類別
 @dataclass
 class ServerConfig:
     """伺服器完整配置資料類別，包含所有伺服器設定和屬性"""
 
-    name: str  # 伺服器名稱
-    minecraft_version: str  # Minecraft 版本
-    loader_type: str  # 模組載入器類型: vanilla, fabric, forge
-    loader_version: str  # 模組載入器版本
-    memory_max_mb: int  # 最大記憶體 (MB) - 必填
-    memory_min_mb: int | None = None  # 最小記憶體 (MB) - 選填
-    path: str = ""  # 伺服器路徑
-    eula_accepted: bool = False  # 是否接受 EULA
-    properties: dict[str, str] | None = None  # 伺服器屬性設定
-    backup_path: str | None = None  # 備份路徑
+    name: str
+    minecraft_version: str
+    loader_type: str
+    loader_version: str
+    memory_max_mb: int
+    memory_min_mb: int | None = None
+    path: str = ""
+    eula_accepted: bool = False
+    properties: dict[str, str] | None = None
+    backup_path: str | None = None
 
     @property
     def memory_mb(self) -> int:

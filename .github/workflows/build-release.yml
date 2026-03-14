@@ -12,44 +12,46 @@ jobs:
   build:
     name: Build and Release
     runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
     permissions:
-      contents: write    # 用於建立 Release 與上傳檔案
-      actions: read      # 保持基本的讀取
+      contents: write
+      actions: read
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           enable-cache: true
 
+      - name: Verify Version Consistency
+        shell: python
+        run: |
+          import os, sys
+          sys.path.append(os.getcwd())
+          from src.version_info.version_info import APP_VERSION
+          tag_ver = os.environ.get("GITHUB_REF_NAME", "")
+          if str(APP_VERSION) not in tag_ver:
+              print(f"::error::Version Mismatch! Code: {APP_VERSION}, Tag: {tag_ver}")
+              sys.exit(1)
+          print(f"Version verified: {APP_VERSION}")
+
       - name: Cache Nuitka compilation
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
         with:
           path: .nuitka-cache
           key: nuitka-${{ runner.os }}-${{ hashFiles('src/**/*.py') }}
           restore-keys: nuitka-${{ runner.os }}-
 
-      - name: Download Inno Setup Chinese Traditional Language File
-        shell: powershell
-        run: |
-          $langDir = 'C:\Program Files (x86)\Inno Setup 6\Languages'
-          if (-not (Test-Path $langDir)) {
-            New-Item -ItemType Directory -Path $langDir -Force | Out-Null
-          }
-          $url = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl'
-          $output = Join-Path $langDir 'ChineseTraditional.isl'
-          Invoke-WebRequest -Uri $url -OutFile $output
-          Write-Host ("Downloaded Chinese Traditional language file to {0}" -f $output)
-          
       - name: Build executable and installer
         shell: cmd
         run: |
@@ -59,167 +61,51 @@ jobs:
       - name: Generate SHA256 checksums
         shell: powershell
         run: |
-          $version = python -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
-          
-          # Installer SHA256
-          $instPath = "dist\MinecraftServerManager-Setup-$version.exe"
-          if (Test-Path $instPath) {
-              $hash = (Get-FileHash -Algorithm SHA256 -Path $instPath).Hash
-              $name = Split-Path $instPath -Leaf
-              "$hash  $name" | Out-File -FilePath "$instPath.sha256" -Encoding ASCII -Force
-              Write-Host "Installer SHA256: $hash"
-          }
-          
-          # Portable ZIP SHA256
-          $zipPath = "dist\MinecraftServerManager-v$version-portable.zip"
-          if (Test-Path $zipPath) {
-              $hash = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash
-              $name = Split-Path $zipPath -Leaf
-              "$hash  $name" | Out-File -FilePath "$zipPath.sha256" -Encoding ASCII -Force
-              Write-Host "Portable ZIP SHA256: $hash"
+          Get-ChildItem "dist\*" -Include "*.exe", "*.zip" | ForEach-Object {
+              $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash
+              "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ASCII -Force
           }
 
       - name: Extract release notes
         id: release_notes
         shell: python
         run: |
-          import os
-          import re
-          import sys
-
-          # Ensure we can import from src
+          import os, re, sys, uuid
           sys.path.append(os.getcwd())
+          from src.version_info.version_info import APP_VERSION
+          content = ""
+          if os.path.exists("CHANGELOG.md"):
+              with open("CHANGELOG.md", "r", encoding="utf-8-sig") as f:
+                  content = f.read()
+          pattern = fr"##\s+\[?{re.escape(str(APP_VERSION))}\]?.*?\n(.*?)(?=\n##\s+|$)"
+          match = re.search(pattern, content, re.S)
+          notes = match.group(1).strip() if match else "Release notes not found in CHANGELOG.md"
           
-          print(f"CWD: {os.getcwd()}")
-
-          try:
-              from src.version_info.version_info import APP_VERSION
-              version = str(APP_VERSION)
-              print(f"Detected version: {version}")
-          except Exception as e:
-              print(f"Error importing version: {e}")
-              version = ""
-
-          tag_name = os.environ.get("GITHUB_REF_NAME", "").strip()
-          tag_version = tag_name
-          version_candidates: list[str] = []
-          for candidate in (version, tag_version):
-              if candidate and candidate not in version_candidates:
-                  version_candidates.append(candidate)
-          print(f"Version candidates: {version_candidates}")
-
-          changelog_file = "CHANGELOG.md"
-          notes = ""
-          
-          if os.path.exists(changelog_file) and version_candidates:
-              try:
-                  # Use utf-8-sig to handle POTENTIAL BOM
-                  with open(changelog_file, "r", encoding="utf-8-sig") as f:
-                      lines = f.readlines()
-                  
-                  print(f"Read {len(lines)} lines from {changelog_file}")
-
-                  capture = False
-                  captured_lines = []
-
-                  def is_target_version_header(line: str) -> bool:
-                      for target_version in version_candidates:
-                          pattern = re.compile(
-                              fr"^##\s+(?:\[{re.escape(target_version)}\]|v?{re.escape(target_version)})(?:\s+|-|$)"
-                          )
-                          if pattern.match(line):
-                              return True
-                      return False
-
-                  # Stop capture when entering next H2 section
-                  next_section_pattern = re.compile(r"^##\s+")
-
-                  for line in lines:
-                      if is_target_version_header(line):
-                          print(f"Found version section: {line.strip()}")
-                          capture = True
-                          continue
-                      
-                      # Stop if we hit the next header
-                      if capture and next_section_pattern.match(line):
-                          print(f"Found next section, stopping capture: {line.strip()}")
-                          break
-                      
-                      if capture:
-                          captured_lines.append(line.rstrip())
-                          
-                  notes = "\n".join(captured_lines).strip()
-                  print(f"Captured release notes length: {len(notes)}")
-              except Exception as e:
-                  print(f"Error reading changelog: {e}")
-
-          if not notes:
-              print("No release notes captured, using default.")
-              notes = "See commits for details"
-          
-          # Write to GITHUB_OUTPUT with explicit utf-8 encoding
-          # Use a unique delimiter to avoid accidental early termination
-          # when release notes contain a standalone "EOF" line.
-          if "GITHUB_OUTPUT" in os.environ:
-              import uuid
-
-              delimiter = f"NOTES_{uuid.uuid4().hex}"
-              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-                  f.write(f"notes<<{delimiter}\n{notes}\n{delimiter}\n")
+          delimiter = f"NOTES_{uuid.uuid4().hex}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"notes<<{delimiter}\n{notes}\n{delimiter}\n")
 
       - name: Create Release and Upload Assets
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 修正重點：將輸出的內容對應至環境變數，避免指令注入漏洞
           RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
         shell: bash
         run: |
-          set -euo pipefail
-          shopt -s nullglob
-
           tag="${GITHUB_REF_NAME}"
-          title="Minecraft Server Manager ${tag}"
           prerelease_args=()
-          # tag 規範：不使用 v 前綴；正式版為純版本號，開發測試版使用 -pre 後綴。
-          # Expected tag naming examples:
-          #   1.6.6
-          #   1.6.6-pre
-          #   1.6.6-pre1
-          # 只有符合「純版本號 + -pre 或 -pre數字」的 tag 會標記為 GitHub pre-release。
-          if [[ "${tag}" =~ ^[0-9]+(\.[0-9]+)*-pre[0-9]*$ ]]; then
-            prerelease_args+=(--prerelease)
-            echo "Detected pre-release tag: ${tag}"
-          fi
+          if [[ "${tag}" =~ -pre ]]; then prerelease_args+=(--prerelease); fi
 
-          assets=(
-            dist/MinecraftServerManager-Setup-*.exe
-            dist/MinecraftServerManager-Setup-*.exe.sha256
-            dist/MinecraftServerManager-v*-portable.zip
-            dist/MinecraftServerManager-v*-portable.zip.sha256
-          )
-
-          if [ ${#assets[@]} -eq 0 ]; then
-            echo "No release assets were found."
-            exit 1
-          fi
-
-          notes_file="$(mktemp)"
-          # 使用環境變數 "$RELEASE_NOTES"
-          printf '%s\n' "$RELEASE_NOTES" > "${notes_file}"
-
-          gh release create "${tag}" "${assets[@]}" \
-            --title "${title}" \
-            --notes-file "${notes_file}" \
+          gh release create "${tag}" dist/* \
+            --title "Minecraft Server Manager ${tag}" \
+            --notes "$RELEASE_NOTES" \
             "${prerelease_args[@]}" \
             --verify-tag
 
       - name: Upload build artifacts
         if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: build-artifacts
-          path: |
-            dist/MinecraftServerManager-Setup-*
-            dist/MinecraftServerManager-v*-portable.zip*
+          path: dist/
           retention-days: 2
