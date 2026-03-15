@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: '3.12'
 
@@ -61,7 +61,7 @@ jobs:
         run: |
           $version = python -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
           
-          # Installer SHA256
+          # 安裝程式 SHA256
           $instPath = "dist\MinecraftServerManager-Setup-$version.exe"
           if (Test-Path $instPath) {
               $hash = (Get-FileHash -Algorithm SHA256 -Path $instPath).Hash
@@ -70,7 +70,7 @@ jobs:
               Write-Host "Installer SHA256: $hash"
           }
           
-          # Portable ZIP SHA256
+          # 可攜版 ZIP SHA256
           $zipPath = "dist\MinecraftServerManager-v$version-portable.zip"
           if (Test-Path $zipPath) {
               $hash = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash
@@ -87,7 +87,7 @@ jobs:
           import re
           import sys
 
-          # Ensure we can import from src
+          # 確保可從 src 匯入模組
           sys.path.append(os.getcwd())
           
           print(f"CWD: {os.getcwd()}")
@@ -113,7 +113,7 @@ jobs:
           
           if os.path.exists(changelog_file) and version_candidates:
               try:
-                  # Use utf-8-sig to handle POTENTIAL BOM
+                  # 使用 utf-8-sig 以處理可能存在的 BOM
                   with open(changelog_file, "r", encoding="utf-8-sig") as f:
                       lines = f.readlines()
                   
@@ -131,7 +131,7 @@ jobs:
                               return True
                       return False
 
-                  # Stop capture when entering next H2 section
+                  # 進入下一個 H2 章節時停止擷取
                   next_section_pattern = re.compile(r"^##\s+")
 
                   for line in lines:
@@ -140,7 +140,7 @@ jobs:
                           capture = True
                           continue
                       
-                      # Stop if we hit the next header
+                      # 若遇到下一個標題就停止
                       if capture and next_section_pattern.match(line):
                           print(f"Found next section, stopping capture: {line.strip()}")
                           break
@@ -157,9 +157,8 @@ jobs:
               print("No release notes captured, using default.")
               notes = "See commits for details"
           
-          # Write to GITHUB_OUTPUT with explicit utf-8 encoding
-          # Use a unique delimiter to avoid accidental early termination
-          # when release notes contain a standalone "EOF" line.
+          # 以明確的 utf-8 編碼寫入 GITHUB_OUTPUT
+          # 使用唯一分隔符，避免 release notes 含獨立 "EOF" 行時提早結束
           if "GITHUB_OUTPUT" in os.environ:
               import uuid
 
@@ -182,7 +181,7 @@ jobs:
           title="Minecraft Server Manager ${tag}"
           prerelease_args=()
           # tag 規範：不使用 v 前綴；正式版為純版本號，開發測試版使用 -pre 後綴。
-          # Expected tag naming examples:
+          # 版本標籤命名範例：
           #   1.6.6
           #   1.6.6-pre
           #   1.6.6-pre1
