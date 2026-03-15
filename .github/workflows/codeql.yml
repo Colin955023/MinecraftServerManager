@@ -33,7 +33,7 @@ jobs:
 
     # --- 針對 uv 的設定區塊 ---
     - name: 安裝 uv
-      uses: astral-sh/setup-uv@4db96194c378173c656ce18a155ffc14a9fc4355
+      uses: astral-sh/setup-uv@e06108dd0aef18192324c70427afc47652e63a82 # v7.5.0
 
     - name: 設定 Python 環境 (使用 uv)
       run: uv python install
@@ -43,7 +43,7 @@ jobs:
     # -----------------------
 
     - name: 初始化 CodeQL
-      uses: github/codeql-action/init@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d
+      uses: github/codeql-action/init@fb0994ef1c058010acf1efccff928b0a83b1ed54 # v4.32.6
       with:
         languages: python
         build-mode: none
@@ -51,6 +51,6 @@ jobs:
         config-file: .github/codeql/codeql-config.yml
 
     - name: 執行 CodeQL 分析
-      uses: github/codeql-action/analyze@b56ba49b26e50535fa1e7f7db0f4f7b4bf65d80d
+      uses: github/codeql-action/analyze@fb0994ef1c058010acf1efccff928b0a83b1ed54 # v4.32.6
       with:
         category: "/language:python"
