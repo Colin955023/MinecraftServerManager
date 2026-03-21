@@ -30,7 +30,7 @@ LanguageDetectionMethod=locale
 SetupLogging=yes
 
 [Languages]
-Name: "chinesetraditional"; MessagesFile: "compiler:Languages\\ChineseTraditional.isl"
+Name: "chinesetraditional"; MessagesFile: "compiler:Default.isl,inno\\ChineseTraditional.isl"
 
 
 [Files]

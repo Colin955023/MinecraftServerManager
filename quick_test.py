@@ -37,7 +37,8 @@ def main() -> int:
     ]
     try:
         completed = subprocess.run(cmd, cwd=project_root, check=False)
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        sys.stderr.write(f"quick_test failed to run pytest via uv: {exc}\n")
         return 1
     return int(completed.returncode)
 

@@ -41,7 +41,7 @@ jobs:
       - name: Download Inno Setup Chinese Traditional Language File
         shell: powershell
         run: |
-          $langDir = 'C:\Program Files (x86)\Inno Setup 6\Languages'
+          $langDir = 'scripts\inno'
           if (-not (Test-Path $langDir)) {
             New-Item -ItemType Directory -Path $langDir -Force | Out-Null
           }
