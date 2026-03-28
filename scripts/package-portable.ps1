@@ -1,7 +1,4 @@
-﻿# Minecraft Server Manager - Portable Package Builder
-
-# 強制 PowerShell 與主控台使用 UTF-8 輸出，避免在由 cmd 呼叫時出現亂碼/重複/跑版
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+﻿[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 $OutputEncoding = [Console]::OutputEncoding
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
 
@@ -24,7 +21,7 @@ try {
 
 # 驗證版本格式，確保不是意外的物件
 if (-not $version -or -not ($version -match '^\d+\.\d+\.\d+')) {
-    $version = '1.7'
+    $version = '1.7.0'
 }
 
 Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan

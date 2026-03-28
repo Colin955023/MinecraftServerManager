@@ -3,7 +3,7 @@ name = "minecraft-server-manager"
 dynamic = ["version"]
 description = "Minecraft 伺服器管理器"
 readme = "README.md"
-requires-python = ">=3.10, <3.13"
+requires-python = ">=3.10, <3.15"
 license = { file = "LICENSE" }
 
 dependencies = [
@@ -37,7 +37,6 @@ dev = [
 minecraft-server-manager = "src.main:main"
 
 [tool.mypy]
-# 預設採用嚴格模式；若新增無型別第三方套件，請在 overrides 逐一放行。
 ignore_missing_imports = false
 check_untyped_defs = true
 

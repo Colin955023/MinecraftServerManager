@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """快速 smoke 測試入口。
 
 執行 pytest 的 smoke 測試子集，固定透過 `uv run --isolated` 運行：
@@ -36,7 +35,7 @@ def main() -> int:
         str(project_root / "tests"),
     ]
     try:
-        completed = subprocess.run(cmd, cwd=project_root, check=False)
+        completed = subprocess.run(cmd, cwd=project_root, check=False, shell=False)
     except (OSError, subprocess.SubprocessError) as exc:
         sys.stderr.write(f"quick_test failed to run pytest via uv: {exc}\n")
         return 1

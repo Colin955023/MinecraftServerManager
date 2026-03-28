@@ -15,8 +15,8 @@ for /f "delims=" %%A in ('py -c "from src.version_info import APP_VERSION; print
 for /f "delims=" %%A in ('py -c "from src.version_info import APP_NAME; print(APP_NAME)" 2^>nul') do set APP_NAME=%%A
 
 if "%APP_VERSION%"=="" (
-    echo [WARN] Could not read APP_VERSION, using default value 1.7
-    set APP_VERSION=1.7
+    echo [WARN] Could not read APP_VERSION, using default value 1.7.0
+    set APP_VERSION=1.7.0
 ) else (
     echo [SUCCESS] Version: %APP_VERSION%
 )

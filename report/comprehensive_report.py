@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """綜合檢查報告產生器。
 
 功能：
@@ -824,7 +823,7 @@ def extract_tool_highlights(result: ToolResult) -> list[str]:
     if result.return_code is not None:
         highlights.append(f"exit code: {result.return_code}")
 
-    # 去重並保序。
+    # 去除重複並保序。
     deduped: list[str] = []
     seen: set[str] = set()
     for item in highlights:

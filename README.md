@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
 Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟動監控到模組安裝更新，全程在圖形介面內完成，模組操作均附帶可審查的 Review 步驟。
 

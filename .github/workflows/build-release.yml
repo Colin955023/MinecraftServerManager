@@ -14,8 +14,8 @@ jobs:
     runs-on: windows-latest
 
     permissions:
-      contents: write    # 用於建立 Release 與上傳檔案
-      actions: read      # 保持基本的讀取
+      contents: write
+      actions: read
     
     steps:
       - name: Checkout repository
@@ -61,7 +61,6 @@ jobs:
         run: |
           $version = python -c "from src.version_info import APP_VERSION; print(APP_VERSION)" 2>$null
           
-          # 安裝程式 SHA256
           $instPath = "dist\MinecraftServerManager-Setup-$version.exe"
           if (Test-Path $instPath) {
               $hash = (Get-FileHash -Algorithm SHA256 -Path $instPath).Hash
@@ -70,7 +69,6 @@ jobs:
               Write-Host "Installer SHA256: $hash"
           }
           
-          # 可攜版 ZIP SHA256
           $zipPath = "dist\MinecraftServerManager-v$version-portable.zip"
           if (Test-Path $zipPath) {
               $hash = (Get-FileHash -Algorithm SHA256 -Path $zipPath).Hash
@@ -87,7 +85,6 @@ jobs:
           import re
           import sys
 
-          # 確保可從 src 匯入模組
           sys.path.append(os.getcwd())
           
           print(f"CWD: {os.getcwd()}")
@@ -113,7 +110,6 @@ jobs:
           
           if os.path.exists(changelog_file) and version_candidates:
               try:
-                  # 使用 utf-8-sig 以處理可能存在的 BOM
                   with open(changelog_file, "r", encoding="utf-8-sig") as f:
                       lines = f.readlines()
                   
@@ -131,7 +127,6 @@ jobs:
                               return True
                       return False
 
-                  # 進入下一個 H2 章節時停止擷取
                   next_section_pattern = re.compile(r"^##\s+")
 
                   for line in lines:
@@ -140,7 +135,6 @@ jobs:
                           capture = True
                           continue
                       
-                      # 若遇到下一個標題就停止
                       if capture and next_section_pattern.match(line):
                           print(f"Found next section, stopping capture: {line.strip()}")
                           break
@@ -157,8 +151,6 @@ jobs:
               print("No release notes captured, using default.")
               notes = "See commits for details"
           
-          # 以明確的 utf-8 編碼寫入 GITHUB_OUTPUT
-          # 使用唯一分隔符，避免 release notes 含獨立 "EOF" 行時提早結束
           if "GITHUB_OUTPUT" in os.environ:
               import uuid
 
@@ -170,7 +162,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 修正重點：將輸出的內容對應至環境變數，避免指令注入漏洞
           RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
         shell: bash
         run: |

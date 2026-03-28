@@ -26,7 +26,7 @@ if errorlevel 1 exit /b 1
 echo.
 
 echo === Type Check ===
-uv run mypy src
+uv run mypy src tests quick_test.py
 if errorlevel 1 exit /b 1
 echo.
 
