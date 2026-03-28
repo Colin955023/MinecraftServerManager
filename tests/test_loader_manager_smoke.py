@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from src.core.loader_manager import LoaderManager
+from src.core import LoaderManager
 from src.utils import PathUtils
 
 

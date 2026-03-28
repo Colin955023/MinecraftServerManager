@@ -6,7 +6,7 @@ from typing import Any, cast
 import pytest
 
 import src.ui.manage_server_frame as manage_server_frame_module
-from src.models.models import ServerConfig
+from src.models import ServerConfig
 
 
 class FakeTreeview(ttk.Treeview):

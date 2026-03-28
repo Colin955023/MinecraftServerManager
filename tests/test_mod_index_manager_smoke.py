@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 
 import pytest
 
-from src.core.mod_manager import ModManager, ModPlatform
-from src.utils.mod_index_manager import ModIndexManager
+from src.core import ModManager, ModPlatform
+from src.utils import ModIndexManager
 
 
 @pytest.mark.smoke
@@ -191,3 +192,76 @@ def test_mod_index_manager_thread_safe_parallel_updates(tmp_path: Path) -> None:
 
     assert all(hashes)
     assert manager.get_statistics()["total_cached"] == len(files)
+
+
+@pytest.mark.smoke
+def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) -> None:
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    file_path = mods_dir / "legacy.jar"
+    file_path.write_bytes(b"legacy")
+
+    index_dir = tmp_path / ".modcache"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    index_file = index_dir / "mod_index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "legacy.jar": {
+                    "size": file_path.stat().st_size,
+                    "mtime": file_path.stat().st_mtime,
+                    "metadata": {"version": "1.0.0"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = ModIndexManager(str(tmp_path))
+    cached = manager.get_cached_metadata(file_path)
+
+    assert cached == {"version": "1.0.0"}
+
+    manager.flush()
+    payload = json.loads(index_file.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert "entries" in payload
+    assert "legacy.jar" in payload["entries"]
+
+
+@pytest.mark.smoke
+def test_mod_index_manager_repairs_invalid_entry_shapes_on_load(tmp_path: Path) -> None:
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    file_path = mods_dir / "broken.jar"
+    file_path.write_bytes(b"broken")
+
+    index_dir = tmp_path / ".modcache"
+    index_dir.mkdir(parents=True, exist_ok=True)
+    index_file = index_dir / "mod_index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "entries": {
+                    "broken.jar": {
+                        "size": file_path.stat().st_size,
+                        "mtime": file_path.stat().st_mtime,
+                        "metadata": ["not-a-dict"],
+                        "provider_metadata": "bad",
+                        "hashes": "bad",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = ModIndexManager(str(tmp_path))
+    report = manager.get_index_consistency_report()
+
+    assert report["schema_version"] == 1
+    assert report["total_entries"] == 1
+    assert manager.get_cached_metadata(file_path) is None
+    assert manager.get_cached_provider_metadata(file_path) is None
+    assert manager.get_cached_hash(file_path, "sha512") == ""

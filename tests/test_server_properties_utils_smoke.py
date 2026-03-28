@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from src.core.server_manager import ServerManager
+from src.core import ServerManager
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper
 
