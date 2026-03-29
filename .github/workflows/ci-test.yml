@@ -52,7 +52,17 @@ jobs:
           category: bandit-3.12
 
       - name: Run detect-secrets privacy scan
-        run: uv tool run detect-secrets scan --only-verified --all-files --fail-on-has-secret
+        run: |
+          uv tool run detect-secrets scan --all-files | python -c "
+          import sys, json; 
+          res = json.load(sys.stdin); 
+          results = res.get('results', {});
+          if results:
+              for file, secrets in results.items():
+                  for s in secrets:
+                      print(f'::error file={file},line={s[\"line_number\"]}::偵測到潛在密鑰: {s[\"type\"]}')
+              sys.exit(1)
+          "
 
   compatibility-tests:
     name: CI-Tests / Python ${{ matrix.python-version }}
