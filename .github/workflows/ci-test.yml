@@ -52,7 +52,17 @@ jobs:
           category: bandit-3.12
 
       - name: Run detect-secrets privacy scan
-        run: uv tool run detect-secrets scan --all-files | python -c "import sys, json; data = json.load(sys.stdin); [print(f'::error file={file},line={s[\'line_number\']}::Secret detected') for file, secrets in data.get('results', {}).items() for s in secrets]"
+        shell: bash
+        run: |
+          uv tool run detect-secrets scan --all-files > secrets_result.json
+          python -c "
+          import json, sys
+          with open('secrets_result.json') as f:
+              data = json.load(f)
+          for file, secrets in data.get('results', {}).items():
+              for s in secrets:
+                  print(f'::error file={file},line={s[\"line_number\"]}::Secret detected')
+          "
 
   compatibility-tests:
     name: CI-Tests / Python ${{ matrix.python-version }}
