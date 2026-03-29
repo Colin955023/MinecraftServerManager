@@ -56,20 +56,24 @@ jobs:
         id: detect_secrets
         continue-on-error: true
         run: |
-          EXCLUDE_PATTERN='(^|/)\\.git(/|$)|(^|/)\\.venv(/|$)|(^|/)\\.pytest_cache(/|$)|(^|/)__pycache__(/|$)|(^|/)\\.github(/|$)|(^|/)\\.tox(/|$)'
-            uv tool run detect-secrets scan --all-files --exclude-files "$EXCLUDE_PATTERN" > secrets_result.json
+          EXCLUDE_PATTERN='(^|[\\/])(\\.git|\\.venv|\\.pytest_cache|__pycache__|\\.github|\\.tox)([\\/]|$)'
+          uv tool run detect-secrets scan --all-files --exclude-files "$EXCLUDE_PATTERN" > secrets_result.json
           python - <<'PY'
           import json, sys, os
           if not os.path.exists('secrets_result.json') or os.path.getsize('secrets_result.json') == 0:
-            sys.exit(0)
+              sys.exit(0)
           with open('secrets_result.json') as f:
-            data = json.load(f)
+              data = json.load(f)
           results = data.get('results', {})
           if results:
-            for file, secrets in results.items():
-              for s in secrets:
-                print(f'::error file={file},line={s["line_number"]}::Secret detected')
-            sys.exit(1)
+              for file_path, secrets in results.items():
+                  # Normalize backslashes to forward slashes so GitHub annotations link properly
+                  file_for_annot = file_path.replace('\\\\', '/')
+                  for s in secrets:
+                      # Be tolerant: some plugins may use different keys for line numbers
+                      line = s.get('line_number') or s.get('start_line') or 1
+                      print(f'::error file={file_for_annot},line={line}::Secret detected')
+              sys.exit(1)
           PY
 
       - name: Upload detect-secrets report
