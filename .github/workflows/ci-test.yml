@@ -54,14 +54,19 @@ jobs:
       - name: Run detect-secrets privacy scan
         shell: bash
         run: |
-          uv tool run detect-secrets scan --all-files > secrets_result.json
+          uv tool run detect-secrets scan --all-files --exclude-files '\.venv' > secrets_result.json
           python -c "
-          import json, sys
+          import json, sys, os
+          if not os.path.exists('secrets_result.json') or os.path.getsize('secrets_result.json') == 0:
+              sys.exit(0)
           with open('secrets_result.json') as f:
               data = json.load(f)
-          for file, secrets in data.get('results', {}).items():
-              for s in secrets:
-                  print(f'::error file={file},line={s[\"line_number\"]}::Secret detected')
+          results = data.get('results', {})
+          if results:
+              for file, secrets in results.items():
+                  for s in secrets:
+                      print(f'::error file={file},line={s[\"line_number\"]}::Secret detected')
+              sys.exit(1)
           "
 
   compatibility-tests:
