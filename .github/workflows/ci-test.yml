@@ -56,7 +56,8 @@ jobs:
         id: detect_secrets
         continue-on-error: true
         run: |
-          EXCLUDE_PATTERN='(^|[\\/])(\\.git|\\.venv|\\.pytest_cache|__pycache__|\\.github|\\.tox)([\\/]|$)'
+          # 1. 簡化正則表達式，移除不必要的雙重跳脫字元，並使用更具兼容性的目錄匹配方式
+          EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.github|\.tox)'
           uv tool run detect-secrets scan --all-files --exclude-files "$EXCLUDE_PATTERN" > secrets_result.json
           python - <<'PY'
           import json, sys, os
@@ -67,10 +68,9 @@ jobs:
           results = data.get('results', {})
           if results:
               for file_path, secrets in results.items():
-                  # Normalize backslashes to forward slashes so GitHub annotations link properly
-                  file_for_annot = file_path.replace('\\\\', '/')
+                  # 2. 修正反斜線替換邏輯，確保 Windows 格式的路徑能正確轉換為 GitHub 標註支援的格式
+                  file_for_annot = file_path.replace('\\', '/')
                   for s in secrets:
-                      # Be tolerant: some plugins may use different keys for line numbers
                       line = s.get('line_number') or s.get('start_line') or 1
                       print(f'::error file={file_for_annot},line={line}::Secret detected')
               sys.exit(1)
