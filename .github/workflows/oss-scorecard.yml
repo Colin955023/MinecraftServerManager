@@ -13,7 +13,6 @@ permissions: {}
 
 jobs:
   analysis:
-    if: github.ref == 'refs/heads/master'
     name: Scorecard 分析
     runs-on: ubuntu-latest
     env:

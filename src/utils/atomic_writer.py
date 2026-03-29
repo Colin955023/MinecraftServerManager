@@ -9,6 +9,9 @@ import os
 import time
 import threading
 from pathlib import Path
+from . import get_logger
+
+logger = get_logger().bind(component="AtomicWriter")
 
 _RETRY_COUNT = 3
 _RETRY_DELAY = 0.02
@@ -37,8 +40,8 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
             if existing == payload:
                 return True
         except (OSError, UnicodeDecodeError):
-            # 若無法讀取現有檔案，視為需覆寫
-            pass
+            # 若無法讀取現有檔案，視為需覆寫；記錄 debug 以便除錯
+            logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p, exc_info=True)
 
     for attempt in range(_RETRY_COUNT):
         tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.{attempt}.tmp"
@@ -56,14 +59,22 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
                 finally:
                     os.close(fd)
             except OSError:
-                pass
+                logger.debug(
+                    "嘗試針對目錄 %s 進行 fsync 失敗；程序將繼續執行且不拋出錯誤。",
+                    p.parent,
+                    exc_info=True,
+                )
             return True
         except OSError:
             try:
                 if tmp_path.exists():
                     tmp_path.unlink()
             except OSError:
-                pass
+                logger.debug(
+                    "嘗試移除臨時檔案 %s 時失敗；忽略錯誤。",
+                    tmp_path,
+                    exc_info=True,
+                )
             if attempt + 1 >= _RETRY_COUNT:
                 return False
             time.sleep(_RETRY_DELAY * (attempt + 1))

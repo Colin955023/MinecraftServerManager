@@ -974,8 +974,6 @@ class ManageServerFrame(ctk.CTkFrame):
         if not tree or not tree.winfo_exists():
             self._set_server_tree_render_lock(False)
             return
-        if tree is None:
-            return
         self._remove_stale_server_items(server_rows)
         diff_preparation = self._prepare_server_tree_diff(tree=tree, server_order=server_order, server_rows=server_rows)
         rows_snapshot = diff_preparation.rows_snapshot

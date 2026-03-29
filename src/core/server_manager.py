@@ -310,7 +310,7 @@ class ServerManager:
                 time.sleep(self.STARTUP_CHECK_DELAY)
                 poll_result = process.poll()
                 if poll_result is not None:
-                    logger.error(f"行程立即結束，返回碼: {poll_result}")
+                    logger.error(f"進程立即結束，返回碼: {poll_result}")
                     try:
                         stdout, _ = process.communicate(timeout=1)
                         if stdout:
@@ -323,7 +323,7 @@ class ServerManager:
                     else:
                         logger.error(f"無法讀取啟動腳本: {script_path}")
                     UIUtils.show_error(
-                        "啟動失敗", f"伺服器行程立即結束，返回碼: {poll_result}\n請檢查日誌了解詳細資訊", parent=parent
+                        "啟動失敗", f"伺服器進程立即結束，返回碼: {poll_result}\n請檢查日誌了解詳細資訊", parent=parent
                     )
                     return False
                 self.running_servers[server_name] = process

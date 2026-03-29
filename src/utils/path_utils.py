@@ -26,7 +26,7 @@ class PathUtils:
     """路徑處理工具類別，提供專案路徑管理和安全路徑操作"""
 
     _json_lock_registry_lock = threading.Lock()
-    _json_path_locks: ClassVar[dict[str, threading.Lock]] = {}
+    _json_path_locks: ClassVar[dict[str, threading.RLock]] = {}
     _json_write_retry_count = 3
     _json_write_retry_delay_sec = 0.03
 
@@ -68,7 +68,7 @@ class PathUtils:
         with PathUtils._json_lock_registry_lock:
             lock = PathUtils._json_path_locks.get(key)
             if lock is None:
-                lock = threading.Lock()
+                lock = threading.RLock()
                 PathUtils._json_path_locks[key] = lock
             return lock
 

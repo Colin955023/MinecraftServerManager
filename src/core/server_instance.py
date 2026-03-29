@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import threading
+from . import get_logger
 from ..utils.subprocess_utils import SubprocessUtils
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from ..models import ServerConfig
 else:
     ServerConfig = Any
+
+logger = get_logger().bind(component="ServerInstance")
 
 
 @dataclass
@@ -62,14 +65,24 @@ class ServerInstance:
                     self.process.kill()
                     self.process.wait(timeout=1)
                 except (SubprocessUtils.TimeoutExpired, OSError):
-                    pass
+                    logger.warning(
+                        "強制終止超時伺服器進程失敗 (id=%s, name=%s).",
+                        getattr(self, "id", None),
+                        getattr(self, "name", None),
+                        exc_info=True,
+                    )
             except OSError:
                 # I/O 相關錯誤（例如管線已關閉），嘗試強制終止以確保資源清理
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
                 except (SubprocessUtils.TimeoutExpired, OSError):
-                    pass
+                    logger.warning(
+                        "強制終止伺服器進程失敗 (id=%s, name=%s).",
+                        getattr(self, "id", None),
+                        getattr(self, "name", None),
+                        exc_info=True,
+                    )
             finally:
                 self.process = None
             return True

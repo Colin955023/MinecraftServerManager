@@ -276,7 +276,7 @@ class ModManager:
         if cached_identity is not None:
             return cached_identity
         resolved_record = resolve_modrinth_provider_record(
-            clean_identifier, search_fallback=lambda query: self._build_provider_record_from_search(query)
+            clean_identifier, search_fallback=self._build_provider_record_from_search
         )
         resolved = (resolved_record.project_id, resolved_record.slug or clean_identifier)
         self._modrinth_identity_cache[cache_key] = resolved
@@ -348,10 +348,10 @@ class ModManager:
                         break
                     except KeyError:
                         continue
-                    except (ValueError, toml.TomlDecodeError) as e:
+                    except (ValueError, toml.TomlDecodeError, UnicodeDecodeError) as e:
                         logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {e}")
                         continue
-                    except (TypeError, UnicodeDecodeError) as e:
+                    except TypeError as e:
                         logger.debug(f"讀取 {metadata_file} 時發生型別/編碼錯誤: {e}")
                         continue
                     except Exception as e:

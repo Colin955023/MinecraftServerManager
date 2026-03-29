@@ -292,8 +292,8 @@ class HTTPUtils:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(f"目錄 fsync 失敗 (path={local_path_obj.parent}): {e}")
             return True
         except (RequestException, OSError) as e:
             logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")
