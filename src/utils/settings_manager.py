@@ -181,8 +181,8 @@ class SettingsManager:
                 if isinstance(current, dict) and current == settings:
                     logger.debug("settings 未變更，跳過寫入")
                     return
-        except Exception:
-            # 若比對失敗則繼續嘗試寫入以確保設定被保留
+        except OSError:
+            # 若比對時發生 I/O 錯誤則繼續嘗試寫入以確保設定被保留
             pass
 
         if not atomic_write_json(self.settings_path, settings):

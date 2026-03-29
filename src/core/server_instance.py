@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import threading
-import subprocess
+from ..utils.subprocess_utils import SubprocessUtils
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -31,9 +31,9 @@ class ServerInstance:
     config: ServerConfig | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
-    process: subprocess.Popen | None = field(default=None, init=False, repr=False)
+    process: Any | None = field(default=None, init=False, repr=False)
 
-    def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> subprocess.Popen:
+    def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> Any:
         """啟動伺服器，回傳 subprocess.Popen 物件。
 
         注意：此方法為同步呼叫（會立即 return Popen），若需非同步監控請使用 BackgroundTask。
@@ -42,7 +42,9 @@ class ServerInstance:
             if self.process is not None:
                 raise RuntimeError("伺服器已在執行中")
             cwd = cwd or self.path
-            proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = SubprocessUtils.popen_checked(
+                cmd, cwd=str(cwd), env=env, stdout=SubprocessUtils.PIPE, stderr=SubprocessUtils.PIPE
+            )
             self.process = proc
             return proc
 
@@ -54,19 +56,19 @@ class ServerInstance:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
+            except SubprocessUtils.TimeoutExpired:
                 # 逾時，嘗試強制終止
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (subprocess.TimeoutExpired, OSError):
+                except (SubprocessUtils.TimeoutExpired, OSError):
                     pass
             except OSError:
                 # I/O 相關錯誤（例如管線已關閉），嘗試強制終止以確保資源清理
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (subprocess.TimeoutExpired, OSError):
+                except (SubprocessUtils.TimeoutExpired, OSError):
                     pass
             finally:
                 self.process = None

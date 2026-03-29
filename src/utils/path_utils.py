@@ -58,7 +58,7 @@ class PathUtils:
         p = Path(path)
         try:
             return str(p.resolve())
-        except Exception:
+        except OSError:
             return str(p.absolute())
 
     @staticmethod
@@ -95,7 +95,7 @@ class PathUtils:
                 if ok:
                     PathUtils._best_effort_sync_dir(p.parent)
                 return bool(ok)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             return False
 
     @staticmethod
@@ -414,7 +414,7 @@ class PathUtils:
                     buf_len = needed
                     continue
                 return Path(buf.value)
-        except Exception:
+        except (OSError, AttributeError):
             return Path(path)
 
     @staticmethod
@@ -424,7 +424,7 @@ class PathUtils:
         行為：
         - 針對同一個原始檔案（原始路徑相同）會聚合至同一份 JSON 檔，位於
           `<project>/.issues/<relative_path>/<filename>.issue.json`。
-        - 若原始檔不在專案根目錄下，會放在 `<project>/.issues/external/<name>.<sha1>.issue.json`。
+        - 若原始檔不在專案根目錄下，會放在 `<project>/.issues/external/<name>.<sha256>.issue.json`。
         - 每個 marker 檔案包含 `path` (原始路徑) 與 `entries` (issue 列表)，新的 issue 會附加到 `entries`。
 
         這樣可減少檔案數量，且利於集中清理、UI 掃描與 TTL 管理。
@@ -441,9 +441,9 @@ class PathUtils:
                 agg_dir = issues_root / rel.parent
                 agg_dir.mkdir(parents=True, exist_ok=True)
                 agg_marker = agg_dir / f"{rel.name}.issue.json"
-            except Exception:
-                # 原始檔不在專案下，使用 external + path hash
-                key = hashlib.sha1(str(p).encode("utf-8")).hexdigest()
+            except ValueError:
+                # 原始檔不在專案下，使用 external + path hash (SHA-256)
+                key = hashlib.sha256(str(p).encode("utf-8")).hexdigest()
                 ext_dir = issues_root / "external"
                 ext_dir.mkdir(parents=True, exist_ok=True)
                 agg_marker = ext_dir / f"{p.name}.{key}.issue.json"
@@ -481,7 +481,7 @@ class PathUtils:
                     try:
                         with open(agg_marker, encoding="utf-8") as f:
                             existing = json.load(f)
-                    except Exception:
+                    except (OSError, json.JSONDecodeError):
                         existing = None
                 if not existing or not isinstance(existing, dict):
                     payload = {"path": str(p), "entries": [entry], "last_updated": now}
@@ -517,11 +517,11 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception:
+                except (OSError, json.JSONDecodeError):
                     data = None
                 markers.append({"marker": str(p), "data": data})
             return markers
-        except Exception:
+        except OSError:
             return []
 
     @staticmethod
@@ -547,8 +547,8 @@ class PathUtils:
             try:
                 rel = Path(p).relative_to(project_root)
                 candidate = issues_root / rel.parent / f"{rel.name}.issue.json"
-            except Exception:
-                key = hashlib.sha1(str(p).encode("utf-8")).hexdigest()
+            except ValueError:
+                key = hashlib.sha256(str(p).encode("utf-8")).hexdigest()
                 candidate = issues_root / "external" / f"{p.name}.{key}.issue.json"
 
             if candidate.exists():
@@ -582,7 +582,7 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception:
+                except (OSError, json.JSONDecodeError):
                     data = None
                 if not data or not isinstance(data, dict):
                     # 若檔案無法解析且已經很久沒更新，刪除
@@ -613,5 +613,5 @@ class PathUtils:
                             except OSError:
                                 continue
             return removed
-        except Exception:
+        except OSError:
             return removed

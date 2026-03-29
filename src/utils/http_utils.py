@@ -235,22 +235,23 @@ class HTTPUtils:
                         h.update(chunk)
                 if h.hexdigest().lower() == expected_sha256.lower():
                     # 直接回報完成（若有 progress callback，給予完成狀態）
-                    try:
-                        if progress_callback:
+                    if progress_callback:
+                        try:
                             size = local_path_obj.stat().st_size
                             progress_callback(size, size)
-                    except Exception:
-                        pass
+                        except OSError as e:
+                            logger.debug(f"progress_callback/stat failed: {e}")
+                        except Exception as e:
+                            logger.debug(f"progress_callback raised: {e}")
                     return True
-            except Exception:
-                # 若檢查過程失敗則繼續下載流程
-                pass
+            except OSError as e:
+                logger.debug(f"檢查本地檔案 SHA-256 失敗，將進行下載: {e}")
         try:
             with tempfile.NamedTemporaryFile(
                 delete=False, prefix=local_path_obj.name + ".", suffix=".part", dir=local_path_obj.parent
             ) as tmp_file:
                 temp_path_obj = Path(tmp_file.name)
-        except Exception:
+        except OSError:
             temp_path_obj = local_path_obj.with_name(local_path_obj.name + ".part")
         try:
             final_headers = cls._get_default_headers()

@@ -75,11 +75,11 @@ class ModIndexManager:
 
                     FILE_ATTRIBUTE_HIDDEN = 0x02
                     ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
-                except Exception:
+                except (AttributeError, OSError):
                     # 無法設為隱藏則忽略
-                    pass
-        except Exception:
-            pass
+                    logger.debug("無法設定資料夾隱藏屬性，忽略")
+        except OSError as e:
+            logger.debug(f"初始化索引目錄時發生 OSError: {e}")
         self._index_lock = threading.RLock()
         self._index: dict[str, dict[str, Any]] = {}
         self._dirty = False
@@ -148,7 +148,7 @@ class ModIndexManager:
                     self._last_save_ts = time.time()
                 else:
                     logger.warning("模組索引保存失敗（atomic write 返回 false）")
-            except Exception as e:
+            except (OSError, TypeError, ValueError) as e:
                 logger.warning(f"無法保存索引檔案: {e}")
 
     def repair_index_entries(self) -> int:

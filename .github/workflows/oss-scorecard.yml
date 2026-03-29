@@ -17,7 +17,7 @@ jobs:
     name: Scorecard 分析
     runs-on: ubuntu-latest
     env:
-      FORCE_NODE_24: 'true'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       security-events: write
       id-token: write

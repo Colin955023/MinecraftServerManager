@@ -16,7 +16,7 @@ jobs:
     name: CI-Tests / Quality Gates
     runs-on: windows-latest
     env:
-      FORCE_NODE_24: 'true'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: read
       security-events: write
@@ -58,7 +58,7 @@ jobs:
     name: CI-Tests / Python ${{ matrix.python-version }}
     runs-on: windows-latest
     env:
-      FORCE_NODE_24: 'true'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     permissions:
       contents: read
     strategy:
