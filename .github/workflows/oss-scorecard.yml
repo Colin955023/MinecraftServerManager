@@ -25,19 +25,19 @@ jobs:
 
     steps:
       - name: "檢出儲存庫"
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           persist-credentials: false
 
       - name: "執行 Scorecard 分析"
-        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2
         with:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
 
       - name: "上傳至 GitHub Security Tab"
-        uses: github/codeql-action/upload-sarif@fb0994ef1c058010acf1efccff928b0a83b1ed54 # v4.32.6
+        uses: github/codeql-action/upload-sarif@fb0994ef1c058010acf1efccff928b0a83b1ed54
         with:
           sarif_file: results.sarif
           category: oss-scorecard
