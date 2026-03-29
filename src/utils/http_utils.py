@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
 """HTTP 網路請求工具模組
-提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載等常用操作
-HTTP Network Request Utilities Module
-Provides standardized HTTP request functionality including JSON retrieval, file downloading and other common operations
+提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
 """
 
 import concurrent.futures
@@ -13,15 +10,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-
+import hashlib
 import requests
-from requests import RequestException
-from requests import HTTPError
+import os
+from requests import HTTPError, RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-from src.version_info import APP_NAME, APP_VERSION
-
+from ..version_info import APP_NAME, APP_VERSION
 from .logger import get_logger
 
 logger = get_logger().bind(component="HTTPUtils")
@@ -34,7 +29,6 @@ class HTTPUtils:
     CONTENT_TIMEOUT_MIN_SECONDS = 30
     DOWNLOAD_TIMEOUT_MIN_SECONDS = 60
     MIN_CHUNK_SIZE = 1024
-
     RETRY_TOTAL = 3
     RETRY_CONNECT = 3
     RETRY_READ = 3
@@ -43,7 +37,6 @@ class HTTPUtils:
     RETRY_STATUS_FORCELIST = (429, 500, 502, 503, 504)
     RETRY_ALLOWED_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
     CONNECTION_POOL_SIZE = 16
-
     _thread_local = threading.local()
 
     @classmethod
@@ -116,9 +109,7 @@ class HTTPUtils:
         return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
     @staticmethod
-    def _get_default_headers(
-        headers: dict[str, str] | None = None,
-    ) -> dict[str, str]:
+    def _get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
         """獲取包含預設 User-Agent 的標頭"""
         default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (colin955023@gmail.com)"}
         if headers:
@@ -135,11 +126,10 @@ class HTTPUtils:
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | None:
         """發送 HTTP GET 請求並解析回傳的 JSON 資料"""
-        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
+        if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
         timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
-
         try:
             final_headers = cls._get_default_headers(headers)
             resp = cls._get_session().get(url, headers=final_headers, params=params, timeout=timeout)
@@ -177,11 +167,10 @@ class HTTPUtils:
         Returns:
             成功時回傳 dict 或 list 型別的 JSON 內容；失敗或被 suppress 時回傳 None。
         """
-        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
+        if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP POST JSON 請求失敗: URL 參數無效")
             return None
         timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
-
         try:
             final_headers = cls._get_default_headers(headers)
             resp = cls._get_session().post(url, headers=final_headers, json=json_body, timeout=timeout)
@@ -199,18 +188,13 @@ class HTTPUtils:
 
     @classmethod
     def get_content(
-        cls,
-        url: str,
-        timeout: int = 30,
-        stream: bool = False,
-        headers: dict[str, str] | None = None,
+        cls, url: str, timeout: int = 30, stream: bool = False, headers: dict[str, str] | None = None
     ) -> bytes | None:
         """發送 HTTP GET 請求並回傳完整的回應內容"""
-        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
+        if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
         timeout = cls._normalize_int_value(timeout, cls.CONTENT_TIMEOUT_MIN_SECONDS)
-
         try:
             final_headers = cls._get_default_headers(headers)
             resp = cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=stream)
@@ -229,43 +213,53 @@ class HTTPUtils:
         timeout: int = 60,
         chunk_size: int = 65536,
         cancel_check: Callable[[], bool] | None = None,
+        expected_sha256: str | None = None,
     ) -> bool:
         """下載檔案並儲存到本機路徑"""
-        if not url or not isinstance(url, str) or not cls._is_valid_url(url):
+        if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("檔案下載失敗: URL 參數無效")
             return False
         if not local_path or not isinstance(local_path, str):
             logger.error("檔案下載失敗: 本地路徑參數無效")
             return False
-
         timeout = cls._normalize_int_value(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
         chunk_size = cls._normalize_int_value(chunk_size, cls.MIN_CHUNK_SIZE)
-
         local_path_obj = Path(local_path)
         local_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        # 若提供預期的 SHA-256，先檢查本地檔案是否已符合，以避免重複下載
+        if expected_sha256 and local_path_obj.exists():
+            try:
+                h = hashlib.new("sha256")
+                with local_path_obj.open("rb") as f:
+                    for chunk in iter(lambda: f.read(8192), b""):
+                        h.update(chunk)
+                if h.hexdigest().lower() == expected_sha256.lower():
+                    # 直接回報完成（若有 progress callback，給予完成狀態）
+                    try:
+                        if progress_callback:
+                            size = local_path_obj.stat().st_size
+                            progress_callback(size, size)
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                # 若檢查過程失敗則繼續下載流程
+                pass
         try:
             with tempfile.NamedTemporaryFile(
-                delete=False,
-                prefix=local_path_obj.name + ".",
-                suffix=".part",
-                dir=local_path_obj.parent,
+                delete=False, prefix=local_path_obj.name + ".", suffix=".part", dir=local_path_obj.parent
             ) as tmp_file:
                 temp_path_obj = Path(tmp_file.name)
         except Exception:
             temp_path_obj = local_path_obj.with_name(local_path_obj.name + ".part")
-
         try:
             final_headers = cls._get_default_headers()
-            with cls._get_session().get(
-                url,
-                headers=final_headers,
-                timeout=timeout,
-                stream=True,
-            ) as resp:
+            with cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
-
+                # 在寫入時同時計算 SHA-256，以便驗證
+                hasher = hashlib.new("sha256")
                 with open(temp_path_obj, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
@@ -276,13 +270,29 @@ class HTTPUtils:
                         if not chunk:
                             continue
                         f.write(chunk)
+                        hasher.update(chunk)
                         downloaded += len(chunk)
                         if progress_callback:
                             progress_callback(downloaded, total_size)
-
+                # 若提供預期 hash，檢查是否吻合
+                computed = hasher.hexdigest().lower()
+                if expected_sha256 and computed != expected_sha256.lower():
+                    logger.error(f"下載檔案的 SHA-256 不符: expected={expected_sha256} computed={computed}")
+                    with contextlib.suppress(OSError):
+                        if temp_path_obj.exists():
+                            temp_path_obj.unlink()
+                    return False
             with contextlib.suppress(OSError):
                 local_path_obj.unlink(missing_ok=True)
             temp_path_obj.replace(local_path_obj)
+            try:
+                fd = os.open(str(local_path_obj.parent), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except OSError:
+                pass
             return True
         except (RequestException, OSError) as e:
             logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")
@@ -293,10 +303,7 @@ class HTTPUtils:
 
     @staticmethod
     def get_json_batch(
-        urls: list[str],
-        timeout: int = 10,
-        headers: dict[str, str] | None = None,
-        max_workers: int = 5,
+        urls: list[str], timeout: int = 10, headers: dict[str, str] | None = None, max_workers: int = 5
     ) -> list[dict[str, Any] | None]:
         """批次發送 HTTP GET 請求並解析回傳的 JSON 資料"""
         if not urls:

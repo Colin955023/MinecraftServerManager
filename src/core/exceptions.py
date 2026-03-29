@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """應用層共用異常型別。"""
 
 from __future__ import annotations

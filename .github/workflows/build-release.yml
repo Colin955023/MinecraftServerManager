@@ -12,6 +12,8 @@ jobs:
   build:
     name: Build and Release
     runs-on: windows-latest
+    env:
+      FORCE_NODE_24: 'true'
 
     permissions:
       contents: write

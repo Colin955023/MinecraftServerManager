@@ -1,8 +1,4 @@
-#!/usr/bin/env python3
-"""
-模組索引管理器 - 提供增量索引以加速模組掃描
-Mod Index Manager - Provides incremental indexing for faster mod scanning
-"""
+"""模組索引管理器：提供增量索引以加速模組掃描。"""
 
 import hashlib
 import json
@@ -11,12 +7,39 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
-from . import get_logger
+import concurrent.futures
+import os
+from . import atomic_write_json, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
-
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
+INDEX_SCHEMA_VERSION = 1
+
+# hash 工作池（共享）：預設 4 個工作執行緒。
+_HASH_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
+_DEFAULT_HASH_WORKERS = 4
+
+
+def _get_hash_executor() -> concurrent.futures.ThreadPoolExecutor:
+    global _HASH_EXECUTOR
+    if _HASH_EXECUTOR is None:
+        workers = min(_DEFAULT_HASH_WORKERS, max(1, os.cpu_count() or _DEFAULT_HASH_WORKERS))
+        _HASH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="modhash")
+    return _HASH_EXECUTOR
+
+
+def _hash_read_sync(file_path: str, algorithm: str, chunk_size: int) -> str:
+    try:
+        h = hashlib.new(algorithm)
+    except (ValueError, TypeError):
+        return ""
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(chunk_size), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return ""
 
 
 class ModIndexManager:
@@ -37,8 +60,26 @@ class ModIndexManager:
         self.index_dir = Path(index_dir) if index_dir else self.server_path / ".modcache"
         self.index_file = self.index_dir / "mod_index.json"
         self.index_dir.mkdir(exist_ok=True)
+        # 在 index 目錄內建立說明檔，並在 Windows 上嘗試將資料夾設為隱藏，避免使用者誤刪或困惑
+        try:
+            readme = self.index_dir / "README.txt"
+            if not readme.exists():
+                readme_content = (
+                    "這個目錄由 Minecraft Server Manager 用於快取模組索引與檔案hash。\n"
+                    "可安全刪除，程式會在下次掃描/啟動時重建索引，但刪除會造成下次掃描較慢。\n"
+                )
+                readme.write_text(readme_content, encoding="utf-8")
+            if os.name == "nt":
+                try:
+                    import ctypes
 
-        # 內存索引
+                    FILE_ATTRIBUTE_HIDDEN = 0x02
+                    ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
+                except Exception:
+                    # 無法設為隱藏則忽略
+                    pass
+        except Exception:
+            pass
         self._index_lock = threading.RLock()
         self._index: dict[str, dict[str, Any]] = {}
         self._dirty = False
@@ -52,45 +93,127 @@ class ModIndexManager:
             if self.index_file.exists():
                 try:
                     with open(self.index_file, encoding="utf-8") as f:
-                        self._index = json.load(f)
+                        raw_payload = json.load(f)
+                    self._index = self._normalize_loaded_payload(raw_payload)
                     logger.info(f"模組索引已載入，包含 {len(self._index)} 個項目")
-                except Exception as e:
+                except (OSError, json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"無法載入索引檔案: {e}，將重新建立")
                     self._index = {}
             else:
                 logger.info("未找到現有索引，將建立新索引")
                 self._index = {}
+            repaired_count = self.repair_index_entries()
+            if repaired_count > 0:
+                logger.info(f"模組索引修復完成，已修復 {repaired_count} 個項目")
+                self._save_index_if_due(force=True)
+
+    def _normalize_loaded_payload(self, payload: Any) -> dict[str, dict[str, Any]]:
+        """將磁碟 payload 正規化為 entries 字典，支援舊版格式遷移。"""
+        if not isinstance(payload, dict):
+            logger.warning("索引檔案格式不是物件，將忽略並重建")
+            return {}
+        if "entries" in payload:
+            entries = payload.get("entries")
+            schema_version = payload.get("schema_version", 0)
+            if schema_version != INDEX_SCHEMA_VERSION:
+                logger.info(f"模組索引 schema 版本遷移: {schema_version} -> {INDEX_SCHEMA_VERSION}")
+            if not isinstance(entries, dict):
+                logger.warning("索引 entries 欄位格式錯誤，將忽略並重建")
+                return {}
+            normalized_entries: dict[str, dict[str, Any]] = {}
+            for key, value in entries.items():
+                if isinstance(key, str) and isinstance(value, dict):
+                    normalized_entries[key] = dict(value)
+            return normalized_entries
+        logger.info("偵測到舊版索引格式，將自動遷移至 schema v1")
+        normalized_entries = {}
+        for key, value in payload.items():
+            if isinstance(key, str) and isinstance(value, dict):
+                normalized_entries[key] = dict(value)
+        return normalized_entries
+
+    def _build_persist_payload(self) -> dict[str, Any]:
+        """建構落盤 payload，保留 schema metadata 以支援未來演進。"""
+        return {"schema_version": INDEX_SCHEMA_VERSION, "entries": self._index}
 
     def _save_index(self) -> None:
         """將索引保存為 JSON"""
         with self._index_lock:
             try:
-                with open(self.index_file, "w", encoding="utf-8") as f:
-                    json.dump(self._index, f, indent=2, ensure_ascii=False)
-                logger.debug("模組索引已保存")
-                self._dirty = False
-                self._last_save_ts = time.time()
+                payload = self._build_persist_payload()
+                ok = atomic_write_json(self.index_file, payload)
+                if ok:
+                    logger.debug("模組索引已保存 (atomic)")
+                    self._dirty = False
+                    self._last_save_ts = time.time()
+                else:
+                    logger.warning("模組索引保存失敗（atomic write 返回 false）")
             except Exception as e:
                 logger.warning(f"無法保存索引檔案: {e}")
+
+    def repair_index_entries(self) -> int:
+        """修復索引資料型別與欄位結構，回傳修復數量。"""
+        repaired_count = 0
+        with self._index_lock:
+            sanitized: dict[str, dict[str, Any]] = {}
+            for file_name, entry in self._index.items():
+                if not isinstance(file_name, str):
+                    repaired_count += 1
+                    continue
+                if not isinstance(entry, dict):
+                    repaired_count += 1
+                    continue
+                normalized_entry = dict(entry)
+                hashes = normalized_entry.get("hashes")
+                if hashes is not None and (not isinstance(hashes, dict)):
+                    normalized_entry.pop("hashes", None)
+                    repaired_count += 1
+                metadata = normalized_entry.get("metadata")
+                if metadata is not None and (not isinstance(metadata, dict)):
+                    normalized_entry.pop("metadata", None)
+                    repaired_count += 1
+                provider_metadata = normalized_entry.get("provider_metadata")
+                if provider_metadata is not None and (not isinstance(provider_metadata, dict)):
+                    normalized_entry.pop("provider_metadata", None)
+                    repaired_count += 1
+                sanitized[file_name] = normalized_entry
+            if repaired_count > 0:
+                self._index = sanitized
+                self._dirty = True
+        return repaired_count
+
+    def get_index_consistency_report(self) -> dict[str, Any]:
+        """回傳索引一致性檢查結果，供觀測與診斷使用。"""
+        with self._index_lock:
+            invalid_entries = 0
+            missing_stats = 0
+            for entry in self._index.values():
+                if not isinstance(entry, dict):
+                    invalid_entries += 1
+                    continue
+                if "size" not in entry or "mtime" not in entry:
+                    missing_stats += 1
+            return {
+                "schema_version": INDEX_SCHEMA_VERSION,
+                "total_entries": len(self._index),
+                "invalid_entries": invalid_entries,
+                "entries_missing_file_stats": missing_stats,
+            }
 
     def _save_index_if_due(self, *, force: bool = False) -> None:
         """依時間節流保存索引，避免每個檔案都立即落盤。"""
         with self._index_lock:
-            if not self._dirty and not force:
+            if not self._dirty and (not force):
                 return
             now = time.time()
-            if not force and (now - self._last_save_ts) < self._autosave_interval_sec:
+            if not force and now - self._last_save_ts < self._autosave_interval_sec:
                 return
             self._save_index()
 
     @staticmethod
     @lru_cache(maxsize=256)
     def _compute_file_hash_cached(
-        file_path: str,
-        algorithm: str,
-        mtime_ns: int,
-        file_size: int,
-        chunk_size: int = 65536,
+        file_path: str, algorithm: str, mtime_ns: int, file_size: int, chunk_size: int = 65536
     ) -> str:
         """
         計算檔案哈希值（用於檢測檔案變更與 provider 更新檢查）
@@ -106,16 +229,18 @@ class ModIndexManager:
             str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
         )
         try:
-            file_hash = hashlib.new(normalized_algorithm)
+            hashlib.new(normalized_algorithm)
         except ValueError:
             logger.warning(f"不支援的檔案哈希演算法: {normalized_algorithm}")
             return ""
-
+        # 透過 Worker 池平滑 I/O 負載，並結合 LRU 緩存避免重複計算。
         try:
-            with open(file_path, "rb") as f:
-                for chunk in iter(lambda: f.read(chunk_size), b""):
-                    file_hash.update(chunk)
-            return file_hash.hexdigest()
+            executor = _get_hash_executor()
+            future = executor.submit(_hash_read_sync, file_path, normalized_algorithm, int(chunk_size))
+            result = future.result()
+            if not result:
+                logger.warning(f"無法計算檔案哈希或結果為空: {file_path}")
+            return result
         except Exception as e:
             logger.warning(f"無法計算檔案哈希: {e}")
             return ""
@@ -133,20 +258,14 @@ class ModIndexManager:
         except OSError as e:
             logger.warning(f"無法讀取檔案狀態以計算哈希: {e}")
             return ""
-
         return ModIndexManager._compute_file_hash_cached(
-            str(file_path),
-            normalized_algorithm,
-            int(stat.st_mtime_ns),
-            int(stat.st_size),
-            int(chunk_size),
+            str(file_path), normalized_algorithm, int(stat.st_mtime_ns), int(stat.st_size), int(chunk_size)
         )
 
     def _get_valid_entry(self, file_path: Path) -> dict[str, Any] | None:
         with self._index_lock:
             if self.should_reindex_file(file_path):
                 return None
-
             file_name = file_path.name
             cached = self._index.get(file_name)
             if isinstance(cached, dict):
@@ -160,13 +279,7 @@ class ModIndexManager:
                 stat = file_path.stat()
                 cached = self._index.get(file_name, {})
                 entry = dict(cached) if isinstance(cached, dict) else {}
-                entry.update(
-                    {
-                        "size": stat.st_size,
-                        "mtime": stat.st_mtime,
-                        "timestamp": time.time(),
-                    }
-                )
+                entry.update({"size": stat.st_size, "mtime": stat.st_mtime, "timestamp": time.time()})
                 entry.update(updates)
                 self._index[file_name] = entry
                 self._dirty = True
@@ -185,20 +298,16 @@ class ModIndexManager:
         with self._index_lock:
             file_name = file_path.name
             if file_name not in self._index:
-                return True  # 新檔案，需要索引
-
+                return True
             cached_entry = self._index[file_name]
-
-            # 檢查檔案大小和修改時間作為快速判斷
             try:
                 current_stat = file_path.stat()
                 if current_stat.st_size != cached_entry.get("size", 0) or current_stat.st_mtime != cached_entry.get(
                     "mtime", 0
                 ):
                     return True
-            except Exception:
+            except OSError:
                 return True
-
             return False
 
     def get_cached_metadata(self, file_path: Path) -> dict[str, Any] | None:
@@ -235,7 +344,6 @@ class ModIndexManager:
         cached = self._get_valid_entry(file_path)
         if not cached:
             return ""
-
         hashes = cached.get("hashes")
         if not isinstance(hashes, dict):
             return ""
@@ -263,7 +371,6 @@ class ModIndexManager:
         }
         if not normalized_metadata:
             return
-
         try:
             cached_provider = self.get_cached_provider_metadata(file_path) or {}
             merged_provider = dict(cached_provider) if merge else {}
@@ -281,7 +388,6 @@ class ModIndexManager:
         normalized_hash = str(file_hash or "").strip().lower()
         if not normalized_hash:
             return
-
         try:
             cached = self._get_valid_entry(file_path) or self._index.get(file_path.name, {})
             hashes = dict(cached.get("hashes", {})) if isinstance(cached, dict) else {}
@@ -299,7 +405,6 @@ class ModIndexManager:
         cached_hash = self.get_cached_hash(file_path, normalized_algorithm)
         if cached_hash:
             return cached_hash
-
         computed_hash = self._compute_file_hash(str(file_path), normalized_algorithm)
         if computed_hash:
             self.cache_file_hash(file_path, normalized_algorithm, computed_hash)
@@ -317,15 +422,12 @@ class ModIndexManager:
                 file_path = self.mods_path / file_name
                 if not file_path.exists():
                     files_to_remove.append(file_name)
-
             for file_name in files_to_remove:
                 del self._index[file_name]
                 logger.debug(f"已清理過期索引: {file_name}")
-
             if files_to_remove:
                 self._dirty = True
                 self._save_index_if_due(force=True)
-
             return len(files_to_remove)
 
     def get_statistics(self) -> dict[str, Any]:

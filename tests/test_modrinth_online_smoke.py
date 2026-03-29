@@ -2562,7 +2562,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
 
 
 @pytest.mark.smoke
-def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path) -> None:
+def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
     old_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2588,7 +2588,7 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path) -> 
             progress_callback(10, 10)
         return new_path
 
-    manager.install_remote_mod_file = fake_install_remote_mod_file
+    monkeypatch.setattr(manager, "install_remote_mod_file", fake_install_remote_mod_file)
 
     replaced_path = manager.replace_local_mod_file(
         local_mod,

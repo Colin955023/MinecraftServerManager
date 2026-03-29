@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
-"""路徑工具模組
-Path Utilities Module
+"""路徑工具模組。
+提供專案中的路徑處理與檔案操作輔助函式。
 """
 
 import ctypes
@@ -11,11 +10,13 @@ import shutil
 import threading
 import time
 import zipfile
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
-
 from .logger import get_logger
+from .atomic_writer import atomic_write_json
+import contextlib
 
 _windll = getattr(ctypes, "windll", None)
 logger = get_logger().bind(component="PathUtils")
@@ -73,13 +74,16 @@ class PathUtils:
 
     @staticmethod
     def _save_json_internal(path: Path | str, data: Any, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
-        """JSON 寫入核心：序列化、路徑鎖、原子替換與重試。"""
+        """JSON 寫入核心：使用路徑專屬鎖後呼叫統一的 atomic_write_json。
+
+        行為保留原本的 `skip_if_unchanged` 檢查，但實際寫入委由
+        `atomic_write_json` 處理，以統一原子替換策略與 fsync 行為。
+        """
         try:
             payload = json.dumps(data, indent=indent, ensure_ascii=False)
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             lock = PathUtils._get_json_path_lock(p)
-
             with lock:
                 if skip_if_unchanged and p.exists():
                     try:
@@ -87,31 +91,10 @@ class PathUtils:
                             return True
                     except OSError as e:
                         logger.debug(f"讀取既有 JSON 失敗，將改為覆寫流程: {p} | {e}")
-
-                for attempt in range(PathUtils._json_write_retry_count):
-                    tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{attempt}.tmp"
-                    tmp_path = PathUtils.get_long_path(p.with_name(tmp_name))
-                    try:
-                        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
-                            f.write(payload)
-                            f.flush()
-                            PathUtils._best_effort_fsync(f)
-
-                        os.replace(tmp_path, p)
-                        PathUtils._best_effort_sync_dir(p.parent)
-                        return True
-                    except OSError:
-                        if attempt + 1 >= PathUtils._json_write_retry_count:
-                            return False
-                        time.sleep(PathUtils._json_write_retry_delay_sec * (attempt + 1))
-                    finally:
-                        try:
-                            if tmp_path.exists():
-                                tmp_path.unlink()
-                        except OSError as e:
-                            logger.debug(f"清理臨時 JSON 檔失敗: {tmp_path} | {e}")
-
-            return False
+                ok = atomic_write_json(p, data, indent=indent)
+                if ok:
+                    PathUtils._best_effort_sync_dir(p.parent)
+                return bool(ok)
         except Exception:
             return False
 
@@ -123,9 +106,8 @@ class PathUtils:
             target_resolved = target_path.resolve(strict=strict)
         except FileNotFoundError:
             return False
-        except Exception:
+        except OSError:
             return False
-
         try:
             target_resolved.relative_to(base_resolved)
             return True
@@ -134,9 +116,7 @@ class PathUtils:
 
     @staticmethod
     def safe_extract_zip(
-        zip_path: Path,
-        dest_dir: Path,
-        progress_callback: Callable[[int, int], None] | None = None,
+        zip_path: Path, dest_dir: Path, progress_callback: Callable[[int, int], None] | None = None
     ) -> None:
         """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞。
 
@@ -147,19 +127,15 @@ class PathUtils:
             members = zf.infolist()
             total_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
             extracted_bytes = 0
-
             if progress_callback is not None:
                 progress_callback(0, total_bytes)
-
             for member in members:
                 member_path = dest_dir / member.filename
                 if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
                     raise ValueError(f"Zip File attempted path traversal: {member.filename}")
-
                 if member.is_dir():
                     member_path.mkdir(parents=True, exist_ok=True)
                     continue
-
                 member_path.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member, "r") as source, open(member_path, "wb") as target:
                     while True:
@@ -170,7 +146,6 @@ class PathUtils:
                         extracted_bytes += len(chunk)
                         if progress_callback is not None and total_bytes > 0:
                             progress_callback(extracted_bytes, total_bytes)
-
             if progress_callback is not None:
                 progress_callback(total_bytes if total_bytes > 0 else extracted_bytes, total_bytes)
 
@@ -214,7 +189,14 @@ class PathUtils:
                 if internal_path in zf.namelist():
                     with zf.open(internal_path) as f:
                         return json.load(f)
-        except Exception:
+        except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "從 Zip 檔案讀取 JSON 失敗",
+                zip_path=str(zip_path),
+                internal_path=internal_path,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             return None
         return None
 
@@ -223,7 +205,7 @@ class PathUtils:
         """將資料轉換為 JSON 字串"""
         try:
             return json.dumps(data, indent=indent, ensure_ascii=False)
-        except Exception:
+        except (TypeError, ValueError):
             return ""
 
     @staticmethod
@@ -231,10 +213,9 @@ class PathUtils:
         """從 JSON 字串解析資料"""
         try:
             return json.loads(json_str)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return None
 
-    # ====== 文件 I/O 操作（統一的內部實現） ======
     @staticmethod
     def _file_io_operation(path: Path, operation: str, **kwargs) -> Any:
         """通用的檔案 I/O 操作（內部使用）"""
@@ -309,7 +290,7 @@ class PathUtils:
                 for chunk in iter(lambda: f.read(8192), b""):
                     h.update(chunk)
             return h.hexdigest().lower()
-        except Exception:
+        except OSError:
             return None
 
     @staticmethod
@@ -368,7 +349,6 @@ class PathUtils:
         try:
             if not src.exists() or not src.is_dir():
                 return False
-
             ignore = shutil.ignore_patterns(*ignore_patterns) if ignore_patterns else None
 
             def _walk_entries() -> list[tuple[Path, list[str], list[str]]]:
@@ -383,31 +363,24 @@ class PathUtils:
                 return entries
 
             entries = _walk_entries()
-            total_files = sum(len(files) for _root, _dirs, files in entries)
+            total_files = sum((len(files) for _root, _dirs, files in entries))
             copied_files = 0
-
             dst.mkdir(parents=True, exist_ok=True)
-
             if progress_callback is not None:
                 progress_callback(0, total_files)
-
             for root_path, dirs, files in entries:
                 relative_root = root_path.relative_to(src)
                 target_root = dst if relative_root == Path(".") else dst / relative_root
                 target_root.mkdir(parents=True, exist_ok=True)
-
                 for dir_name in dirs:
                     (target_root / dir_name).mkdir(parents=True, exist_ok=True)
-
                 for file_name in files:
                     shutil.copy2(root_path / file_name, target_root / file_name)
                     copied_files += 1
                     if progress_callback is not None and total_files > 0:
                         progress_callback(copied_files, total_files)
-
             if progress_callback is not None:
                 progress_callback(copied_files, total_files)
-
             return True
         except OSError:
             return False
@@ -426,26 +399,219 @@ class PathUtils:
         try:
             p_obj = Path(path)
             p_str = str(p_obj)
-
             if _windll is None:
                 return p_obj
-
             GetLongPathNameW = _windll.kernel32.GetLongPathNameW
             GetLongPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
             GetLongPathNameW.restype = ctypes.c_uint
-
             buf_len = 260
             while True:
                 buf = ctypes.create_unicode_buffer(buf_len)
                 needed = GetLongPathNameW(p_str, buf, buf_len)
                 if needed == 0:
-                    # 失敗時回傳原始路徑
                     return p_obj
                 if needed > buf_len:
-                    # 緩衝區不足，調整後重試
                     buf_len = needed
                     continue
-                # 成功取得長路徑
                 return Path(buf.value)
         except Exception:
             return Path(path)
+
+    @staticmethod
+    def mark_issue(path: Path | str, reason: str, details: Any | None = None) -> bool:
+        """在專案根目錄下的 `.issues/` 中建立或更新聚合的 issue marker。
+
+        行為：
+        - 針對同一個原始檔案（原始路徑相同）會聚合至同一份 JSON 檔，位於
+          `<project>/.issues/<relative_path>/<filename>.issue.json`。
+        - 若原始檔不在專案根目錄下，會放在 `<project>/.issues/external/<name>.<sha1>.issue.json`。
+        - 每個 marker 檔案包含 `path` (原始路徑) 與 `entries` (issue 列表)，新的 issue 會附加到 `entries`。
+
+        這樣可減少檔案數量，且利於集中清理、UI 掃描與 TTL 管理。
+        """
+        try:
+            p = Path(path)
+            project_root = PathUtils.get_project_root()
+            issues_root = project_root / ".issues"
+            issues_root.mkdir(parents=True, exist_ok=True)
+
+            # 決定聚合 marker 的路徑
+            try:
+                rel = p.relative_to(project_root)
+                agg_dir = issues_root / rel.parent
+                agg_dir.mkdir(parents=True, exist_ok=True)
+                agg_marker = agg_dir / f"{rel.name}.issue.json"
+            except Exception:
+                # 原始檔不在專案下，使用 external + path hash
+                key = hashlib.sha1(str(p).encode("utf-8")).hexdigest()
+                ext_dir = issues_root / "external"
+                ext_dir.mkdir(parents=True, exist_ok=True)
+                agg_marker = ext_dir / f"{p.name}.{key}.issue.json"
+
+            now = int(time.time())
+            exc_type = ""
+            tb_text = ""
+            if isinstance(details, dict):
+                exc_type = str(details.get("exception_type") or "")
+                tb_text = str(details.get("traceback_summary") or "")
+            elif isinstance(details, BaseException):
+                exc_type = type(details).__name__
+                tb = getattr(details, "__traceback__", None)
+                try:
+                    if tb is not None:
+                        tb_text = "".join(traceback.format_exception(type(details), details, tb))
+                    else:
+                        tb_text = "".join(traceback.format_exception_only(type(details), details)).strip()
+                except Exception:
+                    tb_text = str(details)
+
+            entry = {
+                "timestamp": now,
+                "reason": str(reason),
+                "details": details if details is not None else "",
+                "exception_type": exc_type,
+                "traceback_summary": tb_text,
+            }
+
+            # 讀取既有聚合檔並 append
+            lock = PathUtils._get_json_path_lock(agg_marker)
+            with lock:
+                existing = None
+                if agg_marker.exists():
+                    try:
+                        with open(agg_marker, encoding="utf-8") as f:
+                            existing = json.load(f)
+                    except Exception:
+                        existing = None
+                if not existing or not isinstance(existing, dict):
+                    payload = {"path": str(p), "entries": [entry], "last_updated": now}
+                else:
+                    entries = existing.get("entries") if isinstance(existing.get("entries"), list) else []
+                    entries.append(entry)
+                    existing["entries"] = entries
+                    existing["last_updated"] = now
+                    payload = existing
+
+                ok = PathUtils._save_json_internal(agg_marker, payload, indent=2, skip_if_unchanged=False)
+                if not ok:
+                    logger.debug(f"建立或更新聚合 issue marker 失敗: {agg_marker}")
+                return bool(ok)
+        except Exception as e:
+            logger.debug(f"建立聚合 issue marker 發生錯誤: {path} | {e}")
+            return False
+
+    @staticmethod
+    def list_issue_markers(root: Path | str | None = None) -> list[dict]:
+        """列出集中儲存的聚合 issue marker。
+
+        若 `root` 為 None，預設掃描專案根目錄下的 `.issues/`。
+        回傳格式：[{"marker": "<path>", "data": {...}}, ...]
+        """
+        try:
+            root_path = Path(root) if root is not None else PathUtils.get_project_root()
+            issues_root = root_path / ".issues"
+            markers: list[dict] = []
+            if not issues_root.exists():
+                return markers
+            for p in issues_root.rglob("*.issue.json"):
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = None
+                markers.append({"marker": str(p), "data": data})
+            return markers
+        except Exception:
+            return []
+
+    @staticmethod
+    def recover_issue_marker(marker_path: Path | str, remove_marker: bool = True) -> bool:
+        """嘗試從標記檔回復/清理。
+
+        - 如果標記檔存在且 remove_marker=True，會刪除該標記（因為原始檔仍保留）。
+        - 若需要更進一步的自動復原（例如移動檔案），應在外層實作並在執行前徵求使用者同意。
+        此方法設計為非破壞性（只移除標記），避免在自動化時造成檔案遺失。
+        """
+        try:
+            p = Path(marker_path)
+            project_root = PathUtils.get_project_root()
+            issues_root = project_root / ".issues"
+
+            # 如果傳入的是聚合 marker 檔本身
+            if p.exists() and issues_root in p.parents:
+                if remove_marker:
+                    p.unlink()
+                return True
+
+            # 否則視為原始檔路徑，嘗試找出對應的聚合 marker，並刪除
+            try:
+                rel = Path(p).relative_to(project_root)
+                candidate = issues_root / rel.parent / f"{rel.name}.issue.json"
+            except Exception:
+                key = hashlib.sha1(str(p).encode("utf-8")).hexdigest()
+                candidate = issues_root / "external" / f"{p.name}.{key}.issue.json"
+
+            if candidate.exists():
+                if remove_marker:
+                    candidate.unlink()
+                return True
+            return False
+        except OSError:
+            return False
+
+    @staticmethod
+    def auto_prune_markers(root: Path | str | None = None, max_age_days: int = 365) -> list[str]:
+        """針對集中式聚合 markers 執行過期清理與條目修剪。
+
+        規則（保守）：針對每個聚合檔案，會移除 entries 中 timestamp 早於 cutoff 的項目；
+        若 entries 被清空且原始檔不存在，則刪除整個聚合檔。
+        回傳被移除的聚合檔路徑清單。
+        """
+        removed: list[str] = []
+        try:
+            root_path = Path(root) if root is not None else PathUtils.get_project_root()
+            issues_root = root_path / ".issues"
+            if not issues_root.exists():
+                return removed
+            cutoff = time.time() - max_age_days * 24 * 3600
+            for p in issues_root.rglob("*.issue.json"):
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue
+                try:
+                    with open(p, encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = None
+                if not data or not isinstance(data, dict):
+                    # 若檔案無法解析且已經很久沒更新，刪除
+                    if st.st_mtime < cutoff:
+                        try:
+                            p.unlink()
+                            removed.append(str(p))
+                        except OSError:
+                            continue
+                    continue
+
+                entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+                new_entries = [e for e in entries if int(e.get("timestamp", 0)) >= cutoff]
+                if len(new_entries) != len(entries):
+                    # 更新或刪除該聚合檔
+                    if new_entries:
+                        data["entries"] = new_entries
+                        data["last_updated"] = int(time.time())
+                        with contextlib.suppress(Exception):
+                            PathUtils._save_json_internal(p, data, indent=2, skip_if_unchanged=False)
+                    else:
+                        # 若沒有剩餘條目，僅在原始檔不存在時刪除
+                        orig = Path(data.get("path", "")) if isinstance(data.get("path"), str) else None
+                        if orig is None or not orig.exists():
+                            try:
+                                p.unlink()
+                                removed.append(str(p))
+                            except OSError:
+                                continue
+            return removed
+        except Exception:
+            return removed

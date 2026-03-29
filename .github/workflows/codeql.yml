@@ -21,6 +21,8 @@ jobs:
   analyze:
     name: 分析 (Python)
     runs-on: ubuntu-latest
+    env:
+      FORCE_NODE_24: 'true'
     permissions:
       security-events: write
       packages: read

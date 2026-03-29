@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
 """
 核心模組套件
 提供 Minecraft 伺服器管理器的核心功能模組，包含伺服器管理、版本控制、載入器管理等
-Core Modules Package
-Provides core functionality modules for Minecraft Server Manager including server management, version control, loader management
 """
 
 from __future__ import annotations
-
 from .. import lazy_exports
 
 _EXPORTS: dict[str, tuple[str, str]] = {
@@ -24,5 +20,4 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MetadataResolutionError": (".exceptions", "MetadataResolutionError"),
     "ServerOperationError": (".exceptions", "ServerOperationError"),
 }
-
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

@@ -2,7 +2,7 @@ name: "Google OSS 安全性打分"
 
 on:
   push:
-    branches: [ "master", "dev" ]
+    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
   workflow_dispatch:
@@ -13,8 +13,11 @@ permissions: read-all
 
 jobs:
   analysis:
+    if: github.ref == 'refs/heads/master'
     name: Scorecard 分析
     runs-on: ubuntu-latest
+    env:
+      FORCE_NODE_24: 'true'
     permissions:
       security-events: write
       id-token: write

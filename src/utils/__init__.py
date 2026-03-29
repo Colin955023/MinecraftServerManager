@@ -1,21 +1,16 @@
-#!/usr/bin/env python3
 """工具模組套件
 提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
-Utility Modules Package
-Provides various utility functions and helper classes for the Minecraft Server Manager application
-
-Logger can be imported conveniently:
-    from src.utils import get_logger
-    logger = get_logger().bind(component="ComponentName")
 """
 
 from __future__ import annotations
-
 import src
 
-# 使用統一的 lazy_exports 機制（單一來源原則）
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "record_and_mark": (".exception_utils", "record_and_mark"),
+    "get_shared_manager": (".background_task", "get_shared_manager"),
+    "CancellationToken": (".background_task", "CancellationToken"),
     "get_logger": (".logger", "get_logger"),
+    "shutdown_logging": (".logger", "shutdown_logging"),
     "UIUtils": (".ui_utils", "UIUtils"),
     "IconUtils": (".ui_utils", "IconUtils"),
     "ProgressDialog": (".ui_utils", "ProgressDialog"),
@@ -33,6 +28,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "get_button_style": (".ui_utils", "get_button_style"),
     "get_dropdown_style": (".ui_utils", "get_dropdown_style"),
     "compute_adaptive_pool_limit": (".ui_utils", "compute_adaptive_pool_limit"),
+    "make_tree_insert_batch": (".ui_utils", "make_tree_insert_batch"),
     "compute_exponential_moving_average": (".ui_utils", "compute_exponential_moving_average"),
     "AppRestart": (".app_restart", "AppRestart"),
     "JavaDownloader": (".java_downloader", "JavaDownloader"),
@@ -49,6 +45,79 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "Singleton": (".singleton", "Singleton"),
     "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
     "ModIndexManager": (".mod_index_manager", "ModIndexManager"),
+    "BackgroundTaskManager": (".background_task", "BackgroundTaskManager"),
+    "atomic_write_json": (".atomic_writer", "atomic_write_json"),
+    "ProviderMetadataRecord": (".mod_provider_metadata", "ProviderMetadataRecord"),
+    "LocalProviderEnsureResult": (".mod_provider_metadata", "LocalProviderEnsureResult"),
+    "apply_provider_metadata": (".mod_provider_metadata", "apply_provider_metadata"),
+    "cache_provider_metadata_record": (".mod_provider_metadata", "cache_provider_metadata_record"),
+    "fetch_modrinth_project_detail": (".mod_provider_metadata", "fetch_modrinth_project_detail"),
+    "resolve_modrinth_provider_record": (".mod_provider_metadata", "resolve_modrinth_provider_record"),
+    "ensure_local_mod_provider_record": (".mod_provider_metadata", "ensure_local_mod_provider_record"),
+    "PROVIDER_METADATA_TTL_SECONDS": (".mod_provider_metadata", "PROVIDER_METADATA_TTL_SECONDS"),
+    "is_cached_provider_metadata_fresh": (".mod_provider_metadata", "is_cached_provider_metadata_fresh"),
+    "derive_provider_lifecycle_state": (".mod_provider_metadata", "derive_provider_lifecycle_state"),
+    "compute_provider_revalidation_backoff_seconds": (
+        ".mod_provider_metadata",
+        "compute_provider_revalidation_backoff_seconds",
+    ),
+    "is_provider_revalidation_retry_due": (".mod_provider_metadata", "is_provider_revalidation_retry_due"),
+    "should_attempt_provider_revalidation": (".mod_provider_metadata", "should_attempt_provider_revalidation"),
+    "register_provider_revalidation_failure": (".mod_provider_metadata", "register_provider_revalidation_failure"),
+    "register_provider_revalidation_success": (".mod_provider_metadata", "register_provider_revalidation_success"),
+    "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN": (".mod_provider_metadata", "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN"),
+    "PROVIDER_LIFECYCLE_FRESH": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_FRESH"),
+    "PROVIDER_LIFECYCLE_STALE": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_STALE"),
+    "PROVIDER_LIFECYCLE_MISSING": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_MISSING"),
+    "PROVIDER_LIFECYCLE_RETRYING": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_RETRYING"),
+    "PROVIDER_LIFECYCLE_INVALIDATED": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_INVALIDATED"),
+    "METADATA_SOURCE_HASH": (".mod_semantics", "METADATA_SOURCE_HASH"),
+    "METADATA_SOURCE_CACHED_PROVIDER": (".mod_semantics", "METADATA_SOURCE_CACHED_PROVIDER"),
+    "METADATA_SOURCE_LOOKUP": (".mod_semantics", "METADATA_SOURCE_LOOKUP"),
+    "METADATA_SOURCE_STALE_PROVIDER": (".mod_semantics", "METADATA_SOURCE_STALE_PROVIDER"),
+    "METADATA_SOURCE_UNRESOLVED": (".mod_semantics", "METADATA_SOURCE_UNRESOLVED"),
+    "RECOMMENDATION_SOURCE_HASH_METADATA": (".mod_semantics", "RECOMMENDATION_SOURCE_HASH_METADATA"),
+    "RECOMMENDATION_SOURCE_PROJECT_FALLBACK": (".mod_semantics", "RECOMMENDATION_SOURCE_PROJECT_FALLBACK"),
+    "RECOMMENDATION_SOURCE_STALE_METADATA": (".mod_semantics", "RECOMMENDATION_SOURCE_STALE_METADATA"),
+    "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED": (".mod_semantics", "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED"),
+    "RECOMMENDATION_CONFIDENCE_HIGH": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_HIGH"),
+    "RECOMMENDATION_CONFIDENCE_ADVISORY": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_ADVISORY"),
+    "RECOMMENDATION_CONFIDENCE_RETRYABLE": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_RETRYABLE"),
+    "RECOMMENDATION_CONFIDENCE_BLOCKED": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_BLOCKED"),
+    "METADATA_SOURCE_LABELS": (".mod_semantics", "METADATA_SOURCE_LABELS"),
+    "METADATA_SOURCE_SHORT_LABELS": (".mod_semantics", "METADATA_SOURCE_SHORT_LABELS"),
+    "RECOMMENDATION_SOURCE_LABELS": (".mod_semantics", "RECOMMENDATION_SOURCE_LABELS"),
+    "RECOMMENDATION_SOURCE_SHORT_LABELS": (".mod_semantics", "RECOMMENDATION_SOURCE_SHORT_LABELS"),
+    "RECOMMENDATION_CONFIDENCE_LABELS": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_LABELS"),
+    "ONLINE_REVIEW_PRECHECK_NOTE": (".mod_semantics", "ONLINE_REVIEW_PRECHECK_NOTE"),
+    "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE": (".mod_semantics", "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE"),
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED": (".mod_semantics", "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED"),
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED": (
+        ".mod_semantics",
+        "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED",
+    ),
+    "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO"),
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED"),
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING"),
+    "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED": (
+        ".mod_semantics",
+        "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED",
+    ),
+    "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED": (".mod_semantics", "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED"),
+    "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED": (".mod_semantics", "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED"),
+    "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY": (".mod_semantics", "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY"),
+    "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED": (".mod_semantics", "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED"),
+    "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE": (".mod_semantics", "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE"),
+    "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE": (".mod_semantics", "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE"),
+    "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE": (".mod_semantics", "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE"),
+    "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE": (".mod_semantics", "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE"),
+    "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE"),
+    "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE"),
+    "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE"),
+    "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE"),
+    "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE"),
+    "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE"),
+    "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE"),
+    "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE": (".mod_semantics", "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE"),
 }
-
 __getattr__, __dir__, __all__ = src.lazy_exports(globals(), __name__, _EXPORTS)

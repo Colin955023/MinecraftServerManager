@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 from packaging.version import Version
-from src.utils.server_detection_version_utils import ServerDetectionVersionUtils
+from src.utils import ServerDetectionVersionUtils
 from src.utils import UpdateParsing
 
 
@@ -51,3 +51,16 @@ def test_detect_loader_from_text_supports_vanilla_and_rejects_unsupported_loader
     assert ServerDetectionVersionUtils.detect_loader_from_text("NeoForge server") == "unknown"
     assert ServerDetectionVersionUtils.detect_loader_from_text("totally-random-loader-xyz 12345") == "unknown"
     assert ServerDetectionVersionUtils.detect_loader_from_text("Forge server") == "forge"
+
+
+@pytest.mark.smoke
+def test_parse_mc_version_prefers_packaging_release_tuple() -> None:
+    assert ServerDetectionVersionUtils.parse_mc_version("v1.20.1") == [1, 20, 1]
+    assert ServerDetectionVersionUtils.parse_mc_version("1.20.1-fabric.2") == [1, 20, 1]
+
+
+@pytest.mark.smoke
+def test_is_fabric_compatible_version_uses_standard_version_parser() -> None:
+    assert ServerDetectionVersionUtils.is_fabric_compatible_version("1.14") is True
+    assert ServerDetectionVersionUtils.is_fabric_compatible_version("1.13.2") is False
+    assert ServerDetectionVersionUtils.is_fabric_compatible_version("v1.20.1") is True

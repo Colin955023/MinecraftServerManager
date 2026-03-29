@@ -1,5 +1,4 @@
 from pathlib import Path
-import threading
 
 
 def test_server_instance_init(tmp_path):
@@ -11,7 +10,9 @@ def test_server_instance_init(tmp_path):
     assert inst.name == "myserver"
     assert inst.path == Path(tmp_path)
     assert hasattr(inst, "_lock")
-    assert isinstance(inst._lock, threading.RLock)
+    # 不直接依賴具體實作型別：使用 duck-typing 檢查鎖的行為
+    assert hasattr(inst._lock, "acquire")
+    assert hasattr(inst._lock, "release")
     assert inst.process is None
 
 

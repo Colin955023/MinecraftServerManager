@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """模組管理頁面
 參考 Prism Launcher 設計，支援線上模組查詢與下載
 """
@@ -9,7 +8,7 @@ import re
 import time
 import tkinter as tk
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -17,20 +16,50 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from types import SimpleNamespace
 from typing import Any
-
 import customtkinter as ctk
-
-from ..core import MinecraftVersionManager, ModManager, ModStatus
+from ..core import AppException, MinecraftVersionManager, ModManager, ModStatus
 from ..utils import (
+    LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
+    LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE,
+    LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE,
+    LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE,
+    LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE,
+    LOCAL_UPDATE_REVIEW_PRECHECK_NOTE,
+    LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE,
+    LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE,
+    LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE,
+    METADATA_SOURCE_LABELS,
+    METADATA_SOURCE_SHORT_LABELS,
+    METADATA_SOURCE_STALE_PROVIDER,
+    METADATA_SOURCE_UNRESOLVED,
+    ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE,
+    ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE,
+    ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE,
+    ONLINE_REVIEW_PRECHECK_NOTE,
+    RECOMMENDATION_CONFIDENCE_ADVISORY,
+    RECOMMENDATION_CONFIDENCE_LABELS,
+    RECOMMENDATION_CONFIDENCE_RETRYABLE,
+    RECOMMENDATION_SOURCE_LABELS,
+    RECOMMENDATION_SOURCE_METADATA_UNRESOLVED,
+    RECOMMENDATION_SOURCE_SHORT_LABELS,
+    RECOMMENDATION_SOURCE_STALE_METADATA,
     Colors,
     FontManager,
     FontSize,
     PathUtils,
+    ProviderMetadataRecord,
     Sizes,
     UIUtils,
+    CancellationToken,
+    apply_provider_metadata,
+    cache_provider_metadata_record,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
+    ensure_local_mod_provider_record,
     get_logger,
+    register_provider_revalidation_success,
+    resolve_modrinth_provider_record,
+    PROVIDER_LIFECYCLE_STALE,
 )
 from . import (
     CustomDropdown,
@@ -38,29 +67,19 @@ from . import (
     analyze_mod_version_compatibility,
     build_local_mod_update_plan,
     build_required_dependency_install_plan,
+    deserialize_online_dependency_install_plan,
     enhance_local_mod,
     get_mod_versions,
+    migrate_online_dependency_install_plan_payload,
     resolve_modrinth_project_names,
     search_mods_online,
+    serialize_online_dependency_install_plan,
+    validate_online_dependency_install_plan_payload,
 )
 
 logger = get_logger().bind(component="ModManagement")
-
 SUPPORTED_ONLINE_MOD_LOADERS = {"fabric", "forge"}
 MODRINTH_PROJECT_PAGE_BASE_URL = "https://modrinth.com/mod"
-ONLINE_CATEGORY_OPTIONS: dict[str, list[str]] = {
-    "全部分類": [],
-    "效能優化": ["optimization"],
-    "API / Library": ["library"],
-    "世界生成": ["worldgen"],
-    "冒險內容": ["adventure"],
-    "裝飾建築": ["decoration"],
-    "紅石與科技": ["technology"],
-    "工具與實用": ["utility"],
-    "交通移動": ["transportation"],
-    "儲存整理": ["storage"],
-    "魔法內容": ["magic"],
-}
 
 
 @dataclass(slots=True)
@@ -94,7 +113,7 @@ class PendingInstallReviewEntry:
 
     @property
     def actionable(self) -> bool:
-        return self.enabled and not self.blocking_reasons
+        return self.enabled and (not self.blocking_reasons)
 
     @property
     def runnable(self) -> bool:
@@ -116,11 +135,11 @@ class LocalUpdateReviewEntry:
 
     @property
     def actionable(self) -> bool:
-        return self.enabled and bool(getattr(self.candidate, "actionable", False)) and not self.blocking_reasons
+        return self.enabled and bool(getattr(self.candidate, "actionable", False)) and (not self.blocking_reasons)
 
     @property
     def runnable(self) -> bool:
-        return bool(getattr(self.candidate, "actionable", False)) and not self.blocking_reasons
+        return bool(getattr(self.candidate, "actionable", False)) and (not self.blocking_reasons)
 
 
 @dataclass(slots=True)
@@ -145,11 +164,6 @@ class OnlineBrowseRequest:
     minecraft_version: str | None
     loader_type: str
     sort_by: str
-    categories: tuple[str, ...] = ()
-
-    @property
-    def is_browse_mode(self) -> bool:
-        return not bool(self.query)
 
 
 class ModManagementFrame:
@@ -164,23 +178,13 @@ class ModManagementFrame:
         self.server_manager = server_manager
         self.on_server_selected = on_server_selected_callback
         self.version_manager = version_manager
-
-        # 目前選中的伺服器
         self.current_server = None
         self.mod_manager: ModManager | None = None
-
-        # 版本相關變數
         self.versions: list = []
         self.release_versions: list = []
-
-        # 多選狀態管理
         self.all_selected = False
-        self.selected_mods: set[str] = set()  # 儲存選中的模組 ID
-
-        # 預編譯正則表達式（效能優化：避免每次 refresh 都重新編譯）
-        self.VERSION_PATTERN = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
-
-        # UI 元件
+        self.selected_mods: set[str] = set()
+        self.VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
         self.main_frame: ctk.CTkFrame | None = None
         self.notebook: ttk.Notebook | None = None
         self.local_tab: ctk.CTkFrame | None = None
@@ -188,8 +192,6 @@ class ModManagementFrame:
         self.browse_tree: ttk.Treeview | None = None
         self.browse_filter_label: ctk.CTkLabel | None = None
         self.browse_results_label: ctk.CTkLabel | None = None
-
-        # 本地模組頁面
         self.local_tree: ttk.Treeview | None = None
         self.local_v_scrollbar: ttk.Scrollbar | None = None
         self.local_h_scrollbar: ttk.Scrollbar | None = None
@@ -201,7 +203,6 @@ class ModManagementFrame:
         self._local_rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
         self._local_recycled_item_ids: list[str] = []
         self._local_recycle_pool_max = 500
-        # 重用池觀測指標（debug）：用於調整 pool 上限與命中率。
         self._local_recycle_hits = 0
         self._local_recycle_misses = 0
         self._local_recycle_drops = 0
@@ -214,8 +215,6 @@ class ModManagementFrame:
         self._local_insert_batch_base = 60
         self._local_insert_batch_max = 180
         self._local_insert_batch_divisor = 8
-
-        # 狀態
         self.local_mods: list[Any] = []
         self.online_mods: list[Any] = []
         self._online_mod_index: dict[str, Any] = {}
@@ -223,15 +222,19 @@ class ModManagementFrame:
         self.pending_online_installs: list[PendingOnlineInstall] = []
         self._latest_local_update_plan = LocalModUpdatePlan()
         self.enhanced_mods_cache: dict[str, Any] = {}
+        self._dependency_snapshot_migration_totals: dict[str, int] = {
+            "checked": 0,
+            "migrated": 0,
+            "replayed": 0,
+            "fallback_rebuild": 0,
+        }
         self._last_mods_dir: str | None = None
         self._last_mods_dir_mtime: float | None = None
         self._status_update_job = None
         self._pending_status_message: str = ""
-
         self.ui_queue: queue.Queue = queue.Queue()
-
         self.create_widgets()
-        host = self.main_frame if (self.main_frame and self.main_frame.winfo_exists()) else self.parent
+        host = self.main_frame if self.main_frame and self.main_frame.winfo_exists() else self.parent
         UIUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
@@ -242,15 +245,17 @@ class ModManagementFrame:
             if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
                 if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
                     UIUtils.schedule_coalesced_idle(
-                        self.parent,
-                        "_status_update_job",
-                        self._apply_status_label_update,
-                        owner=self,
+                        self.parent, "_status_update_job", self._apply_status_label_update, owner=self
                     )
                 else:
                     self._apply_status_label_update()
-        except Exception as e:
-            logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
+        except (AttributeError, RuntimeError) as e:
+            logger.warning(f"更新狀態遇到暫時性問題: {e}")
+        except AppException as e:
+            logger.info(f"更新狀態被應用例外攔截: {e}")
+            self.update_status_safe(str(e))
+        except Exception:
+            logger.error("更新狀態失敗: 未知錯誤\n" + traceback.format_exc())
 
     def _apply_status_label_update(self) -> None:
         """套用合併後的狀態文字。"""
@@ -267,7 +272,14 @@ class ModManagementFrame:
 
         def _update():
             if hasattr(self, "progress_var") and self.progress_var:
-                self.progress_var.set(value)
+                try:
+                    self.progress_var.set(value)
+                except (AttributeError, RuntimeError) as e:
+                    logger.warning(f"更新進度遇到暫時性問題: {e}")
+                except AppException as e:
+                    logger.info(f"更新進度被應用例外攔截: {e}")
+                except Exception:
+                    logger.error("更新進度失敗: 未知錯誤\n" + traceback.format_exc())
 
         self.ui_queue.put(_update)
 
@@ -275,8 +287,8 @@ class ModManagementFrame:
     def _get_local_row_palette(is_dark: bool) -> tuple[str, str]:
         """回傳本地模組列表交錯列配色。"""
         if is_dark:
-            return Colors.BG_LISTBOX_DARK, Colors.BG_LISTBOX_ALT_DARK
-        return Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_ALT_LIGHT
+            return (Colors.BG_LISTBOX_DARK, Colors.BG_LISTBOX_ALT_DARK)
+        return (Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_ALT_LIGHT)
 
     @staticmethod
     def _get_parity_tag(index: int) -> str:
@@ -285,36 +297,21 @@ class ModManagementFrame:
 
     def create_widgets(self) -> None:
         """建立 UI 元件"""
-        # 主框架
         self.main_frame = ctk.CTkFrame(self.parent)
-
-        # 標題區域
         self.create_header()
-
-        # 伺服器選擇區域
         self.create_server_selection()
-
-        # 狀態列
         self.create_status_bar()
-
-        # 頁籤介面
         self.create_notebook()
 
     def create_server_selection(self) -> None:
         """建立伺服器選擇區域"""
         server_frame = ctk.CTkFrame(self.main_frame)
         server_frame.pack(fill="x", padx=20, pady=(0, 10))
-
         inner_frame = ctk.CTkFrame(server_frame, fg_color="transparent")
         inner_frame.pack(fill="x", padx=15, pady=10)
-
-        # 伺服器選擇
         ctk.CTkLabel(
-            inner_frame,
-            text="📁 伺服器:",
-            font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold"),
+            inner_frame, text="📁 伺服器:", font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold")
         ).pack(side="left")
-
         self.server_var = tk.StringVar()
         self.server_combo = CustomDropdown(
             inner_frame,
@@ -324,8 +321,6 @@ class ModManagementFrame:
             width=FontManager.get_dpi_scaled_size(200),
         )
         self.server_combo.pack(side="left", padx=(10, 0))
-
-        # 重新整理按鈕
         refresh_btn = ctk.CTkButton(
             inner_frame,
             text="🔄 重新整理",
@@ -340,15 +335,10 @@ class ModManagementFrame:
         """建立標題區域"""
         header_frame = ctk.CTkFrame(self.main_frame)
         header_frame.pack(fill="x", padx=20, pady=(20, 10))
-
-        # 創建標題
         title_label = ctk.CTkLabel(
-            header_frame,
-            text="🧩 模組管理",
-            font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold"),
+            header_frame, text="🧩 模組管理", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
         )
         title_label.pack(side="left", padx=15, pady=15)
-
         desc_label = ctk.CTkLabel(
             header_frame,
             text="參考 Prism Launcher 的模組管理流程",
@@ -363,10 +353,7 @@ class ModManagementFrame:
             return
         self.local_tab = ctk.CTkFrame(self.notebook)
         self.notebook.add(self.local_tab, text="📁 本地模組")
-        # 工具列
         self.create_local_toolbar()
-
-        # 模組列表
         self.create_local_mod_list()
 
     def create_browse_mods_tab(self) -> None:
@@ -382,13 +369,10 @@ class ModManagementFrame:
         """建立線上搜尋區域。"""
         if not self.browse_tab:
             return
-
         search_frame = ctk.CTkFrame(self.browse_tab)
         search_frame.pack(fill="x", padx=14, pady=14)
-
         self.search_var = tk.StringVar()
         self.browse_sort_var = tk.StringVar(value="相關性")
-        self.browse_category_var = tk.StringVar(value="全部分類")
         self.browse_sort_options = {
             "相關性": "relevance",
             "下載量": "downloads",
@@ -396,18 +380,16 @@ class ModManagementFrame:
             "最近更新": "updated",
             "名稱": "name",
         }
-
         search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self.search_var,
-            placeholder_text="留空可直接瀏覽，例如 sodium / lithium / worldedit",
+            placeholder_text="請輸入關鍵字後搜尋，例如 sodium / lithium / worldedit",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             width=FontManager.get_dpi_scaled_size(320),
             height=Sizes.INPUT_HEIGHT,
         )
         search_entry.pack(side="left", padx=(14, 10), pady=14)
         search_entry.bind("<Return>", self.search_online_mods)
-
         sort_dropdown = CustomDropdown(
             search_frame,
             variable=self.browse_sort_var,
@@ -417,17 +399,6 @@ class ModManagementFrame:
             height=Sizes.INPUT_HEIGHT,
         )
         sort_dropdown.pack(side="left", padx=(0, 10), pady=14)
-
-        category_dropdown = CustomDropdown(
-            search_frame,
-            variable=self.browse_category_var,
-            values=list(ONLINE_CATEGORY_OPTIONS.keys()),
-            command=self.on_online_browse_filters_changed,
-            width=FontManager.get_dpi_scaled_size(150),
-            height=Sizes.INPUT_HEIGHT,
-        )
-        category_dropdown.pack(side="left", padx=(0, 10), pady=14)
-
         search_button = ctk.CTkButton(
             search_frame,
             text="🔍 搜尋 Modrinth",
@@ -440,7 +411,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         search_button.pack(side="left", padx=(0, 10), pady=14)
-
         install_button = ctk.CTkButton(
             search_frame,
             text="➕ 加入安裝清單",
@@ -453,7 +423,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         install_button.pack(side="left", pady=14)
-
         self.online_queue_button = ctk.CTkButton(
             search_frame,
             text="🧺 安裝清單 (0)",
@@ -466,7 +435,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         self.online_queue_button.pack(side="left", padx=(10, 0), pady=14)
-
         self.browse_filter_label = ctk.CTkLabel(
             self.browse_tab,
             text="",
@@ -477,7 +445,6 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(980),
         )
         self.browse_filter_label.pack(fill="x", padx=18, pady=(0, 4))
-
         self.browse_results_label = ctk.CTkLabel(
             self.browse_tab,
             text="",
@@ -495,13 +462,10 @@ class ModManagementFrame:
         """建立線上模組列表。"""
         if not self.browse_tab:
             return
-
         list_frame = ctk.CTkFrame(self.browse_tab)
         list_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
         tree_container = ctk.CTkFrame(list_frame)
         tree_container.pack(fill="both", expand=True, padx=10, pady=10)
-
         style = ttk.Style()
         style.configure(
             "BrowseModList.Treeview",
@@ -509,10 +473,8 @@ class ModManagementFrame:
             rowheight=int(26 * FontManager.get_scale_factor()),
         )
         style.configure(
-            "BrowseModList.Treeview.Heading",
-            font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
+            "BrowseModList.Treeview.Heading", font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold")
         )
-
         columns = ("name", "author", "downloads", "description")
         self.browse_tree = ttk.Treeview(
             tree_container,
@@ -521,7 +483,6 @@ class ModManagementFrame:
             height=Sizes.TREEVIEW_VISIBLE_ROWS,
             style="BrowseModList.Treeview",
         )
-
         column_config = {
             "name": ("模組名稱", 220),
             "author": ("作者", 120),
@@ -530,24 +491,15 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             self.browse_tree.heading(col, text=text, anchor="w")
-            self.browse_tree.column(
-                col,
-                width=width,
-                minwidth=60,
-                anchor="w",
-                stretch=(col == "description"),
-            )
-
+            self.browse_tree.column(col, width=width, minwidth=60, anchor="w", stretch=col == "description")
         v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.browse_tree.yview)
         h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.browse_tree.xview)
         self.browse_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-
         self.browse_tree.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-
         UIUtils.bind_treeview_header_auto_fit(
             self.browse_tree,
             on_row_double_click=self.install_online_mod,
@@ -560,46 +512,36 @@ class ModManagementFrame:
     def _get_current_modrinth_context(self) -> tuple[str | None, str | None, str | None]:
         """依目前選取伺服器取得 Minecraft、loader 與 loader 版本資訊。"""
         if not self.current_server:
-            return None, None, None
-
+            return (None, None, None)
         minecraft_version = str(getattr(self.current_server, "minecraft_version", "") or "").strip() or None
         loader_type = str(getattr(self.current_server, "loader_type", "") or "").strip() or None
         loader_version = str(getattr(self.current_server, "loader_version", "") or "").strip() or None
-        return minecraft_version, loader_type, loader_version
+        return (minecraft_version, loader_type, loader_version)
 
     def _get_current_modrinth_filters(self) -> tuple[str | None, str | None]:
         """依目前選取伺服器取得 Minecraft 版本與 loader 過濾條件。"""
         minecraft_version, loader_type, _ = self._get_current_modrinth_context()
-        return minecraft_version, loader_type
-
-    def _get_selected_online_categories(self) -> list[str]:
-        if not hasattr(self, "browse_category_var"):
-            return []
-        selected_label = str(self.browse_category_var.get() or "全部分類").strip() or "全部分類"
-        return list(ONLINE_CATEGORY_OPTIONS.get(selected_label, []))
+        return (minecraft_version, loader_type)
 
     def _get_online_filter_hint_text(self) -> str:
         """建立線上模組瀏覽/搜尋提示文字。"""
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         if not self.current_server:
-            return "留空可直接瀏覽；僅支援 Fabric / Forge。"
-
+            return "請先選擇伺服器並輸入關鍵字後搜尋；僅支援 Fabric / Forge。"
         loader_display = loader_type or "未設定"
         info_parts = [f"MC {minecraft_version or '未設定'}", loader_display]
         if loader_version:
             info_parts.append(loader_version)
-
         hint = "條件：" + " / ".join(info_parts)
         if not loader_type or loader_type.lower() not in SUPPORTED_ONLINE_MOD_LOADERS:
             return hint + "｜僅支援 Fabric / Forge"
-        return hint + "｜留空可直接瀏覽"
+        return hint + "｜請輸入關鍵字後搜尋"
 
     def _get_online_version_dialog_hint_text(self) -> str:
         """建立版本選擇視窗的伺服器條件摘要。"""
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         if not self.current_server:
             return "會依目前伺服器條件自動分析版本相容性。"
-
         loader_display = loader_type or "未設定"
         info_parts = [f"MC {minecraft_version or '未設定'}", loader_display]
         if loader_version:
@@ -616,12 +558,6 @@ class ModManagementFrame:
         if not hasattr(self, "browse_sort_var"):
             return "相關性"
         return str(self.browse_sort_var.get() or "相關性").strip() or "相關性"
-
-    def _get_online_category_label(self) -> str:
-        """取得目前線上瀏覽使用的分類顯示文字。"""
-        if not hasattr(self, "browse_category_var"):
-            return "全部分類"
-        return str(self.browse_category_var.get() or "全部分類").strip() or "全部分類"
 
     def _format_online_result_description(self, mod: Any) -> str:
         """格式化瀏覽列表描述欄位。"""
@@ -643,7 +579,7 @@ class ModManagementFrame:
     def _build_online_results_summary_text(self) -> str:
         """建立瀏覽/搜尋結果摘要，說明目前條件與結果數量。"""
         query = self._get_online_query_text()
-        mode_text = "瀏覽" if not query else f"搜尋 {query}"
+        mode_text = "請輸入關鍵字搜尋" if not query else f"搜尋 {query}"
         sort_text = self._get_online_sort_label()
         result_count = len(self.online_mods)
         return f"{mode_text}｜{result_count} 筆｜排序 {sort_text}"
@@ -672,17 +608,14 @@ class ModManagementFrame:
         minecraft_version, _ = self._get_current_modrinth_filters()
         loader_type, warning_message = self._get_supported_online_loader()
         if warning_message or not loader_type:
-            return None, warning_message
-
+            return (None, warning_message)
+        query = self._get_online_query_text()
+        if not query:
+            return (None, "請先輸入關鍵字再搜尋模組。")
         sort_by = self.browse_sort_options.get(self.browse_sort_var.get(), "relevance")
-        categories = tuple(self._get_selected_online_categories())
         return (
             OnlineBrowseRequest(
-                query=self._get_online_query_text(),
-                minecraft_version=minecraft_version,
-                loader_type=loader_type,
-                sort_by=sort_by,
-                categories=categories,
+                query=query, minecraft_version=minecraft_version, loader_type=loader_type, sort_by=sort_by
             ),
             None,
         )
@@ -696,45 +629,42 @@ class ModManagementFrame:
         return False
 
     def _load_online_mods(self, *, force: bool = False, show_warning: bool = True) -> None:
-        """依目前條件載入線上模組，支援瀏覽與關鍵字搜尋兩種模式。"""
+        """依目前條件載入線上模組（需輸入關鍵字）。"""
         request, warning_message = self._build_online_browse_request()
         if request is None:
             if show_warning and warning_message:
                 UIUtils.show_warning("目前不支援", warning_message, self.parent)
             self._clear_online_mods()
             return
-
         if not force and request == self._last_online_request and self.online_mods:
             return
 
         def search_task() -> None:
             try:
                 filter_hint = self._get_online_filter_hint_text()
-                mode_text = "載入可下載模組" if request.is_browse_mode else "搜尋 Modrinth 模組"
-                self.update_status_safe(f"正在{mode_text}... {filter_hint}")
+                self.update_status_safe(f"正在搜尋 Modrinth 模組... {filter_hint}")
                 mods = search_mods_online(
                     request.query,
                     minecraft_version=request.minecraft_version,
                     loader=request.loader_type,
-                    categories=list(request.categories),
                     sort_by=request.sort_by,
                 )
                 self.online_mods = mods
                 self._online_mod_index = {mod.project_id: mod for mod in mods if getattr(mod, "project_id", "")}
                 self._last_online_request = request
                 self.ui_queue.put(self.refresh_browse_list)
-                if request.is_browse_mode:
-                    self.update_status_safe(f"已載入 {len(mods)} 個可下載模組")
-                else:
-                    self.update_status_safe(f"找到 {len(mods)} 個線上模組")
-            except Exception as e:
-                logger.error(f"搜尋線上模組失敗: {e}\n{traceback.format_exc()}")
+                self.update_status_safe(f"找到 {len(mods)} 個線上模組")
+            except AppException as e:
+                logger.warning(f"搜尋線上模組失敗（可恢復）: {e}")
                 self.update_status_safe(f"搜尋線上模組失敗: {e}")
+            except Exception:
+                logger.error("搜尋線上模組失敗: 未知錯誤\n" + traceback.format_exc())
+                self.update_status_safe("搜尋線上模組失敗：內部錯誤")
 
         UIUtils.run_async(search_task)
 
     def on_online_browse_filters_changed(self, _value: str) -> None:
-        """線上瀏覽排序或分類變更時立即刷新清單。"""
+        """線上瀏覽排序變更時立即刷新清單。"""
         self._refresh_online_filter_hint()
         self._refresh_online_results_summary()
         self._load_online_mods(force=True, show_warning=False)
@@ -756,6 +686,75 @@ class ModManagementFrame:
             return "可安裝，需注意"
         return "可安裝"
 
+    @staticmethod
+    def _normalize_online_version_type(value: Any) -> str:
+        """正規化版本類型，避免不同 provider 字串差異造成排序飄移。"""
+        return str(value or "").strip().lower()
+
+    @classmethod
+    def _get_online_version_type_rank(cls, version_type: Any) -> int:
+        """回傳版本穩定度排名（數字越小越優先）。"""
+        normalized = cls._normalize_online_version_type(version_type)
+        if normalized in {"release", "stable"}:
+            return 0
+        if normalized in {"beta", "pre", "preview", "rc"}:
+            return 1
+        if normalized in {"alpha", "snapshot"}:
+            return 2
+        return 3
+
+    @staticmethod
+    def _get_online_version_compatibility_rank(report: Any | None) -> int:
+        """相容性排名（數字越小越優先）。"""
+        if report is None:
+            return 1
+        return 0 if bool(getattr(report, "compatible", True)) else 2
+
+    @classmethod
+    def _sort_online_versions_for_server(
+        cls, versions: list[Any], version_reports: list[Any] | None
+    ) -> tuple[list[Any], list[Any] | None]:
+        """伺服器安裝場景排序：相容性 > 穩定度 > 發布時間。"""
+        if not versions:
+            return (versions, version_reports)
+        indexed_reports: list[Any | None]
+        if version_reports is None:
+            indexed_reports = [None] * len(versions)
+        else:
+            indexed_reports = [
+                version_reports[index] if index < len(version_reports) else None for index in range(len(versions))
+            ]
+        merged = list(zip(versions, indexed_reports, strict=False))
+
+        def _published_sort_value(version: Any) -> tuple[int, str]:
+            published = str(getattr(version, "date_published", "") or "")
+            return (0 if published else 1, published)
+
+        merged.sort(
+            key=lambda item: (
+                cls._get_online_version_compatibility_rank(item[1]),
+                cls._get_online_version_type_rank(getattr(item[0], "version_type", "")),
+                _published_sort_value(item[0]),
+            )
+        )
+        grouped: dict[tuple[int, int], list[tuple[Any, Any | None]]] = {}
+        for row in merged:
+            group_key = (
+                cls._get_online_version_compatibility_rank(row[1]),
+                cls._get_online_version_type_rank(getattr(row[0], "version_type", "")),
+            )
+            grouped.setdefault(group_key, []).append(row)
+        merged = []
+        for group_key in sorted(grouped):
+            group_rows = grouped[group_key]
+            group_rows.sort(key=lambda row: str(getattr(row[0], "date_published", "") or ""), reverse=True)
+            merged.extend(group_rows)
+        sorted_versions = [item[0] for item in merged]
+        if version_reports is None:
+            return (sorted_versions, None)
+        sorted_reports = [item[1] for item in merged]
+        return (sorted_versions, sorted_reports)
+
     def _format_online_version_report(self, version: Any, report: Any | None) -> str:
         """格式化版本相容性與依賴分析結果。"""
         lines = [
@@ -764,44 +763,35 @@ class ModManagementFrame:
             f"Minecraft：{', '.join(getattr(version, 'game_versions', []) or []) or '-'}",
             f"Loader：{', '.join(getattr(version, 'loaders', []) or []) or '-'}",
         ]
-
         version_type = str(getattr(version, "version_type", "") or "").strip()
         if version_type:
             lines.append(f"版本類型：{version_type}")
-
         published_text = self._format_review_published_at(getattr(version, "date_published", ""))
         if published_text:
             lines.append(f"發布時間：{published_text}")
-
         changelog_text = self._summarize_review_changelog(getattr(version, "changelog", ""))
         if changelog_text:
             lines.append("")
             lines.append("更新內容：")
             lines.append(changelog_text)
-
         if report is None:
             return "\n".join(lines)
-
-        lines.insert(0, f"相容性結果：{'可安裝' if getattr(report, 'compatible', True) else '不符合目前伺服器條件'}")
-
+        lines.insert(0, f"相容性結果：{('可安裝' if getattr(report, 'compatible', True) else '不符合目前伺服器條件')}")
         hard_errors = list(getattr(report, "hard_errors", []) or [])
         if hard_errors:
             lines.append("")
             lines.append("阻擋原因：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(hard_errors, max_items=3))
-
         missing_required = list(getattr(report, "missing_required_dependencies", []) or [])
         if missing_required:
             lines.append("")
             lines.append("需要安裝的必要依賴：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(missing_required, max_items=3))
-
         incompatible_installed = list(getattr(report, "incompatible_installed", []) or [])
         if incompatible_installed:
             lines.append("")
             lines.append("已安裝但不相容的模組：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(incompatible_installed, max_items=3))
-
         installed_version_mismatches = list(getattr(report, "installed_version_mismatches", []) or [])
         if installed_version_mismatches:
             lines.append("")
@@ -809,51 +799,42 @@ class ModManagementFrame:
             lines.extend(
                 f"- {item}" for item in self._summarize_review_messages(installed_version_mismatches, max_items=3)
             )
-
         optional_dependencies = list(getattr(report, "optional_dependencies", []) or [])
         if optional_dependencies:
             lines.append("")
             lines.append("可選依賴：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(optional_dependencies, max_items=2))
-
         already_installed = list(getattr(report, "already_installed", []) or [])
         if already_installed:
             lines.append("")
             lines.append("目前已安裝：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(already_installed, max_items=2))
-
         notes = list(getattr(report, "notes", []) or [])
         if notes:
             lines.append("")
             lines.append("補充說明：")
             lines.extend(f"- {item}" for item in self._summarize_review_messages(notes, max_items=2))
-
         return "\n".join(lines)
 
     def _build_online_install_warning_message(self, report: Any | None) -> str:
         """整理需要使用者確認的安裝前提醒。"""
         if report is None:
             return ""
-
         sections: list[str] = []
         already_installed = list(getattr(report, "already_installed", []) or [])
         if already_installed:
             sections.append("已安裝相同模組：\n" + "\n".join(f"- {item}" for item in already_installed))
-
         missing_required = list(getattr(report, "missing_required_dependencies", []) or [])
         if missing_required:
             sections.append("將自動安裝的必要依賴：\n" + "\n".join(f"- {item}" for item in missing_required))
-
         incompatible_installed = list(getattr(report, "incompatible_installed", []) or [])
         if incompatible_installed:
             sections.append("已安裝的不相容模組：\n" + "\n".join(f"- {item}" for item in incompatible_installed))
-
         installed_version_mismatches = list(getattr(report, "installed_version_mismatches", []) or [])
         if installed_version_mismatches:
             sections.append(
                 "已安裝但版本不符的依賴：\n" + "\n".join(f"- {item}" for item in installed_version_mismatches)
             )
-
         return "\n\n".join(sections)
 
     @staticmethod
@@ -866,28 +847,27 @@ class ModManagementFrame:
     @staticmethod
     def _format_metadata_source_label(source: str | None) -> str:
         normalized = str(source or "").strip().lower()
-        if normalized == "hash":
-            return "雜湊比對"
-        if normalized == "cached_provider":
-            return "已快取 metadata"
-        if normalized == "lookup":
-            return "專案查詢"
-        if normalized == "unresolved":
-            return "尚未識別"
-        return "未知"
+        return METADATA_SOURCE_LABELS.get(normalized, "未知")
 
     @staticmethod
     def _format_metadata_source_short_label(source: str | None) -> str:
         normalized = str(source or "").strip().lower()
-        if normalized == "hash":
-            return "雜湊"
-        if normalized == "cached_provider":
-            return "快取"
-        if normalized == "lookup":
-            return "查詢"
-        if normalized == "unresolved":
-            return "待綁定"
-        return "未知"
+        return METADATA_SOURCE_SHORT_LABELS.get(normalized, "未知")
+
+    @staticmethod
+    def _format_recommendation_source_label(source: str | None) -> str:
+        normalized = str(source or "").strip().lower()
+        return RECOMMENDATION_SOURCE_LABELS.get(normalized, "未知")
+
+    @staticmethod
+    def _format_recommendation_source_short_label(source: str | None) -> str:
+        normalized = str(source or "").strip().lower()
+        return RECOMMENDATION_SOURCE_SHORT_LABELS.get(normalized, "未知")
+
+    @staticmethod
+    def _format_recommendation_confidence_label(confidence: str | None) -> str:
+        normalized = str(confidence or "").strip().lower()
+        return RECOMMENDATION_CONFIDENCE_LABELS.get(normalized, "未知")
 
     @staticmethod
     def _build_modrinth_project_page_url(identifier: str | None) -> str:
@@ -897,52 +877,58 @@ class ModManagementFrame:
         return f"{MODRINTH_PROJECT_PAGE_BASE_URL}/{normalized}"
 
     @classmethod
+    def _resolve_project_page_url_from_candidates(
+        cls, *, url_candidates: Iterable[Any] = (), identifier_candidates: Iterable[Any] = ()
+    ) -> str:
+        for raw_url in url_candidates:
+            clean_url = str(raw_url or "").strip()
+            if clean_url:
+                return clean_url
+        for raw_identifier in identifier_candidates:
+            project_page_url = cls._build_modrinth_project_page_url(str(raw_identifier or "").strip())
+            if project_page_url:
+                return project_page_url
+        return ""
+
+    @classmethod
     def _resolve_online_mod_project_page_url(cls, mod: Any) -> str:
-        homepage_url = str(getattr(mod, "homepage_url", "") or "").strip()
-        if homepage_url:
-            return homepage_url
+        return cls._resolve_project_page_url_from_candidates(
+            url_candidates=(getattr(mod, "homepage_url", ""), getattr(mod, "url", "")),
+            identifier_candidates=(getattr(mod, "slug", ""), getattr(mod, "project_id", "")),
+        )
 
-        source_url = str(getattr(mod, "url", "") or "").strip()
-        if source_url:
-            return source_url
+    def _make_step_progress_callback(self, step_index: int, total_steps: int):
+        """回傳一個 progress callback；將進度換算成整體步驟的 fraction。"""
 
-        slug = str(getattr(mod, "slug", "") or "").strip()
-        if slug:
-            return cls._build_modrinth_project_page_url(slug)
+        def _callback(downloaded: int, total: int) -> None:
+            fraction = downloaded / total if total > 0 else 0.0
+            self.update_progress_safe((step_index + fraction) / max(1, total_steps))
 
-        project_id = str(getattr(mod, "project_id", "") or "").strip()
-        return cls._build_modrinth_project_page_url(project_id)
+        return _callback
 
     @classmethod
     def _resolve_pending_install_review_project_page_url(cls, review_entry: PendingInstallReviewEntry) -> str:
         pending = getattr(review_entry, "pending", None)
         if pending is None:
             return ""
-
-        homepage_url = str(getattr(pending, "homepage_url", "") or "").strip()
-        if homepage_url:
-            return homepage_url
-
-        source_url = str(getattr(pending, "source_url", "") or "").strip()
-        if source_url:
-            return source_url
-
-        project_id = str(getattr(pending, "project_id", "") or "").strip()
-        return cls._build_modrinth_project_page_url(project_id)
+        return cls._resolve_project_page_url_from_candidates(
+            url_candidates=(getattr(pending, "homepage_url", ""), getattr(pending, "source_url", "")),
+            identifier_candidates=(getattr(pending, "project_id", ""),),
+        )
 
     @classmethod
     def _resolve_local_update_review_project_page_url(cls, review_entry: LocalUpdateReviewEntry) -> str:
         candidate = getattr(review_entry, "candidate", None)
         if candidate is None:
             return ""
-
         local_mod = getattr(candidate, "local_mod", None)
-        slug = str(getattr(local_mod, "platform_slug", "") or "").strip()
-        if slug:
-            return cls._build_modrinth_project_page_url(slug)
-
-        project_id = str(getattr(candidate, "project_id", "") or getattr(local_mod, "platform_id", "") or "").strip()
-        return cls._build_modrinth_project_page_url(project_id)
+        return cls._resolve_project_page_url_from_candidates(
+            identifier_candidates=(
+                getattr(local_mod, "platform_slug", ""),
+                getattr(candidate, "project_id", ""),
+                getattr(local_mod, "platform_id", ""),
+            )
+        )
 
     @staticmethod
     def _format_review_published_at(value: str | None) -> str:
@@ -970,15 +956,6 @@ class ModManagementFrame:
         summary_box.configure(state="disabled")
         return summary_box
 
-    @staticmethod
-    def _get_mousewheel_units(delta: int) -> int:
-        if delta == 0:
-            return 0
-        units = int(-delta / 120)
-        if units == 0:
-            return -1 if delta > 0 else 1
-        return units
-
     @classmethod
     def _bind_vertical_mousewheel(cls, widget: Any, *, scroll_callback: Callable[..., Any]) -> None:
         try:
@@ -992,7 +969,7 @@ class ModManagementFrame:
 
     @classmethod
     def _scroll_widget_vertical(cls, event: Any, *, scroll_callback: Callable[..., Any]) -> str | None:
-        units = cls._get_mousewheel_units(int(getattr(event, "delta", 0)))
+        units = UIUtils.get_mousewheel_units(int(getattr(event, "delta", 0)))
         if units == 0:
             return None
         scroll_callback(units, "units")
@@ -1003,7 +980,6 @@ class ModManagementFrame:
         row_id = str(tree.identify_row(int(getattr(event, "y", 0))) or "").strip()
         if not row_id:
             return ""
-
         selection = set(tree.selection())
         if row_id not in selection:
             tree.selection_set(row_id)
@@ -1012,30 +988,83 @@ class ModManagementFrame:
         return row_id
 
     @staticmethod
-    def _build_online_install_review_subtitle(actionable_count: int, blocked_count: int) -> str:
-        segments = ["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"]
+    def _build_review_subtitle(
+        *,
+        prefix_segments: list[str],
+        count_segments: Iterable[tuple[int, str]],
+        blocked_count: int,
+        blocked_label: str,
+        migrated_snapshot_count: int = 0,
+        migrated_snapshot_label: str = "快照遷移",
+    ) -> str:
+        segments = list(prefix_segments)
+        for count, label in count_segments:
+            if count:
+                segments.append(f"{label} {count} 項")
+        if migrated_snapshot_count:
+            segments.append(f"{migrated_snapshot_label} {migrated_snapshot_count} 項")
         if blocked_count:
-            segments.append(f"{blocked_count} 項待處理")
+            segments.append(f"{blocked_label} {blocked_count} 項")
         return "｜".join(segments)
 
     @staticmethod
-    def _build_local_update_review_subtitle(scope_text: str, enabled_count: int, blocked_count: int) -> str:
-        segments = [f"範圍：{scope_text}", f"可執行更新 {enabled_count} 項"]
-        if blocked_count:
-            segments.append(f"{blocked_count} 項待處理")
-        return "｜".join(segments)
+    def _build_online_install_review_subtitle(
+        actionable_count: int, blocked_count: int, *, advisory_count: int = 0, migrated_snapshot_count: int = 0
+    ) -> str:
+        return ModManagementFrame._build_review_subtitle(
+            prefix_segments=["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"],
+            count_segments=((advisory_count, "建議確認"),),
+            blocked_count=blocked_count,
+            blocked_label="待處理",
+            migrated_snapshot_count=migrated_snapshot_count,
+            migrated_snapshot_label="快照自動遷移",
+        )
+
+    @staticmethod
+    def _build_local_update_review_subtitle(
+        scope_text: str,
+        enabled_count: int,
+        blocked_count: int,
+        *,
+        advisory_count: int = 0,
+        retryable_count: int = 0,
+        unknown_count: int = 0,
+        migrated_snapshot_count: int = 0,
+    ) -> str:
+        return ModManagementFrame._build_review_subtitle(
+            prefix_segments=[f"範圍：{scope_text}", f"可執行更新 {enabled_count} 項"],
+            count_segments=(
+                (advisory_count, "建議確認"),
+                (retryable_count, "可重試"),
+                (unknown_count, "待識別"),
+            ),
+            blocked_count=blocked_count,
+            blocked_label="阻擋",
+            migrated_snapshot_count=migrated_snapshot_count,
+        )
 
     def _format_local_update_source_text(self, review_entry: LocalUpdateReviewEntry) -> str:
         provider_label = self._format_review_provider_label(review_entry.provider)
         metadata_source = str(getattr(review_entry.candidate, "metadata_source", "") or "").strip()
-        if not metadata_source:
+        recommendation_source = str(getattr(review_entry.candidate, "recommendation_source", "") or "").strip()
+        segments = [provider_label]
+        if metadata_source:
+            segments.append(self._format_metadata_source_short_label(metadata_source))
+        if recommendation_source:
+            segments.append(self._format_recommendation_source_short_label(recommendation_source))
+        if not segments:
             return provider_label
-        return f"{provider_label}｜{self._format_metadata_source_short_label(metadata_source)}"
+        return "｜".join(segments)
 
     def _build_local_update_metadata_detail(self, review_entry: LocalUpdateReviewEntry) -> str:
         candidate = review_entry.candidate
         lines = [f"Metadata 來源：{self._format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}"]
-
+        recommendation_source = str(getattr(candidate, "recommendation_source", "") or "").strip()
+        recommendation_confidence = str(getattr(candidate, "recommendation_confidence", "") or "").strip()
+        if recommendation_source:
+            lines.append(f"更新建議來源：{self._format_recommendation_source_label(recommendation_source)}")
+        if recommendation_confidence:
+            lines.append(f"更新建議可信度：{self._format_recommendation_confidence_label(recommendation_confidence)}")
         metadata_note = str(getattr(candidate, "metadata_note", "") or "").strip()
         if metadata_note:
             lines.append(f"Metadata 狀態：{metadata_note}")
@@ -1046,7 +1075,7 @@ class ModManagementFrame:
         raw_value = str(value or "").strip()
         if not raw_value:
             return ""
-        normalized = re.sub(r"\s+", " ", raw_value).strip()
+        normalized = re.sub("\\s+", " ", raw_value).strip()
         if len(normalized) <= max_length:
             return normalized
         return normalized[: max(0, max_length - 3)].rstrip() + "..."
@@ -1122,7 +1151,7 @@ class ModManagementFrame:
             dependency_plan = getattr(entry, "dependency_plan", None)
             for dependency_item in list(getattr(dependency_plan, "advisory_items", []) or []):
                 dependency_key = self._build_dependency_review_key(dependency_item)
-                overrides[(root_key, dependency_key)] = bool(getattr(dependency_item, "enabled", False))
+                overrides[root_key, dependency_key] = bool(getattr(dependency_item, "enabled", False))
         return overrides
 
     def _apply_review_advisory_enabled_overrides(
@@ -1156,19 +1185,15 @@ class ModManagementFrame:
         auto_install_count = len(list(getattr(dependency_plan, "items", []) or []))
         advisory_items = list(getattr(dependency_plan, "advisory_items", []) or [])
         optional_count = sum(1 for item in advisory_items if ModManagementFrame._is_optional_dependency_item(item))
-        return auto_install_count, optional_count
+        return (auto_install_count, optional_count)
 
-    def _build_online_review_root_status_text(self, review_entry: PendingInstallReviewEntry) -> str:
-        """建立線上安裝 review 根節點摘要，供 task tree 快速判讀。"""
-        base_status = ("可安裝" if review_entry.enabled else "已停用") if review_entry.runnable else "需先處理"
-
+    def _build_online_review_root_extra_segments(self, review_entry: PendingInstallReviewEntry) -> list[str]:
         auto_dependency_count, optional_dependency_count = self._count_dependency_plan_items(
             getattr(review_entry, "dependency_plan", None)
         )
         warning_count = len(self._dedupe_review_messages(list(getattr(review_entry, "warning_messages", []) or [])))
         blocking_count = len(self._dedupe_review_messages(list(getattr(review_entry, "blocking_reasons", []) or [])))
-
-        segments = [base_status]
+        segments: list[str] = []
         if auto_dependency_count:
             segments.append(f"依賴 {auto_dependency_count}")
         if optional_dependency_count:
@@ -1177,7 +1202,29 @@ class ModManagementFrame:
             segments.append(f"提醒 {warning_count}")
         if blocking_count:
             segments.append(f"阻擋 {blocking_count}")
+        return segments
+
+    @staticmethod
+    def _build_review_root_status_text(
+        review_entry: Any,
+        *,
+        group_key_getter: Callable[[Any], str],
+        group_status_getter: Callable[[str], str],
+        extra_segment_getter: Callable[[Any], list[str]] | None = None,
+    ) -> str:
+        segments = [group_status_getter(group_key_getter(review_entry))]
+        if extra_segment_getter is not None:
+            segments.extend(extra_segment_getter(review_entry))
         return "｜".join(segments)
+
+    def _build_online_review_root_status_text(self, review_entry: PendingInstallReviewEntry) -> str:
+        """建立線上安裝 review 根節點摘要，供 task tree 快速判讀。"""
+        return self._build_review_root_status_text(
+            review_entry,
+            group_key_getter=self._get_online_install_review_group_key,
+            group_status_getter=self._get_online_install_group_status_label,
+            extra_segment_getter=self._build_online_review_root_extra_segments,
+        )
 
     def _build_pending_install_summary_lines(self, review_entry: PendingInstallReviewEntry) -> list[str]:
         """建立待安裝 review 詳細文字頂部摘要。"""
@@ -1219,6 +1266,22 @@ class ModManagementFrame:
             return None
         return "提醒：此模組同時支援 client 端，請提醒玩家端也安裝相同模組版本，以避免連線或功能不一致問題。"
 
+    @classmethod
+    def _build_server_install_blocking_reason(cls, server_side: Any) -> str | None:
+        """伺服器安裝前檢查：若明確標示不支援 server 端，必須阻擋安裝。"""
+        normalized_server_side = cls._normalize_side_support(server_side)
+        if normalized_server_side == "unsupported":
+            return "此模組標記為僅 client 端（server_side=unsupported），不可安裝到伺服器。"
+        return None
+
+    @classmethod
+    def _build_server_install_warning_line(cls, server_side: Any) -> str | None:
+        """server_side 未明確標示時給出提醒，但不阻擋安裝。"""
+        normalized_server_side = cls._normalize_side_support(server_side)
+        if normalized_server_side in {"", "unknown"}:
+            return "提醒：此模組未明確標示 server 端支援，建議安裝前再次確認。"
+        return None
+
     @staticmethod
     def _dedupe_review_messages(messages: list[str] | tuple[str, ...]) -> list[str]:
         deduped: list[str] = []
@@ -1240,7 +1303,7 @@ class ModManagementFrame:
 
     @staticmethod
     def _summarize_review_note(value: str | None, max_length: int = 140) -> str:
-        normalized = re.sub(r"\s+", " ", str(value or "").strip())
+        normalized = re.sub("\\s+", " ", str(value or "").strip())
         if len(normalized) <= max_length:
             return normalized
         return normalized[: max(0, max_length - 3)].rstrip() + "..."
@@ -1258,7 +1321,6 @@ class ModManagementFrame:
     def _format_dependency_resolution_label(source: str | None, confidence: str | None) -> str:
         normalized_source = str(source or "").strip().lower()
         normalized_confidence = str(confidence or "").strip().lower()
-
         source_label = "project id 直連"
         if normalized_source == "version_detail":
             source_label = "版本詳情回補"
@@ -1266,13 +1328,11 @@ class ModManagementFrame:
             source_label = "loader 覆寫"
         elif normalized_source == "version_id":
             source_label = "version id 線索"
-
         confidence_label = "高"
         if normalized_confidence == "fallback":
             confidence_label = "中"
         elif normalized_confidence in {"heuristic", "manual"}:
             confidence_label = "需確認"
-
         return f"{source_label}（{confidence_label}）"
 
     @staticmethod
@@ -1281,12 +1341,10 @@ class ModManagementFrame:
             return "可選依賴，已啟用安裝"
         if is_advisory:
             return "可選依賴，預設略過"
-
         if bool(getattr(dependency_item, "maybe_installed", False)) and is_enabled:
             return "疑似已安裝，已改為安裝"
         if bool(getattr(dependency_item, "maybe_installed", False)):
             return "疑似已安裝，預設略過"
-
         status_note = str(getattr(dependency_item, "status_note", "") or "").strip()
         if status_note:
             return status_note
@@ -1311,9 +1369,8 @@ class ModManagementFrame:
         warning_count = self._count_review_nodes(nodes, "warning")
         enabled_count = self._count_enabled_runnable_entries(entries)
         disabled_count = sum(
-            1 for entry in entries if getattr(entry, "runnable", False) and not getattr(entry, "enabled", False)
+            1 for entry in entries if getattr(entry, "runnable", False) and (not getattr(entry, "enabled", False))
         )
-
         segments = [f"Task graph：{root_count} 個根任務", f"目前將{action_label} {enabled_count} 個根項目"]
         if dependency_count:
             segments.append(f"{dependency_count} 個依賴")
@@ -1328,60 +1385,234 @@ class ModManagementFrame:
             segments.append("預檢：" + self._summarize_review_note(notes[0], max_length=40))
         return "｜".join(segments)
 
-    @staticmethod
-    def _collect_online_review_global_notes(review_entries: list[PendingInstallReviewEntry]) -> list[str]:
-        notes = ["已完成安裝前預檢：重新驗證目前伺服器條件、本地模組與必要依賴。"]
+    def _record_dependency_snapshot_migration_telemetry(self, event: str) -> None:
+        telemetry = getattr(self, "_dependency_snapshot_migration_totals", None)
+        if not isinstance(telemetry, dict):
+            telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
+            self._dependency_snapshot_migration_totals = telemetry
+        if event not in telemetry:
+            return
+        telemetry[event] += 1
+
+    def _build_dependency_snapshot_migration_note(self) -> str:
+        telemetry = getattr(self, "_dependency_snapshot_migration_totals", None)
+        if not isinstance(telemetry, dict):
+            return ""
+        checked_count = telemetry.get("checked", 0)
+        if checked_count <= 0:
+            return ""
+        migrated_count = telemetry.get("migrated", 0)
+        replayed_count = telemetry.get("replayed", 0)
+        fallback_rebuild_count = telemetry.get("fallback_rebuild", 0)
+        return (
+            f"依賴快照遷移觀測：檢查 {checked_count}、自動遷移 {migrated_count}、成功回放 {replayed_count}"
+            + (f"、回放失敗改重建 {fallback_rebuild_count}" if fallback_rebuild_count else "")
+            + "。"
+        )
+
+    def _collect_review_global_notes(
+        self, *, base_notes: Iterable[str], review_entries: list[Any], extra_note_groups: Iterable[Iterable[str]] = ()
+    ) -> list[str]:
+        notes = list(base_notes)
+        migration_note = self._build_dependency_snapshot_migration_note()
+        if migration_note:
+            notes.append(migration_note)
+        for note_group in extra_note_groups:
+            notes.extend(list(note_group or []))
         for entry in review_entries:
             notes.extend(list(getattr(getattr(entry, "dependency_plan", None), "notes", []) or []))
         return ModManagementFrame._dedupe_review_messages(notes)
 
-    @staticmethod
+    def _collect_online_review_global_notes(self, review_entries: list[PendingInstallReviewEntry]) -> list[str]:
+        return self._collect_review_global_notes(
+            base_notes=[ONLINE_REVIEW_PRECHECK_NOTE],
+            review_entries=review_entries,
+        )
+
     def _collect_local_update_global_notes(
-        update_plan: LocalModUpdatePlan, review_entries: list[LocalUpdateReviewEntry]
+        self, update_plan: LocalModUpdatePlan, review_entries: list[LocalUpdateReviewEntry]
     ) -> list[str]:
-        notes = ["已完成更新前預檢：優先使用本地雜湊與已快取 provider metadata 檢查最新版本。"]
-        notes.extend(list(getattr(update_plan, "notes", []) or []))
-        notes.extend(list(getattr(getattr(update_plan, "metadata_summary", None), "notes", []) or []))
-        for entry in review_entries:
-            notes.extend(list(getattr(getattr(entry, "dependency_plan", None), "notes", []) or []))
-        return ModManagementFrame._dedupe_review_messages(notes)
+        return self._collect_review_global_notes(
+            base_notes=[LOCAL_UPDATE_REVIEW_PRECHECK_NOTE],
+            review_entries=review_entries,
+            extra_note_groups=(
+                list(getattr(update_plan, "notes", []) or []),
+                list(getattr(getattr(update_plan, "metadata_summary", None), "notes", []) or []),
+            ),
+        )
 
     def _persist_local_update_plan_metadata(self, update_plan: LocalModUpdatePlan) -> None:
         """將更新檢查得到的 metadata / hash 回寫索引，接近 Prism 的 ensure metadata 流程。"""
         manager = self.mod_manager
         if not manager:
             return
-
+        processed_paths: set[str] = set()
         for candidate in getattr(update_plan, "candidates", []) or []:
             local_mod = getattr(candidate, "local_mod", None)
             file_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
             if not file_path_raw:
                 continue
-
             file_path = Path(file_path_raw)
+            processed_paths.add(str(file_path))
             current_hash = str(getattr(candidate, "current_hash", "") or "").strip()
             if current_hash:
                 manager.index_manager.cache_file_hash(
-                    file_path,
-                    str(getattr(candidate, "hash_algorithm", "sha512") or "sha512"),
-                    current_hash,
+                    file_path, str(getattr(candidate, "hash_algorithm", "sha512") or "sha512"), current_hash
                 )
-
             project_id = str(getattr(candidate, "project_id", "") or "").strip()
+            cached_provider = manager.index_manager.get_cached_provider_metadata(file_path) or {}
+            if project_id.startswith("__stale__::"):
+                # 策略性延後處理應標記為過期（Stale），而不視為重新驗證失敗。
+                payload = dict(cached_provider) if isinstance(cached_provider, dict) else {}
+                payload["lifecycle_state"] = PROVIDER_LIFECYCLE_STALE
+                manager.index_manager.cache_provider_metadata(file_path, payload)
+                continue
             if not project_id or project_id.startswith("__unresolved__::"):
                 continue
-
-            manager.index_manager.cache_provider_metadata(
+            success_payload = register_provider_revalidation_success(cached_provider)
+            manager.index_manager.cache_provider_metadata(file_path, success_payload)
+            cache_provider_metadata_record(
+                manager.index_manager,
                 file_path,
-                {
-                    "platform": "modrinth",
-                    "project_id": project_id,
-                    "slug": str(getattr(local_mod, "platform_slug", "") or "").strip(),
-                    "project_name": str(getattr(candidate, "project_name", "") or project_id).strip(),
-                },
+                ProviderMetadataRecord.from_values(
+                    project_id=project_id,
+                    slug=str(getattr(local_mod, "platform_slug", "") or "").strip(),
+                    project_name=str(getattr(candidate, "project_name", "") or project_id).strip(),
+                ),
+                metadata_source=str(getattr(candidate, "metadata_source", "") or "").strip() or "update_review",
             )
-
+        # 強制回寫掃描結果的 Metadata 與 Hash，以確保增強資料的持久化。
+        try:
+            scanned = manager.get_mod_list()
+            for local_mod in scanned:
+                file_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
+                if not file_path_raw:
+                    continue
+                fp = Path(file_path_raw)
+                if str(fp) in processed_paths:
+                    continue
+                # 若 local_mod 有 hash，則回寫
+                current_hash = str(getattr(local_mod, "current_hash", "") or "").strip()
+                if current_hash:
+                    alg = str(getattr(local_mod, "hash_algorithm", "sha512") or "sha512")
+                    manager.index_manager.cache_file_hash(fp, alg, current_hash)
+                # 若 local_mod 有 provider metadata，則回寫
+                project_id = str(getattr(local_mod, "platform_id", "") or "").strip()
+                slug = str(getattr(local_mod, "platform_slug", "") or "").strip()
+                if project_id or slug:
+                    # 對於掃描時的增強解析，使用 scan_detect 作為 metadata_source
+                    cache_provider_metadata_record(
+                        manager.index_manager,
+                        fp,
+                        ProviderMetadataRecord.from_values(
+                            project_id=project_id,
+                            slug=slug,
+                            project_name=str(getattr(local_mod, "name", "") or "").strip(),
+                        ),
+                        metadata_source="scan_detect",
+                    )
+        except Exception:
+            logger.debug("在回寫掃描結果時發生錯誤，已忽略。")
         manager.index_manager.flush()
+
+    def _cache_local_dependency_plan_snapshot(
+        self, candidate: Any, dependency_plan: Any, *, root_enabled: bool | None = None
+    ) -> None:
+        """將 local update review 的 dependency plan 快照寫回索引，供後續重用/追蹤。"""
+        manager = self.mod_manager
+        if not manager:
+            return
+        local_mod = getattr(candidate, "local_mod", None)
+        file_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
+        if not file_path_raw:
+            return
+        snapshot = serialize_online_dependency_install_plan(
+            dependency_plan,
+            root_project_id=str(getattr(candidate, "project_id", "") or "").strip(),
+            root_project_name=str(getattr(candidate, "project_name", "") or "").strip(),
+            root_target_version_id=str(getattr(candidate, "target_version_id", "") or "").strip(),
+            root_target_version_name=str(getattr(candidate, "target_version_name", "") or "").strip(),
+            root_enabled=root_enabled,
+            plan_source="local_update_review",
+        )
+        has_content = any(
+            [
+                snapshot.get("items"),
+                snapshot.get("advisory_items"),
+                snapshot.get("unresolved_required"),
+                snapshot.get("notes"),
+            ]
+        )
+        if not has_content:
+            return
+        manager.index_manager.cache_provider_metadata(Path(file_path_raw), {"dependency_plan_v1": snapshot})
+
+    def _load_local_dependency_plan_snapshot(self, candidate: Any) -> tuple[Any | None, bool | None]:
+        """自 index 讀回 local update review 的 dependency plan 快照。"""
+        manager = self.mod_manager
+        if not manager:
+            return (None, None)
+        local_mod = getattr(candidate, "local_mod", None)
+        file_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
+        if not file_path_raw:
+            return (None, None)
+        provider_metadata = manager.index_manager.get_cached_provider_metadata(Path(file_path_raw)) or {}
+        snapshot_raw = provider_metadata.get("dependency_plan_v1")
+        if not isinstance(snapshot_raw, dict):
+            return (None, None)
+        self._record_dependency_snapshot_migration_telemetry("checked")
+        migrated_snapshot, migration_state = migrate_online_dependency_install_plan_payload(snapshot_raw)
+        if migrated_snapshot is None:
+            self._record_dependency_snapshot_migration_telemetry("fallback_rebuild")
+            return (None, None)
+        if migration_state == "migrated":
+            self._record_dependency_snapshot_migration_telemetry("migrated")
+            manager.index_manager.cache_provider_metadata(
+                Path(file_path_raw), {"dependency_plan_v1": migrated_snapshot}
+            )
+            logger.info(f"已遷移 dependency_plan_v1 快照並回寫：{file_path_raw}")
+            snapshot_raw = migrated_snapshot
+        snapshot_valid, _snapshot_reason = validate_online_dependency_install_plan_payload(snapshot_raw)
+        if not snapshot_valid:
+            self._record_dependency_snapshot_migration_telemetry("fallback_rebuild")
+            return (None, None)
+        candidate_project_id = str(getattr(candidate, "project_id", "") or "").strip()
+        candidate_target_version_id = str(getattr(candidate, "target_version_id", "") or "").strip()
+        snapshot_project_id = str(snapshot_raw.get("root_project_id", "") or "").strip()
+        snapshot_target_version_id = str(snapshot_raw.get("root_target_version_id", "") or "").strip()
+        snapshot_root_enabled_raw = snapshot_raw.get("root_enabled")
+        snapshot_root_enabled = snapshot_root_enabled_raw if isinstance(snapshot_root_enabled_raw, bool) else None
+        if candidate_project_id and snapshot_project_id and (candidate_project_id != snapshot_project_id):
+            self._record_dependency_snapshot_migration_telemetry("fallback_rebuild")
+            return (None, snapshot_root_enabled)
+        if (
+            candidate_target_version_id
+            and snapshot_target_version_id
+            and (candidate_target_version_id != snapshot_target_version_id)
+        ):
+            self._record_dependency_snapshot_migration_telemetry("fallback_rebuild")
+            return (None, snapshot_root_enabled)
+        restored = deserialize_online_dependency_install_plan(snapshot_raw)
+        has_content = bool(
+            list(getattr(restored, "items", []) or [])
+            or list(getattr(restored, "advisory_items", []) or [])
+            or list(getattr(restored, "unresolved_required", []) or [])
+            or list(getattr(restored, "notes", []) or [])
+        )
+        if has_content:
+            self._record_dependency_snapshot_migration_telemetry("replayed")
+        return (restored if has_content else None, snapshot_root_enabled)
+
+    def _persist_local_update_dependency_plan_snapshots(self, review_entries: list[LocalUpdateReviewEntry]) -> None:
+        """將目前 review 中的依賴勾選狀態回寫快照，供下次回放。"""
+        for review_entry in review_entries:
+            candidate = getattr(review_entry, "candidate", None)
+            dependency_plan = getattr(review_entry, "dependency_plan", None)
+            if candidate is None or dependency_plan is None:
+                continue
+            self._cache_local_dependency_plan_snapshot(
+                candidate, dependency_plan, root_enabled=bool(getattr(review_entry, "enabled", False))
+            )
 
     @staticmethod
     def _collect_online_dependency_required_by(
@@ -1416,11 +1647,9 @@ class ModManagementFrame:
             return project_id
         if file_path:
             return f"local::{file_path}"
-
         filename = str(getattr(candidate, "filename", "") or getattr(local_mod, "filename", "") or "").strip()
         if filename:
             return f"local::{filename}"
-
         project_name = str(getattr(candidate, "project_name", "") or "unknown").strip()
         return f"local::{project_name}"
 
@@ -1435,9 +1664,7 @@ class ModManagementFrame:
 
     @staticmethod
     def _collect_dependency_required_by(
-        review_entries: list[Any],
-        *,
-        parent_name_getter: Callable[[Any], str],
+        review_entries: list[Any], *, parent_name_getter: Callable[[Any], str]
     ) -> dict[tuple[str, str], list[str]]:
         required_by: dict[tuple[str, str], list[str]] = {}
         for entry in review_entries:
@@ -1464,8 +1691,8 @@ class ModManagementFrame:
     @staticmethod
     def _get_sorted_dependency_review_items(dependency_plan: Any) -> list[Any]:
         dependency_entries = [
-            *(list(getattr(dependency_plan, "items", []) or [])),
-            *(list(getattr(dependency_plan, "advisory_items", []) or [])),
+            *list(getattr(dependency_plan, "items", []) or []),
+            *list(getattr(dependency_plan, "advisory_items", []) or []),
         ]
         dependency_entries.sort(
             key=lambda item: (
@@ -1506,19 +1733,15 @@ class ModManagementFrame:
                     dependency_item.enabled = enabled
                     changed = True
                 continue
-
             if "::dependency::" not in normalized_item_id:
                 continue
-
             root_key, dependency_index_text = normalized_item_id.rsplit("::dependency::", 1)
             if root_key not in entry_map:
                 continue
-
             try:
                 dependency_index = int(dependency_index_text)
             except ValueError:
                 continue
-
             dependency_items = ModManagementFrame._get_sorted_dependency_review_items(
                 getattr(entry_map[root_key], "dependency_plan", None)
             )
@@ -1528,7 +1751,6 @@ class ModManagementFrame:
             advisory_item_ids = {id(item) for item in advisory_items}
             if dependency_index < 0 or dependency_index >= len(dependency_items):
                 continue
-
             dependency_item = dependency_items[dependency_index]
             if not (
                 bool(getattr(dependency_item, "maybe_installed", False))
@@ -1538,14 +1760,14 @@ class ModManagementFrame:
                 continue
             if bool(getattr(dependency_item, "enabled", False)) == enabled:
                 continue
-
             dependency_item.enabled = enabled
             changed = True
-
         return changed
 
     @staticmethod
     def _get_review_entry_group_key(entry: Any) -> str:
+        if isinstance(entry, PendingInstallReviewEntry):
+            return ModManagementFrame._get_online_install_review_group_key(entry)
         if not bool(getattr(entry, "runnable", False)):
             return "blocked"
         if not bool(getattr(entry, "enabled", False)):
@@ -1553,11 +1775,186 @@ class ModManagementFrame:
         return "enabled"
 
     @staticmethod
+    def _get_online_install_review_group_key(entry: PendingInstallReviewEntry) -> str:
+        """將線上安裝 review 項目分類為與本地更新 review 共用的 group key。"""
+        if not bool(getattr(entry, "runnable", False)):
+            return "blocked"
+        if not bool(getattr(entry, "enabled", False)):
+            return "disabled"
+        if list(getattr(entry, "warning_messages", []) or []):
+            return "advisory"
+        return "enabled"
+
+    @staticmethod
+    def _get_local_update_review_group_key(entry: LocalUpdateReviewEntry) -> str:
+        candidate = getattr(entry, "candidate", None)
+        recommendation_confidence = str(getattr(candidate, "recommendation_confidence", "") or "").strip().lower()
+        recommendation_source = str(getattr(candidate, "recommendation_source", "") or "").strip().lower()
+        metadata_source = str(getattr(candidate, "metadata_source", "") or "").strip().lower()
+        if not bool(getattr(entry, "runnable", False)):
+            if (
+                recommendation_confidence == RECOMMENDATION_CONFIDENCE_RETRYABLE
+                or recommendation_source == RECOMMENDATION_SOURCE_STALE_METADATA
+                or metadata_source == METADATA_SOURCE_STALE_PROVIDER
+            ):
+                return "retryable"
+            if (
+                recommendation_source == RECOMMENDATION_SOURCE_METADATA_UNRESOLVED
+                or metadata_source == METADATA_SOURCE_UNRESOLVED
+            ):
+                return "unknown"
+            return "blocked"
+        if not bool(getattr(entry, "enabled", False)):
+            return "disabled"
+        if recommendation_confidence == RECOMMENDATION_CONFIDENCE_ADVISORY:
+            return "advisory"
+        return "enabled"
+
+    @staticmethod
     def _get_review_group_specs() -> tuple[tuple[str, str], ...]:
         return (
             ("enabled", "已啟用項目"),
+            ("advisory", "建議確認項目"),
             ("disabled", "已停用項目"),
+            ("retryable", "可重試項目"),
+            ("unknown", "待識別項目"),
             ("blocked", "需先處理項目"),
+        )
+
+    @staticmethod
+    def _count_review_groups(
+        entries: list[Any], *, supported_group_keys: Iterable[str], group_key_getter: Callable[[Any], str]
+    ) -> dict[str, int]:
+        counts = dict.fromkeys(supported_group_keys, 0)
+        for entry in entries:
+            group_key = group_key_getter(entry)
+            counts[group_key] = counts.get(group_key, 0) + 1
+        return counts
+
+    @staticmethod
+    def _count_local_update_review_groups(entries: list[LocalUpdateReviewEntry]) -> dict[str, int]:
+        return ModManagementFrame._count_review_groups(
+            entries,
+            supported_group_keys=("enabled", "advisory", "disabled", "retryable", "unknown", "blocked"),
+            group_key_getter=ModManagementFrame._get_local_update_review_group_key,
+        )
+
+    @staticmethod
+    def _build_local_update_root_status_text(review_entry: LocalUpdateReviewEntry) -> str:
+        return ModManagementFrame._build_review_root_status_text(
+            review_entry,
+            group_key_getter=ModManagementFrame._get_local_update_review_group_key,
+            group_status_getter=ModManagementFrame._get_local_update_group_status_label,
+        )
+
+    @staticmethod
+    def _get_review_group_label(group_key: str, label_map: dict[str, str], *, default_label: str = "需先處理") -> str:
+        return label_map.get(group_key, default_label)
+
+    @staticmethod
+    def _get_local_update_group_status_label(group_key: str) -> str:
+        return ModManagementFrame._get_review_group_label(
+            group_key,
+            {
+                "enabled": "可更新",
+                "advisory": "建議確認",
+                "disabled": "已停用",
+                "retryable": "可重試",
+                "unknown": "需先識別",
+                "blocked": "需先處理",
+            },
+        )
+
+    @staticmethod
+    def _get_online_install_group_status_label(group_key: str) -> str:
+        """線上安裝用 group 標籤；與本地更新共用 group key，但 enabled 標籤不同。"""
+        return ModManagementFrame._get_review_group_label(
+            group_key,
+            {"enabled": "可安裝", "advisory": "建議確認", "disabled": "已停用", "blocked": "需先處理"},
+        )
+
+    @staticmethod
+    def _count_online_install_review_groups(entries: list[PendingInstallReviewEntry]) -> dict[str, int]:
+        return ModManagementFrame._count_review_groups(
+            entries,
+            supported_group_keys=("enabled", "advisory", "disabled", "blocked"),
+            group_key_getter=ModManagementFrame._get_online_install_review_group_key,
+        )
+
+    @staticmethod
+    def _build_review_execution_prompt(
+        review_entries: list[Any],
+        *,
+        counts: dict[str, int],
+        summary_title: str,
+        continue_action_template: str,
+        required_group_keys: Iterable[str],
+        summary_templates: Iterable[tuple[str, str]],
+    ) -> str | None:
+        actionable_count = sum(1 for entry in review_entries if bool(getattr(entry, "actionable", False)))
+        if actionable_count <= 0:
+            return None
+        if not any(counts.get(group_key, 0) > 0 for group_key in required_group_keys):
+            return None
+        summary_lines = [
+            line_template.format(count=counts[group_key])
+            for group_key, line_template in summary_templates
+            if counts.get(group_key, 0)
+        ]
+        if not summary_lines:
+            return None
+        return (
+            f"{summary_title}：\n"
+            + "\n".join(summary_lines)
+            + f"\n\n將繼續{continue_action_template.format(count=actionable_count)}。\n\n是否繼續？"
+        )
+
+    @staticmethod
+    def _build_online_install_execution_prompt(review_entries: list[PendingInstallReviewEntry]) -> str | None:
+        """與 _build_local_update_execution_prompt 共用語意，建立線上安裝前確認提示。"""
+        counts = ModManagementFrame._count_online_install_review_groups(review_entries)
+        return ModManagementFrame._build_review_execution_prompt(
+            review_entries,
+            counts=counts,
+            summary_title="本次安裝摘要",
+            continue_action_template="安裝其餘 {count} 個可安裝項目",
+            required_group_keys=("blocked",),
+            summary_templates=(
+                ("advisory", ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE),
+                ("blocked", ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE),
+            ),
+        )
+
+    @staticmethod
+    def _build_local_update_group_detail_text(group_key: str) -> str:
+        return ModManagementFrame._get_review_group_label(
+            group_key,
+            {
+                "enabled": "處理等級：可更新",
+                "advisory": "處理等級：建議確認，將依目前啟用狀態一併更新",
+                "disabled": "處理等級：已停用，這次不會執行",
+                "retryable": LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
+                "unknown": "處理等級：需先識別，尚未建立可靠的 provider metadata",
+                "blocked": "處理等級：需先處理，仍有相容性或依賴阻擋",
+            },
+            default_label="處理等級：需先處理",
+        )
+
+    @staticmethod
+    def _build_local_update_execution_prompt(review_entries: list[LocalUpdateReviewEntry]) -> str | None:
+        counts = ModManagementFrame._count_local_update_review_groups(review_entries)
+        return ModManagementFrame._build_review_execution_prompt(
+            review_entries,
+            counts=counts,
+            summary_title="本次更新摘要",
+            continue_action_template="更新其餘 {count} 個可更新項目",
+            required_group_keys=("retryable", "unknown", "blocked"),
+            summary_templates=(
+                ("advisory", LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE),
+                ("retryable", LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE),
+                ("unknown", LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE),
+                ("blocked", LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE),
+            ),
         )
 
     @staticmethod
@@ -1566,11 +1963,7 @@ class ModManagementFrame:
 
     @staticmethod
     def _build_dependency_status_text(
-        dependency_item: Any,
-        parent_name: str,
-        required_by_text: str,
-        is_advisory: bool,
-        is_enabled: bool,
+        dependency_item: Any, parent_name: str, required_by_text: str, is_advisory: bool, is_enabled: bool
     ) -> str:
         resolved_required_by = required_by_text or parent_name
         resolution_label = ModManagementFrame._format_dependency_resolution_label(
@@ -1605,7 +1998,7 @@ class ModManagementFrame:
         optional_group_id = f"{root_key}::optional-dependencies"
         optional_group_added = False
         optional_count = sum(
-            1 for item, is_from_advisory in dependency_entries if bool(getattr(item, "is_optional", is_from_advisory))
+            (1 for item, is_from_advisory in dependency_entries if bool(getattr(item, "is_optional", is_from_advisory)))
         )
         for index, (dependency_item, is_from_advisory) in enumerate(dependency_entries):
             dependency_key = self._build_dependency_key(dependency_item)
@@ -1614,11 +2007,7 @@ class ModManagementFrame:
             maybe_installed = bool(getattr(dependency_item, "maybe_installed", False))
             is_enabled = bool(getattr(dependency_item, "enabled", not (is_optional or maybe_installed)))
             dependency_status = self._build_dependency_status_text(
-                dependency_item,
-                parent_name,
-                required_by_text,
-                is_optional,
-                is_enabled,
+                dependency_item, parent_name, required_by_text, is_optional, is_enabled
             )
             parent_id = root_key
             if is_optional:
@@ -1643,19 +2032,13 @@ class ModManagementFrame:
 
     @staticmethod
     def _append_review_message_nodes(
-        nodes: list[ReviewTaskNode],
-        *,
-        messages: list[str],
-        node_factory: Callable[[int, str], ReviewTaskNode],
+        nodes: list[ReviewTaskNode], *, messages: list[str], node_factory: Callable[[int, str], ReviewTaskNode]
     ) -> None:
         for index, message in enumerate(messages):
             nodes.append(node_factory(index, message))
 
     @staticmethod
-    def _mask_redundant_review_values(
-        parent_values: tuple[str, ...],
-        child_values: tuple[str, ...],
-    ) -> tuple[str, ...]:
+    def _mask_redundant_review_values(parent_values: tuple[str, ...], child_values: tuple[str, ...]) -> tuple[str, ...]:
         """將與父節點相同的欄位值改以 '-' 顯示。"""
         masked_values: list[str] = []
         for index, raw_child in enumerate(child_values):
@@ -1666,6 +2049,35 @@ class ModManagementFrame:
             else:
                 masked_values.append(child_text)
         return tuple(masked_values)
+
+    def _build_dependency_task_node(
+        self,
+        *,
+        root_key: str,
+        group_key: str,
+        parent_values: tuple[str, ...],
+        index: int,
+        dependency_item: Any,
+        dependency_status: str,
+        is_advisory: bool,
+        is_enabled: bool,
+        parent_id: str,
+        title_getter: Callable[[Any], str],
+        values_getter: Callable[[Any, bool, bool, str], tuple[str, ...]],
+        detail_getter: Callable[[str, str], str] | None = None,
+    ) -> ReviewTaskNode:
+        child_values = values_getter(dependency_item, is_advisory, is_enabled, dependency_status)
+        detail_text = detail_getter(group_key, dependency_status) if detail_getter is not None else dependency_status
+        return ReviewTaskNode(
+            node_id=f"{root_key}::dependency::{index}",
+            root_key=root_key,
+            group_key=group_key,
+            parent_id=parent_id,
+            title=title_getter(dependency_item),
+            values=self._mask_redundant_review_values(parent_values, child_values),
+            node_kind="dependency",
+            detail=detail_text,
+        )
 
     def _build_online_dependency_task_node(
         self,
@@ -1680,23 +2092,25 @@ class ModManagementFrame:
         is_enabled: bool,
         parent_id: str,
     ) -> ReviewTaskNode:
-        child_values = (
-            "自動" if is_enabled else "略過" if is_advisory else "自動",
-            "Modrinth",
-            dependency_item.project_name,
-            dependency_item.version_name,
-            "optional" if self._is_optional_dependency_item(dependency_item) else "required",
-            dependency_status,
-        )
-        return ReviewTaskNode(
-            node_id=f"{root_key}::dependency::{index}",
+        return self._build_dependency_task_node(
             root_key=root_key,
             group_key=group_key,
+            parent_values=parent_values,
+            index=index,
+            dependency_item=dependency_item,
+            dependency_status=dependency_status,
+            is_advisory=is_advisory,
+            is_enabled=is_enabled,
             parent_id=parent_id,
-            title="依賴",
-            values=self._mask_redundant_review_values(parent_values, child_values),
-            node_kind="dependency",
-            detail=dependency_status,
+            title_getter=lambda _item: "依賴",
+            values_getter=lambda item, advisory, enabled, status: (
+                "自動" if enabled else "略過" if advisory else "自動",
+                "Modrinth",
+                item.project_name,
+                item.version_name,
+                "optional" if self._is_optional_dependency_item(item) else "required",
+                status,
+            ),
         )
 
     def _build_local_dependency_task_node(
@@ -1712,25 +2126,30 @@ class ModManagementFrame:
         is_enabled: bool,
         parent_id: str,
     ) -> ReviewTaskNode:
-        child_values = (
-            "自動" if is_enabled else "略過" if is_advisory else "自動",
-            "-",
-            dependency_item.version_name,
-            "可選依賴" if self._is_optional_dependency_item(dependency_item) else "Modrinth",
-            dependency_status,
-        )
-        return ReviewTaskNode(
-            node_id=f"{root_key}::dependency::{index}",
+        return self._build_dependency_task_node(
             root_key=root_key,
             group_key=group_key,
+            parent_values=parent_values,
+            index=index,
+            dependency_item=dependency_item,
+            dependency_status=dependency_status,
+            is_advisory=is_advisory,
+            is_enabled=is_enabled,
             parent_id=parent_id,
-            title=f"依賴：{dependency_item.project_name}",
-            values=self._mask_redundant_review_values(parent_values, child_values),
-            node_kind="dependency",
-            detail=dependency_status,
+            title_getter=lambda item: f"依賴：{item.project_name}",
+            values_getter=lambda item, advisory, enabled, status: (
+                "自動" if enabled else "略過" if advisory else "自動",
+                "-",
+                item.version_name,
+                "可選依賴" if self._is_optional_dependency_item(item) else "Modrinth",
+                status,
+            ),
+            detail_getter=lambda current_group_key, status: (
+                f"{self._build_local_update_group_detail_text(current_group_key)}\n{status}"
+            ),
         )
 
-    def _build_online_issue_task_node(
+    def _build_issue_task_node(
         self,
         *,
         root_key: str,
@@ -1738,6 +2157,7 @@ class ModManagementFrame:
         parent_values: tuple[str, ...],
         index: int,
         message: str,
+        value_suffix: tuple,
     ) -> ReviewTaskNode:
         return ReviewTaskNode(
             node_id=f"{root_key}::blocked::{index}",
@@ -1745,34 +2165,12 @@ class ModManagementFrame:
             group_key=group_key,
             parent_id=root_key,
             title="需處理",
-            values=self._mask_redundant_review_values(parent_values, ("-", "-", "-", "-", "-", message)),
-            node_kind="issue",
-        )
-
-    def _build_local_issue_task_node(
-        self,
-        *,
-        root_key: str,
-        group_key: str,
-        parent_values: tuple[str, ...],
-        index: int,
-        message: str,
-    ) -> ReviewTaskNode:
-        return ReviewTaskNode(
-            node_id=f"{root_key}::blocked::{index}",
-            root_key=root_key,
-            group_key=group_key,
-            parent_id=root_key,
-            title="需處理",
-            values=self._mask_redundant_review_values(parent_values, ("-", "-", "-", "-", message)),
+            values=self._mask_redundant_review_values(parent_values, (*value_suffix, message)),
             node_kind="issue",
         )
 
     @staticmethod
-    def _append_simulated_installed_mod(
-        simulated_installed_mods: list[Any],
-        simulation_item: Any,
-    ) -> None:
+    def _append_simulated_installed_mod(simulated_installed_mods: list[Any], simulation_item: Any) -> None:
         simulated_installed_mods.append(simulation_item)
 
     def _append_enabled_dependency_simulations(self, simulated_installed_mods: list[Any], dependency_plan: Any) -> None:
@@ -1811,22 +2209,20 @@ class ModManagementFrame:
             maybe_installed_items = [
                 item for item in advisory_items if not ModManagementFrame._is_optional_dependency_item(item)
             ]
-
             if optional_items:
                 lines.append("")
                 lines.append("可選依賴（可啟用後一同安裝）：")
                 lines.extend(
-                    f"- {item.project_name}{'（已啟用）' if getattr(item, 'enabled', False) else '（預設略過）'}"
+                    f"- {item.project_name}{('（已啟用）' if getattr(item, 'enabled', False) else '（預設略過）')}"
                     for item in optional_items[:2]
                 )
                 if len(optional_items) > 2:
                     lines.append(f"- 其餘 {len(optional_items) - 2} 項請於任務樹查看。")
-
             if maybe_installed_items:
                 lines.append("")
                 lines.append("疑似已安裝、預設略過的必要依賴：")
                 lines.extend(
-                    f"- {item.project_name}{'（已改為安裝）' if getattr(item, 'enabled', False) else ''}"
+                    f"- {item.project_name}{('（已改為安裝）' if getattr(item, 'enabled', False) else '')}"
                     for item in maybe_installed_items[:2]
                 )
                 if len(maybe_installed_items) > 2:
@@ -1840,8 +2236,7 @@ class ModManagementFrame:
     def _configure_review_action_button(button: ctk.CTkButton, review_entries: list[Any], action_label: str) -> None:
         runnable_enabled = ModManagementFrame._count_enabled_runnable_entries(review_entries)
         button.configure(
-            text=f"⬇️ {action_label} {runnable_enabled} 個已啟用項目",
-            state="normal" if runnable_enabled else "disabled",
+            text=f"⬇️ {action_label} {runnable_enabled} 個已啟用項目", state="normal" if runnable_enabled else "disabled"
         )
 
     def _toggle_review_selection(
@@ -1864,7 +2259,6 @@ class ModManagementFrame:
             refresh_status_banner()
             refresh_action_button()
             return
-
         selected_root_keys = self._collect_selected_root_keys_from(tree, review_root_keys)
         if not selected_root_keys:
             return
@@ -1907,13 +2301,10 @@ class ModManagementFrame:
 
     def _render_review_task_tree(self, tree: ttk.Treeview, nodes: list[ReviewTaskNode], column_count: int) -> None:
         selected_key = self._get_selected_review_key(
-            tree,
-            {node.root_key for node in nodes if node.node_kind == "root"},
+            tree, {node.root_key for node in nodes if node.node_kind == "root"}
         )
-
         for item_id in tree.get_children():
             tree.delete(item_id)
-
         blank_values = tuple("" for _ in range(column_count))
         group_parent_ids: dict[str, str] = {}
         for group_key, label in self._get_review_group_specs():
@@ -1921,16 +2312,7 @@ class ModManagementFrame:
                 continue
             group_id = self._build_group_node_id(group_key)
             group_parent_ids[group_key] = group_id
-            tree.insert(
-                "",
-                "end",
-                iid=group_id,
-                text=label,
-                values=blank_values,
-                open=True,
-                tags=("group", group_key),
-            )
-
+            tree.insert("", "end", iid=group_id, text=label, values=blank_values, open=True, tags=("group", group_key))
         for node in nodes:
             parent_id = group_parent_ids.get(node.group_key, "") if node.parent_id is None else node.parent_id
             tree.insert(
@@ -1942,9 +2324,7 @@ class ModManagementFrame:
                 open=node.node_kind in {"root", "dependency-group"},
                 tags=(node.node_kind, node.root_key, node.group_key),
             )
-
         UIUtils.refresh_treeview_alternating_rows(tree)
-
         if selected_key and tree.exists(selected_key):
             tree.selection_set(selected_key)
         else:
@@ -1952,295 +2332,110 @@ class ModManagementFrame:
             if first_root and tree.exists(first_root):
                 tree.selection_set(first_root)
 
-    def _build_online_review_task_nodes(self, review_entries: list[PendingInstallReviewEntry]) -> list[ReviewTaskNode]:
+    def _build_flat_review_task_nodes(
+        self,
+        review_entries: list,
+        get_entry_key,
+        get_root_key,
+        get_group_key,
+        get_title,
+        get_status_text,
+        get_root_values,
+    ) -> list[ReviewTaskNode]:
+        """
+        通用化：建立根級節點（扁平列表），排序與欄位由 callback 控制。
+        """
         nodes: list[ReviewTaskNode] = []
-        required_by_map = self._collect_online_dependency_required_by(review_entries)
         sorted_entries = sorted(
             review_entries,
-            key=lambda entry: str(getattr(getattr(entry, "pending", None), "project_name", "") or "").casefold(),
-        )
-        for review_entry in sorted_entries:
-            pending = review_entry.pending
-            root_key = self._build_pending_install_key(pending.project_id, getattr(pending.version, "version_id", ""))
-            group_key = self._get_review_entry_group_key(review_entry)
-            status_text = self._build_online_review_root_status_text(review_entry)
-            root_values = (
-                "是" if review_entry.enabled else "否",
-                self._format_review_provider_label(review_entry.provider),
-                pending.project_name,
-                getattr(pending.version, "display_name", "未知版本"),
-                review_entry.version_type or "-",
-                status_text,
-            )
-
-            nodes.append(
-                ReviewTaskNode(
-                    node_id=root_key,
-                    root_key=root_key,
-                    group_key=group_key,
-                    title="模組",
-                    values=root_values,
-                    node_kind="root",
-                )
-            )
-
-            nodes.extend(
-                self._build_dependency_review_nodes(
-                    root_key=root_key,
-                    group_key=group_key,
-                    optional_group_values=("-", "-", "-", "-", "optional", "-"),
-                    parent_name=pending.project_name,
-                    dependency_plan=review_entry.dependency_plan,
-                    required_by_map=required_by_map,
-                    node_builder=lambda index, dependency_item, dependency_status, is_advisory, is_enabled, parent_id: (
-                        self._build_online_dependency_task_node(
-                            root_key=root_key,
-                            group_key=group_key,
-                            parent_values=root_values,
-                            index=index,
-                            dependency_item=dependency_item,
-                            dependency_status=dependency_status,
-                            is_advisory=is_advisory,
-                            is_enabled=is_enabled,
-                            parent_id=parent_id,
-                        )
-                    ),
-                )
-            )
-
-            self._append_review_message_nodes(
-                nodes,
-                messages=review_entry.blocking_reasons,
-                node_factory=lambda index, message: self._build_online_issue_task_node(
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_values=root_values,
-                    index=index,
-                    message=message,
-                ),
-            )
-
-            self._append_review_message_nodes(
-                nodes,
-                messages=review_entry.warning_messages,
-                node_factory=lambda index, message: ReviewTaskNode(
-                    node_id=f"{root_key}::warning::{index}",
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_id=root_key,
-                    title="提醒",
-                    values=self._mask_redundant_review_values(
-                        root_values,
-                        ("-", "-", "-", "-", "-", message),
-                    ),
-                    node_kind="warning",
-                    detail=message,
-                ),
-            )
-
-            info_messages = self._dedupe_review_messages(
-                [
-                    *list(getattr(getattr(review_entry, "report", None), "notes", []) or []),
-                    *list(getattr(getattr(review_entry, "dependency_plan", None), "notes", []) or []),
-                ]
-            )
-            self._append_review_message_nodes(
-                nodes,
-                messages=info_messages,
-                node_factory=lambda index, message: ReviewTaskNode(
-                    node_id=f"{root_key}::info::{index}",
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_id=root_key,
-                    title="預檢",
-                    values=self._mask_redundant_review_values(
-                        root_values,
-                        ("-", "-", "-", "-", "-", message),
-                    ),
-                    node_kind="warning",
-                    detail=message,
-                ),
-            )
-
-        return nodes
-
-    def _build_local_update_task_nodes(self, review_entries: list[LocalUpdateReviewEntry]) -> list[ReviewTaskNode]:
-        nodes: list[ReviewTaskNode] = []
-        required_by_map = self._collect_local_dependency_required_by(review_entries)
-        sorted_entries = sorted(
-            review_entries,
-            key=lambda entry: str(getattr(getattr(entry, "candidate", None), "project_name", "") or "").casefold(),
+            key=get_entry_key,
         )
         seen_root_keys: set[str] = set()
         for review_entry in sorted_entries:
-            candidate = review_entry.candidate
-            root_key = self._build_local_update_review_key(candidate)
+            root_key = get_root_key(review_entry)
             if root_key in seen_root_keys:
                 continue
             seen_root_keys.add(root_key)
-            group_key = self._get_review_entry_group_key(review_entry)
-            status_text = "需先處理"
-            if review_entry.runnable:
-                status_text = "可更新" if review_entry.enabled else "已停用"
-            elif str(getattr(candidate, "metadata_source", "") or "").strip().lower() == "unresolved":
-                status_text = "需先識別"
-            root_values = (
-                "是" if review_entry.enabled else "否",
-                candidate.current_version or "未知",
-                candidate.target_version_name or "-",
-                self._format_local_update_source_text(review_entry),
-                status_text,
-            )
-
+            group_key = get_group_key(review_entry)
+            status_text = get_status_text(review_entry)
+            root_values = get_root_values(review_entry, status_text)
             nodes.append(
                 ReviewTaskNode(
                     node_id=root_key,
                     root_key=root_key,
                     group_key=group_key,
-                    title=candidate.project_name,
+                    title=get_title(review_entry),
                     values=root_values,
                     node_kind="root",
                 )
             )
-
-            metadata_sections: list[str] = []
-            metadata_detail = self._build_local_update_metadata_detail(review_entry)
-            if metadata_detail:
-                metadata_sections.append(metadata_detail)
-
-            metadata_note = str(getattr(candidate, "metadata_note", "") or "").strip()
-            if metadata_note and metadata_note not in metadata_sections:
-                metadata_sections.append(metadata_note)
-
-            if metadata_sections:
-                metadata_status_text = next(
-                    (line.strip() for section in metadata_sections for line in section.splitlines() if line.strip()),
-                    "Metadata 已更新",
-                )
-                nodes.append(
-                    ReviewTaskNode(
-                        node_id=f"{root_key}::metadata",
-                        root_key=root_key,
-                        group_key=group_key,
-                        parent_id=root_key,
-                        title="Metadata",
-                        values=self._mask_redundant_review_values(
-                            root_values,
-                            (
-                                "-",
-                                candidate.current_version or "-",
-                                candidate.target_version_name or "-",
-                                self._format_metadata_source_label(getattr(candidate, "metadata_source", "")),
-                                metadata_status_text,
-                            ),
-                        ),
-                        node_kind="warning",
-                        detail="\n\n".join(metadata_sections),
-                    )
-                )
-
-            nodes.extend(
-                self._build_dependency_review_nodes(
-                    root_key=root_key,
-                    group_key=group_key,
-                    optional_group_values=("-", "-", "-", "可選依賴", "-"),
-                    parent_name=candidate.project_name,
-                    dependency_plan=review_entry.dependency_plan,
-                    required_by_map=required_by_map,
-                    node_builder=lambda index, dependency_item, dependency_status, is_advisory, is_enabled, parent_id: (
-                        self._build_local_dependency_task_node(
-                            root_key=root_key,
-                            group_key=group_key,
-                            parent_values=root_values,
-                            index=index,
-                            dependency_item=dependency_item,
-                            dependency_status=dependency_status,
-                            is_advisory=is_advisory,
-                            is_enabled=is_enabled,
-                            parent_id=parent_id,
-                        )
-                    ),
-                )
-            )
-
-            self._append_review_message_nodes(
-                nodes,
-                messages=review_entry.blocking_reasons,
-                node_factory=lambda index, message: self._build_local_issue_task_node(
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_values=root_values,
-                    index=index,
-                    message=message,
-                ),
-            )
-
-            warnings = list(getattr(getattr(candidate, "report", None), "warnings", []) or [])
-            notes = list(getattr(candidate, "notes", []) or [])
-            self._append_review_message_nodes(
-                nodes,
-                messages=[*warnings, *notes],
-                node_factory=lambda index, message: ReviewTaskNode(
-                    node_id=f"{root_key}::note::{index}",
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_id=root_key,
-                    title="提醒",
-                    values=self._mask_redundant_review_values(
-                        root_values,
-                        (
-                            "-",
-                            candidate.current_version or "-",
-                            candidate.target_version_name or "-",
-                            "-",
-                            message,
-                        ),
-                    ),
-                    node_kind="warning",
-                    detail=message,
-                ),
-            )
-
-            plan_notes = self._dedupe_review_messages(
-                list(getattr(getattr(review_entry, "dependency_plan", None), "notes", []) or [])
-            )
-            self._append_review_message_nodes(
-                nodes,
-                messages=plan_notes,
-                node_factory=lambda index, message: ReviewTaskNode(
-                    node_id=f"{root_key}::plan::{index}",
-                    root_key=root_key,
-                    group_key=group_key,
-                    parent_id=root_key,
-                    title="預檢",
-                    values=self._mask_redundant_review_values(
-                        root_values,
-                        (
-                            "-",
-                            candidate.current_version or "-",
-                            candidate.target_version_name or "-",
-                            "-",
-                            message,
-                        ),
-                    ),
-                    node_kind="warning",
-                    detail=message,
-                ),
-            )
-
         return nodes
+
+    def _build_online_review_task_nodes(self, review_entries: list[PendingInstallReviewEntry]) -> list[ReviewTaskNode]:
+        """相容層：建立線上安裝 review 的根級 task nodes。"""
+        return self._build_flat_review_task_nodes(
+            review_entries,
+            get_entry_key=lambda entry: (
+                {"blocked": 0, "advisory": 1, "disabled": 2, "enabled": 3}.get(
+                    self._get_online_install_review_group_key(entry), 99
+                ),
+                str(getattr(getattr(entry, "pending", None), "project_name", "") or "").casefold(),
+                str(
+                    getattr(getattr(getattr(entry, "pending", None), "version", None), "display_name", "") or ""
+                ).casefold(),
+            ),
+            get_root_key=lambda entry: self._build_pending_install_key(
+                getattr(getattr(entry, "pending", None), "project_id", ""),
+                getattr(getattr(getattr(entry, "pending", None), "version", None), "version_id", ""),
+            ),
+            get_group_key=lambda entry: self._get_online_install_review_group_key(entry),
+            get_title=lambda _entry: "模組",
+            get_status_text=lambda entry: self._build_online_review_root_status_text(entry),
+            get_root_values=lambda entry, status_text: (
+                "是" if entry.enabled else "否",
+                self._format_review_provider_label(entry.provider),
+                str(getattr(getattr(entry, "pending", None), "project_name", "") or "未知模組"),
+                str(
+                    getattr(getattr(getattr(entry, "pending", None), "version", None), "display_name", "") or "未知版本"
+                ),
+                str(getattr(entry, "version_type", "") or "-"),
+                status_text,
+            ),
+        )
+
+    def _build_local_update_task_nodes(self, review_entries: list[LocalUpdateReviewEntry]) -> list[ReviewTaskNode]:
+        """相容層：建立本地更新 review 的根級 task nodes。"""
+        return self._build_flat_review_task_nodes(
+            review_entries,
+            get_entry_key=lambda entry: (
+                {"blocked": 0, "advisory": 1, "retryable": 2, "unknown": 3, "disabled": 4, "enabled": 5}.get(
+                    self._get_local_update_review_group_key(entry), 99
+                ),
+                str(getattr(getattr(entry, "candidate", None), "project_name", "") or "").casefold(),
+            ),
+            get_root_key=lambda entry: self._build_local_update_review_key(entry.candidate),
+            get_group_key=lambda entry: self._get_local_update_review_group_key(entry),
+            get_title=lambda entry: str(getattr(getattr(entry, "candidate", None), "project_name", "") or "模組"),
+            get_status_text=lambda entry: self._build_local_update_root_status_text(entry),
+            get_root_values=lambda entry, status_text: (
+                "是" if entry.enabled else "否",
+                str(getattr(getattr(entry, "candidate", None), "current_version", "") or "未知"),
+                str(getattr(getattr(entry, "candidate", None), "target_version_name", "") or "-"),
+                self._format_local_update_source_text(entry),
+                status_text,
+            ),
+        )
 
     def _get_supported_online_loader(self) -> tuple[str | None, str | None]:
         """回傳目前伺服器可用於線上模組功能的 loader；若不支援則附帶提示訊息。"""
         if not self.current_server:
-            return None, "請先選擇伺服器後再使用線上模組功能"
-
+            return (None, "請先選擇伺服器後再使用線上模組功能")
         raw_loader = str(getattr(self.current_server, "loader_type", "") or "").strip()
         normalized_loader = raw_loader.lower()
         if normalized_loader not in SUPPORTED_ONLINE_MOD_LOADERS:
             loader_display = raw_loader or "未設定"
-            return None, f"線上模組功能目前僅支援 Fabric 與 Forge，當前伺服器載入器為：{loader_display}"
-        return normalized_loader, None
+            return (None, f"線上模組功能目前僅支援 Fabric 與 Forge，當前伺服器載入器為：{loader_display}")
+        return (normalized_loader, None)
 
     def _refresh_online_queue_button(self) -> None:
         """更新安裝清單按鈕文字。"""
@@ -2290,18 +2485,15 @@ class ModManagementFrame:
             f"已加入安裝清單：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
         )
 
-    def _prepare_online_install_review_entries(
-        self,
-    ) -> list[PendingInstallReviewEntry]:
+    def _prepare_online_install_review_entries(self) -> list[PendingInstallReviewEntry]:
         """以目前本地模組狀態重新驗證待安裝清單。"""
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         simulated_installed_mods = list(self._get_current_installed_mods())
         review_entries: list[PendingInstallReviewEntry] = []
-
         for pending in self.pending_online_installs:
             dependency_project_ids = {
                 str(dependency.get("project_id", "") or "").strip()
-                for dependency in (getattr(pending.version, "dependencies", []) or [])
+                for dependency in getattr(pending.version, "dependencies", []) or []
                 if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
             }
             dependency_names = resolve_modrinth_project_names(dependency_project_ids)
@@ -2324,16 +2516,25 @@ class ModManagementFrame:
                 root_project_id=pending.project_id,
                 root_project_name=pending.project_name,
             )
+            server_side_blocking_reason = self._build_server_install_blocking_reason(
+                getattr(pending, "server_side", "")
+            )
+            server_side_warning_message = self._build_server_install_warning_line(getattr(pending, "server_side", ""))
             blocking_reasons = [
                 *list(getattr(report, "hard_errors", []) or []),
                 *list(getattr(dependency_plan, "unresolved_required", []) or []),
             ]
+            if server_side_blocking_reason:
+                blocking_reasons.append(server_side_blocking_reason)
+            warning_messages = list(getattr(report, "warnings", []) or [])
+            if server_side_warning_message:
+                warning_messages.append(server_side_warning_message)
             review_entry = PendingInstallReviewEntry(
                 pending=pending,
                 report=report,
                 dependency_plan=dependency_plan,
                 blocking_reasons=blocking_reasons,
-                warning_messages=list(getattr(report, "warnings", []) or []),
+                warning_messages=warning_messages,
                 enabled=not blocking_reasons,
                 provider=str(getattr(pending.version, "provider", "modrinth") or "modrinth"),
                 version_type=str(getattr(pending.version, "version_type", "") or ""),
@@ -2341,10 +2542,8 @@ class ModManagementFrame:
                 changelog=str(getattr(pending.version, "changelog", "") or ""),
             )
             review_entries.append(review_entry)
-
             if review_entry.actionable:
                 self._append_enabled_dependency_simulations(simulated_installed_mods, dependency_plan)
-
                 primary_file = getattr(pending.version, "primary_file", None) or {}
                 self._append_simulated_installed_mod(
                     simulated_installed_mods,
@@ -2358,11 +2557,10 @@ class ModManagementFrame:
                         ),
                     ),
                 )
-
         return review_entries
 
     def search_online_mods(self, _event=None) -> None:
-        """載入 Modrinth 線上模組；有關鍵字時搜尋，空白時瀏覽推薦清單。"""
+        """載入 Modrinth 線上模組（需輸入關鍵字）。"""
         self._load_online_mods(force=True, show_warning=True)
 
     def refresh_browse_list(self) -> None:
@@ -2370,12 +2568,9 @@ class ModManagementFrame:
         self._refresh_online_results_summary()
         if not self.browse_tree:
             return
-
         logger.debug(f"重新整理線上模組列表: result_count={len(self.online_mods)}")
-
         for item in self.browse_tree.get_children():
             self.browse_tree.delete(item)
-
         for mod in self.online_mods:
             self.browse_tree.insert(
                 "",
@@ -2389,21 +2584,14 @@ class ModManagementFrame:
         """顯示線上模組右鍵選單。"""
         if not self.browse_tree:
             return
-
         selection = self.browse_tree.selection()
         if not selection:
             return
-
-        menu = tk.Menu(
-            self.parent,
-            tearoff=0,
-            font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
-        )
+        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="⬇️ 安裝模組", command=self.install_online_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_online_mod_info)
         menu.add_command(label="🌐 開啟模組頁面", command=self.open_mod_webpage)
-
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -2417,12 +2605,10 @@ class ModManagementFrame:
             return
         if not self.browse_tree:
             return
-
         selection = self.browse_tree.selection()
         if not selection:
             UIUtils.show_warning("警告", "請先從線上列表選取模組", self.parent)
             return
-
         item = selection[0]
         tags = self.browse_tree.item(item, "tags")
         project_id = tags[0] if tags else ""
@@ -2430,7 +2616,6 @@ class ModManagementFrame:
         if not selected_mod:
             UIUtils.show_error("錯誤", "找不到選取的線上模組資料", self.parent)
             return
-
         minecraft_version, _, loader_version = self._get_current_modrinth_context()
         loader_type, warning_message = self._get_supported_online_loader()
         if warning_message:
@@ -2443,12 +2628,11 @@ class ModManagementFrame:
                 versions = get_mod_versions(selected_mod.project_id, minecraft_version, loader_type)
                 if not versions:
                     versions = get_mod_versions(selected_mod.project_id)
-
                 installed_mods = manager.get_mod_list()
                 dependency_project_ids = {
                     str(dependency.get("project_id", "") or "").strip()
                     for version in versions
-                    for dependency in (getattr(version, "dependencies", []) or [])
+                    for dependency in getattr(version, "dependencies", []) or []
                     if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
                 }
                 dependency_names = resolve_modrinth_project_names(dependency_project_ids)
@@ -2465,6 +2649,7 @@ class ModManagementFrame:
                     )
                     for version in versions
                 ]
+                versions, version_reports = self._sort_online_versions_for_server(versions, version_reports)
 
                 def open_dialog() -> None:
                     if not versions:
@@ -2488,7 +2673,7 @@ class ModManagementFrame:
             self.parent,
             f"安裝模組 - {mod.name}",
             width=920,
-            height=780,
+            height=850,
             make_modal=True,
             bind_icon=True,
             center_on_parent=True,
@@ -2500,17 +2685,14 @@ class ModManagementFrame:
             native_window=True,
             use_transient_for_modal=False,
         )
-
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill="both", expand=True, padx=18, pady=18)
-
         title = ctk.CTkLabel(
             main_frame,
             text=f"選擇要安裝的版本：{mod.name}",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
         title.pack(anchor="w", padx=12, pady=(12, 10))
-
         filter_label = ctk.CTkLabel(
             main_frame,
             text=self._get_online_version_dialog_hint_text(),
@@ -2521,10 +2703,8 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(760),
         )
         filter_label.pack(fill="x", padx=12, pady=(0, 8))
-
         tree_container = ctk.CTkFrame(main_frame)
         tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
         tree_style = UIUtils.configure_treeview_list_style(
             "OnlineVersionList",
             body_font=FontManager.get_font(size=FontSize.INPUT),
@@ -2532,13 +2712,7 @@ class ModManagementFrame:
             rowheight=int(25 * FontManager.get_scale_factor()),
         )
         columns = ("version", "minecraft", "loader", "status", "date")
-        version_tree = ttk.Treeview(
-            tree_container,
-            columns=columns,
-            show="headings",
-            height=12,
-            style=tree_style,
-        )
+        version_tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=12, style=tree_style)
         column_config = {
             "version": ("版本", 150),
             "minecraft": ("Minecraft", 150),
@@ -2548,26 +2722,25 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             version_tree.heading(col, text=text, anchor="w")
-            version_tree.column(col, width=width, minwidth=60, anchor="w", stretch=(col == "status"))
+            version_tree.column(col, width=width, minwidth=60, anchor="w", stretch=col == "status")
         UIUtils.bind_treeview_header_auto_fit(
             version_tree,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             body_font=FontManager.get_font(size=FontSize.INPUT),
             stretch_columns={"status"},
         )
-
         version_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=version_tree.yview)
         version_tree.configure(yscrollcommand=version_scroll.set)
         version_tree.grid(row=0, column=0, sticky="nsew")
         version_scroll.grid(row=0, column=1, sticky="ns")
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-
         for index, version in enumerate(versions):
             published = str(getattr(version, "date_published", "") or "")
             report = None
             if version_reports and index < len(version_reports):
                 report = version_reports[index]
+            status_text = self._get_online_version_status_text(report)
             version_tree.insert(
                 "",
                 "end",
@@ -2576,27 +2749,20 @@ class ModManagementFrame:
                     getattr(version, "display_name", "未知版本"),
                     ", ".join(getattr(version, "game_versions", []) or []) or "-",
                     ", ".join(getattr(version, "loaders", []) or []) or "-",
-                    self._get_online_version_status_text(report),
+                    status_text,
                     published.replace("T", " ").replace("Z", "")[:16] if published else "-",
                 ),
             )
-
         if versions:
             version_tree.selection_set("0")
         UIUtils.refresh_treeview_alternating_rows(version_tree)
-
         summary_label = ctk.CTkLabel(
-            main_frame,
-            text="版本分析",
-            font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
+            main_frame, text="版本分析", font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold")
         )
         summary_label.pack(anchor="w", padx=12, pady=(0, 6))
-
         summary_box = self._create_review_summary_box(main_frame, height=138)
-
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x", padx=12, pady=(0, 8))
-
         install_button = ctk.CTkButton(
             button_frame,
             text="➕ 加入安裝清單",
@@ -2609,7 +2775,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         install_button.pack(side="left")
-
         open_button = ctk.CTkButton(
             button_frame,
             text="🧺 查看清單",
@@ -2622,7 +2787,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         open_button.pack(side="left", padx=(10, 0))
-
         project_page_url = self._resolve_online_mod_project_page_url(mod)
         project_page_button = ctk.CTkButton(
             button_frame,
@@ -2637,7 +2801,6 @@ class ModManagementFrame:
             state="normal" if project_page_url else "disabled",
         )
         project_page_button.pack(side="left", padx=(10, 0))
-
         close_button = ctk.CTkButton(
             button_frame,
             text="關閉",
@@ -2655,13 +2818,11 @@ class ModManagementFrame:
             selection = version_tree.selection()
             if not selection:
                 return
-
             selected_index = int(selection[0])
             selected_version = versions[selected_index]
             report = None
             if version_reports and selected_index < len(version_reports):
                 report = version_reports[selected_index]
-
             summary_box.configure(state="normal")
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_online_version_report(selected_version, report))
@@ -2694,28 +2855,23 @@ class ModManagementFrame:
         if not selection:
             UIUtils.show_warning("警告", "請先選擇要安裝的版本", dialog)
             return
-
         selected_index = int(selection[0])
         version = versions[selected_index]
         report = None
         if version_reports and selected_index < len(version_reports):
             report = version_reports[selected_index]
-
-        if report is not None and not getattr(report, "compatible", True):
+        if report is not None and (not getattr(report, "compatible", True)):
             UIUtils.show_error("版本不相容", self._format_online_version_report(version, report), dialog)
             return
-
         file_info = getattr(version, "primary_file", None)
         if not file_info:
             UIUtils.show_error("錯誤", "此版本沒有可下載的 JAR 檔案", dialog)
             return
-
         download_url = str(file_info.get("url", "") or "")
         filename = str(file_info.get("filename", "") or "")
         if not download_url or not filename:
             UIUtils.show_error("錯誤", "無法取得下載連結或檔名", dialog)
             return
-
         self._add_pending_online_install(
             PendingOnlineInstall(
                 project_id=str(getattr(mod, "project_id", "") or "").strip(),
@@ -2733,37 +2889,33 @@ class ModManagementFrame:
     def _format_pending_install_review_text(self, review_entry: PendingInstallReviewEntry) -> str:
         """格式化待安裝項目的 review 內容。"""
         lines = [self._format_online_version_report(review_entry.pending.version, review_entry.report)]
-
         lines.append("")
         lines.extend(self._build_pending_install_summary_lines(review_entry))
         client_install_reminder = self._build_client_install_reminder_line(
-            getattr(review_entry.pending, "server_side", ""),
-            getattr(review_entry.pending, "client_side", ""),
+            getattr(review_entry.pending, "server_side", ""), getattr(review_entry.pending, "client_side", "")
         )
         if client_install_reminder:
             lines.append(client_install_reminder)
         lines.append("")
-        lines.append(f"執行狀態：{'已啟用' if review_entry.enabled else '已停用'}")
-
+        lines.append(f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}")
+        lines.append(
+            "處理等級："
+            + self._get_online_install_group_status_label(self._get_online_install_review_group_key(review_entry))
+        )
         dependency_plan = getattr(review_entry, "dependency_plan", None)
         self._append_dependency_review_sections(lines, dependency_plan, "將自動安裝的必要依賴：")
-
         if review_entry.blocking_reasons:
             self._append_review_section(lines, "需先處理：", review_entry.blocking_reasons, max_items=3)
         elif review_entry.warning_messages:
             self._append_review_section(lines, "安裝前提醒：", review_entry.warning_messages, max_items=3)
-
         self._append_plan_note_section(lines, dependency_plan)
-
         return "\n".join(lines)
 
     def _remove_selected_pending_online_installs(self, queue_tree, dialog) -> None:
         """從待安裝清單移除選取的根項目。"""
         selected_root_keys = self._collect_selected_root_keys(queue_tree)
-
         if not selected_root_keys:
             return
-
         self.pending_online_installs = [
             item
             for item in self.pending_online_installs
@@ -2787,30 +2939,24 @@ class ModManagementFrame:
         if not manager:
             UIUtils.show_error("錯誤", "模組管理器未初始化", self.parent)
             return
-
         review_entries = self._prepare_online_install_review_entries()
         actionable_entries = [entry for entry in review_entries if entry.actionable]
-        blocked_entries = [entry for entry in review_entries if not entry.runnable]
-
         if not actionable_entries:
-            UIUtils.show_warning("無法安裝", "安裝清單中的項目目前都無法安裝，請先處理相容性或依賴問題。", dialog)
+            UIUtils.show_warning("無法安裝", ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE, dialog)
             return
-
-        if blocked_entries:
-            proceed = UIUtils.ask_yes_no_cancel(
-                "部分項目無法安裝",
-                (
-                    f"目前有 {len(blocked_entries)} 個項目仍有阻擋原因。\n"
-                    f"將只安裝其餘 {len(actionable_entries)} 個可安裝項目，未完成項目會保留在清單中。\n\n是否繼續？"
-                ),
-                parent=dialog,
-                show_cancel=False,
-            )
+        execution_prompt = self._build_online_install_execution_prompt(review_entries)
+        if execution_prompt:
+            proceed = UIUtils.ask_yes_no_cancel("確認本次安裝內容", execution_prompt, parent=dialog, show_cancel=False)
             if proceed is not True:
                 return
-
         dialog.destroy()
-
+        online_group_counts = self._count_online_install_review_groups(review_entries)
+        online_skipped_parts: list[str] = []
+        if online_group_counts.get("disabled", 0):
+            online_skipped_parts.append(f"已停用 {online_group_counts['disabled']} 項")
+        if online_group_counts.get("blocked", 0):
+            online_skipped_parts.append(f"需先處理 {online_group_counts['blocked']} 項")
+        online_skipped_text = "\n略過項目：\n- " + "\n- ".join(online_skipped_parts) if online_skipped_parts else ""
         completion_notes = self._format_completion_notes(
             [
                 *[
@@ -2838,14 +2984,6 @@ class ModManagementFrame:
                 for entry in actionable_entries
             )
             current_step = 0
-
-            def make_step_progress_callback(step_index: int):
-                def _callback(downloaded: int, total: int) -> None:
-                    fraction = (downloaded / total) if total > 0 else 0.0
-                    self.update_progress_safe((step_index + fraction) / max(1, total_steps))
-
-                return _callback
-
             try:
                 for review_entry in actionable_entries:
                     pending = review_entry.pending
@@ -2854,12 +2992,11 @@ class ModManagementFrame:
                         installed_dependency = manager.install_remote_mod_file(
                             dependency_item.download_url,
                             dependency_item.filename,
-                            progress_callback=make_step_progress_callback(current_step),
+                            progress_callback=self._make_step_progress_callback(current_step, total_steps),
                         )
                         if installed_dependency is None:
                             raise RuntimeError(f"必要依賴安裝失敗：{dependency_item.project_name}")
                         current_step += 1
-
                     primary_file = getattr(pending.version, "primary_file", None) or {}
                     filename = str(primary_file.get("filename", "") or "").strip()
                     download_url = str(primary_file.get("url", "") or "").strip()
@@ -2869,7 +3006,7 @@ class ModManagementFrame:
                     installed_path = manager.install_remote_mod_file(
                         download_url,
                         filename,
-                        progress_callback=make_step_progress_callback(current_step),
+                        progress_callback=self._make_step_progress_callback(current_step, total_steps),
                     )
                     if installed_path is None:
                         raise RuntimeError(f"模組安裝失敗：{pending.project_name}")
@@ -2877,7 +3014,6 @@ class ModManagementFrame:
                     succeeded_keys.add(
                         self._build_pending_install_key(pending.project_id, getattr(pending.version, "version_id", ""))
                     )
-
                 self.pending_online_installs = [
                     item
                     for item in self.pending_online_installs
@@ -2891,15 +3027,14 @@ class ModManagementFrame:
                 self.ui_queue.put(
                     lambda: UIUtils.show_info(
                         "安裝完成",
-                        (
-                            f"已安裝 {len(succeeded_keys)} 個排程項目。"
-                            + (
-                                f"\n仍有 {len(self.pending_online_installs)} 個項目保留在安裝清單中。"
-                                if self.pending_online_installs
-                                else ""
-                            )
-                            + completion_notes
-                        ),
+                        f"已安裝 {len(succeeded_keys)} 個排程項目。"
+                        + (
+                            f"\n仍有 {len(self.pending_online_installs)} 個項目保留在安裝清單中。"
+                            if self.pending_online_installs
+                            else ""
+                        )
+                        + online_skipped_text
+                        + completion_notes,
                         self.parent,
                     )
                 )
@@ -2912,14 +3047,14 @@ class ModManagementFrame:
             finally:
                 self.update_progress_safe(0)
 
-        UIUtils.run_async(install_task)
+        cancel_token = CancellationToken()
+        UIUtils.run_async(install_task, cancel_token=cancel_token)
 
     def show_online_install_queue(self) -> None:
         """顯示待安裝清單與最終 review。"""
         if not self.pending_online_installs:
             UIUtils.show_info("安裝清單", "目前安裝清單是空的。", self.parent)
             return
-
         review_entries = self._prepare_online_install_review_entries()
         review_entry_map = {
             self._build_pending_install_key(
@@ -2928,7 +3063,6 @@ class ModManagementFrame:
             for entry in review_entries
         }
         global_review_notes = self._collect_online_review_global_notes(review_entries)
-
         dialog = UIUtils.create_toplevel_dialog(
             self.parent,
             "安裝清單 Review",
@@ -2945,22 +3079,21 @@ class ModManagementFrame:
             native_window=True,
             use_transient_for_modal=False,
         )
-
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill="both", expand=True, padx=18, pady=18)
-
         title = ctk.CTkLabel(
             main_frame,
             text="待安裝模組與依賴檢查",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
         title.pack(anchor="w", padx=12, pady=(12, 8))
-
         subtitle = ctk.CTkLabel(
             main_frame,
             text=self._build_online_install_review_subtitle(
                 sum(1 for entry in review_entries if entry.actionable),
                 self._count_blocked_entries(review_entries),
+                advisory_count=self._count_online_install_review_groups(review_entries).get("advisory", 0),
+                migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
             ),
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
             text_color=Colors.TEXT_SECONDARY,
@@ -2969,7 +3102,6 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(860),
         )
         subtitle.pack(fill="x", padx=12, pady=(0, 6))
-
         overview_label = ctk.CTkLabel(
             main_frame,
             text="",
@@ -2980,10 +3112,8 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(860),
         )
         overview_label.pack(fill="x", padx=12, pady=(0, 6))
-
         tree_container = ctk.CTkFrame(main_frame)
         tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
         queue_tree = ttk.Treeview(
             tree_container,
             columns=("run", "source", "name", "version", "channel", "status"),
@@ -3017,14 +3147,12 @@ class ModManagementFrame:
             body_font=FontManager.get_font(size=FontSize.INPUT),
             stretch_columns={"status"},
         )
-
         queue_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=queue_tree.yview)
         queue_tree.configure(yscrollcommand=queue_scroll.set)
         queue_tree.grid(row=0, column=0, sticky="nsew")
         queue_scroll.grid(row=0, column=1, sticky="ns")
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-
         review_root_keys = set(review_entry_map)
 
         def refresh_queue_tree() -> None:
@@ -3040,15 +3168,21 @@ class ModManagementFrame:
 
         def refresh_queue_status_banner() -> None:
             review_nodes = self._build_online_review_task_nodes(review_entries)
+            counts = self._count_online_install_review_groups(review_entries)
             actionable_count = sum(1 for entry in review_entries if entry.actionable)
-            blocked_count = self._count_blocked_entries(review_entries)
-            subtitle.configure(text=self._build_online_install_review_subtitle(actionable_count, blocked_count))
+            blocked_count = counts.get("blocked", 0)
+            advisory_count = counts.get("advisory", 0)
+            subtitle.configure(
+                text=self._build_online_install_review_subtitle(
+                    actionable_count,
+                    blocked_count,
+                    advisory_count=advisory_count,
+                    migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
+                )
+            )
             overview_label.configure(
                 text=self._format_review_overview_text(
-                    review_entries,
-                    review_nodes,
-                    action_label="安裝",
-                    global_notes=global_review_notes,
+                    review_entries, review_nodes, action_label="安裝", global_notes=global_review_notes
                 )
             )
 
@@ -3057,7 +3191,6 @@ class ModManagementFrame:
             review_entry = review_entry_map.get(selected_root_key)
             if not review_entry:
                 return
-
             summary_box.configure(state="normal")
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_pending_install_review_text(review_entry))
@@ -3074,10 +3207,8 @@ class ModManagementFrame:
         queue_tree.bind("<<TreeviewSelect>>", refresh_queue_summary)
         refresh_queue_tree()
         refresh_queue_summary()
-
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x", padx=12, pady=(0, 8))
-
         install_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -3090,8 +3221,7 @@ class ModManagementFrame:
         def refresh_queue_action_button() -> None:
             actionable_count = sum(1 for entry in review_entries if entry.actionable)
             install_button.configure(
-                text=f"⬇️ 安裝 {actionable_count} 個可安裝項目",
-                state="normal" if actionable_count else "disabled",
+                text=f"⬇️ 安裝 {actionable_count} 個可安裝項目", state="normal" if actionable_count else "disabled"
             )
 
         def refresh_queue_project_page_button(_event=None) -> None:
@@ -3111,7 +3241,6 @@ class ModManagementFrame:
             command=lambda: self._remove_selected_pending_online_installs(queue_tree, dialog),
             padx=(10, 0),
         )
-
         self._create_review_action_button(
             button_frame,
             text="清空清單",
@@ -3120,7 +3249,6 @@ class ModManagementFrame:
             command=lambda: self._clear_pending_online_installs(dialog),
             padx=(10, 0),
         )
-
         project_page_button = self._create_review_action_button(
             button_frame,
             text="開啟專案頁面",
@@ -3129,7 +3257,6 @@ class ModManagementFrame:
             command=open_selected_queue_project_page,
             padx=(10, 0),
         )
-
         self._create_review_action_button(
             button_frame,
             text="關閉",
@@ -3138,12 +3265,10 @@ class ModManagementFrame:
             command=dialog.destroy,
             side="right",
         )
-
         refresh_queue_status_banner()
         refresh_queue_action_button()
         refresh_queue_project_page_button()
         queue_tree.bind("<<TreeviewSelect>>", refresh_queue_project_page_button, add="+")
-
         UIUtils.schedule_toplevel_layout_refresh(
             dialog,
             min_width=1000,
@@ -3154,48 +3279,67 @@ class ModManagementFrame:
         )
 
     def _ensure_local_mod_project_ids(self, local_mods: list[Any]) -> None:
-        """盡量補齊本地模組的 Modrinth project id，供更新檢查使用。"""
+        """盡量補齊本地模組的 Modrinth project id / slug，供更新檢查使用。"""
         for local_mod in local_mods:
-            if str(getattr(local_mod, "platform_id", "") or "").strip():
+            current_project_id = str(getattr(local_mod, "platform_id", "") or "").strip()
+            current_slug = str(getattr(local_mod, "platform_slug", "") or "").strip()
+            if current_project_id and current_slug:
                 continue
-
             enhanced = self.enhanced_mods_cache.get(getattr(local_mod, "filename", ""))
-            if enhanced is None:
-                enhanced = enhance_local_mod(
-                    getattr(local_mod, "filename", ""),
-                    platform_id=getattr(local_mod, "platform_id", ""),
-                    platform_slug=getattr(local_mod, "platform_slug", ""),
-                    local_name=getattr(local_mod, "name", ""),
+
+            def _fallback_resolver() -> ProviderMetadataRecord | None:
+                nonlocal enhanced
+                if enhanced is None:
+                    enhanced = enhance_local_mod(
+                        getattr(local_mod, "filename", ""),
+                        platform_id=getattr(local_mod, "platform_id", ""),
+                        platform_slug=getattr(local_mod, "platform_slug", ""),
+                        local_name=getattr(local_mod, "name", ""),
+                    )
+                    if enhanced:
+                        self.enhanced_mods_cache[getattr(local_mod, "filename", "")] = enhanced
+                if not enhanced:
+                    return None
+                return ProviderMetadataRecord.from_values(
+                    project_id=str(getattr(enhanced, "project_id", "") or "").strip(),
+                    slug=str(getattr(enhanced, "slug", "") or "").strip(),
+                    project_name=str(getattr(enhanced, "name", "") or "").strip(),
                 )
-                if enhanced:
-                    self.enhanced_mods_cache[getattr(local_mod, "filename", "")] = enhanced
 
-            project_id = str(getattr(enhanced, "project_id", "") or "").strip() if enhanced else ""
-            if project_id:
-                local_mod.platform_id = project_id
-                self._cache_local_provider_metadata(local_mod, enhanced)
+            ensured = ensure_local_mod_provider_record(
+                platform_id=current_project_id,
+                platform_slug=current_slug,
+                project_name=str(getattr(local_mod, "name", "") or "").strip(),
+                identifier_resolver=resolve_modrinth_provider_record,
+                fallback_resolver=_fallback_resolver,
+            )
+            if ensured.record.project_id or ensured.record.slug:
+                apply_provider_metadata(local_mod, ensured.record)
+                self._cache_local_provider_metadata(local_mod, enhanced, provider_record=ensured.record)
 
-    def _cache_local_provider_metadata(self, mod: Any, enhanced: Any | None = None) -> None:
+    def _cache_local_provider_metadata(
+        self, mod: Any, enhanced: Any | None = None, *, provider_record: ProviderMetadataRecord | None = None
+    ) -> None:
         """將本地模組已解析出的 provider metadata 回寫到索引。"""
         manager = self.mod_manager
         if not manager:
             return
-
         file_path_raw = str(getattr(mod, "file_path", "") or "").strip()
         if not file_path_raw:
             return
-
-        resolved_project_id = str(getattr(enhanced, "project_id", "") or getattr(mod, "platform_id", "") or "").strip()
-        slug = str(getattr(enhanced, "slug", "") or getattr(mod, "platform_slug", "") or "").strip()
-        project_name = str(getattr(enhanced, "name", "") or getattr(mod, "name", "") or "").strip()
-        provider_metadata = {
-            "platform": "modrinth" if resolved_project_id else "local",
-            "project_id": resolved_project_id,
-            "slug": slug,
-            "project_name": project_name,
-        }
-
-        manager.index_manager.cache_provider_metadata(Path(file_path_raw), provider_metadata)
+        normalized_record = provider_record or ProviderMetadataRecord.from_values(
+            project_id=str(getattr(enhanced, "project_id", "") or getattr(mod, "platform_id", "") or "").strip(),
+            slug=str(getattr(enhanced, "slug", "") or getattr(mod, "platform_slug", "") or "").strip(),
+            project_name=str(getattr(enhanced, "name", "") or getattr(mod, "name", "") or "").strip(),
+        )
+        apply_provider_metadata(mod, normalized_record)
+        # 回寫已增強的 provider metadata 並帶上來源，以便記錄 resolved_at 時間戳
+        cache_provider_metadata_record(
+            manager.index_manager,
+            Path(file_path_raw),
+            normalized_record,
+            metadata_source="scan_detect",
+        )
 
     def _prepare_local_update_review_entries(
         self,
@@ -3207,7 +3351,6 @@ class ModManagementFrame:
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         simulated_installed_mods = list(self._get_current_installed_mods())
         review_entries: list[LocalUpdateReviewEntry] = []
-
         for candidate in update_plan.candidates:
             root_key = str(candidate.project_id or "").strip()
             dependency_plan = SimpleNamespace(items=[], unresolved_required=[])
@@ -3218,30 +3361,39 @@ class ModManagementFrame:
                     *list(getattr(candidate, "dependency_issues", []) or []),
                 ]
             )
-
             target_version = getattr(candidate, "target_version", None)
+            cached_root_enabled: bool | None = None
             if getattr(candidate, "update_available", False) and target_version is not None:
-                dependency_plan = build_required_dependency_install_plan(
-                    target_version,
-                    minecraft_version=minecraft_version,
-                    loader=loader_type,
-                    loader_version=loader_version,
-                    installed_mods=simulated_installed_mods,
-                    root_project_id=candidate.project_id,
-                    root_project_name=candidate.project_name,
-                )
+                cached_dependency_plan, cached_root_enabled = self._load_local_dependency_plan_snapshot(candidate)
+                if cached_dependency_plan is not None:
+                    dependency_plan = cached_dependency_plan
+                else:
+                    dependency_plan = build_required_dependency_install_plan(
+                        target_version,
+                        minecraft_version=minecraft_version,
+                        loader=loader_type,
+                        loader_version=loader_version,
+                        installed_mods=simulated_installed_mods,
+                        root_project_id=candidate.project_id,
+                        root_project_name=candidate.project_name,
+                    )
+                    self._cache_local_dependency_plan_snapshot(
+                        candidate,
+                        dependency_plan,
+                        root_enabled=bool(getattr(candidate, "actionable", False)) and (not bool(blocking_reasons)),
+                    )
                 self._apply_review_advisory_enabled_overrides(dependency_plan, root_key, advisory_enabled_overrides)
                 blocking_reasons.extend(list(getattr(dependency_plan, "unresolved_required", []) or []))
-
+            default_enabled = bool(getattr(candidate, "actionable", False)) and (not blocking_reasons)
+            if not blocking_reasons and root_enabled_overrides is None and (cached_root_enabled is not None):
+                default_enabled = cached_root_enabled
             review_entry = LocalUpdateReviewEntry(
                 candidate=candidate,
                 dependency_plan=dependency_plan,
                 blocking_reasons=blocking_reasons,
-                enabled=root_enabled_overrides.get(
-                    root_key, bool(getattr(candidate, "actionable", False)) and not blocking_reasons
-                )
+                enabled=root_enabled_overrides.get(root_key, default_enabled)
                 if root_enabled_overrides is not None
-                else bool(getattr(candidate, "actionable", False)) and not blocking_reasons,
+                else default_enabled,
                 provider=str(getattr(target_version, "provider", "modrinth") or "modrinth")
                 if target_version
                 else "modrinth",
@@ -3250,14 +3402,11 @@ class ModManagementFrame:
                 changelog=str(getattr(target_version, "changelog", "") or "") if target_version else "",
             )
             review_entries.append(review_entry)
-
             if non_blocking_warnings:
                 existing_notes = list(getattr(candidate, "notes", []) or [])
                 candidate.notes = self._dedupe_review_messages([*non_blocking_warnings, *existing_notes])
-
             if review_entry.actionable:
                 self._append_enabled_dependency_simulations(simulated_installed_mods, dependency_plan)
-
                 self._append_simulated_installed_mod(
                     simulated_installed_mods,
                     self._build_installed_mod_simulation_item(
@@ -3267,7 +3416,6 @@ class ModManagementFrame:
                         candidate.target_version_name,
                     ),
                 )
-
         return review_entries
 
     def _format_local_update_review_text(self, review_entry: LocalUpdateReviewEntry) -> str:
@@ -3277,47 +3425,39 @@ class ModManagementFrame:
             f"模組：{candidate.project_name}",
             f"來源：{self._format_review_provider_label(review_entry.provider)}",
             f"Metadata 來源：{self._format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}",
+            f"更新建議來源：{self._format_recommendation_source_label(getattr(candidate, 'recommendation_source', ''))}",
+            f"更新建議可信度：{self._format_recommendation_confidence_label(getattr(candidate, 'recommendation_confidence', ''))}",
             f"目前版本：{candidate.current_version or '未知'}",
             f"推薦版本：{candidate.target_version_name or '查無可用版本'}",
         ]
-
         metadata_note = str(getattr(candidate, "metadata_note", "") or "").strip()
         if metadata_note:
             lines.append(f"Metadata 狀態：{metadata_note}")
-
         published_text = self._format_review_published_at(review_entry.date_published)
         if published_text:
             lines.append(f"發布時間：{published_text}")
-
         client_install_reminder = self._build_client_install_reminder_line(
-            getattr(candidate, "server_side", ""),
-            getattr(candidate, "client_side", ""),
+            getattr(candidate, "server_side", ""), getattr(candidate, "client_side", "")
         )
         if client_install_reminder:
             lines.append(client_install_reminder)
-
-        lines.append(f"執行狀態：{'已啟用' if review_entry.enabled else '已停用'}")
-
+        lines.append(f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}")
+        lines.append(f"處理等級：{self._build_local_update_root_status_text(review_entry)}")
         if review_entry.blocking_reasons:
             self._append_review_section(lines, "需先處理：", review_entry.blocking_reasons, max_items=3)
-
         self._append_dependency_review_sections(lines, review_entry.dependency_plan, "更新時將一併安裝的必要依賴：")
-
         notes = list(getattr(candidate, "notes", []) or [])
         warnings = list(getattr(getattr(candidate, "report", None), "warnings", []) or [])
         if warnings:
             self._append_review_section(lines, "提醒：", warnings, max_items=3)
         if notes:
             self._append_review_section(lines, "補充說明：", notes, max_items=2)
-
         changelog_text = self._summarize_review_changelog(review_entry.changelog)
         if changelog_text:
             lines.append("")
             lines.append("更新內容：")
             lines.append(changelog_text)
-
         self._append_plan_note_section(lines, getattr(review_entry, "dependency_plan", None))
-
         return "\n".join(lines)
 
     def _install_local_update_review_entries(self, dialog, review_entries: list[LocalUpdateReviewEntry]) -> None:
@@ -3326,32 +3466,31 @@ class ModManagementFrame:
         if not manager:
             UIUtils.show_error("錯誤", "模組管理器未初始化", self.parent)
             return
-
         actionable_entries = [entry for entry in review_entries if entry.actionable]
-        blocked_entries = [entry for entry in review_entries if not entry.runnable]
-        disabled_entries = [entry for entry in review_entries if entry.runnable and not entry.enabled]
+        disabled_entries = [entry for entry in review_entries if entry.runnable and (not entry.enabled)]
         if not actionable_entries:
             message = "目前沒有可直接更新的模組。"
             if disabled_entries:
                 message = "目前沒有已啟用的可更新項目，請先啟用要執行的更新項目。"
             UIUtils.show_warning("沒有可更新項目", message, dialog)
             return
-
-        if blocked_entries:
-            proceed = UIUtils.ask_yes_no_cancel(
-                "部分模組暫時無法更新",
-                (
-                    f"目前有 {len(blocked_entries)} 個模組因相容性或依賴問題無法直接更新。\n"
-                    f"將只更新其餘 {len(actionable_entries)} 個可更新項目。\n\n是否繼續？"
-                ),
-                parent=dialog,
-                show_cancel=False,
-            )
+        execution_prompt = self._build_local_update_execution_prompt(review_entries)
+        if execution_prompt:
+            proceed = UIUtils.ask_yes_no_cancel("確認本次更新內容", execution_prompt, parent=dialog, show_cancel=False)
             if proceed is not True:
                 return
-
         dialog.destroy()
-
+        skipped_counts = self._count_local_update_review_groups(review_entries)
+        skipped_group_parts: list[str] = []
+        if skipped_counts["retryable"]:
+            skipped_group_parts.append(
+                LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE.format(count=skipped_counts["retryable"])
+            )
+        if skipped_counts["unknown"]:
+            skipped_group_parts.append(LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE.format(count=skipped_counts["unknown"]))
+        if skipped_counts["blocked"]:
+            skipped_group_parts.append(LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE.format(count=skipped_counts["blocked"]))
+        skipped_group_text = "\n略過項目：\n- " + "\n- ".join(skipped_group_parts) if skipped_group_parts else ""
         completion_notes = self._format_completion_notes(
             [
                 *[
@@ -3379,14 +3518,6 @@ class ModManagementFrame:
             )
             current_step = 0
             success_count = 0
-
-            def make_step_progress_callback(step_index: int):
-                def _callback(downloaded: int, total: int) -> None:
-                    fraction = (downloaded / total) if total > 0 else 0.0
-                    self.update_progress_safe((step_index + fraction) / max(1, total_steps))
-
-                return _callback
-
             try:
                 for review_entry in actionable_entries:
                     candidate = review_entry.candidate
@@ -3395,35 +3526,32 @@ class ModManagementFrame:
                         installed_dependency = manager.install_remote_mod_file(
                             dependency_item.download_url,
                             dependency_item.filename,
-                            progress_callback=make_step_progress_callback(current_step),
+                            progress_callback=self._make_step_progress_callback(current_step, total_steps),
                         )
                         if installed_dependency is None:
                             raise RuntimeError(f"依賴安裝失敗：{dependency_item.project_name}")
                         current_step += 1
-
                     self.update_status_safe(f"正在更新模組：{candidate.project_name}")
                     updated_path = manager.replace_local_mod_file(
                         candidate.local_mod,
                         candidate.download_url,
                         candidate.target_filename,
-                        progress_callback=make_step_progress_callback(current_step),
+                        progress_callback=self._make_step_progress_callback(current_step, total_steps),
                     )
                     if updated_path is None:
                         raise RuntimeError(f"模組更新失敗：{candidate.project_name}")
                     current_step += 1
                     success_count += 1
-
                 self.update_progress_safe(1.0)
                 self.update_status_safe(f"已完成 {success_count} 個模組更新")
                 self.ui_queue.put(self.load_local_mods)
                 self.ui_queue.put(
                     lambda: UIUtils.show_info(
                         "更新完成",
-                        (
-                            f"已完成 {success_count} 個模組更新。"
-                            + (f"\n已略過 {len(disabled_entries)} 個停用項目。" if disabled_entries else "")
-                            + completion_notes
-                        ),
+                        f"已完成 {success_count} 個模組更新。"
+                        + (f"\n已略過 {len(disabled_entries)} 個停用項目。" if disabled_entries else "")
+                        + skipped_group_text
+                        + completion_notes,
                         self.parent,
                     )
                 )
@@ -3445,13 +3573,13 @@ class ModManagementFrame:
             message = update_plan.notes[0] if update_plan.notes else f"{scope_text}目前沒有可更新或需處理的模組。"
             UIUtils.show_info("更新檢查", message, self.parent)
             return
-
         entry_map = {self._build_local_update_review_key(entry.candidate): entry for entry in review_entries}
         review_root_keys = set(entry_map)
         global_review_notes = self._collect_local_update_global_notes(update_plan, review_entries)
 
         def rebuild_update_review_entries() -> None:
             nonlocal review_entries, entry_map, review_root_keys
+            self._persist_local_update_dependency_plan_snapshots(review_entries)
             root_keys = [self._build_local_update_review_key(entry.candidate) for entry in review_entries]
             root_enabled_overrides = self._collect_review_entry_enabled_overrides(review_entries, root_keys)
             advisory_enabled_overrides = self._collect_review_advisory_enabled_overrides(review_entries, root_keys)
@@ -3479,23 +3607,25 @@ class ModManagementFrame:
             native_window=True,
             use_transient_for_modal=False,
         )
-
         main_frame = ctk.CTkFrame(dialog)
         main_frame.pack(fill="both", expand=True, padx=18, pady=18)
-
         title = ctk.CTkLabel(
             main_frame,
             text="本地模組更新與相容性 Review",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
         title.pack(anchor="w", padx=12, pady=(12, 8))
-
+        local_group_counts = self._count_local_update_review_groups(review_entries)
         subtitle = ctk.CTkLabel(
             main_frame,
             text=self._build_local_update_review_subtitle(
                 scope_text,
                 self._count_enabled_runnable_entries(review_entries),
-                self._count_blocked_entries(review_entries),
+                local_group_counts["blocked"],
+                advisory_count=local_group_counts["advisory"],
+                retryable_count=local_group_counts["retryable"],
+                unknown_count=local_group_counts["unknown"],
+                migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
             ),
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
             text_color=Colors.TEXT_SECONDARY,
@@ -3504,7 +3634,6 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(880),
         )
         subtitle.pack(fill="x", padx=12, pady=(0, 6))
-
         overview_label = ctk.CTkLabel(
             main_frame,
             text="",
@@ -3515,10 +3644,8 @@ class ModManagementFrame:
             wraplength=FontManager.get_dpi_scaled_size(880),
         )
         overview_label.pack(fill="x", padx=12, pady=(0, 6))
-
         tree_container = ctk.CTkFrame(main_frame)
         tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-
         update_tree = ttk.Treeview(
             tree_container,
             columns=("run", "current", "target", "source", "status"),
@@ -3550,7 +3677,6 @@ class ModManagementFrame:
             body_font=FontManager.get_font(size=FontSize.INPUT),
             stretch_columns={"status"},
         )
-
         update_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=update_tree.yview)
         update_tree.configure(yscrollcommand=update_scroll.set)
         update_tree.grid(row=0, column=0, sticky="nsew")
@@ -3559,23 +3685,29 @@ class ModManagementFrame:
         tree_container.grid_columnconfigure(0, weight=1)
 
         def refresh_update_tree() -> None:
-            self._render_review_task_tree(
-                update_tree, self._build_local_update_task_nodes(review_entries), column_count=5
-            )
+            nodes = self._build_local_update_task_nodes(review_entries)
+            self._render_review_task_tree(update_tree, nodes, column_count=5)
 
         summary_box = self._create_review_summary_box(main_frame, height=138)
 
         def refresh_update_status_banner() -> None:
             review_nodes = self._build_local_update_task_nodes(review_entries)
             enabled_count = self._count_enabled_runnable_entries(review_entries)
-            blocked_count = self._count_blocked_entries(review_entries)
-            subtitle.configure(text=self._build_local_update_review_subtitle(scope_text, enabled_count, blocked_count))
+            local_group_counts = self._count_local_update_review_groups(review_entries)
+            subtitle.configure(
+                text=self._build_local_update_review_subtitle(
+                    scope_text,
+                    enabled_count,
+                    local_group_counts["blocked"],
+                    advisory_count=local_group_counts["advisory"],
+                    retryable_count=local_group_counts["retryable"],
+                    unknown_count=local_group_counts["unknown"],
+                    migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
+                )
+            )
             overview_label.configure(
                 text=self._format_review_overview_text(
-                    review_entries,
-                    review_nodes,
-                    action_label="更新",
-                    global_notes=global_review_notes,
+                    review_entries, review_nodes, action_label="更新", global_notes=global_review_notes
                 )
             )
 
@@ -3584,7 +3716,6 @@ class ModManagementFrame:
             review_entry = entry_map.get(selected_key)
             if not review_entry:
                 return
-
             summary_box.configure(state="normal")
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_local_update_review_text(review_entry))
@@ -3612,10 +3743,8 @@ class ModManagementFrame:
         update_tree.bind("<<TreeviewSelect>>", refresh_update_summary)
         refresh_update_tree()
         refresh_update_summary()
-
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         button_frame.pack(fill="x", padx=12, pady=(0, 8))
-
         update_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -3624,7 +3753,6 @@ class ModManagementFrame:
             command=lambda: self._install_local_update_review_entries(dialog, review_entries),
             bold=True,
         )
-
         self._create_review_action_button(
             button_frame,
             text="啟用選取項目",
@@ -3633,7 +3761,6 @@ class ModManagementFrame:
             command=lambda: toggle_update_selection(True),
             padx=(10, 0),
         )
-
         self._create_review_action_button(
             button_frame,
             text="停用選取項目",
@@ -3642,7 +3769,6 @@ class ModManagementFrame:
             command=lambda: toggle_update_selection(False),
             padx=(10, 0),
         )
-
         project_page_button = self._create_review_action_button(
             button_frame,
             text="開啟專案頁面",
@@ -3672,12 +3798,10 @@ class ModManagementFrame:
             command=dialog.destroy,
             side="right",
         )
-
         update_tree.bind("<<TreeviewSelect>>", refresh_update_project_page_button, add="+")
         refresh_update_status_banner()
         refresh_update_action_button()
         refresh_update_project_page_button()
-
         UIUtils.schedule_toplevel_layout_refresh(
             dialog,
             min_width=1060,
@@ -3693,7 +3817,6 @@ class ModManagementFrame:
         if not self.current_server or not manager:
             UIUtils.show_warning("警告", "請先選擇伺服器後再檢查模組更新", self.parent)
             return
-
         selected_mod_ids = self._capture_selected_mod_ids()
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
 
@@ -3702,8 +3825,6 @@ class ModManagementFrame:
                 self.update_status_safe("正在掃描本地模組更新與相容性...")
                 self.update_progress_safe(0.0)
                 installed_mods = manager.get_mod_list()
-                self._ensure_local_mod_project_ids(installed_mods)
-
                 target_mods = installed_mods
                 scope_text = "全部模組"
                 if selected_mod_ids:
@@ -3713,7 +3834,6 @@ class ModManagementFrame:
                         if mod.filename.replace(".jar.disabled", "").replace(".jar", "") in selected_mod_ids
                     ]
                     scope_text = f"已選取的 {len(target_mods)} 個模組"
-
                 last_hash_progress_percent = -1
 
                 def on_hash_progress(completed: int, total: int) -> None:
@@ -3757,7 +3877,6 @@ class ModManagementFrame:
         selection = self.browse_tree.selection()
         if not selection:
             return
-
         item = selection[0]
         values = self.browse_tree.item(item, "values")
         tags = self.browse_tree.item(item, "tags")
@@ -3765,7 +3884,6 @@ class ModManagementFrame:
         mod = self._online_mod_index.get(project_id)
         if not values or not mod:
             return
-
         info = f"模組名稱: {values[0]}\n作者: {values[1]}\n下載數: {values[2]}\n頁面: {getattr(mod, 'url', '')}"
         self.parent.clipboard_clear()
         self.parent.clipboard_append(info)
@@ -3779,36 +3897,24 @@ class ModManagementFrame:
         selection = self.browse_tree.selection()
         if not selection:
             return
-
         item = selection[0]
         tags = self.browse_tree.item(item, "tags")
         project_id = tags[0] if tags else ""
         mod = self._online_mod_index.get(project_id)
         if not mod:
             return
-
         url = self._resolve_online_mod_project_page_url(mod)
         if url:
             UIUtils.open_external(url)
 
     def create_notebook(self) -> None:
         """建立頁籤介面"""
-        # 使用 ttk.Notebook
         self.notebook = ttk.Notebook(self.main_frame)
-
-        # 設置頁籤字體使用DPI縮放
         style = ttk.Style()
         style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold"))
-
         self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 10))
-
-        # 本地模組頁面
         self.create_local_mods_tab()
-
-        # 線上瀏覽頁面
         self.create_browse_mods_tab()
-
-        # 綁定頁籤切換事件
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
     def on_tab_changed(self, _event=None) -> None:
@@ -3817,9 +3923,9 @@ class ModManagementFrame:
             if not self.notebook:
                 return
             current_tab = self.notebook.index(self.notebook.select())
-            if current_tab == 0:  # 本地模組頁面
+            if current_tab == 0:
                 self.refresh_local_list()
-            elif current_tab == 1:  # 線上瀏覽頁面
+            elif current_tab == 1:
                 self._refresh_online_filter_hint()
                 self._load_online_mods(show_warning=False)
         except Exception as e:
@@ -3829,14 +3935,8 @@ class ModManagementFrame:
         """建立本地模組工具列"""
         toolbar_frame = ctk.CTkFrame(self.local_tab)
         toolbar_frame.pack(fill="x", padx=14, pady=14)
-
-        # 左側按鈕
         left_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
         left_frame.pack(side="left", padx=7)
-
-        # 建立統一樣式的按鈕（使用與 manage_server_frame 相同的風格）
-
-        # 匯入模組
         import_btn = ctk.CTkButton(
             left_frame,
             text="📁 匯入模組",
@@ -3849,8 +3949,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         import_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-
-        # 重新整理（強制掃描）
         refresh_mod_list_btn = ctk.CTkButton(
             left_frame,
             text="🔄 重新整理",
@@ -3863,8 +3961,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         refresh_mod_list_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-
-        # 檢查更新
         update_btn = ctk.CTkButton(
             left_frame,
             text="🔄 檢查更新",
@@ -3877,8 +3973,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         update_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-
-        # 全選/取消全選
         self.select_all_btn = ctk.CTkButton(
             left_frame,
             text="☑️ 全選",
@@ -3891,8 +3985,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         self.select_all_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-
-        # 批量啟用/停用
         self.batch_toggle_btn = ctk.CTkButton(
             left_frame,
             text="🔄 批量切換",
@@ -3905,8 +3997,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         self.batch_toggle_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-
-        # 開啟模組資料夾
         folder_btn = ctk.CTkButton(
             left_frame,
             text="📂 開啟資料夾",
@@ -3919,23 +4009,12 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
         )
         folder_btn.pack(side="left")
-
-        # 右側篩選
         right_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
         right_frame.pack(side="right", padx=15)
-
-        # 搜尋框
         search_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
         search_frame.pack(side="left", padx=(0, 15))
-
-        # 搜尋圖示
-        search_label = ctk.CTkLabel(
-            search_frame,
-            text="🔍",
-            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
-        )
+        search_label = ctk.CTkLabel(search_frame, text="🔍", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM))
         search_label.pack(side="left")
-
         self.local_search_var = tk.StringVar()
         search_entry = ctk.CTkEntry(
             search_frame,
@@ -3946,8 +4025,6 @@ class ModManagementFrame:
         )
         search_entry.pack(side="left", padx=(FontManager.get_dpi_scaled_size(8), 0))
         self.local_search_var.trace("w", self.filter_local_mods)
-
-        # 狀態篩選
         self.local_filter_var = tk.StringVar(value="所有")
         filter_combo = CustomDropdown(
             right_frame,
@@ -3978,8 +4055,7 @@ class ModManagementFrame:
                     self.update_status_safe(f"找到 {len(mods)} 個本地模組 (已重新整理)")
                 except Exception as e:
                     logger.bind(component="").error(
-                        f"強制掃描失敗: {e}\n{traceback.format_exc()}",
-                        "ModManagementFrame",
+                        f"強制掃描失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
                     )
                     self.update_status_safe(f"強制掃描失敗: {e}")
 
@@ -3989,8 +4065,6 @@ class ModManagementFrame:
         """建立本地模組列表"""
         list_frame = ctk.CTkFrame(self.local_tab)
         list_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
-        # 匯出模組按鈕
         export_btn = ctk.CTkButton(
             list_frame,
             text="匯出模組列表",
@@ -4003,8 +4077,6 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT_EXPORT,
         )
         export_btn.pack(anchor="ne", pady=(10, 5), padx=10)
-
-        # 建立包含 Treeview 和滾動條的容器
         tree_container = ctk.CTkFrame(list_frame)
         tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         style = ttk.Style()
@@ -4013,31 +4085,16 @@ class ModManagementFrame:
             font=FontManager.get_font(size=FontSize.INPUT),
             rowheight=int(25 * FontManager.get_scale_factor()),
         )
-        style.configure(
-            "ModList.Treeview.Heading",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-        )
-
-        # 建立 Treeview
-        columns = (
-            "status",
-            "name",
-            "version",
-            "author",
-            "loader",
-            "size",
-            "mtime",
-            "description",
-        )
+        style.configure("ModList.Treeview.Heading", font=FontManager.get_font(size=FontSize.LARGE, weight="bold"))
+        columns = ("status", "name", "version", "author", "loader", "size", "mtime", "description")
         self.local_tree = ttk.Treeview(
             tree_container,
             columns=columns,
             show="headings",
             height=Sizes.TREEVIEW_VISIBLE_ROWS,
-            selectmode="extended",  # 支援多選
+            selectmode="extended",
             style="ModList.Treeview",
         )
-
         column_config = {
             "status": ("狀態", 80),
             "name": ("模組名稱", 200),
@@ -4050,30 +4107,21 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             self.local_tree.heading(col, text=text, anchor="w")
-            self.local_tree.column(col, width=width, minwidth=50, stretch=(col == "description"))
-
-        # 滾動條
+            self.local_tree.column(col, width=width, minwidth=50, stretch=col == "description")
         v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
         h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
         self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
         self.local_v_scrollbar = v_scrollbar
         self.local_h_scrollbar = h_scrollbar
-
-        # 使用 grid 佈局確保滾動條在正確位置
         self.local_tree.grid(row=0, column=0, sticky="nsew")
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
         is_dark = ctk.get_appearance_mode() == "Dark"
         bg_odd, bg_even = self._get_local_row_palette(is_dark)
-
         self.local_tree.tag_configure("odd", background=bg_odd)
         self.local_tree.tag_configure("even", background=bg_even)
-
-        # 配置 grid 權重
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-
-        # 綁定事件
         UIUtils.bind_treeview_header_auto_fit(
             self.local_tree,
             on_row_double_click=self.toggle_local_mod,
@@ -4099,78 +4147,40 @@ class ModManagementFrame:
                 min_height=Sizes.DIALOG_LARGE_HEIGHT,
                 max_width=FontManager.get_dpi_scaled_size(1280),
                 max_height=FontManager.get_dpi_scaled_size(960),
-                delay_ms=250,  # 使用稍長延遲確保圖示綁定成功
+                delay_ms=250,
             )
-
-            # 主容器
             main_frame = ctk.CTkFrame(dialog)
             main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-
-            # 標題
             title_label = ctk.CTkLabel(
-                main_frame,
-                text="匯出模組列表",
-                font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold"),
+                main_frame, text="匯出模組列表", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
             )
             title_label.pack(pady=(10, 20))
-
-            # 格式選擇區域
             fmt_frame = ctk.CTkFrame(main_frame)
             fmt_frame.pack(fill="x", pady=(0, 15))
-
             fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
             fmt_inner.pack(fill="x", padx=20, pady=15)
-
             ctk.CTkLabel(
-                fmt_inner,
-                text="選擇匯出格式:",
-                font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
-            ).pack(
-                side="left",
-                padx=(0, 15),
-            )
-
+                fmt_inner, text="選擇匯出格式:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
+            ).pack(side="left", padx=(0, 15))
             fmt_var = tk.StringVar(value="text")
-
-            # 使用 CTK 選項按鈕
             text_radio = ctk.CTkRadioButton(
-                fmt_inner,
-                text="純文字",
-                variable=fmt_var,
-                value="text",
-                font=FontManager.get_font(size=FontSize.LARGE),
+                fmt_inner, text="純文字", variable=fmt_var, value="text", font=FontManager.get_font(size=FontSize.LARGE)
             )
             text_radio.pack(side="left", padx=5)
-
             json_radio = ctk.CTkRadioButton(
-                fmt_inner,
-                text="JSON",
-                variable=fmt_var,
-                value="json",
-                font=FontManager.get_font(size=FontSize.LARGE),
+                fmt_inner, text="JSON", variable=fmt_var, value="json", font=FontManager.get_font(size=FontSize.LARGE)
             )
             json_radio.pack(side="left", padx=5)
-
             html_radio = ctk.CTkRadioButton(
-                fmt_inner,
-                text="HTML",
-                variable=fmt_var,
-                value="html",
-                font=FontManager.get_font(size=FontSize.LARGE),
+                fmt_inner, text="HTML", variable=fmt_var, value="html", font=FontManager.get_font(size=FontSize.LARGE)
             )
             html_radio.pack(side="left", padx=5)
-
-            # 預覽區域
             preview_frame = ctk.CTkFrame(main_frame)
             preview_frame.pack(fill="both", expand=True, pady=(0, 15))
-
             preview_label = ctk.CTkLabel(
-                preview_frame,
-                text="預覽:",
-                font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+                preview_frame, text="預覽:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
             )
             preview_label.pack(anchor="w", padx=15, pady=(15, 5))
-
             text_widget = ctk.CTkTextbox(
                 preview_frame,
                 font=FontManager.get_font(size=FontSize.LARGE),
@@ -4186,8 +4196,6 @@ class ModManagementFrame:
 
             fmt_var.trace_add("write", update_preview)
             update_preview()
-
-            # 按鈕區域
             btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
             btn_frame.pack(pady=(0, 10))
 
@@ -4199,12 +4207,7 @@ class ModManagementFrame:
                 file_path = filedialog.asksaveasfilename(
                     title="儲存模組列表",
                     defaultextension=f".{ext}",
-                    filetypes=[
-                        ("所有檔案", "*.*"),
-                        ("純文字", "*.txt"),
-                        ("JSON", "*.json"),
-                        ("HTML", "*.html"),
-                    ],
+                    filetypes=[("所有檔案", "*.*"), ("純文字", "*.txt"), ("JSON", "*.json"), ("HTML", "*.html")],
                     initialfile=default_name,
                 )
                 if file_path:
@@ -4214,15 +4217,14 @@ class ModManagementFrame:
                         result = UIUtils.ask_yes_no_cancel(
                             "匯出成功",
                             f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？",
-                            parent=dialog,  # 傳遞正確的父視窗
+                            parent=dialog,
                             show_cancel=False,
                         )
                         if result:
                             UIUtils.open_external(file_path)
                     except Exception as e:
                         logger.bind(component="").error(
-                            f"開啟檔案失敗: {e}\n{traceback.format_exc()}",
-                            "ModManagementFrame",
+                            f"開啟檔案失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
                         )
                         UIUtils.show_error("開啟檔案失敗", f"無法開啟檔案: {e}", parent=dialog)
 
@@ -4237,7 +4239,6 @@ class ModManagementFrame:
                 height=int(40 * FontManager.get_scale_factor()),
             )
             save_btn.pack(side="left", padx=(0, 10))
-
             close_btn = ctk.CTkButton(
                 btn_frame,
                 text="關閉",
@@ -4250,7 +4251,6 @@ class ModManagementFrame:
             )
             close_btn.pack(side="left")
             dialog.bind("<Escape>", lambda _e: dialog.destroy())
-
             UIUtils.schedule_toplevel_layout_refresh(
                 dialog,
                 min_width=Sizes.DIALOG_LARGE_WIDTH,
@@ -4259,7 +4259,6 @@ class ModManagementFrame:
                 max_height=FontManager.get_dpi_scaled_size(960),
                 parent=self.parent,
             )
-
         except Exception as e:
             logger.error(f"匯出對話框錯誤: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("匯出對話框錯誤", str(e), self.parent)
@@ -4269,8 +4268,6 @@ class ModManagementFrame:
         status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * FontManager.get_scale_factor()))
         status_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
         status_frame.pack_propagate(False)
-
-        # 狀態標籤
         self.status_label = ctk.CTkLabel(
             status_frame,
             text="請選擇伺服器開始管理模組",
@@ -4278,8 +4275,6 @@ class ModManagementFrame:
             text_color=Colors.TEXT_SECONDARY,
         )
         self.status_label.pack(side="left", padx=10, pady=int(6 * FontManager.get_scale_factor()))
-
-        # 進度條（亮綠色，使用 CTK）
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ctk.CTkProgressBar(
             status_frame,
@@ -4296,8 +4291,6 @@ class ModManagementFrame:
         try:
             servers = list(self.server_manager.servers.values())
             server_names = [server.name for server in servers]
-
-            # 若列表為空，顯示一個空白選項
             if not server_names:
                 self.server_combo.configure(values=[""])
                 self.server_var.set("")
@@ -4313,12 +4306,8 @@ class ModManagementFrame:
                 if server_names:
                     self.server_var.set(server_names[0])
                 self.on_server_changed()
-
         except Exception as e:
-            logger.bind(component="").error(
-                f"載入伺服器列表失敗: {e}\n{traceback.format_exc()}",
-                "ModManagementFrame",
-            )
+            logger.bind(component="").error(f"載入伺服器列表失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame")
             UIUtils.show_error("錯誤", f"載入伺服器列表失敗: {e}", self.parent)
 
     def on_server_changed(self, _event=None) -> None:
@@ -4326,36 +4315,24 @@ class ModManagementFrame:
         server_name = self.server_var.get()
         if not server_name:
             return
-
         try:
-            # 獲取伺服器資訊
             servers = list(self.server_manager.servers.values())
             selected_server = None
-
             for server in servers:
                 if server.name == server_name:
                     selected_server = server
                     break
-
             if not selected_server:
                 return
-
             self.current_server = selected_server
-
             self.mod_manager = ModManager(selected_server.path, selected_server)
             self._last_online_request = None
             self._refresh_online_filter_hint()
-
-            # 載入本地模組
             self.load_local_mods()
-
             if self._is_browse_tab_active():
                 self._load_online_mods(force=True, show_warning=False)
-
-            # 更新狀態
             if self.on_server_selected:
                 self.on_server_selected(server_name)
-
         except Exception as e:
             logger.error(f"切換伺服器失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("錯誤", f"切換伺服器失敗: {e}", self.parent)
@@ -4364,7 +4341,6 @@ class ModManagementFrame:
         """載入本地模組，並同步清空增強 cache，確保顯示一致，並顯示進度條"""
         if not self.mod_manager:
             return
-
         manager = self.mod_manager
         mods_dir = Path(self.current_server.path) / "mods" if self.current_server else None
         mods_dir_key = str(mods_dir.resolve()) if mods_dir else ""
@@ -4373,11 +4349,10 @@ class ModManagementFrame:
             mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
         except Exception:
             mods_dir_mtime = None
-
         if (
             mods_dir_key
             and mods_dir_key == getattr(self, "_last_mods_dir", None)
-            and mods_dir_mtime == getattr(self, "_last_mods_dir_mtime", None)
+            and (mods_dir_mtime == getattr(self, "_last_mods_dir_mtime", None))
             and self.local_mods
         ):
             self.update_status_safe(f"找到 {len(self.local_mods)} 個本地模組")
@@ -4388,8 +4363,6 @@ class ModManagementFrame:
             try:
                 self.update_status_safe("正在掃描本地模組...")
                 mods = list(manager.scan_mods())
-
-                # 去重：同一個 base_name 同時存在 .jar 與 .jar.disabled 時，只保留一筆（優先 enabled）
                 dedup: dict[str, Any] = {}
                 for mod in mods:
                     base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
@@ -4397,13 +4370,11 @@ class ModManagementFrame:
                     if existing is None or mod.status == ModStatus.ENABLED:
                         dedup[base_name] = mod
                 mods = list(dedup.values())
-
                 total = len(mods)
                 self.local_mods = []
                 self.enhanced_mods_cache = {}
                 last_percent = -1
                 for idx, mod in enumerate(mods):
-                    # 預先在背景執行緒計算 mtime，避免 UI 執行緒大量 stat() 卡頓
                     try:
                         mod._cached_mtime = Path(mod.file_path).stat().st_mtime
                     except Exception:
@@ -4414,14 +4385,11 @@ class ModManagementFrame:
                     if rounded_percent != last_percent:
                         last_percent = rounded_percent
                         self.update_progress_safe(percent)
-
-                # 更新快取快照
                 self._last_mods_dir = mods_dir_key
                 try:
                     self._last_mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
                 except Exception:
                     self._last_mods_dir_mtime = mods_dir_mtime
-
                 self.enhance_local_mods()
                 self.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
@@ -4438,7 +4406,6 @@ class ModManagementFrame:
             try:
                 if mod.filename in self.enhanced_mods_cache:
                     return
-
                 enhanced = enhance_local_mod(
                     mod.filename,
                     platform_id=getattr(mod, "platform_id", ""),
@@ -4454,18 +4421,15 @@ class ModManagementFrame:
                         mod.platform_slug = resolved_slug
                     self.enhanced_mods_cache[mod.filename] = enhanced
                     self._cache_local_provider_metadata(mod, enhanced)
-                    time.sleep(0.05)  # 50ms 延遲
+                    time.sleep(0.05)
             except Exception as e:
                 logger.bind(component="").error(
-                    f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}",
-                    "ModManagementFrame",
+                    f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}", "ModManagementFrame"
                 )
 
         def enhance_thread():
             with ThreadPoolExecutor(max_workers=3) as executor:
                 executor.map(enhance_single, self.local_mods)
-
-            # 使用佇列更新 UI
             self.ui_queue.put(self.refresh_local_list)
 
         UIUtils.run_async(enhance_thread)
@@ -4481,18 +4445,15 @@ class ModManagementFrame:
     def _is_exact_local_enhancement_match(self, mod: Any, enhanced: Any) -> bool:
         if not enhanced:
             return False
-
         platform_id = str(getattr(mod, "platform_id", "") or "").strip().lower()
         enhanced_project_id = str(getattr(enhanced, "project_id", "") or "").strip().lower()
         enhanced_slug = str(getattr(enhanced, "slug", "") or "").strip().lower()
-
         return bool(platform_id and platform_id in {enhanced_project_id, enhanced_slug})
 
     def _resolve_local_display_name(self, mod: Any, enhanced: Any) -> str:
         local_name = str(getattr(mod, "name", "") or "").strip()
         if local_name and local_name.lower() not in {"unknown", "unknown mod"}:
             return local_name
-
         enhanced_name = self._get_enhanced_attr(enhanced, "name", local_name)
         if self._is_exact_local_enhancement_match(mod, enhanced):
             return enhanced_name or local_name
@@ -4548,9 +4509,9 @@ class ModManagementFrame:
         """定期輸出 local 重用池命中統計（debug），用於調整池大小。"""
         interval = max(1, int(getattr(self, "_local_recycle_log_every", 200)))
         total = int(getattr(self, "_local_recycle_hits", 0)) + int(getattr(self, "_local_recycle_misses", 0))
-        if total <= 0 or (total % interval) != 0:
+        if total <= 0 or total % interval != 0:
             return
-        raw_hit_rate = (self._local_recycle_hits / total) * 100.0
+        raw_hit_rate = self._local_recycle_hits / total * 100.0
         smoothed_hit_rate = compute_exponential_moving_average(
             previous=getattr(self, "_local_recycle_hit_rate_ema", None),
             current=raw_hit_rate,
@@ -4558,11 +4519,7 @@ class ModManagementFrame:
         )
         self._local_recycle_hit_rate_ema = smoothed_hit_rate
         self._auto_tune_local_recycle_pool(smoothed_hit_rate)
-        message = (
-            f"local recycle stats pool={len(self._local_recycled_item_ids)} "
-            f"hits={self._local_recycle_hits} misses={self._local_recycle_misses} "
-            f"drops={self._local_recycle_drops} hit_rate={raw_hit_rate:.1f}% ema={smoothed_hit_rate:.1f}%"
-        )
+        message = f"local recycle stats pool={len(self._local_recycled_item_ids)} hits={self._local_recycle_hits} misses={self._local_recycle_misses} drops={self._local_recycle_drops} hit_rate={raw_hit_rate:.1f}% ema={smoothed_hit_rate:.1f}%"
         logger.debug(message, "ModManagement")
 
     def _auto_tune_local_recycle_pool(self, hit_rate: float) -> None:
@@ -4583,18 +4540,15 @@ class ModManagementFrame:
         new_size = compute_adaptive_pool_limit(**tune_args)
         if new_size == current:
             return
-
         self._local_recycle_pool_max = new_size
         logger.debug(
-            f"自動調整 local recycle pool 上限: {current} -> {new_size} (hit_rate={hit_rate:.1f}%)",
-            "ModManagement",
+            f"自動調整 local recycle pool 上限: {current} -> {new_size} (hit_rate={hit_rate:.1f}%)", "ModManagement"
         )
 
     def _set_local_tree_render_lock(self, locked: bool) -> None:
         """大量刷新前後鎖住 Treeview 父容器幾何，減少 layout 抖動。"""
         if not self.local_tree:
             return
-
         parent = self.local_tree.master
         if locked:
             if getattr(self, "_local_tree_render_locked", False):
@@ -4605,7 +4559,6 @@ class ModManagementFrame:
             except Exception as e:
                 logger.debug(f"鎖定 local tree 渲染失敗: {e}", "ModManagement")
             return
-
         if not getattr(self, "_local_tree_render_locked", False):
             return
         try:
@@ -4630,7 +4583,6 @@ class ModManagementFrame:
         """擷取目前選取列對應的 mod id（Treeview tag[0]）。"""
         if not self.local_tree:
             return set()
-
         selected_mod_ids: set[str] = set()
         for item_id in self.local_tree.selection():
             tags = self.local_tree.item(item_id, "tags")
@@ -4642,7 +4594,6 @@ class ModManagementFrame:
         """刷新後回復多選狀態。"""
         if not self.local_tree:
             return
-
         selected_items = [
             item_id for mod_id in selected_mod_ids for item_id in [self._local_item_by_mod_id.get(mod_id)] if item_id
         ]
@@ -4672,7 +4623,6 @@ class ModManagementFrame:
         tree = self.local_tree
         if not tree or not tree.winfo_exists():
             return
-
         recycled_pool = set(self._local_recycled_item_ids)
         active_children = list(tree.get_children(""))
         for item_id in active_children:
@@ -4680,7 +4630,6 @@ class ModManagementFrame:
                 continue
             with contextlib.suppress(Exception):
                 tree.delete(item_id)
-
         if recycled_pool:
             self._local_recycled_item_ids = [
                 item_id for item_id in self._local_recycled_item_ids if tree.exists(item_id)
@@ -4699,18 +4648,16 @@ class ModManagementFrame:
         if not tree or not tree.winfo_exists():
             self._set_local_tree_render_lock(False)
             return
-
-        # 先刪除不存在的 row
+        if tree is None:
+            return
         for mod_id, stale_item_id in list(self._local_item_by_mod_id.items()):
             if mod_id in mod_rows:
                 continue
             self._recycle_local_item(stale_item_id)
             self._local_item_by_mod_id.pop(mod_id, None)
-
         rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
         pending_insert: list[tuple[str, tuple[Any, ...], tuple[str, ...]]] = []
         previous_snapshot = getattr(self, "_local_rows_snapshot", {})
-
         for mod_id in mod_order:
             values, tags = mod_rows[mod_id]
             item_id = self._local_item_by_mod_id.get(mod_id)
@@ -4721,84 +4668,51 @@ class ModManagementFrame:
                     rows_snapshot[mod_id] = (values, tags)
                     continue
                 except Exception as e:
-                    logger.debug(f"更新 local row 失敗 mod_id={mod_id}: {e}", "ModManagement")
+                    logger.debug(f"更新本地列失敗 mod_id={mod_id}: {e}", "ModManagement")
                     self._recycle_local_item(item_id)
                     self._local_item_by_mod_id.pop(mod_id, None)
             pending_insert.append((mod_id, values, tags))
-
         if not mod_order:
             self._local_item_by_mod_id.clear()
-            self._finalize_local_refresh(
-                refresh_token=refresh_token,
-                rows_snapshot={},
-                selected_mod_ids=set(),
-            )
+            self._finalize_local_refresh(refresh_token=refresh_token, rows_snapshot={}, selected_mod_ids=set())
             return
-
         batch_size = self._get_local_insert_batch_size(len(pending_insert))
+        from ..utils import make_tree_insert_batch
 
-        def insert_batch(start_index: int, current_job_id: str | None = None) -> None:
-            if current_job_id and self._local_refresh_job == current_job_id:
-                self._local_refresh_job = None
-            if refresh_token != self._local_refresh_token:
-                if current_job_id and self._local_refresh_job == current_job_id:
-                    self._local_refresh_job = None
-                return
-            if not self.local_tree or not self.local_tree.winfo_exists():
-                if current_job_id and self._local_refresh_job == current_job_id:
-                    self._local_refresh_job = None
-                return
+        def _update_recycled(item_id: str, entry: tuple) -> None:
+            tree.item(item_id, values=entry[1], tags=entry[2])
+            tree.reattach(item_id, "", "end")
 
-            try:
-                end_index = min(start_index + batch_size, len(pending_insert))
-                for idx in range(start_index, end_index):
-                    mod_id, values, tags = pending_insert[idx]
-                    recycled_item_id = self._acquire_recycled_local_item()
-                    if recycled_item_id:
-                        self.local_tree.item(recycled_item_id, values=values, tags=tags)
-                        self.local_tree.reattach(recycled_item_id, "", "end")
-                        inserted_item_id = recycled_item_id
-                    else:
-                        inserted_item_id = self.local_tree.insert("", "end", values=values, tags=tags)
-                    self._local_item_by_mod_id[mod_id] = inserted_item_id
-                    rows_snapshot[mod_id] = (values, tags)
+        def _finalize_local() -> None:
+            self._purge_orphan_local_tree_items(
+                {item_id for mod_id in mod_order for item_id in [self._local_item_by_mod_id.get(mod_id)] if item_id}
+            )
+            self._finalize_local_refresh(
+                refresh_token=refresh_token, rows_snapshot=rows_snapshot, selected_mod_ids=selected_mod_ids
+            )
 
-                if end_index < len(pending_insert):
-                    next_job_id: str | None = None
-
-                    def _run_next() -> None:
-                        insert_batch(end_index, current_job_id=next_job_id)
-
-                    next_job_id = self.local_tree.after(1, _run_next)
-                    self._local_refresh_job = next_job_id
-                    return
-
-                for order_index, mod_id in enumerate(mod_order):
-                    item_id = self._local_item_by_mod_id.get(mod_id)
-                    if item_id:
-                        self.local_tree.move(item_id, "", order_index)
-                        if mod_id not in rows_snapshot:
-                            rows_snapshot[mod_id] = mod_rows[mod_id]
-
-                expected_item_ids = {
-                    item_id for mod_id in mod_order for item_id in [self._local_item_by_mod_id.get(mod_id)] if item_id
-                }
-                self._purge_orphan_local_tree_items(expected_item_ids)
-
-                self._finalize_local_refresh(
-                    refresh_token=refresh_token,
-                    rows_snapshot=rows_snapshot,
-                    selected_mod_ids=selected_mod_ids,
-                )
-            except Exception as e:
-                logger.debug(f"差異插入 local mods 批次失敗: {e}", "ModManagement")
-                self._local_refresh_job = None
-                self._set_local_tree_render_lock(False)
-
+        insert_batch = make_tree_insert_batch(
+            tree=tree,
+            pending_insert=pending_insert,
+            batch_size=batch_size,
+            is_refresh_token_valid=lambda: refresh_token == self._local_refresh_token,
+            acquire_recycled=lambda _entry: self._acquire_recycled_local_item(),
+            update_recycled=_update_recycled,
+            insert_new=lambda _idx, entry: tree.insert("", "end", values=entry[1], tags=entry[2]),
+            set_mapping=lambda key, item_id: self._local_item_by_mod_id.__setitem__(key, item_id),
+            mapping_get=lambda key: self._local_item_by_mod_id.get(key),
+            get_key=lambda entry: entry[0],
+            set_row_snapshot=lambda key, values: rows_snapshot.__setitem__(key, values),
+            get_order=lambda: mod_order,
+            _get_rows=lambda key: mod_rows.get(key),
+            finalize_cb=_finalize_local,
+            set_refresh_job=lambda v: setattr(self, "_local_refresh_job", v),
+            move_item=lambda item_id, idx: tree.move(item_id, "", idx),
+            logger_name="ModManagement",
+        )
         if pending_insert:
-            insert_batch(0)
+            insert_batch(0, None)
             return
-
         try:
             for order_index, mod_id in enumerate(mod_order):
                 item_id = self._local_item_by_mod_id.get(mod_id)
@@ -4811,38 +4725,26 @@ class ModManagementFrame:
             self._purge_orphan_local_tree_items(expected_item_ids)
         except Exception as e:
             logger.debug(f"重排 local mods 失敗: {e}", "ModManagement")
-
         self._finalize_local_refresh(
-            refresh_token=refresh_token,
-            rows_snapshot=rows_snapshot,
-            selected_mod_ids=selected_mod_ids,
+            refresh_token=refresh_token, rows_snapshot=rows_snapshot, selected_mod_ids=selected_mod_ids
         )
 
     def refresh_local_list(self) -> None:
         """重新整理本地模組列表（差異更新，避免整棵重建）。"""
         if not hasattr(self, "local_tree") or not self.local_tree:
             return
-
         self._cancel_local_refresh_job()
         self._local_refresh_token += 1
         refresh_token = self._local_refresh_token
         selected_mod_ids = self._capture_selected_mod_ids()
-
-        # 鎖住幾何，避免刷新期間多次 re-layout
         self._set_local_tree_render_lock(True)
-
-        # 準備資料
         search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
         filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "所有"
-        # 使用預編譯的正則表達式（效能優化）
         version_pattern = self.VERSION_PATTERN
-
         mod_order: list[str] = []
         mod_rows: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
-
         seen_mod_ids: set[str] = set()
         for mod in self.local_mods:
-            # 應用篩選 Apply filters
             mod_name_lower = str(getattr(mod, "name", "") or "").lower()
             if search_text and search_text not in mod_name_lower:
                 continue
@@ -4851,21 +4753,13 @@ class ModManagementFrame:
                 or (filter_status == "停用" and mod.status != ModStatus.DISABLED)
             ):
                 continue
-
-            # 獲取增強資訊 Get enhanced info
             enhanced = self.enhanced_mods_cache.get(mod.filename)
-
-            # 解析版本 Parse version
             parsed_version = "未知"
             m = version_pattern.search(mod.filename)
             if m:
                 parsed_version = m.group(1)
-
-            # 使用輔助方法取得增強屬性（效能優化：減少 hasattr 呼叫）
             display_name = self._resolve_local_display_name(mod, enhanced)
             display_author = self._get_enhanced_attr(enhanced, "author", mod.author or "Unknown")
-
-            # 版本顯示優先順序 Version display priority
             if mod.version and mod.version not in ("", "未知"):
                 display_version = mod.version
             elif enhanced:
@@ -4887,13 +4781,9 @@ class ModManagementFrame:
                 display_version = parsed_version
             else:
                 display_version = "未知"
-
             display_description = self._get_enhanced_attr(enhanced, "description", mod.description or "")
-
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
             mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
-
-            # 檔案大小顯示 File size display
             size_val = getattr(mod, "file_size", 0)
             if size_val >= 1024 * 1024:
                 display_size = f"{size_val / 1024 / 1024:.1f} MB"
@@ -4901,8 +4791,6 @@ class ModManagementFrame:
                 display_size = f"{size_val / 1024:.1f} KB"
             else:
                 display_size = f"{size_val} B"
-
-            # 修改時間顯示 Modification time display
             mtime_val = getattr(mod, "_cached_mtime", None)
             if mtime_val is None:
                 try:
@@ -4910,12 +4798,10 @@ class ModManagementFrame:
                     mod._cached_mtime = mtime_val
                 except Exception:
                     mtime_val = None
-
             display_mtime = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M") if mtime_val else "未知"
             if mod_base_name in seen_mod_ids:
                 continue
             seen_mod_ids.add(mod_base_name)
-
             parity_tag = self._get_parity_tag(len(mod_order))
             values: tuple[Any, ...] = (
                 status_text,
@@ -4925,17 +4811,13 @@ class ModManagementFrame:
                 mod.loader_type,
                 display_size,
                 display_mtime,
-                (display_description[:50] + "..." if len(display_description) > 50 else display_description),
+                display_description[:50] + "..." if len(display_description) > 50 else display_description,
             )
             tags = (mod_base_name, parity_tag)
             mod_order.append(mod_base_name)
             mod_rows[mod_base_name] = (values, tags)
-
         self._apply_local_tree_diff(
-            mod_order=mod_order,
-            mod_rows=mod_rows,
-            refresh_token=refresh_token,
-            selected_mod_ids=selected_mod_ids,
+            mod_order=mod_order, mod_rows=mod_rows, refresh_token=refresh_token, selected_mod_ids=selected_mod_ids
         )
 
     def _set_bulk_controls_enabled(self, enabled: bool) -> None:
@@ -4960,56 +4842,42 @@ class ModManagementFrame:
         """雙擊切換本地模組啟用/停用狀態 - 參考 Prism Launcher"""
         if not self.local_tree:
             return
-
         selection = self.local_tree.selection()
         if not selection:
             return
-
-        # 獲取選中的項目
         item = selection[0]
         values = self.local_tree.item(item, "values")
-
         if not values or len(values) < 2:
             return
-
-        mod_name = values[1]  # 模組名稱在第二欄
-
+        mod_name = values[1]
         if not self.mod_manager:
             UIUtils.show_error("錯誤", "模組管理器未初始化", self.parent)
             return
-
         try:
-            # 優先使用 tags 中的 base_name
             tags = self.local_tree.item(item, "tags")
             mod_id = tags[0] if tags and len(tags) > 0 else None
             if not mod_id:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status(f"無法識別模組: {mod_name}")
                 return
-
-            # 快速路徑：用已載入的 local_mods 定位，不再每次 scan_mods
             mods_by_base_name: dict[str, Any] = {}
             for m in getattr(self, "local_mods", []) or []:
                 base_name = m.filename.replace(".jar.disabled", "").replace(".jar", "")
                 existing = mods_by_base_name.get(base_name)
                 if existing is None or m.status == ModStatus.ENABLED:
                     mods_by_base_name[base_name] = m
-
             found_mod = mods_by_base_name.get(mod_id)
             if not found_mod:
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.update_status(f"找不到模組檔案: {mod_id}")
                 return
-
             manager = self.mod_manager
             tree = self.local_tree
 
-            # 切換狀態（背景執行 rename），成功後僅更新該列顯示
             def do_toggle() -> None:
                 self.ui_queue.put(lambda: self._set_bulk_controls_enabled(False))
                 if not manager:
                     return
-
                 old_filename = found_mod.filename
                 old_file_path = getattr(found_mod, "file_path", "")
                 action = "停用" if found_mod.status == ModStatus.ENABLED else "啟用"
@@ -5033,20 +4901,15 @@ class ModManagementFrame:
                                 found_mod._cached_mtime = Path(found_mod.file_path).stat().st_mtime
                             except Exception:
                                 found_mod._cached_mtime = None
-
-                            # 移動 enhanced cache key，避免切換後顯示資訊消失
                             if (
                                 hasattr(self, "enhanced_mods_cache")
                                 and isinstance(self.enhanced_mods_cache, dict)
-                                and old_filename in self.enhanced_mods_cache
-                                and new_filename not in self.enhanced_mods_cache
+                                and (old_filename in self.enhanced_mods_cache)
+                                and (new_filename not in self.enhanced_mods_cache)
                             ):
                                 self.enhanced_mods_cache[new_filename] = self.enhanced_mods_cache[old_filename]
-
-                            # 更新該列的 status 與 mtime（其他欄位保持不動）
                             if not tree or not tree.winfo_exists():
                                 return
-
                             row_values = list(tree.item(item, "values") or [])
                             if row_values:
                                 row_values[0] = "✅ 已啟用" if new_status == ModStatus.ENABLED else "❌ 已停用"
@@ -5061,7 +4924,6 @@ class ModManagementFrame:
                                     current_tags[1] if len(current_tags) > 1 else self._get_parity_tag(tree.index(item))
                                 )
                                 tree.item(item, values=tuple(row_values), tags=(mod_id, parity_tag))
-
                             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                                 self.update_status(f"已{action}模組: {mod_name}")
                         elif hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -5073,7 +4935,6 @@ class ModManagementFrame:
                 self.ui_queue.put(apply_ui_update)
 
             UIUtils.run_async(do_toggle)
-
         except Exception as e:
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.update_status(f"操作失敗: {e}")
@@ -5082,11 +4943,7 @@ class ModManagementFrame:
     def filter_local_mods(self, *_args) -> None:
         """篩選本地模組（debounce，避免連續重建 Treeview）。"""
         UIUtils.schedule_debounce(
-            self.parent,
-            "_local_filter_job",
-            120,
-            self._run_debounced_local_filter_refresh,
-            owner=self,
+            self.parent, "_local_filter_job", 120, self._run_debounced_local_filter_refresh, owner=self
         )
 
     def _run_debounced_local_filter_refresh(self) -> None:
@@ -5097,26 +4954,19 @@ class ModManagementFrame:
         """顯示本地模組右鍵選單"""
         if not self.local_tree:
             return
-
         tree = self.local_tree
         if not self._select_tree_item_for_context_menu(tree, event):
             return
         selection = tree.selection()
         if not selection:
             return
-
-        menu = tk.Menu(
-            self.parent,
-            tearoff=0,
-            font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
-        )
+        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
         menu.add_command(label="📁 在檔案總管中顯示", command=self.show_in_explorer)
         menu.add_separator()
         menu.add_command(label="🗑️ 刪除模組", command=self.delete_local_mod)
-
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -5127,21 +4977,16 @@ class ModManagementFrame:
         if not self.current_server:
             UIUtils.show_warning("警告", "請先選擇伺服器", self.parent)
             return
-
         filetypes = [("JAR files", "*.jar"), ("All files", "*.*")]
         filename = filedialog.askopenfilename(filetypes=filetypes)
-
         if filename:
             try:
                 mods_dir = Path(self.current_server.path) / "mods"
                 mods_dir.mkdir(exist_ok=True)
-
                 target_path = mods_dir / Path(filename).name
-                # 複製檔案（修正：之前缺少實際複製檔案的操作）
                 PathUtils.copy_file(Path(filename), target_path)
                 UIUtils.show_info("成功", f"模組已匯入: {Path(filename).name}", self.parent)
                 self.load_local_mods()
-
             except Exception as e:
                 logger.error(f"匯入模組失敗: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error("錯誤", f"匯入模組失敗: {e}", self.parent)
@@ -5151,7 +4996,6 @@ class ModManagementFrame:
         if not self.current_server:
             UIUtils.show_warning("警告", "請先選擇伺服器", self.parent)
             return
-
         mods_dir = Path(self.current_server.path) / "mods"
         if mods_dir.exists():
             try:
@@ -5165,20 +5009,15 @@ class ModManagementFrame:
         """複製模組資訊"""
         if not self.local_tree:
             return
-
         tree = self.local_tree
         selection = tree.selection()
         if not selection:
             return
-
         try:
             item = selection[0]
             values = tree.item(item, "values")
-
             if values and len(values) >= 4:
-                info = f"模組名稱: {values[1]}\n版本: {values[2]}\n狀態: {values[0]}\n檔案: {values[3] if len(values) > 3 else 'N/A'}"
-
-                # 複製到剪貼板
+                info = f"模組名稱: {values[1]}\n版本: {values[2]}\n狀態: {values[0]}\n檔案: {(values[3] if len(values) > 3 else 'N/A')}"
                 self.parent.clipboard_clear()
                 self.parent.clipboard_append(info)
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -5192,41 +5031,33 @@ class ModManagementFrame:
         """在檔案總管中顯示模組"""
         if not self.local_tree:
             return
-
         tree = self.local_tree
         selection = tree.selection()
         if not selection or not self.current_server:
             return
-
         try:
             item = selection[0]
             tags = tree.item(item, "tags")
-
             if tags and len(tags) > 0:
                 mod_filename = tags[0]
                 mods_dir = Path(self.current_server.path) / "mods"
-
-                # 尋找實際檔案
                 mod_file = None
                 for ext in [".jar", ".jar.disabled"]:
                     potential_file = mods_dir / (mod_filename + ext)
                     if potential_file.exists():
                         mod_file = potential_file
                         break
-
                 if mod_file and mod_file.exists():
                     try:
                         UIUtils.reveal_in_explorer(mod_file)
                     except Exception as e:
                         logger.error(f"無法打開檔案總管顯示檔案: {e}")
-
                     if hasattr(self, "status_label") and self.status_label.winfo_exists():
                         self.status_label.configure(text=f"已在檔案總管中顯示: {mod_file.name}")
                 elif hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.status_label.configure(text="找不到要顯示的模組檔案")
             elif hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text="無法識別模組檔案")
-
         except Exception as e:
             logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -5235,19 +5066,17 @@ class ModManagementFrame:
     def delete_local_mod(self) -> None:
         if not self.local_tree:
             return
-
         tree = self.local_tree
         selection = tree.selection()
         if not selection or not self.current_server:
             return
-
         try:
             selected_mods: list[tuple[str, str]] = []
             seen_mod_ids: set[str] = set()
             for item_id in selection:
                 values = tree.item(item_id, "values")
                 tags = tree.item(item_id, "tags")
-                if not values or len(values) < 2 or not tags or len(tags) == 0:
+                if not values or len(values) < 2 or (not tags) or (len(tags) == 0):
                     continue
                 mod_id = str(tags[0] or "").strip()
                 mod_name = str(values[1] or mod_id).strip()
@@ -5255,26 +5084,18 @@ class ModManagementFrame:
                     continue
                 seen_mod_ids.add(mod_id)
                 selected_mods.append((mod_id, mod_name))
-
             if not selected_mods:
                 return
-
             mod_count = len(selected_mods)
             mod_label = selected_mods[0][1] if mod_count == 1 else f"這 {mod_count} 個模組"
             result = UIUtils.ask_yes_no_cancel(
-                "確認刪除",
-                f"確定要刪除{mod_label}嗎？\n此操作無法復原。",
-                parent=self.parent,
-                show_cancel=False,
+                "確認刪除", f"確定要刪除{mod_label}嗎？\n此操作無法復原。", parent=self.parent, show_cancel=False
             )
-
             if not result:
                 return
-
             mods_dir = Path(self.current_server.path) / "mods"
             deleted_names: list[str] = []
             failed_names: list[str] = []
-
             for mod_filename, mod_name in selected_mods:
                 deleted = False
                 for ext in [".jar", ".jar.disabled"]:
@@ -5284,18 +5105,15 @@ class ModManagementFrame:
                     mod_file.unlink()
                     deleted = True
                     break
-
                 if deleted:
                     deleted_names.append(mod_name)
                 else:
                     failed_names.append(mod_name)
-
             if deleted_names:
                 self.load_local_mods()
                 if hasattr(self, "status_label") and self.status_label.winfo_exists():
                     self.status_label.configure(text=f"已刪除 {len(deleted_names)} 個模組")
-
-                if len(deleted_names) == 1 and not failed_names:
+                if len(deleted_names) == 1 and (not failed_names):
                     UIUtils.show_info("成功", f"模組 '{deleted_names[0]}' 已刪除", self.parent)
                 else:
                     summary = f"已刪除 {len(deleted_names)} 個模組"
@@ -5304,10 +5122,8 @@ class ModManagementFrame:
                     UIUtils.show_info("成功", summary, self.parent)
             elif hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.status_label.configure(text="刪除失敗")
-
-            if failed_names and not deleted_names:
+            if failed_names and (not deleted_names):
                 UIUtils.show_warning("提示", f"沒有成功刪除任何模組：{', '.join(failed_names)}", self.parent)
-
         except Exception as e:
             logger.error(f"刪除模組失敗: {e}\n{traceback.format_exc()}")
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
@@ -5326,43 +5142,33 @@ class ModManagementFrame:
         try:
             if not self.local_tree:
                 return
-
             items = self.local_tree.get_children()
             if not items:
                 return
-
             if self.all_selected:
-                # 取消全選
                 self.local_tree.selection_remove(*items)
                 self.selected_mods.clear()
                 self.all_selected = False
                 try:
-                    # 嘗試更新按鈕文字，考慮到可能有圖片
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="☑️ 全選")
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
             else:
-                # 全選
                 self.local_tree.selection_set(*items)
-                # 更新選中的模組集合
                 self.selected_mods.clear()
                 for item in items:
                     values = self.local_tree.item(item, "values")
                     if values and len(values) >= 2:
-                        mod_name = values[1]  # 模組名稱
+                        mod_name = values[1]
                         self.selected_mods.add(mod_name)
-
                 self.all_selected = True
                 try:
-                    # 嘗試更新按鈕文字，考慮到可能有圖片
                     if hasattr(self.select_all_btn, "configure"):
                         self.select_all_btn.configure(text="❌ 取消全選")
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
-            # 更新狀態顯示
             self.update_selection_status()
-
         except Exception as e:
             logger.error(f"切換全選失敗: {e}\n{traceback.format_exc()}")
 
@@ -5374,21 +5180,17 @@ class ModManagementFrame:
                 return
             if not self.local_tree:
                 return
-
             selected_items = self.local_tree.selection()
             if not selected_items:
                 UIUtils.show_warning("提示", "請先選擇要操作的模組", self.parent)
                 return
-
-            # 用已載入的 local_mods 建索引，避免在主執行緒反覆 scan_mods 造成 UI 凍結
             mods_by_base_name: dict[str, Any] = {}
             for mod in getattr(self, "local_mods", []) or []:
                 base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
                 existing = mods_by_base_name.get(base_name)
                 if existing is None or mod.status == ModStatus.ENABLED:
                     mods_by_base_name[base_name] = mod
-
-            selected_pairs = []  # (base_name, tree_item_id)
+            selected_pairs = []
             seen = set()
             for tree_item_id in selected_items:
                 tags = self.local_tree.item(tree_item_id, "tags")
@@ -5397,30 +5199,24 @@ class ModManagementFrame:
                     if base_name and base_name not in seen:
                         seen.add(base_name)
                         selected_pairs.append((base_name, tree_item_id))
-
-            selected_pairs = [(b, tid) for (b, tid) in selected_pairs if b in mods_by_base_name]
+            selected_pairs = [(b, tid) for b, tid in selected_pairs if b in mods_by_base_name]
             if not selected_pairs:
                 UIUtils.show_warning("提示", "找不到對應的模組檔案", self.parent)
                 return
-
             manager = self.mod_manager
 
             def do_batch():
                 total = len(selected_pairs)
                 success_count = 0
                 last_percent: float = -1
-
                 self.ui_queue.put(lambda: self._set_bulk_controls_enabled(False))
                 self.update_status_safe(f"正在批量切換 {total} 個模組狀態...")
-
                 for idx, (base_name, tree_item_id) in enumerate(selected_pairs, start=1):
                     mod = mods_by_base_name.get(base_name)
                     if not mod:
                         continue
-
                     old_filename = getattr(mod, "filename", "")
                     old_file_path = getattr(mod, "file_path", "")
-
                     if mod.status == ModStatus.ENABLED:
                         ok = manager.set_mod_state(base_name, False)
                         new_status = ModStatus.DISABLED
@@ -5431,11 +5227,8 @@ class ModManagementFrame:
                         new_status = ModStatus.ENABLED
                         new_filename = f"{base_name}.jar"
                         action = "啟用"
-
                     if ok:
                         success_count += 1
-
-                        # 更新記憶體中的 mod 物件與 cache（不做全量重掃）
                         mod.status = new_status
                         mod.filename = new_filename
                         if old_file_path:
@@ -5447,21 +5240,16 @@ class ModManagementFrame:
                             mod._cached_mtime = Path(mod.file_path).stat().st_mtime
                         except Exception:
                             mod._cached_mtime = None
-
                         if (
                             hasattr(self, "enhanced_mods_cache")
                             and isinstance(self.enhanced_mods_cache, dict)
-                            and old_filename in self.enhanced_mods_cache
-                            and new_filename not in self.enhanced_mods_cache
+                            and (old_filename in self.enhanced_mods_cache)
+                            and (new_filename not in self.enhanced_mods_cache)
                         ):
                             self.enhanced_mods_cache[new_filename] = self.enhanced_mods_cache[old_filename]
 
-                        # 局部更新該列（狀態/mtime），避免整頁重繪
                         def apply_row_update(
-                            item_id=tree_item_id,
-                            status=new_status,
-                            mod_obj=mod,
-                            mod_id=base_name,
+                            item_id=tree_item_id, status=new_status, mod_obj=mod, mod_id=base_name
                         ) -> None:
                             try:
                                 if not (
@@ -5485,21 +5273,15 @@ class ModManagementFrame:
                                     )
                                     self.local_tree.item(item_id, values=tuple(row_values), tags=(mod_id, parity_tag))
                             except Exception as e:
-                                # 批量過程中 UI 更新失敗不阻塞主流程
                                 logger.debug(f"批量更新 UI row 失敗: {e}", "ModManagement")
 
                         self.ui_queue.put(apply_row_update)
                     else:
-                        # 失敗就只更新狀態列（不彈窗、不重掃）
                         self.update_status_safe(f"{action}模組失敗: {base_name}")
-
-                    percent = (idx / total) * 100 if total else 0
-                    # 保留進度條行為，但節流 UI 更新頻率
+                    percent = idx / total * 100 if total else 0
                     if int(percent) != int(last_percent):
                         last_percent = percent
                         self.update_progress_safe(percent)
-
-                # Reset progress + final status (保留原本進度條收尾動作)
                 self.update_progress_safe(0)
                 self.update_status_safe(f"已切換 {success_count}/{total} 個模組狀態")
                 self.ui_queue.put(self.update_selection_status)
@@ -5515,19 +5297,15 @@ class ModManagementFrame:
         """更新選擇狀態顯示"""
         if not self.local_tree:
             return
-
         try:
             selected_count = len(self.local_tree.selection())
             total_count = len(self.local_tree.get_children())
-
             if selected_count > 0:
                 status_text = f"已選擇 {selected_count}/{total_count} 個模組"
             else:
                 status_text = f"找到 {total_count} 個模組"
-
             if hasattr(self, "status_label"):
                 self.status_label.configure(text=status_text)
-
         except Exception as e:
             logger.error(f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}")
 
@@ -5535,25 +5313,17 @@ class ModManagementFrame:
         """樹狀檢視選擇變化事件"""
         if not self.local_tree:
             return
-
         try:
-            # 更新選擇狀態
             self.update_selection_status()
-
-            # 更新選中的模組集合
             self.selected_mods.clear()
             selected_items = self.local_tree.selection()
-
             for item in selected_items:
                 values = self.local_tree.item(item, "values")
                 if values and len(values) >= 2:
                     mod_name = values[1]
                     self.selected_mods.add(mod_name)
-
-            # 更新全選按鈕狀態
             total_items = len(self.local_tree.get_children())
             selected_items_count = len(selected_items)
-
             if selected_items_count == 0:
                 self.all_selected = False
                 try:
@@ -5568,7 +5338,6 @@ class ModManagementFrame:
                         self.select_all_btn.configure(text="❌ 取消全選")
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
-
         except Exception as e:
             logger.error(f"處理選擇變化失敗: {e}\n{traceback.format_exc()}")
 
