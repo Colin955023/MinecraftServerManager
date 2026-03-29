@@ -1032,7 +1032,7 @@ class MinecraftServerManager:
             text="👨\u200d💻 開發資訊",
             font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
         ).pack(anchor="w", pady=(0, 10))
-        dev_info = "• 開發者: Minecraft Server Manager Team\n• 技術棧: Python 3.7+, tkinter, coustomtkinter\n• Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化\n• 架構: 模組化設計, 事件驅動\n• 參考專案: PrismLauncher、MinecraftModChecker"
+        dev_info = "• 開發者: Minecraft Server Manager Team\n• 技術棧: Python 3.7+, tkinter, coustomtkinter\n• Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化\n• 架構: 模組化設計, 事件驅動\n• 參考專案: PrismLauncher"
         ctk.CTkLabel(
             scrollable_frame,
             text=dev_info,
@@ -1054,7 +1054,7 @@ class MinecraftServerManager:
         ctk.CTkLabel(
             scrollable_frame, text="📄 授權條款", font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")
         ).pack(anchor="w", pady=(0, 10))
-        license_info = "• 本專案採用 GNU General Public License v3.0 授權條款\n• 部分設計理念參考 PrismLauncher、MinecraftModChecker\n• 僅供學習和個人使用\n• 請遵守 Minecraft EULA 和當地法律法規\n\n特別感謝 PrismLauncher 與 MinecraftModChecker 開發團隊的開源貢獻！"
+        license_info = "• 本專案採用 GNU General Public License v3.0 授權條款\n• 部分設計理念參考 PrismLauncher\n• 僅供學習和個人使用\n• 請遵守 Minecraft EULA 和當地法律法規\n\n特別感謝 PrismLauncher 開發團隊的開源貢獻！"
         ctk.CTkLabel(
             scrollable_frame,
             text=license_info,
