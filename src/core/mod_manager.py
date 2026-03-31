@@ -348,7 +348,7 @@ class ModManager:
                         break
                     except KeyError:
                         continue
-                    except (ValueError, toml.TomlDecodeError, UnicodeDecodeError) as e:
+                    except (ValueError, toml.TomlDecodeError) as e:
                         logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {e}")
                         continue
                     except TypeError as e:
@@ -478,7 +478,7 @@ class ModManager:
         try:
             with jar.open(file_path) as f:
                 return PathUtils.from_json_str(f.read().decode("utf-8"))
-        except (KeyError, OSError, UnicodeDecodeError, ValueError) as e:
+        except (KeyError, OSError, ValueError) as e:
             logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {e}")
             return None
 
