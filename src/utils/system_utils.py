@@ -1,32 +1,23 @@
-#!/usr/bin/env python3
 """系統工具模組
-提供系統資訊查詢與進程管理功能，使用原生 Windows API 取代 psutil 依賴
-System Utilities Module
-Provides system information query and process management functions, using native Windows APIs to replace the psutil dependency
+提供系統資訊查詢與進程管理功能，使用原生 Windows API 以減少對 psutil 的依賴。
 """
 
 import ctypes
 import ctypes.wintypes as wintypes
-from typing import Any, ClassVar
 from collections.abc import Sequence
-
+from typing import Any, ClassVar
 from . import SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="SystemUtils")
-
-
-# Windows API Constants & Structures
-TH32CS_SNAPPROCESS = 0x00000002
-PROCESS_QUERY_INFORMATION = 0x0400
-PROCESS_VM_READ = 0x0010
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TH32CS_SNAPPROCESS = 2
+PROCESS_QUERY_INFORMATION = 1024
+PROCESS_VM_READ = 16
+PROCESS_QUERY_LIMITED_INFORMATION = 4096
 STILL_ACTIVE = 259
-
 _windll: Any = getattr(ctypes, "windll", None)
 _kernel32: Any = getattr(_windll, "kernel32", None)
 _user32: Any = getattr(_windll, "user32", None)
 _psapi: Any = getattr(_windll, "psapi", None)
-
 Structure = ctypes.Structure
 byref = ctypes.byref
 c_size_t = ctypes.c_size_t
@@ -90,11 +81,9 @@ class SystemUtils:
         h_snap = _kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
         if h_snap == -1:
             return snapshot
-
         try:
             pe32 = PROCESSENTRY32()
             pe32.dwSize = sizeof(PROCESSENTRY32)
-
             if _kernel32.Process32First(h_snap, byref(pe32)):
                 while True:
                     current = PROCESSENTRY32()
@@ -104,7 +93,6 @@ class SystemUtils:
                         break
         finally:
             _kernel32.CloseHandle(h_snap)
-
         return snapshot
 
     @staticmethod
@@ -146,11 +134,9 @@ class SystemUtils:
             snapshot = SystemUtils._iterate_process_snapshot()
             if not snapshot:
                 return children
-
             by_parent: dict[int, list[PROCESSENTRY32]] = {}
             for entry in snapshot:
                 by_parent.setdefault(int(entry.th32ParentProcessID), []).append(entry)
-
             queue = [pid_root]
             while queue:
                 parent_pid = queue.pop()
@@ -170,7 +156,6 @@ class SystemUtils:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
             if not h_process:
                 return 0
-
             mem_counters = PROCESS_MEMORY_COUNTERS_EX()
             mem_counters.cb = sizeof(PROCESS_MEMORY_COUNTERS_EX)
             if _psapi.GetProcessMemoryInfo(h_process, byref(mem_counters), sizeof(mem_counters)):
@@ -187,11 +172,9 @@ class SystemUtils:
     def find_java_process(parent_pid: int) -> int | None:
         """從父進程查找 Java 子進程 PID"""
         try:
-            # 檢查父進程本身（如果是直接執行 java）
             parent_name = SystemUtils.get_process_name(parent_pid)
             if parent_name and parent_name.lower() in ("java.exe", "javaw.exe"):
                 return parent_pid
-
             children = SystemUtils.get_process_children(parent_pid)
             for pid, name in children:
                 if name.lower() in ("java.exe", "javaw.exe"):
@@ -219,7 +202,6 @@ class SystemUtils:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not h_process:
                 return False
-
             exit_code = wintypes.DWORD()
             ok = _kernel32.GetExitCodeProcess(h_process, byref(exit_code))
             if not ok:

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Minecraft 伺服器管理器主程式
 提供 Minecraft 伺服器的建立、管理和監控功能的主要入口點
 Minecraft Server Manager Main Application
@@ -9,23 +8,20 @@ import sys
 import traceback
 from contextlib import suppress
 from pathlib import Path
+import customtkinter as ctk
 
 if __name__ == "__main__" and __package__ is None:
     project_root = Path(__file__).resolve().parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 
-import customtkinter as ctk
-
 from src.core import LoaderManager, MinecraftVersionManager
 from src.ui import MinecraftServerManager
-from src.utils import FontManager, UIUtils, get_logger, get_settings_manager
+from src.utils import FontManager, PathUtils, UIUtils, get_logger, get_settings_manager, record_and_mark
 
-# 初始化 logger
 logger = get_logger().bind(component="Main")
 
 
-# ====== 訊息顯示工具 ======
 def show_message(title, message, message_type="error"):
     """統一的訊息提示入口，提供 UI 與 logger fallback 機制"""
     try:
@@ -37,7 +33,6 @@ def show_message(title, message, message_type="error"):
             UIUtils.show_info(title, message, topmost=True)
         return True
     except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as ui_error:
-        # 退回到 logger 輸出
         with suppress(Exception):
             log_message = f"{title}: {message}"
             if message_type == "error":
@@ -50,10 +45,22 @@ def show_message(title, message, message_type="error"):
         return False
 
 
-# ====== 應用程式啟動 ======
 def start_application():
     """初始化應用程式並啟動主視窗"""
     _initialize_managers()
+    try:
+        settings = get_settings_manager()
+        if settings.get("auto_prune_markers_on_startup"):
+            PathUtils.auto_prune_markers()
+    except Exception as e:
+        with suppress(Exception):
+            record_and_mark(
+                e,
+                marker_path=PathUtils.get_project_root(),
+                reason="auto_prune_markers failed",
+                details={"context": "startup"},
+            )
+        get_logger().bind(component="Startup").exception("auto_prune_markers failed")
     _setup_ui_environment()
     _launch_main_window()
 
@@ -67,7 +74,6 @@ def _initialize_managers():
 def _setup_ui_environment():
     """設定 UI 環境和主題"""
     ctk.set_appearance_mode("light")
-
     settings = get_settings_manager()
     dpi_scaling = settings.get_dpi_scaling()
     FontManager.set_scale_factor(dpi_scaling)

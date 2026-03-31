@@ -7,11 +7,9 @@ import re
 import types
 from pathlib import Path
 from typing import Any, ClassVar
-
 from . import PathUtils, get_logger
 
 logger = get_logger().bind(component="ServerPropertiesUtils")
-
 __all__ = ["ServerPropertiesHelper", "ServerPropertiesValidator"]
 
 
@@ -26,11 +24,9 @@ def _load_javaproperties_module() -> Any | None:
 _JAVAPROPERTIES = _load_javaproperties_module()
 
 
-# ====== Server Properties 說明助手  ======
 class ServerPropertiesHelper:
     """server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能。"""
 
-    # 類別級別的屬性描述緩存，避免重複構建
     _property_descriptions_cache: dict[str, str] | None = None
 
     @classmethod
@@ -42,7 +38,6 @@ class ServerPropertiesHelper:
         """
         if cls._property_descriptions_cache is not None:
             return types.MappingProxyType(cls._property_descriptions_cache)
-
         cls._property_descriptions_cache = {
             "accepts-transfers": "是否允許伺服器端接受以Transfer數據包作為登入請求的傳入連接。 (false/true)",
             "allow-flight": "是否允許玩家在生存模式下飛行。 (false/true) 若設為true，安裝了飛行模組的玩家可以飛行。",
@@ -163,15 +158,8 @@ class ServerPropertiesHelper:
                 "initial-enabled-packs",
                 "initial-disabled-packs",
             ],
-            "玩家設定": [
-                "player-idle-timeout",
-                "pause-when-empty-seconds",
-                "allow-flight",
-                "allow-nether",
-            ],
-            "生物設定": [
-                "spawn-monsters",
-            ],
+            "玩家設定": ["player-idle-timeout", "pause-when-empty-seconds", "allow-flight", "allow-nether"],
+            "生物設定": ["spawn-monsters"],
             "功能設定": [
                 "enable-command-block",
                 "enable-query",
@@ -217,7 +205,6 @@ class ServerPropertiesHelper:
                 "max-tick-time",
                 "max-chained-neighbor-updates",
             ],
-            # 資源包
             "資源包設定": [
                 "resource-pack",
                 "resource-pack-sha1",
@@ -225,11 +212,7 @@ class ServerPropertiesHelper:
                 "resource-pack-prompt",
                 "resource-pack-id",
             ],
-            "進階設定": [
-                "bug-report-link",
-                "region-file-compression",
-                "accepts-transfers",
-            ],
+            "進階設定": ["bug-report-link", "region-file-compression", "accepts-transfers"],
         }
 
     @staticmethod
@@ -243,7 +226,6 @@ class ServerPropertiesHelper:
             for item in raw_props:
                 if isinstance(item, list | tuple) and len(item) == 2:
                     iterable.append((item[0], item[1]))
-
         for key, value in iterable:
             key_str = str(key).strip()
             if not key_str:
@@ -259,7 +241,6 @@ class ServerPropertiesHelper:
             properties_file = Path(file_path)
             if not properties_file.exists():
                 return properties
-
             if _JAVAPROPERTIES is not None:
                 try:
                     content = PathUtils.read_text_file(properties_file)
@@ -269,7 +250,6 @@ class ServerPropertiesHelper:
                     return ServerPropertiesHelper._normalize_properties_map(parsed)
                 except Exception as e:
                     logger.debug(f"使用 javaproperties 載入失敗，回退手動解析: {e}")
-
             content = PathUtils.read_text_file(properties_file)
 
             def _unescape_property(token: str) -> str:
@@ -282,49 +262,39 @@ class ServerPropertiesHelper:
                 if token is None:
                     return ""
                 token = token.strip()
-                # 還原常見的跳脫字元
                 result = token
-                result = result.replace("\\t", "\t")  # 制表符
-                result = result.replace("\\n", "\n")  # 換行
-                result = result.replace("\\r", "\r")  # 回車
-                result = result.replace("\\f", "\f")  # 換頁
-                return re.sub(r"\\([:=\s\\])", lambda m: m.group(1), result)
+                result = result.replace("\\t", "\t")
+                result = result.replace("\\n", "\n")
+                result = result.replace("\\r", "\r")
+                result = result.replace("\\f", "\x0c")
+                return re.sub("\\\\([:=\\s\\\\])", lambda m: m.group(1), result)
 
             if content:
                 for line in content.splitlines():
                     line = line.strip()
-                    # 忽略空行和註解行（以 # 開頭）
                     if not line or line.startswith("#"):
                         continue
-
-                    # 使用正則表達式找到第一個未被反斜線轉義的 = 或 : 作為分隔符
-                    match = re.search(r"(?<!\\)(=|:)", line)
+                    match = re.search("(?<!\\\\)(=|:)", line)
                     if not match:
                         continue
-
                     key_part = line[: match.start()]
                     value_part = line[match.end() :]
-
                     key = _unescape_property(key_part)
                     value = _unescape_property(value_part)
-
                     if key and key.strip():
                         properties[key] = value
         except Exception as e:
             logger.exception(f"載入 server.properties 失敗: {e}")
-
         return properties
 
     @staticmethod
-    def save_properties(file_path, properties: dict[str, str]):
+    def save_properties(file_path, properties: dict[str, str]) -> bool:
         """將屬性字典儲存為 server.properties 檔案格式"""
         try:
             properties_file = Path(file_path)
-
             normalized_props: dict[str, str] = {
                 str(key): "" if value is None else str(value) for key, value in (properties or {}).items()
             }
-
             if _JAVAPROPERTIES is not None:
                 try:
                     payload = _JAVAPROPERTIES.dumps(
@@ -341,10 +311,12 @@ class ServerPropertiesHelper:
                     if not PathUtils.write_text_file(temp_path, payload):
                         raise OSError("write temp server.properties failed")
                     PathUtils.move_path(temp_path, properties_file)
-                    return
+                    logger.debug(
+                        f"已使用 javaproperties 儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
+                    )
+                    return True
                 except Exception as e:
                     logger.debug(f"使用 javaproperties 儲存失敗，回退手動序列化: {e}")
-
             lines = ["# Minecraft server properties", "# Generated by Minecraft Server Manager", ""]
 
             def _escape_property_value(raw_value: str) -> str:
@@ -352,49 +324,40 @@ class ServerPropertiesHelper:
 
                 處理以下字元：
                 - \\ -> \\\\
-                - \n -> \\n
+                -
+ -> \\n
                 - \r -> \\r
-                - \t -> \\t
-                - \f -> \\f
+                - 	 -> \\t
+                - \x0c -> \\f
                 - : -> \\: (需正確處理已跳脫的反斜線)
                 - = -> \\= (前導 = 號)
                 - 前導空格 -> \\
                 """
                 if not raw_value:
                     return raw_value
-
                 result: list[str] = []
-
                 for i, ch in enumerate(raw_value):
                     if ch == "\\":
                         result.append(ch)
                         continue
-
-                    # 處理需要跳脫的字元
                     if ch == ":" or ch == "=":
                         backslash_count = 0
                         j = i - 1
                         while j >= 0 and raw_value[j] == "\\":
                             backslash_count += 1
                             j -= 1
-
                         if ch == ":":
-                            # 如果前面有偶數個反斜線，需要跳脫冒號
                             if backslash_count % 2 == 0:
                                 result.append("\\:")
                             else:
                                 result.append(":")
                             continue
-
-                        # 跳脫等號（特別是前導的）
                         if i == 0 or backslash_count % 2 == 0:
                             result.append("\\=")
                         else:
                             result.append("=")
                         continue
-
                     if ch == " " and i == 0:
-                        # 跳脫前導空格
                         result.append("\\ ")
                         continue
                     if ch == "\n":
@@ -406,36 +369,34 @@ class ServerPropertiesHelper:
                     if ch == "\t":
                         result.append("\\t")
                         continue
-                    if ch == "\f":
+                    if ch == "\x0c":
                         result.append("\\f")
                         continue
-
                     result.append(ch)
-
                 return "".join(result)
 
             for key, value in normalized_props.items():
                 val_str = _escape_property_value(str(value))
                 lines.append(f"{key}={val_str}")
-
             lines.append("")
             payload = "\n".join(lines)
             temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
             if not PathUtils.write_text_file(temp_path, payload):
                 raise OSError("write temp server.properties failed")
             PathUtils.move_path(temp_path, properties_file)
+            logger.debug(
+                f"已手動儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
+            )
+            return True
         except Exception as e:
             logger.exception(f"儲存 server.properties 失敗: {e}")
+            return False
 
 
-# ====== Server Properties 驗證器 ======
 class ServerPropertiesValidator:
     """server.properties 屬性驗證器"""
 
-    # 屬性驗證規則：屬性名稱 -> (類型, 最小值, 最大值, 允許的值)
-    # Property validation rules: property_name -> (type, min_value, max_value, allowed_values)
     VALIDATION_RULES: ClassVar[dict[str, tuple[str, int | None, int | None, list[str] | None]]] = {
-        # 整數屬性
         "max-players": ("int", 0, 2147483647, None),
         "max-world-size": ("int", 1, 29999984, None),
         "server-port": ("int", 1, 65534, None),
@@ -444,19 +405,18 @@ class ServerPropertiesValidator:
         "entity-broadcast-range-percentage": ("int", 10, 1000, None),
         "function-permission-level": ("int", 1, 4, None),
         "op-permission-level": ("int", 0, 4, None),
-        "max-tick-time": ("int", -1, None, None),  # -1 為停用
+        "max-tick-time": ("int", -1, None, None),
         "max-chained-neighbor-updates": ("int", None, None, None),
         "network-compression-threshold": ("int", -1, None, None),
         "simulation-distance": ("int", 3, 32, None),
         "view-distance": ("int", 3, 32, None),
         "spawn-protection": ("int", 0, None, None),
         "player-idle-timeout": ("int", 0, None, None),
-        "pause-when-empty-seconds": ("int", -1, None, None),  # -1 為不停止
+        "pause-when-empty-seconds": ("int", -1, None, None),
         "rate-limit": ("int", 0, None, None),
         "text-filtering-version": ("int", 0, None, None),
         "status-heartbeat-interval": ("int", 0, None, None),
         "management-server-port": ("int", 0, None, None),
-        # 布林值屬性
         "accepts-transfers": ("bool", None, None, None),
         "allow-flight": ("bool", None, None, None),
         "allow-nether": ("bool", None, None, None),
@@ -482,19 +442,8 @@ class ServerPropertiesValidator:
         "sync-chunk-writes": ("bool", None, None, None),
         "use-native-transport": ("bool", None, None, None),
         "white-list": ("bool", None, None, None),
-        # 列舉屬性
-        "gamemode": (
-            "enum",
-            None,
-            None,
-            ["survival", "creative", "adventure", "spectator", "0", "1", "2", "3"],
-        ),
-        "difficulty": (
-            "enum",
-            None,
-            None,
-            ["peaceful", "easy", "normal", "hard", "0", "1", "2", "3"],
-        ),
+        "gamemode": ("enum", None, None, ["survival", "creative", "adventure", "spectator", "0", "1", "2", "3"]),
+        "difficulty": ("enum", None, None, ["peaceful", "easy", "normal", "hard", "0", "1", "2", "3"]),
         "level-type": (
             "enum",
             None,
@@ -514,7 +463,6 @@ class ServerPropertiesValidator:
             ],
         ),
         "region-file-compression": ("enum", None, None, ["deflate", "none"]),
-        # 字串屬性 - 無特定限制
         "bug-report-link": ("str", None, None, None),
         "generator-settings": ("str", None, None, None),
         "initial-disabled-packs": ("str", None, None, None),
@@ -535,41 +483,32 @@ class ServerPropertiesValidator:
     def validate_property(prop_name: str, value: str) -> tuple[bool, str]:
         """驗證單一屬性"""
         if not prop_name or not value:
-            return True, ""  # 允許空值
-
+            return (True, "")
         rules = ServerPropertiesValidator.VALIDATION_RULES.get(prop_name)
         if not rules:
-            # 未知屬性，但允許儲存
-            return True, ""
-
+            return (True, "")
         prop_type, min_val, max_val, allowed = rules
-
         try:
             if prop_type == "int":
                 int_val = int(value)
                 if min_val is not None and int_val < min_val:
-                    return False, f"{prop_name}: 值不能小於 {min_val}（目前：{int_val}）"
+                    return (False, f"{prop_name}: 值不能小於 {min_val}（目前：{int_val}）")
                 if max_val is not None and int_val > max_val:
-                    return False, f"{prop_name}: 值不能大於 {max_val}（目前：{int_val}）"
-                return True, ""
-
+                    return (False, f"{prop_name}: 值不能大於 {max_val}（目前：{int_val}）")
+                return (True, "")
             if prop_type == "bool":
                 if value.lower() not in ["true", "false"]:
-                    return False, f"{prop_name}: 必須為 true 或 false（目前：{value}）"
-                return True, ""
-
+                    return (False, f"{prop_name}: 必須為 true 或 false（目前：{value}）")
+                return (True, "")
             if prop_type == "enum":
                 if allowed is not None and value not in allowed:
-                    return False, f"{prop_name}: 無效的值。允許值為：{', '.join(allowed)}（目前：{value}）"
-                return True, ""
-
+                    return (False, f"{prop_name}: 無效的值。允許值為：{', '.join(allowed)}（目前：{value}）")
+                return (True, "")
             if prop_type == "str":
-                return True, ""
-
+                return (True, "")
         except ValueError:
-            return False, f"{prop_name}: 無效的 {prop_type} 值（目前：{value}）"
-
-        return True, ""
+            return (False, f"{prop_name}: 無效的 {prop_type} 值（目前：{value}）")
+        return (True, "")
 
     @staticmethod
     def validate_properties(properties: dict[str, str]) -> tuple[bool, list[str]]:
@@ -579,5 +518,4 @@ class ServerPropertiesValidator:
             is_valid, error_msg = ServerPropertiesValidator.validate_property(prop_name, value)
             if not is_valid:
                 errors.append(error_msg)
-
-        return len(errors) == 0, errors
+        return (len(errors) == 0, errors)

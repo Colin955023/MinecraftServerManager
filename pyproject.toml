@@ -3,16 +3,16 @@ name = "minecraft-server-manager"
 dynamic = ["version"]
 description = "Minecraft 伺服器管理器"
 readme = "README.md"
-requires-python = ">=3.10, <3.13"
+requires-python = ">=3.10, <3.15"
 license = { file = "LICENSE" }
 
 dependencies = [
   "toml>=0.10.2",
   "customtkinter>=5.2.2",
-  "requests>=2.32.5",
+  "requests>=2.33.0",
   "defusedxml>=0.7.1",
-  "markdown>=3.9",
-  "packaging>=25.0",
+  "markdown>=3.10.2",
+  "packaging>=26.0",
   "javaproperties>=0.8.2",
 ]
 
@@ -20,21 +20,23 @@ dependencies = [
 dev = [
   "mypy>=1.19.1",
   "types-toml>=0.10.8.20240310",
-  "nuitka>=2.8.9",
-  "types-requests>=2.31.0.20240406",
-  "uv>=0.6.0",
-  "ruff>=0.14.0",
-  "types-markdown>=3.10.0.20251106",
-  "pytest>=8.4.2",
-  "bandit>=1.8.0",
-  "bandit-sarif-formatter>=1.0.0",
+  "nuitka>=4.0.7",
+  "types-requests>=2.33.0.20260327",
+  "uv>=0.11.2",
+  "ruff>=0.15.8",
+  "types-markdown>=3.10.2.20260211",
+  "pytest>=9.0.2",
+  "bandit>=1.9.4",
+  "bandit-sarif-formatter>=1.1.1",
+  "vulture>=2.16",
+  "eradicate>=3.0.1",
+  "detect-secrets>=1.5.0",
 ]
 
 [project.scripts]
 minecraft-server-manager = "src.main:main"
 
 [tool.mypy]
-# 預設採用嚴格模式；若新增無型別第三方套件，請在 overrides 逐一放行。
 ignore_missing_imports = false
 check_untyped_defs = true
 

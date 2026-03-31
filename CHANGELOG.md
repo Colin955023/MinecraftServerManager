@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.7.0 - 2026-03-31
+
+### 新增
+- 新增線上模組瀏覽與下載功能，並加入對應的 UI 組件（模組瀏覽）。
+- 新增非同步/背景任務支援 `src/utils/background_task.py`、原子寫入工具 `src/utils/atomic_writer.py`、與例外處理輔助 `src/utils/exception_utils.py`。
+- 新增伺服器實例模型 `src/core/server_instance.py` 以及多個測試案例（新增多個 `tests/` 檔案）。
+
+### 調整
+- 大幅重構模組管理，以改善模組體驗並朝 Prism Launcher 對齊。
+- CI/CD 與安全檢查強化：加入 Bandit、detect-secrets 並上傳 SARIF，更新多個 GitHub Actions workflow 以提升安全性與穩定度。
+- 優化安裝與建置流程並更新 `pyproject.toml` 與相依鎖檔（`uv.lock`）。
+- 強化伺服器偵測、版本解析與 `server.properties` 處理。
+
+### 修正
+- 修正 Windows API 呼叫相容性（改用保護性呼叫如 `getattr` 等）。
+- 修正多處 IO/下載/解析相關錯誤與相容性問題，並提升測試與 CI 的穩定性。
+
+### 重大變更
+- 重構伺服器管理與工具模組，拆分原有 server 工具。
+- 模組管理架構改變：引入模組索引與 metadata 提供者，外部 provider 或 UI 插件可能需要更新設定或資料格式。
+
 ## v1.6.6 - 2026-02-20
 
 ### 新增
