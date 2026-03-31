@@ -1,22 +1,16 @@
-#!/usr/bin/env python3
 """
 Minecraft 伺服器管理器 - 主套件
 提供 Minecraft 伺服器建立、管理和監控功能的主要套件模組
-Minecraft Server Manager - Main Package
-Main package module providing Minecraft server creation, management and monitoring functionality
 """
 
 from __future__ import annotations
-
 import importlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
 
 def lazy_exports(
-    module_globals: dict[str, Any],
-    module_name: str,
-    exports: Mapping[str, tuple[str, str]],
+    module_globals: dict[str, Any], module_name: str, exports: Mapping[str, tuple[str, str]]
 ) -> tuple[Callable[[str], Any], Callable[[], list[str]], list[str]]:
     """建立 PEP 562 的模組層級延遲匯出。"""
 
@@ -34,4 +28,4 @@ def lazy_exports(
         return sorted(list(module_globals.keys()) + list(exports.keys()))
 
     __all__ = sorted(exports.keys())
-    return __getattr__, __dir__, __all__
+    return (__getattr__, __dir__, __all__)

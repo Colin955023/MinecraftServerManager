@@ -16,6 +16,47 @@ class _StubSettings:
         return self._dpi_scaling
 
 
+class _StubWindow:
+    def __init__(self, width: int, height: int, x: int = 10, y: int = 20, state: str = "normal"):
+        self._width = width
+        self._height = height
+        self._x = x
+        self._y = y
+        self._state = state
+
+    def update_idletasks(self) -> None:
+        return None
+
+    def state(self) -> str:
+        return self._state
+
+    def winfo_width(self) -> int:
+        return self._width
+
+    def winfo_height(self) -> int:
+        return self._height
+
+    def winfo_x(self) -> int:
+        return self._x
+
+    def winfo_y(self) -> int:
+        return self._y
+
+
+class _StubWindowSettings:
+    def __init__(self):
+        self.saved: tuple[int, int, int | None, int | None, bool] | None = None
+
+    def is_remember_size_position_enabled(self) -> bool:
+        return True
+
+    def get_main_window_settings(self) -> dict[str, int | None | bool]:
+        return {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False}
+
+    def set_main_window_settings(self, width: int, height: int, x: int | None, y: int | None, maximized: bool) -> None:
+        self.saved = (width, height, x, y, maximized)
+
+
 @pytest.mark.smoke
 def test_window_manager_dpi_matrix_fixed_layout(monkeypatch) -> None:
     screen_info = {
@@ -65,3 +106,25 @@ def test_window_manager_dpi_matrix_adaptive_layout_stays_within_usable(monkeypat
         assert height <= screen_info["usable_height"]
         assert width >= 1000
         assert height >= 700
+
+
+@pytest.mark.smoke
+def test_save_main_window_state_skips_transient_small_size(monkeypatch) -> None:
+    settings = _StubWindowSettings()
+    monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: settings)
+
+    small_window = _StubWindow(width=200, height=200)
+    window_manager_module.WindowManager.save_main_window_state(small_window)
+
+    assert settings.saved is None
+
+
+@pytest.mark.smoke
+def test_save_main_window_state_persists_valid_size(monkeypatch) -> None:
+    settings = _StubWindowSettings()
+    monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: settings)
+
+    valid_window = _StubWindow(width=1400, height=900, x=50, y=60)
+    window_manager_module.WindowManager.save_main_window_state(valid_window)
+
+    assert settings.saved == (1400, 900, 50, 60, False)

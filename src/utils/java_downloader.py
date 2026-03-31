@@ -1,16 +1,8 @@
-#!/usr/bin/env python3
 """Java 下載工具模組
-提供 Java 安裝包下載和管理功能，支援 Microsoft JDK 的自動下載與安裝
-Java Download Utility Module
-Provides functions to download and manage Java installations, supports Microsoft JDK automatic download and installation
+提供 Java 安裝包下載與管理功能，支援 Microsoft OpenJDK 的自動下載與安裝流程。
 """
 
-from . import (
-    PathUtils,
-    SubprocessUtils,
-    UIUtils,
-    get_logger,
-)
+from . import PathUtils, SubprocessUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="JavaDownloader")
 
@@ -38,22 +30,12 @@ class JavaDownloader:
             raise Exception("找不到 winget，請手動安裝 Java 或安裝 winget 工具。")
         if major == 8:
             pkg = "Oracle.JavaRuntimeEnvironment"
-        elif major in (11, 16, 17, 21):
+        elif major in (11, 16, 17, 21, 25):
             pkg = f"Microsoft.OpenJDK.{major}"
         else:
-            UIUtils.show_error(
-                "不支援的 Java 主要版本",
-                f"不支援的 Java 主要版本: {major}，請手動安裝。",
-                topmost=True,
-            )
+            UIUtils.show_error("不支援的 Java 主要版本", f"不支援的 Java 主要版本: {major}，請手動安裝。", topmost=True)
             raise Exception(f"不支援的 Java 主要版本: {major}，請手動安裝。")
-        winget_cmd = [
-            "winget",
-            "install",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-            pkg,
-        ]
+        winget_cmd = ["winget", "install", "--accept-package-agreements", "--accept-source-agreements", pkg]
         try:
             SubprocessUtils.run_checked(winget_cmd, check=True)
         except SubprocessUtils.CalledProcessError as e:

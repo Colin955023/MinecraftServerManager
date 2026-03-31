@@ -1,17 +1,13 @@
-#!/usr/bin/env python3
 """輕量虛擬清單元件（以 Tk Listbox 實作）。"""
 
 from __future__ import annotations
-
 import tkinter as tk
 import tkinter.font as tkfont
 from collections.abc import Callable
 from tkinter import ttk
 from typing import Any
-
 import customtkinter as ctk
-
-from ..utils import Colors, FontManager, FontSize
+from ..utils import Colors, FontManager, FontSize, UIUtils
 
 
 def _resolve_token_color(color: str | tuple[str, str]) -> str:
@@ -34,12 +30,7 @@ def _normalize_tk_font(font) -> Any:
             underline = bool(font.cget("underline"))
             overstrike = bool(font.cget("overstrike"))
             return tkfont.Font(
-                family=family,
-                size=size,
-                weight=weight,
-                slant=slant,
-                underline=underline,
-                overstrike=overstrike,
+                family=family, size=size, weight=weight, slant=slant, underline=underline, overstrike=overstrike
             )
         except Exception:
             return font
@@ -67,7 +58,6 @@ class VirtualList(tk.Frame):
         resolved_fg = _resolve_token_color(fg)
         resolved_select_bg = _resolve_token_color(select_bg)
         resolved_select_fg = _resolve_token_color(select_fg)
-
         super().__init__(parent, bg=resolved_bg, highlightthickness=0, bd=0)
         self._on_select = on_select
         self._all_items: list[str] = list(items or [])
@@ -76,7 +66,6 @@ class VirtualList(tk.Frame):
         self._filter_case_sensitive = False
         self._sort_key: Callable[[str], Any] | None = None
         self._sort_reverse = False
-
         self.listbox = tk.Listbox(
             self,
             activestyle="none",
@@ -93,16 +82,13 @@ class VirtualList(tk.Frame):
         if font is None:
             font = FontManager.get_font(size=FontSize.MEDIUM)
         self.listbox.configure(font=_normalize_tk_font(font))
-
         self.scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.listbox.yview)
         self.listbox.configure(yscrollcommand=self.scrollbar.set)
-
         if show_scrollbar:
             self.listbox.pack(side="left", fill="both", expand=True)
             self.scrollbar.pack(side="right", fill="y")
         else:
             self.listbox.pack(fill="both", expand=True)
-
         self.listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
         self._rebuild_view(preserve_selection=False)
 
@@ -110,6 +96,7 @@ class VirtualList(tk.Frame):
         self.listbox.delete(0, "end")
         if self._items:
             self.listbox.insert("end", *self._items)
+        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=len(self._items))
 
     def _rebuild_view(self, *, preserve_selection: bool) -> None:
         previous_value = self.get_selected_value() if preserve_selection else None
@@ -121,11 +108,9 @@ class VirtualList(tk.Frame):
             else:
                 folded_query = query.lower()
                 items = [item for item in items if folded_query in item.lower()]
-
         if self._sort_key is not None:
             with_key = self._sort_key
             items.sort(key=with_key, reverse=self._sort_reverse)
-
         self._items = items
         self._render_items()
         if previous_value and previous_value in self._items:
@@ -156,11 +141,7 @@ class VirtualList(tk.Frame):
         self._rebuild_view(preserve_selection=preserve_selection)
 
     def set_sort(
-        self,
-        key: Callable[[str], Any] | None = None,
-        *,
-        reverse: bool = False,
-        preserve_selection: bool = True,
+        self, key: Callable[[str], Any] | None = None, *, reverse: bool = False, preserve_selection: bool = True
     ) -> None:
         """設定排序方式。`key=None` 表示維持原順序。"""
         self._sort_key = key
@@ -220,6 +201,7 @@ class VirtualList(tk.Frame):
         self._all_items = []
         self._items = []
         self.listbox.delete(0, "end")
+        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=0)
 
     def item_count(self) -> int:
         return len(self._items)
