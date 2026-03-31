@@ -52,7 +52,6 @@ jobs:
       - name: Run detect-secrets privacy scan
         shell: bash
         id: detect_secrets
-        continue-on-error: true
         run: |
           EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.github|\.tox)'
           uv tool run detect-secrets scan --all-files --exclude-files "$EXCLUDE_PATTERN" > secrets_result.json
