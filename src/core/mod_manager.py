@@ -429,7 +429,7 @@ class ModManager:
                                 break
         except (KeyError, toml.TomlDecodeError, ValueError) as e:
             logger.debug(f"解析 Forge 元資料失敗（解析/格式）: {e}")
-        except (TypeError, UnicodeDecodeError) as e:
+        except TypeError as e:
             logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {e}")
         except Exception as e:
             with contextlib.suppress(Exception):
