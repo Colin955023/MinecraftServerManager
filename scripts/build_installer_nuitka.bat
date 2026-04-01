@@ -34,7 +34,7 @@ if "%CURRENT_DIR%"=="" (
     exit /b 1
 )
 echo [SUCCESS] Current path: !CURRENT_DIR!
-set APP_ID={{B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}
+set "APP_ID={B8E0E6D1-2B7E-4A73-9D5A-8C3F8B3E0F11}"
 echo [SUCCESS] File ID: %APP_ID%
 echo.
 echo ========================================================
@@ -106,24 +106,28 @@ if errorlevel 1 (
 echo [SUCCESS] Virtual environment is ready
 REM Install dependencies
 echo [INFO] Installing production dependencies...
-uv pip install --python .venv\Scripts\python.exe toml customtkinter requests defusedxml markdown
-if errorlevel 1 (
-    echo [ERROR] Dependency installation failed
-    exit /b 1
-)
-
-echo [INFO] Installing Nuitka...
-uv pip install --python .venv\Scripts\python.exe "nuitka>=2.8.9"
-if errorlevel 1 (
-    echo [ERROR] Nuitka installation failed
-    exit /b 1
-)
+echo [INFO] Syncing dependencies from pyproject.toml via uv...
+uv sync --all-groups
 
 echo [DONE] Virtual environment and dependencies are ready
 echo.
 REM ============================================================
 REM Step 3: Run Nuitka compilation
 REM ============================================================
+REM Support overriding Nuitka cache dir via environment variable NUITKA_CACHE_DIR
+if defined NUITKA_CACHE_DIR (
+    if /I "%NUITKA_CACHE_HIT%"=="true" (
+        echo [INFO] Reusing restored Nuitka cache at %NUITKA_CACHE_DIR%
+    ) else (
+        echo [INFO] No restored Nuitka cache detected; this build will seed %NUITKA_CACHE_DIR%
+    )
+    if not exist "%NUITKA_CACHE_DIR%" mkdir "%NUITKA_CACHE_DIR%"
+    echo [INFO] Nuitka cache directory ready: %NUITKA_CACHE_DIR%
+)
+if not defined NUITKA_CACHE_DIR (
+    echo [INFO] Nuitka cache dir not set; running with Nuitka defaults.
+)
+
 echo [3/5] Running Nuitka compilation (standalone mode)...
 .venv\Scripts\python.exe -m nuitka ^
     --standalone ^
@@ -266,19 +270,8 @@ set "INNO_LANG_DIR=scripts\inno"
 set "INNO_LANG_FILE=%INNO_LANG_DIR%\ChineseTraditional.isl"
 if exist "%INNO_LANG_FILE%" goto INNO_LANG_READY
 
-echo [INFO] ChineseTraditional.isl not found, downloading...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$langDir = 'scripts\\inno'; if (-not (Test-Path $langDir)) { New-Item -ItemType Directory -Path $langDir -Force | Out-Null }; $url = 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl'; $output = Join-Path $langDir 'ChineseTraditional.isl'; Invoke-WebRequest -Uri $url -OutFile $output"
-if errorlevel 1 goto INNO_LANG_DOWNLOAD_FAILED
-if not exist "%INNO_LANG_FILE%" goto INNO_LANG_MISSING
-goto INNO_LANG_READY
-
-:INNO_LANG_DOWNLOAD_FAILED
-echo [ERROR] Failed to download ChineseTraditional.isl
-echo [TIP] Download manually and place it at: scripts\inno\ChineseTraditional.isl
-exit /b 1
-
-:INNO_LANG_MISSING
 echo [ERROR] Missing Inno language file: %INNO_LANG_FILE%
+echo [TIP] Please commit scripts\inno\ChineseTraditional.isl to the repository to avoid external downloads
 exit /b 1
 
 :INNO_LANG_READY
@@ -298,12 +291,12 @@ REM ============================================================
 echo [5/5] Building portable package...
 REM Prefer PowerShell Core (pwsh), otherwise use Windows PowerShell
 where pwsh >nul 2>nul
-if not errorlevel 1 goto RUN_PWSH
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
+if not errorlevel 1 (
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1" -Version "%APP_VERSION%"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1" -Version "%APP_VERSION%"
+)
 goto PORTABLE_DONE
-
-:RUN_PWSH
-pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0package-portable.ps1"
 
 :PORTABLE_DONE
 

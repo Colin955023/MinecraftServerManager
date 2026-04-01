@@ -76,8 +76,14 @@ if (Test-Path "dist\MinecraftServerManager\unins000.dat") {
     Remove-Item "dist\MinecraftServerManager\unins000.dat" -Force
 }
 
-Write-Host "[3/3] 建立可攜式版本壓縮檔..." -ForegroundColor Yellow
-Compress-Archive -Path "dist\MinecraftServerManager" -DestinationPath $zipPath -Force
+Write-Host "[3/3] 建立可攜式版本壓縮檔 (使用高效能 ZipFile)..." -ForegroundColor Yellow
+
+# 使用 .NET 原生 ZipFile 以提升壓縮效能與避免 Compress-Archive 的路徑長度限制
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+$sourceDir = "dist\MinecraftServerManager"
+if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory($sourceDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 
 if (-not (Test-Path $zipPath)) {
     Write-Host "[錯誤] 壓縮檔建立失敗" -ForegroundColor Red

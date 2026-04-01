@@ -47,14 +47,18 @@ jobs:
           print(f"Version verified: {APP_VERSION}")
 
       - name: Cache Nuitka compilation
+        id: nuitka-cache
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
         with:
           path: .nuitka-cache
-          key: nuitka-${{ runner.os }}-${{ hashFiles('src/**/*.py') }}
+          key: nuitka-${{ runner.os }}-${{ hashFiles('**/*.toml', '**/*.txt') }}
           restore-keys: nuitka-${{ runner.os }}-
 
       - name: Build executable and installer
         shell: cmd
+        env:
+          NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
+          NUITKA_CACHE_HIT: ${{ steps.nuitka-cache.outputs.cache-hit }}
         run: |
           cd /d %GITHUB_WORKSPACE%
           call scripts\build_installer_nuitka.bat
@@ -91,17 +95,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES: ${{ steps.release_notes.outputs.notes }}
-        shell: bash
+        shell: pwsh
         run: |
-          tag="${GITHUB_REF_NAME}"
-          prerelease_args=()
-          if [[ "${tag}" =~ -pre ]]; then prerelease_args+=(--prerelease); fi
-
-          gh release create "${tag}" dist/* \
-            --title "Minecraft Server Manager ${tag}" \
-            --notes "$RELEASE_NOTES" \
-            "${prerelease_args[@]}" \
-            --verify-tag
+          $tag = $env:GITHUB_REF_NAME
+          $prereleaseArgs = @()
+          if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
+          $assets = Get-ChildItem -Path 'dist' -File | Where-Object { $_.Name -match '\.(exe|zip)$' } | ForEach-Object { $_.FullName }
+          if (-not $assets -or $assets.Count -eq 0) {
+              Write-Host 'No release assets found in dist; aborting release creation'
+              exit 1
+          }
+          $args = @('release','create',$tag) + $assets + @('--title', "Minecraft Server Manager $tag", '--notes', $env:RELEASE_NOTES) + $prereleaseArgs + @('--verify-tag')
+          & gh @args
 
       - name: Upload build artifacts
         if: always()

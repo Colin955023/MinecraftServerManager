@@ -52,7 +52,28 @@ jobs:
         run: uv sync --all-groups
 
       - name: Run Bandit security scan
-        run: uv run bandit -r src -f sarif -o bandit-results.sarif --exit-zero
+        run: |
+          uv run bandit -r src -f sarif -o bandit-results.sarif --exit-zero
+          uv run bandit -r src -f json -o bandit-results.json --exit-zero
+
+      - name: Fail on Bandit HIGH findings
+        if: always()
+        shell: python
+        run: |
+          import json, os, sys
+          if not os.path.exists('bandit-results.json'):
+              print('bandit-results.json not found, skipping')
+              sys.exit(0)
+          with open('bandit-results.json', 'r', encoding='utf-8') as f:
+              data = json.load(f)
+          high_found = False
+          for r in data.get('results', []):
+              if r.get('issue_severity', '').upper() == 'HIGH':
+                  print(f"::error::Bandit HIGH: {r.get('filename')}:{r.get('line_number')} {r.get('test_id')} {r.get('issue_text')}")
+                  high_found = True
+          if high_found:
+              sys.exit(1)
+          print('No Bandit HIGH severity issues found')
 
       - name: Upload Bandit SARIF
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
