@@ -2388,9 +2388,9 @@ class ModManagementFrame:
                 getattr(getattr(entry, "pending", None), "project_id", ""),
                 getattr(getattr(getattr(entry, "pending", None), "version", None), "version_id", ""),
             ),
-            get_group_key=lambda entry: self._get_online_install_review_group_key(entry),
+            get_group_key=self._get_online_install_review_group_key,
             get_title=lambda _entry: "模組",
-            get_status_text=lambda entry: self._build_online_review_root_status_text(entry),
+            get_status_text=self._build_online_review_root_status_text,
             get_root_values=lambda entry, status_text: (
                 "是" if entry.enabled else "否",
                 self._format_review_provider_label(entry.provider),
@@ -2414,9 +2414,9 @@ class ModManagementFrame:
                 str(getattr(getattr(entry, "candidate", None), "project_name", "") or "").casefold(),
             ),
             get_root_key=lambda entry: self._build_local_update_review_key(entry.candidate),
-            get_group_key=lambda entry: self._get_local_update_review_group_key(entry),
+            get_group_key=self._get_local_update_review_group_key,
             get_title=lambda entry: str(getattr(getattr(entry, "candidate", None), "project_name", "") or "模組"),
-            get_status_text=lambda entry: self._build_local_update_root_status_text(entry),
+            get_status_text=self._build_local_update_root_status_text(),
             get_root_values=lambda entry, status_text: (
                 "是" if entry.enabled else "否",
                 str(getattr(getattr(entry, "candidate", None), "current_version", "") or "未知"),
@@ -4647,8 +4647,6 @@ class ModManagementFrame:
         tree = self.local_tree
         if not tree or not tree.winfo_exists():
             self._set_local_tree_render_lock(False)
-            return
-        if tree is None:
             return
         for mod_id, stale_item_id in list(self._local_item_by_mod_id.items()):
             if mod_id in mod_rows:
