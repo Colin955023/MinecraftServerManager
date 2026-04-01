@@ -1390,7 +1390,7 @@ class ServerInitializationDialog:
                 self.console_text.insert("end", text)
                 self.console_text.see("end")
         except tk.TclError:
-            pass
+            logger.exception("更新控制台輸出失敗")
 
     def _run_server(self) -> None:
         """在背景執行緒中啟動伺服器"""
