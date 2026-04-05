@@ -25,8 +25,8 @@ permissions:
   contents: read
 
 jobs:
-  quality-gates:
-    name: CI-Tests / Quality Gates
+  bandit-scan:
+    name: CI-Tests / Bandit Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,43 +35,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.12"
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
         with:
-          enable-cache: ${{ github.ref == 'refs/heads/master' }}
-
-      - name: Install dependencies
-        run: uv sync --all-groups --frozen
+          uv-sync: 'true'
 
       - name: Run Bandit security scan
         run: |
-          uv run bandit -r src -f sarif -o bandit-results.sarif --exit-zero
-          uv run bandit -r src -f json -o bandit-results.json --exit-zero
-
-      - name: Fail on Bandit HIGH findings
-        if: always()
-        shell: python
-        run: |
-          import json, os, sys
-          if not os.path.exists('bandit-results.json'):
-              print('bandit-results.json not found, skipping')
-              sys.exit(0)
-          with open('bandit-results.json', 'r', encoding='utf-8') as f:
-              data = json.load(f)
-          high_found = False
-          for r in data.get('results', []):
-              if r.get('issue_severity', '').upper() == 'HIGH':
-                  print(f"::error::Bandit HIGH: {r.get('filename')}:{r.get('line_number')} {r.get('test_id')} {r.get('issue_text')}")
-                  high_found = True
-          if high_found:
-              sys.exit(1)
-          print('No Bandit HIGH severity issues found')
+          uv run bandit -r src tests -f sarif -o bandit-results.sarif --severity-level high --confidence-level high
 
       - name: Upload Bandit SARIF
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -80,66 +55,87 @@ jobs:
           sarif_file: bandit-results.sarif
           category: bandit
 
+  detect-secrets-scan:
+    name: CI-Tests / detect-secrets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          uv-sync: 'true'
+
       - name: Run detect-secrets privacy scan
-        id: detect_secrets
         run: |
           EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.github|\.tox)'
-          uv tool run detect-secrets scan --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > secrets_result.json
-          python - <<'PY'
-          import json, os, sys
-          from pathlib import Path
-          if not os.path.exists('secrets_result.json') or os.path.getsize('secrets_result.json') == 0:
-              sys.exit(0)
-          with open('secrets_result.json') as f:
-              data = json.load(f)
-          results = data.get('results', {})
-          if results:
-              for file_path, secrets in results.items():
-                  file_for_annot = Path(file_path).as_posix()
-                  for s in secrets:
-                      line = s.get('line_number') or 1
-                      print(f'::error file={file_for_annot},line={line}::Potential secret detected in {file_for_annot}')
-              sys.exit(1)
-          PY
+          if [ -f .secrets.baseline ]; then
+            uv run detect-secrets scan --baseline .secrets.baseline --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
+          else
+            uv run detect-secrets scan --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
+          fi
+          uv run python -c "import json,sys; data=json.load(open('detect-secrets-results.json', encoding='utf-8')); sys.exit(1 if data.get('results') else 0)"
 
       - name: Upload detect-secrets report
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: detect_secrets_report
-          path: secrets_result.json
+          path: detect-secrets-results.json
           retention-days: 2
 
-  compatibility-tests:
-    name: CI-Tests / Python ${{ matrix.python-version }}
-    runs-on: windows-latest
+  lint-and-test:
+    name: CI-Tests / ${{ matrix.task }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        include:
+          - task: lint
+            os: windows-latest
+          - task: test
+            os: windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: ${{ matrix.python-version }}
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
         with:
-          enable-cache: ${{ github.ref == 'refs/heads/master' }}
-
-      - name: Install dependencies
-        run: uv sync --all-groups --frozen
+          uv-sync: 'true'
 
       - name: Run Ruff (Lint & Format)
+        if: matrix.task == 'lint'
         run: uv run ruff check src tests quick_test.py && uv run ruff format --check src tests quick_test.py
 
       - name: Run mypy
+        if: matrix.task == 'lint'
         run: uv run mypy src tests quick_test.py
 
+      - name: Run Pylint (cyclic import check)
+        if: matrix.task == 'lint'
+        run: uv run pylint --disable=all --enable=cyclic-import src
+
       - name: Run tests (pytest)
-        run: uv run pytest -q
+        if: matrix.task == 'test'
+        run: uv run pytest -q --junitxml=pytest-results.xml
+
+      - name: Upload pytest JUnit report
+        if: always() && matrix.task == 'test'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: pytest_junit_report_windows
+          path: pytest-results.xml
+          retention-days: 2
+

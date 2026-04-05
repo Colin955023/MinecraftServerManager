@@ -8,7 +8,10 @@ from __future__ import annotations
 from .. import lazy_exports
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "ModrinthVersionLookupResult": (".models", "ModrinthVersionLookupResult"),
     "LoaderVersion": (".models", "LoaderVersion"),
+    "OnlineModVersion": (".models", "OnlineModVersion"),
+    "ResolvedDependencyReference": (".models", "ResolvedDependencyReference"),
     "ServerConfig": (".models", "ServerConfig"),
 }
 

@@ -4,7 +4,7 @@ import json
 
 import pytest
 from src.core import ConfigurationError
-from src.utils import settings_manager as settings_module
+import src.utils.runtime_utils.settings_manager as settings_module
 
 
 @pytest.mark.smoke

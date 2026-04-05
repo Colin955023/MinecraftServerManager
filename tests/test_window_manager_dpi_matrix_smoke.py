@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-import src.utils.window_manager as window_manager_module
+import src.utils.ui_support.window_manager as window_manager_module
 
 
 class _StubSettings:

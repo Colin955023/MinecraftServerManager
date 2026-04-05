@@ -1,0 +1,234 @@
+"""伺服器版本/載入器文字解析工具。
+
+這個模組只負責「字串與版本資訊」相關的判斷，
+避免與檔案掃描、啟動參數偵測邏輯混在同一檔案。
+"""
+
+from __future__ import annotations
+import re
+from functools import lru_cache
+from packaging.version import InvalidVersion, Version
+from .. import get_logger
+
+logger = get_logger().bind(component="ServerDetectionVersionUtils")
+__all__ = ["ServerDetectionVersionUtils"]
+
+
+class ServerDetectionVersionUtils:
+    """版本與載入器文字解析工具。"""
+
+    @staticmethod
+    def _parse_packaging_version(version_str: str) -> Version | None:
+        """優先使用 packaging.Version 解析版本；失敗時回傳 None。"""
+        normalized_input = str(version_str or "").strip()
+        if not normalized_input:
+            return None
+        candidate = normalized_input
+        lower_candidate = candidate.lower()
+        if lower_candidate.startswith("v") and len(candidate) > 1 and candidate[1].isdigit():
+            candidate = candidate[1:]
+        try:
+            return Version(candidate)
+        except InvalidVersion:
+            match = re.search("\\d+(?:\\.\\d+){0,3}", candidate)
+            if not match:
+                return None
+            try:
+                return Version(match.group(0))
+            except InvalidVersion:
+                return None
+
+    @staticmethod
+    def parse_mc_version(version_str: str) -> list[int]:
+        """解析 Minecraft 版本字串為數字列表。
+
+        Args:
+            version_str: 原始版本字串。
+
+        Returns:
+            版本數字列表，例如 `[1, 20, 1]`。
+        """
+        if not version_str or not isinstance(version_str, str):
+            logger.debug(f"無效的 MC 版本字串: {version_str!r}")
+            return []
+        parsed = ServerDetectionVersionUtils._parse_packaging_version(version_str)
+        if parsed is not None and parsed.release:
+            return [int(part) for part in parsed.release]
+        try:
+            matches = re.findall("\\d+", version_str)
+            return [int(x) for x in matches] if matches else []
+        except Exception as e:
+            logger.exception(f"解析 MC 版本時發生錯誤: {e}")
+            return []
+
+    @staticmethod
+    def is_fabric_compatible_version(mc_version: str) -> bool:
+        """檢查 MC 版本是否與 Fabric 相容（1.14+）。
+
+        Args:
+            mc_version: Minecraft 版本字串。
+
+        Returns:
+            若版本與 Fabric 相容則回傳 True，否則回傳 False。
+        """
+        try:
+            parsed = ServerDetectionVersionUtils._parse_packaging_version(mc_version)
+            if parsed is not None:
+                return parsed.release >= (1, 14)
+            version_parts = ServerDetectionVersionUtils.parse_mc_version(mc_version)
+            if not version_parts:
+                return False
+            major = version_parts[0]
+            minor = version_parts[1] if len(version_parts) > 1 else 0
+            return bool(major > 1 or (major == 1 and minor >= 14))
+        except Exception as e:
+            logger.exception(f"檢查 Fabric 相容性時發生錯誤: {e}")
+            return False
+
+    @staticmethod
+    def standardize_loader_type(loader_type: str, loader_version: str = "") -> str:
+        """標準化載入器類型：將輸入轉為小寫並進行基本推斷。
+
+        Args:
+            loader_type: 原始載入器類型。
+            loader_version: 原始載入器版本字串。
+
+        Returns:
+            標準化後的載入器類型。
+        """
+        lt_low = loader_type.lower()
+        if lt_low in ["fabric", "forge", "vanilla", "原版"]:
+            return "vanilla" if lt_low in ["vanilla", "原版"] else lt_low
+        if lt_low in ["unknown", "未知"]:
+            if loader_version and loader_version.replace(".", "").isdigit():
+                return "forge"
+            if loader_version and "fabric" in loader_version.lower():
+                return "fabric"
+            return "unknown"
+        if "vanilla" in lt_low or "official" in lt_low:
+            return "vanilla"
+        if lt_low in ["fabric", "forge"]:
+            return lt_low
+        return "unknown"
+
+    @staticmethod
+    def normalize_mc_version(mc_version) -> str:
+        """標準化 Minecraft 版本字串。
+
+        Args:
+            mc_version: 原始 Minecraft 版本值。
+
+        Returns:
+            標準化後的 Minecraft 版本字串。
+        """
+        if isinstance(mc_version, list) and mc_version:
+            mc_version = str(mc_version[0])
+        if isinstance(mc_version, str) and mc_version.startswith(("[", "(")):
+            m = re.search("(\\d+\\.\\d+)", mc_version)
+            if m:
+                mc_version = m.group(1)
+        return mc_version
+
+    @staticmethod
+    def clean_version(version: str) -> str:
+        """清理版本字串中的常見後綴。
+
+        Args:
+            version: 原始版本字串。
+
+        Returns:
+            清理後的版本字串。
+        """
+        if not version or version == "未知":
+            return version
+        cleaned = re.split(
+            "[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot",
+            version,
+            flags=re.IGNORECASE,
+        )[0]
+        cleaned = re.sub("[^\\w\\d.]+$", "", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def extract_mc_version_from_text(text: str) -> str | None:
+        """從文字中提取 Minecraft 版本。
+
+        Args:
+            text: 待分析的文字內容。
+
+        Returns:
+            找到時回傳版本字串，否則回傳 None。
+        """
+        if not text:
+            return None
+        patterns = [
+            ("minecraft[:\\s]+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)", 1),
+            ("mc[:\\s]+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)", 1),
+            ("version[:\\s]+([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)", 1),
+            ("\\b([0-9]+\\.[0-9]+(?:\\.[0-9]+)?-(?:pre|rc)[0-9]+)\\b", 2),
+            ("\\b([0-9]+\\.[0-9]+-snapshot-[0-9]+)\\b", 3),
+            ("\\b(2[0-9]w[0-9]{1,2}[a-z])\\b", 3),
+            ("\\b([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)\\b", 4),
+        ]
+        matches = []
+        for pattern, priority in patterns:
+            found = re.search(pattern, text, re.IGNORECASE)
+            if found:
+                matches.append((found.group(1), priority))
+        if matches:
+            matches.sort(key=lambda item: item[1])
+            return matches[0][0]
+        return None
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def detect_loader_from_text(text: str) -> str:
+        """從文字中偵測載入器類型。
+
+        Args:
+            text: 待分析的文字內容。
+
+        Returns:
+            偵測到的載入器類型，找不到時回傳 `unknown`。
+        """
+        if not text:
+            return "unknown"
+        text_lower = text.lower()
+        if re.search("\\bvanilla\\b|\\bofficial\\b|\\bminecraft server\\b", text_lower):
+            return "vanilla"
+        if re.search("\\bfabric\\b", text_lower):
+            return "fabric"
+        if re.search("\\bforge\\b", text_lower):
+            return "forge"
+        return "unknown"
+
+    @staticmethod
+    @lru_cache(maxsize=128)
+    def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
+        """從 Forge 路徑字串提取 `(minecraft_version, forge_version)`。
+
+        Args:
+            path_str: Forge 路徑或檔名字串。
+
+        Returns:
+            `(Minecraft 版本, Forge 版本)`，無法解析時回傳 `(None, None)`。
+        """
+        if not path_str:
+            return (None, None)
+        clean_str = path_str
+        if clean_str.endswith(".jar"):
+            clean_str = clean_str[:-4]
+        if clean_str.startswith("forge-"):
+            clean_str = clean_str[6:]
+        patterns = [
+            "^(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?(?:\\.\\d+)?)$",
+            "^(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?(?:\\.\\d+)?)-.*$",
+        ]
+        for pattern in patterns:
+            match = re.match(pattern, clean_str)
+            if match:
+                mc_ver = match.group(1)
+                forge_ver = match.group(2)
+                if mc_ver and forge_ver and (len(mc_ver.split(".")) >= 2) and (len(forge_ver.split(".")) >= 2):
+                    return (mc_ver, forge_ver)
+        return (None, None)

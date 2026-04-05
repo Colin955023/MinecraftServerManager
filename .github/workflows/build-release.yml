@@ -3,6 +3,10 @@ name: Build and Create Release
 on:
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -12,9 +16,11 @@ jobs:
     runs-on: windows-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      RELEASE_TAG: ''
 
     permissions:
       contents: write
+      discussions: write
 
     steps:
       - name: Checkout repository
@@ -22,134 +28,47 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve release tag
-        id: release_tag
-        shell: python
-        run: |
-          import os, re, sys
-
-          sys.path.append(os.getcwd())
-          from src.version_info.version_info import APP_VERSION
-
-          tag_name = f'{APP_VERSION}'
-
-          normalized_tag = tag_name[1:] if tag_name.startswith('v') else tag_name
-          if normalized_tag != str(APP_VERSION):
-              print(f'::error::Tag 與版本號不一致：tag={tag_name}, version={APP_VERSION}')
-              sys.exit(1)
-
-          if not re.fullmatch(r'v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?', tag_name):
-              print(f'::error::Tag 格式不合法：{tag_name}')
-              sys.exit(1)
-
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as fh:
-              fh.write(f'tag_name={tag_name}\n')
-              fh.write(f'version={APP_VERSION}\n')
-
-      - name: Set up Python 3.13
+      - name: Setup Environment
         id: setup-python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        uses: ./.github/actions/setup-python-env
         with:
           python-version: '3.13'
+          uv-sync: 'false'
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
-
-      - name: Cache Nuitka compilation
-        id: nuitka-cache
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7
-        with:
-          path: .nuitka-cache
-          key: nuitka-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('uv.lock', 'pyproject.toml', 'scripts/build_installer_nuitka.bat') }}
-          restore-keys: nuitka-${{ runner.os }}-
-
-      - name: Inspect restored Nuitka cache
+      - name: Resolve release tag
+        id: release_tag
         shell: pwsh
         run: |
-          $cacheDir = Join-Path $env:GITHUB_WORKSPACE '.nuitka-cache'
-          $cacheHit = '${{ steps.nuitka-cache.outputs.cache-hit }}'
-          Write-Host "NUITKA_CACHE_HIT=$cacheHit"
-          if (Test-Path $cacheDir) {
-              $fileCount = (Get-ChildItem -Path $cacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
-              $totalBytes = (Get-ChildItem -Path $cacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-              if (-not $totalBytes) { $totalBytes = 0 }
-              $sizeMb = [Math]::Round($totalBytes / 1MB, 2)
-              Write-Host "Nuitka cache exists. Files=$fileCount SizeMB=$sizeMb Path=$cacheDir"
-              Get-ChildItem -Path $cacheDir -Directory -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host " - $($_.Name)" }
-          } else {
-              Write-Host "Nuitka cache directory not found before build: $cacheDir"
+          `$json = python .\scripts\version_check.py get-all
+          if (`$LASTEXITCODE -ne 0) {
+            Write-Error `"取得版本資訊與驗證失敗`"
+            exit `$LASTEXITCODE
           }
+          
+          `$output = `$json | ConvertFrom-Json
+          `$tag = `$output.Tag
+          `$version = `$output.Version
+
+          `"tag_name=`$tag`" | Out-File -FilePath `$env:GITHUB_OUTPUT -Encoding utf8 -Append
+          `"version=`$version`" | Out-File -FilePath `$env:GITHUB_OUTPUT -Encoding utf8 -Append
+          `"RELEASE_TAG=`$tag`" | Out-File -FilePath `$env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build executable and installer
-        shell: cmd
-        env:
-          NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
-          NUITKA_CACHE_HIT: ${{ steps.nuitka-cache.outputs.cache-hit }}
-        run: |
-          cd /d %GITHUB_WORKSPACE%
-          call scripts\build_installer_nuitka.bat
-
-      - name: Inspect Nuitka cache after build
-        if: always()
         shell: pwsh
-        run: |
-          $cacheDir = Join-Path $env:GITHUB_WORKSPACE '.nuitka-cache'
-          if (Test-Path $cacheDir) {
-              $fileCount = (Get-ChildItem -Path $cacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count
-              $totalBytes = (Get-ChildItem -Path $cacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-              if (-not $totalBytes) { $totalBytes = 0 }
-              $sizeMb = [Math]::Round($totalBytes / 1MB, 2)
-              Write-Host "Nuitka cache after build. Files=$fileCount SizeMB=$sizeMb Path=$cacheDir"
-          } else {
-              Write-Host "Nuitka cache directory not found after build: $cacheDir"
-          }
+        run: python scripts\build_installer_nuitka.py
 
       - name: Extract release notes
         id: release_notes
-        shell: python
-        env:
-          RELEASE_TAG: ${{ steps.release_tag.outputs.tag_name }}
+        shell: pwsh
         run: |
-          import os, re, sys
-          sys.path.append(os.getcwd())
-          from src.version_info.version_info import APP_VERSION
-          content = ""
-          if os.path.exists("CHANGELOG.md"):
-              with open("CHANGELOG.md", "r", encoding="utf-8-sig") as f:
-                  content = f.read()
-
-          tag_name = os.environ.get("RELEASE_TAG", "").strip()
-          version_candidates = [str(APP_VERSION)]
-          if tag_name:
-              version_candidates.append(tag_name)
-              if tag_name.startswith("v") and len(tag_name) > 1:
-                  version_candidates.append(tag_name[1:])
-              else:
-                  version_candidates.append(f"v{tag_name}")
-
-          version_candidates = list(dict.fromkeys([ver for ver in version_candidates if ver]))
-
-          heading_patterns = [
-              fr"##\s+\[?{re.escape(ver)}\]?.*?\n(.*?)(?=\n##\s+|$)"
-              for ver in version_candidates
-          ]
-
-          match = None
-          for pattern in heading_patterns:
-              match = re.search(pattern, content, re.S)
-              if match:
-                  break
-
-          notes = match.group(1).strip() if match else "Release notes not found in CHANGELOG.md"
-
-          with open("release_notes.md", "w", encoding="utf-8") as f:
-              f.write(notes)
-          print("Successfully extracted release notes to release_notes.md")
+          python .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "提取 release notes 失敗"
+            exit $LASTEXITCODE
+          }
 
       - name: Create and push release tag
         shell: pwsh
-        env:
-          RELEASE_TAG: ${{ steps.release_tag.outputs.tag_name }}
         run: |
           if ($env:GITHUB_REF_NAME -ne 'master') {
               Write-Error "此 workflow 只能在 master 分支上手動執行，目前是 $env:GITHUB_REF_NAME"
@@ -193,13 +112,12 @@ jobs:
       - name: Create Release and Upload Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ steps.release_tag.outputs.tag_name }}
         shell: pwsh
         run: |
           $tag = $env:RELEASE_TAG
           $prereleaseArgs = @()
           if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
-          $assets = Get-ChildItem -Path 'dist' -File | Where-Object { $_.Name -match '\.(exe|zip)$' } | ForEach-Object { $_.FullName }
+          $assets = Get-ChildItem -Path 'dist' -File | Where-Object { $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.(exe|zip)$' } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
               Write-Host 'No release assets found in dist; aborting release creation'
               exit 1

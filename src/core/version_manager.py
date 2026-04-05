@@ -4,8 +4,8 @@
 
 import concurrent.futures
 import threading
-from pathlib import Path
 from contextlib import suppress
+from pathlib import Path
 from ..utils import (
     HTTPUtils,
     PathUtils,
@@ -51,7 +51,14 @@ class MinecraftVersionManager(Singleton):
             logger.exception(f"寫入版本快取失敗: {e}")
 
     def fetch_versions(self, max_workers: int = 10) -> list:
-        """從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊"""
+        """從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊。
+
+        Args:
+            max_workers: 同時查詢版本詳細資訊的執行緒數量上限。
+
+        Returns:
+            可用的 Minecraft 伺服器版本清單。
+        """
         with self._lock:
             try:
                 logger.debug("正在獲取官方版本清單...")
@@ -132,7 +139,14 @@ class MinecraftVersionManager(Singleton):
                 return self.get_versions(force_fetch=False)
 
     def get_server_download_url(self, version_id: str) -> str | None:
-        """獲取指定版本的伺服器下載 URL"""
+        """獲取指定版本的伺服器下載 URL。
+
+        Args:
+            version_id: Minecraft 版本 ID。
+
+        Returns:
+            對應版本的伺服器下載 URL；找不到時回傳 None。
+        """
         try:
             versions = self.get_versions(force_fetch=False)
             target_ver = next((v for v in versions if v["id"] == version_id), None)
@@ -150,7 +164,14 @@ class MinecraftVersionManager(Singleton):
             return None
 
     def get_versions(self, force_fetch=False) -> list:
-        """取得 Minecraft 版本列表，優先從本地快取讀取，必要時從官方 API 獲取"""
+        """取得 Minecraft 版本列表，優先從本地快取讀取，必要時從官方 API 獲取。
+
+        Args:
+            force_fetch: 是否強制重新抓取官方版本資料。
+
+        Returns:
+            可用的 Minecraft 伺服器版本清單。
+        """
         try:
             cache_path = Path(self.cache_file)
             if force_fetch or not cache_path.exists():

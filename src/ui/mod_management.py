@@ -6,14 +6,15 @@ import contextlib
 import queue
 import re
 import time
-import tkinter as tk
+import tkinter
+import tkinter.filedialog as filedialog
+import tkinter.ttk as ttk
 import traceback
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, ttk
 from types import SimpleNamespace
 from typing import Any
 import customtkinter as ctk
@@ -36,6 +37,7 @@ from ..utils import (
     ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE,
     ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE,
     ONLINE_REVIEW_PRECHECK_NOTE,
+    PROVIDER_LIFECYCLE_STALE,
     RECOMMENDATION_CONFIDENCE_ADVISORY,
     RECOMMENDATION_CONFIDENCE_LABELS,
     RECOMMENDATION_CONFIDENCE_RETRYABLE,
@@ -43,14 +45,14 @@ from ..utils import (
     RECOMMENDATION_SOURCE_METADATA_UNRESOLVED,
     RECOMMENDATION_SOURCE_SHORT_LABELS,
     RECOMMENDATION_SOURCE_STALE_METADATA,
+    CancellationToken,
     Colors,
-    FontManager,
     FontSize,
     PathUtils,
     ProviderMetadataRecord,
     Sizes,
+    Spacing,
     UIUtils,
-    CancellationToken,
     apply_provider_metadata,
     cache_provider_metadata_record,
     compute_adaptive_pool_limit,
@@ -59,11 +61,14 @@ from ..utils import (
     get_logger,
     register_provider_revalidation_success,
     resolve_modrinth_provider_record,
-    PROVIDER_LIFECYCLE_STALE,
 )
 from . import (
     CustomDropdown,
+    DialogUtils,
+    FontManager,
     LocalModUpdatePlan,
+    TaskUtils,
+    TreeUtils,
     analyze_mod_version_compatibility,
     build_local_mod_update_plan,
     build_required_dependency_install_plan,
@@ -163,6 +168,8 @@ class OnlineBrowseRequest:
 
 
 class ModManagementFrame:
+    """模組管理頁面主框架，整合本地模組管理與線上瀏覽安裝流程。"""
+
     def __init__(
         self,
         parent,
@@ -231,11 +238,15 @@ class ModManagementFrame:
         self.ui_queue: queue.Queue = queue.Queue()
         self.create_widgets()
         host = self.main_frame if self.main_frame and self.main_frame.winfo_exists() else self.parent
-        UIUtils.start_ui_queue_pump(host, self.ui_queue)
+        TaskUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
     def update_status(self, message: str) -> None:
-        """安全地更新狀態標籤（合併 idle 更新，避免高頻重繪）。"""
+        """安全地更新狀態標籤，並合併連續的 idle 更新。
+
+        Args:
+            message: 要顯示的狀態文字。
+        """
         self._pending_status_message = str(message)
         try:
             if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
@@ -260,11 +271,19 @@ class ModManagementFrame:
             self.status_label.configure(text=self._pending_status_message)
 
     def update_status_safe(self, message: str) -> None:
-        """更安全的狀態更新，使用佇列"""
+        """將狀態更新排入 UI 佇列執行。
+
+        Args:
+            message: 要顯示的狀態文字。
+        """
         self.ui_queue.put(lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
-        """更安全的進度更新，使用佇列"""
+        """將進度更新排入 UI 佇列執行。
+
+        Args:
+            value: 介於 0 到 1 的進度值。
+        """
 
         def _update():
             if hasattr(self, "progress_var") and self.progress_var:
@@ -335,13 +354,13 @@ class ModManagementFrame:
     def create_server_selection(self) -> None:
         """建立伺服器選擇區域"""
         server_frame = ctk.CTkFrame(self.main_frame)
-        server_frame.pack(fill="x", padx=20, pady=(0, 10))
+        server_frame.pack(fill="x", padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
         inner_frame = ctk.CTkFrame(server_frame, fg_color="transparent")
-        inner_frame.pack(fill="x", padx=15, pady=10)
+        inner_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=Spacing.SMALL_PLUS)
         ctk.CTkLabel(
             inner_frame, text="📁 伺服器:", font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold")
         ).pack(side="left")
-        self.server_var = tk.StringVar()
+        self.server_var = tkinter.StringVar()
         self.server_combo = CustomDropdown(
             inner_frame,
             variable=self.server_var,
@@ -349,7 +368,7 @@ class ModManagementFrame:
             command=self.on_server_changed,
             width=FontManager.get_dpi_scaled_size(200),
         )
-        self.server_combo.pack(side="left", padx=(10, 0))
+        self.server_combo.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
         refresh_btn = ctk.CTkButton(
             inner_frame,
             text="🔄 重新整理",
@@ -358,23 +377,23 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_SECONDARY,
             height=Sizes.INPUT_HEIGHT,
         )
-        refresh_btn.pack(side="left", padx=(10, 0))
+        refresh_btn.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
 
     def create_header(self) -> None:
         """建立標題區域"""
         header_frame = ctk.CTkFrame(self.main_frame)
-        header_frame.pack(fill="x", padx=20, pady=(20, 10))
+        header_frame.pack(fill="x", padx=Spacing.XL, pady=(Spacing.XL, Spacing.SMALL_PLUS))
         title_label = ctk.CTkLabel(
             header_frame, text="🧩 模組管理", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
         )
-        title_label.pack(side="left", padx=15, pady=15)
+        title_label.pack(side="left", padx=Spacing.LARGE_MINUS, pady=Spacing.LARGE_MINUS)
         desc_label = ctk.CTkLabel(
             header_frame,
             text="參考 Prism Launcher 的模組管理流程",
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             text_color=Colors.TEXT_SECONDARY,
         )
-        desc_label.pack(side="left", padx=(15, 15), pady=15)
+        desc_label.pack(side="left", padx=(Spacing.LARGE_MINUS, Spacing.LARGE_MINUS), pady=Spacing.LARGE_MINUS)
 
     def create_local_mods_tab(self) -> None:
         """建立本地模組頁面"""
@@ -399,9 +418,9 @@ class ModManagementFrame:
         if not self.browse_tab:
             return
         search_frame = ctk.CTkFrame(self.browse_tab)
-        search_frame.pack(fill="x", padx=14, pady=14)
-        self.search_var = tk.StringVar()
-        self.browse_sort_var = tk.StringVar(value="相關性")
+        search_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
+        self.search_var = tkinter.StringVar()
+        self.browse_sort_var = tkinter.StringVar(value="相關性")
         self.browse_sort_options = {
             "相關性": "relevance",
             "下載量": "downloads",
@@ -417,7 +436,7 @@ class ModManagementFrame:
             width=FontManager.get_dpi_scaled_size(320),
             height=Sizes.INPUT_HEIGHT,
         )
-        search_entry.pack(side="left", padx=(14, 10), pady=14)
+        search_entry.pack(side="left", padx=(Spacing.MEDIUM, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
         search_entry.bind("<Return>", self.search_online_mods)
         sort_dropdown = CustomDropdown(
             search_frame,
@@ -427,7 +446,7 @@ class ModManagementFrame:
             width=Sizes.DROPDOWN_FILTER_WIDTH,
             height=Sizes.INPUT_HEIGHT,
         )
-        sort_dropdown.pack(side="left", padx=(0, 10), pady=14)
+        sort_dropdown.pack(side="left", padx=(0, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
         search_button = ctk.CTkButton(
             search_frame,
             text="🔍 搜尋 Modrinth",
@@ -439,7 +458,7 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        search_button.pack(side="left", padx=(0, 10), pady=14)
+        search_button.pack(side="left", padx=(0, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
         install_button = ctk.CTkButton(
             search_frame,
             text="➕ 加入安裝清單",
@@ -451,7 +470,7 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        install_button.pack(side="left", pady=14)
+        install_button.pack(side="left", pady=Spacing.MEDIUM)
         self.online_queue_button = ctk.CTkButton(
             search_frame,
             text="🧺 安裝清單 (0)",
@@ -463,7 +482,7 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        self.online_queue_button.pack(side="left", padx=(10, 0), pady=14)
+        self.online_queue_button.pack(side="left", padx=(Spacing.SMALL_PLUS, 0), pady=Spacing.MEDIUM)
         self.browse_filter_label = ctk.CTkLabel(
             self.browse_tab,
             text="",
@@ -473,7 +492,7 @@ class ModManagementFrame:
             anchor="w",
             wraplength=FontManager.get_dpi_scaled_size(980),
         )
-        self.browse_filter_label.pack(fill="x", padx=18, pady=(0, 4))
+        self.browse_filter_label.pack(fill="x", padx=Spacing.LARGE, pady=(0, Spacing.XS))
         self.browse_results_label = ctk.CTkLabel(
             self.browse_tab,
             text="",
@@ -483,7 +502,7 @@ class ModManagementFrame:
             anchor="w",
             wraplength=FontManager.get_dpi_scaled_size(980),
         )
-        self.browse_results_label.pack(fill="x", padx=18, pady=(0, 6))
+        self.browse_results_label.pack(fill="x", padx=Spacing.LARGE, pady=(0, Spacing.TINY))
         self._refresh_online_filter_hint()
         self._refresh_online_results_summary()
 
@@ -492,9 +511,9 @@ class ModManagementFrame:
         if not self.browse_tab:
             return
         list_frame = ctk.CTkFrame(self.browse_tab)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        list_frame.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
         tree_container = ctk.CTkFrame(list_frame)
-        tree_container.pack(fill="both", expand=True, padx=10, pady=10)
+        tree_container.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
         style = ttk.Style()
         style.configure(
             "BrowseModList.Treeview",
@@ -522,7 +541,10 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             self.browse_tree.heading(col, text=text, anchor="w")
-            self.browse_tree.column(col, width=width, minwidth=60, anchor="w", stretch=col == "description")
+            is_stretch = col == "environments"
+            self.browse_tree.column(
+                col, width=width, minwidth=width if is_stretch else 60, anchor="w", stretch=is_stretch
+            )
         v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.browse_tree.yview)
         h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.browse_tree.xview)
         self.browse_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
@@ -531,11 +553,12 @@ class ModManagementFrame:
         h_scrollbar.grid(row=1, column=0, sticky="ew")
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-        UIUtils.bind_treeview_header_auto_fit(
+        TreeUtils.bind_treeview_header_auto_fit(
             self.browse_tree,
             on_row_double_click=self.install_online_mod,
             heading_font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
             body_font=FontManager.get_font(size=FontSize.INPUT),
+            stretch_columns={"environments"},
         )
         self.browse_tree.bind("<Button-3>", self.show_browse_context_menu)
 
@@ -691,7 +714,7 @@ class ModManagementFrame:
         """依目前條件載入線上模組（需輸入關鍵字）。"""
         request, warning_message = self._build_online_browse_request()
         if request is None:
-            if show_warning and warning_message:
+            if show_warning:
                 UIUtils.show_warning("目前不支援", warning_message, self.parent)
             self._clear_online_mods()
             return
@@ -720,10 +743,14 @@ class ModManagementFrame:
                 logger.error("搜尋線上模組失敗: 未知錯誤\n" + traceback.format_exc())
                 self.update_status_safe("搜尋線上模組失敗：內部錯誤")
 
-        UIUtils.run_async(search_task)
+        TaskUtils.run_async(search_task)
 
     def on_online_browse_filters_changed(self, _value: str) -> None:
-        """線上瀏覽排序變更時立即刷新清單。"""
+        """線上瀏覽排序變更時立即刷新清單。
+
+        Args:
+            _value: 下拉選單回傳的目前值。
+        """
         self._refresh_online_filter_hint()
         self._refresh_online_results_summary()
         self._load_online_mods(force=True, show_warning=False)
@@ -1011,7 +1038,7 @@ class ModManagementFrame:
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             wrap="word",
         )
-        summary_box.pack(fill="x", padx=12, pady=(0, 12))
+        summary_box.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
         summary_box.configure(state="disabled")
         return summary_box
 
@@ -2387,7 +2414,7 @@ class ModManagementFrame:
                 open=node.node_kind in {"root", "dependency-group"},
                 tags=(node.node_kind, node.root_key, node.group_key),
             )
-        UIUtils.refresh_treeview_alternating_rows(tree)
+        TreeUtils.refresh_treeview_alternating_rows(tree)
         if selected_key and tree.exists(selected_key):
             tree.selection_set(selected_key)
         else:
@@ -2623,7 +2650,11 @@ class ModManagementFrame:
         return review_entries
 
     def search_online_mods(self, _event=None) -> None:
-        """載入 Modrinth 線上模組（需輸入關鍵字）。"""
+        """載入 Modrinth 線上模組並觸發搜尋。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         self._load_online_mods(force=True, show_warning=True)
 
     def refresh_browse_list(self) -> None:
@@ -2641,14 +2672,18 @@ class ModManagementFrame:
                 values=self._build_online_browse_row(mod),
                 tags=(getattr(mod, "project_id", ""), getattr(mod, "slug", ""), getattr(mod, "url", "")),
             )
-            UIUtils.refresh_treeview_alternating_rows(self.browse_tree)
+            TreeUtils.refresh_treeview_alternating_rows(self.browse_tree)
 
     def show_browse_context_menu(self, event) -> None:
-        """顯示線上模組右鍵選單。"""
+        """顯示線上模組右鍵選單。
+
+        Args:
+            event: 觸發選單的滑鼠事件。
+        """
         has_selection, _, _ = self._get_selected_online_mod_context()
         if not has_selection:
             return
-        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        menu = tkinter.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="⬇️ 安裝模組", command=self.install_online_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_online_mod_info)
@@ -2659,7 +2694,11 @@ class ModManagementFrame:
             menu.grab_release()
 
     def install_online_mod(self, _event=None) -> None:
-        """取得模組版本列表並讓使用者選擇要安裝的版本。"""
+        """取得模組版本列表並讓使用者選擇要安裝的版本。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         manager = self.mod_manager
         if not self.current_server or not manager:
             UIUtils.show_warning("警告", "請先選擇伺服器後再安裝模組", self.parent)
@@ -2718,17 +2757,17 @@ class ModManagementFrame:
                 logger.error(f"取得模組版本失敗: {e}\n{traceback.format_exc()}")
                 self.update_status_safe(f"取得模組版本失敗: {e}")
 
-        UIUtils.run_async(load_versions_task)
+        TaskUtils.run_async(load_versions_task)
 
     def _show_version_install_dialog(
         self, mod: Any, versions: list[Any], version_reports: list[Any] | None = None
     ) -> None:
         """顯示版本選擇對話框。"""
-        dialog = UIUtils.create_toplevel_dialog(
+        dialog = DialogUtils.create_toplevel_dialog(
             self.parent,
             f"安裝模組 - {mod.name}",
-            width=1080,
-            height=960,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
             make_modal=True,
             bind_icon=True,
             center_on_parent=True,
@@ -2741,13 +2780,13 @@ class ModManagementFrame:
             use_transient_for_modal=False,
         )
         main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=18, pady=18)
+        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
         title = ctk.CTkLabel(
             main_frame,
             text=f"選擇要安裝的版本：{mod.name}",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
-        title.pack(anchor="w", padx=12, pady=(12, 10))
+        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL_PLUS))
         filter_label = ctk.CTkLabel(
             main_frame,
             text=self._get_online_version_dialog_hint_text(),
@@ -2757,19 +2796,22 @@ class ModManagementFrame:
             anchor="w",
             wraplength=FontManager.get_dpi_scaled_size(760),
         )
-        filter_label.pack(fill="x", padx=12, pady=(0, 8))
+        filter_label.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
         tree_container = ctk.CTkFrame(main_frame)
-        tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-        tree_style = UIUtils.configure_treeview_list_style(
+        tree_container.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        tree_style = TreeUtils.configure_treeview_list_style(
             "OnlineVersionList",
             body_font=FontManager.get_font(size=FontSize.INPUT),
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             rowheight=int(25 * FontManager.get_scale_factor()),
         )
-        columns = ("version", "minecraft", "loader", "status", "date")
-        version_tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=12, style=tree_style)
+        columns = ("version", "type", "minecraft", "loader", "status", "date")
+        version_tree = ttk.Treeview(
+            tree_container, columns=columns, show="headings", height=Spacing.MEDIUM, style=tree_style
+        )
         column_config = {
             "version": ("版本", 150),
+            "type": ("類型", 70),
             "minecraft": ("Minecraft", 150),
             "loader": ("Loader", 120),
             "status": ("狀態", 140),
@@ -2777,12 +2819,13 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             version_tree.heading(col, text=text, anchor="w")
-            version_tree.column(col, width=width, minwidth=60, anchor="w", stretch=col == "status")
-        UIUtils.bind_treeview_header_auto_fit(
+            is_stretch = col == "date"
+            version_tree.column(col, width=width, minwidth=width if is_stretch else 60, anchor="w", stretch=is_stretch)
+        TreeUtils.bind_treeview_header_auto_fit(
             version_tree,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             body_font=FontManager.get_font(size=FontSize.INPUT),
-            stretch_columns={"status"},
+            stretch_columns={"date"},
         )
         version_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=version_tree.yview)
         version_tree.configure(yscrollcommand=version_scroll.set)
@@ -2796,12 +2839,15 @@ class ModManagementFrame:
             if version_reports and index < len(version_reports):
                 report = version_reports[index]
             status_text = self._get_online_version_status_text(report)
+            v_type = getattr(version, "version_type", "") or ""
+            type_display = "正式版" if v_type == "release" else ("測試版" if "beta" in v_type else v_type.capitalize())
             version_tree.insert(
                 "",
                 "end",
                 iid=str(index),
                 values=(
                     getattr(version, "display_name", "未知版本"),
+                    type_display,
                     ", ".join(getattr(version, "game_versions", []) or []) or "-",
                     ", ".join(getattr(version, "loaders", []) or []) or "-",
                     status_text,
@@ -2810,14 +2856,14 @@ class ModManagementFrame:
             )
         if versions:
             version_tree.selection_set("0")
-        UIUtils.refresh_treeview_alternating_rows(version_tree)
+        TreeUtils.refresh_treeview_alternating_rows(version_tree)
         summary_label = ctk.CTkLabel(
             main_frame, text="版本分析", font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold")
         )
-        summary_label.pack(anchor="w", padx=12, pady=(0, 6))
-        summary_box = self._create_review_summary_box(main_frame, height=138)
+        summary_label.pack(anchor="w", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=12, pady=(0, 8))
+        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
         install_button = ctk.CTkButton(
             button_frame,
             text="➕ 加入安裝清單",
@@ -2841,7 +2887,7 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        open_button.pack(side="left", padx=(10, 0))
+        open_button.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
         project_page_url = self._resolve_online_mod_project_page_url(mod)
         project_page_button = ctk.CTkButton(
             button_frame,
@@ -2855,7 +2901,7 @@ class ModManagementFrame:
             height=Sizes.BUTTON_HEIGHT,
             state="normal" if project_page_url else "disabled",
         )
-        project_page_button.pack(side="left", padx=(10, 0))
+        project_page_button.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
         close_button = ctk.CTkButton(
             button_frame,
             text="關閉",
@@ -2888,7 +2934,7 @@ class ModManagementFrame:
 
         version_tree.bind("<<TreeviewSelect>>", refresh_version_report)
         refresh_version_report()
-        UIUtils.schedule_toplevel_layout_refresh(
+        DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
             min_width=1000,
             min_height=860,
@@ -3139,7 +3185,31 @@ class ModManagementFrame:
                 self.update_progress_safe(0)
 
         cancel_token = CancellationToken()
-        UIUtils.run_async(install_task, cancel_token=cancel_token)
+        TaskUtils.run_async(install_task, cancel_token=cancel_token)
+
+    def _create_review_shared_ui(self, main_frame: ctk.CTkFrame, wraplength: int) -> tuple[ctk.CTkLabel, ctk.CTkFrame]:
+        """建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
+
+        Args:
+            main_frame: 父框架
+            wraplength: 換行寬度限制
+
+        Returns:
+            包含建立好的標籤與框架組合的元組
+        """
+        overview_label = ctk.CTkLabel(
+            main_frame,
+            text="",
+            font=FontManager.get_font(size=FontSize.NORMAL),
+            text_color=Colors.TEXT_SECONDARY,
+            justify="left",
+            anchor="w",
+            wraplength=FontManager.get_dpi_scaled_size(wraplength),
+        )
+        overview_label.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        tree_container = ctk.CTkFrame(main_frame)
+        tree_container.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        return overview_label, tree_container
 
     def show_online_install_queue(self) -> None:
         """顯示待安裝清單與最終 review。"""
@@ -3154,11 +3224,11 @@ class ModManagementFrame:
             for entry in review_entries
         }
         global_review_notes = self._collect_online_review_global_notes(review_entries)
-        dialog = UIUtils.create_toplevel_dialog(
+        dialog = DialogUtils.create_toplevel_dialog(
             self.parent,
             "安裝清單 Review",
-            width=1040,
-            height=860,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
             make_modal=True,
             bind_icon=True,
             center_on_parent=True,
@@ -3171,13 +3241,13 @@ class ModManagementFrame:
             use_transient_for_modal=False,
         )
         main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=18, pady=18)
+        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
         title = ctk.CTkLabel(
             main_frame,
             text="待安裝模組與依賴檢查",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
-        title.pack(anchor="w", padx=12, pady=(12, 8))
+        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
         subtitle = ctk.CTkLabel(
             main_frame,
             text=self._build_online_install_review_subtitle(
@@ -3192,25 +3262,14 @@ class ModManagementFrame:
             anchor="w",
             wraplength=FontManager.get_dpi_scaled_size(860),
         )
-        subtitle.pack(fill="x", padx=12, pady=(0, 6))
-        overview_label = ctk.CTkLabel(
-            main_frame,
-            text="",
-            font=FontManager.get_font(size=FontSize.NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
-            justify="left",
-            anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(860),
-        )
-        overview_label.pack(fill="x", padx=12, pady=(0, 6))
-        tree_container = ctk.CTkFrame(main_frame)
-        tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        subtitle.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        overview_label, tree_container = self._create_review_shared_ui(main_frame, 860)
         queue_tree = ttk.Treeview(
             tree_container,
             columns=("run", "source", "name", "version", "channel", "status"),
             show="tree headings",
-            height=12,
-            style=UIUtils.configure_treeview_list_style(
+            height=Spacing.MEDIUM,
+            style=TreeUtils.configure_treeview_list_style(
                 "InstallQueueList",
                 body_font=FontManager.get_font(size=FontSize.INPUT),
                 heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
@@ -3218,20 +3277,20 @@ class ModManagementFrame:
             ),
         )
         queue_tree.heading("#0", text="項目")
-        queue_tree.column("#0", width=120, minwidth=90, anchor="w", stretch=False)
+        queue_tree.column("#0", width=Sizes.BUTTON_WIDTH_SECONDARY, minwidth=90, anchor="w", stretch=False)
         queue_tree.heading("run", text="執行")
-        queue_tree.column("run", width=80, minwidth=60, anchor="center", stretch=False)
+        queue_tree.column("run", width=Sizes.BUTTON_WIDTH_COMPACT, minwidth=60, anchor="center", stretch=False)
         queue_tree.heading("source", text="來源")
-        queue_tree.column("source", width=100, minwidth=80, anchor="w", stretch=False)
+        queue_tree.column("source", width=Sizes.BUTTON_WIDTH_SMALL, minwidth=80, anchor="w", stretch=False)
         queue_tree.heading("name", text="名稱")
-        queue_tree.column("name", width=240, minwidth=160, anchor="w", stretch=False)
+        queue_tree.column("name", width=Sizes.CONSOLE_PANEL_HEIGHT, minwidth=160, anchor="w", stretch=False)
         queue_tree.heading("version", text="版本")
-        queue_tree.column("version", width=180, minwidth=120, anchor="w", stretch=False)
+        queue_tree.column("version", width=Sizes.DIALOG_SMALL_HEIGHT, minwidth=120, anchor="w", stretch=False)
         queue_tree.heading("channel", text="類型")
-        queue_tree.column("channel", width=100, minwidth=80, anchor="w", stretch=False)
+        queue_tree.column("channel", width=Sizes.BUTTON_WIDTH_SMALL, minwidth=80, anchor="w", stretch=False)
         queue_tree.heading("status", text="狀態")
-        queue_tree.column("status", width=170, minwidth=130, anchor="w", stretch=True)
-        UIUtils.bind_treeview_header_auto_fit(
+        queue_tree.column("status", width=Sizes.SERVER_TREE_COL_LOADER + 20, minwidth=130, anchor="w", stretch=True)
+        TreeUtils.bind_treeview_header_auto_fit(
             queue_tree,
             include_tree_column=True,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
@@ -3251,7 +3310,7 @@ class ModManagementFrame:
                 queue_tree, self._build_online_review_task_nodes(review_entries), column_count=6
             )
 
-        summary_box = self._create_review_summary_box(main_frame, height=138)
+        summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
         self._bind_vertical_mousewheel(queue_tree, scroll_callback=queue_tree.yview_scroll)
         summary_text_widget = getattr(summary_box, "_textbox", summary_box)
         self._bind_vertical_mousewheel(summary_box, scroll_callback=summary_text_widget.yview_scroll)
@@ -3301,7 +3360,7 @@ class ModManagementFrame:
         refresh_queue_tree()
         refresh_queue_summary()
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=12, pady=(0, 8))
+        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
         install_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -3332,7 +3391,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_WARNING,
             hover_color=Colors.BUTTON_WARNING_HOVER,
             command=lambda: self._remove_selected_pending_online_installs(queue_tree, dialog, review_root_keys),
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
         self._create_review_action_button(
             button_frame,
@@ -3340,7 +3399,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_SECONDARY,
             hover_color=Colors.BUTTON_SECONDARY_HOVER,
             command=lambda: self._clear_pending_online_installs(dialog),
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
         project_page_button = self._create_review_action_button(
             button_frame,
@@ -3348,7 +3407,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             command=open_selected_queue_project_page,
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
         self._create_review_action_button(
             button_frame,
@@ -3362,7 +3421,7 @@ class ModManagementFrame:
         refresh_queue_action_button()
         refresh_queue_project_page_button()
         queue_tree.bind("<<TreeviewSelect>>", refresh_queue_project_page_button, add="+")
-        UIUtils.schedule_toplevel_layout_refresh(
+        DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
             min_width=1000,
             min_height=820,
@@ -3657,7 +3716,7 @@ class ModManagementFrame:
             finally:
                 self.update_progress_safe(0)
 
-        UIUtils.run_async(install_task)
+        TaskUtils.run_async(install_task)
 
     def _show_local_update_review_dialog(self, update_plan: LocalModUpdatePlan, scope_text: str) -> None:
         """顯示本地模組更新檢查結果。"""
@@ -3684,11 +3743,11 @@ class ModManagementFrame:
             entry_map = {self._build_local_update_review_key(entry.candidate): entry for entry in review_entries}
             review_root_keys = set(entry_map)
 
-        dialog = UIUtils.create_toplevel_dialog(
+        dialog = DialogUtils.create_toplevel_dialog(
             self.parent,
             "本地模組更新檢查",
-            width=1100,
-            height=900,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
             make_modal=True,
             bind_icon=True,
             center_on_parent=True,
@@ -3701,13 +3760,13 @@ class ModManagementFrame:
             use_transient_for_modal=False,
         )
         main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=18, pady=18)
+        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
         title = ctk.CTkLabel(
             main_frame,
             text="本地模組更新與相容性 Review",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
-        title.pack(anchor="w", padx=12, pady=(12, 8))
+        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
         local_group_counts = self._count_local_update_review_groups(review_entries)
         subtitle = ctk.CTkLabel(
             main_frame,
@@ -3726,25 +3785,14 @@ class ModManagementFrame:
             anchor="w",
             wraplength=FontManager.get_dpi_scaled_size(880),
         )
-        subtitle.pack(fill="x", padx=12, pady=(0, 6))
-        overview_label = ctk.CTkLabel(
-            main_frame,
-            text="",
-            font=FontManager.get_font(size=FontSize.NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
-            justify="left",
-            anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(880),
-        )
-        overview_label.pack(fill="x", padx=12, pady=(0, 6))
-        tree_container = ctk.CTkFrame(main_frame)
-        tree_container.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        subtitle.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        overview_label, tree_container = self._create_review_shared_ui(main_frame, 880)
         update_tree = ttk.Treeview(
             tree_container,
             columns=("run", "current", "target", "source", "status"),
             show="tree headings",
-            height=12,
-            style=UIUtils.configure_treeview_list_style(
+            height=Spacing.MEDIUM,
+            style=TreeUtils.configure_treeview_list_style(
                 "LocalUpdateList",
                 body_font=FontManager.get_font(size=FontSize.INPUT),
                 heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
@@ -3752,18 +3800,18 @@ class ModManagementFrame:
             ),
         )
         update_tree.heading("#0", text="模組")
-        update_tree.column("#0", width=250, minwidth=170, anchor="w", stretch=False)
+        update_tree.column("#0", width=Sizes.SERVER_TREE_COL_NAME - 50, minwidth=170, anchor="w", stretch=False)
         update_tree.heading("run", text="套用")
-        update_tree.column("run", width=50, minwidth=48, anchor="center", stretch=False)
+        update_tree.column("run", width=Spacing.XXL, minwidth=48, anchor="center", stretch=False)
         update_tree.heading("current", text="目前版本")
-        update_tree.column("current", width=120, minwidth=96, anchor="w", stretch=False)
+        update_tree.column("current", width=Sizes.BUTTON_WIDTH_SECONDARY, minwidth=96, anchor="w", stretch=False)
         update_tree.heading("target", text="建議版本")
-        update_tree.column("target", width=155, minwidth=120, anchor="w", stretch=False)
+        update_tree.column("target", width=Sizes.SERVER_TREE_COL_LOADER + 5, minwidth=120, anchor="w", stretch=False)
         update_tree.heading("source", text="來源 / 識別")
-        update_tree.column("source", width=170, minwidth=130, anchor="w", stretch=False)
+        update_tree.column("source", width=Sizes.SERVER_TREE_COL_LOADER + 20, minwidth=130, anchor="w", stretch=False)
         update_tree.heading("status", text="檢查狀態")
-        update_tree.column("status", width=300, minwidth=240, anchor="w", stretch=True)
-        UIUtils.bind_treeview_header_auto_fit(
+        update_tree.column("status", width=Sizes.INPUT_WIDTH, minwidth=240, anchor="w", stretch=True)
+        TreeUtils.bind_treeview_header_auto_fit(
             update_tree,
             include_tree_column=True,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
@@ -3781,7 +3829,7 @@ class ModManagementFrame:
             nodes = self._build_local_update_task_nodes(review_entries)
             self._render_review_task_tree(update_tree, nodes, column_count=5)
 
-        summary_box = self._create_review_summary_box(main_frame, height=138)
+        summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
 
         def refresh_update_status_banner() -> None:
             review_nodes = self._build_local_update_task_nodes(review_entries)
@@ -3837,7 +3885,7 @@ class ModManagementFrame:
         refresh_update_tree()
         refresh_update_summary()
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=12, pady=(0, 8))
+        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
         update_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -3852,7 +3900,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             command=lambda: toggle_update_selection(True),
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
         self._create_review_action_button(
             button_frame,
@@ -3860,7 +3908,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_SECONDARY,
             hover_color=Colors.BUTTON_SECONDARY_HOVER,
             command=lambda: toggle_update_selection(False),
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
         project_page_button = self._create_review_action_button(
             button_frame,
@@ -3868,7 +3916,7 @@ class ModManagementFrame:
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             command=open_selected_update_project_page,
-            padx=(10, 0),
+            padx=(Spacing.SMALL_PLUS, 0),
         )
 
         def refresh_update_action_button() -> None:
@@ -3895,7 +3943,7 @@ class ModManagementFrame:
         refresh_update_status_banner()
         refresh_update_action_button()
         refresh_update_project_page_button()
-        UIUtils.schedule_toplevel_layout_refresh(
+        DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
             min_width=1060,
             min_height=860,
@@ -3961,7 +4009,7 @@ class ModManagementFrame:
                 self.update_status_safe(f"檢查本地模組更新失敗: {e}")
                 self.ui_queue.put(lambda msg=str(e): UIUtils.show_error("更新檢查失敗", msg, self.parent))
 
-        UIUtils.run_async(check_task)
+        TaskUtils.run_async(check_task)
 
     def copy_online_mod_info(self) -> None:
         """複製線上模組資訊。"""
@@ -3996,13 +4044,17 @@ class ModManagementFrame:
         self.notebook = ttk.Notebook(self.main_frame)
         style = ttk.Style()
         style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold"))
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=(0, 10))
+        self.notebook.pack(fill="both", expand=True, padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
         self.create_local_mods_tab()
         self.create_browse_mods_tab()
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
     def on_tab_changed(self, _event=None) -> None:
-        """頁籤切換事件"""
+        """頁籤切換時同步目前頁面的資料狀態。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         try:
             if not self.notebook:
                 return
@@ -4018,9 +4070,9 @@ class ModManagementFrame:
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列"""
         toolbar_frame = ctk.CTkFrame(self.local_tab)
-        toolbar_frame.pack(fill="x", padx=14, pady=14)
+        toolbar_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
         left_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
-        left_frame.pack(side="left", padx=7)
+        left_frame.pack(side="left", padx=Spacing.SMALL)
         import_btn = ctk.CTkButton(
             left_frame,
             text="📁 匯入模組",
@@ -4094,12 +4146,12 @@ class ModManagementFrame:
         )
         folder_btn.pack(side="left")
         right_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
-        right_frame.pack(side="right", padx=15)
+        right_frame.pack(side="right", padx=Spacing.LARGE_MINUS)
         search_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
-        search_frame.pack(side="left", padx=(0, 15))
+        search_frame.pack(side="left", padx=(0, Spacing.LARGE_MINUS))
         search_label = ctk.CTkLabel(search_frame, text="🔍", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM))
         search_label.pack(side="left")
-        self.local_search_var = tk.StringVar()
+        self.local_search_var = tkinter.StringVar()
         search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self.local_search_var,
@@ -4109,7 +4161,7 @@ class ModManagementFrame:
         )
         search_entry.pack(side="left", padx=(FontManager.get_dpi_scaled_size(8), 0))
         self.local_search_var.trace("w", self.filter_local_mods)
-        self.local_filter_var = tk.StringVar(value="所有")
+        self.local_filter_var = tkinter.StringVar(value="所有")
         filter_combo = CustomDropdown(
             right_frame,
             variable=self.local_filter_var,
@@ -4121,7 +4173,11 @@ class ModManagementFrame:
         filter_combo.pack(side="left")
 
     def on_filter_changed(self, _value: str) -> None:
-        """篩選變更回調"""
+        """本地模組篩選條件變更時重新過濾列表。
+
+        Args:
+            _value: 下拉選單回傳的目前值。
+        """
         self.filter_local_mods()
 
     def refresh_mod_list_force(self) -> None:
@@ -4143,12 +4199,12 @@ class ModManagementFrame:
                     )
                     self.update_status_safe(f"強制掃描失敗: {e}")
 
-            UIUtils.run_async(load_thread)
+            TaskUtils.run_async(load_thread)
 
     def create_local_mod_list(self) -> None:
         """建立本地模組列表"""
         list_frame = ctk.CTkFrame(self.local_tab)
-        list_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        list_frame.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
         export_btn = ctk.CTkButton(
             list_frame,
             text="匯出模組列表",
@@ -4160,9 +4216,9 @@ class ModManagementFrame:
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT_EXPORT,
         )
-        export_btn.pack(anchor="ne", pady=(10, 5), padx=10)
+        export_btn.pack(anchor="ne", pady=(Spacing.SMALL_PLUS, Spacing.TINY), padx=Spacing.SMALL_PLUS)
         tree_container = ctk.CTkFrame(list_frame)
-        tree_container.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        tree_container.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
         style = ttk.Style()
         style.configure(
             "ModList.Treeview",
@@ -4191,7 +4247,8 @@ class ModManagementFrame:
         }
         for col, (text, width) in column_config.items():
             self.local_tree.heading(col, text=text, anchor="w")
-            self.local_tree.column(col, width=width, minwidth=50, stretch=col == "description")
+            is_stretch = col == "description"
+            self.local_tree.column(col, width=width, minwidth=width if is_stretch else 50, stretch=is_stretch)
         v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
         h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
         self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
@@ -4206,11 +4263,12 @@ class ModManagementFrame:
         self.local_tree.tag_configure("even", background=bg_even)
         tree_container.grid_rowconfigure(0, weight=1)
         tree_container.grid_columnconfigure(0, weight=1)
-        UIUtils.bind_treeview_header_auto_fit(
+        TreeUtils.bind_treeview_header_auto_fit(
             self.local_tree,
             on_row_double_click=self.toggle_local_mod,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             body_font=FontManager.get_font(size=FontSize.INPUT),
+            stretch_columns={"description"},
         )
         self.local_tree.bind("<Button-3>", self.show_local_context_menu)
         self.local_tree.bind("<<TreeviewSelect>>", self.on_tree_selection_changed)
@@ -4221,7 +4279,7 @@ class ModManagementFrame:
             UIUtils.show_error("錯誤", "請先選擇伺服器以匯出模組列表。", self.parent)
             return
         try:
-            dialog = UIUtils.create_toplevel_dialog(
+            dialog = DialogUtils.create_toplevel_dialog(
                 self.parent,
                 "匯出模組列表",
                 width=Sizes.DIALOG_LARGE_WIDTH,
@@ -4233,44 +4291,44 @@ class ModManagementFrame:
                 delay_ms=250,
             )
             main_frame = ctk.CTkFrame(dialog)
-            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            main_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
             title_label = ctk.CTkLabel(
                 main_frame, text="匯出模組列表", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
             )
-            title_label.pack(pady=(10, 20))
+            title_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.XL))
             fmt_frame = ctk.CTkFrame(main_frame)
-            fmt_frame.pack(fill="x", pady=(0, 15))
+            fmt_frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
             fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
-            fmt_inner.pack(fill="x", padx=20, pady=15)
+            fmt_inner.pack(fill="x", padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
             ctk.CTkLabel(
                 fmt_inner, text="選擇匯出格式:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
-            ).pack(side="left", padx=(0, 15))
-            fmt_var = tk.StringVar(value="text")
+            ).pack(side="left", padx=(0, Spacing.LARGE_MINUS))
+            fmt_var = tkinter.StringVar(value="text")
             text_radio = ctk.CTkRadioButton(
                 fmt_inner, text="純文字", variable=fmt_var, value="text", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            text_radio.pack(side="left", padx=5)
+            text_radio.pack(side="left", padx=Spacing.TINY)
             json_radio = ctk.CTkRadioButton(
                 fmt_inner, text="JSON", variable=fmt_var, value="json", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            json_radio.pack(side="left", padx=5)
+            json_radio.pack(side="left", padx=Spacing.TINY)
             html_radio = ctk.CTkRadioButton(
                 fmt_inner, text="HTML", variable=fmt_var, value="html", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            html_radio.pack(side="left", padx=5)
+            html_radio.pack(side="left", padx=Spacing.TINY)
             preview_frame = ctk.CTkFrame(main_frame)
-            preview_frame.pack(fill="both", expand=True, pady=(0, 15))
+            preview_frame.pack(fill="both", expand=True, pady=(0, Spacing.LARGE_MINUS))
             preview_label = ctk.CTkLabel(
                 preview_frame, text="預覽:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
             )
-            preview_label.pack(anchor="w", padx=15, pady=(15, 5))
+            preview_label.pack(anchor="w", padx=Spacing.LARGE_MINUS, pady=(Spacing.LARGE_MINUS, Spacing.TINY))
             text_widget = ctk.CTkTextbox(
                 preview_frame,
                 font=FontManager.get_font(size=FontSize.LARGE),
                 height=Sizes.PREVIEW_TEXTBOX_HEIGHT,
                 wrap="word",
             )
-            text_widget.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+            text_widget.pack(fill="both", expand=True, padx=Spacing.LARGE_MINUS, pady=(0, Spacing.LARGE_MINUS))
 
             def update_preview(*_):
                 export_text = self.mod_manager.export_mod_list(fmt_var.get())
@@ -4280,7 +4338,7 @@ class ModManagementFrame:
             fmt_var.trace_add("write", update_preview)
             update_preview()
             btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-            btn_frame.pack(pady=(0, 10))
+            btn_frame.pack(pady=(0, Spacing.SMALL_PLUS))
 
             def do_save():
                 fmt = fmt_var.get()
@@ -4321,7 +4379,7 @@ class ModManagementFrame:
                 width=FontManager.get_dpi_scaled_size(180),
                 height=int(40 * FontManager.get_scale_factor()),
             )
-            save_btn.pack(side="left", padx=(0, 10))
+            save_btn.pack(side="left", padx=(0, Spacing.SMALL_PLUS))
             close_btn = ctk.CTkButton(
                 btn_frame,
                 text="關閉",
@@ -4334,7 +4392,7 @@ class ModManagementFrame:
             )
             close_btn.pack(side="left")
             dialog.bind("<Escape>", lambda _e: dialog.destroy())
-            UIUtils.schedule_toplevel_layout_refresh(
+            DialogUtils.schedule_toplevel_layout_refresh(
                 dialog,
                 min_width=Sizes.DIALOG_LARGE_WIDTH,
                 min_height=Sizes.DIALOG_LARGE_HEIGHT,
@@ -4349,7 +4407,7 @@ class ModManagementFrame:
     def create_status_bar(self) -> None:
         """建立狀態列"""
         status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * FontManager.get_scale_factor()))
-        status_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 20))
+        status_frame.pack(side="bottom", fill="x", padx=Spacing.XL, pady=(0, Spacing.XL))
         status_frame.pack_propagate(False)
         self.status_label = ctk.CTkLabel(
             status_frame,
@@ -4357,8 +4415,8 @@ class ModManagementFrame:
             font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
             text_color=Colors.TEXT_SECONDARY,
         )
-        self.status_label.pack(side="left", padx=10, pady=int(6 * FontManager.get_scale_factor()))
-        self.progress_var = tk.DoubleVar()
+        self.status_label.pack(side="left", padx=Spacing.SMALL_PLUS, pady=int(6 * FontManager.get_scale_factor()))
+        self.progress_var = tkinter.DoubleVar()
         self.progress_bar = ctk.CTkProgressBar(
             status_frame,
             variable=self.progress_var,
@@ -4367,7 +4425,7 @@ class ModManagementFrame:
             progress_color=Colors.PROGRESS_ACCENT,
             fg_color=Colors.PROGRESS_TRACK,
         )
-        self.progress_bar.pack(side="right", padx=10, pady=int(6 * FontManager.get_scale_factor()))
+        self.progress_bar.pack(side="right", padx=Spacing.SMALL_PLUS, pady=int(6 * FontManager.get_scale_factor()))
 
     def load_servers(self) -> None:
         """載入伺服器列表"""
@@ -4394,7 +4452,11 @@ class ModManagementFrame:
             UIUtils.show_error("錯誤", f"載入伺服器列表失敗: {e}", self.parent)
 
     def on_server_changed(self, _event=None) -> None:
-        """伺服器選擇改變時的處理"""
+        """切換目前伺服器時重新載入相關模組資料。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         server_name = self.server_var.get()
         if not server_name:
             return
@@ -4480,7 +4542,7 @@ class ModManagementFrame:
                 self.update_progress_safe(0)
                 self.update_status_safe(f"掃描失敗: {e}")
 
-        UIUtils.run_async(load_thread)
+        TaskUtils.run_async(load_thread)
 
     def enhance_local_mods(self) -> None:
         """本地模組增強資訊，查詢完自動刷新列表（可選）"""
@@ -4515,7 +4577,7 @@ class ModManagementFrame:
                 executor.map(enhance_single, self.local_mods)
             self.ui_queue.put(self.refresh_local_list)
 
-        UIUtils.run_async(enhance_thread)
+        TaskUtils.run_async(enhance_thread)
 
     def _get_enhanced_attr(self, enhanced, attr: str, fallback):
         """屬性值或後備值"""
@@ -4758,7 +4820,6 @@ class ModManagementFrame:
             self._finalize_local_refresh(refresh_token=refresh_token, rows_snapshot={}, selected_mod_ids=set())
             return
         batch_size = self._get_local_insert_batch_size(len(pending_insert))
-        from ..utils import make_tree_insert_batch
 
         def _update_recycled(item_id: str, entry: tuple) -> None:
             tree.item(item_id, values=entry[1], tags=entry[2])
@@ -4772,7 +4833,7 @@ class ModManagementFrame:
                 refresh_token=refresh_token, rows_snapshot=rows_snapshot, selected_mod_ids=selected_mod_ids
             )
 
-        insert_batch = make_tree_insert_batch(
+        insert_batch = TreeUtils.make_tree_insert_batch(
             tree=tree,
             pending_insert=pending_insert,
             batch_size=batch_size,
@@ -4922,7 +4983,11 @@ class ModManagementFrame:
             logger.debug(f"設定批量切換按鈕狀態失敗: {e}", "ModManagement")
 
     def toggle_local_mod(self, _event=None) -> None:
-        """雙擊切換本地模組啟用/停用狀態 - 參考 Prism Launcher"""
+        """切換目前選取本地模組的啟用/停用狀態。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         if not self.local_tree:
             return
         selection = self.local_tree.selection()
@@ -5014,14 +5079,18 @@ class ModManagementFrame:
 
                 self.ui_queue.put(apply_ui_update)
 
-            UIUtils.run_async(do_toggle)
+            TaskUtils.run_async(do_toggle)
         except Exception as e:
             if hasattr(self, "status_label") and self.status_label.winfo_exists():
                 self.update_status(f"操作失敗: {e}")
             logger.error(f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}")
 
     def filter_local_mods(self, *_args) -> None:
-        """篩選本地模組（debounce，避免連續重建 Treeview）。"""
+        """篩選本地模組（debounce，避免連續重建 Treeview）。
+
+        Args:
+            *_args: 來自事件或 trace callback 的額外參數。
+        """
         UIUtils.schedule_debounce(
             self.parent, "_local_filter_job", 120, self._run_debounced_local_filter_refresh, owner=self
         )
@@ -5031,7 +5100,11 @@ class ModManagementFrame:
         self.refresh_local_list()
 
     def show_local_context_menu(self, event) -> None:
-        """顯示本地模組右鍵選單"""
+        """顯示本地模組右鍵選單。
+
+        Args:
+            event: 滑鼠右鍵事件。
+        """
         if not self.local_tree:
             return
         tree = self.local_tree
@@ -5040,7 +5113,7 @@ class ModManagementFrame:
         selection = tree.selection()
         if not selection:
             return
-        menu = tk.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        menu = tkinter.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
@@ -5143,6 +5216,8 @@ class ModManagementFrame:
                 self.status_label.configure(text=f"開啟檔案總管失敗: {e}")
 
     def delete_local_mod(self) -> None:
+        """刪除目前選取的本地模組檔案。"""
+
         if not self.local_tree:
             return
         tree = self.local_tree
@@ -5357,7 +5432,7 @@ class ModManagementFrame:
                 self.ui_queue.put(self.update_selection_status)
                 self.ui_queue.put(lambda: self._set_bulk_controls_enabled(True))
 
-            UIUtils.run_async(do_batch)
+            TaskUtils.run_async(do_batch)
         except Exception as e:
             logger.error(f"批量操作失敗: {e}\n{traceback.format_exc()}")
             self.update_progress_safe(0)
@@ -5380,7 +5455,11 @@ class ModManagementFrame:
             logger.error(f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}")
 
     def on_tree_selection_changed(self, _event=None) -> None:
-        """樹狀檢視選擇變化事件"""
+        """本地模組樹狀檢視選擇變更時同步狀態。
+
+        Args:
+            _event: 事件繫結傳入的事件物件，未使用。
+        """
         if not self.local_tree:
             return
         try:
@@ -5411,14 +5490,22 @@ class ModManagementFrame:
             logger.error(f"處理選擇變化失敗: {e}\n{traceback.format_exc()}")
 
     def pack(self, **kwargs) -> None:
-        """讓框架可以被 pack"""
+        """將主框架以 pack 方式放入父容器。
+
+        Args:
+            kwargs: 傳給 pack 的版面配置參數。
+        """
         if hasattr(self, "main_frame") and self.main_frame:
             self.main_frame.pack(**kwargs)
         else:
             logger.debug("主框架未初始化，無法打包", "ModManagementFrame")
 
     def grid(self, **kwargs) -> None:
-        """讓框架可以被 grid"""
+        """將主框架以 grid 方式放入父容器。
+
+        Args:
+            kwargs: 傳給 grid 的版面配置參數。
+        """
         if hasattr(self, "main_frame") and self.main_frame:
             self.main_frame.grid(**kwargs)
         else:

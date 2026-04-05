@@ -1,0 +1,31 @@
+name: 'Setup Python Environment'
+description: 'Sets up Python, installs uv, and optionally syncs dependencies with uv. Note: You must run actions/checkout before using this action.'
+inputs:
+  python-version:
+    description: 'Python version to set up'
+    required: false
+    default: '3.12'
+  uv-sync:
+    description: 'Whether to run `uv sync` to install dependencies. Set to "true" to run.'
+    required: false
+    default: 'false'
+outputs:
+  python-version:
+    description: 'Installed Python version'
+    value: ${{ steps.setup-python.outputs.python-version }}
+runs:
+  using: "composite"
+  steps:
+    - id: setup-python
+      name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+
+    - name: Install dependencies
+      if: ${{ inputs.uv-sync == 'true' }}
+      shell: bash
+      run: uv sync --all-groups --frozen

@@ -9,6 +9,9 @@ from .. import lazy_exports
 _EXPORTS: dict[str, tuple[str, str]] = {
     "CreateServerFrame": (".create_server_frame", "CreateServerFrame"),
     "CustomDropdown": (".custom_dropdown", "CustomDropdown"),
+    "DialogUtils": (".dialog_utils", "DialogUtils"),
+    "FontManager": (".font_manager", "FontManager"),
+    "IconUtils": (".icon_utils", "IconUtils"),
     "MinecraftServerManager": (".main_window", "MinecraftServerManager"),
     "ManageServerFrame": (".manage_server_frame", "ManageServerFrame"),
     "ModManagementFrame": (".mod_management", "ModManagementFrame"),
@@ -43,8 +46,12 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "migrate_online_dependency_install_plan_payload",
     ),
     "deserialize_online_dependency_install_plan": (".mod_search_service", "deserialize_online_dependency_install_plan"),
+    "ProgressDialog": (".progress_dialog", "ProgressDialog"),
     "ServerMonitorWindow": (".server_monitor_window", "ServerMonitorWindow"),
     "ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
+    "TaskUtils": (".task_utils", "TaskUtils"),
+    "TreeUtils": (".tree_utils", "TreeUtils"),
+    "ui_config": (".ui_config", "ui_config"),
     "VirtualList": (".virtual_list", "VirtualList"),
     "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
 }

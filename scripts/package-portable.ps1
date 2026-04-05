@@ -6,7 +6,7 @@
 $OutputEncoding = [Console]::OutputEncoding
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
 
-$Host.UI.RawUI.WindowTitle = "Minecraft 伺服器管理器 - 可攜式版本打包工具"
+try { $Host.UI.RawUI.WindowTitle = "Minecraft 伺服器管理器 - 可攜式版本打包工具" } catch { }
 $ErrorActionPreference = "Stop"
 
 Set-Location $PSScriptRoot\..
@@ -35,7 +35,7 @@ Write-Host "[資訊] 版本號: $version" -ForegroundColor Cyan
 
 if (-not (Test-Path "dist\MinecraftServerManager")) {
     Write-Host "錯誤: 找不到 dist\MinecraftServerManager 資料夾。" -ForegroundColor Red
-    Write-Host "請先執行 build_installer_nuitka.bat 來生成可攜式版本。" -ForegroundColor Yellow
+    Write-Host "請先執行 build_installer_nuitka.py 來生成可攜式版本。" -ForegroundColor Yellow
     exit 1
 }
 
@@ -73,7 +73,8 @@ $portablePath = "dist\MinecraftServerManager\.portable"
 if (Test-Path $portablePath) {
     Remove-Item $portablePath -Force
 }
-New-Item -Path $portablePath -ItemType File -Force | Out-Null
+# 使用無 BOM 的 ASCII 編碼建立空標記檔，減少 3 bytes 的體積
+[IO.File]::WriteAllBytes((Join-Path $PWD $portablePath), [byte[]]@())
 
 # 確保移除 unins000.exe 與 unins000.dat (若存在)，可攜式版本不需要
 if (Test-Path "dist\MinecraftServerManager\unins000.exe") {
@@ -89,8 +90,22 @@ Write-Host "[3/3] 建立可攜式版本壓縮檔 (使用高效能 ZipFile)..." -
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $sourceDir = "dist\MinecraftServerManager"
+$compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal
+
+# .NET 6+ 支援 SmallestSize (更慢但更小)，CI 環境建議使用
+try {
+    $compressionLevel = [System.IO.Compression.CompressionLevel]::SmallestSize
+} catch {
+    # .NET Framework 或舊版 .NET 不支援 SmallestSize，回退到 Optimal
+    $compressionLevel = [System.IO.Compression.CompressionLevel]::Optimal
+}
+
+$zipPathTemp = "$zipPath.tmp"
+if (Test-Path $zipPathTemp) { Remove-Item $zipPathTemp -Force }
+[System.IO.Compression.ZipFile]::CreateFromDirectory($sourceDir, $zipPathTemp, $compressionLevel, $false)
+
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
-[System.IO.Compression.ZipFile]::CreateFromDirectory($sourceDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+Rename-Item -Path $zipPathTemp -NewName $zipFile
 
 if (-not (Test-Path $zipPath)) {
     Write-Host "[錯誤] 壓縮檔建立失敗" -ForegroundColor Red
@@ -102,7 +117,3 @@ Write-Host ""
 Write-Host "========================================================" -ForegroundColor Cyan
 Write-Host "  打包完成！" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "可攜式版本檔案：dist\$zipFile" -ForegroundColor White
-Write-Host "SHA256 將由 GitHub Release asset 的 digest 提供" -ForegroundColor Yellow
-Write-Host ""

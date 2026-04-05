@@ -10,6 +10,7 @@ from pathlib import Path
 from defusedxml import ElementTree as ET
 from ..models import LoaderVersion
 from ..utils import (
+    CancellationToken,
     HTTPUtils,
     JavaUtils,
     PathUtils,
@@ -21,7 +22,6 @@ from ..utils import (
     atomic_write_json,
     get_logger,
     record_and_mark,
-    CancellationToken,
 )
 from . import MinecraftVersionManager
 
@@ -72,9 +72,20 @@ class LoaderManager(Singleton):
         user_java_path: str | None = None,
         parent_window=None,
     ) -> bool | str:
-        """
-        依 loader_type 下載並部署伺服器檔案。
-        Vanilla/Fabric → bool；Forge → 成功時回傳主 JAR 相對路徑字串。
+        """依 loader_type 下載並部署伺服器檔案。
+
+        Args:
+            loader_type: 載入器類型。
+            minecraft_version: Minecraft 版本。
+            loader_version: 載入器版本。
+            download_path: 伺服器下載目標路徑。
+            progress_callback: 下載進度回呼。
+            cancel_flag: 可選的取消旗標。
+            user_java_path: 使用者指定的 Java 路徑。
+            parent_window: 用於 UI 提示的父視窗。
+
+        Returns:
+            Vanilla / Fabric 成功時回傳 bool；Forge 成功時回傳主 JAR 的相對路徑字串。
         """
         lt = ServerDetectionVersionUtils.standardize_loader_type(loader_type, loader_version)
         if user_java_path and Path(user_java_path).exists():

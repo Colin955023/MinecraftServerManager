@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import src.utils.subprocess_utils as subprocess_utils_module
+import src.utils.runtime_utils.subprocess_utils as subprocess_utils_module
 
 
 @pytest.mark.smoke

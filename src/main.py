@@ -4,6 +4,7 @@ Minecraft Server Manager Main Application
 Main entry point for creating, managing and monitoring Minecraft servers
 """
 
+import ctypes
 import sys
 import traceback
 from contextlib import suppress
@@ -16,8 +17,8 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, str(project_root))
 
 from src.core import LoaderManager, MinecraftVersionManager
-from src.ui import MinecraftServerManager
-from src.utils import FontManager, PathUtils, UIUtils, get_logger, get_settings_manager, record_and_mark
+from src.ui import FontManager, MinecraftServerManager, ui_config
+from src.utils import PathUtils, UIUtils, get_logger, get_settings_manager, record_and_mark
 
 logger = get_logger().bind(component="Main")
 
@@ -73,7 +74,9 @@ def _initialize_managers():
 
 def _setup_ui_environment():
     """設定 UI 環境和主題"""
-    ctk.set_appearance_mode("light")
+    # 初始化 customtkinter 主題配置
+    ui_config.initialize_ui_theme()
+
     settings = get_settings_manager()
     dpi_scaling = settings.get_dpi_scaling()
     FontManager.set_scale_factor(dpi_scaling)
@@ -91,8 +94,6 @@ def main():
     # 註冊 Mutex 供 Inno Setup 偵測應用程式程式執行狀態
     mutex_name = "MinecraftServerManagerMutex"
     try:
-        import ctypes
-
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateMutexW(None, False, mutex_name)
     except Exception as e:

@@ -5,144 +5,259 @@
 from __future__ import annotations
 
 from .. import lazy_exports
+from .mod_utils.modrinth_query_utils import MODRINTH_QUERY_EXPORT_NAMES
 
-_EXPORTS: dict[str, tuple[str, str]] = {
-    "AppRestart": (".app_restart", "AppRestart"),
-    "atomic_write_json": (".atomic_writer", "atomic_write_json"),
-    "best_effort_fsync": (".atomic_writer", "best_effort_fsync"),
-    "BackgroundTaskManager": (".background_task", "BackgroundTaskManager"),
-    "CancellationToken": (".background_task", "CancellationToken"),
-    "get_shared_manager": (".background_task", "get_shared_manager"),
-    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION": (
-        ".dependency_plan_serializer",
-        "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
-    ),
-    "OnlineDependencyInstallItem": (".dependency_plan_serializer", "OnlineDependencyInstallItem"),
-    "OnlineDependencyInstallPlan": (".dependency_plan_serializer", "OnlineDependencyInstallPlan"),
-    "serialize_online_dependency_install_plan": (
-        ".dependency_plan_serializer",
-        "serialize_online_dependency_install_plan",
-    ),
-    "validate_online_dependency_install_plan_payload": (
-        ".dependency_plan_serializer",
-        "validate_online_dependency_install_plan_payload",
-    ),
-    "migrate_online_dependency_install_plan_payload": (
-        ".dependency_plan_serializer",
-        "migrate_online_dependency_install_plan_payload",
-    ),
-    "deserialize_online_dependency_install_plan": (
-        ".dependency_plan_serializer",
-        "deserialize_online_dependency_install_plan",
-    ),
-    "record_and_mark": (".exception_utils", "record_and_mark"),
-    "FontManager": (".font_manager", "FontManager"),
-    "compute_file_hash": (".hash_utils", "compute_file_hash"),
-    "HTTPUtils": (".http_utils", "HTTPUtils"),
-    "JavaDownloader": (".java_downloader", "JavaDownloader"),
-    "JavaUtils": (".java_utils", "JavaUtils"),
-    "get_logger": (".logger", "get_logger"),
-    "shutdown_logging": (".logger", "shutdown_logging"),
-    "ModIndexManager": (".mod_index_manager", "ModIndexManager"),
-    "LocalProviderEnsureResult": (".mod_provider_metadata", "LocalProviderEnsureResult"),
-    "PROVIDER_LIFECYCLE_FRESH": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_FRESH"),
-    "PROVIDER_LIFECYCLE_INVALIDATED": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_INVALIDATED"),
-    "PROVIDER_LIFECYCLE_MISSING": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_MISSING"),
-    "PROVIDER_LIFECYCLE_RETRYING": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_RETRYING"),
-    "PROVIDER_LIFECYCLE_STALE": (".mod_provider_metadata", "PROVIDER_LIFECYCLE_STALE"),
-    "PROVIDER_METADATA_TTL_SECONDS": (".mod_provider_metadata", "PROVIDER_METADATA_TTL_SECONDS"),
-    "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN": (".mod_provider_metadata", "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN"),
-    "ProviderMetadataRecord": (".mod_provider_metadata", "ProviderMetadataRecord"),
-    "apply_provider_metadata": (".mod_provider_metadata", "apply_provider_metadata"),
-    "cache_provider_metadata_record": (".mod_provider_metadata", "cache_provider_metadata_record"),
-    "compute_provider_revalidation_backoff_seconds": (
-        ".mod_provider_metadata",
-        "compute_provider_revalidation_backoff_seconds",
-    ),
-    "derive_provider_lifecycle_state": (".mod_provider_metadata", "derive_provider_lifecycle_state"),
-    "ensure_local_mod_provider_record": (".mod_provider_metadata", "ensure_local_mod_provider_record"),
-    "fetch_modrinth_project_detail": (".mod_provider_metadata", "fetch_modrinth_project_detail"),
-    "is_cached_provider_metadata_fresh": (".mod_provider_metadata", "is_cached_provider_metadata_fresh"),
-    "is_provider_revalidation_retry_due": (".mod_provider_metadata", "is_provider_revalidation_retry_due"),
-    "register_provider_revalidation_failure": (".mod_provider_metadata", "register_provider_revalidation_failure"),
-    "register_provider_revalidation_success": (".mod_provider_metadata", "register_provider_revalidation_success"),
-    "resolve_modrinth_provider_record": (".mod_provider_metadata", "resolve_modrinth_provider_record"),
-    "should_attempt_provider_revalidation": (".mod_provider_metadata", "should_attempt_provider_revalidation"),
-    "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED": (".mod_semantics", "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED"),
-    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED": (".mod_semantics", "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED"),
-    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED": (
-        ".mod_semantics",
-        "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED",
-    ),
-    "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE": (".mod_semantics", "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE"),
-    "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED": (
-        ".mod_semantics",
-        "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED",
-    ),
-    "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED": (".mod_semantics", "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED"),
-    "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE": (".mod_semantics", "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE"),
-    "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED": (".mod_semantics", "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED"),
-    "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY": (".mod_semantics", "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY"),
-    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED"),
-    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING"),
-    "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO": (".mod_semantics", "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO"),
-    "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE"),
-    "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE"),
-    "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE"),
-    "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE"),
-    "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE": (".mod_semantics", "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE"),
-    "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE"),
-    "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE"),
-    "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE": (".mod_semantics", "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE"),
-    "METADATA_SOURCE_CACHED_PROVIDER": (".mod_semantics", "METADATA_SOURCE_CACHED_PROVIDER"),
-    "METADATA_SOURCE_HASH": (".mod_semantics", "METADATA_SOURCE_HASH"),
-    "METADATA_SOURCE_LABELS": (".mod_semantics", "METADATA_SOURCE_LABELS"),
-    "METADATA_SOURCE_LOOKUP": (".mod_semantics", "METADATA_SOURCE_LOOKUP"),
-    "METADATA_SOURCE_SHORT_LABELS": (".mod_semantics", "METADATA_SOURCE_SHORT_LABELS"),
-    "METADATA_SOURCE_STALE_PROVIDER": (".mod_semantics", "METADATA_SOURCE_STALE_PROVIDER"),
-    "METADATA_SOURCE_UNRESOLVED": (".mod_semantics", "METADATA_SOURCE_UNRESOLVED"),
-    "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE": (".mod_semantics", "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE"),
-    "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE": (".mod_semantics", "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE"),
-    "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE": (".mod_semantics", "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE"),
-    "ONLINE_REVIEW_PRECHECK_NOTE": (".mod_semantics", "ONLINE_REVIEW_PRECHECK_NOTE"),
-    "RECOMMENDATION_CONFIDENCE_ADVISORY": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_ADVISORY"),
-    "RECOMMENDATION_CONFIDENCE_BLOCKED": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_BLOCKED"),
-    "RECOMMENDATION_CONFIDENCE_HIGH": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_HIGH"),
-    "RECOMMENDATION_CONFIDENCE_LABELS": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_LABELS"),
-    "RECOMMENDATION_CONFIDENCE_RETRYABLE": (".mod_semantics", "RECOMMENDATION_CONFIDENCE_RETRYABLE"),
-    "RECOMMENDATION_SOURCE_HASH_METADATA": (".mod_semantics", "RECOMMENDATION_SOURCE_HASH_METADATA"),
-    "RECOMMENDATION_SOURCE_LABELS": (".mod_semantics", "RECOMMENDATION_SOURCE_LABELS"),
-    "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED": (".mod_semantics", "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED"),
-    "RECOMMENDATION_SOURCE_PROJECT_FALLBACK": (".mod_semantics", "RECOMMENDATION_SOURCE_PROJECT_FALLBACK"),
-    "RECOMMENDATION_SOURCE_SHORT_LABELS": (".mod_semantics", "RECOMMENDATION_SOURCE_SHORT_LABELS"),
-    "RECOMMENDATION_SOURCE_STALE_METADATA": (".mod_semantics", "RECOMMENDATION_SOURCE_STALE_METADATA"),
-    "PathUtils": (".path_utils", "PathUtils"),
-    "RuntimePaths": (".runtime_paths", "RuntimePaths"),
-    "ServerDetectionUtils": (".server_detection_utils", "ServerDetectionUtils"),
-    "ServerDetectionVersionUtils": (".server_detection_version_utils", "ServerDetectionVersionUtils"),
-    "ServerPropertiesHelper": (".server_properties_utils", "ServerPropertiesHelper"),
-    "ServerPropertiesValidator": (".server_properties_utils", "ServerPropertiesValidator"),
-    "MemoryUtils": (".server_runtime_utils", "MemoryUtils"),
-    "ServerCommands": (".server_runtime_utils", "ServerCommands"),
-    "ServerOperations": (".server_runtime_utils", "ServerOperations"),
-    "get_settings_manager": (".settings_manager", "get_settings_manager"),
-    "Singleton": (".singleton", "Singleton"),
-    "SubprocessUtils": (".subprocess_utils", "SubprocessUtils"),
-    "SystemUtils": (".system_utils", "SystemUtils"),
-    "Colors": (".ui_utils", "Colors"),
-    "FontSize": (".ui_utils", "FontSize"),
-    "IconUtils": (".ui_utils", "IconUtils"),
-    "ProgressDialog": (".ui_utils", "ProgressDialog"),
-    "Sizes": (".ui_utils", "Sizes"),
-    "Spacing": (".ui_utils", "Spacing"),
-    "UIUtils": (".ui_utils", "UIUtils"),
-    "compute_adaptive_pool_limit": (".ui_utils", "compute_adaptive_pool_limit"),
-    "compute_exponential_moving_average": (".ui_utils", "compute_exponential_moving_average"),
-    "get_button_style": (".ui_utils", "get_button_style"),
-    "get_dropdown_style": (".ui_utils", "get_dropdown_style"),
-    "make_tree_insert_batch": (".ui_utils", "make_tree_insert_batch"),
-    "UpdateChecker": (".update_checker", "UpdateChecker"),
-    "UpdateParsing": (".update_parsing", "UpdateParsing"),
-    "WindowManager": (".window_manager", "WindowManager"),
-}
+_EXPORTS: dict[str, tuple[str, str]] = {}
+
+
+def _register_exports(module_path: str, *names: str) -> None:
+    for name in names:
+        _EXPORTS[name] = (module_path, name)
+
+
+_register_exports(
+    ".runtime_utils.app_restart",
+    "AppRestart",
+)
+_register_exports(
+    ".core_utils.atomic_writer",
+    "atomic_write_json",
+    "best_effort_fsync",
+)
+_register_exports(
+    ".runtime_utils.background_task",
+    "BackgroundTaskManager",
+    "run_in_background",
+    "run_async_in_background",
+    "CancellationToken",
+    "get_shared_manager",
+)
+_register_exports(
+    ".network_utils.request_retry_utils",
+    "chunk_sequence",
+    "execute_resilient_batch_requests",
+    "execute_resilient_single_request",
+    "sleep_if_needed",
+)
+_register_exports(
+    ".mod_utils.dependency_plan_serializer",
+    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
+    "OnlineDependencyInstallItem",
+    "OnlineDependencyInstallPlan",
+    "serialize_online_dependency_install_plan",
+    "validate_online_dependency_install_plan_payload",
+    "migrate_online_dependency_install_plan_payload",
+    "deserialize_online_dependency_install_plan",
+)
+_register_exports(
+    ".core_utils.exception_utils",
+    "record_and_mark",
+)
+_register_exports(
+    ".core_utils.hash_utils",
+    "compute_file_hash",
+)
+_register_exports(
+    ".network_utils.http_utils",
+    "HTTPUtils",
+)
+_register_exports(
+    ".core_utils.path_utils",
+    "PathUtils",
+)
+_register_exports(
+    ".java_support.java_downloader",
+    "JavaDownloader",
+)
+_register_exports(
+    ".java_support.java_utils",
+    "JavaUtils",
+)
+_register_exports(
+    ".core_utils.logger",
+    "get_logger",
+    "shutdown_logging",
+)
+_register_exports(".mod_utils.modrinth_query_utils", *MODRINTH_QUERY_EXPORT_NAMES)
+_register_exports(
+    ".mod_utils.mod_version_filtering",
+    "MODRINTH_PREFERRED_HASH_ALGORITHM",
+    "extract_primary_file_hash",
+    "is_allowed_version_type",
+    "normalize_hash_algorithm",
+    "select_best_mod_version",
+    "select_primary_file",
+    "version_type_priority",
+)
+_register_exports(
+    ".mod_utils.local_mod_metadata_utils",
+    "collect_installed_mod_identifiers",
+    "collect_installed_mod_versions",
+    "dependency_candidate_filenames",
+    "dependency_maybe_installed_by_filename",
+    "normalize_filename_stem",
+    "normalize_lax_filename",
+)
+_register_exports(
+    ".mod_utils.mod_dependency_reference_utils",
+    "resolve_dependency_reference",
+)
+_register_exports(
+    ".mod_utils.mod_dependency_planner",
+    "DependencyPlanHooks",
+    "expand_required_dependency_install_plan",
+)
+_register_exports(
+    ".mod_utils.mod_revalidation_batch_utils",
+    "resolve_revalidation_batch_limits",
+    "recompute_adaptive_revalidation_batch_limit",
+)
+_register_exports(
+    ".mod_utils.modrinth_version_lookup",
+    "parse_modrinth_version",
+    "parse_modrinth_version_lookup_response",
+)
+_register_exports(
+    ".mod_utils.mod_index_manager",
+    "ModIndexManager",
+)
+_register_exports(
+    ".mod_utils.mod_provider_metadata",
+    "LocalProviderEnsureResult",
+    "PROVIDER_LIFECYCLE_FRESH",
+    "PROVIDER_LIFECYCLE_INVALIDATED",
+    "PROVIDER_LIFECYCLE_MISSING",
+    "PROVIDER_LIFECYCLE_RETRYING",
+    "PROVIDER_LIFECYCLE_STALE",
+    "PROVIDER_METADATA_TTL_SECONDS",
+    "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN",
+    "ProviderMetadataRecord",
+    "apply_provider_metadata",
+    "cache_provider_metadata_record",
+    "compute_provider_revalidation_backoff_seconds",
+    "derive_provider_lifecycle_state",
+    "ensure_local_mod_provider_record",
+    "fetch_modrinth_project_detail",
+    "is_cached_provider_metadata_fresh",
+    "is_provider_revalidation_retry_due",
+    "register_provider_revalidation_failure",
+    "register_provider_revalidation_success",
+    "resolve_modrinth_provider_record",
+    "should_attempt_provider_revalidation",
+)
+_register_exports(
+    ".mod_utils.mod_semantics",
+    "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED",
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED",
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED",
+    "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE",
+    "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED",
+    "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED",
+    "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE",
+    "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED",
+    "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY",
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED",
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING",
+    "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO",
+    "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE",
+    "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE",
+    "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE",
+    "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE",
+    "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE",
+    "METADATA_SOURCE_CACHED_PROVIDER",
+    "METADATA_SOURCE_HASH",
+    "METADATA_SOURCE_LABELS",
+    "METADATA_SOURCE_LOOKUP",
+    "METADATA_SOURCE_SHORT_LABELS",
+    "METADATA_SOURCE_STALE_PROVIDER",
+    "METADATA_SOURCE_UNRESOLVED",
+    "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE",
+    "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE",
+    "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE",
+    "ONLINE_REVIEW_PRECHECK_NOTE",
+    "RECOMMENDATION_CONFIDENCE_ADVISORY",
+    "RECOMMENDATION_CONFIDENCE_BLOCKED",
+    "RECOMMENDATION_CONFIDENCE_HIGH",
+    "RECOMMENDATION_CONFIDENCE_LABELS",
+    "RECOMMENDATION_CONFIDENCE_RETRYABLE",
+    "RECOMMENDATION_SOURCE_HASH_METADATA",
+    "RECOMMENDATION_SOURCE_LABELS",
+    "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED",
+    "RECOMMENDATION_SOURCE_PROJECT_FALLBACK",
+    "RECOMMENDATION_SOURCE_SHORT_LABELS",
+    "RECOMMENDATION_SOURCE_STALE_METADATA",
+)
+_register_exports(
+    ".server_utils.server_detection_utils",
+    "ServerDetectionUtils",
+)
+_register_exports(
+    ".server_utils.server_detection_version_utils",
+    "ServerDetectionVersionUtils",
+)
+_register_exports(
+    ".server_utils.server_properties_utils",
+    "ServerPropertiesHelper",
+    "ServerPropertiesValidator",
+)
+_register_exports(
+    ".server_utils.server_memory_utils",
+    "MemoryUtils",
+)
+_register_exports(
+    ".server_utils.server_runtime_utils",
+    "ServerCommands",
+    "ServerOperations",
+)
+_register_exports(
+    ".runtime_utils.runtime_paths",
+    "RuntimePaths",
+)
+_register_exports(
+    ".runtime_utils.settings_manager",
+    "get_settings_manager",
+)
+_register_exports(
+    ".runtime_utils.singleton",
+    "Singleton",
+)
+_register_exports(
+    ".runtime_utils.subprocess_utils",
+    "SubprocessUtils",
+)
+_register_exports(
+    ".runtime_utils.system_utils",
+    "SystemUtils",
+)
+_register_exports(
+    ".ui_support.ui_tokens",
+    "Colors",
+    "FontSize",
+    "Sizes",
+    "Spacing",
+)
+_register_exports(
+    ".ui_support.ui_utils",
+    "UIUtils",
+    "compute_adaptive_pool_limit",
+    "compute_exponential_moving_average",
+    "get_button_style",
+    "get_dropdown_style",
+)
+_register_exports(
+    ".update_utils.update_checker",
+    "UpdateChecker",
+)
+_register_exports(
+    ".update_utils.update_parsing",
+    "UpdateParsing",
+)
+_register_exports(
+    ".ui_support.window_manager",
+    "WindowManager",
+)
+
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

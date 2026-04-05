@@ -7,25 +7,26 @@ import contextlib
 import queue
 import re
 import sys
-import tkinter as tk
+import tkinter
+import tkinter.filedialog as filedialog
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog
 from typing import Any
 import customtkinter as ctk
 from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
     Colors,
-    FontManager,
     FontSize,
+    JavaUtils,
     PathUtils,
     RuntimePaths,
-    JavaUtils,
     ServerCommands,
+    ServerDetectionUtils,
     ServerPropertiesHelper,
     Sizes,
+    Spacing,
     SubprocessUtils,
     UIUtils,
     UpdateChecker,
@@ -35,7 +36,15 @@ from ..utils import (
     get_settings_manager,
 )
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
-from . import CreateServerFrame, ManageServerFrame, ModManagementFrame, WindowPreferencesDialog
+from . import (
+    CreateServerFrame,
+    DialogUtils,
+    FontManager,
+    ManageServerFrame,
+    ModManagementFrame,
+    TaskUtils,
+    WindowPreferencesDialog,
+)
 
 logger = get_logger().bind(component="MainWindow")
 
@@ -44,7 +53,14 @@ class MinecraftServerManager:
     """Minecraft 伺服器管理器主視窗類別"""
 
     def set_servers_root(self, new_root: str | None = None) -> str:
-        """取得或設定伺服器根目錄"""
+        """取得或設定伺服器根目錄。
+
+        Args:
+            new_root: 要設定的新根目錄；未提供時會提示使用者選擇。
+
+        Returns:
+            解析後的伺服器根目錄字串。
+        """
         settings = get_settings_manager()
 
         def _fail_exit(msg: str):
@@ -131,7 +147,7 @@ class MinecraftServerManager:
                 self.server_manager.write_servers_config()
             for widget in self.root.winfo_children():
                 try:
-                    if isinstance(widget, (tk.Toplevel, ctk.CTkToplevel)):
+                    if isinstance(widget, (tkinter.Toplevel, ctk.CTkToplevel)):
                         widget.destroy()
                 except Exception as e:
                     logger.error(f"清理子視窗時發生錯誤: {e}\n{traceback.format_exc()}")
@@ -144,7 +160,7 @@ class MinecraftServerManager:
                 logger.error(f"銷毀主視窗時發生錯誤: {e}\n{traceback.format_exc()}")
                 sys.exit(0)
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tkinter.Tk):
         self.root = root
         self.mini_sidebar: Any | None = None
         self.active_nav_title: str | None = None
@@ -156,7 +172,7 @@ class MinecraftServerManager:
         self._console_queue: queue.Queue[Any] = queue.Queue()
         self._startup_update_check_job = None
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
-        UIUtils.start_ui_queue_pump(self.root, self.ui_queue)
+        TaskUtils.start_ui_queue_pump(self.root, self.ui_queue)
         self.settings = get_settings_manager()
         self.setup_window()
         self.servers_root = self.set_servers_root()
@@ -170,7 +186,7 @@ class MinecraftServerManager:
             "maximized", False
         ):
             UIUtils.schedule_debounce(
-                self.root, "_post_reveal_zoom_job", 160, lambda: UIUtils.maximize_window(self.root), owner=self
+                self.root, "_post_reveal_zoom_job", 160, lambda: DialogUtils.maximize_window(self.root), owner=self
             )
         self.preload_java_candidates()
         UIUtils.schedule_debounce(self.root, "_startup_tasks_job", 1000, self._handle_startup_tasks, owner=self)
@@ -217,7 +233,7 @@ class MinecraftServerManager:
             self.loader_manager.preload_loader_versions()
             logger.debug("所有載入器版本載入完成", "MainWindow")
 
-        UIUtils.run_async(fetch_loader_versions_only)
+        TaskUtils.run_async(fetch_loader_versions_only)
 
     def preload_java_candidates(self) -> None:
         """啟動時背景掃描本機 Java 並更新快取。"""
@@ -227,7 +243,7 @@ class MinecraftServerManager:
             JavaUtils.refresh_java_candidates_cache()
             logger.debug("本機 Java 快取更新完成", "MainWindow")
 
-        UIUtils.run_async(refresh_java_cache)
+        TaskUtils.run_async(refresh_java_cache)
 
     def load_data_async(self) -> None:
         """非同步載入資料"""
@@ -240,7 +256,7 @@ class MinecraftServerManager:
                 error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
                 self.ui_queue.put(lambda: logger.error(error_msg))
 
-        UIUtils.run_async(load_versions)
+        TaskUtils.run_async(load_versions)
 
     def _handle_startup_tasks(self) -> None:
         """處理啟動時的任務：首次執行提示和自動更新檢查"""
@@ -302,11 +318,11 @@ class MinecraftServerManager:
         """設定主視窗標題、圖示和現代化樣式"""
         self.root.title("Minecraft 伺服器管理器")
         self.setup_light_theme()
-        UIUtils.setup_window_properties(
+        DialogUtils.setup_window_properties(
             window=self.root,
             parent=None,
-            width=1200,
-            height=800,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
             bind_icon=True,
             center_on_parent=False,
             make_modal=False,
@@ -342,7 +358,7 @@ class MinecraftServerManager:
         header_frame.pack(fill="x", padx=0, pady=0)
         header_frame.pack_propagate(False)
         header_content = ctk.CTkFrame(header_frame, fg_color="transparent")
-        header_content.pack(fill="both", expand=True, padx=20, pady=15)
+        header_content.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
         left_section = ctk.CTkFrame(header_content, fg_color="transparent")
         left_section.pack(side="left", fill="y", anchor="w")
         self.sidebar_toggle_btn = ctk.CTkButton(
@@ -353,7 +369,7 @@ class MinecraftServerManager:
             height=FontManager.get_dpi_scaled_size(32),
             command=self.toggle_sidebar,
         )
-        self.sidebar_toggle_btn.pack(side="left", padx=(0, 15))
+        self.sidebar_toggle_btn.pack(side="left", padx=(0, Spacing.LARGE_MINUS))
         title_section = ctk.CTkFrame(left_section, fg_color="transparent")
         title_section.pack(side="left", fill="y")
         title_label = ctk.CTkLabel(
@@ -375,7 +391,7 @@ class MinecraftServerManager:
         main_container.grid_columnconfigure(0, weight=0, minsize=self._nav_full_width + self._nav_column_padding)
         main_container.grid_columnconfigure(1, weight=1)
         self.nav_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        self.nav_container.grid(row=0, column=0, sticky="nsew", padx=(20, 20), pady=20)
+        self.nav_container.grid(row=0, column=0, sticky="nsew", padx=(Spacing.XL, Spacing.XL), pady=Spacing.XL)
         self.nav_container.grid_rowconfigure(0, weight=1)
         self.nav_container.grid_columnconfigure(0, weight=1)
         try:
@@ -384,7 +400,7 @@ class MinecraftServerManager:
         except Exception as e:
             logger.debug(f"設定導航欄寬度失敗: {e}", "MainWindow")
         self.content_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        self.content_container.grid(row=0, column=1, sticky="nsew", padx=(0, 20), pady=20)
+        self.content_container.grid(row=0, column=1, sticky="nsew", padx=(0, Spacing.XL), pady=Spacing.XL)
         self.content_container.grid_rowconfigure(0, weight=1)
         self.content_container.grid_columnconfigure(0, weight=1)
         self.content_frame = ctk.CTkFrame(self.content_container)
@@ -409,7 +425,11 @@ class MinecraftServerManager:
         self.mod_frame = None
 
     def create_sidebar(self, parent) -> None:
-        """建立現代化側邊欄"""
+        """建立現代化側邊欄。
+
+        Args:
+            parent: 父容器。
+        """
         self.sidebar = ctk.CTkFrame(parent, width=self._nav_full_width, fg_color=self.colors["menu_bg"])
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
@@ -420,9 +440,9 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.INPUT, weight="bold"),
             text_color=Colors.TEXT_ON_LIGHT,
         )
-        sidebar_title.pack(anchor="w", padx=20, pady=(20, 15))
+        sidebar_title.pack(anchor="w", padx=Spacing.XL, pady=(Spacing.XL, Spacing.LARGE_MINUS))
         self.nav_scroll_frame = ctk.CTkScrollableFrame(self.sidebar, label_text="")
-        self.nav_scroll_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        self.nav_scroll_frame.pack(fill="both", expand=True, padx=Spacing.LARGE_MINUS, pady=(0, Spacing.LARGE_MINUS))
         self.nav_buttons = {}
         self.active_nav_key: str | None = None
         nav_items = [
@@ -435,7 +455,7 @@ class MinecraftServerManager:
         ]
         for emoji, title, desc, command, key in nav_items:
             btn_frame = self.create_nav_button(self.nav_scroll_frame, emoji, title, desc, command, key)
-            btn_frame.pack(fill="x", padx=5, pady=3)
+            btn_frame.pack(fill="x", padx=Spacing.TINY, pady=Spacing.XS)
         self._create_sidebar_footer(self.sidebar, mini=False)
 
     def _create_sidebar_footer(self, parent, *, mini: bool) -> None:
@@ -457,7 +477,19 @@ class MinecraftServerManager:
             logger.exception(f"建立側邊欄底部資訊失敗: {e}")
 
     def create_nav_button(self, parent, icon, title, description, command, key) -> ctk.CTkFrame:
-        """建立導航按鈕"""
+        """建立導航按鈕。
+
+        Args:
+            parent: 父容器。
+            icon: 按鈕圖示。
+            title: 按鈕標題。
+            description: 按鈕說明文字。
+            command: 按鈕點擊回呼。
+            key: 導航識別鍵。
+
+        Returns:
+            包含按鈕與說明文字的框架。
+        """
         btn_frame = ctk.CTkFrame(parent, fg_color="transparent")
         btn_text = f"{icon} {title}" if icon else title
         btn = ctk.CTkButton(
@@ -466,20 +498,20 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.HEADING_SMALL),
             anchor="w",
             height=FontManager.get_dpi_scaled_size(55),
-            corner_radius=8,
+            corner_radius=Spacing.SMALL,
             border_spacing=FontManager.get_dpi_scaled_size(10),
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             text_color=Colors.TEXT_ON_DARK,
         )
-        btn.pack(fill="x", padx=2, pady=2)
+        btn.pack(fill="x", padx=Spacing.XS, pady=Spacing.XS)
         ctk.CTkLabel(
             btn_frame,
             text=description,
             font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=Colors.TEXT_SECONDARY,
             anchor="w",
-        ).pack(fill="x", padx=5, pady=(0, 5))
+        ).pack(fill="x", padx=Spacing.TINY, pady=(0, Spacing.TINY))
         main_nav_keys = {"create", "manage", "mods"}
 
         def on_click():
@@ -492,7 +524,11 @@ class MinecraftServerManager:
         return btn_frame
 
     def set_active_nav_button(self, key: str) -> None:
-        """設定活動導航按鈕"""
+        """設定活動導航按鈕。
+
+        Args:
+            key: 要設為活動狀態的導航鍵。
+        """
         if not key:
             return
         if getattr(self, "active_nav_key", None) == key:
@@ -599,7 +635,7 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=Colors.TEXT_PRIMARY[0],
         )
-        mini_title.pack(pady=(15, 10))
+        mini_title.pack(pady=(Spacing.LARGE_MINUS, Spacing.SMALL_PLUS))
         icons_frame = ctk.CTkFrame(self.mini_sidebar, fg_color="transparent")
         icons_frame.pack(fill="both", expand=True)
         nav_icons = [
@@ -617,26 +653,31 @@ class MinecraftServerManager:
                 font=FontManager.get_font(size=FontSize.HEADING_SMALL),
                 width=FontManager.get_dpi_scaled_size(55),
                 height=FontManager.get_dpi_scaled_size(55),
-                corner_radius=8,
+                corner_radius=Spacing.SMALL,
                 fg_color=Colors.BUTTON_INFO,
                 hover_color=Colors.BUTTON_INFO_HOVER,
                 text_color=Colors.TEXT_ON_DARK,
                 command=command,
             )
-            btn.pack(pady=3)
+            btn.pack(pady=Spacing.XS)
             self.create_tooltip(btn, tooltip)
         self._create_sidebar_footer(self.mini_sidebar, mini=True)
 
     def create_tooltip(self, widget, text) -> None:
-        """為元件創建工具提示"""
+        """為元件建立工具提示。
+
+        Args:
+            widget: 要綁定提示的元件。
+            text: 提示文字。
+        """
         UIUtils.bind_tooltip(
             widget,
             text,
             bg=Colors.BG_TOOLTIP,
             fg=Colors.TEXT_ON_DARK,
             font=FontManager.get_font(family="Microsoft JhengHei", size=FontSize.TINY),
-            padx=8,
-            pady=4,
+            padx=Spacing.SMALL,
+            pady=Spacing.XS,
             offset_x=10,
             offset_y=10,
             auto_hide_ms=None,
@@ -699,9 +740,10 @@ class MinecraftServerManager:
         self.set_active_nav_button("create")
 
     def show_manage_server(self, auto_select=None) -> None:
-        """
-        顯示管理伺服器頁面
-        每次都強制刷新伺服器列表
+        """顯示管理伺服器頁面並強制刷新伺服器列表。
+
+        Args:
+            auto_select: 可選的伺服器名稱，用於刷新後自動選取。
         """
         self._ensure_manage_server_frame()
         with contextlib.suppress(Exception):
@@ -746,7 +788,7 @@ class MinecraftServerManager:
         匯入伺服器（資料夾或壓縮檔）
         統一入口匯入伺服器，支援資料夾和壓縮檔
         """
-        dialog = UIUtils.create_toplevel_dialog(
+        dialog = DialogUtils.create_toplevel_dialog(
             parent=self.root,
             title="匯入伺服器",
             width=Sizes.DIALOG_IMPORT_WIDTH,
@@ -757,15 +799,15 @@ class MinecraftServerManager:
         )
         choice = {"value": None}
         content = ctk.CTkFrame(dialog)
-        content.pack(fill="both", expand=True, padx=20, pady=20)
+        content.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         ctk.CTkLabel(content, text="選擇匯入方式", font=FontManager.get_font(size=FontSize.LARGE, weight="bold")).pack(
-            pady=(10, 15)
+            pady=(Spacing.SMALL_PLUS, Spacing.LARGE_MINUS)
         )
         ctk.CTkLabel(content, text="請選擇要匯入的伺服器類型:", font=FontManager.get_font(size=FontSize.MEDIUM)).pack(
-            pady=(0, 20)
+            pady=(0, Spacing.XL)
         )
         button_frame = ctk.CTkFrame(content, fg_color="transparent")
-        button_frame.pack(fill="x", padx=20)
+        button_frame.pack(fill="x", padx=Spacing.XL)
         options = [("📁 匯入資料夾", "folder"), ("📦 匯入壓縮檔", "archive"), ("❌ 取消", "cancel")]
         for label, key in options:
             font_weight = "bold" if key != "cancel" else "normal"
@@ -776,7 +818,7 @@ class MinecraftServerManager:
                 font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight=font_weight),
                 height=Sizes.BUTTON_HEIGHT_MEDIUM,
             )
-            btn.pack(fill="x", pady=5)
+            btn.pack(fill="x", pady=Spacing.TINY)
         dialog.bind("<Escape>", lambda _e: self._set_choice(choice, "cancel", dialog))
         dialog.wait_window()
         if choice["value"] in [None, "cancel"]:
@@ -811,7 +853,6 @@ class MinecraftServerManager:
         if not folder_path:
             return None
         path = Path(folder_path)
-        from ..utils import ServerDetectionUtils
 
         if not ServerDetectionUtils.is_valid_server_folder(path):
             UIUtils.show_error("無效資料夾", "選擇的資料夾不是有效的 Minecraft 伺服器資料夾。", self.root)
@@ -833,7 +874,7 @@ class MinecraftServerManager:
 
     def _prompt_server_name(self, default_name: str) -> str | None:
         """提示輸入伺服器名稱"""
-        dialog = UIUtils.create_toplevel_dialog(
+        dialog = DialogUtils.create_toplevel_dialog(
             parent=self.root,
             title="輸入伺服器名稱",
             width=Sizes.DIALOG_SMALL_WIDTH,
@@ -844,15 +885,15 @@ class MinecraftServerManager:
         )
         result = {"name": None}
         frame = ctk.CTkFrame(dialog)
-        frame.pack(fill="both", expand=True, padx=20, pady=20)
+        frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         ctk.CTkLabel(frame, text="請輸入伺服器名稱:", font=FontManager.get_font(size=FontSize.MEDIUM)).pack(
-            pady=(10, 15)
+            pady=(Spacing.SMALL_PLUS, Spacing.LARGE_MINUS)
         )
         entry = ctk.CTkEntry(frame, font=FontManager.get_font(size=FontSize.MEDIUM), width=Sizes.INPUT_WIDTH)
-        entry.pack(pady=(0, 20))
+        entry.pack(pady=(0, Spacing.XL))
         entry.insert(0, default_name)
         entry.focus()
-        entry.select_range(0, tk.END)
+        entry.select_range(0, tkinter.END)
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack()
 
@@ -879,7 +920,7 @@ class MinecraftServerManager:
 
         ctk.CTkButton(
             btn_frame, text="確定", command=_ok, width=Sizes.BUTTON_WIDTH_COMPACT, height=Sizes.BUTTON_HEIGHT_MEDIUM
-        ).pack(side="left", padx=(0, 10))
+        ).pack(side="left", padx=(0, Spacing.SMALL_PLUS))
         ctk.CTkButton(
             btn_frame, text="取消", command=_cancel, width=Sizes.BUTTON_WIDTH_COMPACT, height=Sizes.BUTTON_HEIGHT_MEDIUM
         ).pack(side="left")
@@ -891,36 +932,35 @@ class MinecraftServerManager:
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
         """完成伺服器匯入流程"""
         target_path = self.server_manager.servers_root / server_name
-        progress_dialog = UIUtils.create_toplevel_dialog(
+        progress_dialog = DialogUtils.create_toplevel_dialog(
             parent=self.root,
             title="正在匯入伺服器",
-            width=420,
-            height=180,
+            width=Sizes.DIALOG_SMALL_WIDTH,
+            height=Sizes.DIALOG_SMALL_HEIGHT,
             resizable=False,
             make_modal=True,
             delay_ms=0,
             reveal_after_setup=False,
         )
         content = ctk.CTkFrame(progress_dialog)
-        content.pack(fill="both", expand=True, padx=20, pady=20)
+        content.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         ctk.CTkLabel(
             content, text=f"正在匯入 {server_name}...", font=FontManager.get_font(size=FontSize.LARGE, weight="bold")
-        ).pack(pady=(5, 10))
+        ).pack(pady=(Spacing.TINY, Spacing.SMALL_PLUS))
         ctk.CTkLabel(
             content,
             text="大型匯入可能需要較長時間，請稍候。",
             font=FontManager.get_font(size=FontSize.NORMAL),
             text_color=Colors.TEXT_SECONDARY,
-        ).pack(pady=(0, 10))
+        ).pack(pady=(0, Spacing.SMALL_PLUS))
         progress_text = ctk.CTkLabel(
             content, text="進度: 0%", font=FontManager.get_font(size=FontSize.NORMAL), text_color=Colors.TEXT_SECONDARY
         )
-        progress_text.pack(pady=(0, 8))
+        progress_text.pack(pady=(0, Spacing.SMALL))
         progress_bar = ctk.CTkProgressBar(content, mode="determinate")
-        progress_bar.pack(fill="x", padx=10, pady=(0, 5))
+        progress_bar.pack(fill="x", padx=Spacing.SMALL_PLUS, pady=(0, Spacing.TINY))
         progress_bar.set(0)
         progress_dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-        from ..utils import ServerDetectionUtils
 
         def _close_progress_dialog() -> None:
             with contextlib.suppress(Exception):
@@ -1000,7 +1040,7 @@ class MinecraftServerManager:
 
                 self.ui_queue.put(_on_import_error)
 
-        UIUtils.run_async(_import_task)
+        TaskUtils.run_async(_import_task)
 
     def hide_all_frames(self) -> None:
         """相容舊流程：頁面切換已改用 tkraise，不再逐一隱藏 frame。"""
@@ -1020,7 +1060,7 @@ class MinecraftServerManager:
 
     def show_about(self) -> None:
         """顯示關於對話框"""
-        about_dialog = UIUtils.create_toplevel_dialog(
+        about_dialog = DialogUtils.create_toplevel_dialog(
             parent=self.root,
             title="關於 Minecraft 伺服器管理器",
             width=Sizes.DIALOG_ABOUT_WIDTH,
@@ -1031,23 +1071,23 @@ class MinecraftServerManager:
             reveal_after_setup=False,
         )
         scrollable_frame = ctk.CTkScrollableFrame(about_dialog)
-        scrollable_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        scrollable_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         ctk.CTkLabel(
             scrollable_frame,
             text="🎮 Minecraft 伺服器管理器",
             font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold"),
-        ).pack(pady=(0, 5))
+        ).pack(pady=(0, Spacing.TINY))
         ctk.CTkLabel(
             scrollable_frame,
             text=f"版本 {APP_VERSION}",
             font=FontManager.get_font(size=FontSize.LARGE),
             text_color=Colors.TEXT_TERTIARY,
-        ).pack(pady=(0, 20))
+        ).pack(pady=(0, Spacing.XL))
         ctk.CTkLabel(
             scrollable_frame,
             text="👨\u200d💻 開發資訊",
             font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         dev_info = "• 開發者: Minecraft Server Manager Team\n• 技術棧: Python 3.7+, tkinter, coustomtkinter\n• Java 管理：自動偵測/下載 Minecraft官方 JDK，完全自動化\n• 架構: 模組化設計, 事件驅動\n• 參考專案: PrismLauncher"
         ctk.CTkLabel(
             scrollable_frame,
@@ -1055,7 +1095,7 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             justify="left",
             wraplength=Sizes.DIALOG_PREFERENCES_WIDTH,
-        ).pack(anchor="w", pady=(0, 5))
+        ).pack(anchor="w", pady=(0, Spacing.TINY))
         github_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
         github_lbl = ctk.CTkLabel(
             scrollable_frame,
@@ -1065,11 +1105,11 @@ class MinecraftServerManager:
             cursor="hand2",
             anchor="w",
         )
-        github_lbl.pack(anchor="w", pady=(0, 20))
+        github_lbl.pack(anchor="w", pady=(0, Spacing.XL))
         github_lbl.bind("<Button-1>", lambda _e, url=github_url: UIUtils.open_external(url))
         ctk.CTkLabel(
             scrollable_frame, text="📄 授權條款", font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         license_info = "• 本專案採用 GNU General Public License v3.0 授權條款\n• 部分設計理念參考 PrismLauncher\n• 僅供學習和個人使用\n• 請遵守 Minecraft EULA 和當地法律法規\n\n特別感謝 PrismLauncher 開發團隊的開源貢獻！"
         ctk.CTkLabel(
             scrollable_frame,
@@ -1077,13 +1117,13 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             justify="left",
             wraplength=Sizes.DIALOG_PREFERENCES_WIDTH,
-        ).pack(anchor="w", pady=(0, 30))
+        ).pack(anchor="w", pady=(0, Spacing.XXL))
         settings_frame = ctk.CTkFrame(scrollable_frame, fg_color="transparent")
-        settings_frame.pack(fill="x", pady=(0, 20))
+        settings_frame.pack(fill="x", pady=(0, Spacing.XL))
         settings = get_settings_manager()
         ctk.CTkLabel(
             settings_frame, text="🔄 更新設定", font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")
-        ).pack(anchor="w", pady=(0, 10))
+        ).pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         auto_update_var = ctk.BooleanVar(value=settings.is_auto_update_enabled())
         auto_update_checkbox = ctk.CTkCheckBox(
             settings_frame,
@@ -1092,7 +1132,7 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             command=lambda: self._on_auto_update_changed(auto_update_var.get(), manual_check_btn),
         )
-        auto_update_checkbox.pack(anchor="w", pady=(0, 10))
+        auto_update_checkbox.pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         manual_check_btn: ctk.CTkButton | None = None
         manual_check_btn = ctk.CTkButton(
             settings_frame,
@@ -1103,15 +1143,15 @@ class MinecraftServerManager:
             height=Sizes.DROPDOWN_HEIGHT,
         )
         if not settings.is_auto_update_enabled():
-            manual_check_btn.pack(anchor="w", pady=(0, 10))
+            manual_check_btn.pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         if RuntimePaths.is_portable_mode():
             ctk.CTkLabel(
                 settings_frame,
                 text="📦 便攜模式",
                 font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-            ).pack(anchor="w", pady=(12, 10))
+            ).pack(anchor="w", pady=(Spacing.MEDIUM, Spacing.SMALL_PLUS))
             portable_info_frame = ctk.CTkFrame(settings_frame, fg_color="transparent")
-            portable_info_frame.pack(fill="x", pady=(0, 10))
+            portable_info_frame.pack(fill="x", pady=(0, Spacing.SMALL_PLUS))
             ctk.CTkLabel(
                 portable_info_frame,
                 text="您正在使用便攜版本。\n如需更新，請從 Releases 下載新版 portable ZIP，或使用內建的檢查更新功能。",
@@ -1126,7 +1166,7 @@ class MinecraftServerManager:
             width=Sizes.BUTTON_WIDTH_SECONDARY,
             height=Sizes.DROPDOWN_HEIGHT,
         )
-        window_prefs_btn.pack(anchor="w", pady=(0, 10))
+        window_prefs_btn.pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
         ctk.CTkButton(
             scrollable_frame,
             text="關閉",
@@ -1134,7 +1174,7 @@ class MinecraftServerManager:
             font=FontManager.get_font(size=FontSize.NORMAL, weight="bold"),
             width=Sizes.BUTTON_WIDTH_SMALL,
             height=Sizes.BUTTON_HEIGHT_MEDIUM,
-        ).pack(pady=(10, 0))
+        ).pack(pady=(Spacing.SMALL_PLUS, 0))
         about_dialog.bind("<Escape>", lambda _e: about_dialog.destroy())
 
     def _on_auto_update_changed(self, enabled: bool, manual_check_btn) -> None:
@@ -1144,7 +1184,7 @@ class MinecraftServerManager:
         if enabled:
             manual_check_btn.pack_forget()
         else:
-            manual_check_btn.pack(anchor="w", pady=(0, 10))
+            manual_check_btn.pack(anchor="w", pady=(0, Spacing.SMALL_PLUS))
 
     def _manual_check_updates(self) -> None:
         """手動檢查更新"""
@@ -1160,21 +1200,37 @@ class MinecraftServerManager:
         WindowPreferencesDialog(self.root, on_settings_changed)
 
     def on_server_created(self, server_config: ServerConfig) -> None:
-        """伺服器建立完成的回調"""
+        """伺服器建立完成的回調。
+
+        Args:
+            server_config: 新建立的伺服器設定。
+        """
         self.initialize_server(server_config)
 
     def initialize_server(self, server_config: ServerConfig) -> None:
+        """啟動伺服器初始化流程。
+
+        Args:
+            server_config: 要初始化的伺服器設定。
+        """
         dialog = ServerInitializationDialog(self.root, server_config, self.complete_initialization)
         dialog.start_initialization()
 
     def on_server_selected(self, server_name: str) -> None:
-        """
-        伺服器被選中的回調
-        當使用者在管理伺服器或模組管理頁面選擇伺服器時，此方法會被呼叫。
+        """伺服器被選中的回調。
+
+        Args:
+            server_name: 被選取的伺服器名稱。
         """
         logger.info(f"選中伺服器: {server_name}")
 
     def complete_initialization(self, server_config: ServerConfig, init_dialog) -> None:
+        """完成伺服器初始化後的 UI 收尾。
+
+        Args:
+            server_config: 已初始化的伺服器設定。
+            init_dialog: 初始化對話框實例。
+        """
         init_dialog.destroy()
         server_path = Path(server_config.path)
         properties_file = server_path / "server.properties"
@@ -1195,7 +1251,7 @@ class MinecraftServerManager:
 class ServerInitializationDialog:
     """伺服器初始化對話框"""
 
-    def __init__(self, parent: tk.Tk, server_config: ServerConfig, completion_callback=None):
+    def __init__(self, parent: tkinter.Tk, server_config: ServerConfig, completion_callback=None):
         self.parent = parent
         self.server_config = server_config
         self.server_path = Path(server_config.path)
@@ -1277,13 +1333,14 @@ class ServerInitializationDialog:
             UIUtils.cancel_scheduled_job(dialog, job_attr, owner=self)
 
     def start_initialization(self) -> None:
+        """啟動初始化對話框流程。"""
         self._create_dialog()
         self._setup_ui()
         self._start_server_thread()
 
     def _create_dialog(self) -> None:
         """建立初始化對話框"""
-        self.init_dialog = UIUtils.create_toplevel_dialog(
+        self.init_dialog = DialogUtils.create_toplevel_dialog(
             self.parent,
             f"初始化伺服器 - {self.server_config.name}",
             width=Sizes.DIALOG_LARGE_WIDTH,
@@ -1306,18 +1363,18 @@ class ServerInitializationDialog:
             text=f"正在初始化伺服器: {self.server_config.name}",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
-        title_label.pack(pady=10)
+        title_label.pack(pady=Spacing.SMALL_PLUS)
         info_label = ctk.CTkLabel(
             self.init_dialog,
             text="伺服器正在首次啟動，請等待初始化完成...\n系統會自動在完成後關閉伺服器",
             font=FontManager.get_font(size=FontSize.LARGE),
         )
-        info_label.pack(pady=5)
+        info_label.pack(pady=Spacing.TINY)
 
     def _create_console(self) -> None:
         """建立控制台輸出區域"""
         console_frame = ctk.CTkFrame(self.init_dialog)
-        console_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        console_frame.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
         self.console_text = ctk.CTkTextbox(
             console_frame,
             font=FontManager.get_font(family="Consolas", size=FontSize.TINY),
@@ -1325,7 +1382,7 @@ class ServerInitializationDialog:
             fg_color=(Colors.BG_CONSOLE, Colors.BG_CONSOLE),
             text_color=(Colors.CONSOLE_TEXT, Colors.CONSOLE_TEXT),
         )
-        self.console_text.pack(fill="both", expand=True, padx=5, pady=5)
+        self.console_text.pack(fill="both", expand=True, padx=Spacing.TINY, pady=Spacing.TINY)
         self._start_console_pump()
 
     def _create_progress_label(self) -> None:
@@ -1335,14 +1392,14 @@ class ServerInitializationDialog:
         self.progress_label = ctk.CTkLabel(
             self.init_dialog, text="狀態: 準備啟動...", font=FontManager.get_font(size=FontSize.INPUT, weight="bold")
         )
-        self.progress_label.pack(pady=5)
+        self.progress_label.pack(pady=Spacing.TINY)
 
     def _create_buttons(self) -> None:
         """建立按鈕區域"""
         if not self.init_dialog:
             return
         button_frame = ctk.CTkFrame(self.init_dialog, fg_color="transparent")
-        button_frame.pack(pady=10)
+        button_frame.pack(pady=Spacing.SMALL_PLUS)
         self.close_button = ctk.CTkButton(
             button_frame,
             text="取消初始化",
@@ -1352,11 +1409,11 @@ class ServerInitializationDialog:
             height=Sizes.BUTTON_HEIGHT_MEDIUM,
             fg_color=Colors.TEXT_ERROR,
             hover_color=Colors.BUTTON_DANGER,
-            border_width=2,
+            border_width=Spacing.XS,
             border_color=Colors.BUTTON_DANGER_HOVER,
-            corner_radius=6,
+            corner_radius=Spacing.TINY,
         )
-        self.close_button.pack(side="right", padx=5)
+        self.close_button.pack(side="right", padx=Spacing.TINY)
 
     def _setup_timeout(self) -> None:
         """設定超時自動關閉"""
@@ -1365,7 +1422,7 @@ class ServerInitializationDialog:
 
     def _start_server_thread(self) -> None:
         """在背景執行緒中啟動伺服器"""
-        UIUtils.run_async(self._run_server)
+        TaskUtils.run_async(self._run_server)
 
     def _close_init_server(self) -> None:
         """關閉初始化伺服器。"""
@@ -1405,7 +1462,7 @@ class ServerInitializationDialog:
             if self.init_dialog and self.init_dialog.winfo_exists() and self.console_text:
                 self.console_text.insert("end", text)
                 self.console_text.see("end")
-        except tk.TclError:
+        except tkinter.TclError:
             logger.exception("更新控制台輸出失敗")
 
     def _run_server(self) -> None:
@@ -1454,7 +1511,6 @@ class ServerInitializationDialog:
     def _build_forge_command(self) -> list[str]:
         """建立 Forge 伺服器命令"""
         user_args = Path(self.server_path) / "user_jvm_args.txt"
-        from ..utils import ServerDetectionUtils
 
         if user_args.exists():
             ServerDetectionUtils.update_forge_user_jvm_args(self.server_path, self.server_config)
@@ -1506,7 +1562,7 @@ class ServerInitializationDialog:
         if self.init_dialog is None or not self.init_dialog.winfo_exists():
             return
         if "Loading dimension" in output or "Preparing spawn area" in output:
-            with contextlib.suppress(tk.TclError):
+            with contextlib.suppress(tkinter.TclError):
                 self._schedule_dialog_job(
                     "_init_world_prep_job",
                     0,
@@ -1517,7 +1573,7 @@ class ServerInitializationDialog:
                     ),
                 )
         elif "Preparing level" in output:
-            with contextlib.suppress(tk.TclError):
+            with contextlib.suppress(tkinter.TclError):
                 self._schedule_dialog_job(
                     "_init_world_load_job",
                     0,

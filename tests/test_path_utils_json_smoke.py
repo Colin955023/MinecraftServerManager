@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 
 import pytest
-import src.utils.path_utils as path_utils_module
+import src.utils.core_utils.path_utils as path_utils_module
 from src.utils import PathUtils
 
 

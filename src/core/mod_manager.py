@@ -19,16 +19,16 @@ from ..utils import (
     ModIndexManager,
     PathUtils,
     ProviderMetadataRecord,
-    ServerDetectionVersionUtils,
     ServerDetectionUtils,
+    ServerDetectionVersionUtils,
     UIUtils,
     cache_provider_metadata_record,
     derive_provider_lifecycle_state,
     ensure_local_mod_provider_record,
     get_logger,
     is_cached_provider_metadata_fresh,
-    resolve_modrinth_provider_record,
     record_and_mark,
+    resolve_modrinth_provider_record,
 )
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 
@@ -100,7 +100,11 @@ class ModManager:
         self.on_mod_list_changed: Callable | None = None
 
     def scan_mods(self) -> list[LocalModInfo]:
-        """掃描 mods 目錄中的模組檔案並建立模組資訊列表"""
+        """掃描 mods 目錄中的模組檔案並建立模組資訊列表。
+
+        Returns:
+            掃描後的模組資訊清單。
+        """
         self.index_manager.cleanup_stale_entries()
         mods = []
         files_to_scan = []
@@ -117,7 +121,14 @@ class ModManager:
         return mods
 
     def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
-        """依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式"""
+        """依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式。
+
+        Args:
+            file_path: 要解析的模組 JAR 檔案路徑。
+
+        Returns:
+            解析成功時回傳 LocalModInfo，失敗時回傳 None。
+        """
         try:
             filename, enabled, base_name = self._parse_file_info(file_path)
             cached_provider = self.index_manager.get_cached_provider_metadata(file_path) or {}
@@ -290,7 +301,14 @@ class ModManager:
         return ProviderMetadataRecord.from_values(platform=platform.value, project_id=project_id, slug=slug)
 
     def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
-        """公開封裝：將使用者輸入的 Modrinth project id / slug 正規化。"""
+        """公開封裝：將使用者輸入的 Modrinth project id / slug 正規化。
+
+        Args:
+            identifier: 使用者輸入的 project id 或 slug。
+
+        Returns:
+            解析後的 project id 與 slug。
+        """
         return self._resolve_modrinth_project_identity(identifier)
 
     def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
@@ -788,7 +806,16 @@ class ModManager:
     def install_remote_mod_file(
         self, download_url: str, filename: str, progress_callback: Callable[[int, int], None] | None = None
     ) -> Path | None:
-        """下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。"""
+        """下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。
+
+        Args:
+            download_url: 遠端檔案下載網址。
+            filename: 要寫入的檔名。
+            progress_callback: 可選的下載進度回呼。
+
+        Returns:
+            安裝成功時回傳目標檔案路徑，失敗時回傳 None。
+        """
         normalized_url = str(download_url or "").strip()
         normalized_filename = str(filename or "").strip()
         if not normalized_url or not normalized_filename:
@@ -831,7 +858,17 @@ class ModManager:
         filename: str,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> Path | None:
-        """以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。"""
+        """以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。
+
+        Args:
+            local_mod: 目前本地模組資訊。
+            download_url: 遠端檔案下載網址。
+            filename: 新版本檔名。
+            progress_callback: 可選的下載進度回呼。
+
+        Returns:
+            更新成功時回傳最終檔案路徑，失敗時回傳 None。
+        """
         if local_mod is None:
             logger.error("更新本地模組失敗：local_mod 為空", "ModManager")
             return None
@@ -867,7 +904,14 @@ class ModManager:
             return None
 
     def export_mod_list(self, format_type: str = "text") -> str:
-        """匯出模組列表，支援 text、json、html 格式"""
+        """匯出模組列表，支援 text、json、html 格式。
+
+        Args:
+            format_type: 輸出格式，預設為 text。
+
+        Returns:
+            依指定格式輸出的模組列表字串；格式不支援時回傳空字串。
+        """
         mods = self.get_mod_list()
         if format_type == "text":
             lines = ["# 模組列表", ""]
@@ -898,7 +942,7 @@ class ModManager:
                 "<!DOCTYPE html>",
                 '<html lang="zh-TW">',
                 '<head><meta charset="UTF-8"><title>模組列表</title>',
-                "<style>table{border-collapse:collapse;}th,td{border:1px solid #ccc;padding:6px;}th{background:#f1f5f9;}</style>",
+                "<style>table{border-collapse:collapse;}th,td{border:1px solid silver;padding:6px;}th{background:whitesmoke;}</style>",
                 "</head><body>",
                 "<h2>模組列表</h2>",
                 "<table>",

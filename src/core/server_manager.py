@@ -89,7 +89,15 @@ class ServerManager:
             waiter.wait(min(wait_interval, remaining))
 
     def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
-        """建立新伺服器並初始化設定"""
+        """建立新伺服器並初始化設定。
+
+        Args:
+            config: 要建立的伺服器設定。
+            properties: 要寫入 server.properties 的初始屬性。
+
+        Returns:
+            建立成功時回傳 True，失敗時回傳 False。
+        """
         try:
             server_path = (self.servers_root / config.name).resolve()
             is_safe = False
@@ -178,7 +186,11 @@ class ServerManager:
             (path / directory).mkdir(exist_ok=True)
 
     def create_launch_script(self, config: ServerConfig) -> None:
-        """建立伺服器啟動腳本"""
+        """建立伺服器啟動腳本。
+
+        Args:
+            config: 伺服器設定與啟動參數來源。
+        """
         server_path = Path(config.path)
         max_memory = config.memory_max_mb
         min_memory = config.memory_min_mb
@@ -257,7 +269,15 @@ class ServerManager:
         PathUtils.write_text_file(start_script_path, bat_content, encoding="gbk", errors="replace")
 
     def update_server_properties(self, server_name: str, properties: dict[str, str]) -> bool:
-        """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值"""
+        """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值。
+
+        Args:
+            server_name: 目標伺服器名稱。
+            properties: 要合併寫入的屬性。
+
+        Returns:
+            成功時回傳 True，失敗時回傳 False。
+        """
         try:
             config = self.servers.get(server_name)
             if not config:
@@ -304,7 +324,15 @@ class ServerManager:
             return False
 
     def start_server(self, server_name: str, parent=None) -> bool:
-        """啟動伺服器"""
+        """啟動伺服器。
+
+        Args:
+            server_name: 目標伺服器名稱。
+            parent: 用於 UI 錯誤提示的父視窗。
+
+        Returns:
+            成功時回傳 True，失敗時回傳 False。
+        """
         try:
             if server_name not in self.servers:
                 UIUtils.show_error("伺服器未找到", f"找不到伺服器: {server_name}", parent=parent)
@@ -412,11 +440,18 @@ class ServerManager:
             except Exception:
                 server_path = None
             record_and_mark(e, marker_path=server_path, reason="啟動伺服器失敗", details={"server": server_name})
-            UIUtils.show_error("啟動失敗", f"無法啟動伺服器 {server_name}。錯誤: {e}")
+            UIUtils.show_error("啟動失敗", f"無法啟動伺服器 {server_name}。錯誤: {e}", parent=parent)
             return False
 
     def delete_server(self, server_name: str) -> bool:
-        """刪除伺服器"""
+        """刪除伺服器。
+
+        Args:
+            server_name: 要刪除的伺服器名稱。
+
+        Returns:
+            成功時回傳 True，失敗時回傳 False。
+        """
         try:
             if server_name not in self.servers:
                 return False
@@ -451,7 +486,11 @@ class ServerManager:
                     record_and_mark(e, marker_path=self.config_file, reason="load_servers_config_failed")
 
     def write_servers_config(self) -> bool:
-        """實際執行保存伺服器配置到 servers_config.json"""
+        """實際執行保存伺服器配置到 servers_config.json。
+
+        Returns:
+            成功寫入時回傳 True，失敗時回傳 False。
+        """
         with self._config_lock:
             try:
                 data: dict[str, dict[str, Any]] = {}
@@ -542,11 +581,25 @@ class ServerManager:
         }
 
     def server_exists(self, name: str) -> bool:
-        """檢查伺服器是否已存在"""
+        """檢查伺服器是否已存在。
+
+        Args:
+            name: 伺服器名稱。
+
+        Returns:
+            若伺服器存在則回傳 True。
+        """
         return name in self.servers
 
     def add_server(self, config: ServerConfig) -> bool:
-        """添加伺服器配置（用於匯入）"""
+        """添加伺服器配置（用於匯入）。
+
+        Args:
+            config: 要加入的伺服器設定。
+
+        Returns:
+            成功寫入設定時回傳 True，失敗時回傳 False。
+        """
         try:
             self.servers[config.name] = config
             self.write_servers_config()
@@ -556,7 +609,14 @@ class ServerManager:
             return False
 
     def load_server_properties(self, server_name: str) -> dict[str, str]:
-        """載入伺服器的 server.properties 檔案內容 (附帶緩存機制)"""
+        """載入伺服器的 server.properties 檔案內容（附帶快取機制）。
+
+        Args:
+            server_name: 伺服器名稱。
+
+        Returns:
+            讀取到的屬性字典；找不到或失敗時回傳空字典。
+        """
         try:
             if server_name not in self.servers:
                 return {}
@@ -571,7 +631,6 @@ class ServerManager:
                 return {}
             cached_mtime, cached_props = self._properties_cache.get(server_name, (0, None))
             if cached_props is not None and mtime == cached_mtime:
-                logger.debug(f"使用 server.properties 快取: server={server_name}, path={properties_file}")
                 return cached_props
             properties = ServerPropertiesHelper.load_properties(properties_file)
             self._properties_cache[server_name] = (mtime, properties)
@@ -591,6 +650,9 @@ class ServerManager:
         """清除 server.properties 快取。
 
         傳入 server_name 時僅清除單一伺服器，否則清除全部。
+
+        Args:
+            server_name: 要清除快取的伺服器名稱；為 None 時清除全部。
         """
         if server_name is None:
             self._properties_cache.clear()
@@ -602,7 +664,14 @@ class ServerManager:
         return self._get_running_instance(server_name) is not None
 
     def stop_server(self, server_name: str) -> bool:
-        """停止伺服器"""
+        """停止伺服器。
+
+        Args:
+            server_name: 目標伺服器名稱。
+
+        Returns:
+            成功停止或已處於停止狀態時回傳 True。
+        """
         try:
             instance = self.running_servers.get(server_name)
             if instance is None:
@@ -643,7 +712,14 @@ class ServerManager:
             self._cleanup_running_server_state(server_name)
 
     def get_server_info(self, server_name: str) -> dict | None:
-        """獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位"""
+        """獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位。
+
+        Args:
+            server_name: 目標伺服器名稱。
+
+        Returns:
+            伺服器資訊字典；找不到伺服器時回傳 None。
+        """
         try:
             if server_name not in self.servers:
                 return None
@@ -721,7 +797,15 @@ class ServerManager:
             return None
 
     def send_command(self, server_name: str, command: str) -> bool:
-        """向運行中的伺服器發送命令"""
+        """向運行中的伺服器發送命令。
+
+        Args:
+            server_name: 目標伺服器名稱。
+            command: 要送出的控制台指令。
+
+        Returns:
+            成功送出時回傳 True，失敗時回傳 False。
+        """
         try:
             instance = self._get_running_instance(server_name)
             if instance is None:
@@ -756,7 +840,15 @@ class ServerManager:
             return False
 
     def read_server_output(self, server_name: str, _timeout: float = 0.1) -> list[str]:
-        """讀取伺服器輸出"""
+        """讀取伺服器輸出。
+
+        Args:
+            server_name: 目標伺服器名稱。
+            _timeout: 保留的相容參數，現階段未使用。
+
+        Returns:
+            目前緩衝中的輸出行清單。
+        """
         try:
             instance = self._get_running_instance(server_name)
             if instance is None:
@@ -773,7 +865,14 @@ class ServerManager:
             return []
 
     def get_server_log_file(self, server_name: str) -> Path | None:
-        """獲取伺服器日誌檔案路徑"""
+        """獲取伺服器日誌檔案路徑。
+
+        Args:
+            server_name: 目標伺服器名稱。
+
+        Returns:
+            找到的日誌檔案路徑；找不到時回傳 None。
+        """
         try:
             if server_name not in self.servers:
                 return None

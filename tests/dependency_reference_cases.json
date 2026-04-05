@@ -1,0 +1,149 @@
+{
+  "cases": [
+    {
+      "name": "direct_project_id_prefers_cached_name",
+      "dependency": {
+        "project_id": " qvIfYCYJ ",
+        "version_id": ""
+      },
+      "dependency_names": {
+        "qvifycyj": "Quilt Standard Libraries"
+      },
+      "loader": null,
+      "version_details": {},
+      "project_names": {},
+      "repeat": 1,
+      "expected": {
+        "project_id": "qvIfYCYJ",
+        "project_name": "Quilt Standard Libraries",
+        "version_id": "",
+        "version_name": "",
+        "resolution_source": "project_id",
+        "resolution_confidence": "direct",
+        "compare_project_id": "qvifycyj",
+        "label": "Quilt Standard Libraries",
+        "version": null
+      },
+      "expected_calls": {
+        "version_details": 0,
+        "project_name": 0
+      },
+      "expected_dependency_names": {
+        "qvifycyj": "Quilt Standard Libraries"
+      }
+    },
+    {
+      "name": "version_detail_fallback_uses_cache_and_name_cache",
+      "dependency": {
+        "version_id": "version-lookup-1"
+      },
+      "dependency_names": {},
+      "loader": null,
+      "version_details": {
+        "version-lookup-1": {
+          "project_id": "Project-A",
+          "version": {
+            "version_id": "ver-1",
+            "version_number": "1.0.0",
+            "display_name": "1.0.0",
+            "files": [
+              {
+                "filename": "project-a-1.0.0.jar",
+                "primary": true
+              }
+            ]
+          }
+        }
+      },
+      "project_names": {
+        "Project-A": "Project Alpha"
+      },
+      "repeat": 2,
+      "expected": {
+        "project_id": "Project-A",
+        "project_name": "Project Alpha",
+        "version_id": "version-lookup-1",
+        "version_name": "1.0.0",
+        "resolution_source": "version_detail",
+        "resolution_confidence": "fallback",
+        "compare_project_id": "project-a",
+        "label": "Project Alpha（需求版本：1.0.0）",
+        "version": {
+          "version_id": "ver-1",
+          "display_name": "1.0.0"
+        }
+      },
+      "expected_calls": {
+        "version_details": 1,
+        "project_name": 1
+      },
+      "expected_dependency_names": {
+        "project-a": "Project Alpha"
+      }
+    },
+    {
+      "name": "fabric_loader_override_resets_version_binding",
+      "dependency": {
+        "project_id": "qvIfYCYJ",
+        "version_id": "legacy-v"
+      },
+      "dependency_names": {},
+      "loader": "fabric",
+      "version_details": {
+        "legacy-v": {
+          "project_id": "qvIfYCYJ",
+          "version": {
+            "version_id": "legacy-v",
+            "version_number": "0.0.1",
+            "display_name": "0.0.1"
+          }
+        }
+      },
+      "project_names": {},
+      "repeat": 1,
+      "expected": {
+        "project_id": "P7dR8mSH",
+        "project_name": "",
+        "version_id": "",
+        "version_name": "",
+        "resolution_source": "loader_override",
+        "resolution_confidence": "fallback",
+        "compare_project_id": "p7dr8msh",
+        "label": "未知模組（project id: P7dR8mSH）",
+        "version": null
+      },
+      "expected_calls": {
+        "version_details": 1,
+        "project_name": 1
+      },
+      "expected_dependency_names": {}
+    },
+    {
+      "name": "filename_only_dependency_uses_safe_fallback_label",
+      "dependency": {
+        "file_name": "optional-lib.jar"
+      },
+      "dependency_names": {},
+      "loader": null,
+      "version_details": {},
+      "project_names": {},
+      "repeat": 1,
+      "expected": {
+        "project_id": "",
+        "project_name": "",
+        "version_id": "",
+        "version_name": "",
+        "resolution_source": "version_id",
+        "resolution_confidence": "fallback",
+        "compare_project_id": "",
+        "label": "optional-lib.jar",
+        "version": null
+      },
+      "expected_calls": {
+        "version_details": 0,
+        "project_name": 0
+      },
+      "expected_dependency_names": {}
+    }
+  ]
+}
