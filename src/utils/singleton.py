@@ -10,6 +10,8 @@ from typing import ClassVar, cast
 
 
 class Singleton:
+    """提供 thread-safe 的單例基底。"""
+
     _instance: ClassVar[object | None] = None
     _initialized: ClassVar[bool] = False
     _instance_lock: ClassVar[threading.Lock] = threading.Lock()

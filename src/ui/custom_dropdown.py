@@ -6,8 +6,8 @@ import tkinter as tk
 import traceback
 from collections.abc import Callable
 import customtkinter as ctk
-from ..utils import Colors, FontManager, FontSize, Sizes, UIUtils, get_logger
-from . import VirtualList
+from ..utils import Colors, FontSize, Sizes, UIUtils, get_logger
+from . import DialogUtils, FontManager, VirtualList
 
 logger = get_logger().bind(component="CustomDropdown")
 
@@ -98,7 +98,18 @@ class CustomDropdown(ctk.CTkFrame):
             return
         self.is_dropdown_open = True
         self.arrow_label.configure(text="▲")
-        window = ctk.CTkToplevel(self)
+        window = DialogUtils.create_toplevel_dialog(
+            self,
+            "",
+            width=self.width,
+            height=self.max_dropdown_height,
+            resizable=False,
+            bind_icon=False,
+            center_on_parent=False,
+            make_modal=False,
+            delay_ms=0,
+            reveal_after_setup=False,
+        )
         self.dropdown_window = window
         window.withdraw()
         window.overrideredirect(True)
@@ -264,15 +275,27 @@ class CustomDropdown(ctk.CTkFrame):
             logger.exception(f"移除全域點擊綁定失敗: {e}")
 
     def get(self) -> str:
-        """獲取當前值"""
+        """獲取當前值。
+
+        Returns:
+            目前選取的字串值。
+        """
         return self.variable.get()
 
     def set(self, value: str) -> None:
-        """設定當前值"""
+        """設定當前值。
+
+        Args:
+            value: 要設為目前值的字串。
+        """
         self.variable.set(value)
 
     def configure(self, **kwargs) -> None:
-        """配置元件"""
+        """配置元件。
+
+        Args:
+            kwargs: 會被轉交給元件設定的參數。
+        """
         if "values" in kwargs:
             self.values = kwargs.pop("values")
         if "state" in kwargs:
@@ -298,7 +321,14 @@ class CustomDropdown(ctk.CTkFrame):
             super().configure(**kwargs)
 
     def cget(self, key: str) -> str | list[str] | int:
-        """獲取配置值"""
+        """獲取配置值。
+
+        Args:
+            key: 要查詢的設定名稱。
+
+        Returns:
+            對應的設定值。
+        """
         if key == "values":
             return self.values
         if key == "state":

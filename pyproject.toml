@@ -29,6 +29,7 @@ lint = [
   "ruff>=0.15.8",
   "vulture>=2.16",
   "eradicate>=3.0.1",
+  "pylint>=4.0.5",
 ]
 
 typecheck = [

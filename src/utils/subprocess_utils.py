@@ -18,6 +18,8 @@ logger = get_logger().bind(component="SubprocessUtils")
 
 
 class SubprocessUtils:
+    """提供安全的 subprocess 包裝，強制使用 shell=False。"""
+
     PIPE = subprocess.PIPE
     STDOUT = subprocess.STDOUT
     DEVNULL = subprocess.DEVNULL
@@ -58,9 +60,8 @@ class SubprocessUtils:
             return cmd_list
         which = PathUtils.find_executable(exe)
         if which is None and os.name == "nt" and exe.lower() == "winget":
-            which = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "winget.exe")
-            if not os.path.exists(which):
-                which = None
+            winget_path = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "winget.exe"
+            which = str(winget_path) if getattr(winget_path, "exists", lambda: False)() else None
 
         if which is None:
             raise FileNotFoundError(f"無法在 PATH 找到執行檔: {exe}")
@@ -79,7 +80,15 @@ class SubprocessUtils:
 
     @staticmethod
     def run_checked(cmd: Iterable[str], **kwargs) -> subprocess.CompletedProcess:
-        """像 subprocess.run，但先驗證 cmd 並強制 shell=False。"""
+        """像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`。
+
+        Args:
+            cmd: 命令列參數序列。
+            **kwargs: 傳遞給 `subprocess.run` 的其他參數。
+
+        Returns:
+            `subprocess.run` 的執行結果。
+        """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
         # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
@@ -87,7 +96,15 @@ class SubprocessUtils:
 
     @staticmethod
     def popen_checked(cmd: Iterable[str], **kwargs) -> subprocess.Popen:
-        """像 subprocess.Popen，但先驗證 cmd 並強制 shell=False。回傳 Popen 物件。"""
+        """像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`。
+
+        Args:
+            cmd: 命令列參數序列。
+            **kwargs: 傳遞給 `subprocess.Popen` 的其他參數。
+
+        Returns:
+            建立完成的 `subprocess.Popen` 物件。
+        """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
         # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。

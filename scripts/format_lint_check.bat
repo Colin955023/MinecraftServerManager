@@ -30,6 +30,11 @@ uv run mypy src tests quick_test.py
 if errorlevel 1 exit /b 1
 echo.
 
+echo === Pylint Cyclic Import Check ===
+uv run pylint --disable=all --enable=cyclic-import src
+if errorlevel 1 exit /b 1
+echo.
+
 echo === Secret Scan ===
 uv tool run detect-secrets scan --only-verified --all-files > secrets_report.json
 findstr /C:"\"results\": {}" secrets_report.json >nul
@@ -49,12 +54,8 @@ uv run python -m compileall -q src
 if errorlevel 1 exit /b 1
 echo.
 
-echo === Run Tests (smoke) ===
-uv run pytest -m smoke -q
-if errorlevel 1 exit /b 1
-
-echo === Run Tests (integration) ===
-uv run pytest -m integration -q
+echo === Run Tests ===
+uv run pytest -q
 if errorlevel 1 exit /b 1
 echo.
 echo ========================================================

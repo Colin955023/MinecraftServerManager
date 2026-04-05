@@ -8,15 +8,16 @@ from collections.abc import Callable
 import customtkinter as ctk
 from ..utils import (
     AppRestart,
-    FontManager,
     FontSize,
     Sizes,
+    Spacing,
     UIUtils,
     WindowManager,
     get_button_style,
     get_logger,
     get_settings_manager,
 )
+from . import DialogUtils, FontManager
 
 logger = get_logger().bind(component="WindowPreferencesDialog")
 
@@ -32,7 +33,7 @@ class WindowPreferencesDialog:
             self.parent.update_idletasks()
             width = self.parent.winfo_width()
             height = self.parent.winfo_height()
-            if WindowManager._is_valid_main_window_size(width, height):
+            if WindowManager.is_valid_main_window_size(width, height):
                 return (width, height)
         except Exception as e:
             logger.debug(f"讀取目前主視窗大小失敗，將回退到已儲存設定: {e}")
@@ -42,7 +43,7 @@ class WindowPreferencesDialog:
         self.parent = parent
         self.on_settings_changed = on_settings_changed
         self.settings = get_settings_manager()
-        self.dialog = UIUtils.create_toplevel_dialog(
+        self.dialog = DialogUtils.create_toplevel_dialog(
             parent,
             "視窗偏好設定",
             width=Sizes.DIALOG_PREFERENCES_WIDTH,
@@ -59,11 +60,11 @@ class WindowPreferencesDialog:
     def _create_widgets(self) -> None:
         """建立介面元件"""
         main_frame = ctk.CTkScrollableFrame(self.dialog)
-        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        main_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         title_label = ctk.CTkLabel(
             main_frame, text="🖥️ 視窗偏好設定", font=FontManager.get_font(size=FontSize.LARGE, weight="bold")
         )
-        title_label.pack(pady=(0, 20))
+        title_label.pack(pady=(0, Spacing.XL))
         self._create_general_section(main_frame)
         self._create_main_window_section(main_frame)
         self._create_display_section(main_frame)
@@ -72,10 +73,10 @@ class WindowPreferencesDialog:
     def _create_section_frame(self, parent, title: str, emoji: str = "") -> ctk.CTkFrame:
         """建立設定區域框架"""
         frame = ctk.CTkFrame(parent)
-        frame.pack(fill="x", pady=(0, 15))
+        frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
         section_title = f"{emoji} {title}" if emoji else title
         ctk.CTkLabel(frame, text=section_title, font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")).pack(
-            anchor="w", padx=15, pady=(15, 10)
+            anchor="w", padx=Spacing.LARGE_MINUS, pady=(Spacing.LARGE_MINUS, Spacing.SMALL_PLUS)
         )
         return frame
 
@@ -84,7 +85,7 @@ class WindowPreferencesDialog:
         checkbox = ctk.CTkCheckBox(
             parent, text=text, variable=variable, font=FontManager.get_font(size=FontSize.NORMAL)
         )
-        checkbox.pack(anchor="w", padx=25, pady=(0, 10))
+        checkbox.pack(anchor="w", padx=25, pady=(0, Spacing.SMALL_PLUS))
         return checkbox
 
     def _create_general_section(self, parent) -> None:
@@ -102,7 +103,7 @@ class WindowPreferencesDialog:
         if should_show_debug:
             self.debug_logging_var = ctk.BooleanVar()
             checkbox = self._create_checkbox(general_frame, "啟用除錯日誌輸出", self.debug_logging_var)
-            checkbox.pack(anchor="w", padx=25, pady=(0, 15))
+            checkbox.pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
         else:
             self.debug_logging_var = ctk.BooleanVar()
             self.debug_logging_var.set(False)
@@ -120,7 +121,7 @@ class WindowPreferencesDialog:
         info_text = f"目前螢幕解析度: {screen_info['width']} × {screen_info['height']}\n目前主視窗大小: {current_width} × {current_height}"
         ctk.CTkLabel(
             main_window_frame, text=info_text, font=FontManager.get_font(size=FontSize.NORMAL), justify="left"
-        ).pack(anchor="w", padx=25, pady=(0, 15))
+        ).pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
         scale_factor = get_settings_manager().get_dpi_scaling()
         reset_button = ctk.CTkButton(
             main_window_frame,
@@ -130,13 +131,13 @@ class WindowPreferencesDialog:
             width=int(150 * scale_factor),
             height=int(32 * scale_factor),
         )
-        reset_button.pack(anchor="w", padx=25, pady=(0, 15))
+        reset_button.pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
 
     def _create_display_section(self, parent) -> None:
         """建立顯示設定區域"""
         display_frame = self._create_section_frame(parent, "顯示設定", "🎨")
         dpi_frame = ctk.CTkFrame(display_frame, fg_color="transparent")
-        dpi_frame.pack(fill="x", padx=25, pady=(0, 15))
+        dpi_frame.pack(fill="x", padx=25, pady=(0, Spacing.LARGE_MINUS))
         ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
         scale_factor = get_settings_manager().get_dpi_scaling()
         self.dpi_scale_var = ctk.DoubleVar()
@@ -149,7 +150,7 @@ class WindowPreferencesDialog:
             width=int(200 * scale_factor),
             command=self._on_dpi_scale_changed,
         )
-        self.dpi_scale_slider.pack(side="left", padx=(10, 10))
+        self.dpi_scale_slider.pack(side="left", padx=(Spacing.SMALL_PLUS, Spacing.SMALL_PLUS))
         self.dpi_scale_label = ctk.CTkLabel(
             dpi_frame, text="1.0x", font=FontManager.get_font(size=FontSize.NORMAL), width=int(40 * scale_factor)
         )
@@ -159,12 +160,12 @@ class WindowPreferencesDialog:
             text="調整此設定以適應高解析度螢幕或改善視覺效果",
             font=FontManager.get_font(size=FontSize.NORMAL),
             text_color="gray",
-        ).pack(anchor="w", padx=25, pady=(0, 15))
+        ).pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
 
     def _create_button_section(self, parent) -> None:
         """建立按鈕區域"""
         button_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        button_frame.pack(fill="x", pady=(20, 0))
+        button_frame.pack(fill="x", pady=(Spacing.XL, 0))
         buttons = [
             ("恢復預設", self._reset_all_settings, "left", get_button_style("danger")),
             ("套用設定", self._apply_settings, "right", get_button_style("primary")),
@@ -285,7 +286,7 @@ class WindowPreferencesDialog:
                             )
                 else:
                     detail_text = supported_diag if supported_diag else None
-                    UIUtils.show_manual_restart_dialog(self.dialog, detail_text)
+                    DialogUtils.show_manual_restart_dialog(self.dialog, detail_text)
 
     def _apply_settings(self) -> None:
         """套用設定"""
@@ -329,7 +330,7 @@ class WindowPreferencesDialog:
                     _, diag = AppRestart.get_restart_diagnostics()
                 except Exception:
                     diag = None
-                UIUtils.show_manual_restart_dialog(self.dialog, diag)
+                DialogUtils.show_manual_restart_dialog(self.dialog, diag)
             self.dialog.destroy()
         except Exception as e:
             logger.error(f"儲存失敗: {e}\n{traceback.format_exc()}")

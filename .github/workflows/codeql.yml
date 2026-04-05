@@ -1,4 +1,4 @@
-name: "CodeQL 進階安全掃描"
+name: "CodeQL Advanced Analysis"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -7,10 +7,18 @@ concurrency:
 on:
   push:
     branches: [ "master" ]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
   merge_group:
     types: [checks_requested]
   pull_request:
     branches: [ "master" ]
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1'
@@ -28,35 +36,30 @@ jobs:
       contents: read
 
     steps:
-    - name: 檢出儲存庫
+    - name: Checkout repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
+        fetch-depth: ${{ github.event_name == 'pull_request' && '10' || '0' }}
         persist-credentials: false
-        fetch-depth: 0
 
-    - name: 安裝 uv
-      uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+    - name: Setup Environment
+      uses: ./.github/actions/setup-python-env
       with:
-        enable-cache: ${{ github.ref == 'refs/heads/master' }}
+        uv-sync: 'true'
 
-    - name: 設定 Python 環境 (使用 uv)
-      run: uv python install
-
-    - name: 安裝專案依賴 (增強 CodeQL 分析準確度)
-      if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
-      run: uv sync --all-groups --frozen
-
-    - name: 初始化 CodeQL
+    - name: init CodeQL
       uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13
       with:
         languages: python
         build-mode: none
+        queries: ${{ github.event_name == 'pull_request' && 'security-extended' || 'security-and-quality' }}
         # 僅保留設定檔引用，細節交給 config-file 處理
         config-file: .github/codeql/codeql-config.yml
-        dependency-caching: ${{ github.ref == 'refs/heads/master' }}
-        trap-caching: ${{ github.ref == 'refs/heads/master' }}
+        dependency-caching: true
+        trap-caching: true
 
-    - name: 執行 CodeQL 分析
+    - name: CodeQL Analyze
       uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13
       with:
         category: "/language:python"
+

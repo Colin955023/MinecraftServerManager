@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from ..core import LoaderManager
 from ..utils import (
-    compute_file_hash,
+    DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION,
     LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED,
     LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED,
     LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED,
@@ -42,23 +42,35 @@ from ..utils import (
     RECOMMENDATION_SOURCE_STALE_METADATA,
     HTTPUtils,
     LocalProviderEnsureResult,
-    PathUtils,
-    ProviderMetadataRecord,
-    apply_provider_metadata,
-    ensure_local_mod_provider_record,
-    fetch_modrinth_project_detail,
-    get_logger,
-    is_cached_provider_metadata_fresh,
-    is_provider_revalidation_retry_due,
-    resolve_modrinth_provider_record,
-    should_attempt_provider_revalidation,
-    DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION,
     OnlineDependencyInstallItem,
     OnlineDependencyInstallPlan,
-    serialize_online_dependency_install_plan,
-    validate_online_dependency_install_plan_payload,
-    migrate_online_dependency_install_plan_payload,
+    PathUtils,
+    ProviderMetadataRecord,
+    apply_loader_specific_dependency_override,
+    apply_provider_metadata,
+    build_local_mod_lookup_candidates,
+    canonical_lookup_key,
+    clean_api_identifier,
+    compute_file_hash,
     deserialize_online_dependency_install_plan,
+    ensure_local_mod_provider_record,
+    execute_resilient_batch_requests,
+    execute_resilient_single_request,
+    expand_target_loader_aliases,
+    fetch_modrinth_project_detail,
+    get_logger,
+    get_modrinth_loader_filters,
+    is_cached_provider_metadata_fresh,
+    is_provider_revalidation_retry_due,
+    is_supported_modrinth_update_loader,
+    migrate_online_dependency_install_plan_payload,
+    normalize_identifier,
+    normalize_local_loader,
+    normalize_mod_search_query,
+    resolve_modrinth_provider_record,
+    serialize_online_dependency_install_plan,
+    should_attempt_provider_revalidation,
+    validate_online_dependency_install_plan_payload,
 )
 
 __all__ = [
@@ -75,7 +87,6 @@ logger = get_logger().bind(component="ModSearchService")
 MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
 MODRINTH_PROJECT_URL = "https://modrinth.com/mod"
 MODRINTH_PROJECT_BATCH_URL = "https://api.modrinth.com/v2/projects"
-MODRINTH_PROJECT_DETAIL_URL_TEMPLATE = "https://api.modrinth.com/v2/project/{project_id}"
 MODRINTH_VERSION_URL_TEMPLATE = "https://api.modrinth.com/v2/project/{project_id}/version"
 MODRINTH_VERSION_DETAIL_URL_TEMPLATE = "https://api.modrinth.com/v2/version/{version_id}"
 MODRINTH_VERSION_FILES_URL = "https://api.modrinth.com/v2/version_files"
@@ -90,7 +101,6 @@ MODRINTH_PREFERRED_HASH_ALGORITHM = "sha512"
 MIN_ACCEPTABLE_LOCAL_MOD_SEARCH_SCORE = 70
 SUPPORTED_SORT_OPTIONS = {"relevance", "downloads", "newest", "updated", "follows"}
 LOCAL_HASH_MAX_WORKERS = 4
-SUPPORTED_MODRINTH_UPDATE_LOADERS = {"fabric", "forge", "quilt", "neoforge"}
 MODRINTH_BATCH_HASH_LOOKUP_SIZE = 64
 MODRINTH_BATCH_PROJECT_LOOKUP_SIZE = 64
 MODRINTH_BATCH_RETRY_ATTEMPTS = 2
@@ -214,7 +224,7 @@ class LocalModUpdateCandidate:
             return False
         if self.current_hash and self.target_file_hash:
             return self.current_hash != self.target_file_hash
-        return _normalize_identifier(self.current_version) != _normalize_identifier(self.target_version_name)
+        return normalize_identifier(self.current_version) != normalize_identifier(self.target_version_name)
 
     @property
     def actionable(self) -> bool:
@@ -286,7 +296,7 @@ class ResolvedDependencyReference:
 
     @property
     def compare_project_id(self) -> str:
-        return _normalize_identifier(self.project_id)
+        return normalize_identifier(self.project_id)
 
 
 @dataclass(slots=True)
@@ -307,72 +317,8 @@ def _normalize_sort(sort_by: str) -> str:
     return "relevance"
 
 
-def _normalize_local_loader(loader: str | None) -> str:
-    normalized_loader = _normalize_identifier(loader)
-    if normalized_loader in {"fabric", "forge"}:
-        return normalized_loader
-    if normalized_loader in {"vanilla", "原版"}:
-        return "vanilla"
-    return normalized_loader
-
-
-def _is_supported_modrinth_update_loader(loader: str | None) -> bool:
-    normalized_loader = _normalize_local_loader(loader)
-    if not normalized_loader:
-        return True
-    return normalized_loader in SUPPORTED_MODRINTH_UPDATE_LOADERS
-
-
-def _expand_target_loader_aliases(loader: str | None, minecraft_version: str | None = None) -> set[str]:
-    normalized_loader = _normalize_local_loader(loader)
-    if not normalized_loader:
-        return set()
-    compatible_loaders = {normalized_loader}
-    normalized_minecraft_version = _normalize_identifier(minecraft_version)
-    if normalized_loader == "quilt":
-        compatible_loaders.add("fabric")
-    if normalized_loader == "neoforge" and normalized_minecraft_version == "1.20.1":
-        compatible_loaders.add("forge")
-    return compatible_loaders
-
-
-def _get_modrinth_loader_filters(loader: str | None, minecraft_version: str | None = None) -> list[str]:
-    """回傳 Modrinth 查詢用 loader 過濾列表（含 Prism 風格 loader alias 擴展）。"""
-    normalized_loader = _normalize_identifier(loader)
-    if not normalized_loader:
-        return []
-    ordered_loaders: list[str] = [normalized_loader]
-    for alias_loader in sorted(_expand_target_loader_aliases(loader, minecraft_version)):
-        if alias_loader not in ordered_loaders:
-            ordered_loaders.append(alias_loader)
-    return ordered_loaders
-
-
-MODRINTH_LOADER_DEPENDENCY_OVERRIDES: tuple[tuple[str, str], ...] = (("qvIfYCYJ", "P7dR8mSH"), ("lwVhp9o5", "Ha28R6CL"))
-
-
-def _apply_loader_specific_dependency_override(project_id: str | None, loader: str | None) -> str:
-    clean_project_id = _clean_api_identifier(project_id)
-    normalized_project_id = _normalize_identifier(clean_project_id)
-    normalized_loader = _normalize_identifier(loader)
-    if not clean_project_id or normalized_loader != "fabric":
-        return clean_project_id
-    for quilt_project_id, fabric_project_id in MODRINTH_LOADER_DEPENDENCY_OVERRIDES:
-        if normalized_project_id == _normalize_identifier(quilt_project_id):
-            return fabric_project_id
-    return clean_project_id
-
-
-def _normalize_identifier(value: str | None) -> str:
-    return str(value or "").strip().lower()
-
-
-def _clean_api_identifier(value: str | None) -> str:
-    return str(value or "").strip()
-
-
 def _normalize_hash_algorithm(algorithm: str | None) -> str:
-    normalized = _normalize_identifier(algorithm)
+    normalized = normalize_identifier(algorithm)
     if normalized in {"sha512", "sha1"}:
         return normalized
     return MODRINTH_PREFERRED_HASH_ALGORITHM
@@ -388,17 +334,6 @@ def _resolve_local_update_recommendation_strategy(
     return (RECOMMENDATION_SOURCE_HASH_METADATA, RECOMMENDATION_CONFIDENCE_HIGH)
 
 
-def _split_camel_case_words(value: str | None) -> str:
-    normalized = str(value or "").strip()
-    if not normalized:
-        return ""
-    return re.sub("(?<=[A-Z])(?=[A-Z][a-z])", " ", re.sub("(?<=[a-z0-9])(?=[A-Z])", " ", normalized))
-
-
-def _canonical_lookup_key(value: str | None) -> str:
-    return re.sub("[^a-z0-9]+", "", str(value or "").strip().lower())
-
-
 def _extract_primary_file_hash(
     version: OnlineModVersion | None, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM
 ) -> str:
@@ -409,53 +344,8 @@ def _extract_primary_file_hash(
     return str(hashes.get(_normalize_hash_algorithm(algorithm), "") or "").strip().lower()
 
 
-def normalize_mod_search_query(raw_query: str) -> str:
-    """將檔名/雜訊字串轉為較適合 Modrinth 搜尋的關鍵字。"""
-    normalized = _split_camel_case_words(raw_query)
-    if not normalized:
-        return ""
-    normalized = normalized.removesuffix(".jar.disabled").removesuffix(".jar")
-    normalized = normalized.replace("_", " ").replace("-", " ")
-    normalized = re.sub("(?i)\\b(?:fabric|forge|loader)\\b", " ", normalized)
-    normalized = re.sub("(?i)\\bmc\\s*\\d+(?:\\.\\d+){1,2}[a-z0-9.-]*\\b", " ", normalized)
-    normalized = re.sub("\\b\\d+(?:\\.\\d+){1,3}[a-z0-9.-]*\\b", " ", normalized)
-    return re.sub("\\s+", " ", normalized).strip() or str(raw_query or "").strip()
-
-
-def _build_local_mod_lookup_candidates(
-    filename: str, *, platform_id: str | None = None, platform_slug: str | None = None, local_name: str | None = None
-) -> tuple[list[str], list[str], set[str]]:
-    filename_stem = filename.replace(".jar.disabled", "").replace(".jar", "")
-    raw_candidates = [
-        str(platform_id or "").strip(),
-        str(platform_slug or "").strip(),
-        str(local_name or "").strip(),
-        filename_stem.strip(),
-    ]
-    exact_identifiers: list[str] = []
-    search_terms: list[str] = []
-    candidate_keys: set[str] = set()
-    for raw_candidate in raw_candidates:
-        if not raw_candidate:
-            continue
-        clean_candidate = _clean_api_identifier(raw_candidate)
-        if clean_candidate and clean_candidate not in exact_identifiers:
-            exact_identifiers.append(clean_candidate)
-        normalized_search = normalize_mod_search_query(raw_candidate)
-        if normalized_search and normalized_search not in search_terms:
-            search_terms.append(normalized_search)
-        slug_candidate = re.sub("[^a-z0-9]+", "-", normalized_search.lower()).strip("-") if normalized_search else ""
-        if slug_candidate and slug_candidate not in exact_identifiers:
-            exact_identifiers.append(slug_candidate)
-        for candidate_value in (raw_candidate, normalized_search, slug_candidate):
-            candidate_key = _canonical_lookup_key(candidate_value)
-            if candidate_key:
-                candidate_keys.add(candidate_key)
-    return (exact_identifiers, search_terms, candidate_keys)
-
-
 def _score_local_mod_search_match(mod: OnlineModInfo, candidate_keys: set[str]) -> int:
-    mod_keys = {_canonical_lookup_key(mod.project_id), _canonical_lookup_key(mod.slug), _canonical_lookup_key(mod.name)}
+    mod_keys = {canonical_lookup_key(mod.project_id), canonical_lookup_key(mod.slug), canonical_lookup_key(mod.name)}
     mod_keys.discard("")
     if not mod_keys:
         return 0
@@ -516,12 +406,12 @@ def _collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tupl
     installed_project_ids: set[str] = set()
     installed_identifiers: set[str] = set()
     for mod in installed_mods or []:
-        platform_id = _normalize_identifier(getattr(mod, "platform_id", ""))
+        platform_id = normalize_identifier(getattr(mod, "platform_id", ""))
         if platform_id:
             installed_project_ids.add(platform_id)
             installed_identifiers.add(platform_id)
         for raw_value in (getattr(mod, "id", ""), getattr(mod, "name", ""), getattr(mod, "filename", "")):
-            normalized_value = _normalize_identifier(raw_value)
+            normalized_value = normalize_identifier(raw_value)
             if normalized_value:
                 installed_identifiers.add(normalized_value)
         stem = _normalize_filename_stem(getattr(mod, "filename", ""))
@@ -533,8 +423,8 @@ def _collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tupl
 def _collect_installed_mod_versions(installed_mods: list[Any] | None) -> dict[str, set[str]]:
     versions_by_project: dict[str, set[str]] = {}
     for mod in installed_mods or []:
-        project_id = _normalize_identifier(getattr(mod, "platform_id", ""))
-        version = _normalize_identifier(getattr(mod, "version", ""))
+        project_id = normalize_identifier(getattr(mod, "platform_id", ""))
+        version = normalize_identifier(getattr(mod, "version", ""))
         if not project_id or not version:
             continue
         versions_by_project.setdefault(project_id, set()).add(version)
@@ -572,7 +462,7 @@ def _parse_modrinth_version_lookup_response(
         normalized_hash = str(file_hash or "").strip().lower()
         if not normalized_hash or not isinstance(raw_item, dict):
             continue
-        project_id = _clean_api_identifier(str(raw_item.get("project_id", "") or ""))
+        project_id = clean_api_identifier(str(raw_item.get("project_id", "") or ""))
         version = _parse_modrinth_version(raw_item)
         resolved[normalized_hash] = ModrinthVersionLookupResult(
             file_hash=normalized_hash, algorithm=normalized_algorithm, project_id=project_id, version=version
@@ -580,105 +470,18 @@ def _parse_modrinth_version_lookup_response(
     return resolved
 
 
-def _chunk_sequence(values: list[str], chunk_size: int) -> list[list[str]]:
-    normalized_size = max(1, int(chunk_size))
-    return [values[index : index + normalized_size] for index in range(0, len(values), normalized_size)]
-
-
-def _sleep_if_needed(delay_seconds: float) -> None:
-    if delay_seconds <= 0:
-        return
-    time.sleep(delay_seconds)
-
-
-def _execute_resilient_single_request(
-    *,
-    request_once: Callable[[], Any],
-    is_success: Callable[[Any], bool],
-    max_attempts: int,
-    throttle_seconds: float = MODRINTH_REQUEST_THROTTLE_SECONDS,
-    retry_backoff_base_seconds: float = MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
-    retry_backoff_max_seconds: float = MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
-) -> tuple[Any, bool, int]:
-    attempts = max(1, int(max_attempts))
-    last_response: Any = None
-    for attempt_index in range(attempts):
-        if attempt_index > 0:
-            backoff_seconds = min(
-                max(0.0, float(retry_backoff_max_seconds)),
-                max(0.0, float(retry_backoff_base_seconds)) * 2 ** (attempt_index - 1),
-            )
-            _sleep_if_needed(backoff_seconds)
-        last_response = request_once()
-        if is_success(last_response):
-            return (last_response, True, attempt_index + 1)
-        if attempt_index + 1 < attempts:
-            _sleep_if_needed(max(0.0, float(throttle_seconds)))
-    return (last_response, False, attempts)
-
-
-def _execute_resilient_batch_requests(
-    items: list[str],
-    *,
-    batch_size: int,
-    max_attempts: int,
-    request_batch: Callable[[list[str]], dict[str, Any] | None],
-    throttle_seconds: float = MODRINTH_REQUEST_THROTTLE_SECONDS,
-    retry_backoff_base_seconds: float = MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
-    retry_backoff_max_seconds: float = MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
-) -> tuple[dict[str, Any], dict[str, int]]:
-    pending_chunks = _chunk_sequence(list(items), batch_size)
-    stats = {
-        "requested_items": len(items),
-        "requested_chunks": len(pending_chunks),
-        "retried_chunks": 0,
-        "split_chunks": 0,
-        "failed_items": 0,
-    }
-    merged_payload: dict[str, Any] = {}
-    while pending_chunks:
-        chunk = pending_chunks.pop(0)
-        chunk_payload: dict[str, Any] | None = None
-        attempts = max(1, int(max_attempts))
-        for attempt_index in range(attempts):
-            if attempt_index > 0:
-                stats["retried_chunks"] += 1
-                backoff_seconds = min(
-                    max(0.0, float(retry_backoff_max_seconds)),
-                    max(0.0, float(retry_backoff_base_seconds)) * 2 ** (attempt_index - 1),
-                )
-                _sleep_if_needed(backoff_seconds)
-            chunk_payload = request_batch(chunk)
-            if chunk_payload is not None:
-                break
-            if attempt_index + 1 < attempts:
-                _sleep_if_needed(max(0.0, float(throttle_seconds)))
-        if chunk_payload is not None:
-            merged_payload.update(chunk_payload)
-            if pending_chunks:
-                _sleep_if_needed(max(0.0, float(throttle_seconds)))
-            continue
-        if len(chunk) > 1:
-            split_mid = len(chunk) // 2
-            left = chunk[:split_mid]
-            right = chunk[split_mid:]
-            if right:
-                pending_chunks.insert(0, right)
-            if left:
-                pending_chunks.insert(0, left)
-            stats["split_chunks"] += 1
-            if pending_chunks:
-                _sleep_if_needed(max(0.0, float(throttle_seconds)))
-            continue
-        stats["failed_items"] += 1
-        if pending_chunks:
-            _sleep_if_needed(max(0.0, float(throttle_seconds)))
-    return (merged_payload, stats)
-
-
 def get_modrinth_current_versions_by_hashes(
     hashes: list[str] | set[str] | tuple[str, ...], algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM
 ) -> dict[str, ModrinthVersionLookupResult]:
+    """依雜湊值取得目前已知的 Modrinth 版本資訊。
+
+    Args:
+        hashes: 要查詢的檔案雜湊清單。
+        algorithm: 雜湊演算法名稱。
+
+    Returns:
+        以雜湊值為 key 的查詢結果字典。
+    """
     normalized_hashes = [str(file_hash or "").strip().lower() for file_hash in hashes if str(file_hash or "").strip()]
     if not normalized_hashes:
         return {}
@@ -687,7 +490,7 @@ def get_modrinth_current_versions_by_hashes(
     def _request_chunk(hash_chunk: list[str]) -> dict[str, Any] | None:
         response = HTTPUtils.post_json(
             url=MODRINTH_VERSION_FILES_URL,
-            headers=HTTPUtils._get_default_headers(),
+            headers=HTTPUtils.get_default_headers(),
             json_body={"hashes": hash_chunk, "algorithm": normalized_algorithm},
             timeout=MODRINTH_VERSION_FILES_TIMEOUT_SECONDS,
         )
@@ -713,11 +516,14 @@ def _modrinth_versions_by_hashes(
     def _request_chunk(hash_chunk: list[str]) -> dict[str, Any] | None:
         return request_batch_builder(hash_chunk)
 
-    raw_payload, batch_stats = _execute_resilient_batch_requests(
+    raw_payload, batch_stats = execute_resilient_batch_requests(
         normalized_hashes,
         batch_size=MODRINTH_BATCH_HASH_LOOKUP_SIZE,
         max_attempts=MODRINTH_BATCH_RETRY_ATTEMPTS,
         request_batch=_request_chunk,
+        throttle_seconds=MODRINTH_REQUEST_THROTTLE_SECONDS,
+        retry_backoff_base_seconds=MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
+        retry_backoff_max_seconds=MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
     )
     parsed = _parse_modrinth_version_lookup_response(raw_payload, algorithm)
     logger.debug(
@@ -732,20 +538,31 @@ def get_modrinth_latest_versions_by_hashes(
     minecraft_version: str | None = None,
     loader: str | None = None,
 ) -> dict[str, ModrinthVersionLookupResult]:
+    """依雜湊值取得最新的 Modrinth 版本資訊。
+
+    Args:
+        hashes: 要查詢的檔案雜湊清單。
+        algorithm: 雜湊演算法名稱。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+
+    Returns:
+        以雜湊值為 key 的查詢結果字典。
+    """
     normalized_hashes = [str(file_hash or "").strip().lower() for file_hash in hashes if str(file_hash or "").strip()]
     if not normalized_hashes:
         return {}
     json_body: dict[str, Any] = {"hashes": normalized_hashes, "algorithm": _normalize_hash_algorithm(algorithm)}
     if minecraft_version:
         json_body["game_versions"] = [str(minecraft_version).strip()]
-    loader_filters = _get_modrinth_loader_filters(loader, minecraft_version)
+    loader_filters = get_modrinth_loader_filters(loader, minecraft_version)
     if loader_filters:
         json_body["loaders"] = loader_filters
 
     def _request_chunk(hash_chunk: list[str]) -> dict[str, Any] | None:
         response = HTTPUtils.post_json(
             url=MODRINTH_VERSION_FILES_UPDATE_URL,
-            headers=HTTPUtils._get_default_headers(),
+            headers=HTTPUtils.get_default_headers(),
             json_body={**json_body, "hashes": hash_chunk},
             timeout=MODRINTH_VERSION_FILES_TIMEOUT_SECONDS,
         )
@@ -761,9 +578,9 @@ def get_modrinth_latest_versions_by_hashes(
 
 
 def _format_dependency_label(dependency: dict[str, Any], dependency_names: dict[str, str]) -> str:
-    project_id = _clean_api_identifier(str(dependency.get("project_id", "") or ""))
-    project_key = _normalize_identifier(project_id)
-    version_id = _clean_api_identifier(str(dependency.get("version_id", "") or ""))
+    project_id = clean_api_identifier(str(dependency.get("project_id", "") or ""))
+    project_key = normalize_identifier(project_id)
+    version_id = clean_api_identifier(str(dependency.get("version_id", "") or ""))
     file_name = str(dependency.get("file_name", "") or dependency.get("filename", "") or "").strip()
     if project_id:
         resolved_name = dependency_names.get(project_key, "").strip()
@@ -776,7 +593,7 @@ def _format_dependency_label(dependency: dict[str, Any], dependency_names: dict[
 
 
 def _version_type_priority(version_type: str) -> int:
-    normalized = _normalize_identifier(version_type)
+    normalized = normalize_identifier(version_type)
     if normalized == "release":
         return 3
     if normalized in {"beta", "snapshot"}:
@@ -786,11 +603,15 @@ def _version_type_priority(version_type: str) -> int:
     return 0
 
 
-def _is_release_version_type(version_type: str) -> bool:
-    normalized = _normalize_identifier(version_type)
-    if normalized in {"", "release", "stable"}:
+def _is_allowed_version_type(version_type: str) -> bool:
+    """判斷版本類型是否在此次搜尋與過濾的允許範圍內（正式版與 Beta 版）。"""
+    normalized = normalize_identifier(version_type)
+    if normalized in {"", "release", "stable", "beta"}:
         return True
-    for marker in ("alpha", "beta", "snapshot", "pre", "prerelease", "rc"):
+    # 允許標記中包含 beta 的版本
+    if "beta" in normalized:
+        return True
+    for marker in ("alpha", "snapshot", "pre", "prerelease", "rc"):
         if marker in normalized:
             return False
     return False
@@ -811,15 +632,18 @@ def _select_best_mod_version(versions: list[OnlineModVersion]) -> OnlineModVersi
 
 
 def _fetch_modrinth_project_detail(project_id: str) -> dict[str, Any] | None:
-    clean_project_id = _clean_api_identifier(project_id)
+    clean_project_id = clean_api_identifier(project_id)
     if not clean_project_id:
         return None
-    response, success, attempts_used = _execute_resilient_single_request(
+    response, success, attempts_used = execute_resilient_single_request(
         request_once=lambda: fetch_modrinth_project_detail(
             clean_project_id, timeout=MODRINTH_PROJECT_DETAIL_TIMEOUT_SECONDS
         ),
         is_success=lambda payload: isinstance(payload, dict),
         max_attempts=MODRINTH_SINGLE_REQUEST_RETRY_ATTEMPTS,
+        throttle_seconds=MODRINTH_REQUEST_THROTTLE_SECONDS,
+        retry_backoff_base_seconds=MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
+        retry_backoff_max_seconds=MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
     )
     if success and attempts_used > 1:
         logger.debug(f"Modrinth project detail 重試成功: {clean_project_id}, attempts={attempts_used}")
@@ -830,7 +654,14 @@ def _fetch_modrinth_project_detail(project_id: str) -> dict[str, Any] | None:
 
 
 def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
-    """盡量將本地模組對應到可用的 Modrinth 專案資訊。"""
+    """盡量將本地模組對應到可用的 Modrinth 專案資訊。
+
+    Args:
+        local_mod: 本地模組物件。
+
+    Returns:
+        解析後的 Modrinth 專案資訊，失敗時回傳 None。
+    """
     _, resolved_project_info = _ensure_local_mod_provider_identity(
         str(getattr(local_mod, "filename", "") or "").strip(),
         platform_id=str(getattr(local_mod, "platform_id", "") or "").strip(),
@@ -845,7 +676,7 @@ def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
 def _build_provider_record_from_online_mod(mod_info: OnlineModInfo | None) -> ProviderMetadataRecord | None:
     if mod_info is None:
         return None
-    project_id = _clean_api_identifier(str(getattr(mod_info, "project_id", "") or ""))
+    project_id = clean_api_identifier(str(getattr(mod_info, "project_id", "") or ""))
     slug = str(getattr(mod_info, "slug", "") or "").strip()
     if not project_id and (not slug):
         return None
@@ -864,7 +695,7 @@ def _normalize_cached_provider_identity(
     resolution_source: str | None = None,
     resolved_at_epoch_ms: Any | None = None,
 ) -> tuple[str, str, bool]:
-    clean_project_id = _clean_api_identifier(platform_id)
+    clean_project_id = clean_api_identifier(platform_id)
     clean_slug = str(platform_slug or "").strip()
     if not clean_project_id and (not clean_slug):
         return ("", "", False)
@@ -900,9 +731,9 @@ def _ensure_local_mod_provider_identity(
         resolution_source=resolution_source,
         resolved_at_epoch_ms=resolved_at_epoch_ms,
     )
-    stale_platform_id = _clean_api_identifier(platform_id)
+    stale_platform_id = clean_api_identifier(platform_id)
     stale_platform_slug = str(platform_slug or "").strip()
-    exact_identifiers, search_terms, candidate_keys = _build_local_mod_lookup_candidates(
+    exact_identifiers, search_terms, candidate_keys = build_local_mod_lookup_candidates(
         filename, platform_id=fresh_platform_id, platform_slug=fresh_platform_slug, local_name=local_name
     )
     fallback_project_info: OnlineModInfo | None = None
@@ -986,12 +817,19 @@ def _ensure_local_mod_provider_identity(
 
 
 def get_modrinth_project_info(project_id: str) -> OnlineModInfo | None:
-    """依 project id 或 slug 取得單一 Modrinth 專案資訊。"""
+    """依 project id 或 slug 取得單一 Modrinth 專案資訊。
+
+    Args:
+        project_id: Modrinth project id 或 slug。
+
+    Returns:
+        專案資訊，找不到時回傳 None。
+    """
     response = _fetch_modrinth_project_detail(project_id)
     if not response:
         return None
     slug = str(response.get("slug", "") or "").strip()
-    resolved_project_id = _clean_api_identifier(str(response.get("id", "") or project_id))
+    resolved_project_id = clean_api_identifier(str(response.get("id", "") or project_id))
     project_slug = slug or resolved_project_id
     url = f"{MODRINTH_PROJECT_URL}/{project_slug}" if project_slug else MODRINTH_PROJECT_URL
     categories = [str(category) for category in response.get("categories", []) if category]
@@ -1025,31 +863,41 @@ def _fetch_modrinth_project_name(project_id: str) -> str | None:
         response.get("title", "")
         or response.get("name", "")
         or response.get("slug", "")
-        or _clean_api_identifier(project_id)
+        or clean_api_identifier(project_id)
     ).strip()
     return resolved_name or None
 
 
 def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
-    """依 Modrinth version id 取得精確版本資訊，並回傳其所屬 project id。"""
-    clean_version_id = _clean_api_identifier(version_id)
+    """依 Modrinth version id 取得精確版本資訊，並回傳其所屬 project id。
+
+    Args:
+        version_id: Modrinth version id。
+
+    Returns:
+        `(project_id, version_info)` 的查詢結果。
+    """
+    clean_version_id = clean_api_identifier(version_id)
     if not clean_version_id:
         return ("", None)
-    response, success, attempts_used = _execute_resilient_single_request(
+    response, success, attempts_used = execute_resilient_single_request(
         request_once=lambda: HTTPUtils.get_json(
             url=MODRINTH_VERSION_DETAIL_URL_TEMPLATE.format(version_id=clean_version_id),
-            headers=HTTPUtils._get_default_headers(),
+            headers=HTTPUtils.get_default_headers(),
             timeout=MODRINTH_VERSION_DETAIL_TIMEOUT_SECONDS,
         ),
         is_success=lambda payload: isinstance(payload, dict),
         max_attempts=MODRINTH_SINGLE_REQUEST_RETRY_ATTEMPTS,
+        throttle_seconds=MODRINTH_REQUEST_THROTTLE_SECONDS,
+        retry_backoff_base_seconds=MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
+        retry_backoff_max_seconds=MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
     )
     if not success or not isinstance(response, dict):
         logger.error(f"取得 Modrinth 版本詳細資訊失敗: {clean_version_id}")
         return ("", None)
     if attempts_used > 1:
         logger.debug(f"Modrinth version detail 重試成功: {clean_version_id}, attempts={attempts_used}")
-    project_id = _clean_api_identifier(str(response.get("project_id", "") or ""))
+    project_id = clean_api_identifier(str(response.get("project_id", "") or ""))
     return (project_id, _parse_modrinth_version(response))
 
 
@@ -1061,8 +909,8 @@ def _resolve_dependency_reference(
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] | None = None,
 ) -> ResolvedDependencyReference:
     resolved = ResolvedDependencyReference(
-        project_id=_clean_api_identifier(str(dependency.get("project_id", "") or "")),
-        version_id=_clean_api_identifier(str(dependency.get("version_id", "") or "")),
+        project_id=clean_api_identifier(str(dependency.get("project_id", "") or "")),
+        version_id=clean_api_identifier(str(dependency.get("version_id", "") or "")),
         file_name=str(dependency.get("file_name", "") or dependency.get("filename", "") or "").strip(),
         resolution_source="project_id" if str(dependency.get("project_id", "") or "").strip() else "version_id",
         resolution_confidence="direct" if str(dependency.get("project_id", "") or "").strip() else "fallback",
@@ -1079,8 +927,8 @@ def _resolve_dependency_reference(
             resolved.project_id = version_project_id
             resolved.resolution_source = "version_detail"
             resolved.resolution_confidence = "fallback"
-    overridden_project_id = _apply_loader_specific_dependency_override(resolved.project_id, loader)
-    if overridden_project_id and _normalize_identifier(overridden_project_id) != resolved.compare_project_id:
+    overridden_project_id = apply_loader_specific_dependency_override(resolved.project_id, loader)
+    if overridden_project_id and normalize_identifier(overridden_project_id) != resolved.compare_project_id:
         resolved.project_id = overridden_project_id
         resolved.project_name = ""
         resolved.version_id = ""
@@ -1104,8 +952,8 @@ def _check_loader_version_rule(
     warnings: list[str] = []
     notes: list[str] = []
     normalized_minecraft_version = str(minecraft_version or "").strip()
-    normalized_loader = _normalize_identifier(loader)
-    normalized_loader_version = _normalize_identifier(loader_version)
+    normalized_loader = normalize_identifier(loader)
+    normalized_loader_version = normalize_identifier(loader_version)
     if not normalized_minecraft_version or not normalized_loader or (not normalized_loader_version):
         return (warnings, notes)
     try:
@@ -1115,7 +963,7 @@ def _check_loader_version_rule(
     except Exception as e:
         logger.warning(f"讀取 {normalized_loader} 載入器規則失敗: {e}")
         return (warnings, notes)
-    available_versions = {_normalize_identifier(version.version) for version in compatible_versions if version.version}
+    available_versions = {normalize_identifier(version.version) for version in compatible_versions if version.version}
     if not available_versions:
         notes.append(
             f"目前找不到 {normalized_loader} 對 Minecraft {normalized_minecraft_version} 的本地規則快取，因此無法額外驗證 loader 版本 {loader_version}。"
@@ -1133,13 +981,20 @@ def _check_loader_version_rule(
 
 
 def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
-    """將 Modrinth project id 轉為較易讀的專案名稱。"""
+    """將 Modrinth project id 轉為較易讀的專案名稱。
+
+    Args:
+        project_ids: 要解析的 project id 清單。
+
+    Returns:
+        以 project id 為 key 的名稱對應表。
+    """
     deduped_project_ids: dict[str, str] = {}
     for project_id in project_ids:
-        clean_project_id = _clean_api_identifier(project_id)
+        clean_project_id = clean_api_identifier(project_id)
         if not clean_project_id:
             continue
-        deduped_project_ids.setdefault(_normalize_identifier(clean_project_id), clean_project_id)
+        deduped_project_ids.setdefault(normalize_identifier(clean_project_id), clean_project_id)
     if not deduped_project_ids:
         return {}
     raw_ids = list(deduped_project_ids.values())
@@ -1147,7 +1002,7 @@ def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str
     def _request_chunk(id_chunk: list[str]) -> dict[str, Any] | None:
         response = HTTPUtils.get_json(
             url=MODRINTH_PROJECT_BATCH_URL,
-            headers=HTTPUtils._get_default_headers(),
+            headers=HTTPUtils.get_default_headers(),
             params={"ids": PathUtils.to_json_str(id_chunk)},
             timeout=MODRINTH_PROJECT_BATCH_TIMEOUT_SECONDS,
         )
@@ -1157,22 +1012,25 @@ def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str
         for item in response:
             if not isinstance(item, dict):
                 continue
-            project_id = _clean_api_identifier(str(item.get("id", "") or ""))
+            project_id = clean_api_identifier(str(item.get("id", "") or ""))
             if project_id:
                 payload[project_id] = item
         return payload
 
-    raw_payload, batch_stats = _execute_resilient_batch_requests(
+    raw_payload, batch_stats = execute_resilient_batch_requests(
         raw_ids,
         batch_size=MODRINTH_BATCH_PROJECT_LOOKUP_SIZE,
         max_attempts=MODRINTH_BATCH_RETRY_ATTEMPTS,
         request_batch=_request_chunk,
+        throttle_seconds=MODRINTH_REQUEST_THROTTLE_SECONDS,
+        retry_backoff_base_seconds=MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
+        retry_backoff_max_seconds=MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
     )
     names: dict[str, str] = {}
     for project_id, item in raw_payload.items():
         if not isinstance(item, dict):
             continue
-        project_key = _normalize_identifier(project_id)
+        project_key = normalize_identifier(project_id)
         if not project_key:
             continue
         name = str(item.get("title", "") or item.get("name", "") or item.get("slug", "") or project_id).strip()
@@ -1201,13 +1059,27 @@ def analyze_mod_version_compatibility(
     installed_mods: list[Any] | None = None,
     dependency_names: dict[str, str] | None = None,
 ) -> OnlineModCompatibilityReport:
-    """根據目前伺服器與已安裝模組分析可用版本的相容性。"""
+    """根據目前伺服器與已安裝模組分析可用版本的相容性。
+
+    Args:
+        version: Modrinth 版本資訊。
+        project_id: 模組 project id。
+        project_name: 模組名稱。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+        loader_version: 目標載入器版本。
+        installed_mods: 已安裝模組清單。
+        dependency_names: 依賴名稱對照表。
+
+    Returns:
+        相容性分析報告。
+    """
     report = OnlineModCompatibilityReport()
     dependency_name_map = dependency_names or {}
-    normalized_minecraft_version = _normalize_identifier(minecraft_version)
-    compatible_loaders = _expand_target_loader_aliases(loader, minecraft_version)
-    version_game_versions = {_normalize_identifier(entry) for entry in version.game_versions if entry}
-    version_loaders = {_normalize_identifier(entry) for entry in version.loaders if entry}
+    normalized_minecraft_version = normalize_identifier(minecraft_version)
+    compatible_loaders = expand_target_loader_aliases(loader, minecraft_version)
+    version_game_versions = {normalize_identifier(entry) for entry in version.game_versions if entry}
+    version_loaders = {normalize_identifier(entry) for entry in version.loaders if entry}
     if (
         normalized_minecraft_version
         and version_game_versions
@@ -1226,7 +1098,7 @@ def analyze_mod_version_compatibility(
     installed_project_ids, installed_identifiers = _collect_installed_mod_identifiers(installed_mods)
     installed_versions_by_project = _collect_installed_mod_versions(installed_mods)
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] = {}
-    normalized_project_id = _normalize_identifier(project_id)
+    normalized_project_id = normalize_identifier(project_id)
     if normalized_project_id and normalized_project_id in installed_project_ids:
         existing_name = project_name or normalized_project_id
         report.already_installed.append(existing_name)
@@ -1234,13 +1106,13 @@ def analyze_mod_version_compatibility(
     for dependency in version.dependencies:
         if not isinstance(dependency, dict):
             continue
-        dependency_type = _normalize_identifier(str(dependency.get("dependency_type", "required") or "required"))
+        dependency_type = normalize_identifier(str(dependency.get("dependency_type", "required") or "required"))
         resolved_dependency = _resolve_dependency_reference(
             dependency, dependency_name_map, loader=loader, version_details_cache=version_details_cache
         )
         dependency_project_id = resolved_dependency.compare_project_id
         dependency_label = resolved_dependency.label
-        normalized_label = _normalize_identifier(dependency_label)
+        normalized_label = normalize_identifier(dependency_label)
         is_installed = False
         has_required_version = True
         if (dependency_project_id and dependency_project_id in installed_project_ids) or (
@@ -1250,7 +1122,7 @@ def analyze_mod_version_compatibility(
         maybe_installed = False
         if not is_installed:
             maybe_installed = _dependency_maybe_installed_by_filename(resolved_dependency, installed_mods)
-        required_version = _normalize_identifier(
+        required_version = normalize_identifier(
             getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
         )
         installed_versions = sorted(installed_versions_by_project.get(dependency_project_id, set()))
@@ -1296,12 +1168,26 @@ def build_required_dependency_install_plan(
     root_project_name: str = "",
     max_depth: int = 20,
 ) -> OnlineDependencyInstallPlan:
-    """為必要依賴建立可自動安裝的連鎖安裝計畫。"""
+    """為必要依賴建立可自動安裝的連鎖安裝計畫。
+
+    Args:
+        version: Modrinth 版本資訊。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+        loader_version: 目標載入器版本。
+        installed_mods: 已安裝模組清單。
+        root_project_id: 根專案 id。
+        root_project_name: 根專案名稱。
+        max_depth: 依賴展開深度上限。
+
+    Returns:
+        必要依賴安裝計畫。
+    """
     plan = OnlineDependencyInstallPlan()
     installed_project_ids, _ = _collect_installed_mod_identifiers(installed_mods)
     installed_versions_by_project = _collect_installed_mod_versions(installed_mods)
     planned_project_ids: set[str] = set()
-    normalized_root_project_id = _normalize_identifier(root_project_id)
+    normalized_root_project_id = normalize_identifier(root_project_id)
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] = {}
 
     def _resolve_dependency_entry(
@@ -1314,7 +1200,7 @@ def build_required_dependency_install_plan(
     def _select_dependency_best_version(
         resolved_dependency: ResolvedDependencyReference, *, log_filtered_fallback: bool
     ) -> OnlineModVersion | None:
-        dependency_api_project_id = _clean_api_identifier(resolved_dependency.project_id)
+        dependency_api_project_id = clean_api_identifier(resolved_dependency.project_id)
         if not dependency_api_project_id:
             return None
         if resolved_dependency.version is not None:
@@ -1406,18 +1292,18 @@ def build_required_dependency_install_plan(
             dependency
             for dependency in current_version.dependencies
             if isinstance(dependency, dict)
-            and _normalize_identifier(str(dependency.get("dependency_type", "required") or "required")) == "required"
+            and normalize_identifier(str(dependency.get("dependency_type", "required") or "required")) == "required"
         ]
         optional_dependencies = [
             dependency
             for dependency in current_version.dependencies
             if isinstance(dependency, dict)
-            and _normalize_identifier(str(dependency.get("dependency_type", "") or "")) == "optional"
+            and normalize_identifier(str(dependency.get("dependency_type", "") or "")) == "optional"
         ]
         if not required_dependencies and (not optional_dependencies):
             return
         dependency_project_ids = {
-            _clean_api_identifier(str(dependency.get("project_id", "") or ""))
+            clean_api_identifier(str(dependency.get("project_id", "") or ""))
             for dependency in [*required_dependencies, *optional_dependencies]
             if str(dependency.get("project_id", "") or "").strip()
         }
@@ -1436,7 +1322,7 @@ def build_required_dependency_install_plan(
                 plan.notes.append(f"略過循環依賴：{dependency_label}")
                 continue
             if dependency_project_id in installed_project_ids:
-                required_version = _normalize_identifier(
+                required_version = normalize_identifier(
                     getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
                 )
                 installed_versions = sorted(installed_versions_by_project.get(dependency_project_id, set()))
@@ -1599,7 +1485,19 @@ def search_mods_online(
     sort_by: str = "relevance",
     limit: int = 20,
 ) -> list[OnlineModInfo]:
-    """透過 Modrinth API 搜尋或瀏覽模組。"""
+    """透過 Modrinth API 搜尋或瀏覽模組。
+
+    Args:
+        query: 搜尋關鍵字。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+        categories: 額外分類條件。
+        sort_by: 排序方式。
+        limit: 最多回傳數量。
+
+    Returns:
+        搜尋到的模組清單。
+    """
     raw_query = str(query or "").strip()
     normalized_query = normalize_mod_search_query(raw_query) if raw_query else ""
     if raw_query and normalized_query != raw_query:
@@ -1607,7 +1505,7 @@ def search_mods_online(
     facets = [["project_type:mod"], ["server_side:required", "server_side:optional"]]
     if minecraft_version:
         facets.append([f"game_versions:{minecraft_version}"])
-    loader_categories = _get_modrinth_loader_filters(loader, minecraft_version)
+    loader_categories = get_modrinth_loader_filters(loader, minecraft_version)
     if loader_categories:
         facets.append([f"categories:{loader_category}" for loader_category in loader_categories])
     if categories:
@@ -1623,7 +1521,7 @@ def search_mods_online(
         params["query"] = normalized_query
     response = HTTPUtils.get_json(
         url=MODRINTH_SEARCH_URL,
-        headers=HTTPUtils._get_default_headers(),
+        headers=HTTPUtils.get_default_headers(),
         params=params,
         timeout=MODRINTH_SEARCH_TIMEOUT_SECONDS,
     )
@@ -1640,7 +1538,14 @@ def search_mods_online(
 
 
 def select_primary_file(files: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """從版本檔案列表中選出最適合下載的檔案。"""
+    """從版本檔案列表中選出最適合下載的檔案。
+
+    Args:
+        files: 版本檔案列表。
+
+    Returns:
+        選中的檔案資訊，找不到時回傳 None。
+    """
     if not files:
         return None
     for file_info in files:
@@ -1663,24 +1568,36 @@ def select_primary_file(files: list[dict[str, Any]] | None) -> dict[str, Any] | 
 def get_mod_versions(
     project_id: str, minecraft_version: str | None = None, loader: str | None = None
 ) -> list[OnlineModVersion]:
-    """取得指定 Modrinth 模組的穩定版本。"""
-    clean_project_id = _clean_api_identifier(project_id)
+    """取得指定 Modrinth 模組的穩定版本。
+
+    Args:
+        project_id: Modrinth project id。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+
+    Returns:
+        符合條件的版本清單。
+    """
+    clean_project_id = clean_api_identifier(project_id)
     if not clean_project_id:
         return []
     url = MODRINTH_VERSION_URL_TEMPLATE.format(project_id=clean_project_id)
-    response, success, attempts_used = _execute_resilient_single_request(
+    response, success, attempts_used = execute_resilient_single_request(
         request_once=lambda: HTTPUtils.get_json(
-            url=url, headers=HTTPUtils._get_default_headers(), timeout=MODRINTH_VERSION_TIMEOUT_SECONDS
+            url=url, headers=HTTPUtils.get_default_headers(), timeout=MODRINTH_VERSION_TIMEOUT_SECONDS
         ),
         is_success=lambda payload: isinstance(payload, list),
         max_attempts=MODRINTH_SINGLE_REQUEST_RETRY_ATTEMPTS,
+        throttle_seconds=MODRINTH_REQUEST_THROTTLE_SECONDS,
+        retry_backoff_base_seconds=MODRINTH_RETRY_BACKOFF_BASE_SECONDS,
+        retry_backoff_max_seconds=MODRINTH_RETRY_BACKOFF_MAX_SECONDS,
     )
     if not success or not isinstance(response, list):
         logger.error(f"取得 Modrinth 版本列表失敗: {clean_project_id}")
         return []
     if attempts_used > 1:
         logger.debug(f"Modrinth project versions 重試成功: {clean_project_id}, attempts={attempts_used}")
-    loader_filters = set(_get_modrinth_loader_filters(loader, minecraft_version))
+    loader_filters = set(get_modrinth_loader_filters(loader, minecraft_version))
     versions: list[OnlineModVersion] = []
     for item in response:
         if not isinstance(item, dict):
@@ -1690,10 +1607,10 @@ def get_mod_versions(
         loaders = parsed_version.loaders
         if minecraft_version and minecraft_version not in game_versions:
             continue
-        normalized_version_loaders = {_normalize_identifier(entry) for entry in loaders if entry}
+        normalized_version_loaders = {normalize_identifier(entry) for entry in loaders if entry}
         if loader_filters and loader_filters.isdisjoint(normalized_version_loaders):
             continue
-        if not _is_release_version_type(parsed_version.version_type):
+        if not _is_allowed_version_type(parsed_version.version_type):
             continue
         versions.append(parsed_version)
     return versions
@@ -1703,12 +1620,12 @@ def get_recommended_mod_version(
     project_id: str, minecraft_version: str | None = None, loader: str | None = None
 ) -> OnlineModVersion | None:
     """取得最適合目前條件的推薦版本，若條件下查無版本則回退到未過濾結果。"""
-    clean_project_id = _clean_api_identifier(project_id)
+    clean_project_id = clean_api_identifier(project_id)
     if not clean_project_id:
         return None
     versions = get_mod_versions(clean_project_id, minecraft_version, loader)
     if not versions:
-        if not _is_supported_modrinth_update_loader(loader):
+        if not is_supported_modrinth_update_loader(loader):
             return None
         versions = get_mod_versions(clean_project_id)
     return _select_best_mod_version(versions)
@@ -1719,18 +1636,26 @@ def analyze_local_mod_file_compatibility(
 ) -> list[str]:
     """以本地模組已知 metadata 產生輔助提示。
 
+    Args:
+        local_mod: 本地模組物件。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+
+    Returns:
+        提示與警告清單。
+
     本地 jar 解析出的 Minecraft 版本常已失去 range 語意，只適合作為提示，
     不適合直接當成更新可行性的判定依據。
     """
     advisories: list[str] = []
-    if not _is_supported_modrinth_update_loader(loader):
+    if not is_supported_modrinth_update_loader(loader):
         return advisories
     local_name = str(getattr(local_mod, "name", "") or getattr(local_mod, "filename", "模組")).strip() or "模組"
     str(getattr(local_mod, "minecraft_version", "") or "").strip()
     local_loader = str(getattr(local_mod, "loader_type", "") or "").strip()
     local_version = str(getattr(local_mod, "version", "") or "").strip()
-    normalized_local_loader = _normalize_local_loader(local_loader)
-    compatible_target_loaders = _expand_target_loader_aliases(loader, minecraft_version)
+    normalized_local_loader = normalize_local_loader(local_loader)
+    compatible_target_loaders = expand_target_loader_aliases(loader, minecraft_version)
     if (
         normalized_local_loader
         and normalized_local_loader not in {"", "未知", "unknown"}
@@ -1757,12 +1682,30 @@ def build_local_mod_update_plan(
     revalidation_failure_low_watermark: float = 0.25,
     revalidation_latency_threshold_ms: float = 800.0,
 ) -> LocalModUpdatePlan:
-    """為本地模組建立更新檢查計畫，優先採用 Prism 風格的 hash-first 批次檢查。"""
+    """為本地模組建立更新檢查計畫，優先採用 Prism 風格的 hash-first 批次檢查。
+
+    Args:
+        local_mods: 本地模組清單。
+        minecraft_version: 目標 Minecraft 版本。
+        loader: 目標載入器類型。
+        loader_version: 目標載入器版本。
+        hash_progress_callback: hash 進度回呼。
+        revalidation_batch_base_limit: 重查批次基準上限。
+        revalidation_batch_min_limit: 重查批次最小上限。
+        revalidation_batch_max_limit: 重查批次最大上限。
+        revalidation_adaptive_enabled: 是否啟用自適應調整。
+        revalidation_failure_high_watermark: 高失敗率門檻。
+        revalidation_failure_low_watermark: 低失敗率門檻。
+        revalidation_latency_threshold_ms: 延遲門檻毫秒數。
+
+    Returns:
+        本地模組更新檢查計畫。
+    """
     plan = LocalModUpdatePlan()
     installed_mods = list(local_mods or [])
     plan.metadata_summary.total_scanned = len(installed_mods)
-    normalized_target_loader = _normalize_local_loader(loader)
-    supports_online_loader_updates = _is_supported_modrinth_update_loader(loader)
+    normalized_target_loader = normalize_local_loader(loader)
+    supports_online_loader_updates = is_supported_modrinth_update_loader(loader)
     if normalized_target_loader and (not supports_online_loader_updates):
         plan.notes.append(
             f"目前本地更新的線上比對僅支援 Fabric / Forge 生態（含相容 alias），已略過 {loader} 的版本更新判定。"
@@ -1885,7 +1828,7 @@ def build_local_mod_update_plan(
         latest_match = latest_versions_by_hash.get(local_hash)
         resolved_project_info = None
         metadata_source = ""
-        raw_existing_project_id = _clean_api_identifier(getattr(local_mod, "platform_id", ""))
+        raw_existing_project_id = clean_api_identifier(getattr(local_mod, "platform_id", ""))
         raw_existing_project_slug = str(getattr(local_mod, "platform_slug", "") or "").strip()
         existing_project_id, existing_project_slug, cached_provider_is_stale = _normalize_cached_provider_identity(
             platform_id=raw_existing_project_id,
@@ -1896,7 +1839,7 @@ def build_local_mod_update_plan(
         had_fresh_cached_identifier = bool(existing_project_id or existing_project_slug)
         if cached_provider_is_stale:
             stale_provider_revalidation_count += 1
-        resolved_project_id = _clean_api_identifier(
+        resolved_project_id = clean_api_identifier(
             getattr(current_match, "project_id", "") or getattr(latest_match, "project_id", "")
         )
         if resolved_project_id:
@@ -2053,22 +1996,22 @@ def build_local_mod_update_plan(
         apply_provider_metadata(
             local_mod,
             ProviderMetadataRecord.from_values(
-                project_id=_clean_api_identifier(getattr(resolved_project_info, "project_id", "")),
+                project_id=clean_api_identifier(getattr(resolved_project_info, "project_id", "")),
                 slug=str(getattr(resolved_project_info, "slug", "") or "").strip(),
                 project_name=str(getattr(resolved_project_info, "name", "") or "").strip(),
             ),
         )
-        project_id = _clean_api_identifier(getattr(resolved_project_info, "project_id", ""))
+        project_id = clean_api_identifier(getattr(resolved_project_info, "project_id", ""))
         if project_id:
             project_ids.append(project_id)
     project_name_map = resolve_modrinth_project_names(project_ids)
     for local_mod in installed_mods:
         filename_key = str(getattr(local_mod, "filename", "") or "").strip()
         resolved_project_info = resolved_project_info_by_filename.get(filename_key)
-        project_id = _clean_api_identifier(getattr(resolved_project_info, "project_id", ""))
+        project_id = clean_api_identifier(getattr(resolved_project_info, "project_id", ""))
         if not project_id:
             continue
-        project_key = _normalize_identifier(project_id)
+        project_key = normalize_identifier(project_id)
         project_name = (
             project_name_map.get(project_key, "").strip()
             or str(getattr(resolved_project_info, "name", "") or "").strip()
@@ -2095,7 +2038,7 @@ def build_local_mod_update_plan(
                 plan.notes.append(f"{project_name}：{preview}（僅作提示，不影響更新判定）{suffix}")
             continue
         dependency_project_ids = {
-            _clean_api_identifier(str(dependency.get("project_id", "") or ""))
+            clean_api_identifier(str(dependency.get("project_id", "") or ""))
             for dependency in recommended_version.dependencies
             if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
         }
@@ -2233,7 +2176,19 @@ def enhance_local_mod(
     resolution_source: str | None = None,
     resolved_at_epoch_ms: Any | None = None,
 ) -> OnlineModInfo | None:
-    """增強本地模組資訊，從線上查詢模組詳細資訊。"""
+    """增強本地模組資訊，從線上查詢模組詳細資訊。
+
+    Args:
+        filename: 本地模組檔名。
+        platform_id: 既有的 platform id。
+        platform_slug: 既有的 platform slug。
+        local_name: 本地顯示名稱。
+        resolution_source: 解析來源標記。
+        resolved_at_epoch_ms: 解析時間毫秒值。
+
+    Returns:
+        增強後的模組資訊，失敗時回傳 None。
+    """
     _ensured, resolved_project_info = _ensure_local_mod_provider_identity(
         filename,
         platform_id=platform_id,

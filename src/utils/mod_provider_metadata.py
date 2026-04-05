@@ -33,6 +33,15 @@ class ProviderMetadataRecord:
 
     @classmethod
     def from_cached(cls, raw: dict[str, Any] | None) -> ProviderMetadataRecord:
+        """從快取 payload 還原 provider metadata。
+
+        Args:
+            raw: 快取中的原始資料。
+
+        Returns:
+            正規化後的 provider metadata。
+        """
+
         if not isinstance(raw, dict):
             return cls()
         return cls.from_values(
@@ -51,6 +60,18 @@ class ProviderMetadataRecord:
         slug: str | None = None,
         project_name: str | None = None,
     ) -> ProviderMetadataRecord:
+        """以原始欄位值建立正規化後的 provider metadata。
+
+        Args:
+            platform: provider 平台名稱。
+            project_id: project id。
+            slug: 專案 slug。
+            project_name: 專案顯示名稱。
+
+        Returns:
+            正規化後的 provider metadata。
+        """
+
         clean_project_id = str(project_id or "").strip()
         clean_slug = str(slug or "").strip()
         clean_project_name = str(project_name or "").strip()
@@ -66,6 +87,12 @@ class ProviderMetadataRecord:
         return self.platform == "modrinth"
 
     def as_cache_payload(self) -> dict[str, str]:
+        """轉成可寫入快取的精簡 payload。
+
+        Returns:
+            只包含已知欄位的字典。
+        """
+
         payload = {"platform": self.platform}
         if self.project_id:
             payload["project_id"] = self.project_id
@@ -104,6 +131,13 @@ def is_cached_provider_metadata_fresh(
 ) -> bool:
     """判斷快取 provider metadata 是否仍在 freshness 視窗內。
 
+    Args:
+        raw: 原始快取資料。
+        ttl_seconds: 視為新鮮的存活秒數。
+
+    Returns:
+        若快取仍有效則回傳 True，否則回傳 False。
+
     相容舊資料：若缺少 `resolved_at_epoch_ms`，視為 legacy cache，暫時視為 fresh。
     """
     if not isinstance(raw, dict) or not raw:
@@ -119,13 +153,21 @@ def is_cached_provider_metadata_fresh(
 def fetch_modrinth_project_detail(
     identifier: str, *, timeout: int = MODRINTH_PROJECT_DETAIL_TIMEOUT_SECONDS
 ) -> dict[str, Any] | None:
-    """依 project id 或 slug 取得 Modrinth 專案詳細資訊。"""
+    """依 project id 或 slug 取得 Modrinth 專案詳細資訊。
+
+    Args:
+        identifier: Modrinth project id 或 slug。
+        timeout: HTTP 請求逾時秒數。
+
+    Returns:
+        專案詳細資訊，找不到時回傳 None。
+    """
     clean_identifier = str(identifier or "").strip()
     if not clean_identifier:
         return None
     response = HTTPUtils.get_json(
         url=MODRINTH_PROJECT_DETAIL_URL_TEMPLATE.format(project_id=clean_identifier),
-        headers=HTTPUtils._get_default_headers(),
+        headers=HTTPUtils.get_default_headers(),
         timeout=timeout,
         suppress_status_codes={404},
     )
@@ -145,7 +187,15 @@ def _remember_provider_record(*keys: str, record: ProviderMetadataRecord) -> Pro
 def resolve_modrinth_provider_record(
     identifier: str, *, search_fallback: Callable[[str], ProviderMetadataRecord | None] | None = None
 ) -> ProviderMetadataRecord:
-    """將 project id / slug 正規化為 canonical provider record。"""
+    """將 project id / slug 正規化為 canonical provider record。
+
+    Args:
+        identifier: 待解析的 project id 或 slug。
+        search_fallback: 可選的替代解析流程。
+
+    Returns:
+        正規化後的 provider metadata 記錄。
+    """
     clean_identifier = str(identifier or "").strip()
     if not clean_identifier:
         return ProviderMetadataRecord()
@@ -192,6 +242,16 @@ def ensure_local_mod_provider_record(
     fallback_resolver: Callable[[], ProviderMetadataRecord | None] | None = None,
 ) -> LocalProviderEnsureResult:
     """以固定順序確保本地模組 provider metadata。
+
+    Args:
+        platform_id: 已知的 platform id。
+        platform_slug: 已知的 platform slug。
+        project_name: 模組顯示名稱。
+        identifier_resolver: 以 identifier 解析 provider record 的函式。
+        fallback_resolver: 最後備援的解析函式。
+
+    Returns:
+        本地 provider metadata 的確保結果。
 
     決策順序：
     1) 既有 platform_id / platform_slug
@@ -259,7 +319,15 @@ def ensure_local_mod_provider_record(
 
 
 def apply_provider_metadata(target: Any, provider_metadata: ProviderMetadataRecord) -> bool:
-    """將 provider metadata 套用到本地模組物件。"""
+    """將 provider metadata 套用到本地模組物件。
+
+    Args:
+        target: 目標物件。
+        provider_metadata: 要套用的 provider metadata。
+
+    Returns:
+        若有修改目標物件則回傳 True，否則回傳 False。
+    """
     changed = False
     project_id = provider_metadata.project_id
     if project_id and getattr(target, "platform_id", "") != project_id:
@@ -293,7 +361,16 @@ def compute_provider_revalidation_backoff_seconds(
     base_seconds: int = PROVIDER_REVALIDATION_RETRY_BASE_SECONDS,
     max_seconds: int = PROVIDER_REVALIDATION_RETRY_MAX_SECONDS,
 ) -> int:
-    """依連續失敗次數計算 retry backoff 秒數。"""
+    """依連續失敗次數計算 retry backoff 秒數。
+
+    Args:
+        failure_count: 連續失敗次數。
+        base_seconds: 基礎退避秒數。
+        max_seconds: 最大退避秒數。
+
+    Returns:
+        計算後的退避秒數。
+    """
     normalized_failures = max(1, int(failure_count))
     normalized_base = max(1, int(base_seconds))
     normalized_max = max(normalized_base, int(max_seconds))
@@ -302,7 +379,15 @@ def compute_provider_revalidation_backoff_seconds(
 
 
 def is_provider_revalidation_retry_due(raw: dict[str, Any] | None, *, now_epoch_ms: int | None = None) -> bool:
-    """判斷 provider metadata 是否已到可重試時間。"""
+    """判斷 provider metadata 是否已到可重試時間。
+
+    Args:
+        raw: 原始 provider metadata。
+        now_epoch_ms: 指定的目前時間毫秒值。
+
+    Returns:
+        若已到可重試時間則回傳 True，否則回傳 False。
+    """
     if not isinstance(raw, dict):
         return True
     next_retry_not_before_epoch_ms = _parse_positive_int(raw.get("next_retry_not_before_epoch_ms"))
@@ -321,6 +406,15 @@ def should_attempt_provider_revalidation(
 ) -> tuple[bool, str]:
     """判斷本輪是否應嘗試 stale provider metadata 重查。
 
+    Args:
+        raw: 原始 provider metadata。
+        attempted_count: 本輪已嘗試次數。
+        max_attempts: 本輪最大嘗試次數。
+        now_epoch_ms: 指定的目前時間毫秒值。
+
+    Returns:
+        `(是否嘗試, 原因碼)` 的判斷結果。
+
     回傳 `(should_attempt, reason)`：
     - `(False, "batch_limit")`: 本輪重查已達批次上限。
     - `(False, "backoff")`: 尚未到下一次可重試時間。
@@ -337,7 +431,15 @@ def should_attempt_provider_revalidation(
 def register_provider_revalidation_failure(
     raw: dict[str, Any] | None, *, now_epoch_ms: int | None = None
 ) -> dict[str, Any]:
-    """記錄 provider revalidation 失敗並產生退避欄位。"""
+    """記錄 provider revalidation 失敗並產生退避欄位。
+
+    Args:
+        raw: 原始 provider metadata。
+        now_epoch_ms: 指定的目前時間毫秒值。
+
+    Returns:
+        更新後的 payload。
+    """
     payload = dict(raw) if isinstance(raw, dict) else {}
     now_ms = int(now_epoch_ms if now_epoch_ms is not None else time.time() * 1000)
     failure_count = _parse_positive_int(payload.get("stale_revalidation_failures")) + 1
@@ -358,7 +460,15 @@ def register_provider_revalidation_failure(
 def register_provider_revalidation_success(
     raw: dict[str, Any] | None, *, now_epoch_ms: int | None = None
 ) -> dict[str, Any]:
-    """重置 provider revalidation 失敗計數並恢復 lifecycle 狀態。"""
+    """重置 provider revalidation 失敗計數並恢復 lifecycle 狀態。
+
+    Args:
+        raw: 原始 provider metadata。
+        now_epoch_ms: 指定的目前時間毫秒值。
+
+    Returns:
+        更新後的 payload。
+    """
     payload = dict(raw) if isinstance(raw, dict) else {}
     payload["stale_revalidation_failures"] = "0"
     payload["last_revalidation_failed_at_epoch_ms"] = "0"
@@ -376,6 +486,13 @@ def derive_provider_lifecycle_state(
     raw: dict[str, Any] | None, *, ttl_seconds: int = PROVIDER_METADATA_TTL_SECONDS
 ) -> str:
     """依索引快取內容推導 provider metadata lifecycle state。
+
+    Args:
+        raw: 原始 provider metadata。
+        ttl_seconds: 視為新鮮的存活秒數。
+
+    Returns:
+        推導後的 lifecycle state。
 
     回傳值為 ``PROVIDER_LIFECYCLE_*`` 常數之一：
     - ``"fresh"``   ─ 快取存在且在 TTL 視窗內
@@ -406,7 +523,15 @@ def cache_provider_metadata_record(
     metadata_source: str | None = None,
     resolved_at_epoch_ms: int | None = None,
 ) -> None:
-    """使用統一 contract 將 provider metadata 寫回索引。"""
+    """使用統一 contract 將 provider metadata 寫回索引。
+
+    Args:
+        index_manager: 索引管理器。
+        file_path: 原始檔案路徑。
+        provider_metadata: 要寫回的 provider metadata。
+        metadata_source: 資料來源標記。
+        resolved_at_epoch_ms: 已解析時間毫秒值。
+    """
     normalized_path = Path(file_path)
     payload = provider_metadata.as_cache_payload()
     normalized_source = str(metadata_source or "").strip().lower()

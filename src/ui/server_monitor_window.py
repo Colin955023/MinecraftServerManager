@@ -15,15 +15,16 @@ from typing import Any
 import customtkinter as ctk
 from ..utils import (
     Colors,
-    FontManager,
     FontSize,
     MemoryUtils,
     ServerOperations,
     Sizes,
+    Spacing,
     UIUtils,
     WindowManager,
     get_logger,
 )
+from . import DialogUtils, FontManager, TaskUtils, TreeUtils
 
 logger = get_logger().bind(component="ServerMonitorWindow")
 
@@ -107,23 +108,42 @@ class ServerMonitorWindow:
             UIUtils.cancel_scheduled_job(self.window, job_attr, owner=self)
 
     def safe_update_widget(self, widget_name: str, update_func: Callable, *args, **kwargs) -> None:
-        """安全地更新 widget，檢查 widget 是否存在"""
+        """安全地更新 widget，檢查 widget 是否存在。
+
+        Args:
+            widget_name: 目標 widget 的屬性名稱。
+            update_func: 更新函式。
+            *args: 傳遞給更新函式的額外位置參數。
+            **kwargs: 傳遞給更新函式的額外關鍵字參數。
+        """
         try:
             if hasattr(self, widget_name):
                 widget = getattr(self, widget_name)
-                UIUtils.safe_update_widget(widget, update_func, *args, **kwargs)
+                TaskUtils.safe_update_widget(widget, update_func, *args, **kwargs)
         except Exception as e:
             logger.error(f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}")
 
     def safe_config_widget(self, widget_name: str, **config) -> None:
-        """安全地配置 widget"""
+        """安全地配置 widget。
+
+        Args:
+            widget_name: 目標 widget 的屬性名稱。
+            **config: 要套用的 widget 設定。
+        """
         self.safe_update_widget(widget_name, lambda w, **cfg: w.configure(**cfg), **config)
 
     def create_window(self) -> None:
         """創建監控視窗"""
-        self.window = tk.Toplevel(self.parent)
-        self.window.withdraw()
-        self.window.title(f"伺服器監控 - {self.server_name}")
+        self.window = DialogUtils.create_toplevel_dialog(
+            self.parent,
+            f"伺服器監控 - {self.server_name}",
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
+            native_window=True,
+            center_on_parent=False,
+            make_modal=False,
+            delay_ms=250,
+        )
         self.window.state("normal")
         base_width = 1000
         base_height = 950
@@ -132,17 +152,6 @@ class ServerMonitorWindow:
         physical_min_height = int(base_height * scale)
         self.window.minsize(physical_min_width, physical_min_height)
         self.window.resizable(True, True)
-        UIUtils.setup_window_properties(
-            window=self.window,
-            parent=self.parent,
-            width=base_width,
-            height=base_height,
-            bind_icon=True,
-            center_on_parent=False,
-            make_modal=False,
-            delay_ms=250,
-            reveal_after_setup=False,
-        )
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         main_frame = ctk.CTkFrame(self.window)
         UIUtils.pack_main_frame(main_frame)
@@ -182,7 +191,11 @@ class ServerMonitorWindow:
                 logger.debug(f"顯示監控視窗失敗: {e}", "ServerMonitorWindow")
 
     def create_control_panel(self, parent) -> None:
-        """創建控制面板"""
+        """創建控制面板。
+
+        Args:
+            parent: 父容器。
+        """
         control_frame = ctk.CTkFrame(parent)
         control_frame.pack(fill="x", pady=(0, int(10 * FontManager.get_scale_factor())))
         title_label = ctk.CTkLabel(
@@ -198,7 +211,7 @@ class ServerMonitorWindow:
         )
         self.status_label.pack(side="left", padx=FontManager.get_dpi_scaled_size(15))
         button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
-        button_frame.pack(side="right", padx=10)
+        button_frame.pack(side="right", padx=Spacing.SMALL_PLUS)
         self.start_button = ctk.CTkButton(
             button_frame,
             text="🚀 啟動",
@@ -207,7 +220,7 @@ class ServerMonitorWindow:
             font=FontManager.get_font(size=FontSize.LARGE),
             width=Sizes.BUTTON_WIDTH_COMPACT,
         )
-        self.start_button.pack(side="left", padx=(0, 5))
+        self.start_button.pack(side="left", padx=(0, Spacing.TINY))
         self.stop_button = ctk.CTkButton(
             button_frame,
             text="⏹️ 停止",
@@ -218,7 +231,7 @@ class ServerMonitorWindow:
             fg_color=Colors.BUTTON_DANGER,
             hover_color=Colors.BUTTON_DANGER_HOVER,
         )
-        self.stop_button.pack(side="left", padx=(0, 5))
+        self.stop_button.pack(side="left", padx=(0, Spacing.TINY))
         self.refresh_button = ctk.CTkButton(
             button_frame,
             text="🔄 刷新",
@@ -228,13 +241,13 @@ class ServerMonitorWindow:
         )
         self.refresh_button.pack(side="left")
         status_frame = ctk.CTkFrame(parent)
-        status_frame.pack(fill="x", pady=(0, 10))
+        status_frame.pack(fill="x", pady=(0, Spacing.SMALL_PLUS))
         status_title_label = ctk.CTkLabel(
             status_frame, text="📈 系統資源", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
         )
-        status_title_label.pack(pady=(10, 5))
+        status_title_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
         status_content_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
-        status_content_frame.pack(fill="x", padx=10, pady=10)
+        status_content_frame.pack(fill="x", padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
         left_frame = ctk.CTkFrame(status_content_frame, fg_color="transparent")
         left_frame.pack(side="left", fill="both", expand=True)
         middle_frame = ctk.CTkFrame(status_content_frame, fg_color="transparent")
@@ -244,33 +257,33 @@ class ServerMonitorWindow:
         self.pid_label = ctk.CTkLabel(
             left_frame, text="🆔 PID: N/A", font=FontManager.get_font(size=FontSize.LARGE), anchor="w"
         )
-        self.pid_label.pack(anchor="w", pady=2)
+        self.pid_label.pack(anchor="w", pady=Spacing.XS)
         self.memory_label = ctk.CTkLabel(
             left_frame, text="🧠 記憶體使用: 0 MB", font=FontManager.get_font(size=FontSize.LARGE), anchor="w"
         )
-        self.memory_label.pack(anchor="w", pady=2)
+        self.memory_label.pack(anchor="w", pady=Spacing.XS)
         self.uptime_label = ctk.CTkLabel(
             middle_frame, text="⏱️ 運行時間: 00:00:00", font=FontManager.get_font(size=FontSize.LARGE), anchor="w"
         )
-        self.uptime_label.pack(anchor="w", pady=2)
+        self.uptime_label.pack(anchor="w", pady=Spacing.XS)
         self.players_label = ctk.CTkLabel(
             middle_frame, text="👥 玩家數量: 0/20", font=FontManager.get_font(size=FontSize.LARGE), anchor="w"
         )
-        self.players_label.pack(anchor="w", pady=2)
+        self.players_label.pack(anchor="w", pady=Spacing.XS)
         self.version_label = ctk.CTkLabel(
             right_frame, text="📦 版本: N/A", font=FontManager.get_font(size=FontSize.LARGE), anchor="w"
         )
         logger.debug("初始化 ServerMonitorWindow，預設版本顯示 N/A")
-        self.version_label.pack(anchor="w", pady=2)
+        self.version_label.pack(anchor="w", pady=Spacing.XS)
         players_frame = ctk.CTkFrame(parent)
-        players_frame.pack(fill="x", pady=(0, 10))
+        players_frame.pack(fill="x", pady=(0, Spacing.SMALL_PLUS))
         players_title_label = ctk.CTkLabel(
             players_frame, text="👥 線上玩家", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
         )
-        players_title_label.pack(pady=(10, 5))
+        players_title_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
         self.players_listbox = tk.Listbox(
             players_frame,
-            height=5,
+            height=Spacing.TINY,
             font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
             bg=Colors.BG_LISTBOX_DARK if ctk.get_appearance_mode() == "Dark" else Colors.BG_LISTBOX_LIGHT,
             fg=Colors.TEXT_ON_DARK if ctk.get_appearance_mode() == "Dark" else Colors.TEXT_ON_LIGHT,
@@ -279,9 +292,9 @@ class ServerMonitorWindow:
             borderwidth=0,
             highlightthickness=0,
         )
-        self.players_listbox.pack(fill="x", padx=10, pady=(0, 10))
+        self.players_listbox.pack(fill="x", padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
         self.players_listbox.insert(tk.END, "無玩家在線")
-        UIUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=1)
+        TreeUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=1)
         self.players_listbox.bind("<ButtonRelease-1>", self._on_player_click)
 
     def _on_player_click(self, _event) -> None:
@@ -303,13 +316,17 @@ class ServerMonitorWindow:
             logger.error(f"複製玩家名稱失敗: {e}")
 
     def create_console_panel(self, parent) -> None:
-        """創建控制台面板"""
+        """創建控制台面板。
+
+        Args:
+            parent: 父容器。
+        """
         console_frame = ctk.CTkFrame(parent)
         console_frame.pack(fill="both", expand=True)
         console_title_label = ctk.CTkLabel(
             console_frame, text="📜 控制台輸出", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
         )
-        console_title_label.pack(pady=(10, 5))
+        console_title_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
         self.console_text = ctk.CTkTextbox(
             console_frame,
             height=Sizes.CONSOLE_PANEL_HEIGHT,
@@ -322,15 +339,15 @@ class ServerMonitorWindow:
         )
         self.console_text.pack(fill="both", expand=True, padx=FontManager.get_dpi_scaled_size(15))
         command_frame = ctk.CTkFrame(console_frame, fg_color="transparent")
-        command_frame.pack(fill="x", padx=FontManager.get_dpi_scaled_size(15), pady=(5, 10))
+        command_frame.pack(fill="x", padx=FontManager.get_dpi_scaled_size(15), pady=(Spacing.TINY, Spacing.SMALL_PLUS))
         command_label = ctk.CTkLabel(command_frame, text="命令:", font=FontManager.get_font(size=FontSize.LARGE))
-        command_label.pack(side="left", padx=(0, 10))
+        command_label.pack(side="left", padx=(0, Spacing.SMALL_PLUS))
         self.command_entry = ctk.CTkEntry(
             command_frame,
             font=FontManager.get_font(family="Consolas", size=FontSize.MEDIUM),
             placeholder_text="輸入指令...",
         )
-        self.command_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.command_entry.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SMALL_PLUS))
         self.command_entry.bind("<Return>", self.send_command)
         self.command_entry.bind("<Up>", self._on_history_up)
         self.command_entry.bind("<Down>", self._on_history_down)
@@ -527,7 +544,7 @@ class ServerMonitorWindow:
                         lambda w: [
                             w.delete(0, tk.END),
                             w.insert(tk.END, "無玩家在線"),
-                            UIUtils.apply_listbox_alternating_rows(w, item_count=1),
+                            TreeUtils.apply_listbox_alternating_rows(w, item_count=1),
                         ],
                     )
                     self._last_ui_state["players_text"] = players_text
@@ -569,7 +586,11 @@ class ServerMonitorWindow:
         self.read_player_list()
 
     def read_player_list(self, line=None) -> None:
-        """讀取玩家列表"""
+        """讀取玩家列表。
+
+        Args:
+            line: 可選的單行玩家統計字串。
+        """
         try:
             if line is not None:
                 lines = [line]
@@ -605,7 +626,11 @@ class ServerMonitorWindow:
             logger.error(f"讀取玩家列表時發生錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 
     def update_player_list(self, players: list) -> None:
-        """更新玩家列表顯示（支援條紋交替顏色）"""
+        """更新玩家列表顯示（支援條紋交替顏色）。
+
+        Args:
+            players: 玩家名稱清單。
+        """
         try:
             players_tuple = tuple(players or [])
             if self._last_player_names == players_tuple:
@@ -618,7 +643,7 @@ class ServerMonitorWindow:
                         self.players_listbox.insert(tk.END, player)
             else:
                 self.players_listbox.insert(tk.END, "無玩家在線")
-            UIUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=self.players_listbox.size())
+            TreeUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=self.players_listbox.size())
         except Exception as e:
             logger.error(f"更新玩家列表錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 
@@ -765,7 +790,11 @@ class ServerMonitorWindow:
             self.command_entry.insert(0, cmd)
 
     def send_command(self, _event=None) -> None:
-        """發送命令到伺服器"""
+        """發送命令到伺服器。
+
+        Args:
+            _event: 事件物件，供按鍵綁定使用。
+        """
         command = self.command_entry.get().strip()
         if not command:
             return
@@ -783,7 +812,11 @@ class ServerMonitorWindow:
             self.add_console_message(f"❌ 命令發送失敗: {command}")
 
     def add_console_message(self, message: str) -> None:
-        """添加控制台訊息 (緩衝處理)"""
+        """添加控制台訊息（緩衝處理）。
+
+        Args:
+            message: 要加入控制台的訊息。
+        """
         self._console_buffer.append(message + "\n")
         self._schedule_console_flush()
 
@@ -798,7 +831,7 @@ class ServerMonitorWindow:
         """顯示視窗"""
         if not self.window:
             self.create_window()
-            UIUtils.start_ui_queue_pump(self.window, self.ui_queue)
+            TaskUtils.start_ui_queue_pump(self.window, self.ui_queue)
             self.start_monitoring()
             self.start_console_flusher()
         if self.window:

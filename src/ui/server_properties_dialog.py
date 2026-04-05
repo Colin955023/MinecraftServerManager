@@ -2,24 +2,24 @@
 提供視覺化的 server.properties 編輯介面
 """
 
-import tkinter as tk
+import tkinter
+import tkinter.ttk as ttk
 import traceback
-from tkinter import ttk
 from typing import Any, ClassVar
 import customtkinter as ctk
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     Colors,
-    FontManager,
     FontSize,
     ServerPropertiesHelper,
     ServerPropertiesValidator,
     Sizes,
+    Spacing,
     UIUtils,
     get_button_style,
     get_logger,
 )
-from . import CustomDropdown
+from . import CustomDropdown, DialogUtils, FontManager
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
 
@@ -87,16 +87,24 @@ class ServerPropertiesDialog:
         self.server_manager = server_manager
         self.properties_helper = ServerPropertiesHelper()
         self.result = None
-        self.dialog = tk.Toplevel(parent)
-        self.dialog.withdraw()
+        self.dialog = DialogUtils.create_toplevel_dialog(
+            parent,
+            f"伺服器設定 - {server_config.name}",
+            width=int(800 * FontManager.get_scale_factor()),
+            height=int(600 * FontManager.get_scale_factor()),
+            native_window=True,
+            center_on_parent=True,
+            make_modal=True,
+            delay_ms=250,
+        )
         self.setup_dialog()
-        self.property_vars: dict[str, tk.StringVar] = {}
-        self.property_widgets: dict[str, tk.Widget] = {}
-        self._property_bool_vars: dict[str, tk.BooleanVar] = {}
+        self.property_vars: dict[str, tkinter.StringVar] = {}
+        self.property_widgets: dict[str, tkinter.Widget] = {}
+        self._property_bool_vars: dict[str, tkinter.BooleanVar] = {}
         self._property_bool_bound: set[str] = set()
         self._property_value_cache: dict[str, str] = {}
         self._tab_content_frames: dict[str, ttk.Frame] = {}
-        self._tab_canvases: dict[str, tk.Canvas] = {}
+        self._tab_canvases: dict[str, tkinter.Canvas] = {}
         self._tab_properties: dict[str, tuple[str, ...]] = {}
         self._tab_scroll_regions: dict[str, tuple[int, int, int, int]] = {}
         self._tab_render_positions: dict[str, int] = {}
@@ -105,17 +113,6 @@ class ServerPropertiesDialog:
         self._materialized_tabs: set[str] = set()
         self.create_widgets()
         self.load_properties()
-        UIUtils.setup_window_properties(
-            window=self.dialog,
-            parent=self.parent,
-            width=int(800 * FontManager.get_scale_factor()),
-            height=int(600 * FontManager.get_scale_factor()),
-            bind_icon=True,
-            center_on_parent=True,
-            make_modal=True,
-            delay_ms=250,
-        )
-        self.dialog.deiconify()
         self.show_dialog()
 
     def setup_dialog(self) -> None:
@@ -193,10 +190,10 @@ class ServerPropertiesDialog:
             text_color=Colors.TEXT_LINK,
             cursor="hand2",
         )
-        link_label.pack(side="left", padx=(5, 0))
+        link_label.pack(side="left", padx=(Spacing.TINY, 0))
         link_label.bind("<Button-1>", lambda _: UIUtils.open_external("https://zh.minecraft.wiki/w/Server.properties"))
 
-    def _apply_scrollregion(self, canvas: tk.Canvas) -> None:
+    def _apply_scrollregion(self, canvas: tkinter.Canvas) -> None:
         """更新分頁 canvas 的捲動區域。"""
         try:
             if not canvas.winfo_exists():
@@ -215,7 +212,7 @@ class ServerPropertiesDialog:
         except Exception:
             return
 
-    def _schedule_scrollregion_update(self, canvas: tk.Canvas) -> None:
+    def _schedule_scrollregion_update(self, canvas: tkinter.Canvas) -> None:
         """合併排程 scrollregion 更新，避免連續重算。"""
         try:
             UIUtils.schedule_coalesced_idle(
@@ -224,14 +221,14 @@ class ServerPropertiesDialog:
         except Exception as e:
             logger.exception(f"排程 scrollregion 更新失敗: {e}")
 
-    def _scroll_canvas_with_mousewheel(self, event, target_canvas: tk.Canvas):
+    def _scroll_canvas_with_mousewheel(self, event, target_canvas: tkinter.Canvas):
         units = UIUtils.get_mousewheel_units(int(getattr(event, "delta", 0)))
         if units == 0:
             return None
         target_canvas.yview_scroll(units, "units")
         return "break"
 
-    def _bind_widget_mousewheel_to_canvas(self, widget: Any, target_canvas: tk.Canvas) -> None:
+    def _bind_widget_mousewheel_to_canvas(self, widget: Any, target_canvas: tkinter.Canvas) -> None:
         try:
             if not widget.winfo_exists():
                 return
@@ -362,7 +359,7 @@ class ServerPropertiesDialog:
         def _add_scrollable_tab(tab_name: str, properties: list[str] | tuple[str, ...]) -> None:
             tab_frame = ttk.Frame(self.notebook)
             self.notebook.add(tab_frame, text=tab_name)
-            canvas = tk.Canvas(tab_frame, highlightthickness=0, bd=0)
+            canvas = tkinter.Canvas(tab_frame, highlightthickness=0, bd=0)
             scrollbar = ttk.Scrollbar(tab_frame, orient="vertical", command=canvas.yview)
             scrollable_frame = ttk.Frame(canvas)
             window_item = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -415,12 +412,12 @@ class ServerPropertiesDialog:
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
         self._on_tab_changed()
 
-    def _get_or_create_property_var(self, prop_name: str) -> tk.StringVar:
+    def _get_or_create_property_var(self, prop_name: str) -> tkinter.StringVar:
         """取得或建立屬性對應的 StringVar，並同步到 cache。"""
         existing = self.property_vars.get(prop_name)
         if existing is not None:
             return existing
-        var = tk.StringVar()
+        var = tkinter.StringVar()
         cached_value = self._property_value_cache.get(prop_name)
         if cached_value is not None:
             var.set(cached_value)
@@ -465,16 +462,30 @@ class ServerPropertiesDialog:
         return prop_frame
 
     def create_property_controls(self, parent, properties: tuple[str, ...] | list[str]) -> None:
-        """批次建立屬性控制項（相容保留）。"""
+        """批次建立屬性控制項（相容保留）。
+
+        Args:
+            parent: 父容器。
+            properties: 要建立控制項的屬性名稱列表。
+        """
         for prop_name in properties:
             self._create_property_control(parent, prop_name)
 
-    def create_property_widget(self, parent, prop_name: str, var: tk.StringVar) -> tk.Widget:
-        """根據屬性類型建立控制項"""
+    def create_property_widget(self, parent, prop_name: str, var: tkinter.StringVar) -> tkinter.Widget:
+        """根據屬性類型建立控制項。
+
+        Args:
+            parent: 父容器。
+            prop_name: 屬性名稱。
+            var: 綁定的字串變數。
+
+        Returns:
+            建立完成的 widget。
+        """
         if prop_name in self.BOOLEAN_PROPS:
             bool_var = self._property_bool_vars.get(prop_name)
             if bool_var is None:
-                bool_var = tk.BooleanVar()
+                bool_var = tkinter.BooleanVar()
                 self._property_bool_vars[prop_name] = bool_var
             normalized = var.get().strip().lower() in ("true", "1", "yes", "on")
             if bool_var.get() != normalized:
@@ -504,7 +515,7 @@ class ServerPropertiesDialog:
             widget.pack(anchor="w", pady=FontManager.get_dpi_scaled_size(3))
         elif prop_name in self.RANGE_PROPS:
             min_val, max_val = self.RANGE_PROPS[prop_name]
-            widget = tk.Spinbox(
+            widget = tkinter.Spinbox(
                 parent,
                 textvariable=var,
                 from_=min_val,
@@ -524,7 +535,12 @@ class ServerPropertiesDialog:
         return widget
 
     def create_tooltip(self, widget, prop_name: str) -> None:
-        """建立工具提示"""
+        """建立工具提示。
+
+        Args:
+            widget: 要綁定提示的元件。
+            prop_name: 屬性名稱。
+        """
         description = self.properties_helper.get_property_description(prop_name)
         UIUtils.bind_tooltip(
             widget,
@@ -532,8 +548,8 @@ class ServerPropertiesDialog:
             bg="lightyellow",
             fg="black",
             font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
-            padx=8,
-            pady=4,
+            padx=Spacing.SMALL,
+            pady=Spacing.XS,
             wraplength=FontManager.get_dpi_scaled_size(600),
             justify="left",
             borderwidth=1,

@@ -14,6 +14,8 @@ logger = get_logger().bind(component="SettingsManager")
 
 
 class MainWindowSettings(TypedDict):
+    """主視窗尺寸與狀態設定。"""
+
     width: int
     height: int
     x: int | None
@@ -22,6 +24,8 @@ class MainWindowSettings(TypedDict):
 
 
 class WindowPreferences(TypedDict):
+    """視窗偏好設定。"""
+
     remember_size_position: bool
     main_window: MainWindowSettings
     auto_center: bool
@@ -30,11 +34,15 @@ class WindowPreferences(TypedDict):
 
 
 class DebugSettings(TypedDict):
+    """除錯相關設定。"""
+
     enable_debug_logging: bool
     enable_window_state_logging: bool
 
 
 class UserSettings(TypedDict):
+    """使用者設定的完整資料結構。"""
+
     servers_root: str
     auto_update_enabled: bool
     first_run_completed: bool
@@ -105,6 +113,15 @@ class SettingsManager:
 
     @staticmethod
     def normalize_servers_base_dir(path_str: str | Path) -> str:
+        """正規化使用者設定的伺服器主資料夾路徑。
+
+        Args:
+            path_str: 原始路徑字串或 Path。
+
+        Returns:
+            正規化後的基底路徑字串。
+        """
+
         # 若為空字串則直接回傳，避免 resolve 成 cwd
         if not path_str or str(path_str).strip() == "":
             return ""
@@ -117,6 +134,15 @@ class SettingsManager:
 
     @staticmethod
     def build_servers_root_path(base_dir: str | Path) -> Path:
+        """從基底資料夾組合出伺服器根目錄。
+
+        Args:
+            base_dir: 使用者指定的基底資料夾。
+
+        Returns:
+            解析後的伺服器根目錄 Path。
+        """
+
         return (Path(base_dir).expanduser() / "servers").resolve()
 
     def _normalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -201,17 +227,35 @@ class SettingsManager:
             logger.error("無法寫入 user_settings.json")
 
     def get(self, key: str, default: Any = None) -> Any:
-        """取得指定鍵值的設定資料"""
+        """取得指定鍵值的設定資料。
+
+        Args:
+            key: 設定鍵名。
+            default: 找不到時的預設值。
+
+        Returns:
+            對應的設定值。
+        """
         return self._settings.get(key, default)
 
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
-        """設定指定鍵值的資料（可選擇立即儲存或延遲儲存以支援批次更新）"""
+        """設定指定鍵值的資料。
+
+        Args:
+            key: 設定鍵名。
+            value: 要寫入的設定值。
+            immediate_save: 是否立即儲存到磁碟。
+        """
         self._settings[key] = value
         if immediate_save:
             self._save_settings(self._settings)
 
     def update_batch(self, updates: dict) -> None:
-        """批次更新多個設定值並一次性儲存（優化 I/O 效能）"""
+        """批次更新多個設定值並一次性儲存。
+
+        Args:
+            updates: 要合併寫入的設定更新項目。
+        """
         self._settings.update(updates)
         self._save_settings(self._settings)
 
@@ -239,7 +283,14 @@ class SettingsManager:
         self.set("servers_root", normalized_path)
 
     def get_validated_servers_root_path(self, *, create: bool = False) -> Path:
-        """回傳已驗證的 servers 根目錄。"""
+        """回傳已驗證的 servers 根目錄。
+
+        Args:
+            create: 若目錄不存在時是否建立。
+
+        Returns:
+            已驗證的伺服器根目錄 Path。
+        """
         base_dir = self.get_servers_root()
         if not base_dir:
             raise ConfigurationError("尚未設定伺服器主資料夾。")
@@ -269,6 +320,7 @@ class SettingsManager:
         return self._get_bool_setting("first_run_completed")
 
     def mark_first_run_completed(self) -> None:
+        """標記首次啟動流程已完成。"""
         self._set_bool_setting("first_run_completed", True)
 
     def get_window_preferences(self) -> WindowPreferences:
@@ -347,7 +399,11 @@ _settings_manager = None
 
 
 def get_settings_manager() -> SettingsManager:
-    """取得全域設定管理器的單例實例"""
+    """取得全域設定管理器的單例實例。
+
+    Returns:
+        全域共用的 `SettingsManager` 實例。
+    """
     global _settings_manager
     if _settings_manager is None:
         _settings_manager = SettingsManager()

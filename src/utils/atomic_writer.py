@@ -6,8 +6,8 @@
 from __future__ import annotations
 import json
 import os
-import time
 import threading
+import time
 from pathlib import Path
 from . import get_logger
 
@@ -17,7 +17,13 @@ _RETRY_COUNT = 3
 _RETRY_DELAY = 0.02
 
 
-def best_effort_fsync(file_obj):
+def best_effort_fsync(file_obj) -> None:
+    """盡力對檔案描述元執行 fsync，不將平台限制視為錯誤。
+
+    Args:
+        file_obj: 已開啟且可取得 fileno 的檔案物件。
+    """
+
     try:
         os.fsync(file_obj.fileno())
     except (AttributeError, OSError, ValueError):
@@ -27,8 +33,14 @@ def best_effort_fsync(file_obj):
 def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
     """以原子方式寫入 JSON 檔案。
 
-    新增參數 `skip_if_unchanged`，當為 True 時若目標檔案存在且與要寫入的 payload 相同，
-    則跳過實際寫入以減少 I/O 與避免觸發不必要的檔案變更事件。
+    Args:
+        path: 目標檔案路徑。
+        data: 要寫入的資料。
+        indent: JSON 縮排層級。
+        skip_if_unchanged: 若內容相同則略過寫入。
+
+    Returns:
+        寫入成功時回傳 True，失敗時回傳 False。
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -52,18 +64,6 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
                 f.flush()
                 best_effort_fsync(f)
             os.replace(tmp_path, p)
-            try:
-                fd = os.open(str(p.parent), os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            except OSError:
-                logger.debug(
-                    "嘗試針對目錄 %s 進行 fsync 失敗；程序將繼續執行且不拋出錯誤。",
-                    p.parent,
-                    exc_info=True,
-                )
             return True
         except OSError:
             try:

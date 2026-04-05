@@ -2,19 +2,19 @@
 提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
 """
 
+import asyncio
 import concurrent.futures
 import contextlib
+import hashlib
+import os
 import tempfile
-import asyncio
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-import hashlib
 import requests
-import os
 from requests import HTTPError, RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -33,6 +33,12 @@ class RateLimiter:
         self._lock = threading.Lock()
 
     def wait(self, domain: str) -> None:
+        """針對指定網域執行節流等待。
+
+        Args:
+            domain: 要限制請求頻率的網域名稱。
+        """
+
         with self._lock:
             now = time.time()
             last = self.last_call_time.get(domain, 0.0)
@@ -130,7 +136,7 @@ class HTTPUtils:
         return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
     @staticmethod
-    def _get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
+    def get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
         """獲取包含預設 User-Agent 的標頭"""
         default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (colin955023@gmail.com)"}
         if headers:
@@ -146,13 +152,24 @@ class HTTPUtils:
         params: dict[str, Any] | None = None,
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | None:
-        """發送 HTTP GET 請求並解析回傳的 JSON 資料"""
+        """發送 HTTP GET 請求並解析回傳的 JSON 資料。
+
+        Args:
+            url: 目標 URL。
+            timeout: 請求逾時秒數。
+            headers: 額外 HTTP headers。
+            params: 查詢參數。
+            suppress_status_codes: 需要靜默處理的 HTTP 狀態碼集合。
+
+        Returns:
+            成功時回傳 JSON 內容，失敗或被 suppress 時回傳 None。
+        """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
         timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
         try:
-            final_headers = cls._get_default_headers(headers)
+            final_headers = cls.get_default_headers(headers)
             _rate_limiter.wait(urlparse(url).netloc)
             resp = cls._get_session().get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
@@ -194,7 +211,7 @@ class HTTPUtils:
             return None
         timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
         try:
-            final_headers = cls._get_default_headers(headers)
+            final_headers = cls.get_default_headers(headers)
             _rate_limiter.wait(urlparse(url).netloc)
             resp = cls._get_session().post(url, headers=final_headers, json=json_body, timeout=timeout)
             resp.raise_for_status()
@@ -213,13 +230,23 @@ class HTTPUtils:
     def get_content(
         cls, url: str, timeout: int = 30, stream: bool = False, headers: dict[str, str] | None = None
     ) -> bytes | None:
-        """發送 HTTP GET 請求並回傳完整的回應內容"""
+        """發送 HTTP GET 請求並回傳完整的回應內容。
+
+        Args:
+            url: 目標 URL。
+            timeout: 請求逾時秒數。
+            stream: 是否以串流方式請求。
+            headers: 額外 HTTP headers。
+
+        Returns:
+            回應內容 bytes；失敗時回傳 None。
+        """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
         timeout = cls._normalize_int_value(timeout, cls.CONTENT_TIMEOUT_MIN_SECONDS)
         try:
-            final_headers = cls._get_default_headers(headers)
+            final_headers = cls.get_default_headers(headers)
             _rate_limiter.wait(urlparse(url).netloc)
             resp = cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=stream)
             resp.raise_for_status()
@@ -239,7 +266,20 @@ class HTTPUtils:
         cancel_check: Callable[[], bool] | None = None,
         expected_sha256: str | None = None,
     ) -> bool:
-        """下載檔案並儲存到本機路徑"""
+        """下載檔案並儲存到本機路徑。
+
+        Args:
+            url: 下載網址。
+            local_path: 本機儲存路徑。
+            progress_callback: 下載進度回呼。
+            timeout: 逾時秒數。
+            chunk_size: 每次讀取的區塊大小。
+            cancel_check: 取消檢查回呼。
+            expected_sha256: 預期的 SHA-256 雜湊。
+
+        Returns:
+            下載成功時回傳 True，失敗時回傳 False。
+        """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("檔案下載失敗: URL 參數無效")
             return False
@@ -278,7 +318,7 @@ class HTTPUtils:
         except OSError:
             temp_path_obj = local_path_obj.with_name(local_path_obj.name + ".part")
         try:
-            final_headers = cls._get_default_headers()
+            final_headers = cls.get_default_headers()
             with cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))
@@ -330,7 +370,17 @@ class HTTPUtils:
     def get_json_batch(
         urls: list[str], timeout: int = 10, headers: dict[str, str] | None = None, max_workers: int = 5
     ) -> list[dict[str, Any] | None]:
-        """批次發送 HTTP GET 請求並解析回傳的 JSON 資料"""
+        """批次發送 HTTP GET 請求並解析回傳的 JSON 資料。
+
+        Args:
+            urls: 要請求的 URL 清單。
+            timeout: 請求逾時秒數。
+            headers: 額外 HTTP headers。
+            max_workers: 同時執行的工作數量。
+
+        Returns:
+            對應每個 URL 的 JSON 結果清單。
+        """
         if not urls:
             return []
         try:
@@ -343,12 +393,18 @@ class HTTPUtils:
 
     @classmethod
     async def get_json_async(cls, *args, **kwargs):
+        """在背景執行緒中非同步取得 JSON 回應。"""
+
         return await asyncio.to_thread(cls.get_json, *args, **kwargs)
 
     @classmethod
     async def post_json_async(cls, *args, **kwargs):
+        """在背景執行緒中非同步送出 JSON POST 請求。"""
+
         return await asyncio.to_thread(cls.post_json, *args, **kwargs)
 
     @classmethod
     async def download_file_async(cls, *args, **kwargs):
+        """在背景執行緒中非同步下載檔案。"""
+
         return await asyncio.to_thread(cls.download_file, *args, **kwargs)

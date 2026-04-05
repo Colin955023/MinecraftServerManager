@@ -1,3 +1,8 @@
+"""檔案雜湊工具。
+
+提供同步與非同步的檔案雜湊計算，並使用背景 worker pool 避免阻塞主執行緒。
+"""
+
 import asyncio
 import concurrent.futures
 import hashlib
@@ -23,9 +28,15 @@ def _get_hash_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 
 def compute_file_hash_sync(file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024) -> str:
-    """
-    同步計算檔案雜湊值。
-    實作 Chunked Streaming（預設 1MB 區塊），適合大型檔案避免記憶體超載。
+    """同步計算檔案雜湊值。
+
+    Args:
+        file_path: 要計算雜湊的檔案路徑。
+        algorithm: 雜湊演算法名稱。
+        chunk_size: 每次讀取的區塊大小。
+
+    Returns:
+        計算後的雜湊字串；失敗時回傳空字串。
     """
     normalized_algorithm = str(algorithm).strip().lower()
     normalized_path = str(file_path).strip()
@@ -64,9 +75,16 @@ def _compute_file_hash_cached_internal(
 def compute_file_hash(
     file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024, use_cache: bool = True
 ) -> str:
-    """
-    計算檔案雜湊值（適用於單次呼叫或大量小檔呼叫）。
-    啟用 use_cache 時會檢查檔案 mtime 與 size 來確保快取正確性。
+    """計算檔案雜湊值（適用於單次呼叫或大量小檔呼叫）。
+
+    Args:
+        file_path: 要計算雜湊的檔案路徑。
+        algorithm: 雜湊演算法名稱。
+        chunk_size: 每次讀取的區塊大小。
+        use_cache: 是否使用快取。
+
+    Returns:
+        計算後的雜湊字串；失敗時回傳空字串。
     """
     normalized_path = str(file_path).strip()
     if not normalized_path:
@@ -91,7 +109,15 @@ def compute_file_hash(
 async def compute_file_hash_async(
     file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024, use_cache: bool = True
 ) -> str:
-    """
-    非同步計算檔案雜湊值。包裝了 asyncio.to_thread 確保 I/O 不會阻塞 Event Loop。
+    """非同步計算檔案雜湊值。
+
+    Args:
+        file_path: 要計算雜湊的檔案路徑。
+        algorithm: 雜湊演算法名稱。
+        chunk_size: 每次讀取的區塊大小。
+        use_cache: 是否使用快取。
+
+    Returns:
+        計算後的雜湊字串；失敗時回傳空字串。
     """
     return await asyncio.to_thread(compute_file_hash, str(file_path), algorithm, chunk_size, use_cache)

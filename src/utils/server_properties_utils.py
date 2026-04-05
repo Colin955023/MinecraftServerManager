@@ -235,7 +235,14 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def load_properties(file_path) -> dict[str, str]:
-        """從 server.properties 檔案讀取屬性配置並解析為字典"""
+        """從 `server.properties` 檔案讀取屬性配置並解析為字典。
+
+        Args:
+            file_path: `server.properties` 檔案路徑。
+
+        Returns:
+            解析後的屬性字典。
+        """
         properties: dict[str, str] = {}
         try:
             properties_file = Path(file_path)
@@ -289,7 +296,15 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def save_properties(file_path, properties: dict[str, str]) -> bool:
-        """將屬性字典儲存為 server.properties 檔案格式"""
+        """將屬性字典儲存為 `server.properties` 檔案格式。
+
+        Args:
+            file_path: `server.properties` 檔案路徑。
+            properties: 要寫入的屬性字典。
+
+        Returns:
+            若儲存成功則回傳 True，否則回傳 False。
+        """
         try:
             properties_file = Path(file_path)
             normalized_props: dict[str, str] = {
@@ -481,7 +496,15 @@ class ServerPropertiesValidator:
 
     @staticmethod
     def validate_property(prop_name: str, value: str) -> tuple[bool, str]:
-        """驗證單一屬性"""
+        """驗證單一屬性。
+
+        Args:
+            prop_name: 屬性名稱。
+            value: 屬性值。
+
+        Returns:
+            `(是否通過, 錯誤訊息)` 的驗證結果。
+        """
         if not prop_name or not value:
             return (True, "")
         rules = ServerPropertiesValidator.VALIDATION_RULES.get(prop_name)
@@ -512,7 +535,14 @@ class ServerPropertiesValidator:
 
     @staticmethod
     def validate_properties(properties: dict[str, str]) -> tuple[bool, list[str]]:
-        """驗證多個屬性"""
+        """驗證多個屬性。
+
+        Args:
+            properties: 要驗證的屬性字典。
+
+        Returns:
+            `(是否通過, 錯誤訊息清單)` 的驗證結果。
+        """
         errors = []
         for prop_name, value in properties.items():
             is_valid, error_msg = ServerPropertiesValidator.validate_property(prop_name, value)

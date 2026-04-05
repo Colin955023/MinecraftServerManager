@@ -26,9 +26,13 @@ class CancellationToken:
         self._cancelled = False
 
     def cancel(self) -> None:
+        """將取消標記設為已取消。"""
+
         self._cancelled = True
 
     def is_cancelled(self) -> bool:
+        """回傳目前是否已請求取消。"""
+
         return self._cancelled
 
 
@@ -48,8 +52,15 @@ class BackgroundTaskManager:
     ) -> concurrent.futures.Future:
         """提交背景任務，完成後若提供 callback 會在背景執行緒呼叫 callback(result)。
 
-        若提供 `cancel_token`，且呼叫方未在 kwargs 中自行提供，會以關鍵字參數
-        `cancel_token` 傳入被執行函式。被執行的函式需自行實作協作式取消（cooperative cancellation）。
+        Args:
+            fn: 要執行的函式。
+            *args: 傳入函式的位置參數。
+            callback: 任務完成後的回呼。
+            cancel_token: 協作式取消標記。
+            **kwargs: 傳入函式的關鍵字參數。
+
+        Returns:
+            提交到執行器後的 Future。
         """
         if cancel_token is not None and "cancel_token" not in kwargs:
             kwargs["cancel_token"] = cancel_token
@@ -84,10 +95,15 @@ class BackgroundTaskManager:
     ) -> asyncio.Task:
         """以 coroutine 介面執行任務。
 
-        - 若 `fn` 為 coroutine function，會在目前 event loop 建立 Task。
-        - 否則會把同步阻塞函式轉給 executor（使用本 instance 的 executor）。
+        Args:
+            fn: 要執行的函式或 coroutine function。
+            *args: 傳入函式的位置參數。
+            callback: 任務完成後的回呼。
+            cancel_token: 協作式取消標記。
+            **kwargs: 傳入函式的關鍵字參數。
 
-        返回值為 asyncio.Task，可由呼叫方 await。
+        Returns:
+            可由呼叫方 await 的 asyncio Task。
         """
         if cancel_token is not None and "cancel_token" not in kwargs:
             kwargs["cancel_token"] = cancel_token
@@ -122,7 +138,13 @@ class BackgroundTaskManager:
             task.add_done_callback(_on_done)
         return task
 
-    def shutdown(self, wait: bool = True):
+    def shutdown(self, wait: bool = True) -> None:
+        """關閉 executor，必要時等待既有任務完成。
+
+        Args:
+            wait: 是否等待既有任務完成。
+        """
+
         self._executor.shutdown(wait=wait)
 
 
@@ -130,6 +152,12 @@ _shared_manager: BackgroundTaskManager | None = None
 
 
 def get_shared_manager() -> BackgroundTaskManager:
+    """取得全域共用的背景任務管理器。
+
+    Returns:
+        全域共用的 BackgroundTaskManager 實例。
+    """
+
     global _shared_manager
     if _shared_manager is None:
         _shared_manager = BackgroundTaskManager()

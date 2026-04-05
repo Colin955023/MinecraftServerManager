@@ -160,7 +160,14 @@ def _build_online_dependency_install_item(payload: Any) -> OnlineDependencyInsta
 
 
 def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
-    """將依賴安裝項目正規化為可持久化 payload。"""
+    """將依賴安裝項目正規化為可持久化 payload。
+
+    Args:
+        item: 原始依賴安裝項目，可以是物件或映射。
+
+    Returns:
+        可直接序列化與持久化的標準化字典。
+    """
     graph_depth = _normalize_positive_int_value(item, "graph_depth")
     edge_kind = _normalize_text_value(item, "edge_kind", "required", lowercase=True) or "required"
     edge_source = _normalize_text_value(item, "edge_source", f"{edge_kind}:modrinth_dependency", lowercase=True)
@@ -199,7 +206,20 @@ def serialize_online_dependency_install_plan(
     root_enabled: bool | None = None,
     plan_source: str = "review",
 ) -> dict[str, Any]:
-    """將依賴安裝計畫轉為可持久化 payload。"""
+    """將依賴安裝計畫轉為可持久化 payload。
+
+    Args:
+        plan: 原始依賴安裝計畫。
+        root_project_id: 根專案 ID。
+        root_project_name: 根專案名稱。
+        root_target_version_id: 根目標版本 ID。
+        root_target_version_name: 根目標版本名稱。
+        root_enabled: 根專案是否啟用。
+        plan_source: 計畫來源標記。
+
+    Returns:
+        可寫入快取或檔案的計畫 payload。
+    """
     serialized_items = [
         serialize_online_dependency_install_item(item) for item in list(getattr(plan, "items", []) or [])
     ]
@@ -229,7 +249,14 @@ def serialize_online_dependency_install_plan(
 
 
 def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[bool, str]:
-    """驗證 dependency plan 快照是否符合 replay 契約。"""
+    """驗證 dependency plan 快照是否符合 replay 契約。
+
+    Args:
+        raw: 待驗證的原始 payload。
+
+    Returns:
+        `(是否通過, 原因碼)` 的驗證結果。
+    """
     if not isinstance(raw, dict):
         return (False, "payload-not-dict")
     schema_version = raw.get("schema_version")
@@ -279,7 +306,14 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
 
 
 def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
-    """嘗試遷移舊版 dependency plan payload 至可回放格式。"""
+    """嘗試遷移舊版 dependency plan payload 至可回放格式。
+
+    Args:
+        raw: 待遷移的原始 payload。
+
+    Returns:
+        `(遷移後 payload, 狀態碼)` 的結果；失敗時回傳 `(None, 原因碼)`。
+    """
     if not isinstance(raw, dict):
         return (None, "payload-not-dict")
     schema_version = raw.get("schema_version")
@@ -346,7 +380,14 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
 
 
 def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
-    """從持久化 payload 還原 `OnlineDependencyInstallPlan`。"""
+    """從持久化 payload 還原 `OnlineDependencyInstallPlan`。
+
+    Args:
+        raw: 已序列化的原始 payload。
+
+    Returns:
+        還原後的 `OnlineDependencyInstallPlan`。
+    """
     if not isinstance(raw, dict):
         return OnlineDependencyInstallPlan()
 

@@ -104,7 +104,11 @@ class SystemUtils:
 
     @staticmethod
     def get_total_memory_mb() -> int:
-        """獲取系統總實體記憶體"""
+        """獲取系統總實體記憶體。
+
+        Returns:
+            系統總實體記憶體（MB）。
+        """
         try:
             stat = MEMORYSTATUSEX()
             stat.dwLength = sizeof(stat)
@@ -117,7 +121,14 @@ class SystemUtils:
 
     @staticmethod
     def get_process_name(pid: int) -> str:
-        """獲取指定 PID 的進程名稱"""
+        """獲取指定 PID 的進程名稱。
+
+        Args:
+            pid: 進程 ID。
+
+        Returns:
+            進程名稱；找不到時回傳空字串。
+        """
         try:
             for entry in SystemUtils._iterate_process_snapshot():
                 if entry.th32ProcessID == pid:
@@ -128,7 +139,14 @@ class SystemUtils:
 
     @staticmethod
     def get_process_children(pid_root: int) -> list[tuple[int, str]]:
-        """獲取子進程列表 [(pid, name), ...]"""
+        """獲取子進程列表 [(pid, name), ...]。
+
+        Args:
+            pid_root: 父進程 ID。
+
+        Returns:
+            子進程清單。
+        """
         children: list[tuple[int, str]] = []
         try:
             snapshot = SystemUtils._iterate_process_snapshot()
@@ -150,7 +168,14 @@ class SystemUtils:
 
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
-        """獲取進程記憶體使用量 (bytes)"""
+        """獲取進程記憶體使用量（bytes）。
+
+        Args:
+            pid: 進程 ID。
+
+        Returns:
+            進程記憶體使用量（位元組）。
+        """
         h_process = 0
         try:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid)
@@ -170,7 +195,14 @@ class SystemUtils:
 
     @staticmethod
     def find_java_process(parent_pid: int) -> int | None:
-        """從父進程查找 Java 子進程 PID"""
+        """從父進程查找 Java 子進程 PID。
+
+        Args:
+            parent_pid: 父進程 ID。
+
+        Returns:
+            Java 子進程 PID；找不到時回傳 None。
+        """
         try:
             parent_name = SystemUtils.get_process_name(parent_pid)
             if parent_name and parent_name.lower() in ("java.exe", "javaw.exe"):
@@ -185,7 +217,14 @@ class SystemUtils:
 
     @staticmethod
     def kill_process_tree(pid: int) -> bool:
-        """強制結束進程樹"""
+        """強制結束進程樹。
+
+        Args:
+            pid: 要結束的進程 ID。
+
+        Returns:
+            成功執行 taskkill 時回傳 True。
+        """
         try:
             cmd = ["taskkill", "/PID", str(pid), "/T", "/F"]
             SubprocessUtils.run_checked(cmd, stdout=SubprocessUtils.DEVNULL, stderr=SubprocessUtils.DEVNULL)
@@ -196,7 +235,14 @@ class SystemUtils:
 
     @staticmethod
     def is_process_running(pid: int) -> bool:
-        """檢查進程是否運行中"""
+        """檢查進程是否運行中。
+
+        Args:
+            pid: 進程 ID。
+
+        Returns:
+            進程仍在執行時回傳 True。
+        """
         h_process = 0
         try:
             h_process = _kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
@@ -223,7 +269,14 @@ class SystemUtils:
 
     @staticmethod
     def get_system_metrics(index: int) -> int:
-        """獲取系統指標"""
+        """獲取系統指標。
+
+        Args:
+            index: Windows 系統指標編號。
+
+        Returns:
+            系統指標值；失敗時回傳 0。
+        """
         try:
             return _user32.GetSystemMetrics(index)
         except Exception:

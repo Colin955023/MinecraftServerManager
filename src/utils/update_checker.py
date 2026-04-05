@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 import markdown as _markdown
 from packaging.version import Version
+from ..ui import TaskUtils
 from . import (
     HTTPUtils,
     PathUtils,
@@ -25,6 +26,8 @@ logger = get_logger().bind(component="UpdateChecker")
 
 
 class UpdateChecker:
+    """集中處理 GitHub Releases 更新檢查與安裝流程。"""
+
     @staticmethod
     def _parse_version(version_str: str | None) -> Version | None:
         """解析版本字串為 PEP 440 Version 物件。"""
@@ -71,7 +74,7 @@ class UpdateChecker:
                 logger.error(f"安裝程式路徑不在允許的暫存目錄中：{resolved_path}")
                 return
             if resolved_path.is_file():
-                confirm = UIUtils.call_on_ui(
+                confirm = TaskUtils.call_on_ui(
                     parent,
                     lambda: UIUtils.ask_yes_no_cancel(
                         "執行安裝程式",
@@ -174,6 +177,15 @@ class UpdateChecker:
     def check_and_prompt_update(
         current_version: str, owner: str, repo: str, show_up_to_date_message: bool = True, parent=None
     ) -> None:
+        """檢查最新版本並在需要時提示使用者進行更新。
+
+        Args:
+            current_version: 目前版本字串。
+            owner: GitHub repository owner。
+            repo: GitHub repository 名稱。
+            show_up_to_date_message: 是否在已是最新版本時顯示提示。
+            parent: 父視窗物件。
+        """
 
         def _work() -> None:
             temp_files_to_cleanup: list[Path] = []
@@ -195,7 +207,7 @@ class UpdateChecker:
             def _handle_checksum_mismatch(asset_name: str) -> None:
                 """統一處理下載檔案 SHA256 驗證失敗。"""
                 logger.error(f"[驗證失敗] SHA256 不符合！檔案: {asset_name}")
-                UIUtils.call_on_ui(
+                TaskUtils.call_on_ui(
                     parent,
                     lambda: UIUtils.show_error(
                         "SHA256 驗證失敗",
@@ -213,7 +225,7 @@ class UpdateChecker:
                 if not latest:
                     logger.info("無法從 GitHub 取得最新版本資訊")
                     if show_up_to_date_message:
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_info(
                                 "檢查更新",
@@ -233,7 +245,7 @@ class UpdateChecker:
                 if latest_ver <= current_ver:
                     logger.info("目前已是最新版本")
                     if show_up_to_date_message:
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_info(
                                 "檢查更新",
@@ -249,7 +261,7 @@ class UpdateChecker:
                 rendered = UpdateChecker._clean_release_notes(body)
                 html_url = latest.get("html_url")
                 msg = f"發現新版本：{name}\n目前版本：{current_version}\n\n釋出說明：\n{rendered}\n\n是否下載並安裝？"
-                result = UIUtils.call_on_ui(
+                result = TaskUtils.call_on_ui(
                     parent,
                     lambda: UIUtils.ask_yes_no_cancel("更新可用", msg, parent=parent, show_cancel=False, topmost=True),
                 )
@@ -261,7 +273,7 @@ class UpdateChecker:
                 if asset_mode == "installer_fallback":
                     logger.info("可攜式更新資源不存在，回退使用 installer 資源")
                 if not asset:
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_info(
                             "無安裝檔",
@@ -275,7 +287,7 @@ class UpdateChecker:
                     return
                 download_url = asset.get("browser_download_url")
                 if not download_url:
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_error(
                             "無下載連結",
@@ -317,7 +329,7 @@ class UpdateChecker:
                     return checksum == hex_checksum.lower() if checksum else False
 
                 if asset_mode == "portable" and download_url and str(download_url).lower().endswith(".zip"):
-                    if not UIUtils.call_on_ui(
+                    if not TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.ask_yes_no_cancel(
                             "可攜式更新可用",
@@ -336,7 +348,7 @@ class UpdateChecker:
                         chk = _fetch_checksum_for_asset(latest)
                         if not chk:
                             logger.error("[安全檢查失敗] 未找到 SHA256，拒絕下載未經驗證的檔案")
-                            UIUtils.call_on_ui(
+                            TaskUtils.call_on_ui(
                                 parent,
                                 lambda: UIUtils.show_error(
                                     "缺少 SHA256 驗證資訊",
@@ -352,7 +364,7 @@ class UpdateChecker:
                         logger.info("[開始下載] 確認有 SHA256 可驗證，現在開始安全下載主檔案")
                     except Exception:
                         logger.exception("[安全檢查錯誤] 在查詢 SHA256 時發生錯誤，為避免風險將中止更新")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
                                 "安全驗證錯誤",
@@ -368,7 +380,7 @@ class UpdateChecker:
                         tmp_zip_path = tmpf.name
                     temp_files_to_cleanup.append(Path(tmp_zip_path))
                     if not HTTPUtils.download_file(download_url, tmp_zip_path):
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error("下載失敗", "無法下載可攜式更新。", parent=parent, topmost=True),
                         )
@@ -387,7 +399,7 @@ class UpdateChecker:
                         PathUtils.safe_extract_zip(Path(tmp_zip_path), extracted_dir)
                     except Exception as e:
                         logger.exception(f"解壓更新檔失敗: {e}")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
                                 "解壓失敗", "無法解壓下載的更新檔。", parent=parent, topmost=True
@@ -395,10 +407,10 @@ class UpdateChecker:
                         )
                         _cleanup_temp_files(temp_files_to_cleanup)
                         return
-                    base = RuntimePaths._get_portable_base_dir()
+                    base = RuntimePaths.get_portable_base_dir()
                     cfg = base / ".config"
                     lg = base / ".log"
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_info(
                             "更新中", "正在應用更新，程式將在 3 秒後關閉...", parent=parent, topmost=True
@@ -419,7 +431,7 @@ class UpdateChecker:
                     except Exception as e:
                         error_msg = str(e)
                         logger.exception(f"備份失敗: {error_msg}")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
                                 "備份失敗",
@@ -437,7 +449,7 @@ class UpdateChecker:
                         base.resolve(strict=True)
                         if not PathUtils.is_path_within(temp_root, extracted_dir_resolved, strict=True):
                             logger.error(f"解壓目錄不在暫存目錄中，已取消更新：{extracted_dir_resolved}")
-                            UIUtils.call_on_ui(
+                            TaskUtils.call_on_ui(
                                 parent,
                                 lambda: UIUtils.show_error(
                                     "安全錯誤",
@@ -450,7 +462,7 @@ class UpdateChecker:
                             return
                         if not PathUtils.is_path_within(temp_root, backup_root_resolved, strict=True):
                             logger.error(f"備份目錄不在暫存目錄中，已取消更新：{backup_root_resolved}")
-                            UIUtils.call_on_ui(
+                            TaskUtils.call_on_ui(
                                 parent,
                                 lambda: UIUtils.show_error(
                                     "安全錯誤",
@@ -463,7 +475,7 @@ class UpdateChecker:
                             return
                     except Exception as e:
                         logger.exception(f"驗證路徑時發生錯誤: {e}")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
                                 "錯誤", "路徑驗證失敗，已取消更新。", parent=parent, topmost=True
@@ -487,7 +499,7 @@ class UpdateChecker:
                         apply_bat.write_text(bat, encoding="utf-8")
                     except Exception:
                         logger.exception("寫入批次檔失敗")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error("錯誤", "無法建立套用更新的腳本。", parent=parent, topmost=True),
                         )
@@ -501,7 +513,7 @@ class UpdateChecker:
                                 apply_bat=str(apply_bat_resolved),
                                 temp_root=str(temp_root),
                             )
-                            UIUtils.call_on_ui(
+                            TaskUtils.call_on_ui(
                                 parent,
                                 lambda: UIUtils.show_error(
                                     "錯誤",
@@ -534,7 +546,7 @@ class UpdateChecker:
                     chk = _fetch_checksum_for_asset(latest)
                     if not chk:
                         logger.error("[安全檢查失敗] 未找到 SHA256，拒絕下載未經驗證的檔案")
-                        UIUtils.call_on_ui(
+                        TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error(
                                 "缺少 SHA256 驗證資訊",
@@ -550,7 +562,7 @@ class UpdateChecker:
                     logger.info("[開始下載] 確認有 SHA256 可驗證，現在開始安全下載安裝程式")
                 except Exception:
                     logger.exception("[安全檢查錯誤] 在查詢 SHA256 時發生錯誤，為避免風險將中止更新")
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_error(
                             "安全驗證錯誤",
@@ -579,7 +591,7 @@ class UpdateChecker:
                     if dest in temp_files_to_cleanup:
                         temp_files_to_cleanup.remove(dest)
                     _cleanup_temp_files(temp_files_to_cleanup)
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_info(
                             "更新準備就緒",
@@ -592,7 +604,7 @@ class UpdateChecker:
                     logger.info("準備關閉當前程式以完成更新")
                     UpdateChecker._graceful_exit(parent)
                 else:
-                    UIUtils.call_on_ui(
+                    TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_error(
                             "下載失敗", "無法下載安裝檔，請稍後再試。", parent=parent, topmost=True
@@ -602,7 +614,7 @@ class UpdateChecker:
             except Exception as e:
                 logger.exception(f"更新檢查失敗: {e}")
                 error_msg = str(e)
-                UIUtils.call_on_ui(
+                TaskUtils.call_on_ui(
                     parent,
                     lambda: UIUtils.show_error(
                         "更新檢查失敗", f"無法完成更新檢查或下載：{error_msg}", parent=parent, topmost=True
@@ -610,4 +622,4 @@ class UpdateChecker:
                 )
                 _cleanup_temp_files(temp_files_to_cleanup)
 
-        UIUtils.run_async(_work)
+        TaskUtils.run_async(_work)

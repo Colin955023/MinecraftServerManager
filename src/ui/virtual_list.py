@@ -1,13 +1,15 @@
 """輕量虛擬清單元件（以 Tk Listbox 實作）。"""
 
 from __future__ import annotations
-import tkinter as tk
+import tkinter
 import tkinter.font as tkfont
+import tkinter.ttk as ttk
 from collections.abc import Callable
-from tkinter import ttk
 from typing import Any
 import customtkinter as ctk
-from ..utils import Colors, FontManager, FontSize, UIUtils
+
+from ..utils import Colors, FontSize
+from . import FontManager, TreeUtils
 
 
 def _resolve_token_color(color: str | tuple[str, str]) -> str:
@@ -37,7 +39,7 @@ def _normalize_tk_font(font) -> Any:
     return font
 
 
-class VirtualList(tk.Frame):
+class VirtualList(tkinter.Frame):
     """以 Listbox 提供大量項目清單顯示，避免建立大量 row widgets。"""
 
     def __init__(
@@ -66,7 +68,7 @@ class VirtualList(tk.Frame):
         self._filter_case_sensitive = False
         self._sort_key: Callable[[str], Any] | None = None
         self._sort_reverse = False
-        self.listbox = tk.Listbox(
+        self.listbox = tkinter.Listbox(
             self,
             activestyle="none",
             exportselection=False,
@@ -96,7 +98,7 @@ class VirtualList(tk.Frame):
         self.listbox.delete(0, "end")
         if self._items:
             self.listbox.insert("end", *self._items)
-        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=len(self._items))
+        TreeUtils.apply_listbox_alternating_rows(self.listbox, item_count=len(self._items))
 
     def _rebuild_view(self, *, preserve_selection: bool) -> None:
         previous_value = self.get_selected_value() if preserve_selection else None
@@ -126,6 +128,8 @@ class VirtualList(tk.Frame):
         self._on_select(value, idx)
 
     def set_items(self, items: list[str] | tuple[str, ...], *, preserve_selection: bool = True) -> None:
+        """設定清單資料並可選擇保留目前選取項目。"""
+
         self._all_items = list(items)
         self._rebuild_view(preserve_selection=preserve_selection)
 
@@ -155,12 +159,16 @@ class VirtualList(tk.Frame):
         self._rebuild_view(preserve_selection=preserve_selection)
 
     def get_selected_index(self) -> int | None:
+        """取得目前選取項目的索引。"""
+
         selection = self.listbox.curselection()
         if not selection:
             return None
         return int(selection[0])
 
     def get_selected_value(self) -> str | None:
+        """取得目前選取項目的值。"""
+
         idx = self.get_selected_index()
         if idx is None:
             return None
@@ -169,6 +177,14 @@ class VirtualList(tk.Frame):
         return self._items[idx]
 
     def select_index(self, index: int, *, ensure_visible: bool = True, notify: bool = False) -> None:
+        """選取指定索引的項目。
+
+        Args:
+            index: 要選取的索引。
+            ensure_visible: 是否捲動到可見範圍。
+            notify: 是否觸發選取 callback。
+        """
+
         if index < 0 or index >= len(self._items):
             return
         self.listbox.selection_clear(0, "end")
@@ -198,14 +214,18 @@ class VirtualList(tk.Frame):
         self.set_font(FontManager.get_font(family=family, size=size, weight=weight))
 
     def clear(self) -> None:
+        """清空清單內容與目前資料。"""
+
         self._all_items = []
         self._items = []
         self.listbox.delete(0, "end")
-        UIUtils.apply_listbox_alternating_rows(self.listbox, item_count=0)
+        TreeUtils.apply_listbox_alternating_rows(self.listbox, item_count=0)
 
     @property
     def item_count(self) -> int:
         return len(self._items)
 
     def total_count(self) -> int:
+        """取得原始資料總數。"""
+
         return len(self._all_items)

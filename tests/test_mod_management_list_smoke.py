@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -8,6 +9,7 @@ import pytest
 
 import src.ui.mod_management as mod_management_module
 import src.utils.ui_utils as ui_utils_module
+import src.utils as meta_module
 
 Colors = ui_utils_module.Colors
 UIUtils = ui_utils_module.UIUtils
@@ -296,12 +298,27 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
 
     captured: dict[str, Any] = {}
 
-    monkeypatch.setattr(frame, "_cancel_local_refresh_job", lambda: None)
-    monkeypatch.setattr(frame, "_set_local_tree_render_lock", lambda _enabled: None)
-    monkeypatch.setattr(frame, "_capture_selected_mod_ids", lambda: set())
-    monkeypatch.setattr(frame, "_resolve_local_display_name", lambda mod, _enhanced: mod.name)
-    monkeypatch.setattr(frame, "_get_enhanced_attr", lambda _enhanced, _attr, default: default)
-    monkeypatch.setattr(frame, "_apply_local_tree_diff", lambda **kwargs: captured.update(kwargs))
+    def _noop_cancel_local_refresh_job() -> None:
+        return None
+
+    def _noop_set_local_tree_render_lock(_enabled: Any) -> None:
+        return None
+
+    def _capture_selected_mod_ids_func() -> set:
+        return set()
+
+    def _resolve_local_display_name_func(mod: Any, _enhanced: Any) -> str:
+        return mod.name
+
+    def _get_enhanced_attr_func(_enhanced: Any, _attr: str, default: Any) -> Any:
+        return default
+
+    monkeypatch.setattr(frame, "_cancel_local_refresh_job", _noop_cancel_local_refresh_job)
+    monkeypatch.setattr(frame, "_set_local_tree_render_lock", _noop_set_local_tree_render_lock)
+    monkeypatch.setattr(frame, "_capture_selected_mod_ids", _capture_selected_mod_ids_func)
+    monkeypatch.setattr(frame, "_resolve_local_display_name", _resolve_local_display_name_func)
+    monkeypatch.setattr(frame, "_get_enhanced_attr", _get_enhanced_attr_func)
+    monkeypatch.setattr(frame, "_apply_local_tree_diff", captured.update)
 
     frame.refresh_local_list()
 
@@ -1115,7 +1132,7 @@ def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder(mon
 
     monkeypatch.setattr(mod_management_module.FontManager, "get_dpi_scaled_size", lambda value: value)
 
-    column_id = UIUtils._get_treeview_separator_column_from_x(tree, 140)
+    column_id = mod_management_module.TreeUtils._get_treeview_separator_column_from_x(tree, 140)
 
     assert column_id == "name"
     assert tree.requested_columns == ["name", "version"]
@@ -2372,9 +2389,6 @@ def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
 
 @pytest.mark.smoke
 def test_derive_provider_lifecycle_state_fresh_within_ttl() -> None:
-    import time
-    import src.utils as meta_module
-
     now_ms = int(time.time() * 1000)
     raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(now_ms - 60_000)}
 
@@ -2383,8 +2397,6 @@ def test_derive_provider_lifecycle_state_fresh_within_ttl() -> None:
 
 @pytest.mark.smoke
 def test_derive_provider_lifecycle_state_stale_past_ttl() -> None:
-    import src.utils as meta_module
-
     expired_ms = 1_000
     raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(expired_ms)}
 
@@ -2393,8 +2405,6 @@ def test_derive_provider_lifecycle_state_stale_past_ttl() -> None:
 
 @pytest.mark.smoke
 def test_derive_provider_lifecycle_state_missing_when_no_data() -> None:
-    import src.utils as meta_module
-
     assert meta_module.derive_provider_lifecycle_state(None) == meta_module.PROVIDER_LIFECYCLE_MISSING
     assert meta_module.derive_provider_lifecycle_state({}) == meta_module.PROVIDER_LIFECYCLE_MISSING
     assert (
@@ -2405,8 +2415,6 @@ def test_derive_provider_lifecycle_state_missing_when_no_data() -> None:
 
 @pytest.mark.smoke
 def test_derive_provider_lifecycle_state_ignores_manual_override_flag() -> None:
-    import src.utils as meta_module
-
     expired_ms = 1_000
     raw = {
         "project_id": "sodium",
@@ -2420,8 +2428,6 @@ def test_derive_provider_lifecycle_state_ignores_manual_override_flag() -> None:
 
 @pytest.mark.smoke
 def test_ensure_local_mod_provider_record_sets_lifecycle_fresh_when_both_ids_present() -> None:
-    import src.utils as meta_module
-
     result = meta_module.ensure_local_mod_provider_record(
         platform_id="sodium",
         platform_slug="sodium",
@@ -2433,8 +2439,6 @@ def test_ensure_local_mod_provider_record_sets_lifecycle_fresh_when_both_ids_pre
 
 @pytest.mark.smoke
 def test_ensure_local_mod_provider_record_sets_lifecycle_missing_when_unresolved() -> None:
-    import src.utils as meta_module
-
     result = meta_module.ensure_local_mod_provider_record(
         platform_id="",
         platform_slug="",

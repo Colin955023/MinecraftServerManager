@@ -27,7 +27,7 @@ class RuntimePaths:
         return Path(base)
 
     @staticmethod
-    def _get_portable_base_dir() -> Path:
+    def get_portable_base_dir() -> Path:
         """取得便攜模式的基礎目錄（可執行檔所在目錄）"""
         return RuntimePaths.get_exe_dir()
 
@@ -42,7 +42,7 @@ class RuntimePaths:
     def get_user_data_dir() -> Path:
         """取得應用程式的使用者資料存放目錄"""
         if RuntimePaths.is_portable_mode():
-            return RuntimePaths._get_portable_base_dir() / ".config"
+            return RuntimePaths.get_portable_base_dir() / ".config"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager"
 
     @staticmethod
@@ -54,11 +54,18 @@ class RuntimePaths:
     def get_log_dir() -> Path:
         """取得應用程式的日誌存放目錄"""
         if RuntimePaths.is_portable_mode():
-            return RuntimePaths._get_portable_base_dir() / ".log"
+            return RuntimePaths.get_portable_base_dir() / ".log"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager" / "log"
 
     @staticmethod
     def ensure_dir(p: Path) -> Path:
-        """確保指定路徑的目錄存在，如果不存在則建立"""
+        """確保指定路徑的目錄存在，如果不存在則建立。
+
+        Args:
+            p: 要建立的目錄路徑。
+
+        Returns:
+            已確認存在的目錄路徑。
+        """
         p.mkdir(parents=True, exist_ok=True)
         return p

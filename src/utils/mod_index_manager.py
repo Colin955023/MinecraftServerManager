@@ -1,13 +1,13 @@
 """模組索引管理器：提供增量索引以加速模組掃描。"""
 
+import ctypes
 import json
+import os
 import threading
 import time
-import ctypes
 from pathlib import Path
 from typing import Any
-import os
-from . import atomic_write_json, get_logger, compute_file_hash
+from . import atomic_write_json, compute_file_hash, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
@@ -123,7 +123,11 @@ class ModIndexManager:
                 logger.warning(f"無法保存索引檔案: {e}")
 
     def repair_index_entries(self) -> int:
-        """修復索引資料型別與欄位結構，回傳修復數量。"""
+        """修復索引資料型別與欄位結構。
+
+        Returns:
+            已修復的索引項目數量。
+        """
         repaired_count = 0
         with self._index_lock:
             sanitized: dict[str, dict[str, Any]] = {}
@@ -154,7 +158,11 @@ class ModIndexManager:
         return repaired_count
 
     def get_index_consistency_report(self) -> dict[str, Any]:
-        """回傳索引一致性檢查結果，供觀測與診斷使用。"""
+        """回傳索引一致性檢查結果，供觀測與診斷使用。
+
+        Returns:
+            索引一致性摘要資料。
+        """
         with self._index_lock:
             invalid_entries = 0
             missing_stats = 0
@@ -256,7 +264,15 @@ class ModIndexManager:
         return None
 
     def get_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
-        """獲取快取的指定演算法哈希值。"""
+        """獲取快取的指定演算法哈希值。
+
+        Args:
+            file_path: 檔案路徑。
+            algorithm: 哈希演算法名稱。
+
+        Returns:
+            快取中的雜湊值；不存在時回傳空字串。
+        """
         normalized_algorithm = (
             str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
         )
@@ -284,7 +300,13 @@ class ModIndexManager:
     def cache_provider_metadata(
         self, file_path: Path, provider_metadata: dict[str, Any], *, merge: bool = True
     ) -> None:
-        """快取 provider metadata，供後續更新與比對使用。"""
+        """快取 provider metadata，供後續更新與比對使用。
+
+        Args:
+            file_path: 檔案路徑。
+            provider_metadata: 要寫入的 provider metadata。
+            merge: 是否與既有快取合併。
+        """
         normalized_metadata = {
             str(key): value for key, value in dict(provider_metadata or {}).items() if value not in (None, "", [], {})
         }
@@ -300,7 +322,13 @@ class ModIndexManager:
             logger.warning(f"無法快取 provider metadata: {e}")
 
     def cache_file_hash(self, file_path: Path, algorithm: str, file_hash: str) -> None:
-        """快取指定演算法的檔案哈希值。"""
+        """快取指定演算法的檔案哈希值。
+
+        Args:
+            file_path: 檔案路徑。
+            algorithm: 哈希演算法名稱。
+            file_hash: 計算後的雜湊值。
+        """
         normalized_algorithm = (
             str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
         )
@@ -317,7 +345,15 @@ class ModIndexManager:
             logger.warning(f"無法快取檔案哈希: {e}")
 
     def ensure_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
-        """確保指定演算法的檔案哈希已寫入索引，並回傳該值。"""
+        """確保指定演算法的檔案哈希已寫入索引，並回傳該值。
+
+        Args:
+            file_path: 檔案路徑。
+            algorithm: 哈希演算法名稱。
+
+        Returns:
+            索引中的雜湊值；若尚未存在且無法計算，回傳空字串。
+        """
         normalized_algorithm = (
             str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
         )
@@ -350,7 +386,11 @@ class ModIndexManager:
             return len(files_to_remove)
 
     def get_statistics(self) -> dict[str, Any]:
-        """獲取索引統計信息"""
+        """獲取索引統計資訊。
+
+        Returns:
+            索引統計摘要。
+        """
         with self._index_lock:
             return {
                 "total_cached": len(self._index),

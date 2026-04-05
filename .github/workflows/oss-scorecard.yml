@@ -1,13 +1,10 @@
 name: "Google OSS 安全性打分"
 
 on:
-  push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+  workflow_run:
+    workflows: ["github-actions CI-Tests"]
+    types: [completed]
   workflow_dispatch:
-  merge_group:
-    types: [checks_requested]
   schedule:
     - cron: '0 0 * * 1'
 
@@ -17,6 +14,7 @@ permissions:
 jobs:
   analysis:
     name: Scorecard analyze
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master') }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -28,23 +26,24 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: "執行 Scorecard 分析"
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a
         with:
-          results_file: results.sarif
+          results_file: openossf_scorecard_report.sarif
           results_format: sarif
-          publish_results: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
+          publish_results: true
 
       - name: "上傳至 GitHub Security Tab"
         uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13
         with:
-          sarif_file: results.sarif
+          sarif_file: openossf_scorecard_report.sarif
           category: "OpenSSF Scorecard"
 
       - name: "上傳 Scorecard 結果檔案"
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: scorecard_results
-          path: results.sarif
+          name: openossf_scorecard_report
+          path: openossf_scorecard_report.sarif
           retention-days: 2

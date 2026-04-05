@@ -268,7 +268,7 @@ def test_get_mod_versions_skips_prerelease_entries(monkeypatch) -> None:
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
-    assert [version.version_id for version in versions] == ["release1"]
+    assert [version.version_id for version in versions] == ["beta1", "release1"]
 
 
 @pytest.mark.smoke

@@ -5,30 +5,29 @@
 import concurrent.futures
 import queue
 import threading
-import tkinter as tk
+import tkinter
+import tkinter.filedialog as filedialog
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog
 from typing import Any
 import customtkinter as ctk
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
-    get_shared_manager,
     CancellationToken,
     Colors,
-    FontManager,
     FontSize,
     JavaUtils,
-    ProgressDialog,
     Sizes,
+    Spacing,
     SystemUtils,
     UIUtils,
-    record_and_mark,
     get_logger,
+    get_shared_manager,
+    record_and_mark,
 )
-from . import CustomDropdown
+from . import CustomDropdown, FontManager, ProgressDialog, TaskUtils
 
 logger = get_logger().bind(component="CreateServerFrame")
 
@@ -38,7 +37,11 @@ class CreateServerFrame(ctk.CTkFrame):
 
     @staticmethod
     def get_system_memory_mb() -> int:
-        """獲取系統記憶體容量"""
+        """獲取系統記憶體容量。
+
+        Returns:
+            系統總記憶體容量（MB），失敗時回傳 0。
+        """
         try:
             return SystemUtils.get_total_memory_mb()
         except Exception as e:
@@ -87,21 +90,26 @@ class CreateServerFrame(ctk.CTkFrame):
             UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.winfo_toplevel())
 
     def create_java_path_field(self, parent, row) -> None:
-        """建立 Java 路徑欄位（可手動輸入/瀏覽）"""
+        """建立 Java 路徑欄位（可手動輸入/瀏覽）。
+
+        Args:
+            parent: 父容器。
+            row: 要放置的表單列號。
+        """
         ctk.CTkLabel(
             parent,
             text="Java 執行檔路徑 (可選):",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=row, column=0, sticky="w", pady=5)
-        self.java_path_var = tk.StringVar(value="")
+        ).grid(row=row, column=0, sticky="w", pady=Spacing.TINY)
+        self.java_path_var = tkinter.StringVar(value="")
         java_path_entry = ctk.CTkEntry(
             parent,
             textvariable=self.java_path_var,
             font=FontManager.get_font(size=FontSize.MEDIUM),
             width=Sizes.INPUT_WIDTH,
         )
-        java_path_entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
+        java_path_entry.grid(row=row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
 
         def browse_java():
             path = filedialog.askopenfilename(
@@ -111,7 +119,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.java_path_var.set(path)
 
         browse_btn = UIUtils.create_styled_button(parent, "瀏覽...", browse_java, "small")
-        browse_btn.grid(row=row, column=2, padx=(8, 0), pady=5)
+        browse_btn.grid(row=row, column=2, padx=(Spacing.SMALL, 0), pady=Spacing.TINY)
 
         def auto_detect():
             mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
@@ -124,7 +132,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 self.java_path_var.set(java_path_win)
 
         auto_btn = UIUtils.create_styled_button(parent, "自動偵測", auto_detect, "small")
-        auto_btn.grid(row=row, column=3, padx=(8, 0), pady=5)
+        auto_btn.grid(row=row, column=3, padx=(Spacing.SMALL, 0), pady=Spacing.TINY)
 
     def __init__(
         self,
@@ -147,7 +155,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self._create_server_error_job = None
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
         self.bg_tasks = get_shared_manager()
-        UIUtils.start_ui_queue_pump(self, self.ui_queue)
+        TaskUtils.start_ui_queue_pump(self, self.ui_queue)
         self.create_widgets()
         self.preload_version_data()
 
@@ -169,16 +177,16 @@ class CreateServerFrame(ctk.CTkFrame):
     def create_widgets(self) -> None:
         """建立介面元件"""
         main_container = ctk.CTkFrame(self, fg_color="transparent")
-        main_container.pack(fill="both", expand=True, padx=20, pady=15)
+        main_container.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
         title_label = ctk.CTkLabel(
             main_container,
             text="建立新伺服器",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
             text_color=Colors.TEXT_HEADING,
         )
-        title_label.pack(pady=(0, 15))
+        title_label.pack(pady=(0, Spacing.LARGE_MINUS))
         eula_frame = ctk.CTkFrame(main_container, fg_color=Colors.BG_ALERT)
-        eula_frame.pack(pady=(0, 12), fill="x")
+        eula_frame.pack(pady=(0, Spacing.MEDIUM), fill="x")
         eula_frame.grid_columnconfigure(1, weight=1)
         eula_icon = ctk.CTkLabel(
             eula_frame,
@@ -186,7 +194,7 @@ class CreateServerFrame(ctk.CTkFrame):
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             text_color=Colors.BUTTON_WARNING_HOVER,
         )
-        eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(8, 4), pady=6)
+        eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(Spacing.SMALL, Spacing.XS), pady=Spacing.TINY)
         eula_link = ctk.CTkLabel(
             eula_frame,
             text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
@@ -194,19 +202,23 @@ class CreateServerFrame(ctk.CTkFrame):
             text_color=Colors.TEXT_WARNING,
             cursor="hand2",
         )
-        eula_link.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=6)
+        eula_link.grid(row=0, column=1, sticky="ew", padx=(0, Spacing.SMALL), pady=Spacing.TINY)
         eula_link.bind("<Button-1>", lambda _e: UIUtils.open_external("https://aka.ms/MinecraftEULA"))
         content_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        content_container.pack(fill="x", expand=False, pady=(0, 8))
+        content_container.pack(fill="x", expand=False, pady=(0, Spacing.SMALL))
         self.create_form(content_container)
         self.create_buttons(main_container)
 
     def create_form(self, parent) -> None:
-        """建立表單"""
+        """建立表單。
+
+        Args:
+            parent: 父容器。
+        """
         form_frame = ctk.CTkFrame(parent)
-        form_frame.pack(fill="x", pady=(0, 15))
+        form_frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
         content_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        content_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         self.create_field(content_frame, 0, "伺服器名稱:", "我的伺服器", "server_name")
         self.create_java_path_field(content_frame, 1)
         ctk.CTkLabel(
@@ -214,8 +226,8 @@ class CreateServerFrame(ctk.CTkFrame):
             text="模組載入器:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=2, column=0, sticky="w", pady=5)
-        self.loader_type_var = tk.StringVar(value="Vanilla")
+        ).grid(row=2, column=0, sticky="w", pady=Spacing.TINY)
+        self.loader_type_var = tkinter.StringVar(value="Vanilla")
         self.loader_type_combo = CustomDropdown(
             content_frame,
             variable=self.loader_type_var,
@@ -225,7 +237,7 @@ class CreateServerFrame(ctk.CTkFrame):
             dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(15, 0), pady=5)
+        self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
         self.loader_type_var.trace_add("write", lambda *_args: self.update_server_config_ui())
         loader_version_row = 3
         ctk.CTkLabel(
@@ -233,10 +245,12 @@ class CreateServerFrame(ctk.CTkFrame):
             text="載入器版本:",
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=loader_version_row, column=0, sticky="w", pady=5)
+        ).grid(row=loader_version_row, column=0, sticky="w", pady=Spacing.TINY)
         loader_version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        loader_version_frame.grid(row=loader_version_row, column=1, sticky="ew", padx=(15, 0), pady=5)
-        self.loader_version_var = tk.StringVar(value="無")
+        loader_version_frame.grid(
+            row=loader_version_row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY
+        )
+        self.loader_version_var = tkinter.StringVar(value="無")
         self.loader_version_combo = CustomDropdown(
             loader_version_frame,
             variable=self.loader_version_var,
@@ -246,13 +260,13 @@ class CreateServerFrame(ctk.CTkFrame):
             dropdown_font_size=FontSize.MEDIUM,
             state="disabled",
         )
-        self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SMALL))
         loader_reload_btn = UIUtils.create_styled_button(
             loader_version_frame, text="⟳", command=self.reload_loader_versions, button_type="small"
         )
         loader_reload_btn.pack(side="left")
         version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        version_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=10)
+        version_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=Spacing.SMALL_PLUS)
         ctk.CTkLabel(
             version_frame,
             text="Minecraft 版本:",
@@ -261,7 +275,7 @@ class CreateServerFrame(ctk.CTkFrame):
         ).pack(anchor="w")
         mc_version_frame = ctk.CTkFrame(version_frame, fg_color="transparent")
         mc_version_frame.pack(fill="x")
-        self.mc_version_var = tk.StringVar()
+        self.mc_version_var = tkinter.StringVar()
         self.mc_version_combo = CustomDropdown(
             mc_version_frame,
             variable=self.mc_version_var,
@@ -272,13 +286,13 @@ class CreateServerFrame(ctk.CTkFrame):
             dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self.mc_version_combo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.mc_version_combo.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SMALL))
         mc_reload_btn = UIUtils.create_styled_button(
             mc_version_frame, text="⟳", command=self.reload_mc_versions, button_type="small"
         )
         mc_reload_btn.pack(side="left")
         memory_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        memory_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=10)
+        memory_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=Spacing.SMALL_PLUS)
         ctk.CTkLabel(
             memory_frame,
             text="記憶體設定 (MB):",
@@ -286,33 +300,33 @@ class CreateServerFrame(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY_CONTRAST,
         ).pack(anchor="w")
         memory_input_frame = ctk.CTkFrame(memory_frame, fg_color="transparent")
-        memory_input_frame.pack(fill="x", pady=(5, 0))
+        memory_input_frame.pack(fill="x", pady=(Spacing.TINY, 0))
         min_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, Spacing.TINY))
         ctk.CTkLabel(
             min_memory_frame,
             text="最小記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
-        self.min_memory_var = tk.StringVar(value="1024")
+        self.min_memory_var = tkinter.StringVar(value="1024")
         self.min_memory_entry = ctk.CTkEntry(
             min_memory_frame, textvariable=self.min_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
         )
-        self.min_memory_entry.pack(fill="x", pady=(2, 0))
+        self.min_memory_entry.pack(fill="x", pady=(Spacing.XS, 0))
         max_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        max_memory_frame.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        max_memory_frame.pack(side="left", fill="x", expand=True, padx=(Spacing.TINY, 0))
         ctk.CTkLabel(
             max_memory_frame,
             text="最大記憶體:",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             text_color=Colors.TEXT_MUTED,
         ).pack(anchor="w")
-        self.max_memory_var = tk.StringVar(value="2048")
+        self.max_memory_var = tkinter.StringVar(value="2048")
         self.max_memory_entry = ctk.CTkEntry(
             max_memory_frame, textvariable=self.max_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
         )
-        self.max_memory_entry.pack(fill="x", pady=(2, 0))
+        self.max_memory_entry.pack(fill="x", pady=(Spacing.XS, 0))
         self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
         self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
         memory_tip = ctk.CTkLabel(
@@ -323,7 +337,7 @@ class CreateServerFrame(ctk.CTkFrame):
             wraplength=Sizes.WRAP_LENGTH_WIDE,
             justify="left",
         )
-        memory_tip.pack(anchor="w", pady=(5, 0))
+        memory_tip.pack(anchor="w", pady=(Spacing.TINY, 0))
         self.memory_warning_label = ctk.CTkLabel(
             memory_frame,
             text="",
@@ -331,7 +345,7 @@ class CreateServerFrame(ctk.CTkFrame):
             text_color=Colors.TEXT_ERROR,
             wraplength=Sizes.WRAP_LENGTH_MEDIUM,
         )
-        self.memory_warning_label.pack(anchor="w", pady=(3, 0))
+        self.memory_warning_label.pack(anchor="w", pady=(Spacing.XS, 0))
         content_frame.columnconfigure(1, weight=1)
 
     def _update_combo_state(self, combo, var=None, message="載入中...", state="disabled") -> None:
@@ -344,7 +358,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
     def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:
         """執行背景任務並處理錯誤"""
-        UIUtils.run_in_daemon_thread(
+        TaskUtils.run_in_daemon_thread(
             task_func,
             ui_queue=getattr(self, "ui_queue", None),
             widget=self,
@@ -438,24 +452,39 @@ class CreateServerFrame(ctk.CTkFrame):
         )
 
     def create_field(self, parent, row, label_text, default_value, var_name) -> tuple:
-        """建立文字輸入欄位"""
+        """建立文字輸入欄位。
+
+        Args:
+            parent: 父容器。
+            row: 要放置的表單列號。
+            label_text: 欄位標籤文字。
+            default_value: 預設值。
+            var_name: 要建立的變數名稱前綴。
+
+        Returns:
+            `(StringVar, CTkEntry)` 元組。
+        """
         ctk.CTkLabel(
             parent,
             text=label_text,
             font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
             text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=row, column=0, sticky="w", pady=5)
-        var = tk.StringVar(value=default_value)
+        ).grid(row=row, column=0, sticky="w", pady=Spacing.TINY)
+        var = tkinter.StringVar(value=default_value)
         setattr(self, f"{var_name}_var", var)
         entry = ctk.CTkEntry(
             parent, textvariable=var, font=FontManager.get_font(size=FontSize.MEDIUM), width=Sizes.INPUT_WIDTH
         )
-        entry.grid(row=row, column=1, sticky="ew", padx=(15, 0), pady=5)
+        entry.grid(row=row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
         setattr(self, f"{var_name}_entry", entry)
         return (var, entry)
 
     def create_buttons(self, parent) -> None:
-        """建立按鈕"""
+        """建立按鈕。
+
+        Args:
+            parent: 父容器。
+        """
         button_container = ctk.CTkFrame(parent, fg_color="transparent")
         button_container.pack(fill="x", side="bottom")
         button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
@@ -468,7 +497,7 @@ class CreateServerFrame(ctk.CTkFrame):
             width=Sizes.BUTTON_WIDTH_PRIMARY,
             height=Sizes.BUTTON_HEIGHT_LARGE,
         )
-        self.create_button.pack(side="left", padx=(0, 15))
+        self.create_button.pack(side="left", padx=(0, Spacing.LARGE_MINUS))
         reset_button = UIUtils.create_styled_button(
             button_frame,
             text="重設表單",
@@ -506,7 +535,11 @@ class CreateServerFrame(ctk.CTkFrame):
             UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.winfo_toplevel())
 
     def update_versions(self, versions: list) -> None:
-        """更新版本列表，並預設選擇最新版本"""
+        """更新版本列表，並預設選擇最新版本。
+
+        Args:
+            versions: 可用版本清單。
+        """
         self.versions = versions
         self.release_versions = versions
         self.update_version_list()
@@ -557,7 +590,11 @@ class CreateServerFrame(ctk.CTkFrame):
         return None
 
     def update_server_config_ui(self, _event=None) -> None:
-        """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單"""
+        """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單。
+
+        Args:
+            _event: 事件物件，供 trace callback 使用。
+        """
         mc_version = self.mc_version_var.get()
         loader_type = self.loader_type_var.get()
         name = self.server_name_var.get()
@@ -594,7 +631,12 @@ class CreateServerFrame(ctk.CTkFrame):
         threading.Thread(target=self.load_loader_versions, args=(loader_type, mc_version), daemon=True).start()
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
-        """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）"""
+        """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）。
+
+        Args:
+            loader_type: 載入器類型。
+            mc_version: Minecraft 版本。
+        """
         try:
 
             def set_loading():
@@ -660,7 +702,11 @@ class CreateServerFrame(ctk.CTkFrame):
             self.ui_queue.put(handle_error)
 
     def validate_form(self) -> bool:
-        """驗證表單"""
+        """驗證表單。
+
+        Returns:
+            若表單內容通過驗證則回傳 True，否則回傳 False。
+        """
         server_name = self.server_name_var.get().strip()
         if not server_name:
             UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.winfo_toplevel())
@@ -743,10 +789,14 @@ class CreateServerFrame(ctk.CTkFrame):
             path="",
             eula_accepted=True,
         )
-        UIUtils.run_async(self.create_server_async, config)
+        TaskUtils.run_async(self.create_server_async, config)
 
     def create_server_async(self, config: ServerConfig) -> None:
-        """非同步建立伺服器"""
+        """非同步建立伺服器。
+
+        Args:
+            config: 伺服器建立設定。
+        """
         parent_window = self.winfo_toplevel()
         progress_dialog = None
         progress_ready = threading.Event()
@@ -829,7 +879,13 @@ class CreateServerFrame(ctk.CTkFrame):
             self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
     def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
-        """下載伺服器檔案"""
+        """下載伺服器檔案。
+
+        Args:
+            config: 伺服器建立設定。
+            progress_dialog: 進度對話框。
+            server_path: 伺服器資料夾路徑。
+        """
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
         parent_window = self.winfo_toplevel()

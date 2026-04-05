@@ -5,31 +5,33 @@
 import contextlib
 import queue
 import time
-import tkinter as tk
+import tkinter
+import tkinter.filedialog as filedialog
 import tkinter.font as tkfont
+import tkinter.ttk as ttk
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, ttk
 from typing import Any, Protocol
 import customtkinter as ctk
 from ..core import ServerConfig, ServerManager
 from ..utils import (
-    FontManager,
     FontSize,
     MemoryUtils,
     PathUtils,
+    ServerDetectionUtils,
     ServerOperations,
     Sizes,
+    Spacing,
     SubprocessUtils,
     UIUtils,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
     get_logger,
 )
-from . import ServerMonitorWindow, ServerPropertiesDialog
+from . import FontManager, ServerMonitorWindow, ServerPropertiesDialog, TaskUtils, TreeUtils
 
 logger = get_logger().bind(component="ManageServerFrame")
 
@@ -117,7 +119,7 @@ class ManageServerFrame(ctk.CTkFrame):
         self._server_insert_batch_divisor = 8
         self.ui_queue: queue.Queue = queue.Queue()
         self.create_widgets()
-        UIUtils.start_ui_queue_pump(self, self.ui_queue)
+        TaskUtils.start_ui_queue_pump(self, self.ui_queue)
         self._post_action_immediate_job = None
         self._post_action_delayed_job = None
         self._delayed_refresh_job = None
@@ -164,64 +166,72 @@ class ManageServerFrame(ctk.CTkFrame):
             return
         self._widgets_created = True
         main_container = ctk.CTkFrame(self, fg_color="transparent")
-        main_container.pack(fill="both", expand=True, padx=20, pady=20)
+        main_container.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
         title_label = ctk.CTkLabel(
             main_container, text="⚙️ 管理伺服器", font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")
         )
-        title_label.pack(pady=(0, 20))
+        title_label.pack(pady=(0, Spacing.XL))
         self.create_controls(main_container)
         self.create_server_list(main_container)
         self.create_actions(main_container)
 
     def create_controls(self, parent) -> None:
-        """建立控制區"""
+        """建立控制區。
+
+        Args:
+            parent: 父容器。
+        """
         control_frame = ctk.CTkFrame(parent)
-        control_frame.pack(fill="x", pady=(0, 20))
+        control_frame.pack(fill="x", pady=(0, Spacing.XL))
         control_title = ctk.CTkLabel(
             control_frame, text="偵測設定", font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")
         )
-        control_title.pack(anchor="w", pady=(15, 10), padx=(15, 0))
+        control_title.pack(anchor="w", pady=(Spacing.LARGE_MINUS, Spacing.SMALL_PLUS), padx=(Spacing.LARGE_MINUS, 0))
         path_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
-        path_frame.pack(fill="x", padx=15, pady=(0, 10))
+        path_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=(0, Spacing.SMALL_PLUS))
         ctk.CTkLabel(path_frame, text="偵測路徑:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
-        self.detect_path_var = tk.StringVar(value=str(self.server_manager.servers_root))
+        self.detect_path_var = tkinter.StringVar(value=str(self.server_manager.servers_root))
         self.detect_path_entry = ctk.CTkEntry(
             path_frame, textvariable=self.detect_path_var, font=FontManager.get_font(size=FontSize.SMALL)
         )
-        self.detect_path_entry.pack(side="left", fill="x", expand=True, padx=(10, 0))
+        self.detect_path_entry.pack(side="left", fill="x", expand=True, padx=(Spacing.SMALL_PLUS, 0))
         browse_button = UIUtils.create_styled_button(
             path_frame, text="瀏覽", command=self.browse_path, button_type="small"
         )
-        browse_button.pack(side="left", padx=(5, 0))
+        browse_button.pack(side="left", padx=(Spacing.TINY, 0))
         button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
-        button_frame.pack(pady=(0, 15))
+        button_frame.pack(pady=(0, Spacing.LARGE_MINUS))
         detect_button = UIUtils.create_styled_button(
             button_frame,
             text="🔍 偵測現有伺服器",
             command=lambda: self.detect_servers(show_message=True),
             button_type="secondary",
         )
-        detect_button.pack(side="left", padx=5)
+        detect_button.pack(side="left", padx=Spacing.TINY)
         add_button = UIUtils.create_styled_button(
             button_frame, text="➕ 手動新增", command=self.add_server, button_type="secondary"
         )
-        add_button.pack(side="left", padx=5)
+        add_button.pack(side="left", padx=Spacing.TINY)
         refresh_button = UIUtils.create_styled_button(
             button_frame, text="🔄 重新整理", command=lambda: self.refresh_servers(), button_type="secondary"
         )
-        refresh_button.pack(side="left", padx=5)
+        refresh_button.pack(side="left", padx=Spacing.TINY)
 
     def create_server_list(self, parent) -> None:
-        """建立伺服器列表"""
+        """建立伺服器列表。
+
+        Args:
+            parent: 父容器。
+        """
         list_frame = ttk.LabelFrame(parent, text="伺服器列表", padding=10)
-        list_frame.pack(fill="both", expand=True, pady=(0, 20))
+        list_frame.pack(fill="both", expand=True, pady=(0, Spacing.XL))
         style = ttk.Style()
         style.configure(
             "ServerList.TLabelframe.Label", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold")
         )
         list_frame.configure(style="ServerList.TLabelframe")
         columns = ("名稱", "版本", "載入器", "狀態", "備份狀態", "路徑")
-        tree_style = UIUtils.configure_treeview_list_style(
+        tree_style = TreeUtils.configure_treeview_list_style(
             "ServerList",
             body_font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
             heading_font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
@@ -237,7 +247,7 @@ class ManageServerFrame(ctk.CTkFrame):
         self.server_tree.heading("路徑", text="路徑")
         self._apply_server_tree_columns_layout()
         self.server_tree.bind("<<TreeviewSelect>>", self.on_server_select)
-        UIUtils.bind_treeview_header_auto_fit(
+        TreeUtils.bind_treeview_header_auto_fit(
             self.server_tree,
             on_row_double_click=self.on_server_double_click,
             heading_font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL_PLUS, "bold"),
@@ -246,9 +256,14 @@ class ManageServerFrame(ctk.CTkFrame):
         )
         self.server_tree.bind("<Button-3>", self.show_server_context_menu)
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.server_tree.yview)
-        self.server_tree.configure(yscrollcommand=scrollbar.set)
-        self.server_tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        h_scrollbar = ttk.Scrollbar(list_frame, orient="horizontal", command=self.server_tree.xview)
+        self.server_tree.configure(yscrollcommand=scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        self.server_tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
 
     def _server_tree_display_columns(self) -> tuple[str, ...]:
         return ("名稱", "版本", "載入器", "狀態", "備份狀態", "路徑")
@@ -265,13 +280,12 @@ class ManageServerFrame(ctk.CTkFrame):
         status_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_STATUS)
         backup_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_BACKUP)
         path_width = FontManager.get_dpi_scaled_size(Sizes.SERVER_TREE_COL_PATH)
-        path_min_width = max(FontManager.get_dpi_scaled_size(180), path_width // 2)
         tree.column("名稱", width=name_width, minwidth=name_width, stretch=False, anchor="w")
         tree.column("版本", width=version_width, minwidth=version_width, stretch=False, anchor="w")
         tree.column("載入器", width=loader_width, minwidth=loader_width, stretch=False, anchor="w")
         tree.column("狀態", width=status_width, minwidth=status_width, stretch=False, anchor="w")
         tree.column("備份狀態", width=backup_width, minwidth=backup_width, stretch=False, anchor="w")
-        tree.column("路徑", width=path_width, minwidth=path_min_width, stretch=True, anchor="w")
+        tree.column("路徑", width=path_width, minwidth=path_width, stretch=True, anchor="w")
 
     def _get_server_tree_column_from_x(self, x: int) -> str | None:
         """依滑鼠 x 座標回傳對應欄位名稱。"""
@@ -340,13 +354,17 @@ class ManageServerFrame(ctk.CTkFrame):
         tree.column(column_id, width=computed_width, minwidth=safety_min_width, stretch=column_id == "路徑", anchor="w")
 
     def show_server_context_menu(self, event) -> None:
-        """顯示右鍵選單"""
+        """顯示右鍵選單。
+
+        Args:
+            event: 滑鼠右鍵事件。
+        """
         if not self.server_tree:
             return
         selection = self.server_tree.selection()
         if not selection:
             return
-        menu = tk.Menu(self, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        menu = tkinter.Menu(self, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="🔄 重新檢測伺服器", command=self.recheck_selected_server)
         menu.add_separator()
         menu.add_command(label="📁 重新設定備份路徑", command=self.reset_backup_path)
@@ -385,7 +403,6 @@ class ManageServerFrame(ctk.CTkFrame):
         if not config:
             return
         server_name = config.name
-        from ..utils import ServerDetectionUtils
 
         ServerDetectionUtils.detect_server_type(Path(config.path), config)
         self.server_manager.write_servers_config()
@@ -460,7 +477,14 @@ class ManageServerFrame(ctk.CTkFrame):
             UIUtils.show_error("錯誤", f"無法開啟備份資料夾: {e}", self.winfo_toplevel())
 
     def get_backup_status(self, server_name: str) -> str:
-        """獲取伺服器的備份狀態文字"""
+        """獲取伺服器的備份狀態文字。
+
+        Args:
+            server_name: 伺服器名稱。
+
+        Returns:
+            備份狀態字串。
+        """
         if not server_name or server_name not in self.server_manager.servers:
             return "❓ 無法檢查"
         config = self.server_manager.servers[server_name]
@@ -492,21 +516,25 @@ class ManageServerFrame(ctk.CTkFrame):
             return "❓ 檢查失敗"
 
     def create_actions(self, parent) -> None:
-        """建立操作區"""
+        """建立操作區。
+
+        Args:
+            parent: 父容器。
+        """
         action_frame = ctk.CTkFrame(parent)
         action_frame.pack(fill="x")
         action_title = ctk.CTkLabel(
             action_frame, text="操作", font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")
         )
-        action_title.pack(anchor="w", pady=(5, 0), padx=(15, 0))
+        action_title.pack(anchor="w", pady=(Spacing.TINY, 0), padx=(Spacing.LARGE_MINUS, 0))
         info_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
-        info_frame.pack(fill="x", padx=15, pady=(5, 5))
+        info_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=(Spacing.TINY, Spacing.TINY))
         self.info_label = ctk.CTkLabel(
             info_frame, text="選擇一個伺服器以查看詳細資訊", font=FontManager.get_font(size=FontSize.MEDIUM)
         )
         self.info_label.pack(anchor="w")
         button_frame = ctk.CTkFrame(action_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=15, pady=(0, 15))
+        button_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=(0, Spacing.LARGE_MINUS))
         buttons = [
             ("🚀", "啟動", self.start_server, "start_stop"),
             ("📊", "監控", self.monitor_server, "monitor"),
@@ -521,7 +549,7 @@ class ManageServerFrame(ctk.CTkFrame):
             btn = UIUtils.create_styled_button(
                 button_frame, text=btn_text, command=command, button_type="secondary", state="disabled"
             )
-            btn.pack(side="left", padx=(0, 5))
+            btn.pack(side="left", padx=(0, Spacing.TINY))
             key = fixed_key if fixed_key else f"{emoji} {text}"
             self.action_buttons[key] = btn
 
@@ -559,7 +587,11 @@ class ManageServerFrame(ctk.CTkFrame):
             self.refresh_servers()
 
     def detect_servers(self, show_message: bool = True) -> None:
-        """偵測現有伺服器，無論新建或覆蓋都會呼叫 detect_server_type"""
+        """偵測現有伺服器，無論新建或覆蓋都會呼叫 `detect_server_type`。
+
+        Args:
+            show_message: 是否在完成後顯示提示訊息。
+        """
         path = self.detect_path_var.get()
         if not path or not Path(path).exists():
             if show_message:
@@ -575,12 +607,11 @@ class ManageServerFrame(ctk.CTkFrame):
                 error_msg = str(error)
                 self.ui_queue.put(lambda: UIUtils.show_error("錯誤", f"偵測失敗: {error_msg}", self.winfo_toplevel()))
 
-        UIUtils.run_async(task)
+        TaskUtils.run_async(task)
 
     def _detect_servers_task(self, path):
         count = 0
         path_obj = Path(path)
-        from ..utils import ServerDetectionUtils
 
         for item_path_obj in path_obj.iterdir():
             if item_path_obj.is_dir():
@@ -642,7 +673,6 @@ class ManageServerFrame(ctk.CTkFrame):
             return "⚠️ 需要接受 EULA"
         if server_jar_exists:
             return "❌ 缺少 EULA"
-        from ..utils import ServerDetectionUtils
 
         missing = ServerDetectionUtils.get_missing_server_files(Path(config.path))
         if missing:
@@ -657,8 +687,6 @@ class ManageServerFrame(ctk.CTkFrame):
             loader_type: 載入器類型 (vanilla/forge/fabric)，用於正確判斷啟動檔案
         """
         try:
-            from ..utils import ServerDetectionUtils
-
             server_path_obj = Path(server_path)
             result = ServerDetectionUtils.find_main_jar(server_path_obj, loader_type or "vanilla")
             if result.startswith("@"):
@@ -914,7 +942,7 @@ class ManageServerFrame(ctk.CTkFrame):
         self._server_refresh_job = None
         self._server_rows_snapshot = rows_snapshot
         if self.server_tree and self.server_tree.winfo_exists():
-            UIUtils.refresh_treeview_alternating_rows(self.server_tree)
+            TreeUtils.refresh_treeview_alternating_rows(self.server_tree)
         self._restore_server_selection(previous_selection)
         self.update_selection()
         self._set_server_tree_render_lock(False)
@@ -979,7 +1007,6 @@ class ManageServerFrame(ctk.CTkFrame):
             )
             return
         batch_size = self._get_server_insert_batch_size(len(pending_insert))
-        from ..utils import make_tree_insert_batch
 
         def _update_recycled(item_id: str, entry: tuple) -> None:
             tree.item(item_id, values=entry[1])
@@ -990,7 +1017,7 @@ class ManageServerFrame(ctk.CTkFrame):
                 refresh_token=refresh_token, previous_selection=previous_selection, rows_snapshot=rows_snapshot
             )
 
-        insert_batch = make_tree_insert_batch(
+        insert_batch = TreeUtils.make_tree_insert_batch(
             tree=tree,
             pending_insert=pending_insert,
             batch_size=batch_size,
@@ -1025,7 +1052,11 @@ class ManageServerFrame(ctk.CTkFrame):
         )
 
     def refresh_servers(self, reload_config: bool = True) -> None:
-        """重新整理伺服器列表：只更新 UI，不自動偵測。"""
+        """重新整理伺服器列表：只更新 UI，不自動偵測。
+
+        Args:
+            reload_config: 是否重新載入伺服器設定。
+        """
 
         def task():
             try:
@@ -1036,7 +1067,7 @@ class ManageServerFrame(ctk.CTkFrame):
                     f"重新整理伺服器列表失敗: {e}\n{traceback.format_exc()}", "ManageServerFrame"
                 )
 
-        UIUtils.run_async(task)
+        TaskUtils.run_async(task)
 
     def _refresh_servers_task(self, reload_config: bool = True) -> ServerRefreshPayload:
         """後台任務：載入配置並獲取伺服器狀態"""
@@ -1092,7 +1123,11 @@ class ManageServerFrame(ctk.CTkFrame):
                 self._set_server_tree_render_lock(False)
 
     def on_server_select(self, _event) -> None:
-        """伺服器選擇事件"""
+        """伺服器選擇事件。
+
+        Args:
+            _event: 事件物件。
+        """
         if not self.server_tree:
             return
         selection = self.server_tree.selection()
@@ -1105,7 +1140,14 @@ class ManageServerFrame(ctk.CTkFrame):
         self.update_selection()
 
     def on_server_tree_double_click(self, event) -> str | None:
-        """Treeview 雙擊事件：欄位分隔線自動調寬，列雙擊開啟設定。"""
+        """Treeview 雙擊事件：欄位分隔線自動調寬，列雙擊開啟設定。
+
+        Args:
+            event: 滑鼠事件。
+
+        Returns:
+            若攔截事件則回傳 `break`，否則回傳 None。
+        """
         tree = self.server_tree
         if not tree:
             return None
@@ -1125,7 +1167,11 @@ class ManageServerFrame(ctk.CTkFrame):
         return None
 
     def on_server_double_click(self, event) -> None:
-        """伺服器雙擊事件"""
+        """伺服器雙擊事件。
+
+        Args:
+            event: 滑鼠事件。
+        """
         if self.server_tree and self.server_tree.identify_row(event.y) and self.selected_server:
             self.configure_server()
 
@@ -1215,7 +1261,20 @@ class ManageServerFrame(ctk.CTkFrame):
         """監控伺服器"""
         if not self.selected_server:
             return
+
+        if not hasattr(self, "_monitor_windows"):
+            self._monitor_windows: dict[str, ServerMonitorWindow] = {}
+
+        # 關閉或移除無效的視窗參照
+        if self.selected_server in self._monitor_windows:
+            old_win = self._monitor_windows[self.selected_server]
+            if old_win and hasattr(old_win, "window") and old_win.window and old_win.window.winfo_exists():
+                old_win.window.lift()
+                old_win.window.focus_set()
+                return
+
         monitor_window = ServerMonitorWindow(self.winfo_toplevel(), self.server_manager, self.selected_server)
+        self._monitor_windows[self.selected_server] = monitor_window
         monitor_window.show()
 
     def configure_server(self) -> None:

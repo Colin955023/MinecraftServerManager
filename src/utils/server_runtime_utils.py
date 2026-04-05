@@ -16,7 +16,15 @@ class MemoryUtils:
 
     @staticmethod
     def parse_memory_setting(text: str, setting_type: str = "Xmx") -> int | None:
-        """解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數。"""
+        """解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數。
+
+        Args:
+            text: 參數文字。
+            setting_type: 設定類型，通常為 Xmx 或 Xms。
+
+        Returns:
+            以 MB 表示的記憶體大小；解析失敗時回傳 None。
+        """
         if not text or not isinstance(text, str):
             return None
         if not setting_type or setting_type not in ["Xmx", "Xms"]:
@@ -36,7 +44,15 @@ class MemoryUtils:
 
     @staticmethod
     def format_memory_mb(memory_mb: int, compact: bool = True) -> str:
-        """格式化記憶體大小（MB），自動選擇單位顯示。"""
+        """格式化記憶體大小（MB），自動選擇單位顯示。
+
+        Args:
+            memory_mb: 以 MB 表示的記憶體數值。
+            compact: 是否使用簡寫格式。
+
+        Returns:
+            格式化後的字串。
+        """
         if compact:
             if memory_mb >= 1024:
                 return f"{memory_mb // 1024}G" if memory_mb % 1024 == 0 else f"{memory_mb / 1024:.1f}G"
@@ -56,7 +72,15 @@ class ServerOperations:
 
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
-        """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）。"""
+        """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）。
+
+        Args:
+            server_manager: 伺服器管理器實例。
+            server_name: 目標伺服器名稱。
+
+        Returns:
+            成功停止時回傳 True。
+        """
         try:
             command_success = server_manager.send_command(server_name, "stop")
             return command_success or server_manager.stop_server(server_name)
@@ -70,7 +94,15 @@ class ServerCommands:
 
     @staticmethod
     def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
-        """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。"""
+        """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。
+
+        Args:
+            server_config: 伺服器設定物件。
+            return_list: 是否回傳命令列清單。
+
+        Returns:
+            Java 啟動命令字串或命令列清單。
+        """
         from . import ServerDetectionUtils
 
         server_path = Path(server_config.path)

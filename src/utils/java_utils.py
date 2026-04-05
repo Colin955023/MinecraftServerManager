@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-import contextlib
 import concurrent.futures
+import contextlib
 import os
 import re
 import threading
@@ -18,6 +18,8 @@ logger = get_logger().bind(component="JavaUtils")
 
 
 class JavaUtils:
+    """提供 Java 偵測、快取與安裝流程的工具集合。"""
+
     COMMON_JAVA_PATHS: ClassVar[list[str]] = [
         "C:\\\\Program Files\\\\Java",
         "C:\\\\Program Files (x86)\\\\Java",
@@ -30,7 +32,14 @@ class JavaUtils:
 
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
-        """取得指定 javaw.exe 的主要版本號"""
+        """取得指定 `javaw.exe` 的主要版本號。
+
+        Args:
+            java_path: `javaw.exe` 的完整路徑。
+
+        Returns:
+            Java major 版本，找不到或解析失敗時回傳 None。
+        """
         try:
             res = SubprocessUtils.run_checked(
                 [java_path, "-version"],
@@ -164,7 +173,11 @@ class JavaUtils:
 
     @staticmethod
     def refresh_java_candidates_cache() -> list[tuple[str, int]]:
-        """重新掃描本機 Java 並更新 JSON 快取。"""
+        """重新掃描本機 Java 並更新 JSON 快取。
+
+        Returns:
+            最新掃描到的 Java 候選清單。
+        """
         final_results = JavaUtils._scan_and_cache_local_java_candidates()
         with JavaUtils._java_cache_lock:
             JavaUtils._cached_java_candidates = list(final_results)
@@ -184,7 +197,14 @@ class JavaUtils:
 
     @staticmethod
     def get_required_java_major(mc_version: str) -> int:
-        """根據 mc_version 決定所需 Java major 版本"""
+        """根據 Minecraft 版本決定所需 Java major 版本。
+
+        Args:
+            mc_version: Minecraft 版本字串。
+
+        Returns:
+            對應的 Java major 版本。
+        """
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
         cache_path = RuntimePaths.get_cache_dir() / "mc_versions_cache.json"
@@ -214,7 +234,11 @@ class JavaUtils:
 
     @staticmethod
     def get_all_local_java_candidates() -> list:
-        """返回所有可用的 javaw.exe 路徑及其主要版本號列表"""
+        """取得所有可用的 `javaw.exe` 路徑及其主要版本號列表。
+
+        Returns:
+            `javaw.exe` 路徑與 major 版本的配對清單。
+        """
         with JavaUtils._java_cache_lock:
             if JavaUtils._cached_java_candidates:
                 return list(JavaUtils._cached_java_candidates)
@@ -237,7 +261,16 @@ class JavaUtils:
 
     @staticmethod
     def get_best_java_path(mc_version: str, required_major: int | None = None, ask_download: bool = True) -> str | None:
-        """為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑，找不到時詢問自動下載"""
+        """為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑。
+
+        Args:
+            mc_version: Minecraft 版本字串。
+            required_major: 指定的 Java major 版本；未提供時會自動推導。
+            ask_download: 找不到符合版本時是否詢問自動安裝。
+
+        Returns:
+            找到時回傳 `javaw.exe` 路徑，否則回傳 None。
+        """
         required_major = required_major if required_major else JavaUtils.get_required_java_major(mc_version)
         candidates = JavaUtils.get_all_local_java_candidates()
         for path, major in candidates:
@@ -247,7 +280,11 @@ class JavaUtils:
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
             res = UIUtils.ask_yes_no_cancel(
                 "Java 未找到",
-                f"未找到合適的 Java {required_major}，是否自動下載安裝？\n\n選擇 [是] 會自動下載安裝 {vendor} ，選擇 [否] 請手動下載並指定 Java 路徑。",
+                (
+                    f"未找到合適的 Java {required_major}。是否由程式自動安裝 {vendor}？\n\n"
+                    "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
+                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑。"
+                ),
                 show_cancel=False,
                 topmost=True,
             )

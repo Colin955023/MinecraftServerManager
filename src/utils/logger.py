@@ -11,11 +11,22 @@ from . import RuntimePaths
 
 
 class LoguruShim:
+    """以標準 logging 模擬常用的 loguru 介面。"""
+
     def __init__(self, logger_impl, extra=None):
         self.logger = logger_impl
         self.extra = extra or {"component": "Global"}
 
     def bind(self, **kwargs):
+        """回傳綁定額外上下文的 logger 包裝。
+
+        Args:
+            **kwargs: 要合併的額外上下文。
+
+        Returns:
+            綁定後的 LoguruShim 實例。
+        """
+
         new_extra = self.extra.copy()
         new_extra.update(kwargs)
         return LoguruShim(self.logger, new_extra)
@@ -51,17 +62,21 @@ class LoguruShim:
     critical = partialmethod(_log, logging.CRITICAL)
 
     def exception(self, msg, *args, **kwargs):
+        """以 error 等級記錄例外並自動帶入 exc_info。
+
+        Args:
+            msg: 日誌訊息。
+            *args: 訊息格式化參數。
+            **kwargs: 額外關鍵字參數。
+        """
+
         kwargs["exc_info"] = True
         self._log(logging.ERROR, msg, *args, **kwargs)
 
-    def add(self, *args, **kwargs):
-        pass
-
-    def remove(self, *args, **kwargs):
-        pass
-
 
 class LoggerConfig:
+    """初始化並管理專案共用的標準 logging 設定。"""
+
     _initialized = False
     _CONSOLE_HANDLER_NAME = "msm_console"
     _FILE_HANDLER_NAME = "msm_file"
@@ -71,7 +86,9 @@ class LoggerConfig:
         return any(getattr(handler, "name", "") == handler_name for handler in root.handlers)
 
     @staticmethod
-    def initialize():
+    def initialize() -> None:
+        """建立 root logger 的 console 與檔案 handler。"""
+
         if LoggerConfig._initialized:
             return
         root = logging.getLogger()
@@ -104,7 +121,9 @@ class LoggerConfig:
         LoggerConfig._initialized = True
 
     @staticmethod
-    def get_logger():
+    def get_logger() -> LoguruShim:
+        """取得包裝後的專案 logger。"""
+
         LoggerConfig.initialize()
         return LoguruShim(logging.getLogger("MSM"))
 

@@ -7,11 +7,12 @@
 | 語言 | Python 3.10+ |
 | GUI | CustomTkinter + Tkinter |
 | 打包 | Nuitka（可執行檔）、Inno Setup（安裝精靈） |
-| 網路 | requests（集中 timeout / retry policy） |
-| 系統監控 | psutil |
+| 網路 | requests + urllib3 Retry（集中 timeout / retry policy） |
+| 版本解析 | packaging |
 | XML 解析 | defusedxml（防止 XXE 攻擊） |
+| Release Notes 解析 | markdown |
 | 測試 | pytest（smoke、integration） |
-| 靜態檢查 | ruff、mypy |
+| 靜態檢查 | ruff、mypy、bandit |
 
 ---
 
@@ -19,12 +20,13 @@
 
 ```
 src/main.py
- └── ui/main_window.py        主視窗、頁面組裝、背景工作排程
-	 ├── core/server_manager  伺服器生命週期（建立／啟動／停止／備份）
-	 ├── core/mod_manager     模組掃描、安裝、更新規劃
-	 ├── core/version_manager Minecraft 版本查詢
-	 ├── core/loader_manager  Fabric／Forge／NeoForge 版本快取
-	 └── ui/mod_search_service Modrinth API 整合（搜尋、相容性分析、依賴規劃）
+ └── ui/main_window.py            主視窗、頁面組裝、背景工作排程
+     ├── core/server_manager.py   伺服器生命週期（建立／啟動／停止／備份）
+     ├── core/mod_manager.py      模組掃描、安裝、更新執行
+     ├── core/version_manager.py  Minecraft 版本查詢
+     ├── core/loader_manager.py   Fabric／Forge 版本查詢與快取
+     ├── ui/mod_search_service.py Modrinth 搜尋、相容性分析、依賴規劃
+     └── utils/update_checker.py  更新檢查、下載與套用流程
 ```
 
 ---
@@ -38,7 +40,7 @@ src/main.py
 | `server_manager.py` | 伺服器 CRUD、啟動／停止、備份 |
 | `mod_manager.py` | 本地模組掃描、安裝、更新執行 |
 | `version_manager.py` | Minecraft 版本列表查詢 |
-| `loader_manager.py` | Fabric／Forge／NeoForge 版本查詢與 TTL 快取 |
+| `loader_manager.py` | Fabric／Forge 版本查詢與 TTL 快取 |
 
 ### `src/ui/`
 
@@ -59,8 +61,9 @@ src/main.py
 | `http_utils.py` | requests session，集中 timeout／retry |
 | `window_manager.py` | DPI 感知、視窗定位、狀態持久化 |
 | `logger.py` | 集中日誌初始化 |
-| `java_utils.py` / `java_downloader.py` | Java 自動偵測與下載 |
+| `java_utils.py` / `java_downloader.py` | Java 自動偵測；必要時在背景透過 winget 安裝官方 JDK / JRE 並自動同意授權 |
 | `path_utils.py` / `runtime_paths.py` | 路徑解析（安裝版 vs. 可攜版） |
+| `update_checker.py` / `update_parsing.py` | GitHub Releases 更新檢查、資產選擇與驗證 |
 
 ---
 
@@ -85,16 +88,18 @@ src/main.py
 - **列表差異更新**：Treeview 只更新變動列，不整批重繪。
 - **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
 
-## 6. Modrinth Loader 相容邏輯（Prism 風格）
+## 6. Modrinth Loader 相容策略（Prism 風格）
 
-搜尋、版本過濾、hash 批次更新與相容性分析均採用與 Prism Launcher 相同的 loader 擴展策略。
+搜尋、版本過濾、hash 批次更新與相容性分析會採用 Prism Launcher 風格的 loader 擴展策略。
+
+這些邏輯僅用於 **Modrinth 搜尋、過濾與更新規劃**，不代表建立伺服器 UI 額外支援 Quilt 或 NeoForge 選項；建立流程目前仍以 Vanilla／Fabric／Forge 為主。
 
 ### Loader Alias 擴展（`_expand_target_loader_aliases`）
 
 | 伺服器 Loader | 額外帶入的 filter | 說明 |
 |---|---|---|
-| Quilt | `fabric` | Modrinth 上絕大多數 Quilt 相容模組只有 `fabric` 標籤 |
-| NeoForge 1.20.1 | `forge` | 該版本是 Forge 的直接 fork，binary 完全相容；1.20.2+ 不擴展 |
+| Quilt | `fabric` | Modrinth 上許多 Quilt 相容模組只標記 `fabric`，因此會一併納入候選 |
+| NeoForge 1.20.1 | `forge` | 僅在 1.20.1 的搜尋與更新規劃中額外納入 Forge 候選；1.20.2+ 不擴展 |
 
 ### Dependency Project ID Override（`MODRINTH_LOADER_DEPENDENCY_OVERRIDES`，僅 Fabric loader）
 
@@ -109,10 +114,10 @@ NeoForge / Forge loader 不套用此重定向。
 
 ## 7. 資料與設定路徑
 
-| 模式 | 路徑 |
-|------|------|
-| 安裝版 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\` |
-| 可攜版 | 執行檔同層 `.config\`、`.log\` |
+| 模式 | 設定 | 日誌 | 快取 |
+|------|------|------|------|
+| 安裝版 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
+| 可攜版 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
 
 設定由 `settings_manager`（singleton）讀寫並持久化。
 
@@ -125,11 +130,14 @@ uv sync
 # 啟動程式
 uv run python -m src.main
 
-# 快速 smoke test
+# 快速 test
 uv run quick_test.py
 
 # 完整格式／型別／測試門禁
 scripts/format_lint_check.bat
+
+# 產生綜合報告
+uv run report\comprehensive_report.py
 ```
 
 ## 9. 建議閱讀順序

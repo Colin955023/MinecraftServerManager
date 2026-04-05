@@ -18,7 +18,15 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_loader_type(server_path: Path, jar_names: list[str]) -> str:
-        """偵測載入器類型"""
+        """偵測載入器類型。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            jar_names: 伺服器目錄內的 JAR 檔名清單。
+
+        Returns:
+            偵測到的載入器類型。
+        """
         for fabric_jar in FABRIC_JAR_NAMES:
             if (server_path / fabric_jar).exists():
                 return "fabric"
@@ -34,7 +42,16 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
-        """尋找主要 JAR 檔案，根據載入器類型和伺服器配置進行優先級檢測"""
+        """尋找主要 JAR 檔案，根據載入器類型和伺服器配置進行優先順序檢測。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            loader_type: 載入器類型。
+            server_config: 伺服器設定物件。
+
+        Returns:
+            主要 JAR 檔或啟動參照字串。
+        """
         loader_type = (loader_type or "").lower()
         if loader_type == "forge":
             args_file = ServerDetectionUtils.find_forge_args_file(server_path, server_config)
@@ -61,7 +78,14 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
-        """尋找伺服器啟動腳本"""
+        """尋找伺服器啟動腳本。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+
+        Returns:
+            找到時回傳啟動腳本 Path，否則回傳 None。
+        """
         script_candidates = ["start_server.bat", "run.bat", "start.bat", "server.bat"]
         for script_name in script_candidates:
             candidate_path = server_path / script_name
@@ -88,7 +112,14 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_eula_acceptance(server_path: Path) -> bool:
-        """檢測 eula.txt 檔案中是否已設定 eula=true"""
+        """檢測 `eula.txt` 檔案中是否已設定 `eula=true`。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+
+        Returns:
+            若已接受 EULA 則回傳 True，否則回傳 False。
+        """
         eula_file = server_path / "eula.txt"
         if not eula_file.exists():
             return False
@@ -158,7 +189,12 @@ class ServerDetectionUtils:
 
     @staticmethod
     def update_forge_user_jvm_args(server_path: Path, config: ServerConfig) -> None:
-        """更新新版 Forge 的 user_jvm_args.txt 檔案，設定記憶體參數"""
+        """更新新版 Forge 的 `user_jvm_args.txt` 檔案，設定記憶體參數。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            config: 伺服器設定物件。
+        """
         user_jvm_args_path = server_path / "user_jvm_args.txt"
         lines = []
         if config.memory_min_mb:
@@ -173,7 +209,12 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:
-        """檢測記憶體大小 - 簡化版本"""
+        """從多個來源檢測記憶體設定。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            config: 伺服器設定物件。
+        """
         memory_sources = [
             [("user_jvm_args.txt", False), ("jvm.args", False)],
             [("start_server.bat", True), ("start.bat", True)],
@@ -215,7 +256,13 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_server_type(server_path: Path, config: "ServerConfig", print_result: bool = True) -> None:
-        """檢測伺服器類型和版本 - 統一的偵測邏輯"""
+        """檢測伺服器類型和版本。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            config: 伺服器設定物件。
+            print_result: 是否輸出偵測結果日誌。
+        """
         try:
             jar_files = list(server_path.glob("*.jar"))
             jar_names = [f.name for f in jar_files]
@@ -267,7 +314,14 @@ class ServerDetectionUtils:
 
     @staticmethod
     def is_valid_server_folder(folder_path: Path) -> bool:
-        """檢查是否為有效的 Minecraft 伺服器資料夾"""
+        """檢查是否為有效的 Minecraft 伺服器資料夾。
+
+        Args:
+            folder_path: 待檢查的資料夾路徑。
+
+        Returns:
+            若為有效的伺服器資料夾則回傳 True，否則回傳 False。
+        """
         if not folder_path.is_dir():
             return False
         server_jars = ["server.jar", "minecraft_server.jar", "fabric-server-launch.jar", "fabric-server-launcher.jar"]
@@ -304,7 +358,14 @@ class ServerDetectionUtils:
     def detect_loader_and_version_from_sources(
         server_path: Path, config, loader: str, detection_source: dict | None = None
     ) -> None:
-        """從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版"""
+        """從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版本。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            config: 伺服器設定物件。
+            loader: 已知的載入器類型。
+            detection_source: 用來記錄偵測來源的字典。
+        """
         if detection_source is None:
             detection_source = {}
 
@@ -434,7 +495,15 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_forge_args_file(server_path: Path, server_config=None) -> Path | None:
-        """尋找 Forge 的 win_args.txt 啟動參數檔"""
+        """尋找 Forge 的 `win_args.txt` 啟動參數檔。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            server_config: 伺服器設定物件。
+
+        Returns:
+            找到時回傳參數檔 Path，否則回傳 None。
+        """
         forge_lib_dir = server_path / "libraries" / "net" / "minecraftforge" / "forge"
         if not forge_lib_dir.is_dir():
             return None

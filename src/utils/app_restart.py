@@ -9,6 +9,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+from ..ui import DialogUtils, TaskUtils
 from . import PathUtils, SubprocessUtils, UIUtils, get_logger, shutdown_logging
 
 logger = get_logger().bind(component="AppRestart")
@@ -187,7 +189,11 @@ class AppRestart:
 
     @staticmethod
     def can_restart() -> bool:
-        """檢查當前環境是否支援應用程式重啟功能"""
+        """檢查當前環境是否支援應用程式重啟功能。
+
+        Returns:
+            若可安全重啟則回傳 True。
+        """
         try:
             executable_path, is_frozen, script_path = AppRestart._get_executable_info()
             if is_frozen:
@@ -250,7 +256,11 @@ class AppRestart:
 
     @staticmethod
     def get_restart_diagnostics() -> tuple[bool, str]:
-        """回傳是否可重啟與診斷文字說明"""
+        """回傳是否可重啟與診斷文字說明。
+
+        Returns:
+            可重啟狀態與診斷字串。
+        """
         try:
             executable_path, is_frozen, script_path = AppRestart._get_executable_info()
             if is_frozen:
@@ -331,7 +341,14 @@ class AppRestart:
 
     @staticmethod
     def restart_application(delay: float = 1.0) -> bool:
-        """重啟應用程式，支援延遲啟動和狀態檢測"""
+        """重啟應用程式，支援延遲啟動和狀態檢測。
+
+        Args:
+            delay: 啟動新實例前的延遲秒數。
+
+        Returns:
+            成功安排重啟時回傳 True，失敗時回傳 False。
+        """
         try:
             executable_cmd, is_frozen, script_path = AppRestart._get_executable_info()
             restart_success = threading.Event()
@@ -417,7 +434,7 @@ class AppRestart:
                     logger.exception(f"重啟失敗: {e}")
                     restart_error.set()
 
-            UIUtils.run_async(delayed_restart)
+            TaskUtils.run_async(delayed_restart)
             max_wait_time = delay + 2.0
             if restart_success.wait(timeout=max_wait_time):
                 return True
@@ -428,7 +445,12 @@ class AppRestart:
 
     @staticmethod
     def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
-        """安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理"""
+        """安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理。
+
+        Args:
+            parent_window: 要關閉的父視窗。
+            delay: 啟動新實例前的延遲秒數。
+        """
         try:
             restart_initiated = AppRestart.restart_application(delay)
             if restart_initiated:
@@ -470,6 +492,6 @@ class AppRestart:
                     _supported, details = AppRestart.get_restart_diagnostics()
                 except Exception:
                     _supported, details = (False, "無法取得重啟診斷。")
-                UIUtils.show_manual_restart_dialog(parent_window or None, details)
+                DialogUtils.show_manual_restart_dialog(parent_window or None, details)
         except Exception as e:
             logger.exception(f"重啟程式失敗: {e}")

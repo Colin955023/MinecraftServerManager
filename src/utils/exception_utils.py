@@ -4,12 +4,14 @@
 """
 
 from __future__ import annotations
+
+import contextlib
 import traceback
 from pathlib import Path
 from typing import Any
-from .path_utils import PathUtils
+
 from .logger import get_logger
-import contextlib
+from .path_utils import PathUtils
 
 logger = get_logger().bind(component="ExceptionUtils")
 
@@ -22,9 +24,11 @@ def record_and_mark(
 ) -> None:
     """記錄例外並在指定路徑建立 issue marker（非破壞性）。
 
-    - `marker_path`: 若提供，會在同目錄建立 `.{filename}.issue.json` 的 marker。
-    - `reason`: marker 中的 reason 欄位；若為 None 則使用 exc 的字串。
-    - `details`: 會寫入 marker 的 details 欄位（若為 dict 則會合併）。
+    Args:
+        exc: 要記錄的例外。
+        marker_path: 若提供，會在同目錄建立 marker。
+        reason: marker 中的原因欄位。
+        details: 會寫入 marker 的額外資訊。
     """
     try:
         exc_type = type(exc).__name__

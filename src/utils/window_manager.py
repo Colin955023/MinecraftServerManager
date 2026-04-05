@@ -4,7 +4,6 @@
 
 import contextlib
 import time
-import tkinter as tk
 from typing import Any
 from . import SystemUtils, get_logger, get_settings_manager
 
@@ -22,7 +21,7 @@ class WindowManager:
 
     @staticmethod
     def _log_invalid_main_window_size(width: int, height: int) -> None:
-        """記錄未通過 `_is_valid_main_window_size` 的主視窗尺寸。
+        """記錄未通過 `is_valid_main_window_size` 的主視窗尺寸。
 
         此方法僅負責節流記錄，避免視窗連續觸發 configure 事件時刷爆日誌。
         """
@@ -38,7 +37,7 @@ class WindowManager:
         WindowManager._last_invalid_size_log_time = now
 
     @staticmethod
-    def _is_valid_main_window_size(width: int, height: int) -> bool:
+    def is_valid_main_window_size(width: int, height: int) -> bool:
         """檢查主視窗尺寸是否為可持久化的有效值。
 
         判斷依據為 `_min_tracked_width` / `_min_tracked_height`，
@@ -48,14 +47,22 @@ class WindowManager:
 
     @staticmethod
     def get_screen_info(window=None) -> dict[str, Any]:
-        """取得 Windows 系統的螢幕資訊，包含 DPI 縮放和工作區域"""
+        """取得 Windows 系統的螢幕資訊，包含 DPI 縮放和工作區域。
+
+        Args:
+            window: 可選的視窗物件；未提供時改用系統指標。
+
+        Returns:
+            包含螢幕寬高、DPI、可用區域與中心點的資訊字典。
+        """
         try:
             if window is None:
-                temp_root = tk.Tk()
-                temp_root.withdraw()
-                screen_width = temp_root.winfo_screenwidth()
-                screen_height = temp_root.winfo_screenheight()
-                temp_root.destroy()
+                SystemUtils.set_process_dpi_aware()
+                screen_width = SystemUtils.get_system_metrics(0)
+                screen_height = SystemUtils.get_system_metrics(1)
+                if screen_width <= 0 or screen_height <= 0:
+                    screen_width = 1920
+                    screen_height = 1080
             else:
                 screen_width = window.winfo_screenwidth()
                 screen_height = window.winfo_screenheight()
@@ -98,7 +105,16 @@ class WindowManager:
     def calculate_optimal_size(
         screen_info: dict[str, Any], min_width: int = 1000, min_height: int = 700
     ) -> tuple[int, int]:
-        """根據螢幕大小計算最佳視窗尺寸"""
+        """根據螢幕大小計算最佳視窗尺寸。
+
+        Args:
+            screen_info: 螢幕資訊字典。
+            min_width: 最小寬度。
+            min_height: 最小高度。
+
+        Returns:
+            最佳視窗寬高。
+        """
         settings = get_settings_manager()
         if settings.is_adaptive_sizing_enabled():
             if screen_info["width"] <= 1366:
@@ -124,7 +140,16 @@ class WindowManager:
 
     @staticmethod
     def calculate_center_position(screen_info: dict[str, Any], width: int, height: int) -> tuple[int, int]:
-        """計算視窗置中位置，考慮工作區域和多螢幕環境"""
+        """計算視窗置中位置，考慮工作區域和多螢幕環境。
+
+        Args:
+            screen_info: 螢幕資訊字典。
+            width: 視窗寬度。
+            height: 視窗高度。
+
+        Returns:
+            置中後的 x 與 y 座標。
+        """
         usable_height = screen_info.get("usable_height", screen_info["height"])
         x = max(0, (screen_info["width"] - width) // 2)
         y = max(0, (usable_height - height) // 2)
@@ -136,7 +161,12 @@ class WindowManager:
 
     @staticmethod
     def setup_main_window(window, force_defaults: bool = False) -> None:
-        """設定主視窗的大小、位置和狀態"""
+        """設定主視窗的大小、位置和狀態。
+
+        Args:
+            window: 主要視窗。
+            force_defaults: 是否強制使用預設大小與位置。
+        """
         settings = get_settings_manager()
         screen_info = WindowManager.get_screen_info(window)
         window_settings = settings.get_main_window_settings()
@@ -172,7 +202,11 @@ class WindowManager:
 
     @staticmethod
     def save_main_window_state(window) -> None:
-        """儲存主視窗狀態"""
+        """儲存主視窗狀態。
+
+        Args:
+            window: 主要視窗。
+        """
         settings = get_settings_manager()
         if not settings.is_remember_size_position_enabled():
             return
@@ -186,7 +220,7 @@ class WindowManager:
                 height = window.winfo_height()
                 x = window.winfo_x()
                 y = window.winfo_y()
-                if WindowManager._is_valid_main_window_size(width, height):
+                if WindowManager.is_valid_main_window_size(width, height):
                     settings.set_main_window_settings(width, height, x, y, False)
                 else:
                     WindowManager._log_invalid_main_window_size(width, height)
@@ -210,7 +244,15 @@ class WindowManager:
     def setup_dialog_window(
         window, parent=None, width: int | None = None, height: int | None = None, center_on_parent: bool = True
     ) -> None:
-        """設定對話框視窗的大小和位置"""
+        """設定對話框視窗的大小和位置。
+
+        Args:
+            window: 對話框視窗。
+            parent: 父視窗。
+            width: 視窗寬度。
+            height: 視窗高度。
+            center_on_parent: 是否以父視窗為基準置中。
+        """
         settings = get_settings_manager()
         screen_info = WindowManager.get_screen_info(window)
         if width is None or height is None:
@@ -247,7 +289,11 @@ class WindowManager:
 
     @staticmethod
     def bind_window_state_tracking(window) -> None:
-        """綁定視窗狀態追蹤事件"""
+        """綁定視窗狀態追蹤事件。
+
+        Args:
+            window: 要追蹤狀態的視窗。
+        """
         from .ui_utils import UIUtils
 
         def on_configure(event):

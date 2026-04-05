@@ -19,7 +19,14 @@ class UpdateParsing:
     @staticmethod
     @lru_cache(maxsize=256)
     def parse_version(version_str: str | None) -> Version | None:
-        """解析版本字串為 PEP 440 Version 物件。"""
+        """解析版本字串為 PEP 440 Version 物件。
+
+        Args:
+            version_str: 原始版本字串。
+
+        Returns:
+            解析後的 `Version`，失敗時回傳 None。
+        """
         try:
             if not isinstance(version_str, str) or not version_str.strip():
                 logger.warning(f"無效的版本字串，version_str={version_str!r}")
@@ -32,7 +39,16 @@ class UpdateParsing:
 
     @staticmethod
     def get_latest_release(owner: str, repo: str, include_prerelease: bool = False) -> dict[str, Any] | None:
-        """取得最新 release（預設忽略 prerelease），失敗時回傳 None。"""
+        """取得最新 release（預設忽略 prerelease），失敗時回傳 None。
+
+        Args:
+            owner: GitHub repository owner。
+            repo: GitHub repository 名稱。
+            include_prerelease: 是否包含 prerelease。
+
+        Returns:
+            最新 release 資料，找不到時回傳 None。
+        """
         url = f"{UpdateParsing._GITHUB_API}/repos/{owner}/{repo}/releases"
         data = HTTPUtils.get_json(url, timeout=15)
         if not data or isinstance(data, dict):
@@ -48,7 +64,14 @@ class UpdateParsing:
 
     @staticmethod
     def choose_installer_asset(release: dict[str, Any]) -> dict[str, Any]:
-        """挑選 installer.exe 更新檔。"""
+        """挑選 installer.exe 更新檔。
+
+        Args:
+            release: GitHub release 資料。
+
+        Returns:
+            選中的 installer 資源，找不到時回傳空字典。
+        """
         assets = release.get("assets") or []
         exe_assets = []
         for asset in assets:
@@ -69,7 +92,14 @@ class UpdateParsing:
 
     @staticmethod
     def choose_portable_asset(release: dict[str, Any]) -> dict[str, Any]:
-        """挑選 portable.zip 更新檔。"""
+        """挑選 portable.zip 更新檔。
+
+        Args:
+            release: GitHub release 資料。
+
+        Returns:
+            選中的 portable 資源，找不到時回傳空字典。
+        """
         assets = release.get("assets") or []
         for asset in assets:
             try:
@@ -84,6 +114,10 @@ class UpdateParsing:
     @staticmethod
     def select_update_asset(release: dict[str, Any], portable_mode: bool) -> tuple[dict[str, Any], str]:
         """根據執行模式挑選更新資產，並回傳選擇策略。
+
+        Args:
+            release: GitHub release 資料。
+            portable_mode: 是否為可攜式模式。
 
         Returns:
             (asset, mode)
@@ -115,7 +149,14 @@ class UpdateParsing:
 
     @staticmethod
     def parse_asset_digest(asset: dict[str, Any]) -> tuple[str, str] | None:
-        """從 GitHub release asset 的 digest 欄位解析 checksum。"""
+        """從 GitHub release asset 的 digest 欄位解析 checksum。
+
+        Args:
+            asset: GitHub release asset 資料。
+
+        Returns:
+            `(algorithm, checksum)`，無法解析時回傳 None。
+        """
         digest = (asset.get("digest") or "").strip()
         if not digest:
             return None
