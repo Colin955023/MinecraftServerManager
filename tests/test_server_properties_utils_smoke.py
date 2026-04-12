@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from src.core import ServerManager
+import src.core.server_manager as server_manager_module
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper
 
@@ -100,3 +101,74 @@ def test_load_server_properties_skips_config_write_when_properties_unchanged(tmp
     assert loaded_first == props
     assert loaded_second == props
     assert write_calls == []
+
+
+@pytest.mark.smoke
+def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+
+    create_config = ServerConfig(
+        name="../escape",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path="",
+    )
+    assert manager.create_server(create_config) is False
+    assert "../escape" not in manager.servers
+
+    outside_path = tmp_path.parents[0] / "escape"
+    delete_config = ServerConfig(
+        name="escape",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(outside_path),
+    )
+    manager.servers[delete_config.name] = delete_config
+
+    write_calls: list[str] = []
+
+    def _track_write_servers_config() -> bool:
+        write_calls.append("called")
+        return True
+
+    monkeypatch.setattr(manager, "write_servers_config", _track_write_servers_config)
+
+    assert manager.delete_server(delete_config.name) is False
+    assert manager.servers[delete_config.name] == delete_config
+    assert write_calls == []
+
+
+@pytest.mark.smoke
+def test_server_manager_rejects_outside_path_on_start(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+    outside_path = tmp_path.parents[0] / "escape"
+    outside_path.mkdir(parents=True, exist_ok=True)
+
+    manager.servers["escape"] = ServerConfig(
+        name="escape",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(outside_path),
+    )
+
+    error_calls: list[tuple[str, str]] = []
+
+    def _track_error(title: str, message: str, _parent=None, **_kwargs) -> None:
+        error_calls.append((title, message))
+
+    monkeypatch.setattr(server_manager_module.UIUtils, "show_error", _track_error)
+    monkeypatch.setattr(
+        manager,
+        "create_launch_script",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not create script")),
+    )
+
+    assert manager.start_server("escape") is False
+    assert error_calls
+    assert "必須位於伺服器資料夾內" in error_calls[0][1]

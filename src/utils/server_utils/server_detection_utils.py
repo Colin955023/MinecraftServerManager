@@ -558,7 +558,7 @@ class ServerDetectionUtils:
                 forge_libs_list: list[str] = list(set(forge_libs))
                 result["forge_libraries"] = forge_libs_list
                 logger.debug(f"找到 {len(forge_libs_list)} 個 Forge libraries")
-            parent_dir = args_path.parent.name
+            parent_dir = args_path.parents[0].name
             mc_ver, forge_ver = ServerDetectionVersionUtils.extract_version_from_forge_path(parent_dir)
             if mc_ver and forge_ver:
                 result["minecraft_version"] = mc_ver

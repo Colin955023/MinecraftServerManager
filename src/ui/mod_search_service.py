@@ -996,6 +996,11 @@ def build_required_dependency_install_plan(
         edge_kind: str,
         edge_source: str,
     ) -> OnlineDependencyInstallItem:
+        expected_hash = (
+            extract_primary_file_hash(best_version)
+            or extract_primary_file_hash(best_version, "sha1")
+            or extract_primary_file_hash(best_version, "sha256")
+        )
         return OnlineDependencyInstallItem(
             project_id=resolved_dependency.project_id,
             project_name=dependency_label,
@@ -1011,6 +1016,7 @@ def build_required_dependency_install_plan(
             enabled=enabled,
             is_optional=is_optional,
             provider=str(getattr(best_version, "provider", "modrinth") or "modrinth").strip() or "modrinth",
+            expected_hash=expected_hash,
             required_by=[parent_name] if parent_name else [],
             decision_source=str(decision_source or "").strip() or "required:auto",
             graph_depth=max(1, int(graph_depth)),

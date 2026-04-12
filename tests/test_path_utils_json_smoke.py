@@ -105,3 +105,19 @@ def test_copy_dir_reports_progress(tmp_path) -> None:
     assert progress_events[0] == (0, 2)
     assert progress_events[-1] == (2, 2)
     assert [done for done, _total in progress_events] == sorted(done for done, _total in progress_events)
+
+
+@pytest.mark.smoke
+def test_delete_within_blocks_paths_outside_base(tmp_path) -> None:
+    base_dir = tmp_path / "servers_root"
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    inside_dir = base_dir / "alpha"
+    inside_dir.mkdir(parents=True, exist_ok=True)
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir(parents=True, exist_ok=True)
+
+    assert PathUtils.delete_within(base_dir, inside_dir) is True
+    assert inside_dir.exists() is False
+    assert PathUtils.delete_within(base_dir, outside_dir) is False
+    assert outside_dir.exists() is True

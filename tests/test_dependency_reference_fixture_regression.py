@@ -7,7 +7,7 @@ from typing import Any
 from src.models import OnlineModVersion
 from src.utils import resolve_dependency_reference
 
-FIXTURE_PATH = Path(__file__).parent / "dependency_reference_cases.json"
+FIXTURE_PATH = Path(__file__).parents[0] / "dependency_reference_cases.json"
 
 
 def _build_online_mod_version(payload: dict[str, Any]) -> OnlineModVersion:

@@ -47,6 +47,8 @@ class ServerManager:
         self._properties_cache: dict[str, Any] = {}
         self._config_lock = threading.Lock()
         self.load_servers_config()
+        if not self.config_file.exists():
+            self.write_servers_config()
 
     def _cleanup_running_server_state(self, server_name: str) -> None:
         """清除執行中伺服器的 runtime 狀態。"""
@@ -88,6 +90,28 @@ class ServerManager:
                 return process.poll() is not None
             waiter.wait(min(wait_interval, remaining))
 
+    def _validate_server_runtime_path(self, config: ServerConfig, parent=None) -> Path | None:
+        """在啟動前驗證伺服器路徑是否安全且可用。"""
+        try:
+            server_path = Path(config.path).resolve(strict=False)
+        except Exception as e:
+            UIUtils.show_error("伺服器路徑無效", f"伺服器路徑無效: {e}", parent=parent)
+            return None
+        if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
+            UIUtils.show_error(
+                "伺服器路徑無效",
+                f"伺服器路徑必須位於伺服器資料夾內: {server_path}",
+                parent=parent,
+            )
+            return None
+        if not server_path.exists():
+            UIUtils.show_error("伺服器路徑不存在", f"伺服器路徑不存在: {server_path}", parent=parent)
+            return None
+        if not server_path.is_dir():
+            UIUtils.show_error("伺服器路徑無效", f"伺服器路徑不是資料夾: {server_path}", parent=parent)
+            return None
+        return server_path
+
     def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
         """建立新伺服器並初始化設定。
 
@@ -100,16 +124,7 @@ class ServerManager:
         """
         try:
             server_path = (self.servers_root / config.name).resolve()
-            is_safe = False
-            try:
-                is_safe = server_path.is_relative_to(self.servers_root)
-            except AttributeError:
-                try:
-                    server_path.relative_to(self.servers_root)
-                    is_safe = True
-                except ValueError:
-                    is_safe = False
-            if not is_safe:
+            if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
                 raise ValueError(f"無效的伺服器名稱 (路徑遍歷偵測): {config.name}")
             server_path.mkdir(exist_ok=True)
             config.path = str(server_path)
@@ -338,9 +353,8 @@ class ServerManager:
                 UIUtils.show_error("伺服器未找到", f"找不到伺服器: {server_name}", parent=parent)
                 return False
             config = self.servers[server_name]
-            server_path = Path(config.path)
-            if not server_path.exists():
-                UIUtils.show_error("伺服器路徑不存在", f"伺服器路徑不存在: {server_path}", parent=parent)
+            server_path = self._validate_server_runtime_path(config, parent=parent)
+            if server_path is None:
                 return False
             self.create_launch_script(config)
             script_path = ServerDetectionUtils.find_startup_script(server_path)
@@ -456,8 +470,12 @@ class ServerManager:
             if server_name not in self.servers:
                 return False
             config = self.servers[server_name]
-            server_path = Path(config.path)
-            PathUtils.delete_path(server_path)
+            server_path = Path(config.path).resolve(strict=False)
+            if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
+                logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
+                return False
+            if not PathUtils.delete_within(self.servers_root, server_path):
+                return False
             del self.servers[server_name]
             self.write_servers_config()
             return True

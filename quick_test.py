@@ -34,7 +34,7 @@ def main() -> int:
         try:
             pip_result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "uv"],
-                cwd=Path(__file__).resolve().parent,
+                cwd=Path(__file__).resolve().parents[0],
                 check=False,
                 shell=False,
             )
@@ -51,7 +51,7 @@ def main() -> int:
             sys.stderr.write("quick_test could not find uv after pip installation.\n")
             return 1
 
-    project_root = Path(__file__).resolve().parent
+    project_root = Path(__file__).resolve().parents[0]
     cmd = [
         str(uv_path),
         "run",

@@ -12,7 +12,7 @@ from pathlib import Path
 import customtkinter as ctk
 
 if __name__ == "__main__" and __package__ is None:
-    project_root = Path(__file__).resolve().parent.parent
+    project_root = Path(__file__).resolve().parents[1]
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
 

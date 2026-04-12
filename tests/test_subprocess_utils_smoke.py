@@ -10,7 +10,7 @@ import src.utils.runtime_utils.subprocess_utils as subprocess_utils_module
 @pytest.mark.smoke
 def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp_path) -> None:
     resolved_executable = tmp_path / "bin" / "java.exe"
-    resolved_executable.parent.mkdir(parents=True, exist_ok=True)
+    resolved_executable.parents[0].mkdir(parents=True, exist_ok=True)
     resolved_executable.write_text("", encoding="utf-8")
     captured: dict[str, object] = {}
 
@@ -67,7 +67,7 @@ def test_popen_checked_forces_shell_false_for_absolute_path(monkeypatch, tmp_pat
 )
 def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_path, method_name: str) -> None:
     resolved_executable = tmp_path / "bin" / "java.exe"
-    resolved_executable.parent.mkdir(parents=True, exist_ok=True)
+    resolved_executable.parents[0].mkdir(parents=True, exist_ok=True)
     resolved_executable.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(

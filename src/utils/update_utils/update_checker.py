@@ -38,9 +38,7 @@ class UpdateChecker:
     @staticmethod
     def _is_development_environment() -> bool:
         """僅在開發環境允許偵測 prerelease。"""
-        is_nuitka = "__compiled__" in globals()
-        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
-        return not is_packaged
+        return not RuntimePaths.is_packaged()
 
     @staticmethod
     def _choose_installer_asset(release: dict) -> dict:
@@ -49,6 +47,104 @@ class UpdateChecker:
     @staticmethod
     def _select_update_asset(release: dict, portable_mode: bool) -> tuple[dict, str]:
         return UpdateParsing.select_update_asset(release, portable_mode)
+
+    @staticmethod
+    def _escape_powershell_single_quoted_literal(value: str) -> str:
+        """
+        回傳可安全嵌入 PowerShell 單引號字串的文字。
+
+        Args:
+            value: 任意字串。
+
+        Returns:
+            已轉義的字串，適合放在 PowerShell 單引號字串中。
+        """
+        return "'" + value.replace("'", "''") + "'"
+
+    @staticmethod
+    def _build_portable_update_script(
+        source_dir: Path,
+        destination_dir: Path,
+        backup_dir: Path,
+        cleanup_dir: Path,
+        executable_name: str = "MinecraftServerManager.exe",
+    ) -> str:
+        """產生 portable 更新流程使用的 PowerShell 腳本。
+
+        Args:
+            source_dir: 更新檔解壓來源目錄。
+            destination_dir: 最終安裝目錄。
+            backup_dir: 原始安裝備份目錄。
+            cleanup_dir: 解壓暫存目錄。
+            executable_name: 啟動用可執行檔名稱。
+
+        Returns:
+            可直接寫入 `.ps1` 檔案的腳本文字。
+        """
+        source_literal = UpdateChecker._escape_powershell_single_quoted_literal(str(source_dir))
+        destination_literal = UpdateChecker._escape_powershell_single_quoted_literal(str(destination_dir))
+        backup_literal = UpdateChecker._escape_powershell_single_quoted_literal(str(backup_dir))
+        cleanup_literal = UpdateChecker._escape_powershell_single_quoted_literal(str(cleanup_dir))
+        exe_literal = UpdateChecker._escape_powershell_single_quoted_literal(executable_name)
+        lines = [
+            "$ErrorActionPreference = 'Stop'",
+            f"$sourceDir = {source_literal}",
+            f"$destinationDir = {destination_literal}",
+            f"$backupDir = {backup_literal}",
+            f"$cleanupDir = {cleanup_literal}",
+            f"$executableName = {exe_literal}",
+            "for ($count = 0; $count -lt 20; $count++) {",
+            "    $process = Get-Process -Name 'MinecraftServerManager' -ErrorAction SilentlyContinue",
+            "    if (-not $process) {",
+            "        break",
+            "    }",
+            "    Start-Sleep -Seconds 1",
+            "}",
+            "Start-Sleep -Seconds 3",
+            "if (Test-Path -LiteralPath $destinationDir) {",
+            "    Get-ChildItem -LiteralPath $destinationDir -Force | ForEach-Object {",
+            "        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue",
+            "    }",
+            "}",
+            "if (Test-Path -LiteralPath $sourceDir) {",
+            "    Get-ChildItem -LiteralPath $sourceDir -Force | ForEach-Object {",
+            "        Copy-Item -LiteralPath $_.FullName -Destination $destinationDir -Recurse -Force",
+            "    }",
+            "}",
+            "$configSource = Join-Path $backupDir '.config'",
+            "if (Test-Path -LiteralPath $configSource) {",
+            "    $configDestination = Join-Path $destinationDir '.config'",
+            "    New-Item -ItemType Directory -Force -Path $configDestination | Out-Null",
+            "    Get-ChildItem -LiteralPath $configSource -Force | ForEach-Object {",
+            "        Copy-Item -LiteralPath $_.FullName -Destination $configDestination -Recurse -Force",
+            "    }",
+            "}",
+            "$logSource = Join-Path $backupDir '.log'",
+            "if (Test-Path -LiteralPath $logSource) {",
+            "    $logDestination = Join-Path $destinationDir '.log'",
+            "    New-Item -ItemType Directory -Force -Path $logDestination | Out-Null",
+            "    Get-ChildItem -LiteralPath $logSource -Force | ForEach-Object {",
+            "        Copy-Item -LiteralPath $_.FullName -Destination $logDestination -Recurse -Force",
+            "    }",
+            "}",
+            "$portableMarker = Join-Path $destinationDir '.portable'",
+            "if (-not (Test-Path -LiteralPath $portableMarker)) {",
+            "    New-Item -ItemType File -Force -Path $portableMarker | Out-Null",
+            "}",
+            "try {",
+            "    $portableFile = Get-Item -LiteralPath $portableMarker -ErrorAction Stop",
+            "    $portableFile.Attributes = $portableFile.Attributes -bor [System.IO.FileAttributes]::Hidden",
+            "} catch {",
+            '    Write-Verbose "無法隱藏 .portable 標記：$($_.Exception.Message)"',
+            "}",
+            "Start-Sleep -Seconds 2",
+            "Start-Process -FilePath (Join-Path $destinationDir $executableName) -WorkingDirectory $destinationDir",
+            "Remove-Item -LiteralPath $cleanupDir -Recurse -Force -ErrorAction SilentlyContinue",
+            "Start-Sleep -Seconds 5",
+            "Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue",
+            "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue",
+        ]
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _launch_installer(installer_path: Path, parent=None) -> None:
@@ -439,7 +535,6 @@ class UpdateChecker:
                             ),
                         )
                         return
-                    apply_bat = Path(tempfile.gettempdir()) / f"msm_apply_update_{int(time.time())}.bat"
                     try:
                         temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
                         extracted_dir_resolved = extracted_dir.resolve(strict=True)
@@ -481,34 +576,40 @@ class UpdateChecker:
                         )
                         _cleanup_temp_files(temp_files_to_cleanup)
                         return
-                    src = str(extracted_dir).replace("/", "\\")
-                    dst = str(base).replace("/", "\\")
-                    backup_path = str(backup_root).replace("/", "\\")
+                    source_dir = Path(extracted_dir).expanduser()
+                    cleanup_dir = Path(extracted_dir).expanduser()
+                    destination_dir = Path(base).expanduser()
+                    backup_dir = Path(backup_root).expanduser()
                     extracted_items = list(extracted_dir.iterdir())
                     if (
                         len(extracted_items) == 1
                         and extracted_items[0].is_dir()
                         and (extracted_items[0].name == "MinecraftServerManager")
                     ):
-                        src = str(extracted_items[0]).replace("/", "\\")
-                        logger.info(f"檢測到嵌套資料夾，調整源路徑為: {src}")
-                    bat = f'@echo off\nchcp 65001 >nul\nsetlocal enabledelayedexpansion\nREM 等待主程式完全退出（檢查20次，每次等待1秒）\nset "count=0"\n:wait_loop\ntasklist /FI "IMAGENAME eq MinecraftServerManager.exe" 2>nul | find /I "MinecraftServerManager.exe" >nul\nif %ERRORLEVEL%==0 (\n    if !count! lss 20 (\n        set /a count=!count!+1\n        timeout /t 1 /nobreak >nul\n        goto wait_loop\n    )\n)\nREM 給予額外的時間確保所有檔案都解鎖\ntimeout /t 3 /nobreak >nul\nREM 刪除整個原始目錄\nfor /d %%I in ("{dst}\\*") do (\n    rmdir /s /q "%%I" 2>nul\n)\nfor %%I in ("{dst}\\*") do (\n    del /q "%%I" 2>nul\n)\ntimeout /t 1 /nobreak >nul\nREM 複製新版本檔案（使用 PowerShell 以獲得更好的錯誤處理）\npowershell -Command "try {{ Copy-Item -LiteralPath "{src}\\*" -Destination "{dst}" -Recurse -Force -ErrorAction Stop }} catch {{ exit 1 }}"\nif %ERRORLEVEL% neq 0 (\n    echo 複製失敗，嘗試使用 xcopy...\n    xcopy "{src}\\*" "{dst}\\" /E /Y /I /R\n)\nREM 恢復備份的 .config 與 .log\nif exist "{backup_path}\\.config" (\n    xcopy "{backup_path}\\.config\\*" "{dst}\\.config\\" /E /Y /I /R 2>nul\n)\nif exist "{backup_path}\\.log" (\n    xcopy "{backup_path}\\.log\\*" "{dst}\\.log\\" /E /Y /I /R 2>nul\n)\nREM 恢復或建立 .portable 標記\nif not exist "{dst}\\.portable" (\n    echo. > "{dst}\\.portable"\n    attrib +h "{dst}\\.portable" 2>nul\n)\nREM 啟動新版本\ntimeout /t 2 /nobreak >nul\nstart "" "{dst}\\MinecraftServerManager.exe"\nREM 刪除備份（更新成功後）\ntimeout /t 5 /nobreak >nul\nrmdir /s /q "{backup_path}" 2>nul\nREM 自刪更新批次檔\ndel /f /q "%~f0" 2>nul\nendlocal\nexit /b 0\n'
+                        source_dir = Path(extracted_items[0]).expanduser()
+                        logger.info(f"檢測到嵌套資料夾，調整源路徑為: {source_dir}")
+                    script = UpdateChecker._build_portable_update_script(
+                        source_dir=source_dir,
+                        destination_dir=destination_dir,
+                        backup_dir=backup_dir,
+                        cleanup_dir=cleanup_dir,
+                    )
+                    apply_script = temp_root / "apply_update.ps1"
                     try:
-                        apply_bat.write_text(bat, encoding="utf-8")
+                        apply_script.write_text(script, encoding="utf-8")
                     except Exception:
-                        logger.exception("寫入批次檔失敗")
+                        logger.exception("寫入 PowerShell 更新腳本失敗")
                         TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_error("錯誤", "無法建立套用更新的腳本。", parent=parent, topmost=True),
                         )
                         return
                     try:
-                        temp_root = Path(tempfile.gettempdir()).resolve(strict=True)
-                        apply_bat_resolved = apply_bat.resolve(strict=True)
-                        if not PathUtils.is_path_within(temp_root, apply_bat_resolved, strict=True):
+                        apply_script_resolved = apply_script.resolve(strict=True)
+                        if not PathUtils.is_path_within(temp_root, apply_script_resolved, strict=True):
                             logger.error(
-                                "套用更新批次檔的路徑不在暫存目錄中，已拒絕執行。",
-                                apply_bat=str(apply_bat_resolved),
+                                "套用更新腳本的路徑不在暫存目錄中，已拒絕執行。",
+                                apply_script=str(apply_script_resolved),
                                 temp_root=str(temp_root),
                             )
                             TaskUtils.call_on_ui(
@@ -521,19 +622,29 @@ class UpdateChecker:
                                 ),
                             )
                             return
-                        cmd_exe = PathUtils.find_executable("cmd.exe") or "C:\\Windows\\System32\\cmd.exe"
-                        SubprocessUtils.popen_checked(
-                            [cmd_exe, "/c", "start", "", str(apply_bat_resolved)],
-                            stdin=SubprocessUtils.DEVNULL,
-                            stdout=SubprocessUtils.DEVNULL,
-                            stderr=SubprocessUtils.DEVNULL,
-                            close_fds=True,
+                        powershell_executable = (
+                            PathUtils.find_executable("pwsh") or PathUtils.find_executable("powershell") or "powershell"
+                        )
+                        SubprocessUtils.popen_detached(
+                            [
+                                str(powershell_executable),
+                                "-NoLogo",
+                                "-NoProfile",
+                                "-NonInteractive",
+                                "-ExecutionPolicy",
+                                "Bypass",
+                                "-File",
+                                str(apply_script_resolved),
+                            ],
+                            cwd=str(apply_script_resolved.parents[0]),
                         )
                     except Exception:
-                        logger.exception("啟動套用批次檔失敗")
+                        logger.exception("啟動套用更新腳本失敗")
                         _cleanup_temp_files(temp_files_to_cleanup)
                         return
-                    logger.info("更新批次已啟動，準備關閉程式以進行更新")
+                    logger.info("更新腳本已啟動，準備關閉程式以進行更新")
+                    if extracted_dir in temp_files_to_cleanup:
+                        temp_files_to_cleanup.remove(extracted_dir)
                     _cleanup_temp_files(temp_files_to_cleanup)
                     time.sleep(close_delay_seconds)
                     UpdateChecker._graceful_exit(parent)

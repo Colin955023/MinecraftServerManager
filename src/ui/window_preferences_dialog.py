@@ -2,7 +2,6 @@
 Window preferences dialog for configuring window behavior and appearance.
 """
 
-import sys
 import traceback
 from collections.abc import Callable
 import customtkinter as ctk
@@ -11,6 +10,7 @@ from ..utils import (
     FontSize,
     Sizes,
     Spacing,
+    RuntimePaths,
     UIUtils,
     WindowManager,
     get_button_style,
@@ -97,9 +97,7 @@ class WindowPreferencesDialog:
         self._create_checkbox(general_frame, "自動置中新的對話框視窗", self.auto_center_var)
         self.adaptive_sizing_var = ctk.BooleanVar()
         self._create_checkbox(general_frame, "啟用自適應視窗大小調整", self.adaptive_sizing_var)
-        is_nuitka = "__compiled__" in globals()
-        is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
-        should_show_debug = not is_packaged
+        should_show_debug = not RuntimePaths.is_packaged()
         if should_show_debug:
             self.debug_logging_var = ctk.BooleanVar()
             checkbox = self._create_checkbox(general_frame, "啟用除錯日誌輸出", self.debug_logging_var)

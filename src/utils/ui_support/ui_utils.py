@@ -501,12 +501,10 @@ class UIUtils:
         try:
             if target_path.exists():
                 target_path = target_path.resolve()
-            target_str = str(target_path)
-            if os.name == "nt":
-                target_str = target_str.replace("/", "\\")
-                if not UIUtils._is_safe_windows_path_argument(target_str):
-                    logger.error("在檔案總管中顯示失敗：路徑包含不安全字元")
-                    return
+            target_str = str(Path(target_path).expanduser())
+            if os.name == "nt" and not UIUtils._is_safe_windows_path_argument(target_str):
+                logger.error("在檔案總管中顯示失敗：路徑包含不安全字元")
+                return
             explorer = PathUtils.find_executable("explorer") or str(
                 Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
             )
@@ -515,7 +513,7 @@ class UIUtils:
                 return
             except Exception as e:
                 logger.debug(f"使用 explorer /select 失敗: {e}")
-            folder_path = target_path if target_path.is_dir() else target_path.parent
+            folder_path = target_path if target_path.is_dir() else target_path.parents[0]
             UIUtils.open_external(str(folder_path))
         except Exception as e:
             logger.exception(f"在檔案總管中顯示失敗: {e}")

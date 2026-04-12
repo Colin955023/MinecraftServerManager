@@ -61,6 +61,7 @@ from ..utils import (
     get_logger,
     register_provider_revalidation_success,
     resolve_modrinth_provider_record,
+    extract_primary_file_hash,
 )
 from . import (
     CustomDropdown,
@@ -220,6 +221,14 @@ class ModManagementFrame:
         self._local_insert_batch_divisor = 8
         self.local_mods: list[Any] = []
         self.online_mods: list[Any] = []
+        self._online_refresh_job: str | None = None
+        self._online_refresh_token = 0
+        self._online_tree_render_locked = False
+        self._online_rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
+        self._online_mod_by_row_key: dict[str, Any] = {}
+        self._online_insert_batch_base = 60
+        self._online_insert_batch_max = 180
+        self._online_insert_batch_divisor = 8
         self._online_mod_index: dict[str, Any] = {}
         self._last_online_request: OnlineBrowseRequest | None = None
         self.pending_online_installs: list[PendingOnlineInstall] = []
@@ -622,6 +631,17 @@ class ModManagementFrame:
         return self._format_single_line_text(getattr(mod, "description", ""))
 
     @staticmethod
+    def _build_online_browse_key(mod: Any) -> str:
+        """建立線上瀏覽列表使用的穩定識別鍵。"""
+        return str(
+            getattr(mod, "project_id", "")
+            or getattr(mod, "slug", "")
+            or getattr(mod, "url", "")
+            or getattr(mod, "name", "")
+            or ""
+        ).strip()
+
+    @staticmethod
     def _format_online_environment_text(mod: Any) -> str:
         """格式化線上模組的支援環境。"""
         server_side = str(getattr(mod, "server_side", "") or "").strip()
@@ -656,7 +676,12 @@ class ModManagementFrame:
         item = selection[0]
         tags = self.browse_tree.item(item, "tags")
         project_id = str(tags[0]) if tags else ""
-        return (True, project_id, self._online_mod_index.get(project_id))
+        mod = self._online_mod_index.get(project_id)
+        if mod is None:
+            mod = self._online_mod_by_row_key.get(str(item))
+            if mod is not None and not project_id:
+                project_id = str(getattr(mod, "project_id", "") or "").strip()
+        return (True, project_id, mod)
 
     def _build_online_results_summary_text(self) -> str:
         """建立瀏覽/搜尋結果摘要，說明目前條件與結果數量。"""
@@ -675,9 +700,84 @@ class ModManagementFrame:
         """清空目前線上模組瀏覽結果。"""
         self.online_mods = []
         self._online_mod_index = {}
+        self._online_mod_by_row_key = {}
+        self._online_rows_snapshot = {}
         self._last_online_request = None
+        self._online_refresh_token += 1
+        self._cancel_online_refresh_job()
         self.ui_queue.put(self._refresh_online_results_summary)
         self.ui_queue.put(self.refresh_browse_list)
+
+    def _cancel_online_refresh_job(self) -> None:
+        """取消尚未完成的線上模組列表批次插入。"""
+        tree = self.browse_tree
+        if not tree:
+            self._online_refresh_job = None
+            return
+        UIUtils.cancel_scheduled_job(tree, "_online_refresh_job", owner=self)
+
+    def _set_online_tree_render_lock(self, locked: bool) -> None:
+        """大量刷新前後鎖住線上 Treeview 父容器幾何，減少 layout 抖動。"""
+        tree = self.browse_tree
+        if not tree:
+            return
+        parent = getattr(tree, "master", None)
+        if parent is None:
+            return
+        if locked:
+            if getattr(self, "_online_tree_render_locked", False):
+                return
+            try:
+                parent.grid_propagate(False)
+                self._online_tree_render_locked = True
+            except Exception as e:
+                logger.debug(f"鎖定線上模組列表渲染失敗: {e}", "ModManagement")
+            return
+        if not getattr(self, "_online_tree_render_locked", False):
+            return
+        try:
+            parent.grid_propagate(True)
+        except Exception as e:
+            logger.debug(f"解除線上模組列表渲染鎖失敗: {e}", "ModManagement")
+        finally:
+            self._online_tree_render_locked = False
+
+    def _get_online_insert_batch_size(self, pending_count: int) -> int:
+        """依待插入筆數動態計算線上列表批次大小。"""
+        if pending_count <= 0:
+            return 1
+        base = max(1, int(getattr(self, "_online_insert_batch_base", 60)))
+        max_size = max(base, int(getattr(self, "_online_insert_batch_max", 180)))
+        divisor = max(1, int(getattr(self, "_online_insert_batch_divisor", 8)))
+        dynamic_size = max(base, pending_count // divisor)
+        dynamic_size = min(dynamic_size, max_size)
+        return min(dynamic_size, pending_count)
+
+    def _purge_orphan_online_tree_items(self, expected_item_ids: set[str]) -> None:
+        """刪除線上瀏覽 Treeview 中不屬於目前資料的孤兒列。"""
+        tree = self.browse_tree
+        if not tree or not tree.winfo_exists():
+            return
+        for item_id in list(tree.get_children("")):
+            if item_id in expected_item_ids:
+                continue
+            with contextlib.suppress(Exception):
+                tree.delete(item_id)
+
+    def _finalize_online_refresh(
+        self,
+        *,
+        refresh_token: int,
+        rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]],
+        mod_by_row_key: dict[str, Any],
+    ) -> None:
+        """刷新收尾：只接受最新 token，避免舊任務覆蓋。"""
+        if refresh_token != self._online_refresh_token:
+            return
+        self._online_refresh_job = None
+        self._online_rows_snapshot = rows_snapshot
+        self._online_mod_by_row_key = mod_by_row_key
+        self._set_online_tree_render_lock(False)
 
     def _get_online_query_text(self) -> str:
         """取得目前線上模組輸入框文字。"""
@@ -733,6 +833,12 @@ class ModManagementFrame:
                 )
                 self.online_mods = mods
                 self._online_mod_index = {mod.project_id: mod for mod in mods if getattr(mod, "project_id", "")}
+                online_mod_by_row_key: dict[str, Any] = {}
+                for mod in mods:
+                    row_key = self._build_online_browse_key(mod)
+                    if row_key:
+                        online_mod_by_row_key[row_key] = mod
+                self._online_mod_by_row_key = online_mod_by_row_key
                 self._last_online_request = request
                 self.ui_queue.put(self.refresh_browse_list)
                 self.update_status_safe(f"找到 {len(mods)} 個線上模組")
@@ -1451,6 +1557,7 @@ class ModManagementFrame:
         *,
         action_label: str,
         global_notes: list[str] | None = None,
+        deduped_dependency_count: int = 0,
     ) -> str:
         _ = global_notes
         root_count = len(entries)
@@ -1468,6 +1575,8 @@ class ModManagementFrame:
             segments.append(f"{issue_count} 個待處理")
         if warning_count:
             segments.append(f"{warning_count} 個提醒")
+        if deduped_dependency_count:
+            segments.append(f"已合併 {deduped_dependency_count} 個重複依賴")
         if disabled_count:
             segments.append(f"另有 {disabled_count} 個已停用項目")
         notes = self._dedupe_review_messages(list(global_notes or []))
@@ -2462,10 +2571,10 @@ class ModManagementFrame:
         return nodes
 
     def _build_online_review_task_nodes(self, review_entries: list[PendingInstallReviewEntry]) -> list[ReviewTaskNode]:
-        """相容層：建立線上安裝 review 的根級 task nodes。"""
-        return self._build_flat_review_task_nodes(
-            review_entries,
-            get_entry_key=lambda entry: (
+        """建立線上安裝 review 的 task nodes，包含必要依賴子節點。"""
+
+        def _entry_sort_key(entry: PendingInstallReviewEntry) -> tuple[Any, ...]:
+            return (
                 {"blocked": 0, "advisory": 1, "disabled": 2, "enabled": 3}.get(
                     self._get_online_install_review_group_key(entry), 99
                 ),
@@ -2473,7 +2582,11 @@ class ModManagementFrame:
                 str(
                     getattr(getattr(getattr(entry, "pending", None), "version", None), "display_name", "") or ""
                 ).casefold(),
-            ),
+            )
+
+        root_nodes = self._build_flat_review_task_nodes(
+            review_entries,
+            get_entry_key=_entry_sort_key,
             get_root_key=lambda entry: self._build_pending_install_key(
                 getattr(getattr(entry, "pending", None), "project_id", ""),
                 getattr(getattr(getattr(entry, "pending", None), "version", None), "version_id", ""),
@@ -2492,6 +2605,62 @@ class ModManagementFrame:
                 status_text,
             ),
         )
+        root_node_map = {node.root_key: node for node in root_nodes if node.node_kind == "root"}
+        required_by_map = self._collect_dependency_required_by(
+            review_entries,
+            parent_name_getter=lambda entry: str(
+                getattr(getattr(entry, "pending", None), "project_name", "") or ""
+            ).strip(),
+        )
+        dependency_nodes: list[ReviewTaskNode] = []
+        for review_entry in sorted(review_entries, key=_entry_sort_key):
+            pending = getattr(review_entry, "pending", None)
+            root_key = self._build_pending_install_key(
+                getattr(pending, "project_id", ""),
+                getattr(getattr(pending, "version", None), "version_id", ""),
+            )
+            root_node = root_node_map.get(root_key)
+            if root_node is None:
+                continue
+            root_group_key = root_node.group_key
+            root_values = root_node.values
+
+            def _build_online_dependency_node(
+                index: int,
+                dependency_item: Any,
+                dependency_status: str,
+                is_optional: bool,
+                is_enabled: bool,
+                parent_id: str,
+                *,
+                _root_key: str = root_key,
+                _group_key: str = root_group_key,
+                _parent_values: tuple[str, ...] = root_values,
+            ) -> ReviewTaskNode:
+                return self._build_online_dependency_task_node(
+                    root_key=_root_key,
+                    group_key=_group_key,
+                    parent_values=_parent_values,
+                    index=index,
+                    dependency_item=dependency_item,
+                    dependency_status=dependency_status,
+                    is_advisory=is_optional,
+                    is_enabled=is_enabled,
+                    parent_id=parent_id,
+                )
+
+            dependency_nodes.extend(
+                self._build_dependency_review_nodes(
+                    root_key=root_key,
+                    group_key=root_node.group_key,
+                    optional_group_values=root_node.values,
+                    parent_name=str(getattr(pending, "project_name", "") or "模組"),
+                    dependency_plan=getattr(review_entry, "dependency_plan", None),
+                    required_by_map=required_by_map,
+                    node_builder=_build_online_dependency_node,
+                )
+            )
+        return [*root_nodes, *dependency_nodes]
 
     def _build_local_update_task_nodes(self, review_entries: list[LocalUpdateReviewEntry]) -> list[ReviewTaskNode]:
         """相容層：建立本地更新 review 的根級 task nodes。"""
@@ -2536,6 +2705,69 @@ class ModManagementFrame:
     def _build_pending_install_key(project_id: str, version_id: str) -> str:
         return f"{str(project_id or '').strip()}::{str(version_id or '').strip()}"
 
+    @staticmethod
+    def _build_dependency_install_key(dependency_item: Any) -> tuple[str, str, str, str]:
+        return (
+            str(getattr(dependency_item, "project_id", "") or "").strip(),
+            str(getattr(dependency_item, "version_id", "") or "").strip(),
+            str(getattr(dependency_item, "download_url", "") or "").strip(),
+            str(getattr(dependency_item, "filename", "") or "").strip(),
+        )
+
+    @staticmethod
+    def _resolve_expected_download_hash(version: Any | None) -> str:
+        return (
+            extract_primary_file_hash(version)
+            or extract_primary_file_hash(version, "sha1")
+            or extract_primary_file_hash(version, "sha256")
+        )
+
+    @staticmethod
+    def _build_download_kwargs(
+        progress_callback: Callable[[int, int], None] | None,
+        expected_hash: str | None = None,
+    ) -> dict[str, Any]:
+        download_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
+        if str(expected_hash or "").strip():
+            download_kwargs["expected_hash"] = expected_hash
+        return download_kwargs
+
+    def _install_dependency_item(
+        self,
+        manager: ModManager,
+        dependency_item: Any,
+        *,
+        current_step: int,
+        total_steps: int,
+        status_message: str,
+    ) -> Path | None:
+        self.update_status_safe(f"{status_message}：{dependency_item.project_name}")
+        expected_hash = str(getattr(dependency_item, "expected_hash", "") or "").strip() or None
+        return manager.install_remote_mod_file(
+            dependency_item.download_url,
+            dependency_item.filename,
+            **self._build_download_kwargs(
+                self._make_step_progress_callback(current_step, total_steps),
+                expected_hash,
+            ),
+        )
+
+    def _collect_unique_dependency_install_keys(
+        self, review_entries: list[Any]
+    ) -> tuple[set[tuple[str, str, str, str]], int]:
+        unique_keys: set[tuple[str, str, str, str]] = set()
+        duplicate_count = 0
+        for review_entry in review_entries:
+            for dependency_item in self._get_enabled_dependency_install_items(
+                getattr(review_entry, "dependency_plan", None)
+            ):
+                dependency_key = self._build_dependency_install_key(dependency_item)
+                if dependency_key in unique_keys:
+                    duplicate_count += 1
+                    continue
+                unique_keys.add(dependency_key)
+        return (unique_keys, duplicate_count)
+
     def _get_current_installed_mods(self) -> list[Any]:
         manager = self.mod_manager
         if not manager:
@@ -2560,8 +2792,17 @@ class ModManagementFrame:
             version=str(version_name or "").strip(),
         )
 
-    def _add_pending_online_install(self, pending: PendingOnlineInstall) -> None:
-        """加入待安裝清單，若同版本已存在則覆蓋。"""
+    def _add_pending_online_install(self, pending: PendingOnlineInstall) -> bool:
+        """加入待安裝清單，若同版本已存在則覆蓋。
+
+        Returns:
+            若成功加入則回傳 True；若因伺服器端不支援而被阻擋則回傳 False。
+        """
+        blocking_reason = self._build_server_install_blocking_reason(getattr(pending, "server_side", ""))
+        if blocking_reason:
+            logger.info("拒絕加入安裝清單: %s", blocking_reason)
+            UIUtils.show_warning("無法加入安裝清單", blocking_reason, self.parent)
+            return False
         pending_key = self._build_pending_install_key(pending.project_id, getattr(pending.version, "version_id", ""))
         remaining_items = [
             item
@@ -2574,6 +2815,7 @@ class ModManagementFrame:
         self.update_status(
             f"已加入安裝清單：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
         )
+        return True
 
     def _prepare_online_install_review_entries(self) -> list[PendingInstallReviewEntry]:
         """以目前本地模組狀態重新驗證待安裝清單。"""
@@ -2658,21 +2900,103 @@ class ModManagementFrame:
         self._load_online_mods(force=True, show_warning=True)
 
     def refresh_browse_list(self) -> None:
-        """重新整理線上模組列表。"""
+        """重新整理線上模組列表（差異更新，避免整棵重建）。"""
         self._refresh_online_results_summary()
-        if not self.browse_tree:
+        tree = self.browse_tree
+        if not tree or not tree.winfo_exists():
             return
+        self._cancel_online_refresh_job()
+        self._online_refresh_token += 1
+        refresh_token = self._online_refresh_token
+        self._set_online_tree_render_lock(True)
         logger.debug(f"重新整理線上模組列表: result_count={len(self.online_mods)}")
-        for item in self.browse_tree.get_children():
-            self.browse_tree.delete(item)
+        mod_order: list[str] = []
+        mod_rows: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
+        mods_by_row_key: dict[str, Any] = {}
+        seen_row_keys: set[str] = set()
+        previous_snapshot = getattr(self, "_online_rows_snapshot", {})
         for mod in self.online_mods:
-            self.browse_tree.insert(
-                "",
-                "end",
-                values=self._build_online_browse_row(mod),
-                tags=(getattr(mod, "project_id", ""), getattr(mod, "slug", ""), getattr(mod, "url", "")),
+            row_key = self._build_online_browse_key(mod)
+            if not row_key or row_key in seen_row_keys:
+                continue
+            values = self._build_online_browse_row(mod)
+            row_tags = (
+                str(getattr(mod, "project_id", "") or "").strip(),
+                str(getattr(mod, "slug", "") or "").strip(),
+                str(getattr(mod, "url", "") or "").strip(),
             )
-            TreeUtils.refresh_treeview_alternating_rows(self.browse_tree)
+            mod_order.append(row_key)
+            mod_rows[row_key] = (values, row_tags)
+            mods_by_row_key[row_key] = mod
+            seen_row_keys.add(row_key)
+
+        if not mod_order:
+            for item_id in list(tree.get_children("")):
+                with contextlib.suppress(Exception):
+                    tree.delete(item_id)
+            self._finalize_online_refresh(refresh_token=refresh_token, rows_snapshot={}, mod_by_row_key={})
+            return
+
+        rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
+        pending_insert: list[tuple[str, tuple[Any, ...], tuple[str, ...]]] = []
+        for row_key in mod_order:
+            stored_values, stored_tags = mod_rows[row_key]
+            values = stored_values
+            tags = stored_tags
+            if tree.exists(row_key):
+                try:
+                    if previous_snapshot.get(row_key) != (values, tags):
+                        tree.item(row_key, values=values, tags=tags)
+                    rows_snapshot[row_key] = (values, tags)
+                    continue
+                except Exception as e:
+                    logger.debug(f"更新線上列失敗 row_key={row_key}: {e}", "ModManagement")
+                    with contextlib.suppress(Exception):
+                        tree.delete(row_key)
+            pending_insert.append((row_key, values, tags))
+
+        expected_item_ids = set(mod_order)
+        self._purge_orphan_online_tree_items(expected_item_ids)
+        batch_size = self._get_online_insert_batch_size(len(pending_insert))
+
+        def _finalize_online() -> None:
+            try:
+                if tree and tree.winfo_exists():
+                    for order_index, row_key in enumerate(mod_order):
+                        if tree.exists(row_key):
+                            tree.move(row_key, "", order_index)
+                    TreeUtils.refresh_treeview_alternating_rows(tree)
+            except Exception as e:
+                logger.debug(f"重排線上 mods 失敗: {e}", "ModManagement")
+            self._finalize_online_refresh(
+                refresh_token=refresh_token,
+                rows_snapshot=rows_snapshot,
+                mod_by_row_key=mods_by_row_key,
+            )
+
+        insert_batch = TreeUtils.make_tree_insert_batch(
+            tree=tree,
+            pending_insert=pending_insert,
+            batch_size=batch_size,
+            is_refresh_token_valid=lambda: refresh_token == self._online_refresh_token,
+            acquire_recycled=lambda _entry: None,
+            update_recycled=lambda _item_id, _entry: None,
+            insert_new=lambda _idx, entry: tree.insert("", "end", iid=entry[0], values=entry[1], tags=entry[2]),
+            set_mapping=lambda _key, _item_id: None,
+            mapping_get=lambda key: key if tree.exists(key) else None,
+            get_key=lambda entry: entry[0],
+            set_row_snapshot=lambda key, values: rows_snapshot.__setitem__(key, values),
+            get_order=lambda: mod_order,
+            _get_rows=lambda key: mod_rows.get(key),
+            finalize_cb=_finalize_online,
+            set_refresh_job=lambda v: setattr(self, "_online_refresh_job", v),
+            move_item=lambda item_id, idx: tree.move(item_id, "", idx),
+            logger_name="ModManagement",
+        )
+        if pending_insert:
+            insert_batch(0, None)
+            return
+        _finalize_online()
 
     def show_browse_context_menu(self, event) -> None:
         """顯示線上模組右鍵選單。
@@ -2973,7 +3297,7 @@ class ModManagementFrame:
         if not download_url or not filename:
             UIUtils.show_error("錯誤", "無法取得下載連結或檔名", dialog)
             return
-        self._add_pending_online_install(
+        if self._add_pending_online_install(
             PendingOnlineInstall(
                 project_id=str(getattr(mod, "project_id", "") or "").strip(),
                 project_name=str(getattr(mod, "name", "未知模組") or "未知模組").strip(),
@@ -2984,8 +3308,8 @@ class ModManagementFrame:
                 server_side=str(getattr(mod, "server_side", "") or "").strip(),
                 client_side=str(getattr(mod, "client_side", "") or "").strip(),
             )
-        )
-        dialog.destroy()
+        ):
+            dialog.destroy()
 
     def _format_pending_install_review_text(self, review_entry: PendingInstallReviewEntry) -> str:
         """格式化待安裝項目的 review 內容。"""
@@ -3084,6 +3408,10 @@ class ModManagementFrame:
         if online_group_counts.get("blocked", 0):
             online_skipped_parts.append(f"需先處理 {online_group_counts['blocked']} 項")
         online_skipped_text = "\n略過項目：\n- " + "\n- ".join(online_skipped_parts) if online_skipped_parts else ""
+        unique_dependency_keys, duplicate_dependency_count = self._collect_unique_dependency_install_keys(
+            actionable_entries
+        )
+        dependency_install_count = len(unique_dependency_keys)
         completion_notes = self._format_completion_notes(
             [
                 *[
@@ -3106,30 +3434,44 @@ class ModManagementFrame:
 
         def install_task(cancel_token: CancellationToken | None = None) -> None:
             succeeded_keys: set[str] = set()
-            total_steps = sum(
-                len(self._get_enabled_dependency_install_items(entry.dependency_plan)) + 1
-                for entry in actionable_entries
-            )
+            processed_dependency_keys: set[tuple[str, str, str, str]] = set()
+            total_steps = dependency_install_count + len(actionable_entries)
             current_step = 0
             try:
                 if cancel_token and cancel_token.is_cancelled():
                     self.update_status_safe("安裝清單已取消")
                     return
-                logger.info("安裝清單背景執行開始: actionable=%d total_steps=%d", len(actionable_entries), total_steps)
+                logger.info(
+                    "安裝清單背景執行開始: actionable=%d dependency_unique=%d dependency_duplicated=%d total_steps=%d",
+                    len(actionable_entries),
+                    dependency_install_count,
+                    duplicate_dependency_count,
+                    total_steps,
+                )
                 for review_entry in actionable_entries:
                     if cancel_token and cancel_token.is_cancelled():
                         self.update_status_safe("安裝清單已取消")
                         return
                     pending = review_entry.pending
                     for dependency_item in self._get_enabled_dependency_install_items(review_entry.dependency_plan):
+                        dependency_key = self._build_dependency_install_key(dependency_item)
+                        if dependency_key in processed_dependency_keys:
+                            logger.info(
+                                "略過重複必要依賴下載: %s (%s)",
+                                dependency_item.project_name,
+                                dependency_item.version_name,
+                            )
+                            continue
+                        processed_dependency_keys.add(dependency_key)
                         if cancel_token and cancel_token.is_cancelled():
                             self.update_status_safe("安裝清單已取消")
                             return
-                        self.update_status_safe(f"正在安裝必要依賴：{dependency_item.project_name}")
-                        installed_dependency = manager.install_remote_mod_file(
-                            dependency_item.download_url,
-                            dependency_item.filename,
-                            progress_callback=self._make_step_progress_callback(current_step, total_steps),
+                        installed_dependency = self._install_dependency_item(
+                            manager,
+                            dependency_item,
+                            current_step=current_step,
+                            total_steps=total_steps,
+                            status_message="正在安裝必要依賴",
                         )
                         if installed_dependency is None:
                             raise RuntimeError(f"必要依賴安裝失敗：{dependency_item.project_name}")
@@ -3137,13 +3479,17 @@ class ModManagementFrame:
                     primary_file = getattr(pending.version, "primary_file", None) or {}
                     filename = str(primary_file.get("filename", "") or "").strip()
                     download_url = str(primary_file.get("url", "") or "").strip()
+                    expected_hash = self._resolve_expected_download_hash(pending.version)
                     self.update_status_safe(
                         f"正在安裝模組：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
                     )
                     installed_path = manager.install_remote_mod_file(
                         download_url,
                         filename,
-                        progress_callback=self._make_step_progress_callback(current_step, total_steps),
+                        **self._build_download_kwargs(
+                            self._make_step_progress_callback(current_step, total_steps),
+                            expected_hash or None,
+                        ),
                     )
                     if installed_path is None:
                         raise RuntimeError(f"模組安裝失敗：{pending.project_name}")
@@ -3159,12 +3505,25 @@ class ModManagementFrame:
                 ]
                 self._refresh_online_queue_button()
                 self.update_progress_safe(1.0)
-                self.update_status_safe(f"已完成 {len(succeeded_keys)} 個安裝項目")
+                self.update_status_safe(
+                    f"已完成 {len(succeeded_keys)} 個模組安裝，必要依賴已補裝 {dependency_install_count} 個"
+                    + (f"，並合併 {duplicate_dependency_count} 個重複項目" if duplicate_dependency_count else "")
+                )
                 self.ui_queue.put(self.load_local_mods)
                 self.ui_queue.put(
                     lambda: UIUtils.show_info(
                         "安裝完成",
-                        f"已安裝 {len(succeeded_keys)} 個排程項目。"
+                        f"已完成 {len(succeeded_keys)} 個模組安裝。"
+                        + (
+                            f"\n必要依賴：已補裝 {dependency_install_count} 個。"
+                            + (
+                                f"已合併 {duplicate_dependency_count} 個重複項目，避免重複下載。"
+                                if duplicate_dependency_count
+                                else ""
+                            )
+                            if dependency_install_count
+                            else "\n必要依賴：本次無需額外補裝。"
+                        )
                         + (
                             f"\n仍有 {len(self.pending_online_installs)} 個項目保留在安裝清單中。"
                             if self.pending_online_installs
@@ -3217,6 +3576,8 @@ class ModManagementFrame:
             UIUtils.show_info("安裝清單", "目前安裝清單是空的。", self.parent)
             return
         review_entries = self._prepare_online_install_review_entries()
+        actionable_entries = [entry for entry in review_entries if entry.actionable]
+        _, duplicate_dependency_count = self._collect_unique_dependency_install_keys(actionable_entries)
         review_entry_map = {
             self._build_pending_install_key(
                 entry.pending.project_id, getattr(entry.pending.version, "version_id", "")
@@ -3332,7 +3693,11 @@ class ModManagementFrame:
             )
             overview_label.configure(
                 text=self._format_review_overview_text(
-                    review_entries, review_nodes, action_label="安裝", global_notes=global_review_notes
+                    review_entries,
+                    review_nodes,
+                    action_label="安裝",
+                    global_notes=global_review_notes,
+                    deduped_dependency_count=duplicate_dependency_count,
                 )
             )
 
@@ -3674,21 +4039,26 @@ class ModManagementFrame:
                 for review_entry in actionable_entries:
                     candidate = review_entry.candidate
                     for dependency_item in self._get_enabled_dependency_install_items(review_entry.dependency_plan):
-                        self.update_status_safe(f"正在更新所需依賴：{dependency_item.project_name}")
-                        installed_dependency = manager.install_remote_mod_file(
-                            dependency_item.download_url,
-                            dependency_item.filename,
-                            progress_callback=self._make_step_progress_callback(current_step, total_steps),
+                        installed_dependency = self._install_dependency_item(
+                            manager,
+                            dependency_item,
+                            current_step=current_step,
+                            total_steps=total_steps,
+                            status_message="正在更新所需依賴",
                         )
                         if installed_dependency is None:
                             raise RuntimeError(f"依賴安裝失敗：{dependency_item.project_name}")
                         current_step += 1
                     self.update_status_safe(f"正在更新模組：{candidate.project_name}")
+                    expected_hash = self._resolve_expected_download_hash(candidate.target_version)
                     updated_path = manager.replace_local_mod_file(
                         candidate.local_mod,
                         candidate.download_url,
                         candidate.target_filename,
-                        progress_callback=self._make_step_progress_callback(current_step, total_steps),
+                        **self._build_download_kwargs(
+                            self._make_step_progress_callback(current_step, total_steps),
+                            expected_hash or None,
+                        ),
                     )
                     if updated_path is None:
                         raise RuntimeError(f"模組更新失敗：{candidate.project_name}")

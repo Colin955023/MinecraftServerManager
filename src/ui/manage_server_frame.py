@@ -27,6 +27,7 @@ from ..utils import (
     Spacing,
     SubprocessUtils,
     UIUtils,
+    get_settings_manager,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
     get_logger,
@@ -166,9 +167,12 @@ class ManageServerFrame(ctk.CTkFrame):
             return
         self._widgets_created = True
         main_container = ctk.CTkFrame(self, fg_color="transparent")
-        main_container.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
+        main_container.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
+
         title_label = ctk.CTkLabel(
-            main_container, text="⚙️ 管理伺服器", font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")
+            main_container,
+            text="⚙️ 管理伺服器",
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
         title_label.pack(pady=(0, Spacing.XL))
         self.create_controls(main_container)
@@ -179,14 +183,14 @@ class ManageServerFrame(ctk.CTkFrame):
         """建立控制區。
 
         Args:
-            parent: 父容器。
+            parent: 控制區的父容器。
+
+        Returns:
+            None。
         """
-        control_frame = ctk.CTkFrame(parent)
+        control_frame = ctk.CTkFrame(parent, fg_color="transparent")
         control_frame.pack(fill="x", pady=(0, Spacing.XL))
-        control_title = ctk.CTkLabel(
-            control_frame, text="偵測設定", font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")
-        )
-        control_title.pack(anchor="w", pady=(Spacing.LARGE_MINUS, Spacing.SMALL_PLUS), padx=(Spacing.LARGE_MINUS, 0))
+
         path_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         path_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=(0, Spacing.SMALL_PLUS))
         ctk.CTkLabel(path_frame, text="偵測路徑:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
@@ -199,6 +203,7 @@ class ManageServerFrame(ctk.CTkFrame):
             path_frame, text="瀏覽", command=self.browse_path, button_type="small"
         )
         browse_button.pack(side="left", padx=(Spacing.TINY, 0))
+
         button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
         button_frame.pack(pady=(0, Spacing.LARGE_MINUS))
         detect_button = UIUtils.create_styled_button(
@@ -558,9 +563,8 @@ class ManageServerFrame(ctk.CTkFrame):
         path = filedialog.askdirectory(title="選擇伺服器目錄")
         if path:
             abs_path = Path(path).resolve()
-            norm_path = str(abs_path)
-            base_dir = norm_path
-            servers_root = None
+            base_dir = str(abs_path)
+            servers_root: str | None = None
             if self.set_servers_root:
                 try:
                     servers_root = self.set_servers_root(base_dir)
@@ -570,18 +574,21 @@ class ManageServerFrame(ctk.CTkFrame):
                     )
                     UIUtils.show_error("錯誤", f"無法寫入設定: {e}", self.winfo_toplevel())
                     return
-            if not servers_root:
-                servers_root = str((Path(base_dir) / "servers").resolve())
-            servers_root_path = Path(servers_root)
-            if not servers_root_path.exists():
+                if not servers_root:
+                    return
+            else:
                 try:
-                    servers_root_path.mkdir(parents=True, exist_ok=True)
+                    settings = get_settings_manager()
+                    settings.set_servers_root(base_dir)
+                    servers_root = str(settings.get_validated_servers_root_path(create=True))
                 except Exception as e:
                     logger.bind(component="").error(
-                        f"無法建立 servers 資料夾: {e}\n{traceback.format_exc()}", "ManageServerFrame"
+                        f"寫入伺服器路徑設定失敗: {e}\n{traceback.format_exc()}", "ManageServerFrame"
                     )
-                    UIUtils.show_error("錯誤", f"無法建立 servers 資料夾: {e}", self.winfo_toplevel())
+                    UIUtils.show_error("錯誤", f"無法寫入設定: {e}", self.winfo_toplevel())
                     return
+            if servers_root is None:
+                return
             self.detect_path_var.set(servers_root)
             self.server_manager.servers_root = Path(servers_root)
             self.refresh_servers()
@@ -1078,12 +1085,12 @@ class ManageServerFrame(ctk.CTkFrame):
         return self._build_server_refresh_payload(self._build_server_display_data())
 
     def _format_server_path_for_display(self, raw_path: str) -> str:
-        """將絕對路徑轉為易讀的 `servers\\<name>` 形式。"""
+        """將絕對路徑轉為易讀的 servers 子路徑形式。"""
         try:
             servers_root = Path(self.server_manager.servers_root).resolve()
             resolved = Path(raw_path).resolve()
             relative = resolved.relative_to(servers_root)
-            return f"servers\\{relative}"
+            return str(Path("servers") / relative)
         except Exception:
             return str(raw_path)
 

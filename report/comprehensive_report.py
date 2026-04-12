@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = REPO_ROOT / "report"
 HTML_REPORT_PATH = REPORT_DIR / "comprehensive_report.html"
 PYTHON_EXECUTABLE = Path(sys.executable)
-SCRIPTS_DIR = PYTHON_EXECUTABLE.parent
+SCRIPTS_DIR = PYTHON_EXECUTABLE.parents[0]
 
 MAX_DETAIL_ITEMS = 250
 TOOL_TIMEOUT_SECONDS = 180
@@ -1840,7 +1840,7 @@ def main() -> int:
     end_step(idx, started, f"findings={len(docstring_result.findings)}")
 
     output_html_path = HTML_REPORT_PATH
-    output_html_path.parent.mkdir(parents=True, exist_ok=True)
+    output_html_path.parents[0].mkdir(parents=True, exist_ok=True)
 
     summary = {
         "code_quality": len(code_quality_findings.findings),

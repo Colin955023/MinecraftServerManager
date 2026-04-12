@@ -6,12 +6,14 @@ import contextlib
 import re
 import threading
 import time
+import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any
 import toml
 from ..utils import (
     HTTPUtils,
@@ -93,11 +95,26 @@ class ModManager:
     def __init__(self, server_path: str, server_config=None) -> None:
         self.server_path = Path(server_path)
         self.mods_path = self.server_path / "mods"
+        self.download_staging_root = self.server_path / ".download_staging"
         self.server_config = server_config
         self._modrinth_identity_cache: dict[str, tuple[str, str]] = {}
-        self.mods_path.mkdir(exist_ok=True)
+        self.mods_path.mkdir(parents=True, exist_ok=True)
+        self.download_staging_root.mkdir(parents=True, exist_ok=True)
         self.index_manager: ModIndexManager = ModIndexManager(server_path)
         self.on_mod_list_changed: Callable | None = None
+
+    @staticmethod
+    def _normalize_expected_hash(expected_hash: str | None) -> tuple[str, str]:
+        normalized_hash = str(expected_hash or "").strip().lower()
+        if not normalized_hash:
+            return ("", "")
+        if len(normalized_hash) == 40:
+            return (normalized_hash, "sha1")
+        if len(normalized_hash) == 64:
+            return (normalized_hash, "sha256")
+        if len(normalized_hash) == 128:
+            return (normalized_hash, "sha512")
+        return (normalized_hash, "")
 
     def scan_mods(self) -> list[LocalModInfo]:
         """掃描 mods 目錄中的模組檔案並建立模組資訊列表。
@@ -804,7 +821,11 @@ class ModManager:
         return [mod for mod in mods if mod.status == ModStatus.ENABLED]
 
     def install_remote_mod_file(
-        self, download_url: str, filename: str, progress_callback: Callable[[int, int], None] | None = None
+        self,
+        download_url: str,
+        filename: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+        expected_hash: str | None = None,
     ) -> Path | None:
         """下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。
 
@@ -812,6 +833,7 @@ class ModManager:
             download_url: 遠端檔案下載網址。
             filename: 要寫入的檔名。
             progress_callback: 可選的下載進度回呼。
+            expected_hash: 可選的預期檔案雜湊，用於下載驗證。
 
         Returns:
             安裝成功時回傳目標檔案路徑，失敗時回傳 None。
@@ -826,13 +848,39 @@ class ModManager:
             logger.error(f"安裝遠端模組失敗：不支援的檔案類型 {safe_filename}", "ModManager")
             return None
         try:
-            self.mods_path.mkdir(parents=True, exist_ok=True)
             target_path = self.mods_path / safe_filename
-            logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}", "ModManager")
-            downloaded = HTTPUtils.download_file(normalized_url, str(target_path), progress_callback=progress_callback)
-            if not downloaded:
-                logger.warning(f"遠端模組下載未完成: {safe_filename}", "ModManager")
+            normalized_expected_hash, expected_hash_algorithm = self._normalize_expected_hash(expected_hash)
+            if normalized_expected_hash and not expected_hash_algorithm:
+                logger.error(
+                    f"安裝遠端模組失敗：無法判定雜湊演算法（長度 {len(normalized_expected_hash)}）",
+                    "ModManager",
+                )
                 return None
+            if normalized_expected_hash and target_path.exists():
+                current_hash = PathUtils.calculate_checksum(target_path, expected_hash_algorithm)
+                if current_hash and current_hash == normalized_expected_hash:
+                    if progress_callback:
+                        try:
+                            size = target_path.stat().st_size
+                            progress_callback(size, size)
+                        except OSError as e:
+                            logger.exception(f"更新進度回呼時發生錯誤: {e}")
+                    logger.info(f"遠端模組已存在且雜湊一致，略過下載: {safe_filename}", "ModManager")
+                    return target_path
+            verification_note = f"，含雜湊驗證({expected_hash_algorithm})" if normalized_expected_hash else ""
+            logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}", "ModManager")
+            with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
+                staging_path = Path(staging_dir) / safe_filename
+                download_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
+                if normalized_expected_hash:
+                    download_kwargs["expected_hash"] = normalized_expected_hash
+                downloaded = HTTPUtils.download_file(normalized_url, str(staging_path), **download_kwargs)
+                if not downloaded:
+                    logger.warning(f"遠端模組下載未完成: {safe_filename}", "ModManager")
+                    return None
+                if not PathUtils.replace_within(self.server_path, staging_path, target_path):
+                    logger.warning(f"遠端模組無法原子寫入目標路徑: {safe_filename}", "ModManager")
+                    return None
             if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
                 self.on_mod_list_changed()
             logger.info(f"遠端模組安裝完成: {safe_filename}", "ModManager")
@@ -857,6 +905,7 @@ class ModManager:
         download_url: str,
         filename: str,
         progress_callback: Callable[[int, int], None] | None = None,
+        expected_hash: str | None = None,
     ) -> Path | None:
         """以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。
 
@@ -865,6 +914,7 @@ class ModManager:
             download_url: 遠端檔案下載網址。
             filename: 新版本檔名。
             progress_callback: 可選的下載進度回呼。
+            expected_hash: 可選的預期檔案雜湊，用於下載驗證。
 
         Returns:
             更新成功時回傳最終檔案路徑，失敗時回傳 None。
@@ -872,20 +922,28 @@ class ModManager:
         if local_mod is None:
             logger.error("更新本地模組失敗：local_mod 為空", "ModManager")
             return None
-        installed_path = self.install_remote_mod_file(download_url, filename, progress_callback=progress_callback)
+        install_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
+        if str(expected_hash or "").strip():
+            install_kwargs["expected_hash"] = expected_hash
+        installed_path = self.install_remote_mod_file(download_url, filename, **install_kwargs)
         if installed_path is None:
             return None
         final_path = installed_path
         try:
             if local_mod.status == ModStatus.DISABLED and installed_path.suffix == ".jar":
                 disabled_path = installed_path.with_name(installed_path.name + ".disabled")
-                disabled_path.unlink(missing_ok=True)
+                PathUtils.delete_within(self.server_path, disabled_path)
                 installed_path.rename(disabled_path)
                 final_path = disabled_path
             old_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
             old_path = Path(old_path_raw).resolve(strict=False) if old_path_raw else None
-            if old_path and old_path != final_path.resolve(strict=False) and old_path.exists():
-                old_path.unlink(missing_ok=True)
+            if (
+                old_path
+                and old_path != final_path.resolve(strict=False)
+                and old_path.exists()
+                and not PathUtils.delete_within(self.server_path, old_path)
+            ):
+                logger.warning(f"略過刪除不在伺服器目錄內的舊模組檔案: {old_path}")
             if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
                 self.on_mod_list_changed()
             return final_path

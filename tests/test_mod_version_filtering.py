@@ -16,6 +16,7 @@ from src.utils import (
 def test_normalize_hash_algorithm_falls_back_to_sha512() -> None:
     assert normalize_hash_algorithm(None) == MODRINTH_PREFERRED_HASH_ALGORITHM
     assert normalize_hash_algorithm("SHA1") == "sha1"
+    assert normalize_hash_algorithm("sha256") == "sha256"
     assert normalize_hash_algorithm("md5") == MODRINTH_PREFERRED_HASH_ALGORITHM
 
 
@@ -30,10 +31,11 @@ def test_select_primary_file_prefers_primary_jar_then_first_dict() -> None:
 
 
 def test_extract_primary_file_hash_uses_selected_algorithm() -> None:
-    version = SimpleNamespace(primary_file={"hashes": {"sha512": " ABC123 ", "sha1": " DEF456 "}})
+    version = SimpleNamespace(primary_file={"hashes": {"sha512": " ABC123 ", "sha1": " DEF456 ", "sha256": " GHI789 "}})
 
     assert extract_primary_file_hash(version) == "abc123"
     assert extract_primary_file_hash(version, "sha1") == "def456"
+    assert extract_primary_file_hash(version, "sha256") == "ghi789"
     assert extract_primary_file_hash(SimpleNamespace(primary_file={"hashes": "bad"})) == ""
 
 

@@ -43,7 +43,7 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
         寫入成功時回傳 True，失敗時回傳 False。
     """
     p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    p.parents[0].mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, indent=indent, ensure_ascii=False)
 
     if skip_if_unchanged and p.exists():

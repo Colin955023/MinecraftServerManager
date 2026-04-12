@@ -30,6 +30,7 @@ class OnlineDependencyInstallItem:
     enabled: bool = True
     is_optional: bool = False
     provider: str = "modrinth"
+    expected_hash: str = ""
     required_by: list[str] = field(default_factory=list)
     decision_source: str = "required:auto"
     graph_depth: int = 1
@@ -151,6 +152,7 @@ def _build_online_dependency_install_item(payload: Any) -> OnlineDependencyInsta
         enabled=bool(payload.get("enabled", True)),
         is_optional=bool(payload.get("is_optional", False)),
         provider=_normalize_text_value(payload, "provider", "modrinth") or "modrinth",
+        expected_hash=_normalize_text_value(payload, "expected_hash"),
         required_by=_normalize_string_list(payload.get("required_by", [])),
         decision_source=_normalize_text_value(payload, "decision_source") or "required:auto",
         graph_depth=graph_depth,
@@ -182,6 +184,7 @@ def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
         "filename": _normalize_text_value(item, "filename"),
         "download_url": _normalize_text_value(item, "download_url"),
         "parent_name": _normalize_text_value(item, "parent_name"),
+        "expected_hash": _normalize_text_value(item, "expected_hash"),
         "required_by": _normalize_required_by(item),
         "maybe_installed": bool(_get_source_value(item, "maybe_installed", False)),
         "status_note": _normalize_text_value(item, "status_note"),

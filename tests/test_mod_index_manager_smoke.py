@@ -157,7 +157,7 @@ def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_look
 def test_compute_file_hash_recomputes_when_file_content_changes(tmp_path: Path) -> None:
     ModIndexManager(str(tmp_path))
     file_path = tmp_path / "mods" / "cached.jar"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"first-content")
 
     first_hash = compute_file_hash(str(file_path), "sha512")

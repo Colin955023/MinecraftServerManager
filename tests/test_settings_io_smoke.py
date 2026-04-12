@@ -52,6 +52,25 @@ def test_settings_manager_normalizes_servers_folder_and_validates_root(tmp_path,
 
 
 @pytest.mark.smoke
+def test_settings_manager_set_servers_root_then_validate_creates_missing_servers_folder(tmp_path, monkeypatch) -> None:
+    user_data_dir = tmp_path / "user_data"
+    monkeypatch.setattr(
+        settings_module.RuntimePaths,
+        "get_user_data_dir",
+        staticmethod(lambda: user_data_dir),
+    )
+
+    manager = settings_module.SettingsManager()
+    manager.set_servers_root(str(tmp_path / "workspace"))
+    validated_root = manager.get_validated_servers_root_path(create=True)
+
+    assert validated_root == (tmp_path / "workspace" / "servers").resolve()
+    assert manager.get_servers_root() == str((tmp_path / "workspace").resolve())
+    assert validated_root.exists() is True
+    assert validated_root.is_dir() is True
+
+
+@pytest.mark.smoke
 def test_settings_manager_validated_servers_root_requires_configuration(tmp_path, monkeypatch) -> None:
     user_data_dir = tmp_path / "user_data"
     monkeypatch.setattr(

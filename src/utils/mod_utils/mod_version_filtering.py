@@ -18,7 +18,7 @@ def normalize_hash_algorithm(algorithm: str | None) -> str:
     """
 
     normalized = normalize_identifier(algorithm)
-    if normalized in {"sha512", "sha1"}:
+    if normalized in {"sha512", "sha1", "sha256"}:
         return normalized
     return MODRINTH_PREFERRED_HASH_ALGORITHM
 

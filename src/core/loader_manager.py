@@ -109,7 +109,7 @@ class LoaderManager(Singleton):
                     "-loader",
                     loader_version,
                     "-dir",
-                    str(Path(download_path).parent),
+                    str(Path(download_path).parents[0]),
                 ],
                 minecraft_version=minecraft_version,
                 _loader_version=loader_version,
@@ -397,7 +397,7 @@ class LoaderManager(Singleton):
         parent_window=None,
     ) -> bool | str:
         """Fabric 與 Forge 共用：下載安裝器 → （Fabric 需先下載官方伺服器）→ 執行安裝器。"""
-        installer_path = str(Path(download_path).parent / Path(installer_url).name)
+        installer_path = str(Path(download_path).parents[0] / Path(installer_url).name)
         if need_vanilla:
             dl_start, dl_end = (10, 15)
             vanilla_start, vanilla_end = (15, 90)
@@ -432,7 +432,7 @@ class LoaderManager(Singleton):
         try:
             process = SubprocessUtils.popen_checked(
                 cmd,
-                cwd=str(Path(download_path).parent),
+                cwd=str(Path(download_path).parents[0]),
                 stdin=SubprocessUtils.DEVNULL,
                 stdout=SubprocessUtils.PIPE,
                 stderr=SubprocessUtils.STDOUT,
@@ -475,7 +475,7 @@ class LoaderManager(Singleton):
             logger.exception(f"執行安裝器時發生錯誤: {e}")
             return self._fail(progress_callback, f"執行安裝器時發生錯誤: {e}", debug=f"[DEBUG] Popen exception: {e}")
         try:
-            base_dir = Path(download_path).parent
+            base_dir = Path(download_path).parents[0]
             run_bat_path = base_dir / "run.bat"
             run_sh_path = base_dir / "run.sh"
             start_server_path = base_dir / "start_server.bat"

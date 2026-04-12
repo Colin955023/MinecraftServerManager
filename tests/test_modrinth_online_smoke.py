@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -1718,7 +1719,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
 @pytest.mark.smoke
 def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "example-mod.jar"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"old-mod")
     current_hash = mod_search_service_module.compute_file_hash(str(file_path), "sha512")
 
@@ -2541,9 +2542,12 @@ def test_build_local_mod_update_plan_adaptive_revalidation_batch_shrinks_on_high
 def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
 
-    def fake_download_file(url, local_path, progress_callback=None, **_kwargs):
+    def fake_download_file(url, local_path, progress_callback=None, expected_hash=None, **_kwargs):
         assert url == "https://example.invalid/example.jar"
+        assert expected_hash == "c" * 64
         path = Path(local_path)
+        assert ".download_staging" in path.parts
+        assert path.parents[0] != tmp_path / "mods"
         path.write_bytes(b"jar-bytes")
         if progress_callback:
             progress_callback(10, 10)
@@ -2554,6 +2558,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
     installed_path = manager.install_remote_mod_file(
         "https://example.invalid/example.jar",
         "example.jar",
+        expected_hash="c" * 64,
     )
 
     assert installed_path == tmp_path / "mods" / "example.jar"
@@ -2562,10 +2567,33 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
 
 
 @pytest.mark.smoke
+def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+    target_path = tmp_path / "mods" / "example.jar"
+    target_path.parents[0].mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(b"jar-bytes")
+    expected_hash = hashlib.sha256(b"jar-bytes").hexdigest()
+
+    def fake_download_file(*_args, **_kwargs):
+        raise AssertionError("verified target should skip download")
+
+    monkeypatch.setattr(mod_manager_module.HTTPUtils, "download_file", fake_download_file)
+
+    installed_path = manager.install_remote_mod_file(
+        "https://example.invalid/example.jar",
+        "example.jar",
+        expected_hash=expected_hash,
+    )
+
+    assert installed_path == target_path
+    assert installed_path.read_bytes() == b"jar-bytes"
+
+
+@pytest.mark.smoke
 def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
-    old_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.parents[0].mkdir(parents=True, exist_ok=True)
     old_path.write_bytes(b"old-bytes")
     new_path = tmp_path / "mods" / "example-new.jar"
 
@@ -2580,7 +2608,50 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
         file_path=str(old_path),
     )
 
-    def fake_install_remote_mod_file(download_url, filename, progress_callback=None):
+    def fake_install_remote_mod_file(download_url, filename, progress_callback=None, expected_hash=None):
+        assert download_url == "https://example.invalid/example-new.jar"
+        assert filename == "example-new.jar"
+        assert expected_hash == "d" * 64
+        new_path.write_bytes(b"new-bytes")
+        if progress_callback:
+            progress_callback(10, 10)
+        return new_path
+
+    monkeypatch.setattr(manager, "install_remote_mod_file", fake_install_remote_mod_file)
+
+    replaced_path = manager.replace_local_mod_file(
+        local_mod,
+        "https://example.invalid/example-new.jar",
+        "example-new.jar",
+        expected_hash="d" * 64,
+    )
+
+    assert replaced_path == new_path
+    assert new_path.exists()
+    assert old_path.exists() is False
+
+
+@pytest.mark.smoke
+def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+    external_dir = tmp_path.parents[0] / f"{tmp_path.name}-external"
+    external_dir.mkdir(parents=True, exist_ok=True)
+    old_path = external_dir / "example-old.jar"
+    old_path.write_bytes(b"old-bytes")
+    new_path = tmp_path / "mods" / "example-new.jar"
+
+    local_mod = mod_manager_module.LocalModInfo(
+        id="example-old",
+        name="Example Mod",
+        filename="example-old.jar",
+        version="1.0.0",
+        minecraft_version="1.21",
+        loader_type="Fabric",
+        status=mod_manager_module.ModStatus.ENABLED,
+        file_path=str(old_path),
+    )
+
+    def fake_install_remote_mod_file(download_url, filename, progress_callback=None, _expected_hash=None):
         assert download_url == "https://example.invalid/example-new.jar"
         assert filename == "example-new.jar"
         new_path.write_bytes(b"new-bytes")
@@ -2598,13 +2669,13 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
 
     assert replaced_path == new_path
     assert new_path.exists()
-    assert old_path.exists() is False
+    assert old_path.exists() is True
 
 
 @pytest.mark.smoke
 def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "uncached.jar"
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"uncached-content")
 
     local_mod_cached = SimpleNamespace(
@@ -3324,6 +3395,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
                 resolution_source="project_id",
                 resolution_confidence="direct",
                 provider="modrinth",
+                expected_hash="a" * 64,
                 required_by=["Root Mod"],
                 decision_source="required:auto",
                 graph_depth=1,
@@ -3343,6 +3415,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
                 enabled=False,
                 is_optional=True,
                 provider="modrinth",
+                expected_hash="b" * 64,
                 required_by=["Root Mod"],
                 decision_source="optional:advisory_default_disabled",
                 graph_depth=2,
@@ -3370,11 +3443,13 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     assert payload["root_target_version_id"] == "root-ver-1"
     assert payload["root_target_version_name"] == "1.2.3"
     assert payload["items"][0]["provider"] == "modrinth"
+    assert payload["items"][0]["expected_hash"] == "a" * 64
     assert payload["items"][0]["required_by"] == ["Root Mod"]
     assert payload["items"][0]["decision_source"] == "required:auto"
     assert payload["items"][0]["graph_depth"] == 1
     assert payload["items"][0]["edge_kind"] == "required"
     assert payload["items"][0]["edge_source"] == "required:modrinth_dependency"
+    assert payload["advisory_items"][0]["expected_hash"] == "b" * 64
     assert payload["advisory_items"][0]["decision_source"] == "optional:advisory_default_disabled"
     assert payload["advisory_items"][0]["graph_depth"] == 2
     assert payload["graph_edges"][0]["depth"] == 1
@@ -3383,9 +3458,11 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     assert mod_search_service_module.validate_online_dependency_install_plan_payload(payload) == (True, "ok")
     assert restored.items[0].project_id == "AANobbMI"
     assert restored.items[0].required_by == ["Root Mod"]
+    assert restored.items[0].expected_hash == "a" * 64
     assert restored.items[0].graph_depth == 1
     assert restored.items[0].edge_kind == "required"
     assert restored.advisory_items[0].decision_source == "optional:advisory_default_disabled"
+    assert restored.advisory_items[0].expected_hash == "b" * 64
 
 
 @pytest.mark.smoke

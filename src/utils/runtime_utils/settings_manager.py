@@ -3,7 +3,6 @@
 """
 
 import contextlib
-import sys
 import time
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -91,9 +90,7 @@ def _get_default_debug_settings(*, enabled: bool) -> DebugSettings:
 
 def _get_default_settings() -> dict[str, Any]:
     """取得預設設定（根據環境動態計算）"""
-    is_nuitka = "__compiled__" in globals()
-    is_packaged = bool(getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS") or is_nuitka)
-    default_debug_logging = not is_packaged
+    default_debug_logging = not RuntimePaths.is_packaged()
     return {
         "servers_root": "",
         "auto_update_enabled": True,
@@ -130,7 +127,7 @@ class SettingsManager:
             return ""
         normalized = str(Path(path_str).expanduser().resolve())
         if Path(normalized).name.lower() == "servers":
-            parent = str(Path(normalized).parent)
+            parent = str(Path(normalized).parents[0])
             if parent:
                 return parent
         return normalized
@@ -281,7 +278,7 @@ class SettingsManager:
         """取得使用者設定的伺服器主資料夾路徑。"""
         return str(self._settings.get("servers_root", "")).strip()
 
-    def set_servers_root(self, path: str) -> None:
+    def set_servers_root(self, path: str | Path) -> None:
         normalized_path = self.normalize_servers_base_dir(path)
         self.set("servers_root", normalized_path)
 

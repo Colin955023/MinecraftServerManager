@@ -17,8 +17,8 @@ def print_error_and_exit(msg: str, exit_code: int = 1):
 
 
 def main():
-    script_dir = Path(__file__).resolve().parent
-    project_root = script_dir.parent
+    script_dir = Path(__file__).resolve().parents[0]
+    project_root = script_dir.parents[0]
     os.chdir(project_root)
 
     is_ci = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"

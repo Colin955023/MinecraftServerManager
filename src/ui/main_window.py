@@ -31,7 +31,6 @@ from ..utils import (
     UIUtils,
     UpdateChecker,
     WindowManager,
-    atomic_write_json,
     get_logger,
     get_settings_manager,
 )
@@ -69,23 +68,6 @@ class MinecraftServerManager:
             self.root.destroy()
             exit(0)
 
-        def _ensure_directory_exists(path: Path):
-            """確保目錄存在"""
-            if not path.exists():
-                try:
-                    path.mkdir(parents=True, exist_ok=True)
-                except Exception as e:
-                    logger.error(f"無法建立資料夾: {e}\n{traceback.format_exc()}")
-                    _fail_exit(f"無法建立資料夾: {e}")
-
-        def _ensure_servers_config_file(path: Path) -> None:
-            """在選定 servers 目錄後預先建立空設定檔，避免首次建立伺服器時才初始化。"""
-            config_file = path / "servers_config.json"
-            if config_file.exists():
-                return
-            if not atomic_write_json(config_file, {}):
-                logger.warning(f"預先建立 servers_config.json 失敗: {config_file}")
-
         def _prompt_for_directory() -> str:
             """提示選擇目錄"""
             UIUtils.show_info(
@@ -106,33 +88,32 @@ class MinecraftServerManager:
         if new_root:
             try:
                 settings.set_servers_root(new_root)
+                path_obj = settings.get_validated_servers_root_path(create=True)
             except Exception as e:
                 logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
                 UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
+                return ""
         else:
             stored = settings.get_servers_root()
-            base_dir = stored if stored else ""
-            while not base_dir:
-                base_dir = _prompt_for_directory()
-                if base_dir:
+            if stored:
+                try:
+                    path_obj = settings.get_validated_servers_root_path(create=True)
+                except ConfigurationError as exc:
+                    _fail_exit(str(exc))
+                    return ""
+            else:
+                while True:
+                    base_dir = _prompt_for_directory()
+                    if not base_dir:
+                        continue
                     try:
                         settings.set_servers_root(base_dir)
+                        path_obj = settings.get_validated_servers_root_path(create=True)
+                        break
                     except Exception as e:
                         logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
                         UIUtils.show_error("設定錯誤", f"無法寫入設定: {e}", self.root)
-            try:
-                if stored and Path(stored).name.lower() == "servers":
-                    settings.set_servers_root(stored)
-            except Exception as e:
-                logger.debug(f"向後相容性路徑檢查失敗: {e}", "MainWindow")
-        try:
-            path_obj = settings.get_validated_servers_root_path(create=True)
-        except ConfigurationError as exc:
-            _fail_exit(str(exc))
-            return ""
-        _ensure_directory_exists(path_obj)
-        _ensure_servers_config_file(path_obj)
-        self.servers_root = str(path_obj.resolve())
+        self.servers_root = str(path_obj)
         return self.servers_root
 
     def on_closing(self) -> None:
@@ -999,7 +980,8 @@ class MinecraftServerManager:
                     items = list(target_path.iterdir())
                     if len(items) == 1 and items[0].is_dir():
                         for item in items[0].iterdir():
-                            PathUtils.move_path(item, target_path / item.name)
+                            if not PathUtils.move_within(target_path, item, target_path / item.name):
+                                raise Exception(f"搬移匯入檔案失敗：{item.name}")
                         items[0].rmdir()
                 else:
                     if not PathUtils.copy_dir(source_path, target_path, progress_callback=_on_import_progress):

@@ -265,6 +265,7 @@ class HTTPUtils:
         chunk_size: int = 65536,
         cancel_check: Callable[[], bool] | None = None,
         expected_sha256: str | None = None,
+        expected_hash: str | None = None,
     ) -> bool:
         """下載檔案並儲存到本機路徑。
 
@@ -276,6 +277,7 @@ class HTTPUtils:
             chunk_size: 每次讀取的區塊大小。
             cancel_check: 取消檢查回呼。
             expected_sha256: 預期的 SHA-256 雜湊。
+            expected_hash: 預期的雜湊值，支援 sha1 / sha256 / sha512。
 
         Returns:
             下載成功時回傳 True，失敗時回傳 False。
@@ -289,15 +291,27 @@ class HTTPUtils:
         timeout = cls._normalize_int_value(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
         chunk_size = cls._normalize_int_value(chunk_size, cls.MIN_CHUNK_SIZE)
         local_path_obj = Path(local_path)
-        local_path_obj.parent.mkdir(parents=True, exist_ok=True)
-        # 若提供預期的 SHA-256，先檢查本地檔案是否已符合，以避免重複下載
-        if expected_sha256 and local_path_obj.exists():
+        local_path_obj.parents[0].mkdir(parents=True, exist_ok=True)
+        normalized_expected_hash = str(expected_hash or expected_sha256 or "").strip().lower()
+        expected_hash_algorithm = ""
+        if normalized_expected_hash:
+            if len(normalized_expected_hash) == 40:
+                expected_hash_algorithm = "sha1"
+            elif len(normalized_expected_hash) == 64:
+                expected_hash_algorithm = "sha256"
+            elif len(normalized_expected_hash) == 128:
+                expected_hash_algorithm = "sha512"
+            else:
+                logger.error(f"檔案下載失敗: 無法根據雜湊長度判定演算法 (len={len(normalized_expected_hash)})")
+                return False
+        # 若提供預期雜湊，先檢查本地檔案是否已符合，以避免重複下載
+        if normalized_expected_hash and local_path_obj.exists():
             try:
-                h = hashlib.new("sha256")
+                h = hashlib.new(expected_hash_algorithm)
                 with local_path_obj.open("rb") as f:
                     for chunk in iter(lambda: f.read(8192), b""):
                         h.update(chunk)
-                if h.hexdigest().lower() == expected_sha256.lower():
+                if h.hexdigest().lower() == normalized_expected_hash:
                     # 直接回報完成（若有 progress callback，給予完成狀態）
                     if progress_callback:
                         try:
@@ -309,10 +323,10 @@ class HTTPUtils:
                             logger.debug(f"progress_callback raised: {e}")
                     return True
             except OSError as e:
-                logger.debug(f"檢查本地檔案 SHA-256 失敗，將進行下載: {e}")
+                logger.debug(f"檢查本地檔案雜湊失敗，將進行下載: {e}")
         try:
             with tempfile.NamedTemporaryFile(
-                delete=False, prefix=local_path_obj.name + ".", suffix=".part", dir=local_path_obj.parent
+                delete=False, prefix=local_path_obj.name + ".", suffix=".part", dir=local_path_obj.parents[0]
             ) as tmp_file:
                 temp_path_obj = Path(tmp_file.name)
         except OSError:
@@ -323,8 +337,8 @@ class HTTPUtils:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
-                # 在寫入時同時計算 SHA-256，以便驗證
-                hasher = hashlib.new("sha256")
+                # 在寫入時同時計算檔案雜湊，以便驗證
+                hasher = hashlib.new(expected_hash_algorithm or "sha256")
                 with open(temp_path_obj, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
@@ -341,8 +355,10 @@ class HTTPUtils:
                             progress_callback(downloaded, total_size)
                 # 若提供預期 hash，檢查是否吻合
                 computed = hasher.hexdigest().lower()
-                if expected_sha256 and computed != expected_sha256.lower():
-                    logger.error(f"下載檔案的 SHA-256 不符: expected={expected_sha256} computed={computed}")
+                if normalized_expected_hash and computed != normalized_expected_hash:
+                    logger.error(
+                        f"下載檔案的雜湊不符: algorithm={expected_hash_algorithm} expected={normalized_expected_hash} computed={computed}"
+                    )
                     with contextlib.suppress(OSError):
                         if temp_path_obj.exists():
                             temp_path_obj.unlink()
@@ -351,13 +367,13 @@ class HTTPUtils:
                 local_path_obj.unlink(missing_ok=True)
             temp_path_obj.replace(local_path_obj)
             try:
-                fd = os.open(str(local_path_obj.parent), os.O_RDONLY)
+                fd = os.open(str(local_path_obj.parents[0]), os.O_RDONLY)
                 try:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
             except OSError as e:
-                logger.debug(f"目錄 fsync 失敗 (path={local_path_obj.parent}): {e}")
+                logger.debug(f"目錄 fsync 失敗 (path={local_path_obj.parents[0]}): {e}")
             return True
         except (RequestException, OSError) as e:
             logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {e}")

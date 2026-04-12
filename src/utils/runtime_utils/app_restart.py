@@ -13,6 +13,7 @@ from pathlib import Path
 from ...ui import DialogUtils, TaskUtils
 from .. import (
     PathUtils,
+    RuntimePaths,
     UIUtils,
     get_logger,
     shutdown_logging,
@@ -67,7 +68,7 @@ class AppRestart:
         except Exception:
             is_frozen = False
         try:
-            if not is_frozen and hasattr(sys, "_MEIPASS"):
+            if not is_frozen and RuntimePaths.is_packaged():
                 is_frozen = True
                 if exe_path is None and getattr(sys, "executable", None):
                     with contextlib.suppress(Exception):
@@ -84,7 +85,7 @@ class AppRestart:
         except Exception as e:
             logger.debug(f"檢查打包標記時發生例外: {e}")
         if not is_frozen:
-            is_frozen = bool(getattr(sys, "frozen", False) or getattr(sys, "__compiled__", False))
+            is_frozen = RuntimePaths.is_packaged()
         if is_frozen:
             try:
                 if exe_path is not None and "python" in exe_path.name.lower():
@@ -122,11 +123,12 @@ class AppRestart:
             logger.debug(f"argv0 偵測失敗: {e}")
         script_path: Path | None = None
         try:
-            candidate = Path(__file__).parent.parent / "main.py"
+            project_root = PathUtils.get_project_root()
+            candidate = project_root / "src" / "main.py"
             if candidate.exists() and candidate.is_file():
                 script_path = candidate
             else:
-                found = AppRestart._find_main_in_parents(Path(__file__).parent.parent, max_levels=6)
+                found = AppRestart._find_main_in_parents(project_root, max_levels=6)
                 if found:
                     script_path = found
                 else:
@@ -152,9 +154,9 @@ class AppRestart:
                 candidate2 = cur / "main.py"
                 if candidate2.exists() and candidate2.is_file():
                     return candidate2
-                if cur.parent == cur:
+                if cur.parents[0] == cur:
                     break
-                cur = cur.parent
+                cur = cur.parents[0]
         except Exception:
             return None
         return None
@@ -165,7 +167,7 @@ class AppRestart:
         try:
             candidates = [
                 Path.cwd() / "MinecraftServerManager.exe",
-                Path(__file__).parent.parent.parent / "MinecraftServerManager.exe",
+                RuntimePaths.get_portable_base_dir() / "MinecraftServerManager.exe",
             ]
             try:
                 if sys.executable:
@@ -179,7 +181,7 @@ class AppRestart:
                 logger.debug("加入 sys.argv[0] 候選項失敗: %s", e)
             cur = Path(__file__).resolve(strict=False)
             for _ in range(4):
-                cur = cur.parent
+                cur = cur.parents[0]
                 candidates.append(cur / "MinecraftServerManager.exe")
             for c in candidates:
                 if c is None:
@@ -321,7 +323,7 @@ class AppRestart:
                     if not exists:
                         found = AppRestart._find_main_in_parents(Path.cwd(), max_levels=6)
                         if not found and script_resolved is not None:
-                            found = AppRestart._find_main_in_parents(script_resolved.parent, max_levels=6)
+                            found = AppRestart._find_main_in_parents(script_resolved.parents[0], max_levels=6)
                         if found:
                             script_resolved = found
                             exists = True
@@ -360,7 +362,7 @@ class AppRestart:
             executable_cmd, is_frozen, script_path = AppRestart._get_executable_info()
             restart_success = threading.Event()
             restart_error = threading.Event()
-            script_parent = script_path.parent if script_path is not None else None
+            script_parent = script_path.parents[0] if script_path is not None else None
             _ = str(script_path) if script_path is not None else None
 
             def delayed_restart():
@@ -369,7 +371,7 @@ class AppRestart:
                     time.sleep(delay)
                     if is_frozen:
                         exe_path = executable_cmd[0]
-                        exe_cwd = str(Path(exe_path).parent) if exe_path else None
+                        exe_cwd = str(Path(exe_path).parents[0]) if exe_path else None
                         logger.debug(f"啟動執行檔: {exe_path}, cwd={exe_cwd}")
                         process = SubprocessUtils.popen_detached([exe_path], cwd=exe_cwd)
                     else:
@@ -393,7 +395,7 @@ class AppRestart:
                                 if "python" in interp_name or interp_name.startswith("py"):
                                     if isinstance(script_path, Path):
                                         use_cmd = [interpreter_str, str(script_path)]
-                                        target_cwd = str(script_path.parent)
+                                        target_cwd = str(script_path.parents[0])
                                         logger.debug(f"以 Python 執行檔案重啟: {use_cmd}, 指令={target_cwd}")
                                     else:
                                         logger.debug("script_path 不是 Path，將回退到其他重啟方法")
@@ -401,7 +403,7 @@ class AppRestart:
                                     exe_fb = AppRestart._find_exe_fallback()
                                     if exe_fb:
                                         use_cmd = [str(exe_fb)]
-                                        target_cwd = str(exe_fb.parent)
+                                        target_cwd = str(exe_fb.parents[0])
                                         logger.debug(
                                             f"偵測到非-Python exe，改用 exe fallback 重啟: {use_cmd}, 指令={target_cwd}"
                                         )
@@ -415,13 +417,13 @@ class AppRestart:
                                 )
                                 runner = runner or "python"
                                 use_cmd = [runner, str(found)]
-                                target_cwd = str(found.parent)
+                                target_cwd = str(found.parents[0])
                                 logger.debug(f"在父層找到 main.py，使用檔案重啟: {use_cmd}, 指令={target_cwd}")
                             else:
                                 exe_fallback = AppRestart._find_exe_fallback()
                                 if exe_fallback:
                                     use_cmd = [str(exe_fallback)]
-                                    target_cwd = str(exe_fallback.parent)
+                                    target_cwd = str(exe_fallback.parents[0])
                                     logger.debug(f"使用 exe fallback 重啟: {use_cmd}, 指令={target_cwd}")
                                 else:
                                     runner = interpreter_str or AppRestart._prefer_windowless_python(

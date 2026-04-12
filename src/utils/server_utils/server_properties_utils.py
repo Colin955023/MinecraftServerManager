@@ -326,7 +326,8 @@ class ServerPropertiesHelper:
                     temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
                     if not PathUtils.write_text_file(temp_path, payload):
                         raise OSError("write temp server.properties failed")
-                    PathUtils.move_path(temp_path, properties_file)
+                    if not PathUtils.move_within(properties_file.parents[0], temp_path, properties_file):
+                        raise OSError("move temp server.properties failed")
                     logger.debug(
                         f"已使用 javaproperties 儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
                     )
@@ -399,7 +400,8 @@ class ServerPropertiesHelper:
             temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
             if not PathUtils.write_text_file(temp_path, payload):
                 raise OSError("write temp server.properties failed")
-            PathUtils.move_path(temp_path, properties_file)
+            if not PathUtils.move_within(properties_file.parents[0], temp_path, properties_file):
+                raise OSError("move temp server.properties failed")
             logger.debug(
                 f"已手動儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
             )

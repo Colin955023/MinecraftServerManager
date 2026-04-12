@@ -122,6 +122,84 @@ class _ContextMenuTree:
         self.seen = item_id
 
 
+class _BrowseRefreshTree:
+    def __init__(self, rows: dict[str, dict[str, tuple[str, ...]]], selection: tuple[str, ...] = ()) -> None:
+        self.children = list(rows.keys())
+        self.rows = {
+            item_id: {"values": tuple(row["values"]), "tags": tuple(row["tags"])} for item_id, row in rows.items()
+        }
+        self.deleted: list[str] = []
+        self.inserted: list[tuple[str | None, tuple[str, ...], tuple[str, ...]]] = []
+        self.updated: list[tuple[str, dict[str, tuple[str, ...]]]] = []
+        self.moved: list[tuple[str, int]] = []
+        self._selection = selection
+
+    def winfo_exists(self) -> bool:
+        return True
+
+    def get_children(self, _item: str = "") -> list[str]:
+        return list(self.children)
+
+    def exists(self, item_id: str) -> bool:
+        return item_id in self.rows
+
+    def delete(self, item_id: str) -> None:
+        self.deleted.append(item_id)
+        self.rows.pop(item_id, None)
+        self.children = [child for child in self.children if child != item_id]
+        self._selection = tuple(item for item in self._selection if item != item_id)
+
+    def insert(
+        self,
+        _parent: str,
+        _index: str,
+        *,
+        iid: str | None = None,
+        values: tuple[str, ...] = (),
+        tags: tuple[str, ...] = (),
+    ) -> str:
+        self.inserted.append((iid, tuple(values), tuple(tags)))
+        item_id = iid or f"item-{len(self.children)}"
+        self.rows[item_id] = {"values": tuple(values), "tags": tuple(tags)}
+        self.children.append(item_id)
+        return item_id
+
+    def item(self, item_id: str, option: str | None = None, **kwargs):
+        if kwargs:
+            row = self.rows.setdefault(item_id, {"values": (), "tags": ()})
+            if "values" in kwargs:
+                row["values"] = tuple(kwargs["values"])
+            if "tags" in kwargs:
+                row["tags"] = tuple(kwargs["tags"])
+            self.updated.append((item_id, kwargs))
+            return None
+        row = self.rows[item_id]
+        if option == "values":
+            return row["values"]
+        if option == "tags":
+            return row["tags"]
+        return row
+
+    def move(self, item_id: str, _parent: str, index: int) -> None:
+        if item_id in self.children:
+            self.children.remove(item_id)
+        self.children.insert(index, item_id)
+        self.moved.append((item_id, index))
+
+    def tag_configure(self, *_args, **_kwargs) -> None:
+        return None
+
+    def selection(self) -> tuple[str, ...]:
+        return self._selection
+
+    def selection_set(self, *items: str) -> None:
+        self._selection = tuple(items)
+
+    def after(self, _delay_ms: int, callback):
+        callback()
+        return "after-id"
+
+
 def _pending_install(project_id: str, project_name: str, version_id: str) -> mod_management_module.PendingOnlineInstall:
     return mod_management_module.PendingOnlineInstall(
         project_id=project_id,
@@ -217,6 +295,92 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
     summary = frame._build_online_results_summary_text()
 
     assert summary == "請輸入關鍵字搜尋｜0 筆｜排序 相關性"
+
+
+@pytest.mark.smoke
+def test_refresh_browse_list_uses_incremental_updates_and_row_key_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame_any = cast(Any, frame)
+    frame_any.browse_tree = _BrowseRefreshTree(
+        {
+            "alpha": {
+                "values": ("Alpha Mod", "Author A", "1,000", "舊描述", "Modrinth", "僅伺服器"),
+                "tags": ("alpha", "alpha-slug", "https://example.invalid/alpha"),
+            },
+            "beta": {
+                "values": ("Beta Mod", "Author B", "2,000", "舊描述", "Modrinth", "僅客戶端"),
+                "tags": ("beta", "beta-slug", "https://example.invalid/beta"),
+            },
+        }
+    )
+    frame_any._online_refresh_job = None
+    frame_any._online_refresh_token = 0
+    frame_any._online_tree_render_locked = False
+    frame_any._online_rows_snapshot = {
+        "alpha": (
+            ("Alpha Mod", "Author A", "1,000", "舊描述", "Modrinth", "僅伺服器"),
+            ("alpha", "alpha-slug", "https://example.invalid/alpha"),
+        ),
+        "beta": (
+            ("Beta Mod", "Author B", "2,000", "舊描述", "Modrinth", "僅客戶端"),
+            ("beta", "beta-slug", "https://example.invalid/beta"),
+        ),
+    }
+    frame_any._online_mod_by_row_key = {
+        "alpha": SimpleNamespace(project_id="alpha", slug="alpha-slug", url="https://example.invalid/alpha"),
+        "beta": SimpleNamespace(project_id="beta", slug="beta-slug", url="https://example.invalid/beta"),
+    }
+    frame_any._online_mod_index = {
+        "alpha": frame_any._online_mod_by_row_key["alpha"],
+        "beta": frame_any._online_mod_by_row_key["beta"],
+    }
+    frame_any._refresh_online_results_summary = lambda: None
+    monkeypatch.setattr(frame, "_set_online_tree_render_lock", lambda _locked: None)
+
+    updated_alpha = SimpleNamespace(
+        project_id="alpha",
+        slug="alpha-slug",
+        url="https://example.invalid/alpha",
+        name="Alpha Mod",
+        author="Author A",
+        download_count=1000,
+        description="新描述",
+        source="modrinth",
+        server_side="required",
+    )
+    row_key_only_gamma = SimpleNamespace(
+        project_id="",
+        slug="gamma-slug",
+        url="https://example.invalid/gamma",
+        name="Gamma Mod",
+        author="Author G",
+        download_count=3000,
+        description="Gamma 說明",
+        source="modrinth",
+    )
+    frame.online_mods = [updated_alpha, row_key_only_gamma]
+
+    frame.refresh_browse_list()
+
+    tree = cast(_BrowseRefreshTree, frame_any.browse_tree)
+    assert tree.deleted == ["beta"]
+    assert tree.inserted == [
+        (
+            "gamma-slug",
+            ("Gamma Mod", "Author G", "3,000", "Gamma 說明", "Modrinth", "未知"),
+            ("", "gamma-slug", "https://example.invalid/gamma"),
+        )
+    ]
+    assert tree.updated
+    assert tree.rows["alpha"]["values"] == ("Alpha Mod", "Author A", "1,000", "新描述", "Modrinth", "僅伺服器")
+    assert tree.children == ["alpha", "gamma-slug"]
+
+    tree.selection_set("gamma-slug")
+    has_selection, project_id, selected_mod = frame._get_selected_online_mod_context()
+
+    assert has_selection is True
+    assert project_id == ""
+    assert selected_mod is row_key_only_gamma
 
 
 @pytest.mark.smoke
@@ -787,6 +951,11 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該只有一個根級節點"
 
+    dependency_nodes = [node for node in nodes if node.node_kind == "dependency"]
+    assert len(dependency_nodes) == 1, "應該把必要依賴列為子節點"
+    assert dependency_nodes[0].values[2] == "Cloth Config"
+    assert "required-by：Fabric API" in dependency_nodes[0].detail
+
     # 驗證分組正確（warning_messages 導致 advisory 分組）
     assert any(node.node_kind == "root" and node.group_key == "advisory" for node in nodes), "應該被分組為 advisory"
 
@@ -828,6 +997,10 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
     assert any(node.values[2] == "Fabric API" for node in root_nodes)
     assert any(node.values[2] == "Lithium" for node in root_nodes)
 
+    dependency_nodes = [node for node in nodes if node.node_kind == "dependency"]
+    assert len(dependency_nodes) == 2, "兩個根項目都應該顯示依賴子節點"
+    assert all("required-by：Fabric API、Lithium" in node.detail for node in dependency_nodes)
+
 
 @pytest.mark.smoke
 def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> None:
@@ -865,6 +1038,12 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
     assert len(root_nodes) == 2, "應該有兩個根級節點"
     assert any(node.values[2] == "Fabric API" and node.values[0] == "是" for node in root_nodes)
     assert any(node.values[2] == "Lithium" and node.values[0] == "否" for node in root_nodes)
+
+    dependency_nodes = [node for node in nodes if node.node_kind == "dependency"]
+    enabled_dependency = next(node for node in dependency_nodes if node.root_key == "fabric-api::v1")
+    disabled_dependency = next(node for node in dependency_nodes if node.root_key == "lithium::v2")
+    assert "required-by：Fabric API" in enabled_dependency.detail
+    assert "Lithium" not in disabled_dependency.detail
 
 
 @pytest.mark.smoke
@@ -966,6 +1145,107 @@ def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column(
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert root_node.values[5] == "建議確認｜依賴 1｜提醒 1"
+
+
+@pytest.mark.smoke
+def test_install_pending_online_install_queue_deduplicates_shared_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame_any = cast(Any, frame)
+    frame_any.parent = SimpleNamespace()
+
+    first_version = SimpleNamespace(
+        version_id="v1",
+        display_name="1.0.0",
+        primary_file={"filename": "first.jar", "url": "https://example.com/first.jar"},
+    )
+    second_version = SimpleNamespace(
+        version_id="v2",
+        display_name="1.0.0",
+        primary_file={"filename": "second.jar", "url": "https://example.com/second.jar"},
+    )
+    first_pending = mod_management_module.PendingOnlineInstall("first-mod", "First Mod", first_version)
+    second_pending = mod_management_module.PendingOnlineInstall("second-mod", "Second Mod", second_version)
+    frame_any.pending_online_installs = [first_pending, second_pending]
+
+    shared_dependency = SimpleNamespace(
+        project_id="cloth-config",
+        version_id="dep-v1",
+        project_name="Cloth Config",
+        version_name="17.0.0",
+        filename="cloth-config.jar",
+        download_url="https://example.com/cloth-config.jar",
+    )
+    dependency_plan = SimpleNamespace(items=[shared_dependency], advisory_items=[], unresolved_required=[], notes=[])
+    review_entries = [
+        mod_management_module.PendingInstallReviewEntry(
+            pending=first_pending,
+            report=None,
+            dependency_plan=dependency_plan,
+            blocking_reasons=[],
+            warning_messages=[],
+            enabled=True,
+            provider="modrinth",
+            version_type="release",
+        ),
+        mod_management_module.PendingInstallReviewEntry(
+            pending=second_pending,
+            report=None,
+            dependency_plan=SimpleNamespace(
+                items=[shared_dependency], advisory_items=[], unresolved_required=[], notes=[]
+            ),
+            blocking_reasons=[],
+            warning_messages=[],
+            enabled=True,
+            provider="modrinth",
+            version_type="release",
+        ),
+    ]
+
+    install_calls: list[tuple[str, str]] = []
+    shown_messages: list[tuple[str, str]] = []
+    dialog_destroyed: list[bool] = []
+    queued_items: list[Any] = []
+
+    class _ImmediateQueue:
+        def put(self, item) -> None:
+            queued_items.append(item)
+            if callable(item):
+                item()
+
+    def _record_install(download_url: str, filename: str, progress_callback=None) -> str:
+        _ = progress_callback
+        install_calls.append((download_url, filename))
+        return f"/tmp/{filename}"
+
+    frame_any.ui_queue = _ImmediateQueue()
+    frame_any.load_local_mods = lambda: queued_items.append("load_local_mods")
+    frame_any.update_status_safe = lambda _message: None
+    frame_any.update_progress_safe = lambda _value: None
+    frame_any._make_step_progress_callback = lambda *_args, **_kwargs: lambda *_inner_args, **_inner_kwargs: None
+    frame_any.mod_manager = SimpleNamespace(install_remote_mod_file=_record_install)
+
+    monkeypatch.setattr(
+        mod_management_module.TaskUtils, "run_async", lambda task, cancel_token=None: task(cancel_token=cancel_token)
+    )
+
+    def _show_info(title: str, message: str, parent=None) -> None:
+        _ = parent
+        shown_messages.append((title, message))
+
+    monkeypatch.setattr(mod_management_module.UIUtils, "show_info", _show_info)
+
+    dialog = SimpleNamespace(destroy=lambda: dialog_destroyed.append(True))
+
+    frame._install_pending_online_install_queue(dialog, review_entries)
+
+    assert dialog_destroyed == [True]
+    assert install_calls == [
+        (shared_dependency.download_url, shared_dependency.filename),
+        ("https://example.com/first.jar", "first.jar"),
+        ("https://example.com/second.jar", "second.jar"),
+    ]
+    assert any("必要依賴：已補裝 1 個" in message for _title, message in shown_messages)
+    assert any("已合併 1 個重複項目，避免重複下載。" in message for _title, message in shown_messages)
 
 
 @pytest.mark.smoke
@@ -1274,6 +1554,69 @@ def test_build_local_update_review_subtitle_includes_failure_matrix_counts() -> 
 
 
 @pytest.mark.smoke
+def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame_any = cast(Any, frame)
+    frame_any.pending_online_installs = []
+    frame_any.parent = SimpleNamespace()
+    frame_any.update_status = lambda _message: None
+    frame_any._refresh_online_queue_button = lambda: None
+
+    messages: list[tuple[str, str]] = []
+
+    def _show_warning(title: str, message: str, _parent=None) -> None:
+        messages.append((title, message))
+
+    monkeypatch.setattr(mod_management_module.UIUtils, "show_warning", _show_warning)
+
+    blocked_version = SimpleNamespace(version_id="v-client-only", display_name="1.0.0")
+    added = frame._add_pending_online_install(
+        mod_management_module.PendingOnlineInstall(
+            "client-only-mod",
+            "Client Only Mod",
+            blocked_version,
+            server_side="unsupported",
+            client_side="required",
+        )
+    )
+
+    assert added is False
+    assert frame_any.pending_online_installs == []
+    assert messages == [
+        (
+            "無法加入安裝清單",
+            "此模組標記為僅 client 端（server_side=unsupported），不可安裝到伺服器。",
+        )
+    ]
+
+
+@pytest.mark.smoke
+def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame_any = cast(Any, frame)
+    frame_any.pending_online_installs = []
+    frame_any.parent = SimpleNamespace()
+    frame_any.update_status = lambda _message: None
+    frame_any._refresh_online_queue_button = lambda: None
+    monkeypatch.setattr(mod_management_module.UIUtils, "show_warning", lambda *_args, **_kwargs: None)
+
+    first_version = SimpleNamespace(version_id="v1", display_name="1.0.0")
+    second_version = SimpleNamespace(version_id="v1", display_name="1.0.1")
+
+    first_added = frame._add_pending_online_install(
+        mod_management_module.PendingOnlineInstall("fabric-api", "Fabric API", first_version)
+    )
+    second_added = frame._add_pending_online_install(
+        mod_management_module.PendingOnlineInstall("fabric-api", "Fabric API Updated", second_version)
+    )
+
+    assert first_added is True
+    assert second_added is True
+    assert len(frame_any.pending_online_installs) == 1
+    assert frame_any.pending_online_installs[0].project_name == "Fabric API Updated"
+
+
+@pytest.mark.smoke
 def test_build_local_update_review_subtitle_includes_migrated_snapshot_count() -> None:
     text = mod_management_module.ModManagementFrame._build_local_update_review_subtitle(
         "全部模組",
@@ -1351,11 +1694,16 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
     ]
 
     text = frame._format_review_overview_text(
-        entries, nodes, action_label="安裝", global_notes=["已完成 metadata 預檢"]
+        entries,
+        nodes,
+        action_label="安裝",
+        global_notes=["已完成 metadata 預檢"],
+        deduped_dependency_count=2,
     )
 
     assert "Task graph：1 個根任務" in text
     assert "目前將安裝 1 個根項目" in text
+    assert "已合併 2 個重複依賴" in text
     assert "預檢：已完成 metadata 預檢" in text
 
 

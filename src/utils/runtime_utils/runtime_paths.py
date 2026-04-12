@@ -11,6 +11,17 @@ class RuntimePaths:
     """運行時路徑管理工具類"""
 
     @staticmethod
+    def is_packaged() -> bool:
+        """檢測是否為打包執行環境。"""
+        is_nuitka = "__compiled__" in globals()
+        return bool(
+            getattr(sys, "frozen", False)
+            or hasattr(sys, "_MEIPASS")
+            or is_nuitka
+            or getattr(sys, "__compiled__", False)
+        )
+
+    @staticmethod
     def is_portable_mode() -> bool:
         """檢測是否為便攜模式（可執行檔旁有 .portable 標記檔或 .config 資料夾）"""
         exe_dir = RuntimePaths.get_exe_dir()
@@ -33,10 +44,24 @@ class RuntimePaths:
 
     @staticmethod
     def get_exe_dir() -> Path:
-        """取得當前執行檔或專案根目錄的基礎目錄。"""
-        if getattr(sys, "frozen", False):
-            return Path(sys.executable).parent
-        return Path(__file__).resolve().parent.parent.parent
+        """取得當前執行檔或專案根目錄的基礎目錄。
+
+        Returns:
+            執行環境對應的基礎目錄 Path。
+        """
+        if RuntimePaths.is_packaged():
+            executable = getattr(sys, "executable", "")
+            if executable:
+                try:
+                    return Path(executable).resolve().parents[0]
+                except OSError:
+                    return Path(executable).parents[0]
+        try:
+            from ..core_utils.path_utils import PathUtils
+
+            return PathUtils.get_project_root()
+        except Exception:
+            return Path(__file__).resolve().parents[2]
 
     @staticmethod
     def get_user_data_dir() -> Path:

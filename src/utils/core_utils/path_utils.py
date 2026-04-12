@@ -7,6 +7,7 @@ import ctypes
 import hashlib
 import json
 import os
+import sys
 import shutil
 import threading
 import time
@@ -74,7 +75,7 @@ class PathUtils:
         try:
             payload = json.dumps(data, indent=indent, ensure_ascii=False)
             p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
+            p.parents[0].mkdir(parents=True, exist_ok=True)
             lock = PathUtils._get_json_path_lock(p)
             with lock:
                 if skip_if_unchanged and p.exists():
@@ -85,7 +86,7 @@ class PathUtils:
                         logger.debug(f"讀取既有 JSON 失敗，將改為覆寫流程: {p} | {e}")
                 ok = atomic_write_json(p, data, indent=indent)
                 if ok:
-                    PathUtils._best_effort_sync_dir(p.parent)
+                    PathUtils._best_effort_sync_dir(p.parents[0])
                 return bool(ok)
         except (OSError, TypeError, ValueError):
             return False
@@ -142,7 +143,7 @@ class PathUtils:
                 if member.is_dir():
                     member_path.mkdir(parents=True, exist_ok=True)
                     continue
-                member_path.parent.mkdir(parents=True, exist_ok=True)
+                member_path.parents[0].mkdir(parents=True, exist_ok=True)
                 with zf.open(member, "r") as source, open(member_path, "wb") as target:
                     while True:
                         chunk = source.read(1024 * 1024)
@@ -157,8 +158,24 @@ class PathUtils:
 
     @staticmethod
     def get_project_root() -> Path:
-        """獲取專案根目錄路徑"""
-        return Path(__file__).parent.parent.parent
+        """獲取專案根目錄的絕對路徑。
+
+        優先沿著目前模組位置向上尋找 `pyproject.toml`，這樣即使本檔案
+        被搬到不同子目錄，仍可正確定位專案根目錄。若為 frozen 執行，
+        則退回可執行檔所在目錄。
+
+        Returns:
+            專案根目錄的絕對 Path。
+        """
+        current = Path(__file__).resolve()
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parents[0]
+
+        for parent in current.parents:
+            if (parent / "pyproject.toml").exists():
+                return parent
+
+        return current.parents[3]
 
     @staticmethod
     def get_assets_path() -> Path:
@@ -282,7 +299,7 @@ class PathUtils:
                 errors = kwargs.get("errors", "replace")
                 return path.read_text(encoding=encoding, errors=errors)
             if operation == "write_text":
-                path.parent.mkdir(parents=True, exist_ok=True)
+                path.parents[0].mkdir(parents=True, exist_ok=True)
                 content = kwargs.get("content", "")
                 encoding = kwargs.get("encoding", "utf-8")
                 errors = kwargs.get("errors")
@@ -293,7 +310,7 @@ class PathUtils:
                     return None
                 return path.read_bytes()
             if operation == "write_bytes":
-                path.parent.mkdir(parents=True, exist_ok=True)
+                path.parents[0].mkdir(parents=True, exist_ok=True)
                 content = kwargs.get("content", b"")
                 path.write_bytes(content)
                 return True
@@ -330,7 +347,7 @@ class PathUtils:
             若寫入成功則回傳 True，否則回傳 False。
         """
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parents[0].mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding=encoding, errors=errors) as f:
                 f.write(content)
                 f.flush()
@@ -415,6 +432,26 @@ class PathUtils:
             return False
 
     @staticmethod
+    def delete_within(base_dir: Path | str, path: Path | str) -> bool:
+        """僅在 `path` 位於 `base_dir` 之下時才刪除。
+
+        Args:
+            base_dir: 允許刪除的根目錄。
+            path: 預計刪除的目標路徑。
+
+        Returns:
+            若刪除成功則回傳 True，否則回傳 False。
+        """
+        try:
+            base = Path(base_dir).resolve(strict=True)
+            target = Path(path).resolve(strict=False)
+            if not PathUtils.is_path_within(base, target, strict=False):
+                return False
+            return PathUtils.delete_path(target)
+        except OSError:
+            return False
+
+    @staticmethod
     def move_path(src: Path, dst: Path) -> bool:
         """移動檔案或目錄。
 
@@ -428,8 +465,60 @@ class PathUtils:
         try:
             if not src.exists():
                 return False
-            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.parents[0].mkdir(parents=True, exist_ok=True)
             shutil.move(src, dst)
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def move_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
+        """僅在來源與目的地都位於 `base_dir` 之下時才搬移。
+
+        Args:
+            base_dir: 允許搬移的根目錄。
+            src: 來源路徑。
+            dst: 目的地路徑。
+
+        Returns:
+            若搬移成功則回傳 True，否則回傳 False。
+        """
+        try:
+            base = Path(base_dir).resolve(strict=True)
+            src_resolved = src.resolve(strict=False)
+            dst_resolved = dst.resolve(strict=False)
+            if not PathUtils.is_path_within(base, src_resolved, strict=False):
+                return False
+            if not PathUtils.is_path_within(base, dst_resolved, strict=False):
+                return False
+            return PathUtils.move_path(src_resolved, dst_resolved)
+        except OSError:
+            return False
+
+    @staticmethod
+    def replace_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
+        """
+        僅在來源與目的地都位於 `base_dir` 之下時才以原子替換檔案。
+
+        Args:
+            base_dir: 允許操作的根目錄。
+            src: 來源檔案路徑。
+            dst: 目的地檔案路徑。
+        Returns:
+            若替換成功則回傳 True，否則回傳 False。
+        """
+        try:
+            base = Path(base_dir).resolve(strict=True)
+            src_resolved = src.resolve(strict=True)
+            dst_resolved = dst.resolve(strict=False)
+            if not PathUtils.is_path_within(base, src_resolved, strict=False):
+                return False
+            if not PathUtils.is_path_within(base, dst_resolved, strict=False):
+                return False
+            if src_resolved.is_dir():
+                return False
+            dst_resolved.parents[0].mkdir(parents=True, exist_ok=True)
+            src_resolved.replace(dst_resolved)
             return True
         except OSError:
             return False
@@ -448,7 +537,7 @@ class PathUtils:
         try:
             if not src.exists():
                 return False
-            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.parents[0].mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             return True
         except OSError:
@@ -585,7 +674,7 @@ class PathUtils:
             # 決定聚合 marker 的路徑
             try:
                 rel = p.relative_to(project_root)
-                agg_dir = issues_root / rel.parent
+                agg_dir = issues_root / rel.parents[0]
                 agg_dir.mkdir(parents=True, exist_ok=True)
                 agg_marker = agg_dir / f"{rel.name}.issue.json"
             except ValueError:
@@ -706,7 +795,7 @@ class PathUtils:
             # 否則視為原始檔路徑，嘗試找出對應的聚合 marker，並刪除
             try:
                 rel = Path(p).relative_to(project_root)
-                candidate = issues_root / rel.parent / f"{rel.name}.issue.json"
+                candidate = issues_root / rel.parents[0] / f"{rel.name}.issue.json"
             except ValueError:
                 key = hashlib.sha256(str(p).encode("utf-8")).hexdigest()
                 candidate = issues_root / "external" / f"{p.name}.{key}.issue.json"
