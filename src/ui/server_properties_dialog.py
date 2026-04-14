@@ -6,7 +6,9 @@ import tkinter
 import tkinter.ttk as ttk
 import traceback
 from typing import Any, ClassVar
+
 import customtkinter as ctk
+
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     Colors,

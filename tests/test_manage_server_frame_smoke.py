@@ -4,7 +4,6 @@ from tkinter import ttk
 from typing import Any, cast
 
 import pytest
-
 import src.ui.manage_server_frame as manage_server_frame_module
 from src.models import ServerConfig
 

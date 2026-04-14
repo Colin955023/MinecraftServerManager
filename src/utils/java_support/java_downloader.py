@@ -5,8 +5,8 @@
 import os
 import shutil
 from pathlib import Path
-from .. import SubprocessUtils
-from .. import get_logger
+
+from .. import SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="JavaDownloader")
 
@@ -29,7 +29,7 @@ class JavaDownloader:
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             # 使用 pathlib 的 / 運算子串接路徑
-            alias_path = Path(local_app_data) / "Microsoft" / "WindowsApps" / "winget.exe"
+            alias_path = Path(local_app_data).resolve() / "Microsoft" / "WindowsApps" / "winget.exe"
             if alias_path.exists():
                 return alias_path
 

@@ -4,9 +4,10 @@
 
 from functools import lru_cache
 from typing import Any, ClassVar
+
 from packaging.version import InvalidVersion, Version
-from .. import HTTPUtils
-from .. import get_logger
+
+from .. import HTTPUtils, get_logger
 
 logger = get_logger().bind(component="UpdateParsing")
 

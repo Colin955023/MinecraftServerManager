@@ -3,11 +3,13 @@
 """
 
 from __future__ import annotations
+
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
+
 from ..core import LoaderManager
 from ..models import ModrinthVersionLookupResult, OnlineModVersion, ResolvedDependencyReference
 from ..utils import (
@@ -28,6 +30,7 @@ from ..utils import (
     METADATA_SOURCE_LOOKUP,
     METADATA_SOURCE_STALE_PROVIDER,
     METADATA_SOURCE_UNRESOLVED,
+    MODRINTH_PREFERRED_HASH_ALGORITHM,
     PROVIDER_LIFECYCLE_INVALIDATED,
     PROVIDER_LIFECYCLE_RETRYING,
     PROVIDER_LIFECYCLE_STALE,
@@ -40,6 +43,7 @@ from ..utils import (
     RECOMMENDATION_SOURCE_METADATA_UNRESOLVED,
     RECOMMENDATION_SOURCE_PROJECT_FALLBACK,
     RECOMMENDATION_SOURCE_STALE_METADATA,
+    DependencyPlanHooks,
     HTTPUtils,
     LocalProviderEnsureResult,
     OnlineDependencyInstallItem,
@@ -50,41 +54,39 @@ from ..utils import (
     build_local_mod_lookup_candidates,
     canonical_lookup_key,
     clean_api_identifier,
+    collect_installed_mod_identifiers,
+    collect_installed_mod_versions,
     compute_file_hash,
+    dependency_maybe_installed_by_filename,
     deserialize_online_dependency_install_plan,
-    DependencyPlanHooks,
     ensure_local_mod_provider_record,
     execute_resilient_batch_requests,
     execute_resilient_single_request,
-    collect_installed_mod_identifiers,
-    collect_installed_mod_versions,
-    dependency_maybe_installed_by_filename,
-    extract_primary_file_hash,
+    expand_required_dependency_install_plan,
     expand_target_loader_aliases,
+    extract_primary_file_hash,
     fetch_modrinth_project_detail,
     get_logger,
     get_modrinth_loader_filters,
+    is_allowed_version_type,
     is_cached_provider_metadata_fresh,
     is_provider_revalidation_retry_due,
     is_supported_modrinth_update_loader,
-    MODRINTH_PREFERRED_HASH_ALGORITHM,
     migrate_online_dependency_install_plan_payload,
+    normalize_hash_algorithm,
     normalize_identifier,
     normalize_local_loader,
     normalize_mod_search_query,
-    resolve_modrinth_provider_record,
-    serialize_online_dependency_install_plan,
-    should_attempt_provider_revalidation,
-    validate_online_dependency_install_plan_payload,
-    normalize_hash_algorithm,
-    select_best_mod_version,
-    is_allowed_version_type,
     parse_modrinth_version,
     parse_modrinth_version_lookup_response,
     recompute_adaptive_revalidation_batch_limit,
-    resolve_revalidation_batch_limits,
-    expand_required_dependency_install_plan,
     resolve_dependency_reference,
+    resolve_modrinth_provider_record,
+    resolve_revalidation_batch_limits,
+    select_best_mod_version,
+    serialize_online_dependency_install_plan,
+    should_attempt_provider_revalidation,
+    validate_online_dependency_install_plan_payload,
 )
 
 __all__ = [

@@ -4,11 +4,9 @@
 
 import re
 from pathlib import Path
+
 from ...models import ServerConfig
-from .. import PathUtils
-from .server_detection_version_utils import ServerDetectionVersionUtils
-from .. import UIUtils
-from .. import get_logger
+from .. import PathUtils, ServerDetectionVersionUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="ServerDetectionUtils")
 __all__ = ["ServerDetectionUtils"]
@@ -262,7 +260,7 @@ class ServerDetectionUtils:
             ServerDetectionUtils.update_forge_user_jvm_args(server_path, config)
 
     @staticmethod
-    def detect_server_type(server_path: Path, config: "ServerConfig", print_result: bool = True) -> None:
+    def detect_server_type(server_path: Path, config: ServerConfig, print_result: bool = True) -> None:
         """檢測伺服器類型和版本。
 
         Args:

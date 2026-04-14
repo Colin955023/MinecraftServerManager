@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "prHourlyLimit": 10,
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "matchCategories": [
+        "python"
+      ],
+      "matchFileNames": [
+        "/(^|/)pyproject\\.toml$/"
+      ]
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true,
+      "labels": ["dependencies", "automerge"]
+    },
+    {
+      "groupName": "Pytest ecosystem",
+      "matchPackageNames": ["pytest", "pytest-cov", "pytest-mock"]
+    }
+  ],
+  "dependencyDashboard": true,
+  "prCreation": "not-pending",
+  "timezone": "Asia/Taipei",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 4am on monday"]
+  }
+}

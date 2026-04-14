@@ -4,9 +4,10 @@
 
 import contextlib
 import re
+import tempfile
 import threading
 import time
-import tempfile
+import tomllib
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import toml
+
+TomlDecodeError = tomllib.TOMLDecodeError
 from ..utils import (
     HTTPUtils,
     LocalProviderEnsureResult,
@@ -190,7 +192,7 @@ class ModManager:
                 stale_revalidation_failures = max(
                     0, int(str(refreshed_provider.get("stale_revalidation_failures", "0") or "0").strip() or 0)
                 )
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as _:
                 stale_revalidation_failures = 0
             return LocalModInfo(
                 id=base_name,
@@ -384,7 +386,7 @@ class ModManager:
                         break
                     except KeyError:
                         continue
-                    except (ValueError, toml.TomlDecodeError) as e:
+                    except (ValueError, TomlDecodeError) as e:
                         logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {e}")
                         continue
                     except TypeError as e:
@@ -463,7 +465,7 @@ class ModManager:
                                 mc_version = d.get("versionRange", mod_data["mc_version"])
                                 mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
                                 break
-        except (KeyError, toml.TomlDecodeError, ValueError) as e:
+        except (KeyError, TomlDecodeError, ValueError) as e:
             logger.debug(f"解析 Forge 元資料失敗（解析/格式）: {e}")
         except TypeError as e:
             logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {e}")
@@ -523,8 +525,8 @@ class ModManager:
         try:
             with jar.open(file_path) as f:
                 toml_txt = f.read().decode(errors="ignore")
-                return toml.loads(toml_txt)
-        except (KeyError, toml.TomlDecodeError) as e:
+                return tomllib.loads(toml_txt)
+        except (KeyError, TomlDecodeError) as e:
             logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {e}")
             return None
         except (OSError, UnicodeDecodeError) as e:
@@ -762,8 +764,20 @@ class ModManager:
                 False 表示操作失敗或發生例外錯誤
         """
         try:
+            # 將 mod_id 淨化為檔名（basename），以避免路徑注入
+            safe_mod_id = Path(str(mod_id or "")).name
+            if not safe_mod_id:
+                logger.error(f"無效的模組識別字串: {mod_id}")
+                return False
+            if safe_mod_id != str(mod_id):
+                logger.warning(f"淨化不安全的 mod_id: {mod_id} -> {safe_mod_id}")
+            mod_id = safe_mod_id
             enabled_file = self.mods_path / f"{mod_id}.jar"
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
+            # 額外檢查結果路徑是否仍在 mods 目錄內
+            if not PathUtils.is_path_within(self.mods_path, enabled_file, strict=False):
+                logger.error(f"模組路徑不在 mods 目錄內: {enabled_file}")
+                return False
             if enable:
                 src_file = disabled_file
                 dst_file = enabled_file

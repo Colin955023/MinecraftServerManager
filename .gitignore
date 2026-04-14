@@ -67,3 +67,4 @@ cache/
 report/*
 !report/comprehensive_report.py
 *.xml
+.vscode/tasks.json

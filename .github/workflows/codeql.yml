@@ -22,6 +22,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1'
+
 permissions:
   contents: read
 
@@ -34,12 +35,13 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      actions: read
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        fetch-depth: ${{ github.event_name == 'pull_request' && '10' || '0' }}
+        fetch-depth: 0
         persist-credentials: false
 
     - name: Setup Environment
@@ -47,19 +49,16 @@ jobs:
       with:
         uv-sync: 'true'
 
-    - name: init CodeQL
-      uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
       with:
         languages: python
         build-mode: none
-        queries: ${{ github.event_name == 'pull_request' && 'security-extended' || 'security-and-quality' }}
-        # 僅保留設定檔引用，細節交給 config-file 處理
+        queries: security-and-quality
         config-file: .github/codeql/codeql-config.yml
-        dependency-caching: true
-        trap-caching: true
 
-    - name: CodeQL Analyze
-      uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
       with:
         category: "/language:python"
-
+        upload: true

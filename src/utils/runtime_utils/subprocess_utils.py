@@ -11,8 +11,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .. import get_logger
-from .. import PathUtils
+from .. import PathUtils, get_logger
 
 logger = get_logger().bind(component="SubprocessUtils")
 
@@ -60,8 +59,10 @@ class SubprocessUtils:
             return cmd_list
         which = PathUtils.find_executable(exe)
         if which is None and os.name == "nt" and exe.lower() == "winget":
-            winget_path = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WindowsApps" / "winget.exe"
-            which = str(winget_path) if getattr(winget_path, "exists", lambda: False)() else None
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                winget_path = Path(local_app_data).resolve() / "Microsoft" / "WindowsApps" / "winget.exe"
+                which = str(winget_path) if getattr(winget_path, "exists", lambda: False)() else None
 
         if which is None:
             raise FileNotFoundError(f"無法在 PATH 找到執行檔: {exe}")

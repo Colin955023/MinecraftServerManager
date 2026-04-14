@@ -11,14 +11,10 @@ import re
 import threading
 from pathlib import Path
 from typing import ClassVar
+
 from ...core import MinecraftVersionManager
-from .. import HTTPUtils
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
 from .java_downloader import JavaDownloader
-from .. import PathUtils
-from .. import RuntimePaths
-from .. import SubprocessUtils
-from .. import UIUtils
-from .. import get_logger
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -143,7 +139,7 @@ class JavaUtils:
         except Exception as e:
             logger.exception(f"搜尋 Java 失敗: {e}")
         for p_str in search_paths:
-            search_path_obj = Path(p_str)
+            search_path_obj = Path(p_str).resolve()
             javaw_exe = search_path_obj / "javaw.exe"
             if javaw_exe.exists():
                 candidate_paths.add(javaw_exe)

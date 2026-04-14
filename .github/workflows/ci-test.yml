@@ -46,11 +46,11 @@ jobs:
 
       - name: Run Bandit security scan
         run: |
-          uv run bandit -r src tests -f sarif -o bandit-results.sarif --severity-level high --confidence-level high
+          uv run bandit -r src tests -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
 
       - name: Upload Bandit SARIF
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13
+        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
         with:
           sarif_file: bandit-results.sarif
           category: bandit
@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload detect-secrets report
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: detect_secrets_report
           path: detect-secrets-results.json
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload pytest JUnit report
         if: always() && matrix.task == 'test'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pytest_junit_report_windows
           path: pytest-results.xml

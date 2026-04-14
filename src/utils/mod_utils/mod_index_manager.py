@@ -7,9 +7,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from .. import atomic_write_json
-from .. import compute_file_hash
-from .. import get_logger
+
+from .. import atomic_write_json, compute_file_hash, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
@@ -48,7 +47,7 @@ class ModIndexManager:
                 try:
                     FILE_ATTRIBUTE_HIDDEN = 0x02
                     ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
-                except (AttributeError, OSError):
+                except (AttributeError, OSError) as _:
                     # 無法設為隱藏則忽略
                     logger.debug("無法設定資料夾隱藏屬性，忽略")
         except OSError as e:

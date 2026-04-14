@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from src.utils import (
     PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN,
     ProviderMetadataRecord,

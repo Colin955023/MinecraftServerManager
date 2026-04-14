@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
+
 import customtkinter as ctk
+
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     FontSize,
@@ -27,10 +29,10 @@ from ..utils import (
     Spacing,
     SubprocessUtils,
     UIUtils,
-    get_settings_manager,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
     get_logger,
+    get_settings_manager,
 )
 from . import FontManager, ServerMonitorWindow, ServerPropertiesDialog, TaskUtils, TreeUtils
 
@@ -302,7 +304,7 @@ class ManageServerFrame(ctk.CTkFrame):
             return None
         try:
             column_idx = int(str(col_ref).lstrip("#")) - 1
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as _:
             return None
         columns = self._server_tree_display_columns()
         if column_idx < 0 or column_idx >= len(columns):

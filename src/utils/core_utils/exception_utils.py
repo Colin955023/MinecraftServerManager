@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import contextlib
-import traceback
 from pathlib import Path
 from typing import Any
 
@@ -30,17 +29,7 @@ def record_and_mark(
         reason: marker 中的原因欄位。
         details: 會寫入 marker 的額外資訊。
     """
-    try:
-        exc_type = type(exc).__name__
-        tb = getattr(exc, "__traceback__", None)
-        tb_text = (
-            "".join(traceback.format_exception(type(exc), exc, tb))
-            if tb is not None
-            else "".join(traceback.format_exception_only(type(exc), exc))
-        )
-    except Exception:
-        exc_type = type(exc).__name__ if exc is not None else "Exception"
-        tb_text = str(exc)
+    exc_type = type(exc).__name__ if exc is not None else "Exception"
 
     try:
         logger.bind(exception_type=exc_type).exception(f"已處理例外: {exc}")
@@ -52,10 +41,16 @@ def record_and_mark(
         return
     try:
         p = Path(marker_path)
+        marker_details: dict[str, Any]
+        if isinstance(details, dict):
+            marker_details = dict(details)
+        elif details is None:
+            marker_details = {}
+        else:
+            marker_details = {"details": details}
+        marker_details["exception_type"] = exc_type
         # 若 marker_path 為檔案，使用其父目錄與檔名；PathUtils.mark_issue 會產生 marker 的檔名
-        PathUtils.mark_issue(
-            p, reason or str(exc), details={**(details or {}), "exception_type": exc_type, "traceback_summary": tb_text}
-        )
+        PathUtils.mark_issue(p, reason or str(exc), details=marker_details)
     except Exception:
         with contextlib.suppress(Exception):
             logger.debug(f"建立 marker 失敗: {marker_path}")

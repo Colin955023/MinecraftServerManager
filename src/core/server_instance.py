@@ -11,8 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..utils import SubprocessUtils
-from ..utils import get_logger
+from ..utils import SubprocessUtils, get_logger
 
 if TYPE_CHECKING:
     # 僅在型別檢查時引入以避免執行時依賴循環
@@ -157,7 +156,7 @@ class ServerInstance:
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError):
+                except (SubprocessUtils.TimeoutExpired, OSError) as _:
                     logger.warning(
                         "強制終止超時伺服器進程失敗 (id=%s, name=%s).",
                         getattr(self, "id", None),
@@ -169,7 +168,7 @@ class ServerInstance:
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError):
+                except (SubprocessUtils.TimeoutExpired, OSError) as _:
                     logger.warning(
                         "強制終止伺服器進程失敗 (id=%s, name=%s).",
                         getattr(self, "id", None),

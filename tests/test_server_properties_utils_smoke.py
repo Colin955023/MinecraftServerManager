@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from src.core import ServerManager
 import src.core.server_manager as server_manager_module
+from src.core import ServerManager
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper
 

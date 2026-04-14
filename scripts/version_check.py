@@ -101,7 +101,7 @@ def main() -> int:
         changelog = _ensure_non_empty_str(parser, "changelog", getattr(args, "changelog", None))
         output = _ensure_non_empty_str(parser, "output", getattr(args, "output", None))
         try:
-            write_release_notes(Path(changelog), Path(output), strict=args.strict)
+            write_release_notes(Path(changelog).resolve(), Path(output).resolve(), strict=args.strict)
         except ReleaseNotesNotFoundError as e:
             sys.stderr.write(f"[錯誤] {e}\n")
             return 1

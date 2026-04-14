@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 import src.core.mod_manager as mod_manager_module
 import src.ui.mod_search_service as mod_search_service_module
 

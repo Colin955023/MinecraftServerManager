@@ -5,11 +5,13 @@
 """
 
 from __future__ import annotations
+
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 from .. import HTTPUtils
 
 MODRINTH_PROJECT_DETAIL_URL_TEMPLATE = "https://api.modrinth.com/v2/project/{project_id}"
@@ -121,7 +123,7 @@ def _parse_resolved_at_epoch_ms(raw: dict[str, Any] | None) -> int | None:
         return None
     try:
         resolved_at = int(str(value).strip())
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as _:
         return None
     return resolved_at if resolved_at > 0 else None
 
@@ -350,7 +352,7 @@ PROVIDER_LIFECYCLE_INVALIDATED = "invalidated"
 def _parse_positive_int(raw_value: Any) -> int:
     try:
         parsed = int(str(raw_value or "").strip())
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as _:
         return 0
     return parsed if parsed > 0 else 0
 

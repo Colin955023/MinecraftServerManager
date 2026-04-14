@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ...models import ModrinthVersionLookupResult, OnlineModVersion
-from .. import normalize_hash_algorithm, clean_api_identifier
+from .. import clean_api_identifier, normalize_hash_algorithm
 
 
 def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:

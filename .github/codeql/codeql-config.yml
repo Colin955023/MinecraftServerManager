@@ -4,7 +4,9 @@ paths-ignore:
   - 'docs/**'
   - 'assets/**'
   - 'report/**'
-  - 'tests/**'
+  - 'dist/**'
+  - 'build/**'
+  - '**/__pycache__/**'
 
 packs:
   - codeql/python-queries

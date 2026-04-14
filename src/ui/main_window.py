@@ -13,7 +13,9 @@ import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
 import customtkinter as ctk
+
 from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (

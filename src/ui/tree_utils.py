@@ -139,7 +139,7 @@ class TreeUtils:
             for column_id in candidate_columns:
                 try:
                     width = int(treeview.column(column_id, "width"))
-                except (tkinter.TclError, TypeError, ValueError):
+                except (tkinter.TclError, TypeError, ValueError) as _:
                     continue
                 columns.append(column_id)
                 widths.append(width)
@@ -151,7 +151,7 @@ class TreeUtils:
                 xview = treeview.xview()
                 if xview and len(xview) >= 1:
                     xview_start = float(xview[0])
-            except (tkinter.TclError, TypeError, ValueError):
+            except (tkinter.TclError, TypeError, ValueError) as _:
                 xview_start = 0.0
             logical_x = int(x + xview_start * total_width)
             threshold = FontManager.get_dpi_scaled_size(6)

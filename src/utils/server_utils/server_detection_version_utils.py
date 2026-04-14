@@ -5,9 +5,12 @@
 """
 
 from __future__ import annotations
+
 import re
 from functools import lru_cache
+
 from packaging.version import InvalidVersion, Version
+
 from .. import get_logger
 
 logger = get_logger().bind(component="ServerDetectionVersionUtils")

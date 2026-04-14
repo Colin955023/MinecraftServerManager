@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-
 from src.core import ModManager, ModPlatform
 from src.utils import ModIndexManager, compute_file_hash
 

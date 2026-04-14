@@ -14,10 +14,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
 import requests
 from requests import HTTPError, RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
 from ...version_info import APP_NAME, APP_VERSION
 from .. import get_logger
 
@@ -92,7 +94,7 @@ class HTTPUtils:
         """確保輸入為有效正整數，且不低於指定下限。"""
         try:
             normalized = int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as _:
             normalized = minimum
         return max(minimum, normalized)
 

@@ -11,15 +11,7 @@ import time
 from pathlib import Path
 
 from ...ui import DialogUtils, TaskUtils
-from .. import (
-    PathUtils,
-    RuntimePaths,
-    UIUtils,
-    get_logger,
-    shutdown_logging,
-    SubprocessUtils,
-)
-
+from .. import PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, shutdown_logging
 
 logger = get_logger().bind(component="AppRestart")
 
@@ -49,7 +41,7 @@ class AppRestart:
         try:
             if isinstance(executable_path, list) and len(executable_path) > 0:
                 return executable_path[0]
-        except (IndexError, TypeError, AttributeError):
+        except (IndexError, TypeError, AttributeError) as _:
             return None
         return None
 
@@ -58,7 +50,7 @@ class AppRestart:
         """取得當前應用程式的執行檔資訊，區分打包檔案與 Python 腳本模式"""
         exe_path: Path | None = None
         try:
-            exe_path = Path(sys.executable) if sys.executable else None
+            exe_path = Path(sys.executable).resolve() if sys.executable else None
         except Exception:
             exe_path = None
         is_frozen = False
@@ -72,10 +64,10 @@ class AppRestart:
                 is_frozen = True
                 if exe_path is None and getattr(sys, "executable", None):
                     with contextlib.suppress(Exception):
-                        exe_path = Path(sys.executable)
+                        exe_path = Path(sys.executable).resolve()
             if not is_frozen and sys.argv and sys.argv[0]:
                 try:
-                    _argv0 = Path(sys.argv[0])
+                    _argv0 = Path(sys.argv[0]).resolve()
                     if _argv0.suffix.lower() == ".exe":
                         is_frozen = True
                         if exe_path is None:
@@ -92,7 +84,7 @@ class AppRestart:
                     alt = None
                     try:
                         if sys.argv and sys.argv[0]:
-                            a = Path(sys.argv[0])
+                            a = Path(sys.argv[0]).resolve()
                             if a.suffix.lower() == ".exe" and a.exists():
                                 alt = a
                     except Exception:
@@ -111,7 +103,7 @@ class AppRestart:
             exe_str = str(exe_path) if exe_path is not None else str(sys.executable) if sys.executable else ""
             return ([exe_str], True, None)
         try:
-            argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+            argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
             if (
                 argv0
                 and argv0.exists()
@@ -171,12 +163,12 @@ class AppRestart:
             ]
             try:
                 if sys.executable:
-                    candidates.append(Path(sys.executable))
+                    candidates.append(Path(sys.executable).resolve())
             except Exception as e:
                 logger.debug("加入 sys.executable 候選項失敗: %s", e)
             try:
                 if sys.argv and sys.argv[0]:
-                    candidates.append(Path(sys.argv[0]))
+                    candidates.append(Path(sys.argv[0]).resolve())
             except Exception as e:
                 logger.debug("加入 sys.argv[0] 候選項失敗: %s", e)
             cur = Path(__file__).resolve(strict=False)

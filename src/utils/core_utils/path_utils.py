@@ -7,15 +7,15 @@ import ctypes
 import hashlib
 import json
 import os
-import sys
 import shutil
+import sys
 import threading
 import time
-import traceback
 import zipfile
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
+
 from .atomic_writer import atomic_write_json, best_effort_fsync
 from .logger import get_logger
 
@@ -88,7 +88,7 @@ class PathUtils:
                 if ok:
                     PathUtils._best_effort_sync_dir(p.parents[0])
                 return bool(ok)
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError) as _:
             return False
 
     @staticmethod
@@ -117,6 +117,42 @@ class PathUtils:
             return False
 
     @staticmethod
+    def _sanitize_archive_member_name(member_name: str) -> Path | None:
+        """清理 zip/zip-like 內部檔案名稱，移除絕對路徑與父目錄參考。
+
+        Args:
+            member_name: zip 內部檔案名稱。
+        Returns:
+            安全的相對路徑，或 None 表示無效名稱。
+        """
+        try:
+            if not member_name:
+                return None
+            p = PurePosixPath(str(member_name))
+            # 移除空、 '.' 與 '..' 元件
+            parts = [part for part in p.parts if part and part not in (".", "..")]
+            if not parts:
+                return None
+            return Path(*parts)
+        except Exception:
+            return None
+
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """
+        取得傳入字串的安全檔名（basename）。
+
+        Args:
+            filename: 原始檔名字串。
+        Returns:
+            安全的檔名，若無法解析則回傳空字串。
+        """
+        try:
+            return Path(str(filename or "")).name
+        except Exception:
+            return ""
+
+    @staticmethod
     def safe_extract_zip(
         zip_path: Path, dest_dir: Path, progress_callback: Callable[[int, int], None] | None = None
     ) -> None:
@@ -137,10 +173,14 @@ class PathUtils:
             if progress_callback is not None:
                 progress_callback(0, total_bytes)
             for member in members:
-                member_path = dest_dir / member.filename
+                # 先將 zip 內部名稱清理成安全的相對路徑，避免 Zip Slip
+                sanitized = PathUtils._sanitize_archive_member_name(member.filename)
+                if sanitized is None:
+                    raise ValueError(f"壓縮檔包含不安全的成員名稱: {member.filename}")
+                member_path = dest_dir / sanitized
                 if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
-                    raise ValueError(f"Zip File attempted path traversal: {member.filename}")
-                if member.is_dir():
+                    raise ValueError(f"壓縮檔嘗試路徑遍歷: {member.filename}")
+                if member.is_dir() or str(member.filename).endswith("/"):
                     member_path.mkdir(parents=True, exist_ok=True)
                     continue
                 member_path.parents[0].mkdir(parents=True, exist_ok=True)
@@ -243,8 +283,13 @@ class PathUtils:
         """
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
-                if internal_path in zf.namelist():
-                    with zf.open(internal_path) as f:
+                # 先清理 internal_path 以避免不安全的路徑
+                sanitized = PathUtils._sanitize_archive_member_name(internal_path)
+                if sanitized is None:
+                    return None
+                member_name = "/".join(sanitized.parts)
+                if member_name in zf.namelist():
+                    with zf.open(member_name) as f:
                         return json.load(f)
         except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as exc:
             logger.debug(
@@ -270,7 +315,7 @@ class PathUtils:
         """
         try:
             return json.dumps(data, indent=indent, ensure_ascii=False)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as _:
             return ""
 
     @staticmethod
@@ -285,7 +330,7 @@ class PathUtils:
         """
         try:
             return json.loads(json_str)
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except (json.JSONDecodeError, TypeError, ValueError) as _:
             return None
 
     @staticmethod
@@ -642,7 +687,7 @@ class PathUtils:
                     buf_len = needed
                     continue
                 return Path(buf.value)
-        except (OSError, AttributeError):
+        except (OSError, AttributeError) as _:
             return Path(path)
 
     @staticmethod
@@ -686,27 +731,17 @@ class PathUtils:
 
             now = int(time.time())
             exc_type = ""
-            tb_text = ""
             if isinstance(details, dict):
                 exc_type = str(details.get("exception_type") or "")
-                tb_text = str(details.get("traceback_summary") or "")
             elif isinstance(details, BaseException):
                 exc_type = type(details).__name__
-                tb = getattr(details, "__traceback__", None)
-                try:
-                    if tb is not None:
-                        tb_text = "".join(traceback.format_exception(type(details), details, tb))
-                    else:
-                        tb_text = "".join(traceback.format_exception_only(type(details), details)).strip()
-                except Exception:
-                    tb_text = str(details)
+                details = {"exception_type": exc_type}
 
             entry = {
                 "timestamp": now,
                 "reason": str(reason),
                 "details": details if details is not None else "",
                 "exception_type": exc_type,
-                "traceback_summary": tb_text,
             }
 
             # 讀取既有聚合檔並 append
@@ -717,7 +752,7 @@ class PathUtils:
                     try:
                         with open(agg_marker, encoding="utf-8") as f:
                             existing = json.load(f)
-                    except (OSError, json.JSONDecodeError):
+                    except (OSError, json.JSONDecodeError) as _:
                         existing = None
                 if not existing or not isinstance(existing, dict):
                     payload = {"path": str(p), "entries": [entry], "last_updated": now}
@@ -759,7 +794,7 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except (OSError, json.JSONDecodeError):
+                except (OSError, json.JSONDecodeError) as _:
                     data = None
                 markers.append({"marker": str(p), "data": data})
             return markers
@@ -838,7 +873,7 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except (OSError, json.JSONDecodeError):
+                except (OSError, json.JSONDecodeError) as _:
                     data = None
                 if not data or not isinstance(data, dict):
                     # 若檔案無法解析且已經很久沒更新，刪除
@@ -861,7 +896,8 @@ class PathUtils:
                             PathUtils._save_json_internal(p, data, indent=2, skip_if_unchanged=False)
                     else:
                         # 若沒有剩餘條目，僅在原始檔不存在時刪除
-                        orig = Path(data.get("path", "")) if isinstance(data.get("path"), str) else None
+                        path_val = data.get("path", "")
+                        orig = Path(path_val).resolve() if isinstance(path_val, str) and path_val else None
                         if orig is None or not orig.exists():
                             try:
                                 p.unlink()
