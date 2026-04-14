@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload detect-secrets report
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: detect_secrets_report
           path: detect-secrets-results.json
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload pytest JUnit report
         if: always() && matrix.task == 'test'
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pytest_junit_report_windows
           path: pytest-results.xml
