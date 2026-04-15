@@ -6,6 +6,7 @@ import concurrent.futures
 import threading
 from contextlib import suppress
 from pathlib import Path
+
 from ..utils import (
     HTTPUtils,
     PathUtils,

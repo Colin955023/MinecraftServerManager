@@ -7,8 +7,8 @@ import ctypes
 import hashlib
 import json
 import os
-import sys
 import shutil
+import sys
 import threading
 import time
 import traceback
@@ -16,6 +16,7 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
+
 from .atomic_writer import atomic_write_json, best_effort_fsync
 from .logger import get_logger
 

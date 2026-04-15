@@ -5,7 +5,9 @@
 import tkinter as tk
 import traceback
 from collections.abc import Callable
+
 import customtkinter as ctk
+
 from ..utils import Colors, FontSize, Sizes, UIUtils, get_logger
 from . import DialogUtils, FontManager, VirtualList
 

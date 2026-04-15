@@ -6,10 +6,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-
 import src.ui.mod_management as mod_management_module
-import src.utils.ui_support.ui_utils as ui_utils_module
 import src.utils as meta_module
+import src.utils.ui_support.ui_utils as ui_utils_module
 
 Colors = ui_utils_module.Colors
 UIUtils = ui_utils_module.UIUtils

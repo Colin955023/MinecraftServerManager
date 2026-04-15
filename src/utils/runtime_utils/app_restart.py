@@ -14,12 +14,11 @@ from ...ui import DialogUtils, TaskUtils
 from .. import (
     PathUtils,
     RuntimePaths,
+    SubprocessUtils,
     UIUtils,
     get_logger,
     shutdown_logging,
-    SubprocessUtils,
 )
-
 
 logger = get_logger().bind(component="AppRestart")
 

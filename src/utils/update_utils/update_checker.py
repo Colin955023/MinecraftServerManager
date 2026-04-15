@@ -9,16 +9,12 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+
 import markdown as _markdown
 from packaging.version import Version
+
 from ...ui import TaskUtils
-from .. import HTTPUtils
-from .. import PathUtils
-from .. import RuntimePaths
-from .. import SubprocessUtils
-from .. import UIUtils
-from .update_parsing import UpdateParsing
-from .. import get_logger
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, UpdateParsing, get_logger
 
 logger = get_logger().bind(component="UpdateChecker")
 

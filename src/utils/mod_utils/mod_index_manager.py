@@ -7,9 +7,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from .. import atomic_write_json
-from .. import compute_file_hash
-from .. import get_logger
+
+from .. import atomic_write_json, compute_file_hash, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"

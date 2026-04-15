@@ -1,4 +1,5 @@
 import json
+
 from src.utils import atomic_write_json
 
 

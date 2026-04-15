@@ -7,8 +7,8 @@ import re
 import types
 from pathlib import Path
 from typing import Any, ClassVar
-from .. import PathUtils
-from .. import get_logger
+
+from .. import PathUtils, get_logger
 
 logger = get_logger().bind(component="ServerPropertiesUtils")
 __all__ = ["ServerPropertiesHelper", "ServerPropertiesValidator"]

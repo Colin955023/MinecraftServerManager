@@ -17,7 +17,9 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
 import customtkinter as ctk
+
 from ..core import AppException, MinecraftVersionManager, ModManager, ModStatus
 from ..utils import (
     LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
@@ -58,10 +60,10 @@ from ..utils import (
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
     ensure_local_mod_provider_record,
+    extract_primary_file_hash,
     get_logger,
     register_provider_revalidation_success,
     resolve_modrinth_provider_record,
-    extract_primary_file_hash,
 )
 from . import (
     CustomDropdown,

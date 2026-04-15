@@ -11,8 +11,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from .. import get_logger
-from .. import PathUtils
+from .. import PathUtils, get_logger
 
 logger = get_logger().bind(component="SubprocessUtils")
 

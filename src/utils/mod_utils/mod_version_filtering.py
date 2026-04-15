@@ -1,7 +1,9 @@
 """Modrinth 版本篩選與檔案選擇工具。"""
 
 from __future__ import annotations
+
 from typing import Any
+
 from .. import normalize_identifier
 
 MODRINTH_PREFERRED_HASH_ALGORITHM = "sha512"

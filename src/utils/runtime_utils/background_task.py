@@ -7,6 +7,7 @@
 """
 
 from __future__ import annotations
+
 import asyncio
 import concurrent.futures
 import functools
@@ -14,6 +15,7 @@ import inspect
 import threading
 from collections.abc import Callable
 from typing import Any
+
 from .. import get_logger
 
 logger = get_logger().bind(component="BackgroundTask")

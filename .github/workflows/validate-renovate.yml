@@ -1,0 +1,23 @@
+name: Validate Renovate config
+
+on:
+  push:
+    paths:
+      - 'renovate.json'
+      - '.github/renovate.json'
+  pull_request:
+    paths:
+      - 'renovate.json'
+      - '.github/renovate.json'
+
+jobs:
+  validate-renovate-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - name: Validate renovate.json
+        run: |
+          # 使用 renovate 的 config validator 檢查 repo-local config
+          npx --yes --package renovate -- renovate-config-validator --no-global --strict

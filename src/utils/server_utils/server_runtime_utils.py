@@ -3,9 +3,10 @@
 """
 
 from __future__ import annotations
+
 from pathlib import Path
-from .. import JavaUtils
-from .. import get_logger
+
+from .. import JavaUtils, get_logger
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
 __all__ = ["ServerCommands", "ServerOperations"]

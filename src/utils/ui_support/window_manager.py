@@ -5,9 +5,8 @@
 import contextlib
 import time
 from typing import Any
-from .. import SystemUtils
-from .. import get_logger
-from .. import get_settings_manager
+
+from .. import SystemUtils, get_logger, get_settings_manager
 
 logger = get_logger().bind(component="WindowManager")
 
