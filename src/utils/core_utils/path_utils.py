@@ -89,7 +89,7 @@ class PathUtils:
                 if ok:
                     PathUtils._best_effort_sync_dir(p.parents[0])
                 return bool(ok)
-        except (OSError, TypeError, ValueError):
+        except OSError, TypeError, ValueError:
             return False
 
     @staticmethod
@@ -271,7 +271,7 @@ class PathUtils:
         """
         try:
             return json.dumps(data, indent=indent, ensure_ascii=False)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return ""
 
     @staticmethod
@@ -286,7 +286,7 @@ class PathUtils:
         """
         try:
             return json.loads(json_str)
-        except (json.JSONDecodeError, TypeError, ValueError):
+        except json.JSONDecodeError, TypeError, ValueError:
             return None
 
     @staticmethod
@@ -643,7 +643,7 @@ class PathUtils:
                     buf_len = needed
                     continue
                 return Path(buf.value)
-        except (OSError, AttributeError):
+        except OSError, AttributeError:
             return Path(path)
 
     @staticmethod
@@ -718,7 +718,7 @@ class PathUtils:
                     try:
                         with open(agg_marker, encoding="utf-8") as f:
                             existing = json.load(f)
-                    except (OSError, json.JSONDecodeError):
+                    except OSError, json.JSONDecodeError:
                         existing = None
                 if not existing or not isinstance(existing, dict):
                     payload = {"path": str(p), "entries": [entry], "last_updated": now}
@@ -760,7 +760,7 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except (OSError, json.JSONDecodeError):
+                except OSError, json.JSONDecodeError:
                     data = None
                 markers.append({"marker": str(p), "data": data})
             return markers
@@ -839,7 +839,7 @@ class PathUtils:
                 try:
                     with open(p, encoding="utf-8") as f:
                         data = json.load(f)
-                except (OSError, json.JSONDecodeError):
+                except OSError, json.JSONDecodeError:
                     data = None
                 if not data or not isinstance(data, dict):
                     # 若檔案無法解析且已經很久沒更新，刪除

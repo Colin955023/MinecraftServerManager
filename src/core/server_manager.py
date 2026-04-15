@@ -711,7 +711,7 @@ class ServerManager:
                     process.stdin.write("stop\n")
                     process.stdin.flush()
                 process.wait(timeout=5)
-            except (SubprocessUtils.TimeoutExpired, OSError, BrokenPipeError):
+            except SubprocessUtils.TimeoutExpired, OSError, BrokenPipeError:
                 try:
                     process.terminate()
                     process.wait(timeout=5)

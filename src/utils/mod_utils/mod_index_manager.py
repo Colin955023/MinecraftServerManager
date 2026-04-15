@@ -47,7 +47,7 @@ class ModIndexManager:
                 try:
                     FILE_ATTRIBUTE_HIDDEN = 0x02
                     ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
-                except (AttributeError, OSError):
+                except AttributeError, OSError:
                     # 無法設為隱藏則忽略
                     logger.debug("無法設定資料夾隱藏屬性，忽略")
         except OSError as e:

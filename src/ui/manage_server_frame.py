@@ -304,7 +304,7 @@ class ManageServerFrame(ctk.CTkFrame):
             return None
         try:
             column_idx = int(str(col_ref).lstrip("#")) - 1
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         columns = self._server_tree_display_columns()
         if column_idx < 0 or column_idx >= len(columns):

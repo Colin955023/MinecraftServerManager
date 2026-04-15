@@ -41,7 +41,7 @@ class AppRestart:
         try:
             if isinstance(executable_path, list) and len(executable_path) > 0:
                 return executable_path[0]
-        except (IndexError, TypeError, AttributeError):
+        except IndexError, TypeError, AttributeError:
             return None
         return None
 

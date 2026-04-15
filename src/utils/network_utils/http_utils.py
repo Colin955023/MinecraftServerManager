@@ -94,7 +94,7 @@ class HTTPUtils:
         """確保輸入為有效正整數，且不低於指定下限。"""
         try:
             normalized = int(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             normalized = minimum
         return max(minimum, normalized)
 

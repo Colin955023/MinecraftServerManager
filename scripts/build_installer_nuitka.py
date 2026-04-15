@@ -1,8 +1,8 @@
+import logging
 import os
-import sys
 import shutil
 import subprocess
-import logging
+import sys
 from pathlib import Path
 
 os.environ["PYTHONUTF8"] = "1"
@@ -26,7 +26,7 @@ def main():
     logging.info("Step 0: 讀取版本資訊...")
     try:
         sys.path.insert(0, str(project_root))
-        from src.version_info import APP_VERSION, APP_NAME, APP_ID
+        from src.version_info import APP_ID, APP_NAME, APP_VERSION
     except Exception as e:
         print_error_and_exit(f"無法讀取版本資訊: {e}")
 

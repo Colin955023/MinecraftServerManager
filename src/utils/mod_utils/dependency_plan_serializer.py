@@ -103,7 +103,7 @@ def _normalize_positive_int_value(source: Any, key: str, default: int = 1, min_v
     raw_value = _get_source_value(source, key, default)
     try:
         value = int(raw_value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         value = default
     if value < min_value:
         return min_value
@@ -273,7 +273,7 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
             return (False, "invalid-graph-edge")
         try:
             depth = int(edge_payload.get("depth", 0) or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return (False, "invalid-graph-depth")
         if depth < 1:
             return (False, "invalid-graph-depth")
@@ -295,7 +295,7 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
                 return (False, f"invalid-{collection_key}-entry")
             try:
                 item_depth = int(item_payload.get("graph_depth", 0) or 0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 return (False, "invalid-item-depth")
             if item_depth < 1:
                 return (False, "invalid-item-depth")

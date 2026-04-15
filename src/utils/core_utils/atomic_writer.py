@@ -28,7 +28,7 @@ def best_effort_fsync(file_obj) -> None:
 
     try:
         os.fsync(file_obj.fileno())
-    except (AttributeError, OSError, ValueError):
+    except AttributeError, OSError, ValueError:
         return
 
 
@@ -53,7 +53,7 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
             existing = p.read_text(encoding="utf-8")
             if existing == payload:
                 return True
-        except (OSError, UnicodeDecodeError):
+        except OSError, UnicodeDecodeError:
             # 若無法讀取現有檔案，視為需覆寫；記錄 debug 以便除錯
             logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p, exc_info=True)
 
