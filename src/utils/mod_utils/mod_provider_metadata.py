@@ -123,7 +123,7 @@ def _parse_resolved_at_epoch_ms(raw: dict[str, Any] | None) -> int | None:
         return None
     try:
         resolved_at = int(str(value).strip())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return resolved_at if resolved_at > 0 else None
 
@@ -352,7 +352,7 @@ PROVIDER_LIFECYCLE_INVALIDATED = "invalidated"
 def _parse_positive_int(raw_value: Any) -> int:
     try:
         parsed = int(str(raw_value or "").strip())
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
     return parsed if parsed > 0 else 0
 

@@ -6,11 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ...models import OnlineModVersion, ResolvedDependencyReference
-from .. import (
-    apply_loader_specific_dependency_override,
-    clean_api_identifier,
-    normalize_identifier,
-)
+from .. import apply_loader_specific_dependency_override, clean_api_identifier, normalize_identifier
 
 
 def resolve_dependency_reference(

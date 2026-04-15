@@ -11,14 +11,7 @@ import time
 from pathlib import Path
 
 from ...ui import DialogUtils, TaskUtils
-from .. import (
-    PathUtils,
-    RuntimePaths,
-    SubprocessUtils,
-    UIUtils,
-    get_logger,
-    shutdown_logging,
-)
+from .. import PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, shutdown_logging
 
 logger = get_logger().bind(component="AppRestart")
 
@@ -48,7 +41,7 @@ class AppRestart:
         try:
             if isinstance(executable_path, list) and len(executable_path) > 0:
                 return executable_path[0]
-        except (IndexError, TypeError, AttributeError):
+        except IndexError, TypeError, AttributeError:
             return None
         return None
 

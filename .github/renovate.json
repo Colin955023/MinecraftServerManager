@@ -7,6 +7,14 @@
   ],
   "packageRules": [
     {
+      "matchCategories": [
+        "python"
+      ],
+      "matchFileNames": [
+        "/(^|/)pyproject\\.toml$/"
+      ]
+    },
+    {
       "matchUpdateTypes": ["minor", "patch"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true,
@@ -20,13 +28,9 @@
   "dependencyDashboard": true,
   "prCreation": "not-pending",
   "timezone": "Asia/Taipei",
-  "python": {
-    "fileMatch": ["(^|/)pyproject\\.toml$"]
-  },
   "lockFileMaintenance": {
     "enabled": true,
     "automerge": true,
-    "fileMatch": ["(^|/)uv.lock$","(^|/)pyproject\\.toml$"],
     "schedule": ["before 4am on monday"]
   }
 }

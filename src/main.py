@@ -104,7 +104,7 @@ def main():
         start_application()
     except KeyboardInterrupt:
         show_message("程式中斷", "程式被使用者中斷\n感謝使用 Minecraft 伺服器管理器！", "info")
-    except (RuntimeError, OSError, ValueError, TypeError, AttributeError):
+    except RuntimeError, OSError, ValueError, TypeError, AttributeError:
         error_message = f"程式執行錯誤：\n\n{traceback.format_exc()}"
         show_message("執行錯誤", error_message, "error")
         sys.exit(1)
