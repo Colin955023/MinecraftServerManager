@@ -32,7 +32,7 @@ jobs:
         id: setup-python
         uses: ./.github/actions/setup-python-env
         with:
-          python-version: '3.13'
+          python-version: '3.13'  # use the latest Python 3.13 version available in the runner
           uv-sync: 'false'
 
       - name: Resolve release tag

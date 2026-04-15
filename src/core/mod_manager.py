@@ -7,6 +7,7 @@ import re
 import tempfile
 import threading
 import time
+import tomllib
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,8 +15,6 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 TomlDecodeError = tomllib.TOMLDecodeError
 from ..utils import (
@@ -193,7 +192,7 @@ class ModManager:
                 stale_revalidation_failures = max(
                     0, int(str(refreshed_provider.get("stale_revalidation_failures", "0") or "0").strip() or 0)
                 )
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 stale_revalidation_failures = 0
             return LocalModInfo(
                 id=base_name,

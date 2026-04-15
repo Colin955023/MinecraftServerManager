@@ -1,7 +1,7 @@
 # Minecraft 伺服器管理器
 
 [![Platform](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.14%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)

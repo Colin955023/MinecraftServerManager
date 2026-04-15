@@ -156,7 +156,7 @@ class ServerInstance:
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError):
+                except SubprocessUtils.TimeoutExpired, OSError:
                     logger.warning(
                         "強制終止超時伺服器進程失敗 (id=%s, name=%s).",
                         getattr(self, "id", None),
@@ -168,7 +168,7 @@ class ServerInstance:
                 try:
                     self.process.kill()
                     self.process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError):
+                except SubprocessUtils.TimeoutExpired, OSError:
                     logger.warning(
                         "強制終止伺服器進程失敗 (id=%s, name=%s).",
                         getattr(self, "id", None),

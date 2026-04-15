@@ -260,7 +260,7 @@ class ServerDetectionUtils:
             ServerDetectionUtils.update_forge_user_jvm_args(server_path, config)
 
     @staticmethod
-    def detect_server_type(server_path: Path, config: "ServerConfig", print_result: bool = True) -> None:
+    def detect_server_type(server_path: Path, config: ServerConfig, print_result: bool = True) -> None:
         """檢測伺服器類型和版本。
 
         Args:
