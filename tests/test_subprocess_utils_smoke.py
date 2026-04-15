@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 import src.utils.runtime_utils.subprocess_utils as subprocess_utils_module
 
 

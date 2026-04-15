@@ -6,11 +6,9 @@ import contextlib
 import time
 from pathlib import Path
 from typing import Any, TypedDict, cast
+
 from ...core import ConfigurationError
-from .. import PathUtils
-from .runtime_paths import RuntimePaths
-from .. import atomic_write_json
-from .. import get_logger
+from .. import PathUtils, RuntimePaths, atomic_write_json, get_logger
 
 logger = get_logger().bind(component="SettingsManager")
 

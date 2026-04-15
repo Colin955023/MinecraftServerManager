@@ -9,6 +9,7 @@ import sys
 import traceback
 from contextlib import suppress
 from pathlib import Path
+
 import customtkinter as ctk
 
 if __name__ == "__main__" and __package__ is None:

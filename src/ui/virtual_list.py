@@ -1,11 +1,13 @@
 """輕量虛擬清單元件（以 Tk Listbox 實作）。"""
 
 from __future__ import annotations
+
 import tkinter
 import tkinter.font as tkfont
 import tkinter.ttk as ttk
 from collections.abc import Callable
 from typing import Any
+
 import customtkinter as ctk
 
 from ..utils import Colors, FontSize

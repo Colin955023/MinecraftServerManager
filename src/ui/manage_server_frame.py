@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
+
 import customtkinter as ctk
+
 from ..core import ServerConfig, ServerManager
 from ..utils import (
     FontSize,
@@ -27,10 +29,10 @@ from ..utils import (
     Spacing,
     SubprocessUtils,
     UIUtils,
-    get_settings_manager,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
     get_logger,
+    get_settings_manager,
 )
 from . import FontManager, ServerMonitorWindow, ServerPropertiesDialog, TaskUtils, TreeUtils
 

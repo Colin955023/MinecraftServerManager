@@ -7,7 +7,9 @@ import threading
 import time
 from contextlib import suppress
 from pathlib import Path
+
 from defusedxml import ElementTree as ET
+
 from ..models import LoaderVersion
 from ..utils import (
     CancellationToken,

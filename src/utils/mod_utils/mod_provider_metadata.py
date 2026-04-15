@@ -5,11 +5,13 @@
 """
 
 from __future__ import annotations
+
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 from .. import HTTPUtils
 
 MODRINTH_PROJECT_DETAIL_URL_TEMPLATE = "https://api.modrinth.com/v2/project/{project_id}"

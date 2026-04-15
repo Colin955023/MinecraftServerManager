@@ -4,13 +4,15 @@ Window preferences dialog for configuring window behavior and appearance.
 
 import traceback
 from collections.abc import Callable
+
 import customtkinter as ctk
+
 from ..utils import (
     AppRestart,
     FontSize,
+    RuntimePaths,
     Sizes,
     Spacing,
-    RuntimePaths,
     UIUtils,
     WindowManager,
     get_button_style,

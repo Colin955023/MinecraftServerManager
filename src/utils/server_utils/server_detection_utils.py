@@ -4,11 +4,9 @@
 
 import re
 from pathlib import Path
+
 from ...models import ServerConfig
-from .. import PathUtils
-from .server_detection_version_utils import ServerDetectionVersionUtils
-from .. import UIUtils
-from .. import get_logger
+from .. import PathUtils, ServerDetectionVersionUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="ServerDetectionUtils")
 __all__ = ["ServerDetectionUtils"]

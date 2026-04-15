@@ -6,7 +6,8 @@ import ctypes
 import ctypes.wintypes as wintypes
 from collections.abc import Sequence
 from typing import Any, ClassVar
-from .. import get_logger, SubprocessUtils
+
+from .. import SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="SystemUtils")
 TH32CS_SNAPPROCESS = 2

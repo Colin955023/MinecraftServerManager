@@ -11,14 +11,10 @@ import re
 import threading
 from pathlib import Path
 from typing import ClassVar
+
 from ...core import MinecraftVersionManager
-from .. import HTTPUtils
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
 from .java_downloader import JavaDownloader
-from .. import PathUtils
-from .. import RuntimePaths
-from .. import SubprocessUtils
-from .. import UIUtils
-from .. import get_logger
 
 logger = get_logger().bind(component="JavaUtils")
 

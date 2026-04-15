@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 from packaging.version import Version
-from src.utils import ServerDetectionVersionUtils
-from src.utils import UpdateParsing
+from src.utils import ServerDetectionVersionUtils, UpdateParsing
 
 
 @pytest.mark.smoke

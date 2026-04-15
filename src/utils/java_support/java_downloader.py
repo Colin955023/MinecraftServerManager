@@ -5,8 +5,8 @@
 import os
 import shutil
 from pathlib import Path
-from .. import SubprocessUtils
-from .. import get_logger
+
+from .. import SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="JavaDownloader")
 

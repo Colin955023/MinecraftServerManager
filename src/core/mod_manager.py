@@ -4,9 +4,9 @@
 
 import contextlib
 import re
+import tempfile
 import threading
 import time
-import tempfile
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +14,10 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import toml
+
+import tomllib
+
+TomlDecodeError = tomllib.TOMLDecodeError
 from ..utils import (
     HTTPUtils,
     LocalProviderEnsureResult,
@@ -384,7 +387,7 @@ class ModManager:
                         break
                     except KeyError:
                         continue
-                    except (ValueError, toml.TomlDecodeError) as e:
+                    except (ValueError, TomlDecodeError) as e:
                         logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {e}")
                         continue
                     except TypeError as e:
@@ -463,7 +466,7 @@ class ModManager:
                                 mc_version = d.get("versionRange", mod_data["mc_version"])
                                 mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
                                 break
-        except (KeyError, toml.TomlDecodeError, ValueError) as e:
+        except (KeyError, TomlDecodeError, ValueError) as e:
             logger.debug(f"解析 Forge 元資料失敗（解析/格式）: {e}")
         except TypeError as e:
             logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {e}")
@@ -523,8 +526,8 @@ class ModManager:
         try:
             with jar.open(file_path) as f:
                 toml_txt = f.read().decode(errors="ignore")
-                return toml.loads(toml_txt)
-        except (KeyError, toml.TomlDecodeError) as e:
+                return tomllib.loads(toml_txt)
+        except (KeyError, TomlDecodeError) as e:
             logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {e}")
             return None
         except (OSError, UnicodeDecodeError) as e:

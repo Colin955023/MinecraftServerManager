@@ -13,10 +13,7 @@ from typing import Any
 import customtkinter as ctk
 
 from ...ui import DialogUtils, FontManager
-from .ui_tokens import Colors
-from .. import PathUtils
-from .. import SubprocessUtils
-from .. import get_logger
+from .. import Colors, PathUtils, SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="UIUtils")
 
