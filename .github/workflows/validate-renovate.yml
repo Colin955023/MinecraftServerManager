@@ -22,5 +22,4 @@ jobs:
 
       - name: Validate renovate.json
         run: |
-          # 使用 renovate 的 config validator 檢查 repo-local config
-          npx --yes --package renovate renovate-config-validator --no-global --strict
+          npx --yes --package renovate renovate-config-validator ./.github/renovate.json --strict

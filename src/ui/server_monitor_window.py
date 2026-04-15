@@ -15,17 +15,7 @@ from typing import Any
 
 import customtkinter as ctk
 
-from ..utils import (
-    Colors,
-    FontSize,
-    MemoryUtils,
-    ServerOperations,
-    Sizes,
-    Spacing,
-    UIUtils,
-    WindowManager,
-    get_logger,
-)
+from ..utils import Colors, FontSize, MemoryUtils, ServerOperations, Sizes, Spacing, UIUtils, WindowManager, get_logger
 from . import DialogUtils, FontManager, TaskUtils, TreeUtils
 
 logger = get_logger().bind(component="ServerMonitorWindow")

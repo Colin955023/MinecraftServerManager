@@ -11,14 +11,7 @@ import time
 from pathlib import Path
 
 from ...ui import DialogUtils, TaskUtils
-from .. import (
-    PathUtils,
-    RuntimePaths,
-    SubprocessUtils,
-    UIUtils,
-    get_logger,
-    shutdown_logging,
-)
+from .. import PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, shutdown_logging
 
 logger = get_logger().bind(component="AppRestart")
 

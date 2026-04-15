@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from src.utils import (
-    recompute_adaptive_revalidation_batch_limit,
-    resolve_revalidation_batch_limits,
-)
+from src.utils import recompute_adaptive_revalidation_batch_limit, resolve_revalidation_batch_limits
 
 
 def test_resolve_revalidation_batch_limits_handles_defaults() -> None:
