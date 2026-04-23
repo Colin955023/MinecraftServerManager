@@ -70,8 +70,10 @@ from .models import (
     OnlineModCompatibilityReport,
     OnlineModInfo,
 )
-from .provider_adapter import (
+from .modrinth_service import (
     build_provider_record_from_online_mod,
+    fetch_modrinth_project_name,
+    get_mod_version_details,
     get_mod_versions,
     get_modrinth_current_versions_by_hashes,
     get_modrinth_latest_versions_by_hashes,
@@ -123,6 +125,8 @@ class DependencyPlanningService:
             dependency_names,
             loader=self.loader,
             version_details_cache=self.version_details_cache,
+            get_mod_version_details_fn=get_mod_version_details,
+            fetch_project_name_fn=fetch_modrinth_project_name,
         )
 
     def select_dependency_best_version(
@@ -177,6 +181,8 @@ class DependencyPlanningService:
             loader_version=self.loader_version,
             installed_mods=self.installed_mods,
             dependency_names=dependency_names,
+            get_mod_version_details_fn=get_mod_version_details,
+            fetch_project_name_fn=fetch_modrinth_project_name,
         )
 
     def extract_dependency_download_target(self, best_version: OnlineModVersion) -> tuple[str, str] | None:
@@ -648,6 +654,8 @@ def build_local_mod_update_plan(
             loader_version=loader_version,
             installed_mods=installed_mods,
             dependency_names=dependency_names,
+            get_mod_version_details_fn=get_mod_version_details,
+            fetch_project_name_fn=fetch_modrinth_project_name,
         )
         dependency_issues = [
             *list(report.missing_required_dependencies),

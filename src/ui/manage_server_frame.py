@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 import customtkinter as ctk
 
@@ -62,13 +62,6 @@ class ServerRefreshExecutionPlan:
 
     should_apply: bool
     refresh_context: ServerRefreshContext | None = None
-
-
-class _ServerTreeItemUpdater(Protocol):
-    """供 diff 準備階段更新既有列時使用的最小 Tree 介面。"""
-
-    def item(self, item_id: str, *, values: tuple[Any, ...]) -> object:
-        pass
 
 
 @dataclass(frozen=True)
@@ -965,7 +958,7 @@ class ManageServerFrame(ctk.CTkFrame):
             self._server_item_by_name.pop(name, None)
 
     def _prepare_server_tree_diff(
-        self, *, tree: _ServerTreeItemUpdater, server_order: list[str], server_rows: dict[str, tuple[Any, ...]]
+        self, *, tree: ttk.Treeview, server_order: list[str], server_rows: dict[str, tuple[Any, ...]]
     ) -> ServerTreeDiffPreparation:
         """更新既有列並回傳待插入資料與最新 snapshot。"""
         rows_snapshot: dict[str, tuple[Any, ...]] = {}

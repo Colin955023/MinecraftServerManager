@@ -22,7 +22,7 @@ from ...utils import (
 )
 from ..custom_dropdown import CustomDropdown
 from ..font_manager import FontManager
-from ..mod_search_service.provider_adapter import enhance_local_mod
+from ..mod_search_service.modrinth_service import enhance_local_mod
 from ..task_utils import TaskUtils
 from ..tree_utils import TreeUtils
 from .constants import logger

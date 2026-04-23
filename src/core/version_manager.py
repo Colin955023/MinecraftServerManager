@@ -109,7 +109,7 @@ class MinecraftVersionManager(Singleton):
                                 url = v_data.get("downloads", {}).get("server", {}).get("url")
                                 v_obj["server_url"] = url if url else ""
                             else:
-                                pass
+                                v_obj["server_url"] = ""
                         except Exception as e:
                             with suppress(Exception):
                                 record_and_mark(

@@ -1,4 +1,4 @@
-"""Provider adapter 與 Modrinth 網路查詢。"""
+"""Modrinth 網路查詢與本地 metadata 輔助。"""
 
 from __future__ import annotations
 
@@ -59,8 +59,18 @@ from .constants import (
     logger,
 )
 from .models import OnlineModInfo
-from .provider_protocol import ModProvider, ProviderDependencyContext, ProviderDownloadContract
-from .provider_registry import get_mod_provider, register_mod_provider
+
+
+@dataclass(slots=True)
+class ModrinthDownloadContract:
+    """描述 Modrinth 版本可下載檔案的核心欄位。"""
+
+    provider: str
+    project_id: str
+    version_id: str
+    download_url: str
+    filename: str
+    expected_hash: str = ""
 
 
 def _normalize_sort(sort_by: str) -> str:
@@ -69,164 +79,6 @@ def _normalize_sort(sort_by: str) -> str:
     if sort_by == "name":
         return "relevance"
     return "relevance"
-
-
-@dataclass(slots=True)
-class ModrinthProvider(ModProvider):
-    """Modrinth provider 實作。"""
-
-    provider_id: str = "modrinth"
-
-    def search(
-        self,
-        query: str,
-        minecraft_version: str | None = None,
-        loader: str | None = None,
-        categories: list[str] | None = None,
-        sort_by: str = "relevance",
-        limit: int = 20,
-    ) -> list[OnlineModInfo]:
-        """
-        透過 Modrinth API 搜尋或瀏覽模組。
-
-        Args:
-            query: 搜尋關鍵字。
-            minecraft_version: 目標 Minecraft 版本。
-            loader: 目標載入器類型。
-            categories: 額外分類條件。
-            sort_by: 排序方式。
-            limit: 最多回傳數量。
-        Returns:
-            搜尋到的模組清單。
-        """
-        return _search_mods_online_impl(
-            query,
-            minecraft_version=minecraft_version,
-            loader=loader,
-            categories=categories,
-            sort_by=sort_by,
-            limit=limit,
-        )
-
-    def get_versions(
-        self, project_id: str, minecraft_version: str | None = None, loader: str | None = None
-    ) -> list[OnlineModVersion]:
-        return _get_mod_versions_impl(project_id, minecraft_version=minecraft_version, loader=loader)
-
-    def get_project(self, project_id: str) -> OnlineModInfo | None:
-        return _get_modrinth_project_info_impl(project_id)
-
-    def get_version_details(self, version_id: str) -> tuple[str, OnlineModVersion | None]:
-        return _get_mod_version_details_impl(version_id)
-
-    def get_current_versions_by_hashes(
-        self, hashes: list[str] | set[str] | tuple[str, ...], algorithm: str
-    ) -> dict[str, ModrinthVersionLookupResult]:
-        return get_modrinth_current_versions_by_hashes(hashes, algorithm)
-
-    def get_latest_versions_by_hashes(
-        self,
-        hashes: list[str] | set[str] | tuple[str, ...],
-        algorithm: str,
-        minecraft_version: str | None = None,
-        loader: str | None = None,
-    ) -> dict[str, ModrinthVersionLookupResult]:
-        return get_modrinth_latest_versions_by_hashes(
-            hashes,
-            algorithm,
-            minecraft_version=minecraft_version,
-            loader=loader,
-        )
-
-    def get_recommended_version(
-        self, project_id: str, minecraft_version: str | None = None, loader: str | None = None
-    ) -> OnlineModVersion | None:
-        return _get_recommended_mod_version_impl(project_id, minecraft_version=minecraft_version, loader=loader)
-
-    def resolve_local_project_info(self, local_mod: Any) -> OnlineModInfo | None:
-        """
-        依本地模組資訊解析對應的 Modrinth 專案。
-
-        Args:
-            local_mod: 本地模組物件。
-
-        Returns:
-            解析後的 Modrinth 專案資訊；無法解析時回傳 None。
-        """
-        return _resolve_local_mod_project_info_impl(local_mod)
-
-    def resolve_project_names(self, project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
-        """
-        批次將 Modrinth project id 轉為可讀名稱。
-
-        Args:
-            project_ids: 要解析的 project id 集合。
-
-        Returns:
-            以 project id 為 key 的名稱對應表。
-        """
-        return _resolve_modrinth_project_names_impl(project_ids)
-
-    def resolve_dependencies(
-        self,
-        version: OnlineModVersion,
-        *,
-        context: ProviderDependencyContext,
-    ):
-        """
-        解析指定版本所需的依賴安裝計畫。
-
-        Args:
-            version: 目標版本資訊。
-            context: 依賴解析所需的執行上下文。
-
-        Returns:
-            依賴安裝計畫。
-        """
-        from .dependency_planner_facade import build_required_dependency_install_plan
-
-        return build_required_dependency_install_plan(
-            version,
-            minecraft_version=context.minecraft_version,
-            loader=context.loader,
-            loader_version=context.loader_version,
-            installed_mods=context.installed_mods,
-            root_project_id=context.root_project_id,
-            root_project_name=context.root_project_name,
-            max_depth=context.max_depth,
-        )
-
-    def get_download_contract(
-        self,
-        *,
-        project_id: str,
-        version: OnlineModVersion,
-    ) -> ProviderDownloadContract | None:
-        """
-        建立下載指定版本所需的最小契約資料。
-
-        Args:
-            project_id: 所屬專案的 project id。
-            version: 目標版本資訊。
-
-        Returns:
-            可供下載流程使用的契約資料；欄位不足時回傳 None。
-        """
-        primary_file = getattr(version, "primary_file", None)
-        if not primary_file:
-            return None
-        download_url = str(primary_file.get("url", "") or "").strip()
-        filename = str(primary_file.get("filename", "") or "").strip()
-        if not download_url or not filename:
-            return None
-        return ProviderDownloadContract(
-            provider=self.provider_id,
-            project_id=str(project_id or "").strip(),
-            version_id=str(getattr(version, "version_id", "") or "").strip(),
-            download_url=download_url,
-            filename=filename,
-            expected_hash=(extract_primary_file_hash(version) or extract_primary_file_hash(version, "sha256")),
-        )
 
 
 def _score_local_mod_search_match(mod: OnlineModInfo, candidate_keys: set[str]) -> int:
@@ -374,7 +226,7 @@ def _fetch_modrinth_project_detail(project_id: str) -> dict[str, Any] | None:
     return response
 
 
-def _resolve_local_mod_project_info_impl(local_mod: Any) -> OnlineModInfo | None:
+def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
     """盡量將本地模組對應到可用的 Modrinth 專案資訊。
 
     Args:
@@ -558,7 +410,7 @@ def _ensure_local_mod_provider_identity(
     return (ensured, None)
 
 
-def _get_modrinth_project_info_impl(project_id: str) -> OnlineModInfo | None:
+def get_modrinth_project_info(project_id: str) -> OnlineModInfo | None:
     """依 project id 或 slug 取得單一 Modrinth 專案資訊。
 
     Args:
@@ -618,7 +470,7 @@ def fetch_modrinth_project_name(project_id: str) -> str | None:
     return resolved_name or None
 
 
-def _get_mod_version_details_impl(version_id: str) -> tuple[str, OnlineModVersion | None]:
+def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
     """依 Modrinth version id 取得精確版本資訊，並回傳其所屬 project id。
 
     Args:
@@ -651,7 +503,7 @@ def _get_mod_version_details_impl(version_id: str) -> tuple[str, OnlineModVersio
     return (project_id, parse_modrinth_version(response))
 
 
-def _resolve_modrinth_project_names_impl(project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
+def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
     """將 Modrinth project id 轉為較易讀的專案名稱。
 
     Args:
@@ -751,7 +603,7 @@ def _is_server_compatible_online_mod(mod: OnlineModInfo) -> bool:
     return client_side != "required"
 
 
-def _search_mods_online_impl(
+def search_mods_online(
     query: str,
     minecraft_version: str | None = None,
     loader: str | None = None,
@@ -811,7 +663,7 @@ def _search_mods_online_impl(
     return mods
 
 
-def _get_mod_versions_impl(
+def get_mod_versions(
     project_id: str, minecraft_version: str | None = None, loader: str | None = None
 ) -> list[OnlineModVersion]:
     """取得指定 Modrinth 模組的穩定版本。
@@ -862,7 +714,7 @@ def _get_mod_versions_impl(
     return versions
 
 
-def _get_recommended_mod_version_impl(
+def get_recommended_mod_version(
     project_id: str, minecraft_version: str | None = None, loader: str | None = None
 ) -> OnlineModVersion | None:
     """取得最適合目前條件的推薦版本，若條件下查無版本則回退到未過濾結果。"""
@@ -913,102 +765,46 @@ def enhance_local_mod(
     return resolved_project_info
 
 
-register_mod_provider(ModrinthProvider())
-
-
-def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
+def get_modrinth_download_contract(
+    *,
+    project_id: str,
+    version: OnlineModVersion,
+) -> ModrinthDownloadContract | None:
     """
-    依本地模組資訊解析對應的 Modrinth 專案。
+    建立下載指定 Modrinth 版本所需的最小契約資料。
 
     Args:
-        local_mod: 本地模組物件。
+        project_id: 所屬專案的 project id。
+        version: 目標版本資訊。
 
     Returns:
-        解析後的 Modrinth 專案資訊；無法解析時回傳 None。
+        可供下載流程使用的契約資料；欄位不足時回傳 None。
     """
-    return get_mod_provider("modrinth").resolve_local_project_info(local_mod)
-
-
-def get_modrinth_project_info(project_id: str) -> OnlineModInfo | None:
-    return get_mod_provider("modrinth").get_project(project_id)
-
-
-def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
-    return get_mod_provider("modrinth").get_version_details(version_id)
-
-
-def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
-    """
-    批次將 Modrinth project id 轉為可讀名稱。
-
-    Args:
-        project_ids: 要解析的 project id 集合。
-
-    Returns:
-        以 project id 為 key 的名稱對應表。
-    """
-    return get_mod_provider("modrinth").resolve_project_names(project_ids)
-
-
-def search_mods_online(
-    query: str,
-    minecraft_version: str | None = None,
-    loader: str | None = None,
-    categories: list[str] | None = None,
-    sort_by: str = "relevance",
-    limit: int = 20,
-) -> list[OnlineModInfo]:
-    """
-    透過預設 provider 搜尋或瀏覽線上模組。
-
-    Args:
-        query: 搜尋關鍵字。
-        minecraft_version: 目標 Minecraft 版本。
-        loader: 目標載入器類型。
-        categories: 額外分類條件。
-        sort_by: 排序方式。
-        limit: 最多回傳數量。
-
-    Returns:
-        搜尋到的模組清單。
-    """
-    return get_mod_provider("modrinth").search(
-        query,
-        minecraft_version=minecraft_version,
-        loader=loader,
-        categories=categories,
-        sort_by=sort_by,
-        limit=limit,
-    )
-
-
-def get_mod_versions(
-    project_id: str, minecraft_version: str | None = None, loader: str | None = None
-) -> list[OnlineModVersion]:
-    return get_mod_provider("modrinth").get_versions(project_id, minecraft_version=minecraft_version, loader=loader)
-
-
-def get_recommended_mod_version(
-    project_id: str, minecraft_version: str | None = None, loader: str | None = None
-) -> OnlineModVersion | None:
-    return get_mod_provider("modrinth").get_recommended_version(
-        project_id,
-        minecraft_version=minecraft_version,
-        loader=loader,
+    primary_file = getattr(version, "primary_file", None)
+    if not primary_file:
+        return None
+    download_url = str(primary_file.get("url", "") or "").strip()
+    filename = str(primary_file.get("filename", "") or "").strip()
+    if not download_url or not filename:
+        return None
+    return ModrinthDownloadContract(
+        provider="modrinth",
+        project_id=str(project_id or "").strip(),
+        version_id=str(getattr(version, "version_id", "") or "").strip(),
+        download_url=download_url,
+        filename=filename,
+        expected_hash=(extract_primary_file_hash(version) or extract_primary_file_hash(version, "sha256")),
     )
 
 
 __all__ = [
-    "ModProvider",
-    "ModrinthProvider",
+    "ModrinthDownloadContract",
     "OnlineModInfo",
-    "ProviderDependencyContext",
-    "ProviderDownloadContract",
     "enhance_local_mod",
-    "get_mod_provider",
     "get_mod_version_details",
     "get_mod_versions",
     "get_modrinth_current_versions_by_hashes",
+    "get_modrinth_download_contract",
     "get_modrinth_latest_versions_by_hashes",
     "get_modrinth_project_info",
     "get_recommended_mod_version",

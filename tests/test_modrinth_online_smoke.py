@@ -11,7 +11,7 @@ import src.ui as mod_search_service_module
 import src.ui.mod_management.review as mod_management_review_module
 import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
 import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
-import src.ui.mod_search_service.provider_adapter as mod_search_provider_module
+import src.ui.mod_search_service.modrinth_service as mod_search_provider_module
 from src.models import OnlineModVersion
 from src.utils import HTTPUtils, extract_download_host
 
@@ -62,10 +62,8 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
 
 
 @pytest.mark.smoke
-def test_get_mod_provider_exposes_download_contract() -> None:
-    provider = mod_search_provider_module.get_mod_provider("modrinth")
-
-    contract = provider.get_download_contract(
+def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
+    contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
         version=OnlineModVersion(
             version_id="ver123",
@@ -92,10 +90,8 @@ def test_get_mod_provider_exposes_download_contract() -> None:
 
 
 @pytest.mark.smoke
-def test_get_mod_provider_download_contract_falls_back_to_sha256_before_sha1() -> None:
-    provider = mod_search_provider_module.get_mod_provider("modrinth")
-
-    contract = provider.get_download_contract(
+def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
+    contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
         version=OnlineModVersion(
             version_id="ver123",

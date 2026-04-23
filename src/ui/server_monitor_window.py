@@ -613,7 +613,7 @@ class ServerMonitorWindow:
                     found = True
                     break
             if not found:
-                pass
+                self.update_player_list([])
         except Exception as e:
             logger.error(f"讀取玩家列表時發生錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 

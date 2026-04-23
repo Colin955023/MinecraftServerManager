@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from ...core import LoaderManager
@@ -18,6 +19,7 @@ from ...utils import (
 )
 from .constants import logger
 from .models import OnlineModCompatibilityReport
+from .modrinth_service import fetch_modrinth_project_name, get_mod_version_details
 
 
 def resolve_dependency_reference_with_provider_context(
@@ -26,6 +28,8 @@ def resolve_dependency_reference_with_provider_context(
     *,
     loader: str | None = None,
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] | None = None,
+    get_mod_version_details_fn: Callable[[str], tuple[str, OnlineModVersion | None]] | None = None,
+    fetch_project_name_fn: Callable[[str], str | None] | None = None,
 ) -> ResolvedDependencyReference:
     """補上 provider 查詢能力後解析單筆依賴參照。
 
@@ -34,19 +38,19 @@ def resolve_dependency_reference_with_provider_context(
         dependency_names: 依賴名稱對照表。
         loader: 目標載入器類型。
         version_details_cache: 版本詳情快取，避免重複查詢。
+        get_mod_version_details_fn: 由呼叫端注入的版本詳情查詢函式。
+        fetch_project_name_fn: 由呼叫端注入的專案名稱查詢函式。
 
     Returns:
         已補齊 provider 上下文的依賴解析結果。
     """
-    from .provider_adapter import fetch_modrinth_project_name, get_mod_version_details
-
     return resolve_dependency_reference(
         dependency,
         dependency_names,
         loader=loader,
         version_details_cache=version_details_cache,
-        get_mod_version_details=get_mod_version_details,
-        fetch_project_name=fetch_modrinth_project_name,
+        get_mod_version_details=get_mod_version_details_fn or get_mod_version_details,
+        fetch_project_name=fetch_project_name_fn or fetch_modrinth_project_name,
     )
 
 
@@ -93,6 +97,8 @@ def analyze_mod_version_compatibility(
     loader_version: str | None = None,
     installed_mods: list[Any] | None = None,
     dependency_names: dict[str, str] | None = None,
+    get_mod_version_details_fn: Callable[[str], tuple[str, OnlineModVersion | None]] | None = None,
+    fetch_project_name_fn: Callable[[str], str | None] | None = None,
 ) -> OnlineModCompatibilityReport:
     """根據目前伺服器與已安裝模組分析可用版本的相容性。
 
@@ -105,6 +111,8 @@ def analyze_mod_version_compatibility(
         loader_version: 目標載入器版本。
         installed_mods: 已安裝模組清單。
         dependency_names: 依賴名稱對照表。
+        get_mod_version_details_fn: 由呼叫端注入的版本詳情查詢函式。
+        fetch_project_name_fn: 由呼叫端注入的專案名稱查詢函式。
 
     Returns:
         相容性分析報告。
@@ -143,7 +151,12 @@ def analyze_mod_version_compatibility(
             continue
         dependency_type = normalize_identifier(str(dependency.get("dependency_type", "required") or "required"))
         resolved_dependency = resolve_dependency_reference_with_provider_context(
-            dependency, dependency_name_map, loader=loader, version_details_cache=version_details_cache
+            dependency,
+            dependency_name_map,
+            loader=loader,
+            version_details_cache=version_details_cache,
+            get_mod_version_details_fn=get_mod_version_details_fn,
+            fetch_project_name_fn=fetch_project_name_fn,
         )
         dependency_project_id = resolved_dependency.compare_project_id
         dependency_label = resolved_dependency.label
