@@ -3,27 +3,25 @@
 ## v1.7.0 - 2026-04-03
 
 ### 新增
-- 新增線上模組搜尋/版本查詢與下載流程，加入 `mod_search_service` 與模組頁面整合能力（含依賴解析與相容性檢查）。
-- 新增模組索引與 metadata 管線：`mod_index_manager`、`mod_provider_metadata`、`mod_semantics`，支援增量掃描與 provider 資料整併。
-- 新增伺服器實例模型與工具拆分：`server_instance`、`server_detection_utils`、`server_detection_version_utils`、`server_properties_utils`、`server_runtime_utils`。
-- 新增通用基礎設施：`background_task`、`atomic_writer`、`exception_utils`、`update_parsing`、`virtual_list`。
-- 新增與擴充 smoke/整合測試，涵蓋模組管理、provider 協調、版本解析、設定 I/O、子程序與 UI 池化/DPI 行為。
+- **線上模組搜尋系統**：新增 `mod_search_service`，支援線上模組搜尋、版本查詢與下載流程，並整合依賴解析與相容性檢查機制。
+- **模組索引管線**：新增 `mod_index_manager`、`mod_provider_metadata` 與 `mod_semantics`，支援增量掃描與 provider 資料整併功能。
+- **伺服器實例工具組**：新增 `server_instance` 及拆分後的 `server_detection_utils`、`server_detection_version_utils`、`server_properties_utils` 與 `server_runtime_utils` 以落實職責分離。
+- **通用基礎設施**：新增 `background_task`（背景任務）、`atomic_writer`（原子寫入）、`exception_utils`（例外處理）、`update_parsing` 與 `virtual_list`（虛擬列表）等工具模組。
+- **自動化測試測試**：新增並擴充 Smoke 與整合測試，涵蓋模組管理、版本解析、設定檔 I/O 及 UI DPI 適應行為。
 
 ### 調整
-- 重構模組管理與 UI 架構（`mod_management`、`manage_server_frame`、`main_window`），降低耦合並改善操作流暢度。
-- 將舊有大型工具模組拆分為職責明確的伺服器檢測/屬性/執行模組，並統一版本偵測流程。
-- 優化 Java 與 I/O 熱路徑：加入快取與受限工作池並行處理，降低重複掃描與雜湊成本。
-- 優化建置與打包流程：調整 Nuitka 快取策略、修正環境變數處理、更新可攜版封裝腳本。
-- 重構 CI/CD 與安全掃描：升級 GitHub Actions 工作流程、整合 Bandit/detect-secrets 與品質檢查入口。
-- 更新文件與相依套件，對齊目前模組系統與建置流程。
+- **架構重構**：重構 `mod_management`、`manage_server_frame` 與 `main_window` UI 架構，降低模組間耦合度並改善操作流暢度。
+- **效能優化**：優化 Java 與 I/O 熱路徑，導入快取機制與受限工作池（Task Pooling）並行處理，大幅降低重複掃描與雜湊運算成本。
+- **建置流程優化**：調整 Nuitka 建置快取策略，修正環境變數處理邏輯，並更新可攜版封裝腳本。
+- **CI/CD 與安全加固**：升級 GitHub Actions 工作流，整合 Bandit/detect-secrets 安全掃描與品質檢查機制。
 
 ### 修正
-- 修正 Windows API 呼叫相容性問題（採保護性呼叫如 `getattr`）。
-- 修正多處 I/O、下載、解析與流程銜接問題，提升建置、啟動與模組操作穩定性。
-- 修正部分工作流程與腳本中的重複或不一致設定，降低 CI 失敗機率。
+- 修正 Windows API 呼叫的相容性問題（導入保護性呼叫機制）。
+- 修正多處 I/O 下載與解析流程中的銜接問題，提升系統啟動與模組操作的穩定性。
+- 修正工作流程腳本中重複的設定值，降低 CI 自動化建置失敗的機率。
 
 ### 重大變更
-- 模組管理架構改變：引入模組索引與 metadata 提供者，既有外部 provider 或 UI 插件可能需要更新設定或資料格式。
+- **模組管理架構更迭**：引入模組索引與 Metadata 提供者機制，既有的外部 Provider 或 UI 插件可能需要更新資料格式以維持相容。
 
 ## v1.6.6 - 2026-02-20
 

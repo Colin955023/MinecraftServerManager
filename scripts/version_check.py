@@ -21,6 +21,14 @@ from src.version_info.version_info import APP_VERSION
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
+def _configure_stdio_utf8() -> None:
+    """讓 CLI 在 Windows CI 的非 UTF-8 預設編碼下仍能輸出中文。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+
+
 def _ensure_non_empty_str(parser: argparse.ArgumentParser, opt_name: str, value: object) -> str:
     """確保參數值為非空字串。"""
     if not isinstance(value, str) or not value.strip():
@@ -49,9 +57,11 @@ def extract_release_notes(changelog_path: Path, *, strict: bool = False) -> str:
     content = changelog_path.read_text(encoding="utf-8-sig") if changelog_path.exists() else ""
 
     version = get_app_version()
-    heading_pattern = rf"##\s+\[?{re.escape(version)}\]?.*?\n(.*?)(?=\n##\s+|$)"
+    escaped_version = re.escape(version)
+    heading_version = rf"(?:\[v?{escaped_version}\]|v?{escaped_version})"
+    heading_pattern = rf"^##\s+{heading_version}(?=\s|$).*?\n(.*?)(?=^##\s+|\Z)"
 
-    match = re.search(heading_pattern, content, re.S)
+    match = re.search(heading_pattern, content, re.S | re.M)
     if match:
         return match.group(1).strip()
 
@@ -82,6 +92,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    _configure_stdio_utf8()
     parser = _build_parser()
     args = parser.parse_args()
 

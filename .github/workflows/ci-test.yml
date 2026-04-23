@@ -8,15 +8,7 @@ on:
   push:
     branches:
       - master
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - 'CHANGELOG.md'
   workflow_dispatch:
   merge_group:
     types: [checks_requested]
@@ -138,4 +130,3 @@ jobs:
           name: pytest_junit_report_windows
           path: pytest-results.xml
           retention-days: 2
-

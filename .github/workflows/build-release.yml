@@ -39,19 +39,19 @@ jobs:
         id: release_tag
         shell: pwsh
         run: |
-          `$json = python .\scripts\version_check.py get-all
-          if (`$LASTEXITCODE -ne 0) {
-            Write-Error `"取得版本資訊與驗證失敗`"
-            exit `$LASTEXITCODE
+          $json = python .\scripts\version_check.py get-all
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "取得版本資訊與驗證失敗"
+            exit $LASTEXITCODE
           }
           
-          `$output = `$json | ConvertFrom-Json
-          `$tag = `$output.Tag
-          `$version = `$output.Version
+          $output = $json | ConvertFrom-Json
+          $tag = $output.Tag
+          $version = $output.Version
 
-          `"tag_name=`$tag`" | Out-File -FilePath `$env:GITHUB_OUTPUT -Encoding utf8 -Append
-          `"version=`$version`" | Out-File -FilePath `$env:GITHUB_OUTPUT -Encoding utf8 -Append
-          `"RELEASE_TAG=`$tag`" | Out-File -FilePath `$env:GITHUB_ENV -Encoding utf8 -Append
+          "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build executable and installer
         shell: pwsh
