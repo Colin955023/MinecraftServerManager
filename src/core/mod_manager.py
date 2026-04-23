@@ -4,89 +4,39 @@
 
 import contextlib
 import re
-import tempfile
-import threading
-import time
 import tomllib
 import zipfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Any
 
 TomlDecodeError = tomllib.TOMLDecodeError
 from ..utils import (
-    HTTPUtils,
     LocalProviderEnsureResult,
     ModIndexManager,
     PathUtils,
     ProviderMetadataRecord,
     ServerDetectionUtils,
     ServerDetectionVersionUtils,
-    UIUtils,
-    cache_provider_metadata_record,
-    derive_provider_lifecycle_state,
     ensure_local_mod_provider_record,
     get_logger,
-    is_cached_provider_metadata_fresh,
     record_and_mark,
-    resolve_modrinth_provider_record,
 )
-from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+from .local_mod_scanner import LocalModScanner
+from .mod_file_installer import ModFileInstaller
+from .mod_models import (
+    LocalModInfo,
+    LocalModMutationResult,
+    ModFileOperationResult,
+    ModPlatform,
+    ModStatus,
+)
+from .mod_provider_resolver import (
+    ModProviderResolver,
+    resolve_platform_info_from_cache,
+    search_on_modrinth_candidates,
+)
 
 logger = get_logger().bind(component="ModManager")
-MODRINTH_HASH_ALGORITHM = "sha512"
-MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
-
-
-class ModStatus(Enum):
-    """模組狀態"""
-
-    ENABLED = "enabled"
-    DISABLED = "disabled"
-
-
-class ModPlatform(Enum):
-    """模組來源平台"""
-
-    MODRINTH = "modrinth"
-    LOCAL = "local"
-
-
-@dataclass
-class LocalModInfo:
-    """本地模組資訊"""
-
-    id: str
-    name: str
-    filename: str
-    version: str
-    minecraft_version: str
-    loader_type: str
-    description: str = ""
-    author: str = ""
-    platform: ModPlatform = ModPlatform.LOCAL
-    platform_id: str = ""
-    platform_slug: str = ""
-    status: ModStatus = ModStatus.ENABLED
-    file_path: str = ""
-    download_url: str = ""
-    homepage_url: str = ""
-    dependencies: list[str] | None = None
-    file_size: int = 0
-    current_hash: str = ""
-    hash_algorithm: str = ""
-    resolution_source: str = ""
-    resolved_at_epoch_ms: str = ""
-    provider_lifecycle_state: str = ""
-    stale_revalidation_failures: int = 0
-    next_retry_not_before_epoch_ms: str = ""
-
-    def __post_init__(self):
-        if self.dependencies is None:
-            self.dependencies = []
 
 
 class ModManager:
@@ -104,19 +54,130 @@ class ModManager:
         self.download_staging_root.mkdir(parents=True, exist_ok=True)
         self.index_manager: ModIndexManager = ModIndexManager(server_path)
         self.on_mod_list_changed: Callable | None = None
+        self._local_mod_scanner: LocalModScanner | None = None
+        self._mod_file_installer: ModFileInstaller | None = None
+        self._provider_resolver: ModProviderResolver | None = None
+
+    def _get_local_mod_scanner(self) -> LocalModScanner:
+        """延後建立本地模組掃描器，讓 `ModManager` 保持 orchestration 角色。"""
+        scanner = getattr(self, "_local_mod_scanner", None)
+        if scanner is None:
+            scanner = LocalModScanner(
+                index_manager=self.index_manager,
+                mods_path=self.mods_path,
+                server_config=self.server_config,
+                resolve_platform_info=self._resolve_platform_info,
+                quarantine_file=self._quarantine_file,
+            )
+            self._local_mod_scanner = scanner
+        return scanner
+
+    def _get_mod_file_installer(self) -> ModFileInstaller:
+        """延後建立檔案安裝器，並同步最新的 UI 通知回呼。"""
+        installer = getattr(self, "_mod_file_installer", None)
+        if installer is None:
+            installer = ModFileInstaller(
+                server_path=self.server_path,
+                mods_path=self.mods_path,
+                download_staging_root=self.download_staging_root,
+                on_mod_list_changed=self.on_mod_list_changed,
+                logger=logger,
+            )
+            self._mod_file_installer = installer
+        installer.on_mod_list_changed = self.on_mod_list_changed
+        return installer
+
+    def _get_provider_resolver(self) -> ModProviderResolver:
+        """延後建立 provider 解析器，避免 `__new__` 測試案例需要完整初始化。"""
+        resolver = getattr(self, "_provider_resolver", None)
+        if resolver is None:
+            resolver = ModProviderResolver(
+                index_manager=self.index_manager,
+                modrinth_identity_cache=self._modrinth_identity_cache,
+                read_json_from_jar=self._read_json_from_jar,
+                quarantine_file=self._quarantine_file,
+            )
+            self._provider_resolver = resolver
+        return resolver
+
+    @staticmethod
+    def _success_mutation_result(
+        message: str = "",
+        *,
+        final_path: Path | None = None,
+        affected_count: int = 0,
+    ) -> LocalModMutationResult:
+        """建立成功的本地模組異動結果。"""
+        return LocalModMutationResult(
+            status="completed", message=message, final_path=final_path, affected_count=affected_count
+        )
+
+    @staticmethod
+    def _failure_mutation_result(
+        title: str,
+        message: str,
+        *,
+        missing_ids: tuple[str, ...] = (),
+    ) -> LocalModMutationResult:
+        """建立失敗的本地模組異動結果。"""
+        return LocalModMutationResult(status="failed", title=title, message=message, missing_ids=missing_ids)
 
     @staticmethod
     def _normalize_expected_hash(expected_hash: str | None) -> tuple[str, str]:
-        normalized_hash = str(expected_hash or "").strip().lower()
-        if not normalized_hash:
-            return ("", "")
-        if len(normalized_hash) == 40:
-            return (normalized_hash, "sha1")
-        if len(normalized_hash) == 64:
-            return (normalized_hash, "sha256")
-        if len(normalized_hash) == 128:
-            return (normalized_hash, "sha512")
-        return (normalized_hash, "")
+        return ModFileInstaller.normalize_expected_hash(expected_hash)
+
+    @staticmethod
+    def _is_operation_cancelled(cancel_check: Callable[[], bool] | None) -> bool:
+        if cancel_check is None:
+            return False
+        try:
+            return bool(cancel_check())
+        except Exception as e:
+            logger.exception(f"取消檢查回呼失敗: {e}")
+            return False
+
+    def _restore_backup_to_path(self, original_path: Path | None, backup_path: Path | None) -> bool:
+        return self._get_mod_file_installer().restore_backup_to_path(original_path, backup_path)
+
+    def _rollback_replaced_mod_file(
+        self,
+        *,
+        old_path: Path | None,
+        installed_path: Path | None,
+        final_path: Path | None,
+        backup_path: Path | None,
+        cancelled: bool,
+        operation_name: str,
+    ) -> ModFileOperationResult:
+        return self._get_mod_file_installer().rollback_replaced_mod_file(
+            old_path=old_path,
+            installed_path=installed_path,
+            final_path=final_path,
+            backup_path=backup_path,
+            cancelled=cancelled,
+            operation_name=operation_name,
+        )
+
+    def _install_remote_mod_file_result(
+        self,
+        download_url: str,
+        filename: str,
+        progress_callback: Callable[[int, int], None] | None = None,
+        expected_hash: str | None = None,
+        *,
+        provider: str | None = "modrinth",
+        cancel_check: Callable[[], bool] | None = None,
+        notify_change: bool = True,
+    ) -> ModFileOperationResult:
+        return self._get_mod_file_installer().install_remote_mod_file_result(
+            download_url=download_url,
+            filename=filename,
+            progress_callback=progress_callback,
+            expected_hash=expected_hash,
+            provider=provider,
+            cancel_check=cancel_check,
+            notify_change=notify_change,
+        )
 
     def scan_mods(self) -> list[LocalModInfo]:
         """掃描 mods 目錄中的模組檔案並建立模組資訊列表。
@@ -124,20 +185,7 @@ class ModManager:
         Returns:
             掃描後的模組資訊清單。
         """
-        self.index_manager.cleanup_stale_entries()
-        mods = []
-        files_to_scan = []
-        for file_path in self.mods_path.glob("*.jar*"):
-            if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"):
-                files_to_scan.append(file_path)
-        files_to_scan.sort(key=lambda path: path.name.lower())
-        with ThreadPoolExecutor(max_workers=min(6, len(files_to_scan) or 1)) as executor:
-            results = executor.map(self.create_mod_info_from_file, files_to_scan)
-        for mod_info in results:
-            if mod_info:
-                mods.append(mod_info)
-        self.index_manager.flush()
-        return mods
+        return self._get_local_mod_scanner().scan_mods(self.create_mod_info_from_file)
 
     def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
         """依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式。
@@ -148,94 +196,7 @@ class ModManager:
         Returns:
             解析成功時回傳 LocalModInfo，失敗時回傳 None。
         """
-        try:
-            filename, enabled, base_name = self._parse_file_info(file_path)
-            cached_provider = self.index_manager.get_cached_provider_metadata(file_path) or {}
-            mod_data = {
-                "name": base_name,
-                "version": "未知",
-                "author": "",
-                "description": "",
-                "loader_type": "未知",
-                "mc_version": "未知",
-            }
-            cached_metadata = self.index_manager.get_cached_metadata(file_path)
-            if cached_metadata:
-                mod_data.update(cached_metadata)
-            else:
-                self._extract_metadata_from_jar(file_path, mod_data)
-                self._apply_fallback_logic(base_name, mod_data)
-                self.index_manager.cache_metadata(
-                    file_path,
-                    {
-                        "version": mod_data["version"],
-                        "author": mod_data["author"],
-                        "description": mod_data["description"],
-                        "loader_type": mod_data["loader_type"],
-                        "mc_version": mod_data["mc_version"],
-                    },
-                )
-            self._apply_server_config_overrides(mod_data)
-            platform, platform_id, platform_slug = self._resolve_platform_info(
-                file_path, mod_data["name"], base_name, filename, cached_provider
-            )
-            current_hash = ""
-            hash_algorithm = ""
-            if platform == ModPlatform.MODRINTH and platform_id:
-                current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_HASH_ALGORITHM)
-                hash_algorithm = MODRINTH_HASH_ALGORITHM if current_hash else ""
-            refreshed_provider = self.index_manager.get_cached_provider_metadata(file_path) or cached_provider
-            provider_lifecycle_state = str(
-                refreshed_provider.get("lifecycle_state", "") or derive_provider_lifecycle_state(refreshed_provider)
-            ).strip()
-            try:
-                stale_revalidation_failures = max(
-                    0, int(str(refreshed_provider.get("stale_revalidation_failures", "0") or "0").strip() or 0)
-                )
-            except (TypeError, ValueError) as _:
-                stale_revalidation_failures = 0
-            return LocalModInfo(
-                id=base_name,
-                name=mod_data["name"],
-                filename=filename,
-                version=mod_data["version"],
-                minecraft_version=mod_data["mc_version"],
-                loader_type=mod_data["loader_type"],
-                description=mod_data["description"],
-                author=mod_data["author"],
-                platform=platform,
-                platform_id=platform_id,
-                platform_slug=platform_slug,
-                status=ModStatus.ENABLED if enabled else ModStatus.DISABLED,
-                file_path=str(file_path),
-                file_size=file_path.stat().st_size,
-                current_hash=current_hash,
-                hash_algorithm=hash_algorithm,
-                resolution_source=str(refreshed_provider.get("resolution_source", "") or "").strip(),
-                resolved_at_epoch_ms=str(refreshed_provider.get("resolved_at_epoch_ms", "") or "").strip(),
-                provider_lifecycle_state=provider_lifecycle_state,
-                stale_revalidation_failures=stale_revalidation_failures,
-                next_retry_not_before_epoch_ms=str(
-                    refreshed_provider.get("next_retry_not_before_epoch_ms", "") or ""
-                ).strip(),
-            )
-        except (OSError, zipfile.BadZipFile) as e:
-            record_and_mark(
-                e, marker_path=file_path, reason="io_or_bad_zip", details={"context": "create_mod_info_from_file"}
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "io_or_bad_zip")
-            return None
-        except (TypeError, ValueError, KeyError) as e:
-            logger.debug(f"解析模組檔案時遇到格式/型別問題 {file_path}: {e}")
-            return None
-        except Exception as e:
-            record_and_mark(
-                e, marker_path=file_path, reason="unexpected_error", details={"context": "create_mod_info_from_file"}
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "unexpected_error")
-            return None
+        return self._get_local_mod_scanner().create_mod_info_from_file(file_path)
 
     def _resolve_platform_info(
         self,
@@ -246,33 +207,19 @@ class ModManager:
         cached_provider: dict[str, object] | None = None,
     ) -> tuple[ModPlatform, str, str]:
         """優先使用索引中的 provider metadata，必要時才重新偵測。"""
-        raw_cached_provider = dict(cached_provider or {})
-        cache_is_fresh = is_cached_provider_metadata_fresh(raw_cached_provider)
-        cached_record = ProviderMetadataRecord.from_cached(raw_cached_provider)
-        explicit_local_marker = str(raw_cached_provider.get("platform", "") or "").strip().lower() == "local"
-        if not cache_is_fresh:
-            cached_record = ProviderMetadataRecord.from_values(project_name=cached_record.project_name)
-        if explicit_local_marker and (not cached_record.project_id) and (not cached_record.slug):
-            return (ModPlatform.LOCAL, "", cached_record.slug)
-        ensure_result = self._ensure_platform_provider_record(
-            file_path=file_path, name=name, base_name=base_name, filename=filename, cached_record=cached_record
-        )
-        resolved_record = ensure_result.record
-        platform = ModPlatform.MODRINTH if resolved_record.project_id else ModPlatform.LOCAL
-        platform_id = resolved_record.project_id
-        platform_slug = resolved_record.slug
-        cache_provider_metadata_record(
-            self.index_manager,
-            file_path,
-            ProviderMetadataRecord.from_values(
-                platform=platform.value,
-                project_id=platform_id,
-                slug=platform_slug,
-                project_name=str(name or "").strip(),
+        return resolve_platform_info_from_cache(
+            index_manager=self.index_manager,
+            file_path=file_path,
+            name=name,
+            cached_provider=cached_provider,
+            ensure_platform_provider_record=lambda cached_record: self._ensure_platform_provider_record(
+                file_path=file_path,
+                name=name,
+                base_name=base_name,
+                filename=filename,
+                cached_record=cached_record,
             ),
-            metadata_source=str(getattr(ensure_result, "source", "") or "").strip() or "scan_detect",
         )
-        return (platform, platform_id, platform_slug)
 
     def _ensure_platform_provider_record(
         self, *, file_path: Path, name: str, base_name: str, filename: str, cached_record: ProviderMetadataRecord
@@ -299,19 +246,7 @@ class ModManager:
 
     def _resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
         """將 slug 或 project id 轉為 canonical Modrinth project id 與 slug。"""
-        clean_identifier = str(identifier or "").strip()
-        if not clean_identifier:
-            return ("", "")
-        cache_key = clean_identifier.lower()
-        cached_identity = self._modrinth_identity_cache.get(cache_key)
-        if cached_identity is not None:
-            return cached_identity
-        resolved_record = resolve_modrinth_provider_record(
-            clean_identifier, search_fallback=self._build_provider_record_from_search
-        )
-        resolved = (resolved_record.project_id, resolved_record.slug or clean_identifier)
-        self._modrinth_identity_cache[cache_key] = resolved
-        return resolved
+        return self._get_provider_resolver().resolve_modrinth_project_identity(identifier)
 
     def _build_provider_record_from_search(self, query: str) -> ProviderMetadataRecord | None:
         platform, project_id, slug = self._search_on_modrinth(query, query, query)
@@ -632,37 +567,7 @@ class ModManager:
         self, file_path: Path, name: str, base_name: str, filename: str
     ) -> tuple[ModPlatform, str, str]:
         """從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID"""
-        platform = ModPlatform.LOCAL
-        platform_id = ""
-        platform_slug = ""
-        try:
-            with zipfile.ZipFile(file_path, "r") as jar:
-                if "fabric.mod.json" in jar.namelist():
-                    platform_slug = self._extract_platform_id_from_fabric(jar)
-                elif "META-INF/mods.toml" in jar.namelist():
-                    platform_slug = self._extract_platform_id_from_forge(jar)
-                if platform_slug:
-                    resolved_project_id, resolved_slug = self._resolve_modrinth_project_identity(platform_slug)
-                    platform_id = resolved_project_id
-                    platform_slug = resolved_slug or platform_slug
-                if platform_id:
-                    platform = ModPlatform.MODRINTH
-        except (zipfile.BadZipFile, OSError) as e:
-            record_and_mark(
-                e, marker_path=file_path, reason="io_or_bad_zip_detect", details={"context": "_detect_platform_info"}
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "io_or_bad_zip_detect")
-        except Exception as e:
-            record_and_mark(
-                e, marker_path=file_path, reason="unexpected_detect_error", details={"context": "_detect_platform_info"}
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "unexpected_detect_error")
-        if platform == ModPlatform.LOCAL or not platform_id:
-            platform, platform_id, searched_slug = self._search_on_modrinth(name, base_name, filename)
-            platform_slug = searched_slug or platform_slug
-        return (platform, platform_id, platform_slug)
+        return self._get_provider_resolver().detect_platform_info(file_path, name, base_name, filename)
 
     def _extract_platform_id_from_fabric(self, jar) -> str:
         """解析 Fabric 模組元資料以提取平台 ID"""
@@ -704,36 +609,7 @@ class ModManager:
 
     def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
         """在 Modrinth API 上搜索模組"""
-        try:
-            search_keywords = []
-            if name and name != "未知":
-                search_keywords.append(name)
-            if base_name and base_name not in search_keywords:
-                search_keywords.append(base_name)
-            if filename and filename not in search_keywords:
-                search_keywords.append(filename)
-            for keyword in search_keywords:
-                headers = {
-                    "User-Agent": f"MinecraftServerManager/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"
-                }
-                data = HTTPUtils.get_json(MODRINTH_SEARCH_URL, timeout=8, headers=headers, params={"query": keyword})
-                if data and data.get("hits"):
-                    hit = data["hits"][0]
-                    project_id = str(hit.get("project_id", "") or "").strip()
-                    slug = str(hit.get("slug", "") or project_id).strip()
-                    return (ModPlatform.MODRINTH, project_id or slug, slug)
-        except (ValueError, TypeError) as e:
-            logger.debug(f"Modrinth 搜尋遇到解析/型別錯誤: {e}")
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="modrinth_search_failed",
-                    details={"name": name, "base_name": base_name, "filename": filename},
-                )
-            logger.exception(f"Modrinth 搜尋失敗: {e}")
-        return (ModPlatform.LOCAL, "", "")
+        return search_on_modrinth_candidates(name, base_name, filename)
 
     def _clean_author(self, author: str) -> str:
         """清理作者字串"""
@@ -744,7 +620,7 @@ class ModManager:
             return ""
         return author
 
-    def set_mod_state(self, mod_id: str, enable: bool) -> bool:
+    def set_mod_state_result(self, mod_id: str, enable: bool) -> LocalModMutationResult:
         """
         設定模組啟用或停用狀態
 
@@ -759,73 +635,62 @@ class ModManager:
                 False 表示停用模組（新增 .disabled 後綴）
 
         Returns:
-            bool:
-                True  表示操作成功或模組已在目標狀態
-                False 表示操作失敗或發生例外錯誤
+            本地模組異動結果。
         """
-        try:
-            # 將 mod_id 淨化為檔名（basename），以避免路徑注入
-            safe_mod_id = Path(str(mod_id or "")).name
-            if not safe_mod_id:
-                logger.error(f"無效的模組識別字串: {mod_id}")
-                return False
-            if safe_mod_id != str(mod_id):
-                logger.warning(f"淨化不安全的 mod_id: {mod_id} -> {safe_mod_id}")
-            mod_id = safe_mod_id
-            enabled_file = self.mods_path / f"{mod_id}.jar"
-            disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
-            # 額外檢查結果路徑是否仍在 mods 目錄內
-            if not PathUtils.is_path_within(self.mods_path, enabled_file, strict=False):
-                logger.error(f"模組路徑不在 mods 目錄內: {enabled_file}")
-                return False
-            if enable:
-                src_file = disabled_file
-                dst_file = enabled_file
-                conflict_bak_suffix = "disabled"
-            else:
-                src_file = enabled_file
-                dst_file = disabled_file
-                conflict_bak_suffix = "enabled"
-            if dst_file.exists() and (not src_file.exists()):
-                return True
-            if dst_file.exists() and src_file.exists():
-                try:
-                    same_size = dst_file.stat().st_size == src_file.stat().st_size
-                except OSError:
-                    same_size = False
-                if same_size:
-                    src_file.unlink(missing_ok=True)
-                    return True
-                bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.bak"
-                if bak.exists():
-                    bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.{int(time.time())}.bak"
-                src_file.rename(bak)
-                return True
-            if src_file.exists():
-                src_file.rename(dst_file)
-                if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
-                    self.on_mod_list_changed()
-                return True
-            return False
-        except (OSError, PermissionError) as e:
-            action = "啟用" if enable else "停用"
-            logger.error(f"{action}模組失敗（IO/權限）: {e}", "ModManager")
-            if threading.current_thread() is threading.main_thread():
-                UIUtils.show_error(f"{action}失敗", f"{action}模組失敗: {e}")
-            return False
-        except Exception as e:
-            action = "啟用" if enable else "停用"
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="set_mod_state_unexpected",
-                    details={"mod": mod_id},
-                )
-            logger.exception(f"{action}模組時發生未預期錯誤: {e}")
-            if threading.current_thread() is threading.main_thread():
-                UIUtils.show_error(f"{action}失敗", f"{action}模組失敗: {e}")
-            return False
+        return self._get_mod_file_installer().set_mod_state_result(mod_id, enable)
+
+    def set_mod_state(self, mod_id: str, enable: bool) -> bool:
+        """設定模組啟用或停用狀態。"""
+        return self.set_mod_state_result(mod_id, enable).completed
+
+    def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
+        """匯入本地模組檔案到目前伺服器的 mods 目錄。
+
+        Args:
+            source_path: 要匯入的本地模組檔案路徑。
+
+        Returns:
+            匯入流程結果，供 UI 或呼叫端判斷成功與失敗原因。
+        """
+
+        return self._get_mod_file_installer().import_local_mod_file_result(source_path)
+
+    def import_local_mod_file(self, source_path: str | Path) -> Path | None:
+        """匯入本地模組檔案。
+
+        Args:
+            source_path: 要匯入的本地模組檔案路徑。
+
+        Returns:
+            匯入成功時回傳最終檔案路徑，失敗時回傳 None。
+        """
+
+        result = self.import_local_mod_file_result(source_path)
+        return result.final_path if result.completed else None
+
+    def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
+        """刪除一或多個本地模組檔案。
+
+        Args:
+            mod_ids: 要刪除的模組識別值列表。
+
+        Returns:
+            刪除流程結果，包含成功數量與缺失模組資訊。
+        """
+
+        return self._get_mod_file_installer().delete_local_mods_result(mod_ids)
+
+    def delete_local_mods(self, mod_ids: list[str] | tuple[str, ...]) -> bool:
+        """刪除一或多個本地模組檔案。
+
+        Args:
+            mod_ids: 要刪除的模組識別值列表。
+
+        Returns:
+            全部刪除成功時回傳 True，否則回傳 False。
+        """
+
+        return self.delete_local_mods_result(mod_ids).completed
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:
         """獲取模組列表"""
@@ -836,82 +701,35 @@ class ModManager:
 
     def install_remote_mod_file(
         self,
+        *,
         download_url: str,
         filename: str,
         progress_callback: Callable[[int, int], None] | None = None,
+        provider: str | None = "modrinth",
         expected_hash: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> Path | None:
-        """下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。
+        """
+        下載遠端模組檔案並安裝到目前伺服器的 mods 目錄。
 
         Args:
             download_url: 遠端檔案下載網址。
             filename: 要寫入的檔名。
             progress_callback: 可選的下載進度回呼。
-            expected_hash: 可選的預期檔案雜湊，用於下載驗證。
+            expected_hash: 預期檔案雜湊，需為 SHA-256 或 SHA-512；若缺少則拒絕下載。
 
         Returns:
             安裝成功時回傳目標檔案路徑，失敗時回傳 None。
         """
-        normalized_url = str(download_url or "").strip()
-        normalized_filename = str(filename or "").strip()
-        if not normalized_url or not normalized_filename:
-            logger.error("安裝遠端模組失敗：download_url 或 filename 為空", "ModManager")
-            return None
-        safe_filename = Path(normalized_filename).name
-        if not safe_filename.lower().endswith(".jar"):
-            logger.error(f"安裝遠端模組失敗：不支援的檔案類型 {safe_filename}", "ModManager")
-            return None
-        try:
-            target_path = self.mods_path / safe_filename
-            normalized_expected_hash, expected_hash_algorithm = self._normalize_expected_hash(expected_hash)
-            if normalized_expected_hash and not expected_hash_algorithm:
-                logger.error(
-                    f"安裝遠端模組失敗：無法判定雜湊演算法（長度 {len(normalized_expected_hash)}）",
-                    "ModManager",
-                )
-                return None
-            if normalized_expected_hash and target_path.exists():
-                current_hash = PathUtils.calculate_checksum(target_path, expected_hash_algorithm)
-                if current_hash and current_hash == normalized_expected_hash:
-                    if progress_callback:
-                        try:
-                            size = target_path.stat().st_size
-                            progress_callback(size, size)
-                        except OSError as e:
-                            logger.exception(f"更新進度回呼時發生錯誤: {e}")
-                    logger.info(f"遠端模組已存在且雜湊一致，略過下載: {safe_filename}", "ModManager")
-                    return target_path
-            verification_note = f"，含雜湊驗證({expected_hash_algorithm})" if normalized_expected_hash else ""
-            logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}", "ModManager")
-            with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
-                staging_path = Path(staging_dir) / safe_filename
-                download_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
-                if normalized_expected_hash:
-                    download_kwargs["expected_hash"] = normalized_expected_hash
-                downloaded = HTTPUtils.download_file(normalized_url, str(staging_path), **download_kwargs)
-                if not downloaded:
-                    logger.warning(f"遠端模組下載未完成: {safe_filename}", "ModManager")
-                    return None
-                if not PathUtils.replace_within(self.server_path, staging_path, target_path):
-                    logger.warning(f"遠端模組無法原子寫入目標路徑: {safe_filename}", "ModManager")
-                    return None
-            if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
-                self.on_mod_list_changed()
-            logger.info(f"遠端模組安裝完成: {safe_filename}", "ModManager")
-            return target_path
-        except (OSError, ValueError) as e:
-            logger.exception(f"安裝遠端模組失敗（IO/參數） {safe_filename}: {e}")
-            return None
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=target_path if "target_path" in locals() else None,
-                    reason="install_remote_mod_file_unexpected",
-                    details={"filename": safe_filename, "url": normalized_url},
-                )
-            logger.exception(f"安裝遠端模組失敗 {safe_filename}: {e}")
-            return None
+        result = self._install_remote_mod_file_result(
+            download_url=download_url,
+            filename=filename,
+            progress_callback=progress_callback,
+            expected_hash=expected_hash,
+            provider=provider,
+            cancel_check=cancel_check,
+        )
+        return result.final_path if result.completed else None
 
     def replace_local_mod_file(
         self,
@@ -920,60 +738,33 @@ class ModManager:
         filename: str,
         progress_callback: Callable[[int, int], None] | None = None,
         expected_hash: str | None = None,
+        *,
+        provider: str | None = "modrinth",
+        cancel_check: Callable[[], bool] | None = None,
     ) -> Path | None:
-        """以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。
+        """
+        以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態。
 
         Args:
             local_mod: 目前本地模組資訊。
             download_url: 遠端檔案下載網址。
             filename: 新版本檔名。
             progress_callback: 可選的下載進度回呼。
-            expected_hash: 可選的預期檔案雜湊，用於下載驗證。
+            expected_hash: 預期檔案雜湊，需為 SHA-256 或 SHA-512；若缺少則拒絕下載。
 
         Returns:
             更新成功時回傳最終檔案路徑，失敗時回傳 None。
         """
-        if local_mod is None:
-            logger.error("更新本地模組失敗：local_mod 為空", "ModManager")
-            return None
-        install_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
-        if str(expected_hash or "").strip():
-            install_kwargs["expected_hash"] = expected_hash
-        installed_path = self.install_remote_mod_file(download_url, filename, **install_kwargs)
-        if installed_path is None:
-            return None
-        final_path = installed_path
-        try:
-            if local_mod.status == ModStatus.DISABLED and installed_path.suffix == ".jar":
-                disabled_path = installed_path.with_name(installed_path.name + ".disabled")
-                PathUtils.delete_within(self.server_path, disabled_path)
-                installed_path.rename(disabled_path)
-                final_path = disabled_path
-            old_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
-            old_path = Path(old_path_raw).resolve(strict=False) if old_path_raw else None
-            if (
-                old_path
-                and old_path != final_path.resolve(strict=False)
-                and old_path.exists()
-                and not PathUtils.delete_within(self.server_path, old_path)
-            ):
-                logger.warning(f"略過刪除不在伺服器目錄內的舊模組檔案: {old_path}")
-            if self.on_mod_list_changed and threading.current_thread() is threading.main_thread():
-                self.on_mod_list_changed()
-            return final_path
-        except (OSError, ValueError) as e:
-            logger.exception(f"更新本地模組失敗（IO/參數） {getattr(local_mod, 'filename', 'unknown')}: {e}")
-            return None
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="replace_local_mod_file_unexpected",
-                    details={"local_mod_filename": getattr(local_mod, "filename", None)},
-                )
-            logger.exception(f"更新本地模組失敗 {getattr(local_mod, 'filename', 'unknown')}: {e}")
-            return None
+        return self._get_mod_file_installer().replace_local_mod_file(
+            local_mod=local_mod,
+            download_url=download_url,
+            filename=filename,
+            install_remote_mod_file_result=self._install_remote_mod_file_result,
+            progress_callback=progress_callback,
+            expected_hash=expected_hash,
+            provider=provider,
+            cancel_check=cancel_check,
+        )
 
     def export_mod_list(self, format_type: str = "text") -> str:
         """匯出模組列表，支援 text、json、html 格式。

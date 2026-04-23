@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import threading
 from pathlib import Path
 
@@ -102,3 +103,65 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
     cache = PathUtils.load_json(Path(manager.forge_cache_file))
     assert isinstance(cache, dict)
     assert cache.get("1.21.1", [])[:3] == ["1.21.1-54.0.10", "1.21.1-54.0.9", "1.21.1-54.0.2"]
+
+
+@pytest.mark.smoke
+def test_download_and_run_installer_cleans_process_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = LoaderManager.__new__(LoaderManager)
+    test_root = Path("tests") / ".tmp_loader_manager_cancelled"
+    shutil.rmtree(test_root, ignore_errors=True)
+    test_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(manager, "_download_file_with_progress", lambda *_args, **_kwargs: True)
+
+    class _Stdout:
+        def readline(self) -> str:
+            return "Downloading installer...\n"
+
+    class _Process:
+        pid = 4321
+        returncode = None
+        stdout = _Stdout()
+
+        def poll(self):
+            return None
+
+    cleaned: list[tuple[str, object]] = []
+
+    def _record_tree_cleanup(pid: int) -> bool:
+        cleaned.append(("tree", pid))
+        return True
+
+    def _record_path_cleanup(path: object) -> bool:
+        cleaned.append(("path", str(path)))
+        return True
+
+    monkeypatch.setattr(
+        "src.core.loader_manager.SubprocessUtils.popen_checked",
+        lambda *_args, **_kwargs: _Process(),
+    )
+    monkeypatch.setattr(
+        "src.core.loader_manager.SystemUtils.kill_process_tree",
+        _record_tree_cleanup,
+    )
+    monkeypatch.setattr(
+        "src.core.loader_manager.SystemUtils.kill_java_processes_in_path",
+        _record_path_cleanup,
+    )
+    monkeypatch.setattr("src.core.loader_manager.record_and_mark", lambda *_args, **_kwargs: None)
+
+    result = manager._download_and_run_installer(
+        installer_url="https://example.invalid/installer.jar",
+        installer_args=["java", "-jar", "{installer}", "--installServer"],
+        minecraft_version="1.21.1",
+        _loader_version="0.16.0",
+        download_path=str(test_root / "server.jar"),
+        progress_callback=None,
+        cancel_flag={"cancelled": True},
+        need_vanilla=False,
+    )
+
+    assert result is False
+    assert ("tree", 4321) in cleaned
+    assert ("path", str(test_root)) in cleaned
+    shutil.rmtree(test_root, ignore_errors=True)

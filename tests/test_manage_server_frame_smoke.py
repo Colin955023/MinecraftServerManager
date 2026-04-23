@@ -153,7 +153,7 @@ def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending(mon
     )
 
     preparation = frame._prepare_server_tree_diff(
-        tree=cast(manage_server_frame_module._ServerTreeItemUpdater, tree),
+        tree=tree,
         server_order=["Alpha", "Beta", "Gamma"],
         server_rows={
             "Alpha": ("Alpha", "new"),

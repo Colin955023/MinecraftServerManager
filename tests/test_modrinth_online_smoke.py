@@ -7,7 +7,23 @@ from types import SimpleNamespace
 
 import pytest
 import src.core.mod_manager as mod_manager_module
-import src.ui.mod_search_service as mod_search_service_module
+import src.ui as mod_search_service_module
+import src.ui.mod_management.review as mod_management_review_module
+import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
+import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
+import src.ui.mod_search_service.modrinth_service as mod_search_provider_module
+from src.models import OnlineModVersion
+from src.utils import HTTPUtils, extract_download_host
+
+
+def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    for module in (
+        mod_search_service_module,
+        mod_search_provider_module,
+        mod_search_compatibility_module,
+        mod_search_planner_module,
+    ):
+        monkeypatch.setattr(module, name, value, raising=False)
 
 
 @pytest.mark.smoke
@@ -43,6 +59,57 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
     assert results[0].homepage_url == "https://modrinth.com/mod/sodium"
     assert results[0].server_side == "required"
     assert results[0].client_side == "optional"
+
+
+@pytest.mark.smoke
+def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
+    contract = mod_search_provider_module.get_modrinth_download_contract(
+        project_id="proj123",
+        version=OnlineModVersion(
+            version_id="ver123",
+            version_number="1.0.0",
+            display_name="1.0.0",
+            files=[
+                {
+                    "url": "https://cdn.modrinth.com/data/proj123/ver123/example.jar",
+                    "filename": "example.jar",
+                    "primary": True,
+                    "hashes": {"sha512": "a" * 128},
+                }
+            ],
+        ),
+    )
+
+    assert contract is not None
+    assert contract.provider == "modrinth"
+    assert contract.project_id == "proj123"
+    assert contract.version_id == "ver123"
+    assert contract.download_url.endswith("example.jar")
+    assert contract.filename == "example.jar"
+    assert contract.expected_hash == "a" * 128
+
+
+@pytest.mark.smoke
+def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
+    contract = mod_search_provider_module.get_modrinth_download_contract(
+        project_id="proj123",
+        version=OnlineModVersion(
+            version_id="ver123",
+            version_number="1.0.0",
+            display_name="1.0.0",
+            files=[
+                {
+                    "url": "https://cdn.modrinth.com/data/proj123/ver123/example.jar",
+                    "filename": "example.jar",
+                    "primary": True,
+                    "hashes": {"sha1": "b" * 40, "sha256": "c" * 64},
+                }
+            ],
+        ),
+    )
+
+    assert contract is not None
+    assert contract.expected_hash == "c" * 64
 
 
 @pytest.mark.smoke
@@ -276,7 +343,7 @@ def test_get_recommended_mod_version_returns_none_when_only_prerelease_exists(mo
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
 
     assert (
         mod_search_service_module.get_recommended_mod_version("proj123", minecraft_version="1.21", loader="fabric")
@@ -319,9 +386,9 @@ def test_get_mod_versions_retries_single_request_after_transient_failure(monkeyp
         ]
 
     monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
@@ -347,9 +414,9 @@ def test_get_mod_version_details_retries_single_request_after_transient_failure(
         }
 
     monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
-    monkeypatch.setattr(mod_search_service_module, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
+    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
 
     project_id, version = mod_search_service_module.get_mod_version_details("ver1")
 
@@ -540,7 +607,7 @@ def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monk
         raise AssertionError("fuzzy search should not run when platform_id is available")
 
     monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", fail_search)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", fail_search)
 
     enhanced = mod_search_service_module.enhance_local_mod(
         "fabric-api-0.120.0+1.21.1.jar",
@@ -557,13 +624,13 @@ def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monk
 
 @pytest.mark.smoke
 def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> None:
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_project_info",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "search_mods_online",
         lambda *_args, **_kwargs: [
             mod_search_service_module.OnlineModInfo(
@@ -597,16 +664,12 @@ def test_enhance_local_mod_prefers_cached_slug_identifier_resolver_before_fuzzy_
             project_name="Inventory Profiles Next",
         )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_provider_record",
-        fake_resolver,
-    )
+    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_provider_record", fake_resolver)
 
     def fail_search(*_args, **_kwargs):
         raise AssertionError("fuzzy search should not run when cached slug can be canonicalized")
 
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", fail_search)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", fail_search)
 
     enhanced = mod_search_service_module.enhance_local_mod(
         "inventory-profiles-next-2.2.2.jar",
@@ -639,9 +702,9 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
             return resolved_info
         return None
 
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_provider_record",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("stale cached identifier should not be canonicalized directly")
@@ -659,7 +722,7 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
             )
         ]
 
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", fake_search)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", fake_search)
 
     enhanced = mod_search_service_module.enhance_local_mod(
         "inventory-profiles-next-2.2.2.jar",
@@ -680,8 +743,8 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
 def test_enhance_local_mod_returns_stale_fallback_when_revalidation_fails(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
 
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     enhanced = mod_search_service_module.enhance_local_mod(
         "inventory-profiles-next-2.2.2.jar",
@@ -702,15 +765,11 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     next_retry_epoch_ms = int(time.time() * 1000) + (10 * 60 * 1000)
 
-    monkeypatch.setattr(mod_search_service_module, "compute_file_hash", lambda *_args, **_kwargs: "")
-    monkeypatch.setattr(
-        mod_search_service_module, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {}
-    )
-    monkeypatch.setattr(
-        mod_search_service_module, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {}
-    )
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "compute_file_hash", lambda *_args, **_kwargs: "")
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     local_mod = SimpleNamespace(
         filename="sodium.jar",
@@ -869,14 +928,14 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
         )
     ]
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "_fetch_modrinth_project_name",
+    _patch_mod_search_attr(
+        monkeypatch,
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -920,14 +979,14 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
     )
     installed_mods = [SimpleNamespace(filename="cloth_config+1.0.0.jar", name="Unknown Mod")]
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "_fetch_modrinth_project_name",
+    _patch_mod_search_attr(
+        monkeypatch,
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -966,8 +1025,8 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
         dependencies=[{"version_id": "p7dr8msh", "dependency_type": "required"}],
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
@@ -978,8 +1037,8 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
 
-    monkeypatch.setattr(mod_search_service_module, "_fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(monkeypatch, "fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
 
     plan = mod_search_service_module.build_required_dependency_install_plan(
         root_version,
@@ -1020,14 +1079,14 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     )
     installed_mods = [SimpleNamespace(filename="cloth_config+1.0.0.jar", name="Unknown Mod")]
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "_fetch_modrinth_project_name",
+    _patch_mod_search_attr(
+        monkeypatch,
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -1070,18 +1129,14 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
         author="Libz",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda _local_mod: resolved_info,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: resolved_info)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_local_mod_file_compatibility",
         lambda _local_mod, _minecraft_version=None, _loader=None: [],
     )
@@ -1090,11 +1145,7 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
         captured_project_ids.append(project_id)
         return
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        fake_get_recommended_mod_version,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -1130,16 +1181,8 @@ def test_resolve_local_mod_project_info_normalizes_camel_case_local_names(monkey
             return resolved_info
         return None
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_project_info",
-        fake_get_modrinth_project_info,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "search_mods_online",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     resolved = mod_search_service_module.resolve_local_mod_project_info(local_mod)
 
@@ -1169,16 +1212,8 @@ def test_resolve_local_mod_project_info_uses_platform_slug_when_project_id_missi
             return resolved_info
         return None
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_project_info",
-        fake_get_modrinth_project_info,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "search_mods_online",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     resolved = mod_search_service_module.resolve_local_mod_project_info(local_mod)
 
@@ -1201,23 +1236,11 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_project_info",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(
+        monkeypatch,
         "search_mods_online",
         lambda *_args, **_kwargs: [
             mod_search_service_module.OnlineModInfo(
@@ -1228,11 +1251,7 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
             )
         ],
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -1287,28 +1306,20 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
         captured_project_ids.append(project_id)
         return recommended_version if project_id == "YL57xq9U" else None
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        fake_resolve_local_mod_project_info,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        fake_get_recommended_mod_version,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", fake_resolve_local_mod_project_info)
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_local_mod_file_compatibility",
         lambda _local_mod, _minecraft_version=None, _loader=None: [],
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
@@ -1391,9 +1402,9 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
             ]
         return []
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"cloth-config": "Cloth Config", "fabric-api": "Fabric API"},
     )
@@ -1453,9 +1464,9 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
             )
         ]
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda project_ids: {str(project_id).lower(): str(project_id).title() for project_id in project_ids},
     )
@@ -1493,12 +1504,8 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
     def fake_resolve_modrinth_project_names(_project_ids):
         return {"p7dr8msh": "Fabric API"}
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        fake_resolve_modrinth_project_names,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
 
     plan = mod_search_service_module.build_required_dependency_install_plan(
         root_version,
@@ -1547,15 +1554,15 @@ def test_build_required_dependency_install_plan_overrides_quilt_dependency_to_fa
             )
         ]
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"p7dr8msh": "Fabric API", "qvifycyj": "QSL"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "_fetch_modrinth_project_name",
+    _patch_mod_search_attr(
+        monkeypatch,
+        "fetch_modrinth_project_name",
         lambda project_id: "Fabric API" if project_id == "P7dR8mSH" else "QSL",
     )
 
@@ -1608,15 +1615,15 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
             )
         ]
 
-    monkeypatch.setattr(mod_search_service_module, "get_mod_versions", fake_get_mod_versions)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"qvifycyj": "QSL"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "_fetch_modrinth_project_name",
+    _patch_mod_search_attr(
+        monkeypatch,
+        "fetch_modrinth_project_name",
         lambda project_id: "QSL" if project_id == "qvIfYCYJ" else None,
     )
 
@@ -1678,26 +1685,10 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
             notes=["已找到相容更新"],
         )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        fake_get_recommended_mod_version,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda _local_mod: resolved_info,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        fake_resolve_modrinth_project_names,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_mod_version_compatibility",
-        fake_analyze_mod_version_compatibility,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: resolved_info)
+    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
+    _patch_mod_search_attr(monkeypatch, "analyze_mod_version_compatibility", fake_analyze_mod_version_compatibility)
 
     update_plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -1762,15 +1753,12 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
         file_path=str(file_path),
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
             current_hash: mod_search_service_module.ModrinthVersionLookupResult(
-                file_hash=current_hash,
-                algorithm="sha512",
-                project_id="proj123",
-                version=current_version,
+                file_hash=current_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
     )
@@ -1791,28 +1779,24 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
             )
         }
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        fake_get_modrinth_latest_versions_by_hashes,
+    _patch_mod_search_attr(
+        monkeypatch, "get_modrinth_latest_versions_by_hashes", fake_get_modrinth_latest_versions_by_hashes
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fallback path should not be used")),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_local_mod_file_compatibility",
         lambda _local_mod, _minecraft_version=None, _loader=None: [],
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
@@ -1862,15 +1846,13 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "compute_file_hash",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached hash first")),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda _hashes, _algorithm="sha512": {},
+    _patch_mod_search_attr(
+        monkeypatch, "get_modrinth_current_versions_by_hashes", lambda _hashes, _algorithm="sha512": {}
     )
 
     def fake_get_modrinth_latest_versions_by_hashes(
@@ -1889,23 +1871,19 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
             )
         }
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        fake_get_modrinth_latest_versions_by_hashes,
+    _patch_mod_search_attr(
+        monkeypatch, "get_modrinth_latest_versions_by_hashes", fake_get_modrinth_latest_versions_by_hashes
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_local_mod_file_compatibility",
         lambda _local_mod, _minecraft_version=None, _loader=None: [],
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
@@ -1955,45 +1933,29 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
             cached_hash: mod_search_service_module.ModrinthVersionLookupResult(
-                file_hash=cached_hash,
-                algorithm="sha512",
-                project_id="proj123",
-                version=current_version,
+                file_hash=cached_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("hash-resolved entries should not fallback to project-based latest version lookup")
@@ -2039,46 +2001,25 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: latest_version,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
     update_plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -2132,18 +2073,10 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
         author="jellysquid3",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda local_mod: (
             resolved_cached
@@ -2153,21 +2086,13 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
             else None
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next", "aanobbmi": "Sodium"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: None,
-    )
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod_cached, local_mod_lookup, local_mod_unresolved],
@@ -2201,16 +2126,8 @@ def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(m
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
     def fake_get_modrinth_project_info(identifier: str, *_args, **_kwargs):
         attempted_identifiers.append(identifier)
@@ -2223,31 +2140,22 @@ def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(m
             )
         return None
 
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_provider_record",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("stale cached identifier should not drive canonical resolver")
         ),
     )
-
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: None,
-    )
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -2275,26 +2183,10 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
         file_path="C:/mods/unknown-mod.jar",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda _local_mod: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -2330,18 +2222,10 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -2379,16 +2263,8 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
     resolve_calls = {"project": 0, "search": 0}
 
@@ -2399,8 +2275,8 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
         resolve_calls["search"] += 1
         return []
 
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", _count_project_info)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", _count_search)
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", _count_project_info)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", _count_search)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -2421,7 +2297,7 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_reached(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     original_limit = mod_search_service_module.PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN
-    monkeypatch.setattr(mod_search_service_module, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", 1)
+    _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", 1)
 
     mod1 = SimpleNamespace(
         platform_id="inventoryprofilesnext",
@@ -2456,18 +2332,10 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [mod1, mod2],
@@ -2480,7 +2348,7 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_
     assert any("批次上限（1）" in note for note in plan.metadata_summary.notes)
 
     # 還原僅為保守防禦，避免後續測試依賴 module-level 常數。
-    monkeypatch.setattr(mod_search_service_module, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", original_limit)
+    _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", original_limit)
 
 
 @pytest.mark.smoke
@@ -2507,18 +2375,10 @@ def test_build_local_mod_update_plan_adaptive_revalidation_batch_shrinks_on_high
 
     local_mods = [_make_stale_mod(i) for i in range(10)]
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(mod_search_service_module, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_search_service_module, "search_mods_online", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         local_mods,
@@ -2552,11 +2412,11 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
             progress_callback(10, 10)
         return True
 
-    monkeypatch.setattr(mod_manager_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
-        "https://example.invalid/example.jar",
-        "example.jar",
+        download_url="https://example.invalid/example.jar",
+        filename="example.jar",
         expected_hash="c" * 64,
     )
 
@@ -2576,16 +2436,44 @@ def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, m
     def fake_download_file(*_args, **_kwargs):
         raise AssertionError("verified target should skip download")
 
-    monkeypatch.setattr(mod_manager_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
-        "https://example.invalid/example.jar",
-        "example.jar",
+        download_url="https://example.invalid/example.jar",
+        filename="example.jar",
         expected_hash=expected_hash,
     )
 
     assert installed_path == target_path
     assert installed_path.read_bytes() == b"jar-bytes"
+
+
+@pytest.mark.smoke
+def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+
+    def fake_download_file(*_args, **_kwargs):
+        raise AssertionError("remote mod install should reject insecure verification before download")
+
+    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+
+    assert (
+        manager.install_remote_mod_file(
+            download_url="https://example.invalid/example.jar",
+            filename="example.jar",
+            expected_hash=None,
+        )
+        is None
+    )
+    assert (
+        manager.install_remote_mod_file(
+            download_url="https://example.invalid/example.jar",
+            filename="example.jar",
+            expected_hash="f" * 40,
+        )
+        is None
+    )
+    assert (tmp_path / "mods" / "example.jar").exists() is False
 
 
 @pytest.mark.smoke
@@ -2607,16 +2495,27 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
         file_path=str(old_path),
     )
 
-    def fake_install_remote_mod_file(download_url, filename, progress_callback=None, expected_hash=None):
+    def fake_install_remote_result(
+        download_url,
+        filename,
+        progress_callback=None,
+        expected_hash=None,
+        provider="modrinth",
+        cancel_check=None,
+        notify_change=True,
+    ):
         assert download_url == "https://example.invalid/example-new.jar"
         assert filename == "example-new.jar"
         assert expected_hash == "d" * 64
+        assert provider == "modrinth"
+        assert cancel_check is None
+        assert notify_change is False
         new_path.write_bytes(b"new-bytes")
         if progress_callback:
             progress_callback(10, 10)
-        return new_path
+        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
 
-    monkeypatch.setattr(manager, "install_remote_mod_file", fake_install_remote_mod_file)
+    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
 
     replaced_path = manager.replace_local_mod_file(
         local_mod,
@@ -2650,15 +2549,27 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
         file_path=str(old_path),
     )
 
-    def fake_install_remote_mod_file(download_url, filename, progress_callback=None, _expected_hash=None):
+    def fake_install_remote_result(
+        download_url,
+        filename,
+        progress_callback=None,
+        expected_hash=None,
+        provider="modrinth",
+        cancel_check=None,
+        notify_change=True,
+    ):
         assert download_url == "https://example.invalid/example-new.jar"
         assert filename == "example-new.jar"
+        assert expected_hash is None
+        assert provider == "modrinth"
+        assert cancel_check is None
+        assert notify_change is False
         new_path.write_bytes(b"new-bytes")
         if progress_callback:
             progress_callback(10, 10)
-        return new_path
+        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
 
-    monkeypatch.setattr(manager, "install_remote_mod_file", fake_install_remote_mod_file)
+    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
 
     replaced_path = manager.replace_local_mod_file(
         local_mod,
@@ -2669,6 +2580,183 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
     assert replaced_path == new_path
     assert new_path.exists()
     assert old_path.exists() is True
+
+
+@pytest.mark.smoke
+def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+
+    def fake_download_file(url, local_path, _progress_callback=None, expected_hash=None, cancel_check=None, **_kwargs):
+        assert url == "https://example.invalid/example.jar"
+        assert expected_hash == "e" * 64
+        assert callable(cancel_check)
+        Path(local_path).write_bytes(b"partial")
+        return False
+
+    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+
+    installed_path = manager.install_remote_mod_file(
+        download_url="https://example.invalid/example.jar",
+        filename="example.jar",
+        expected_hash="e" * 64,
+        cancel_check=lambda: True,
+    )
+
+    assert installed_path is None
+    assert (tmp_path / "mods" / "example.jar").exists() is False
+
+
+@pytest.mark.smoke
+def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+    old_path = tmp_path / "mods" / "example-old.jar"
+    old_path.parents[0].mkdir(parents=True, exist_ok=True)
+    old_path.write_bytes(b"old-bytes")
+    new_path = tmp_path / "mods" / "example-new.jar"
+
+    local_mod = mod_manager_module.LocalModInfo(
+        id="example-old",
+        name="Example Mod",
+        filename="example-old.jar",
+        version="1.0.0",
+        minecraft_version="1.21",
+        loader_type="Fabric",
+        status=mod_manager_module.ModStatus.ENABLED,
+        file_path=str(old_path),
+    )
+
+    def fake_install_remote_result(*_args, **_kwargs):
+        new_path.write_bytes(b"new-bytes")
+        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
+
+    original_delete_within = mod_manager_module.PathUtils.delete_within
+
+    def fake_delete_within(base_dir, path):
+        if Path(path).resolve(strict=False) == old_path.resolve(strict=False):
+            return False
+        return original_delete_within(base_dir, path)
+
+    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
+    monkeypatch.setattr(mod_manager_module.PathUtils, "delete_within", fake_delete_within)
+
+    replaced_path = manager.replace_local_mod_file(
+        local_mod,
+        "https://example.invalid/example-new.jar",
+        "example-new.jar",
+    )
+
+    assert replaced_path is None
+    assert old_path.exists()
+    assert old_path.read_bytes() == b"old-bytes"
+    assert new_path.exists() is False
+
+
+@pytest.mark.smoke
+def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(tmp_path: Path, monkeypatch) -> None:
+    manager = mod_manager_module.ModManager(str(tmp_path))
+    old_path = tmp_path / "mods" / "example.jar"
+    old_path.parents[0].mkdir(parents=True, exist_ok=True)
+    old_path.write_bytes(b"old-bytes")
+
+    local_mod = mod_manager_module.LocalModInfo(
+        id="example",
+        name="Example Mod",
+        filename="example.jar",
+        version="1.0.0",
+        minecraft_version="1.21",
+        loader_type="Fabric",
+        status=mod_manager_module.ModStatus.ENABLED,
+        file_path=str(old_path),
+    )
+
+    cancel_calls = {"count": 0}
+
+    def fake_download_file(_url, local_path, **_kwargs):
+        Path(local_path).write_bytes(b"new-bytes")
+        return True
+
+    def cancel_check() -> bool:
+        cancel_calls["count"] += 1
+        return cancel_calls["count"] >= 3
+
+    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+
+    replaced_path = manager.replace_local_mod_file(
+        local_mod,
+        "https://example.invalid/example.jar",
+        "example.jar",
+        cancel_check=cancel_check,
+    )
+
+    assert replaced_path is None
+    assert old_path.exists()
+    assert old_path.read_bytes() == b"old-bytes"
+
+
+@pytest.mark.smoke
+def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads() -> None:
+    version = mod_search_service_module.OnlineModVersion(
+        version_id="ver-1",
+        version_number="1.0.0",
+        display_name="1.0.0",
+        provider="modrinth",
+        files=[{"filename": "example.jar", "url": "https://mirror.example.com/example.jar", "primary": True}],
+    )
+    dependency_plan = mod_search_service_module.OnlineDependencyInstallPlan(
+        items=[
+            mod_search_service_module.OnlineDependencyInstallItem(
+                project_id="dep-1",
+                project_name="Fabric API",
+                version_id="dep-ver",
+                version_name="2.0.0",
+                filename="fabric-api.jar",
+                download_url="https://cdn.modrinth.com/fabric-api.jar",
+                provider="modrinth",
+            )
+        ],
+        advisory_items=[
+            mod_search_service_module.OnlineDependencyInstallItem(
+                project_id="dep-2",
+                project_name="Mirror Dep",
+                version_id="dep-ver-2",
+                version_name="3.0.0",
+                filename="mirror-dep.jar",
+                download_url="https://edge.example.net/mirror-dep.jar",
+                provider="modrinth",
+                enabled=True,
+                is_optional=True,
+            )
+        ],
+    )
+    review_entry = mod_search_service_module.PendingInstallReviewEntry(
+        pending=mod_search_service_module.PendingOnlineInstall(
+            project_id="proj-1",
+            project_name="Example Mod",
+            version=version,
+        ),
+        report=None,
+        dependency_plan=dependency_plan,
+    )
+
+    prompt = mod_management_review_module.ModManagementReviewMixin._build_non_official_source_confirmation_prompt(
+        [review_entry],
+        action_label="安裝",
+    )
+
+    prompt_hosts: dict[str, str] = {}
+    for line in prompt.splitlines():
+        normalized_line = line.strip()
+        if not normalized_line.startswith("- ") or "（非 " not in normalized_line:
+            continue
+        label, source_text = normalized_line[2:].split("：", 1)
+        host, _provider_text = source_text.split("（非 ", 1)
+        prompt_hosts[label] = host
+
+    expected_hosts = {
+        "Example Mod (1.0.0)": extract_download_host((version.primary_file or {}).get("url", "")),
+        "Mirror Dep（依賴）": extract_download_host(dependency_plan.advisory_items[0].download_url),
+    }
+    assert prompt_hosts == expected_hosts
 
 
 @pytest.mark.smoke
@@ -2702,26 +2790,10 @@ def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monke
         hash_algorithm="",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     progress_events: list[tuple[int, int]] = []
     plan = mod_search_service_module.build_local_mod_update_plan(
@@ -2777,8 +2849,8 @@ def test_analyze_local_mod_file_compatibility_accepts_fabric_mod_on_quilt_server
 
 @pytest.mark.smoke
 def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(monkeypatch) -> None:
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_mod_versions",
         lambda _project_id, _minecraft_version=None, loader=None: (
             []
@@ -2811,35 +2883,26 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_latest_versions_by_hashes",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("unsupported loader should skip hash-based latest update lookup")
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("unsupported loader should skip project-based fallback update lookup")
@@ -2871,40 +2934,21 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: ["提示 A", "提示 B", "提示 C"],
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(
+        monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: ["提示 A", "提示 B", "提示 C"]
     )
 
     plan = mod_search_service_module.build_local_mod_update_plan(
@@ -2947,46 +2991,25 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
         ],
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: latest_version,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: ["提示 A"],
-    )
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: ["提示 A"])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -3046,45 +3069,33 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
         hash_algorithm="sha512",
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda *_args, **_kwargs: {
             local_hash: mod_search_service_module.ModrinthVersionLookupResult(
-                file_hash=local_hash,
-                algorithm="sha512",
-                project_id="proj123",
-                version=current_version,
+                file_hash=local_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_modrinth_latest_versions_by_hashes",
         lambda *_args, **_kwargs: {
             local_hash: mod_search_service_module.ModrinthVersionLookupResult(
-                file_hash=local_hash,
-                algorithm="sha512",
-                project_id="proj123",
-                version=latest_version,
+                file_hash=local_hash, algorithm="sha512", project_id="proj123", version=latest_version
             )
         },
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -3128,46 +3139,25 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
         ],
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"proj123": "Example Mod"},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_local_mod_project_info",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
-            project_id="proj123",
-            slug="example-mod",
-            name="Example Mod",
-            author="Example",
+            project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: latest_version,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [local_mod],
@@ -3222,19 +3212,11 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         files=[{"filename": "sodium-0.7.0.jar", "url": "https://cdn.modrinth.com/sodium-0.7.0.jar", "primary": True}],
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_provider_record",
         lambda identifier: (
             mod_search_service_module.ProviderMetadataRecord.from_values(
@@ -3244,28 +3226,16 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
             else mod_search_service_module.ProviderMetadataRecord()
         ),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda _local_mod: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
+    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(
+        monkeypatch,
         "get_recommended_mod_version",
         lambda project_id, *_args, **_kwargs: latest_version if project_id == "sodium" else None,
     )
@@ -3321,46 +3291,22 @@ def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolve
         enabled=True,
     )
 
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_current_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_modrinth_latest_versions_by_hashes",
-        lambda *_args, **_kwargs: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _patch_mod_search_attr(
+        monkeypatch,
         "resolve_modrinth_provider_record",
         lambda _identifier: mod_search_service_module.ProviderMetadataRecord(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_local_mod_project_info",
-        lambda _local_mod: None,
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {},
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "analyze_local_mod_file_compatibility",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        mod_search_service_module,
+    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
+    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
+    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _patch_mod_search_attr(
+        monkeypatch,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
     )
-    monkeypatch.setattr(
-        mod_search_service_module,
-        "get_recommended_mod_version",
-        lambda *_args, **_kwargs: None,
-    )
+    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
     plan = mod_search_service_module.build_local_mod_update_plan(
         [stale_mod, dep_unresolved_mod],

@@ -3,6 +3,7 @@
 """
 
 import concurrent.futures
+import contextlib
 import queue
 import threading
 import tkinter
@@ -816,11 +817,11 @@ class CreateServerFrame(ctk.CTkFrame):
                 raise Exception("建立進度對話框失敗")
             if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):
                 return
-            success = self.server_manager.create_server(config)
-            if not success:
-                logger.error(f"建立伺服器基礎結構失敗 config: {config}")
+            create_result = self.server_manager.create_server_result(config)
+            if create_result.failed:
+                logger.error(f"建立伺服器基礎結構失敗 config: {config} | {create_result.message}")
                 progress_dialog.close()
-                raise Exception("建立伺服器基礎結構失敗")
+                raise Exception(create_result.message or "建立伺服器基礎結構失敗")
             if not config.loader_type or config.loader_type == "unknown":
                 progress_dialog.close()
                 raise Exception(f"偵測失敗：loader_type 無法判斷，config={config}")
@@ -890,7 +891,13 @@ class CreateServerFrame(ctk.CTkFrame):
         """
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
-        parent_window = self.winfo_toplevel()
+
+        # [1] 建立 server_path 後 sleep 0.3 秒，確保目錄完全建立
+        with contextlib.suppress(Exception):
+            server_path.mkdir(parents=True, exist_ok=True)
+        import time
+
+        time.sleep(0.3)
 
         def progress_callback(percent, status):
             progress_dialog.update_progress(percent, status)
@@ -919,7 +926,6 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_callback,
                 token,
                 user_java_path,
-                parent_window,
             )
             result[0] = ok
 
@@ -933,14 +939,33 @@ class CreateServerFrame(ctk.CTkFrame):
             except concurrent.futures.TimeoutError:
                 continue
         if result[0] is False:
-            msg = f"伺服器下載失敗，參數如下：\nloader_type: {loader_type}\nminecraft_version: {config.minecraft_version}\nloader_version: {config.loader_version}\ndownload_path: {download_path}\nuser_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}\n"
+            # [2] 失敗時補充 cmd 與 installer.log 內容
+            log_details = []
+            log_details.append(f"loader_type: {loader_type}")
+            log_details.append(f"minecraft_version: {config.minecraft_version}")
+            log_details.append(f"loader_version: {config.loader_version}")
+            log_details.append(f"download_path: {download_path}")
+            log_details.append(f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}")
+            # 嘗試補充 cmd
+            try:
+                installer_dir = server_path
+                possible_logs = [installer_dir / "installer.log"]
+                for log_path in possible_logs:
+                    if log_path.exists():
+                        log_details.append(
+                            f"\n--- {log_path.name} ---\n"
+                            + log_path.read_text(encoding="utf-8", errors="ignore")[-2048:]
+                        )
+            except Exception as e:
+                log_details.append(f"[installer.log 讀取失敗: {e}]")
+            msg = "伺服器下載失敗，參數如下：\n" + "\n".join(log_details)
 
             def _show_download_failed_message() -> None:
                 UIUtils.show_error("下載失敗", msg, topmost=True)
 
             self.ui_queue.put(_show_download_failed_message)
             logger.bind(component="").error(
-                f"server_path: {server_path}\nconfig: {config}\n{traceback.format_exc()}", "CreateServerFrame"
+                f"server_path: {server_path}\nconfig: {config}\n{msg}\n{traceback.format_exc()}", "CreateServerFrame"
             )
             raise Exception(msg)
 

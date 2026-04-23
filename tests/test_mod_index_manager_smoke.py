@@ -120,7 +120,9 @@ def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tm
             ]
         }
 
-    monkeypatch.setattr("src.core.mod_manager.HTTPUtils.get_json", fake_get_json)
+    from src.utils import HTTPUtils
+
+    monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
 
     platform, project_id, slug = manager._search_on_modrinth("Fabric API", "fabric-api", "fabric-api.jar")
 
@@ -144,7 +146,9 @@ def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_look
         assert params == {"query": "ferritecore"}
         return {"hits": [{"project_id": "uXXizFIs", "slug": "ferrite-core"}]}
 
-    monkeypatch.setattr("src.core.mod_manager.HTTPUtils.get_json", fake_get_json)
+    from src.utils import HTTPUtils
+
+    monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
 
     project_id, slug = manager.resolve_modrinth_project_identity("ferritecore")
 

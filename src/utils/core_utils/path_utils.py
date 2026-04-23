@@ -4,6 +4,7 @@
 
 import contextlib
 import ctypes
+import datetime
 import hashlib
 import json
 import os
@@ -730,6 +731,7 @@ class PathUtils:
                 agg_marker = ext_dir / f"{p.name}.{key}.issue.json"
 
             now = int(time.time())
+            now_fmt = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d-%H-%M-%S")
             exc_type = ""
             if isinstance(details, dict):
                 exc_type = str(details.get("exception_type") or "")
@@ -739,6 +741,7 @@ class PathUtils:
 
             entry = {
                 "timestamp": now,
+                "timestamp_fmt": now_fmt,
                 "reason": str(reason),
                 "details": details if details is not None else "",
                 "exception_type": exc_type,

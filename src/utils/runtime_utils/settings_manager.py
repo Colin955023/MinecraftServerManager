@@ -217,9 +217,8 @@ class SettingsManager:
                         self._no_change_skip_count = 0
                         self._no_change_last_log_monotonic = now_monotonic
                     return
-        except OSError:
-            # 若比對時發生 I/O 錯誤則繼續嘗試寫入以確保設定被保留
-            pass
+        except OSError as e:
+            logger.debug(f"比對 settings 檔案時發生 I/O 錯誤，改為直接寫入: {e}")
 
         if not atomic_write_json(self.settings_path, settings):
             logger.error("無法寫入 user_settings.json")
