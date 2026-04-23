@@ -891,7 +891,6 @@ class CreateServerFrame(ctk.CTkFrame):
         """
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
-        parent_window = self.winfo_toplevel()
 
         # [1] 建立 server_path 後 sleep 0.3 秒，確保目錄完全建立
         with contextlib.suppress(Exception):
@@ -927,7 +926,6 @@ class CreateServerFrame(ctk.CTkFrame):
                 progress_callback,
                 token,
                 user_java_path,
-                parent_window,
             )
             result[0] = ok
 
