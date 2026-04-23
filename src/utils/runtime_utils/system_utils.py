@@ -7,6 +7,8 @@ import ctypes.wintypes as wintypes
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
+import psutil
+
 from .. import SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="SystemUtils")
@@ -73,6 +75,40 @@ class PROCESS_MEMORY_COUNTERS_EX(Structure):
 
 
 class SystemUtils:
+    """系統工具類別"""
+
+    @staticmethod
+    def kill_java_processes_in_path(path) -> bool:
+        """嘗試終止指定路徑下所有 java/javaw 進程（根據 cwd）。
+
+        Args:
+            path: 目標資料夾。
+
+        Returns:
+            至少有一個進程被終止則回傳 True。
+        """
+        killed = False
+        try:
+            abs_path = str(path)
+            snapshot = SystemUtils._iterate_process_snapshot()
+            for entry in snapshot:
+                name = SystemUtils._decode_process_name(entry).lower()
+                if name not in ("java.exe", "javaw.exe"):
+                    continue
+                pid = int(entry.th32ProcessID)
+                # 嘗試取得該進程的工作目錄
+                try:
+                    p = psutil.Process(pid)
+                    cwd = p.cwd()
+                    if abs_path in cwd:
+                        p.terminate()
+                        killed = True
+                except Exception:
+                    logger.warning(f"無法訪問進程 {pid} 的工作目錄，跳過檢查: {SystemUtils.get_process_name(pid)}")
+        except Exception as e:
+            logger.error(f"kill_java_processes_in_path 失敗: {e}")
+        return killed
+
     """系統工具類別"""
 
     @staticmethod

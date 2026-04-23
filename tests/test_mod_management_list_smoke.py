@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-import src.ui.mod_management as mod_management_module
+import src.ui as mod_management_module
 import src.utils as meta_module
 import src.utils.ui_support.ui_utils as ui_utils_module
 
@@ -748,18 +748,30 @@ def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unkno
 
 
 @pytest.mark.smoke
-def test_delete_local_mod_removes_all_selected_files(tmp_path: Path, monkeypatch) -> None:
+def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path, monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    mods_dir = tmp_path / "mods"
-    mods_dir.mkdir()
-    (mods_dir / "clumps.jar").write_text("a", encoding="utf-8")
-    (mods_dir / "fabric-api.jar.disabled").write_text("b", encoding="utf-8")
-
+    deleted_ids: list[list[str]] = []
     shown_messages: list[str] = []
     frame.local_tree = cast(Any, _DeleteTree())
     frame.current_server = cast(Any, type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
+
+    def _delete_local_mods_result(ids: list[str]) -> SimpleNamespace:
+        deleted_ids.append(list(ids))
+        return SimpleNamespace(
+            affected_count=2,
+            completed=True,
+            partial=False,
+            message="已刪除 2 個模組檔案",
+            title="",
+            missing_ids=(),
+        )
+
+    frame.mod_manager = cast(
+        Any,
+        SimpleNamespace(delete_local_mods_result=_delete_local_mods_result),
+    )
     monkeypatch.setattr(frame, "load_local_mods", lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
@@ -780,52 +792,52 @@ def test_delete_local_mod_removes_all_selected_files(tmp_path: Path, monkeypatch
 
     frame.delete_local_mod()
 
-    assert not (mods_dir / "clumps.jar").exists()
-    assert not (mods_dir / "fabric-api.jar.disabled").exists()
+    assert deleted_ids == [["clumps", "fabric-api"]]
     assert shown_messages[0] == "reloaded"
-    assert shown_messages[1] == "已刪除 2 個模組"
+    assert shown_messages[1] == "已刪除 2 個模組檔案"
     assert frame.status_label.text == "已刪除 2 個模組"
 
 
 @pytest.mark.smoke
-def test_delete_local_mod_handles_unlink_permission_error(tmp_path: Path, monkeypatch) -> None:
+def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    mods_dir = tmp_path / "mods"
-    mods_dir.mkdir()
-    blocked_file = mods_dir / "clumps.jar"
-    blocked_file.write_text("a", encoding="utf-8")
-
     shown_messages: list[str] = []
     frame.local_tree = cast(Any, _DeleteTree())
     frame.current_server = cast(Any, type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
+    frame.mod_manager = cast(
+        Any,
+        SimpleNamespace(
+            delete_local_mods_result=lambda _ids: SimpleNamespace(
+                affected_count=0,
+                completed=False,
+                partial=False,
+                message="刪除模組失敗: permission denied",
+                title="刪除失敗",
+                missing_ids=(),
+            )
+        ),
+    )
     monkeypatch.setattr(frame, "load_local_mods", lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
         del parent, show_cancel
         return True
 
-    def _raise_permission_error(self: Path, *, missing_ok: bool = False) -> None:
-        del self, missing_ok
-        raise PermissionError("permission denied")
-
     monkeypatch.setattr(mod_management_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
     monkeypatch.setattr(mod_management_module.UIUtils, "show_info", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(mod_management_module.UIUtils, "show_warning", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         mod_management_module.UIUtils,
-        "show_error",
+        "show_warning",
         lambda _title, message, _parent=None: shown_messages.append(message),
     )
-    monkeypatch.setattr(Path, "unlink", _raise_permission_error)
 
     frame.delete_local_mod()
 
-    assert blocked_file.exists() is True
     assert shown_messages
     assert shown_messages[-1] == "刪除模組失敗: permission denied"
-    assert frame.status_label.text == "刪除失敗: permission denied"
+    assert frame.status_label.text == "刪除模組失敗: permission denied"
 
 
 @pytest.mark.smoke
@@ -1211,8 +1223,14 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
             if callable(item):
                 item()
 
-    def _record_install(download_url: str, filename: str, progress_callback=None) -> str:
-        _ = progress_callback
+    def _record_install(
+        download_url: str,
+        filename: str,
+        progress_callback=None,
+        provider="modrinth",
+        cancel_check=None,
+    ) -> str:
+        _ = (progress_callback, provider, cancel_check)
         install_calls.append((download_url, filename))
         return f"/tmp/{filename}"
 
@@ -1231,6 +1249,10 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         _ = parent
         shown_messages.append((title, message))
 
+    def _confirm_dialog(*_args, **_kwargs) -> bool:
+        return True
+
+    monkeypatch.setattr(mod_management_module.UIUtils, "ask_yes_no_cancel", _confirm_dialog)
     monkeypatch.setattr(mod_management_module.UIUtils, "show_info", _show_info)
 
     dialog = SimpleNamespace(destroy=lambda: dialog_destroyed.append(True))

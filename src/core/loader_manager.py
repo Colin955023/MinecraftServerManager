@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from defusedxml import ElementTree as ET
@@ -20,11 +21,23 @@ from ..utils import (
     ServerDetectionVersionUtils,
     Singleton,
     SubprocessUtils,
-    UIUtils,
+    SystemUtils,
     atomic_write_json,
     get_logger,
     record_and_mark,
 )
+
+
+@dataclass
+class OperationResult:
+    """通用操作結果類別，用於統一表示方法執行的成功與失敗狀態，以及相關訊息和錯誤資訊。"""
+
+    success: bool
+    message: str = ""
+    error: Exception | None = None
+    extra: dict = field(default_factory=dict)
+
+
 from . import MinecraftVersionManager
 
 logger = get_logger().bind(component="LoaderManager")
@@ -48,7 +61,12 @@ class LoaderManager(Singleton):
         self._initialized = True
 
     def clear_cache_file(self):
-        """通用快取檔案清除方法。"""
+        """
+        通用快取檔案清除方法。
+
+        Returns:
+            OperationResult: 包含成功狀態、訊息和錯誤資訊的操作結果物件。
+        """
         try:
             fabric_path = Path(self.fabric_cache_file)
             forge_path = Path(self.forge_cache_file)
@@ -58,10 +76,55 @@ class LoaderManager(Singleton):
             self._preloaded_once = False
         except PermissionError as e:
             logger.exception(f"清除快取檔案失敗: {e}")
-            UIUtils.show_error("清除快取檔案失敗", f"無法刪除快取檔案\n權限不足\n{e}", topmost=True)
+            return OperationResult(False, f"無法刪除快取檔案\n權限不足\n{e}", error=e)
         except OSError as e:
             logger.exception(f"清除快取檔案失敗 (IO): {e}")
-            UIUtils.show_error("清除快取檔案失敗", f"無法刪除快取檔案\n{e}", topmost=True)
+            return OperationResult(False, f"無法刪除快取檔案\n{e}", error=e)
+
+    @staticmethod
+    def _is_cancel_requested(cancel_flag: dict | CancellationToken | None) -> bool:
+        """統一判斷目前流程是否已被要求取消。"""
+        if not cancel_flag:
+            return False
+        try:
+            if hasattr(cancel_flag, "is_cancelled") and callable(cancel_flag.is_cancelled):
+                return bool(cancel_flag.is_cancelled())
+            if isinstance(cancel_flag, dict):
+                return bool(cancel_flag.get("cancelled"))
+            if hasattr(cancel_flag, "cancelled"):
+                return bool(cancel_flag.cancelled)
+        except Exception:
+            return False
+        return False
+
+    def _cleanup_failed_installer_process(
+        self,
+        process,
+        *,
+        base_dir: Path,
+        installer_path: str,
+        reason: str,
+        details: dict | None = None,
+    ) -> None:
+        """在 installer 失敗或取消時清理殘留進程。"""
+        if process is None:
+            return
+        try:
+            if process.poll() is None:
+                SystemUtils.kill_process_tree(process.pid)
+        except Exception as e:
+            logger.warning(f"終止安裝器進程樹失敗: {e}")
+        try:
+            SystemUtils.kill_java_processes_in_path(base_dir)
+        except Exception as e:
+            logger.warning(f"清理安裝器殘留 Java 進程失敗: {e}")
+        with suppress(Exception):
+            record_and_mark(
+                RuntimeError(reason),
+                Path(installer_path),
+                reason=reason,
+                details=details or {"installer": installer_path, "base_dir": str(base_dir)},
+            )
 
     def download_server_jar_with_progress(
         self,
@@ -72,7 +135,6 @@ class LoaderManager(Singleton):
         progress_callback=None,
         cancel_flag: dict | None = None,
         user_java_path: str | None = None,
-        parent_window=None,
     ) -> bool | str:
         """依 loader_type 下載並部署伺服器檔案。
 
@@ -84,18 +146,23 @@ class LoaderManager(Singleton):
             progress_callback: 下載進度回呼。
             cancel_flag: 可選的取消旗標。
             user_java_path: 使用者指定的 Java 路徑。
-            parent_window: 用於 UI 提示的父視窗。
 
         Returns:
             Vanilla / Fabric 成功時回傳 bool；Forge 成功時回傳主 JAR 的相對路徑字串。
         """
         lt = ServerDetectionVersionUtils.standardize_loader_type(loader_type, loader_version)
+        java_path = None
+        java_path_auto = False
         if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
             java_path = JavaUtils.get_best_java_path(minecraft_version, ask_download=True)
+            java_path_auto = True
         if not java_path:
             return False
+        # [3] 若 java_path 是自動偵測，於 log 補全
+        if java_path_auto:
+            logger.info(f"[Java偵測] 自動選用 java_path: {java_path}")
         if lt == "vanilla":
             return self._download_vanilla_server(minecraft_version, download_path, progress_callback, cancel_flag)
         if lt == "fabric":
@@ -119,7 +186,6 @@ class LoaderManager(Singleton):
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=True,
-                parent_window=parent_window,
             )
         if lt == "forge":
             installer_url = f"https://maven.minecraftforge.net/net/minecraftforge/forge/{minecraft_version}-{loader_version}/forge-{minecraft_version}-{loader_version}-installer.jar"
@@ -132,7 +198,6 @@ class LoaderManager(Singleton):
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=False,
-                parent_window=parent_window,
             )
         return self._fail(
             progress_callback,
@@ -211,9 +276,8 @@ class LoaderManager(Singleton):
                     details={"context": "_preload_fabric_versions"},
                 )
             logger.exception(f"載入 Fabric 版本失敗（IO/解析）: {e}")
-            UIUtils.show_error("載入 Fabric 版本失敗", f"無法從 API 獲取 Fabric 版本：{e}", topmost=True)
+            return OperationResult(False, f"無法從 API 獲取 Fabric 版本：{e}", error=e)
         except Exception as e:
-            # 通用回退機制：記錄日誌、為快取檔建立檢查用的 marker，並回報給 UI
             with suppress(Exception):
                 record_and_mark(
                     e,
@@ -222,7 +286,7 @@ class LoaderManager(Singleton):
                     details={"url": fabric_url},
                 )
             logger.exception(f"載入 Fabric 版本失敗: {e}")
-            UIUtils.show_error("載入 Fabric 版本失敗", f"無法從 API 獲取 Fabric 版本：{e}", topmost=True)
+            return OperationResult(False, f"無法從 API 獲取 Fabric 版本：{e}", error=e)
 
     def _preload_forge_versions(self) -> None:
         logger.debug("預先抓取  Forge 載入器版本...", "LoaderManager")
@@ -289,13 +353,11 @@ class LoaderManager(Singleton):
                     details={"context": "_preload_forge_versions"},
                 )
             logger.exception(f"Maven metadata API 方法失敗（IO/解析）: {e}")
-            UIUtils.show_error("載入 Forge 版本失敗", f"無法從 Maven metadata API 獲取 Forge 版本：{e}", topmost=True)
             return
         except Exception as e:
             with suppress(Exception):
                 record_and_mark(e, Path(self.forge_cache_file), reason="載入 Forge 版本失敗")
             logger.exception(f"Maven metadata API 方法失敗: {e}")
-            UIUtils.show_error("載入 Forge 版本失敗", f"無法從 Maven metadata API 獲取 Forge 版本：{e}", topmost=True)
             return
 
     def get_compatible_loader_versions(self, mc_version: str, loader_type: str) -> list[LoaderVersion]:
@@ -396,10 +458,10 @@ class LoaderManager(Singleton):
         progress_callback,
         cancel_flag,
         need_vanilla: bool = False,
-        parent_window=None,
     ) -> bool | str:
         """Fabric 與 Forge 共用：下載安裝器 → （Fabric 需先下載官方伺服器）→ 執行安裝器。"""
-        installer_path = str(Path(download_path).parents[0] / Path(installer_url).name)
+        base_dir = Path(download_path).parents[0]
+        installer_path = str(base_dir / Path(installer_url).name)
         if need_vanilla:
             dl_start, dl_end = (10, 15)
             vanilla_start, vanilla_end = (15, 90)
@@ -431,10 +493,11 @@ class LoaderManager(Singleton):
         if not isinstance(cmd, list) or any(not isinstance(a, str) for a in cmd):
             logger.error(f"無效的安裝器命令參數: {cmd}")
             return self._fail(progress_callback, "執行安裝器失敗：無效的命令參數")
+        process = None
         try:
             process = SubprocessUtils.popen_checked(
                 cmd,
-                cwd=str(Path(download_path).parents[0]),
+                cwd=str(base_dir),
                 stdin=SubprocessUtils.DEVNULL,
                 stdout=SubprocessUtils.PIPE,
                 stderr=SubprocessUtils.STDOUT,
@@ -446,6 +509,15 @@ class LoaderManager(Singleton):
             if process.stdout is None:
                 return False
             while True:
+                if self._is_cancel_requested(cancel_flag):
+                    self._cleanup_failed_installer_process(
+                        process,
+                        base_dir=base_dir,
+                        installer_path=installer_path,
+                        reason="installer_cancelled",
+                        details={"cmd": cmd},
+                    )
+                    return self._fail(progress_callback, "已取消安裝，並已清理殘留安裝程序")
                 line = process.stdout.readline()
                 if not line and process.poll() is not None:
                     break
@@ -464,9 +536,27 @@ class LoaderManager(Singleton):
                     debug=f"[DEBUG] cmd: {' '.join(cmd)}",
                 )
         except (SubprocessUtils.CalledProcessError, OSError) as e:
+            self._cleanup_failed_installer_process(
+                process,
+                base_dir=base_dir,
+                installer_path=installer_path,
+                reason="run_installer_failed_expected",
+                details={"installer": installer_path, "cmd": cmd, "error": str(e)},
+            )
             logger.exception(f"執行安裝器時發生可預期的子程序錯誤: {e}")
-            return self._fail(progress_callback, f"執行安裝器時發生錯誤: {e}", debug=f"[DEBUG] Popen exception: {e}")
+            return self._fail(
+                progress_callback,
+                f"執行安裝器時發生錯誤，並已嘗試清理殘留進程: {e}",
+                debug=f"[DEBUG] Popen exception: {e}",
+            )
         except Exception as e:
+            self._cleanup_failed_installer_process(
+                process,
+                base_dir=base_dir,
+                installer_path=installer_path,
+                reason="run_installer_failed",
+                details={"installer": installer_path, "cmd": cmd, "error": str(e)},
+            )
             with suppress(Exception):
                 record_and_mark(
                     e,
@@ -475,9 +565,12 @@ class LoaderManager(Singleton):
                     details={"installer": installer_path, "cmd": cmd},
                 )
             logger.exception(f"執行安裝器時發生錯誤: {e}")
-            return self._fail(progress_callback, f"執行安裝器時發生錯誤: {e}", debug=f"[DEBUG] Popen exception: {e}")
+            return self._fail(
+                progress_callback,
+                f"執行安裝器時發生錯誤，並已嘗試清理殘留進程: {e}",
+                debug=f"[DEBUG] Popen exception: {e}",
+            )
         try:
-            base_dir = Path(download_path).parents[0]
             run_bat_path = base_dir / "run.bat"
             run_sh_path = base_dir / "run.sh"
             start_server_path = base_dir / "start_server.bat"
@@ -495,7 +588,7 @@ class LoaderManager(Singleton):
                         java_line += " nogui"
                 except OSError as e:
                     logger.warning(f"無法讀取 run.bat (IO): {e}")
-                    UIUtils.show_warning("讀取失敗", f"無法讀取 run.bat：{e}", parent=parent_window)
+                    return False
                 except Exception as e:
                     with suppress(Exception):
                         record_and_mark(
@@ -505,7 +598,7 @@ class LoaderManager(Singleton):
                             details={"path": str(run_bat_path)},
                         )
                     logger.exception(f"讀取 run.bat 時發生未預期錯誤: {e}")
-                    UIUtils.show_warning("讀取失敗", f"無法讀取 run.bat：{e}", parent=parent_window)
+                    return False
             if java_line and start_server_path.exists():
                 try:
                     content = PathUtils.read_text_file(start_server_path, errors="ignore")
@@ -522,7 +615,7 @@ class LoaderManager(Singleton):
                         PathUtils.write_text_file(start_server_path, "".join(new_lines))
                 except OSError as e:
                     logger.exception(f"修改 start_server.bat 失敗（IO）: {e}")
-                    UIUtils.show_warning("修改失敗", f"無法修改 start_server.bat：{e}", parent=parent_window)
+                    return False
                 except Exception as e:
                     with suppress(Exception):
                         record_and_mark(
@@ -532,7 +625,7 @@ class LoaderManager(Singleton):
                             details={"path": str(start_server_path)},
                         )
                     logger.exception(f"修改 start_server.bat 時發生未預期錯誤: {e}")
-                    UIUtils.show_warning("修改失敗", f"無法修改 start_server.bat：{e}", parent=parent_window)
+                    return False
             try:
                 for file_path in [
                     run_bat_path,
@@ -545,9 +638,7 @@ class LoaderManager(Singleton):
                         file_path.unlink()
             except OSError as e:
                 logger.exception(f"清理安裝檔失敗（IO）: {installer_path}: {e}")
-                UIUtils.show_warning(
-                    "清理失敗", f"安裝完成，但無法清理安裝器檔案：{installer_path}\n可手動刪除。", parent=parent_window
-                )
+                logger.warning(f"安裝完成，但無法清理安裝器檔案：{installer_path}，可手動刪除。")
             except Exception as e:
                 with suppress(Exception):
                     files_tried = [
@@ -564,9 +655,7 @@ class LoaderManager(Singleton):
                         details={"installer": installer_path, "files": files_tried},
                     )
                 logger.exception(f"清理安裝檔失敗: {installer_path}: {e}")
-                UIUtils.show_warning(
-                    "清理失敗", f"安裝完成，但無法清理安裝器檔案：{installer_path}\n可手動刪除。", parent=parent_window
-                )
+                logger.warning(f"安裝完成，但無法清理安裝器檔案：{installer_path}，可手動刪除。")
         except Exception as e:
             with suppress(Exception):
                 record_and_mark(
@@ -576,7 +665,7 @@ class LoaderManager(Singleton):
                     details={"installer": installer_path},
                 )
             logger.exception(f"安裝過程中發生錯誤: {e}")
-            UIUtils.show_error("安裝失敗", f"安裝過程中發生錯誤：{e}", parent=parent_window)
+            return False
         return True
 
     def _download_vanilla_server(
@@ -614,25 +703,10 @@ class LoaderManager(Singleton):
                 progress_callback(percent, status_text)
 
         def check_cancel():
-            if not cancel_flag:
-                return False
-            try:
-                # 支援多種取消標記形式：CancellationToken、dict 或帶有 cancelled 屬性的物件
-                if hasattr(cancel_flag, "is_cancelled") and callable(cancel_flag.is_cancelled):
-                    cancelled = bool(cancel_flag.is_cancelled())
-                elif isinstance(cancel_flag, dict):
-                    cancelled = bool(cancel_flag.get("cancelled"))
-                elif hasattr(cancel_flag, "cancelled"):
-                    cancelled = bool(cancel_flag.cancelled)
-                else:
-                    cancelled = False
-                if cancelled:
-                    if progress_callback:
-                        self._fail(progress_callback, "已取消下載")
-                    return True
-            except Exception:
-                return False
-            return False
+            cancelled = self._is_cancel_requested(cancel_flag)
+            if cancelled and progress_callback:
+                self._fail(progress_callback, "已取消下載")
+            return cancelled
 
         if HTTPUtils.download_file(
             url, dest_path, progress_callback=on_progress, timeout=30, cancel_check=check_cancel

@@ -39,11 +39,7 @@ class WindowManager:
 
     @staticmethod
     def is_valid_main_window_size(width: int, height: int) -> bool:
-        """檢查主視窗尺寸是否為可持久化的有效值。
-
-        判斷依據為 `_min_tracked_width` / `_min_tracked_height`，
-        用來排除初始化與佈局過程中的暫態尺寸。
-        """
+        """檢查主視窗尺寸是否為可持久化的有效值。"""
         return width >= WindowManager._min_tracked_width and height >= WindowManager._min_tracked_height
 
     @staticmethod

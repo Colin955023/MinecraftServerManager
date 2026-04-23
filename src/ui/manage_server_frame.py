@@ -1249,11 +1249,15 @@ class ManageServerFrame(ctk.CTkFrame):
                 UIUtils.show_error("錯誤", f"停止伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
             self._schedule_post_action_updates(100, 2000)
         else:
-            success = self.server_manager.start_server(self.selected_server, parent=self.master)
-            if success:
+            start_result = self.server_manager.start_server_result(self.selected_server)
+            if start_result.success:
                 self.monitor_server()
             else:
-                UIUtils.show_error("錯誤", f"啟動伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
+                UIUtils.show_error(
+                    start_result.title or "錯誤",
+                    start_result.message or f"啟動伺服器 {self.selected_server} 失敗",
+                    self.winfo_toplevel(),
+                )
             self._schedule_post_action_updates(100, 1500)
 
     def _immediate_update(self) -> None:
@@ -1338,8 +1342,8 @@ class ManageServerFrame(ctk.CTkFrame):
             if backup_result is None:
                 return
             delete_backup = backup_result
-        success = self.server_manager.delete_server(self.selected_server)
-        if success:
+        delete_result = self.server_manager.delete_server_result(self.selected_server)
+        if delete_result.success:
             if delete_backup and backup_path:
                 try:
                     PathUtils.delete_path(backup_path)
@@ -1361,7 +1365,11 @@ class ManageServerFrame(ctk.CTkFrame):
                 UIUtils.show_info("成功", f"伺服器 {self.selected_server} 已刪除", self.winfo_toplevel())
             self.refresh_servers()
         else:
-            UIUtils.show_error("錯誤", f"刪除伺服器 {self.selected_server} 失敗", self.winfo_toplevel())
+            UIUtils.show_error(
+                delete_result.title or "錯誤",
+                delete_result.message or f"刪除伺服器 {self.selected_server} 失敗",
+                self.winfo_toplevel(),
+            )
 
     def backup_server(self) -> None:
         """備份伺服器世界檔案"""

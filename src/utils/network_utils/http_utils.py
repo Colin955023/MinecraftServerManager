@@ -2,7 +2,6 @@
 提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
 """
 
-import asyncio
 import concurrent.futures
 import contextlib
 import hashlib
@@ -22,6 +21,7 @@ from urllib3.util.retry import Retry
 
 from ...version_info import APP_NAME, APP_VERSION
 from .. import get_logger
+from .async_http_utils import AsyncHTTPUtils
 
 logger = get_logger().bind(component="HTTPUtils")
 
@@ -279,7 +279,7 @@ class HTTPUtils:
             chunk_size: 每次讀取的區塊大小。
             cancel_check: 取消檢查回呼。
             expected_sha256: 預期的 SHA-256 雜湊。
-            expected_hash: 預期的雜湊值，支援 sha1 / sha256 / sha512。
+            expected_hash: 預期的雜湊值，僅支援 sha256 / sha512。
 
         Returns:
             下載成功時回傳 True，失敗時回傳 False。
@@ -297,14 +297,12 @@ class HTTPUtils:
         normalized_expected_hash = str(expected_hash or expected_sha256 or "").strip().lower()
         expected_hash_algorithm = ""
         if normalized_expected_hash:
-            if len(normalized_expected_hash) == 40:
-                expected_hash_algorithm = "sha1"
-            elif len(normalized_expected_hash) == 64:
+            if len(normalized_expected_hash) == 64:
                 expected_hash_algorithm = "sha256"
             elif len(normalized_expected_hash) == 128:
                 expected_hash_algorithm = "sha512"
             else:
-                logger.error(f"檔案下載失敗: 無法根據雜湊長度判定演算法 (len={len(normalized_expected_hash)})")
+                logger.error(f"檔案下載失敗: 僅接受 SHA-256 / SHA-512 預期雜湊 (len={len(normalized_expected_hash)})")
                 return False
         # 若提供預期雜湊，先檢查本地檔案是否已符合，以避免重複下載
         if normalized_expected_hash and local_path_obj.exists():
@@ -411,18 +409,24 @@ class HTTPUtils:
 
     @classmethod
     async def get_json_async(cls, *args, **kwargs):
-        """在背景執行緒中非同步取得 JSON 回應。"""
+        """使用 aiohttp 非同步取得 JSON 回應。"""
 
-        return await asyncio.to_thread(cls.get_json, *args, **kwargs)
+        return await AsyncHTTPUtils.get_json(*args, **kwargs)
 
     @classmethod
     async def post_json_async(cls, *args, **kwargs):
-        """在背景執行緒中非同步送出 JSON POST 請求。"""
+        """使用 aiohttp 非同步送出 JSON POST 請求。"""
 
-        return await asyncio.to_thread(cls.post_json, *args, **kwargs)
+        return await AsyncHTTPUtils.post_json(*args, **kwargs)
+
+    @classmethod
+    async def get_content_async(cls, *args, **kwargs):
+        """使用 aiohttp 非同步取得完整回應內容。"""
+
+        return await AsyncHTTPUtils.get_content(*args, **kwargs)
 
     @classmethod
     async def download_file_async(cls, *args, **kwargs):
-        """在背景執行緒中非同步下載檔案。"""
+        """使用 aiohttp 非同步下載檔案。"""
 
-        return await asyncio.to_thread(cls.download_file, *args, **kwargs)
+        return await AsyncHTTPUtils.download_file(*args, **kwargs)

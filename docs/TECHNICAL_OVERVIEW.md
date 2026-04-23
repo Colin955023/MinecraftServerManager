@@ -4,7 +4,7 @@
 
 | 類別 | 使用套件／工具 |
 |------|----------------|
-| 語言 | Python 3.10+ |
+| 語言 | Python 3.14 |
 | GUI | CustomTkinter + Tkinter |
 | 打包 | Nuitka（可執行檔）、Inno Setup（安裝精靈） |
 | 網路 | requests + urllib3 Retry（集中 timeout / retry policy） |
@@ -22,10 +22,14 @@
 src/main.py
  └── ui/main_window.py            主視窗、頁面組裝、背景工作排程
      ├── core/server_manager.py   伺服器生命週期（建立／啟動／停止／備份）
-     ├── core/mod_manager.py      模組掃描、安裝、更新執行
+     ├── core/mod_manager.py      模組協調層（委派掃描／安裝／provider 辨識）
+     ├── core/local_mod_scanner.py 本地模組掃描、JAR metadata 解析
+     ├── core/mod_file_installer.py 模組檔案安裝、替換、回滾與刪改
+     ├── core/mod_provider_resolver.py provider metadata 與 Modrinth 身分解析
      ├── core/version_manager.py  Minecraft 版本查詢
      ├── core/loader_manager.py   Fabric／Forge 版本查詢與快取
-     ├── ui/mod_search_service.py Modrinth 搜尋、相容性分析、依賴規劃
+     ├── ui/mod_management/*      本地模組列表、Review、安裝清單與同步顯示
+     ├── ui/mod_search_service/*  Modrinth 搜尋、相容性分析、依賴規劃
      └── utils/update_checker.py  更新檢查、下載與套用流程
 ```
 
@@ -38,7 +42,10 @@ src/main.py
 | 檔案 | 職責 |
 |------|------|
 | `server_manager.py` | 伺服器 CRUD、啟動／停止、備份 |
-| `mod_manager.py` | 本地模組掃描、安裝、更新執行 |
+| `mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
+| `local_mod_scanner.py` | 本地模組掃描、JAR metadata 解析與快取回填 |
+| `mod_file_installer.py` | 模組下載、原子替換、回滾、匯入、刪除、啟停 |
+| `mod_provider_resolver.py` | provider metadata、slug / project id 正規化與搜尋 fallback |
 | `version_manager.py` | Minecraft 版本列表查詢 |
 | `loader_manager.py` | Fabric／Forge 版本查詢與 TTL 快取 |
 
@@ -49,15 +56,15 @@ src/main.py
 | `main_window.py` | 主視窗框架、頁面切換 |
 | `create_server_frame.py` | 建立伺服器精靈 |
 | `manage_server_frame.py` | 伺服器清單與操作面板 |
-| `mod_management.py` | 模組管理頁面 |
-| `mod_search_service.py` | Modrinth 搜尋、相容性分析、依賴規劃 |
+| `mod_management/` | 模組管理頁面、Review、樹狀列表同步與安裝執行 |
+| `mod_search_service/` | Modrinth 搜尋、相容性分析、依賴規劃與 provider 轉接 |
 | `server_monitor_window.py` | 即時監控視窗 |
 
 ### `src/utils/`
 
 | 檔案 | 職責 |
 |------|------|
-| `settings_manager.py` | 設定讀寫（singleton） |
+| `settings_manager.py` | 設定讀寫與共享設定管理器存取 |
 | `http_utils.py` | requests session，集中 timeout／retry |
 | `window_manager.py` | DPI 感知、視窗定位、狀態持久化 |
 | `logger.py` | 集中日誌初始化 |
@@ -119,7 +126,7 @@ NeoForge / Forge loader 不套用此重定向。
 | 安裝版 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
 | 可攜版 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
 
-設定由 `settings_manager`（singleton）讀寫並持久化。
+設定由 `settings_manager` 模組統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
 
 ## 8. 開發指令
 
@@ -148,5 +155,5 @@ uv run report\comprehensive_report.py
 2. `src/ui/main_window.py` — 整體 UI 框架與頁面切換
 3. `src/core/server_manager.py` — 伺服器核心邏輯
 4. `src/core/mod_manager.py` — 模組服務
-5. `src/ui/mod_search_service.py` — Modrinth 整合（最複雜的模組）
+5. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
 6. `src/utils/window_manager.py` — 視窗管理慣例

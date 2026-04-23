@@ -5,7 +5,7 @@
 import contextlib
 import threading
 import time
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +18,6 @@ from ..utils import (
     ServerPropertiesHelper,
     SubprocessUtils,
     SystemUtils,
-    UIUtils,
     atomic_write_json,
     get_logger,
     record_and_mark,
@@ -26,6 +25,20 @@ from ..utils import (
 from . import ServerInstance
 
 logger = get_logger().bind(component="ServerManager")
+
+
+@dataclass(slots=True)
+class ServerOperationResult:
+    """描述伺服器操作結果，供 UI 層決定如何呈現。"""
+
+    success: bool
+    title: str = ""
+    message: str = ""
+    server_name: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return not self.success
 
 
 class ServerManager:
@@ -50,12 +63,40 @@ class ServerManager:
         if not self.config_file.exists():
             self.write_servers_config()
 
+    @staticmethod
+    def _success_result(message: str = "", *, server_name: str = "") -> ServerOperationResult:
+        """建立成功結果。"""
+        return ServerOperationResult(success=True, message=message, server_name=server_name)
+
+    @staticmethod
+    def _failure_result(title: str, message: str, *, server_name: str = "") -> ServerOperationResult:
+        """建立失敗結果。"""
+        return ServerOperationResult(success=False, title=title, message=message, server_name=server_name)
+
     def _cleanup_running_server_state(self, server_name: str) -> None:
         """清除執行中伺服器的 runtime 狀態。"""
         instance = self.running_servers.pop(server_name, None)
         if instance is not None:
             instance.clear_process()
             instance.clear_output_buffer()
+
+    def _cleanup_failed_runtime_process(self, server_name: str, server_path: Path | None, process: Any | None) -> bool:
+        """在建立/啟動流程異常時清理殘留進程。"""
+        cleaned = False
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    cleaned = bool(SystemUtils.kill_process_tree(process.pid)) or cleaned
+            except Exception as e:
+                logger.warning(f"清理伺服器進程樹失敗: {server_name} | {e}")
+        try:
+            if server_path and server_path.exists():
+                cleaned = bool(SystemUtils.kill_java_processes_in_path(server_path)) or cleaned
+        except Exception as e:
+            logger.warning(f"清理伺服器資料夾下 Java 進程失敗: {server_name} | {e}")
+        if cleaned:
+            logger.warning(f"流程失敗後已清理伺服器殘留進程: {server_name}")
+        return cleaned
 
     def _get_running_instance(self, server_name: str) -> ServerInstance | None:
         """取得仍在執行中的 instance；若已過期則自動清理。"""
@@ -90,29 +131,47 @@ class ServerManager:
                 return process.poll() is not None
             waiter.wait(min(wait_interval, remaining))
 
-    def _validate_server_runtime_path(self, config: ServerConfig, parent=None) -> Path | None:
+    def _validate_server_runtime_path(self, config: ServerConfig) -> tuple[Path | None, ServerOperationResult | None]:
         """在啟動前驗證伺服器路徑是否安全且可用。"""
         try:
             server_path = Path(config.path).resolve(strict=False)
         except Exception as e:
-            UIUtils.show_error("伺服器路徑無效", f"伺服器路徑無效: {e}", parent=parent)
-            return None
-        if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
-            UIUtils.show_error(
-                "伺服器路徑無效",
-                f"伺服器路徑必須位於伺服器資料夾內: {server_path}",
-                parent=parent,
+            return (
+                None,
+                self._failure_result("伺服器路徑無效", f"伺服器路徑無效: {e}", server_name=getattr(config, "name", "")),
             )
-            return None
+        if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑無效",
+                    f"伺服器路徑必須位於伺服器資料夾內: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
         if not server_path.exists():
-            UIUtils.show_error("伺服器路徑不存在", f"伺服器路徑不存在: {server_path}", parent=parent)
-            return None
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑不存在",
+                    f"伺服器路徑不存在: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
         if not server_path.is_dir():
-            UIUtils.show_error("伺服器路徑無效", f"伺服器路徑不是資料夾: {server_path}", parent=parent)
-            return None
-        return server_path
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑無效",
+                    f"伺服器路徑不是資料夾: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
+        return (server_path, None)
 
-    def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
+    def create_server_result(
+        self, config: ServerConfig, properties: dict[str, str] | None = None
+    ) -> ServerOperationResult:
         """建立新伺服器並初始化設定。
 
         Args:
@@ -120,7 +179,7 @@ class ServerManager:
             properties: 要寫入 server.properties 的初始屬性。
 
         Returns:
-            建立成功時回傳 True，失敗時回傳 False。
+            建立流程結果，供 UI 或呼叫端決定後續呈現。
         """
         try:
             server_path = (self.servers_root / config.name).resolve()
@@ -172,16 +231,43 @@ class ServerManager:
             ServerPropertiesHelper.save_properties(properties_file, properties)
             config.properties = properties
             self.create_launch_script(config)
-            return True
+            return self._success_result(f"伺服器 {config.name} 已建立", server_name=config.name)
         except Exception as e:
             try:
                 server_path = (self.servers_root / config.name).resolve()
             except Exception:
                 server_path = None
+            # 嘗試終止殘留 Java 進程
+            try:
+                killed = False
+                if server_path and server_path.exists():
+                    # 掃描該資料夾下的 java 進程
+                    killed = SystemUtils.kill_java_processes_in_path(server_path)
+                    if killed:
+                        logger.warning(f"異常建立失敗，自動終止殘留 Java 進程於: {server_path}")
+            except Exception as kill_exc:
+                logger.error(f"自動終止殘留 Java 進程失敗: {kill_exc}")
             record_and_mark(
                 e, marker_path=server_path, reason="建立伺服器失敗", details={"server": getattr(config, "name", None)}
             )
-            return False
+            return self._failure_result(
+                "建立失敗",
+                f"建立過程發生錯誤，已嘗試清理殘留 Java 進程。請檢查日誌與 .issues 目錄。\n錯誤: {e}",
+                server_name=getattr(config, "name", ""),
+            )
+
+    def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
+        """建立新伺服器並初始化設定。
+
+        Args:
+            config: 要建立的伺服器設定。
+            properties: 建立後要額外寫入的 `server.properties` 內容。
+
+        Returns:
+            建立成功時回傳 True，否則回傳 False。
+        """
+
+        return self.create_server_result(config, properties).success
 
     def _create_eula_file(self, server_path: Path) -> None:
         """建立並同意 EULA 檔案"""
@@ -338,33 +424,35 @@ class ServerManager:
             )
             return False
 
-    def start_server(self, server_name: str, parent=None) -> bool:
+    def start_server_result(self, server_name: str) -> ServerOperationResult:
         """啟動伺服器。
 
         Args:
             server_name: 目標伺服器名稱。
-            parent: 用於 UI 錯誤提示的父視窗。
 
         Returns:
-            成功時回傳 True，失敗時回傳 False。
+            啟動流程結果。
         """
+        process = None
         try:
             if server_name not in self.servers:
-                UIUtils.show_error("伺服器未找到", f"找不到伺服器: {server_name}", parent=parent)
-                return False
+                return self._failure_result("伺服器未找到", f"找不到伺服器: {server_name}", server_name=server_name)
             config = self.servers[server_name]
-            server_path = self._validate_server_runtime_path(config, parent=parent)
+            server_path, validation_result = self._validate_server_runtime_path(config)
+            if validation_result is not None:
+                return validation_result
             if server_path is None:
-                return False
+                return self._failure_result("啟動失敗", f"無法解析伺服器路徑: {server_name}", server_name=server_name)
             self.create_launch_script(config)
             script_path = ServerDetectionUtils.find_startup_script(server_path)
             if script_path:
                 logger.info(f"找到啟動腳本: {script_path}")
             else:
-                UIUtils.show_error(
-                    "啟動腳本未找到", "找不到啟動腳本 (start_server.bat, run.bat, start.bat, server.bat)", parent=parent
+                return self._failure_result(
+                    "啟動腳本未找到",
+                    "找不到啟動腳本 (start_server.bat, run.bat, start.bat, server.bat)",
+                    server_name=server_name,
                 )
-                return False
             logger.debug(f"準備啟動伺服器: {server_name}")
             logger.debug(f"腳本路徑: {script_path}")
             logger.debug(f"工作目錄: {server_path}")
@@ -401,10 +489,11 @@ class ServerManager:
                         logger.debug(f"啟動腳本內容:\n{script_content}")
                     else:
                         logger.error(f"無法讀取啟動腳本: {script_path}")
-                    UIUtils.show_error(
-                        "啟動失敗", f"伺服器進程立即結束，返回碼: {poll_result}\n請檢查日誌了解詳細資訊", parent=parent
+                    return self._failure_result(
+                        "啟動失敗",
+                        f"伺服器進程立即結束，返回碼: {poll_result}\n請檢查日誌了解詳細資訊",
+                        server_name=server_name,
                     )
-                    return False
                 instance = ServerInstance(id=server_name, name=server_name, path=server_path, config=config)
                 instance.attach_process(process)
                 instance.attach_output_buffer(self.OUTPUT_QUEUE_MAX_SIZE)
@@ -444,18 +533,71 @@ class ServerManager:
 
                 threading.Thread(target=_output_reader, args=(process, instance, server_name), daemon=True).start()
                 logger.info(f"伺服器 {server_name} 啟動成功，PID: {process.pid}")
-                return True
+                return self._success_result(
+                    f"伺服器 {server_name} 啟動成功，PID: {process.pid}", server_name=server_name
+                )
             except FileNotFoundError as e:
                 logger.exception(f"檔案路徑錯誤: {e}")
-                return False
+                return self._failure_result("啟動失敗", f"找不到啟動所需檔案: {e}", server_name=server_name)
         except Exception as e:
             try:
                 server_path = Path(getattr(self.servers.get(server_name), "path", ""))
             except Exception:
                 server_path = None
+            cleaned = self._cleanup_failed_runtime_process(server_name, server_path, process)
             record_and_mark(e, marker_path=server_path, reason="啟動伺服器失敗", details={"server": server_name})
-            UIUtils.show_error("啟動失敗", f"無法啟動伺服器 {server_name}。錯誤: {e}", parent=parent)
-            return False
+            cleanup_note = "已嘗試清理殘留進程。" if cleaned else "未偵測到可清理的殘留進程。"
+            return self._failure_result(
+                "啟動失敗",
+                f"無法啟動伺服器 {server_name}。{cleanup_note}\n錯誤: {e}",
+                server_name=server_name,
+            )
+
+    def start_server(self, server_name: str) -> bool:
+        """啟動伺服器。
+
+        Args:
+            server_name: 目標伺服器名稱。
+
+        Returns:
+            啟動成功時回傳 True，否則回傳 False。
+        """
+
+        return self.start_server_result(server_name).success
+
+    def delete_server_result(self, server_name: str) -> ServerOperationResult:
+        """刪除伺服器。
+
+        Args:
+            server_name: 要刪除的伺服器名稱。
+
+        Returns:
+            刪除流程結果。
+        """
+        try:
+            if server_name not in self.servers:
+                return self._failure_result("刪除失敗", f"找不到伺服器: {server_name}", server_name=server_name)
+            config = self.servers[server_name]
+            server_path = Path(config.path).resolve(strict=False)
+            if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
+                logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
+                return self._failure_result(
+                    "刪除失敗",
+                    f"拒絕刪除不在伺服器根目錄下的路徑: {server_path}",
+                    server_name=server_name,
+                )
+            if not PathUtils.delete_within(self.servers_root, server_path):
+                return self._failure_result("刪除失敗", f"無法刪除伺服器資料夾: {server_path}", server_name=server_name)
+            del self.servers[server_name]
+            self.write_servers_config()
+            return self._success_result(f"伺服器 {server_name} 已刪除", server_name=server_name)
+        except Exception as e:
+            try:
+                server_path = Path(getattr(self.servers.get(server_name), "path", ""))
+            except Exception:
+                server_path = None
+            record_and_mark(e, marker_path=server_path, reason="刪除伺服器失敗", details={"server": server_name})
+            return self._failure_result("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}", server_name=server_name)
 
     def delete_server(self, server_name: str) -> bool:
         """刪除伺服器。
@@ -464,29 +606,10 @@ class ServerManager:
             server_name: 要刪除的伺服器名稱。
 
         Returns:
-            成功時回傳 True，失敗時回傳 False。
+            刪除成功時回傳 True，否則回傳 False。
         """
-        try:
-            if server_name not in self.servers:
-                return False
-            config = self.servers[server_name]
-            server_path = Path(config.path).resolve(strict=False)
-            if not PathUtils.is_path_within(self.servers_root, server_path, strict=False):
-                logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
-                return False
-            if not PathUtils.delete_within(self.servers_root, server_path):
-                return False
-            del self.servers[server_name]
-            self.write_servers_config()
-            return True
-        except Exception as e:
-            try:
-                server_path = Path(getattr(self.servers.get(server_name), "path", ""))
-            except Exception:
-                server_path = None
-            record_and_mark(e, marker_path=server_path, reason="刪除伺服器失敗", details={"server": server_name})
-            UIUtils.show_error("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}")
-            return False
+
+        return self.delete_server_result(server_name).success
 
     def load_servers_config(self) -> None:
         """載入伺服器配置"""

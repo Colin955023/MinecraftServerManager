@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-import src.core.server_manager as server_manager_module
 from src.core import ServerManager
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper
@@ -156,19 +155,14 @@ def test_server_manager_rejects_outside_path_on_start(tmp_path, monkeypatch) -> 
         memory_max_mb=2048,
         path=str(outside_path),
     )
-
-    error_calls: list[tuple[str, str]] = []
-
-    def _track_error(title: str, message: str, _parent=None, **_kwargs) -> None:
-        error_calls.append((title, message))
-
-    monkeypatch.setattr(server_manager_module.UIUtils, "show_error", _track_error)
     monkeypatch.setattr(
         manager,
         "create_launch_script",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not create script")),
     )
 
-    assert manager.start_server("escape") is False
-    assert error_calls
-    assert "必須位於伺服器資料夾內" in error_calls[0][1]
+    result = manager.start_server_result("escape")
+
+    assert result.success is False
+    assert result.title == "伺服器路徑無效"
+    assert "必須位於伺服器資料夾內" in result.message

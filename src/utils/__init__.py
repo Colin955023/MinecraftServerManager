@@ -58,6 +58,10 @@ _register_exports(
     "compute_file_hash",
 )
 _register_exports(
+    ".network_utils.async_http_utils",
+    "AsyncHTTPUtils",
+)
+_register_exports(
     ".network_utils.http_utils",
     "HTTPUtils",
 )
@@ -101,6 +105,16 @@ _register_exports(
 _register_exports(
     ".mod_utils.mod_dependency_reference_utils",
     "resolve_dependency_reference",
+)
+_register_exports(
+    ".mod_utils.download_source_policy",
+    "OFFICIAL_DOWNLOAD_HOSTS",
+    "build_non_official_source_warning",
+    "build_non_official_source_warning_message",
+    "extract_download_host",
+    "get_non_official_download_host",
+    "get_official_download_hosts",
+    "normalize_download_provider",
 )
 _register_exports(
     ".mod_utils.mod_dependency_planner",

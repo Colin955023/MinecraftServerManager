@@ -654,14 +654,19 @@ class ServerMonitorWindow:
     def start_server(self) -> None:
         """啟動伺服器"""
         self.console_text.delete("0.0", "end")
-        success = self.server_manager.start_server(self.server_name, parent=self.window)
-        if success:
+        start_result = self.server_manager.start_server_result(self.server_name)
+        if start_result.success:
             self.add_console_message(f"✅ 伺服器 {self.server_name} 啟動中...")
             self._schedule_window_job("_start_status_job", 500, self.update_status)
             if not self.is_monitoring:
                 self.start_monitoring()
         else:
-            self.add_console_message(f"❌ 啟動伺服器 {self.server_name} 失敗")
+            self.add_console_message(f"❌ {start_result.message or f'啟動伺服器 {self.server_name} 失敗'}")
+            UIUtils.show_error(
+                start_result.title or "啟動失敗",
+                start_result.message or f"啟動伺服器 {self.server_name} 失敗",
+                self.window,
+            )
 
     def stop_server(self) -> None:
         """停止伺服器"""
