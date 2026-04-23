@@ -74,6 +74,7 @@ class LoaderManager(Singleton):
             forge_path.unlink(missing_ok=True)
             self._version_cache.clear()
             self._preloaded_once = False
+            return OperationResult(True, "快取檔案已成功清除")
         except PermissionError as e:
             logger.exception(f"清除快取檔案失敗: {e}")
             return OperationResult(False, f"無法刪除快取檔案\n權限不足\n{e}", error=e)
@@ -255,7 +256,7 @@ class LoaderManager(Singleton):
             return (0,)
         return tuple(int(part) for part in numeric_parts)
 
-    def _preload_fabric_versions(self):
+    def _preload_fabric_versions(self) -> OperationResult:
         """從 API 取得 Fabric 載入器版本並覆蓋寫入 json（只保留 stable 版本）。"""
         logger.debug("預先抓取 Fabric 載入器版本...", "LoaderManager")
         fabric_url = "https://meta.fabricmc.net/v2/versions/loader"
@@ -267,6 +268,7 @@ class LoaderManager(Singleton):
                 fabric_path = Path(self.fabric_cache_file)
                 if not atomic_write_json(fabric_path, stable_versions):
                     logger.warning("寫入 Fabric 版本快取失敗")
+            return OperationResult(True, "Fabric 版本預載完成")
         except (OSError, ValueError) as e:
             with suppress(Exception):
                 record_and_mark(

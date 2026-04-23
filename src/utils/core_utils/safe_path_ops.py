@@ -21,7 +21,9 @@ class SafePathOps:
         try:
             base_resolved = base_dir.resolve(strict=True)
             target_resolved = target_path.resolve(strict=strict)
-        except FileNotFoundError, OSError:
+        except FileNotFoundError:
+            return False
+        except OSError:
             return False
         try:
             target_resolved.relative_to(base_resolved)

@@ -64,7 +64,9 @@ class JsonIO:
         """
         try:
             return json.dumps(data, indent=indent, ensure_ascii=False)
-        except TypeError, ValueError:
+        except TypeError:
+            return ""
+        except ValueError:
             return ""
 
     @staticmethod
@@ -79,5 +81,9 @@ class JsonIO:
         """
         try:
             return json.loads(json_str)
-        except json.JSONDecodeError, TypeError, ValueError:
+        except json.JSONDecodeError:
+            return None
+        except TypeError:
+            return None
+        except ValueError:
             return None
