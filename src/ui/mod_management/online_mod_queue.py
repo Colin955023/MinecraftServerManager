@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import contextlib
+# 直接內嵌原 runtime_typing 內容，避免循環依賴
+import queue
 import re
 import tkinter
 import tkinter.ttk as ttk
@@ -30,8 +31,47 @@ from .. import (
     search_mods_online,
 )
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
-from .models import OnlineBrowseRequest
-from .runtime_typing import ModManagementRuntimeBase
+from .models import OnlineBrowseRequest, PendingOnlineInstall
+
+
+class ModManagementRuntimeBase:
+    """為拆分後的 mixin 提供共同宿主屬性型別。"""
+
+    parent: Any
+    current_server: Any | None
+    mod_manager: Any | None
+    notebook: Any | None
+    browse_tree: ttk.Treeview | None
+    browse_filter_label: Any | None
+    browse_results_label: Any | None
+    browse_sort_var: Any
+    browse_sort_options: dict[str, str]
+    local_tree: ttk.Treeview | None
+    local_mods: list[Any]
+    online_mods: list[Any]
+    pending_online_installs: list[PendingOnlineInstall]
+    ui_queue: queue.Queue[Any]
+    enhanced_mods_cache: dict[str, Any]
+    VERSION_PATTERN: re.Pattern[str]
+    _last_online_request: OnlineBrowseRequest | None
+    _online_refresh_job: str | None
+    _online_refresh_token: int
+    _online_tree_render_locked: bool
+    _online_rows_snapshot: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]]
+    _online_mod_by_row_key: dict[str, Any]
+    _online_mod_index: dict[str, Any]
+    _local_refresh_job: str | None
+    _local_refresh_token: int
+    _local_item_by_mod_id: dict[str, str]
+    _local_recycled_item_ids: list[str]
+    _local_recycle_hits: int
+    _local_recycle_misses: int
+    _local_recycle_drops: int
+    _local_recycle_hit_rate_ema: float | None
+
+    def __getattr__(self, _name: str) -> Any:
+        """讓共同宿主 mixin 的交叉方法在型別檢查時保持可見。"""
+        raise AttributeError(_name)
 
 
 class ModManagementQueueMixin(ModManagementRuntimeBase):
@@ -153,9 +193,10 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         """判斷目前是否正在顯示線上瀏覽頁。"""
         if not self.notebook:
             return False
-        with contextlib.suppress(Exception):
+        try:
             return self.notebook.index(self.notebook.select()) == 1
-        return False
+        except Exception:
+            return False
 
     def _load_online_mods(self, *, force: bool = False, show_warning: bool = True) -> None:
         """依目前條件載入線上模組（需輸入關鍵字）。"""

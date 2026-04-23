@@ -17,7 +17,7 @@ from ...utils import (
 )
 from ..tree_utils import TreeUtils
 from .constants import logger
-from .runtime_typing import ModManagementRuntimeBase
+from .online_mod_queue import ModManagementRuntimeBase
 
 
 class ModManagementTreeSyncMixin(ModManagementRuntimeBase):

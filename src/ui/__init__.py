@@ -10,7 +10,7 @@ from .. import lazy_exports
 from . import ui_config as ui_config
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "ModManagementRuntimeBase": (".mod_management.runtime_typing", "ModManagementRuntimeBase"),
+    "ModManagementRuntimeBase": (".mod_management.online_mod_queue", "ModManagementRuntimeBase"),
     "CreateServerFrame": (".create_server_frame", "CreateServerFrame"),
     "CustomDropdown": (".custom_dropdown", "CustomDropdown"),
     "DialogUtils": (".dialog_utils", "DialogUtils"),

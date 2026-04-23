@@ -46,7 +46,8 @@ def extract_download_host(download_url: str | None) -> str:
     """
 
     try:
-        return str(urlparse(str(download_url or "").strip()).netloc or "").strip().lower()
+        parsed_url = urlparse(str(download_url or "").strip())
+        return str(parsed_url.hostname or "").strip().rstrip(".").lower()
     except Exception:
         return ""
 

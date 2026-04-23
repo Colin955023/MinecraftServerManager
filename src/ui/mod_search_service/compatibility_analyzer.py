@@ -18,7 +18,6 @@ from ...utils import (
 )
 from .constants import logger
 from .models import OnlineModCompatibilityReport
-from .provider_adapter import _fetch_modrinth_project_name, get_mod_version_details
 
 
 def resolve_dependency_reference_with_provider_context(
@@ -39,6 +38,7 @@ def resolve_dependency_reference_with_provider_context(
     Returns:
         已補齊 provider 上下文的依賴解析結果。
     """
+    from .provider_adapter import fetch_modrinth_project_name, get_mod_version_details
 
     return resolve_dependency_reference(
         dependency,
@@ -46,7 +46,7 @@ def resolve_dependency_reference_with_provider_context(
         loader=loader,
         version_details_cache=version_details_cache,
         get_mod_version_details=get_mod_version_details,
-        fetch_project_name=_fetch_modrinth_project_name,
+        fetch_project_name=fetch_modrinth_project_name,
     )
 
 
@@ -212,7 +212,6 @@ def analyze_local_mod_file_compatibility(
     if not is_supported_modrinth_update_loader(loader):
         return advisories
     local_name = str(getattr(local_mod, "name", "") or getattr(local_mod, "filename", "模組")).strip() or "模組"
-    str(getattr(local_mod, "minecraft_version", "") or "").strip()
     local_loader = str(getattr(local_mod, "loader_type", "") or "").strip()
     local_version = str(getattr(local_mod, "version", "") or "").strip()
     normalized_local_loader = normalize_local_loader(local_loader)

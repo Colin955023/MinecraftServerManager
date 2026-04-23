@@ -13,7 +13,7 @@ import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibil
 import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
 import src.ui.mod_search_service.provider_adapter as mod_search_provider_module
 from src.models import OnlineModVersion
-from src.utils import HTTPUtils
+from src.utils import HTTPUtils, extract_download_host
 
 
 def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
@@ -939,7 +939,7 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "_fetch_modrinth_project_name",
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -990,7 +990,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "_fetch_modrinth_project_name",
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -1041,7 +1041,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
 
-    _patch_mod_search_attr(monkeypatch, "_fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
+    _patch_mod_search_attr(monkeypatch, "fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
     _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
 
     plan = mod_search_service_module.build_required_dependency_install_plan(
@@ -1090,7 +1090,7 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "_fetch_modrinth_project_name",
+        "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
@@ -1566,7 +1566,7 @@ def test_build_required_dependency_install_plan_overrides_quilt_dependency_to_fa
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "_fetch_modrinth_project_name",
+        "fetch_modrinth_project_name",
         lambda project_id: "Fabric API" if project_id == "P7dR8mSH" else "QSL",
     )
 
@@ -1627,7 +1627,7 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "_fetch_modrinth_project_name",
+        "fetch_modrinth_project_name",
         lambda project_id: "QSL" if project_id == "qvIfYCYJ" else None,
     )
 
@@ -2747,9 +2747,20 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
         action_label="安裝",
     )
 
-    assert "mirror.example.com" in prompt
-    assert "edge.example.net" in prompt
-    assert "Fabric API" not in prompt
+    prompt_hosts: dict[str, str] = {}
+    for line in prompt.splitlines():
+        normalized_line = line.strip()
+        if not normalized_line.startswith("- ") or "（非 " not in normalized_line:
+            continue
+        label, source_text = normalized_line[2:].split("：", 1)
+        host, _provider_text = source_text.split("（非 ", 1)
+        prompt_hosts[label] = host
+
+    expected_hosts = {
+        "Example Mod (1.0.0)": extract_download_host((version.primary_file or {}).get("url", "")),
+        "Mirror Dep（依賴）": extract_download_host(dependency_plan.advisory_items[0].download_url),
+    }
+    assert prompt_hosts == expected_hosts
 
 
 @pytest.mark.smoke

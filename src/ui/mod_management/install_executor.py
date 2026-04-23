@@ -22,7 +22,7 @@ from ...utils import (
 from ..task_utils import TaskUtils
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
 from .models import LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
-from .runtime_typing import ModManagementRuntimeBase
+from .online_mod_queue import ModManagementRuntimeBase
 
 
 class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
@@ -90,8 +90,8 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         self.update_status_safe(f"{status_message}：{dependency_item.project_name}")
         expected_hash = str(getattr(dependency_item, "expected_hash", "") or "").strip() or None
         return manager.install_remote_mod_file(
-            dependency_item.download_url,
-            dependency_item.filename,
+            download_url=dependency_item.download_url,
+            filename=dependency_item.filename,
             **self._build_download_kwargs(
                 self._make_step_progress_callback(current_step, total_steps),
                 expected_hash,
@@ -455,8 +455,8 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
                         f"正在安裝模組：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
                     )
                     installed_path = manager.install_remote_mod_file(
-                        download_url,
-                        filename,
+                        download_url=download_url,
+                        filename=filename,
                         **self._build_download_kwargs(
                             self._make_step_progress_callback(current_step, total_steps),
                             expected_hash or None,

@@ -35,7 +35,7 @@ from .local_mod_list_presenter import LocalModListPresenter
 from .local_tree_virtualization_state import LocalTreeVirtualizationState
 from .models import OnlineBrowseRequest, PendingOnlineInstall
 from .online_browse_presenter import OnlineBrowsePresenter
-from .queue import ModManagementQueueMixin
+from .online_mod_queue import ModManagementQueueMixin
 from .review import ModManagementReviewMixin
 from .tree_sync import ModManagementTreeSyncMixin
 

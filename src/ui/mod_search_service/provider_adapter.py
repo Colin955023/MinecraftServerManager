@@ -597,7 +597,15 @@ def _get_modrinth_project_info_impl(project_id: str) -> OnlineModInfo | None:
     )
 
 
-def _fetch_modrinth_project_name(project_id: str) -> str | None:
+def fetch_modrinth_project_name(project_id: str) -> str | None:
+    """
+    依 project id 或 slug 取得 Modrinth 專案名稱。
+
+    Args:
+        project_id: Modrinth project id 或 slug。
+    Returns:
+        專案名稱，找不到時回傳 None。
+    """
     response = _fetch_modrinth_project_detail(project_id)
     if not response:
         return None
@@ -704,7 +712,7 @@ def _resolve_modrinth_project_names_impl(project_ids: list[str] | set[str] | tup
     for project_key, raw_project_id in deduped_project_ids.items():
         if project_key in names:
             continue
-        resolved_name = _fetch_modrinth_project_name(raw_project_id)
+        resolved_name = fetch_modrinth_project_name(raw_project_id)
         if resolved_name:
             names[project_key] = resolved_name
         else:
