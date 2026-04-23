@@ -19,16 +19,16 @@ from ...utils import (
     Spacing,
     UIUtils,
 )
-from ..dialog_utils import DialogUtils
-from ..font_manager import FontManager
-from ..mod_search_service.compatibility_analyzer import analyze_mod_version_compatibility
-from ..mod_search_service.provider_adapter import (
+from .. import (
+    DialogUtils,
+    FontManager,
+    TaskUtils,
+    TreeUtils,
+    analyze_mod_version_compatibility,
     get_mod_versions,
     resolve_modrinth_project_names,
     search_mods_online,
 )
-from ..task_utils import TaskUtils
-from ..tree_utils import TreeUtils
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
 from .models import OnlineBrowseRequest
 from .runtime_typing import ModManagementRuntimeBase
