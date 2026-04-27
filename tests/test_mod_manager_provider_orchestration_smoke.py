@@ -16,7 +16,6 @@ class _StubIndexManager:
         self.cached.append((Path(file_path), payload))
 
 
-@pytest.mark.smoke
 def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()
@@ -48,7 +47,6 @@ def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypat
     assert manager.index_manager.cached[-1][1]["slug"] == "inventory-profiles-next"
 
 
-@pytest.mark.smoke
 def test_resolve_platform_info_uses_fallback_detection_when_no_cached_identifier(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -76,7 +74,6 @@ def test_resolve_platform_info_uses_fallback_detection_when_no_cached_identifier
     assert manager.index_manager.cached[-1][1]["project_id"] == "AANobbMI"
 
 
-@pytest.mark.smoke
 def test_resolve_platform_info_keeps_local_without_lookup_when_cached_local_marker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -103,7 +100,6 @@ def test_resolve_platform_info_keeps_local_without_lookup_when_cached_local_mark
     assert manager.index_manager.cached == []
 
 
-@pytest.mark.smoke
 def test_resolve_platform_info_re_resolves_when_cached_provider_is_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()

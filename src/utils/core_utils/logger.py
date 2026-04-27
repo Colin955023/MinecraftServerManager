@@ -81,10 +81,15 @@ class LoggerConfig:
     _initialized = False
     _CONSOLE_HANDLER_NAME = "msm_console"
     _FILE_HANDLER_NAME = "msm_file"
+    _debug_logging_enabled = False
 
     @staticmethod
     def _has_handler(root: logging.Logger, handler_name: str) -> bool:
         return any(getattr(handler, "name", "") == handler_name for handler in root.handlers)
+
+    @staticmethod
+    def _is_debug_logging_allowed() -> bool:
+        return RuntimePaths.is_development_environment()
 
     @staticmethod
     def initialize() -> None:
@@ -92,6 +97,7 @@ class LoggerConfig:
 
         if LoggerConfig._initialized:
             return
+        LoggerConfig._debug_logging_enabled = LoggerConfig._is_debug_logging_allowed()
         root = logging.getLogger()
         root.setLevel(logging.DEBUG)
         fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
@@ -115,7 +121,7 @@ class LoggerConfig:
                 fh = logging.FileHandler(log_file, encoding="utf-8")
                 fh.set_name(LoggerConfig._FILE_HANDLER_NAME)
                 fh.setFormatter(fmt)
-                fh.setLevel(logging.DEBUG)
+                fh.setLevel(logging.DEBUG if LoggerConfig._debug_logging_enabled else logging.INFO)
                 root.addHandler(fh)
             except Exception as log_error:
                 root.warning(f"初始化檔案日誌處理器失敗: {log_error}")

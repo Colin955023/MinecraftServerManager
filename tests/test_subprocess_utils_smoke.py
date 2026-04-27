@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 import src.utils.runtime_utils.subprocess_utils as subprocess_utils_module
 
 
-@pytest.mark.smoke
 def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp_path) -> None:
     resolved_executable = tmp_path / "bin" / "java.exe"
     resolved_executable.parents[0].mkdir(parents=True, exist_ok=True)
@@ -32,7 +32,6 @@ def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp
     assert captured["kwargs"] == {"shell": False, "check": False}
 
 
-@pytest.mark.smoke
 def test_popen_checked_forces_shell_false_for_absolute_path(monkeypatch, tmp_path) -> None:
     executable = tmp_path / "java.exe"
     executable.write_text("", encoding="utf-8")
@@ -56,7 +55,25 @@ def test_popen_checked_forces_shell_false_for_absolute_path(monkeypatch, tmp_pat
     assert captured["kwargs"] == {"shell": False, "cwd": str(tmp_path)}
 
 
-@pytest.mark.smoke
+def test_popen_checked_defaults_text_mode_decode_errors_to_replace(monkeypatch, tmp_path) -> None:
+    executable = tmp_path / "java.exe"
+    executable.write_text("", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_popen(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(pid=12345, args=cmd)
+
+    monkeypatch.setattr(subprocess_utils_module.subprocess, "Popen", fake_popen)
+
+    subprocess_utils_module.SubprocessUtils.popen_checked([str(executable), "-version"], text=True)
+
+    kwargs = cast(dict[str, object], captured["kwargs"])
+    assert kwargs["shell"] is False
+    assert kwargs["errors"] == "replace"
+
+
 @pytest.mark.parametrize(
     "method_name",
     [
@@ -80,7 +97,6 @@ def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_
         method(["java", "-version"], executable="cmd.exe")
 
 
-@pytest.mark.smoke
 def test_validate_cmd_rejects_blank_executable() -> None:
     with pytest.raises(ValueError, match="cmd\\[0\\] 不得為空"):
         subprocess_utils_module.SubprocessUtils._validate_cmd(["   "])

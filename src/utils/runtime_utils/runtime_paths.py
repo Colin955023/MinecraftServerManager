@@ -13,11 +13,11 @@ class RuntimePaths:
     @staticmethod
     def is_packaged() -> bool:
         """檢測是否為打包執行環境。"""
-        is_nuitka = "__compiled__" in globals()
+        is_compiled_app = "__compiled__" in globals()
         return bool(
             getattr(sys, "frozen", False)
             or hasattr(sys, "_MEIPASS")
-            or is_nuitka
+            or is_compiled_app
             or getattr(sys, "__compiled__", False)
         )
 
@@ -28,6 +28,11 @@ class RuntimePaths:
         portable_marker = exe_dir / ".portable"
         config_dir = exe_dir / ".config"
         return portable_marker.exists() or config_dir.exists()
+
+    @staticmethod
+    def is_development_environment() -> bool:
+        """回傳目前是否為非打包且非便攜的開發環境。"""
+        return not RuntimePaths.is_packaged() and not RuntimePaths.is_portable_mode()
 
     @staticmethod
     def _get_localappdata() -> Path:
@@ -61,11 +66,18 @@ class RuntimePaths:
 
             return PathUtils.get_project_root()
         except Exception:
-            return Path(__file__).resolve().parents[2]
+            current_file = Path(__file__).resolve()
+            for parent in current_file.parents:
+                if (parent / "pyproject.toml").exists():
+                    return parent
+            return current_file.parents[3]
 
     @staticmethod
     def get_user_data_dir() -> Path:
         """取得應用程式的使用者資料存放目錄"""
+        override = os.environ.get("MSM_USER_DATA_DIR")
+        if override:
+            return Path(override)
         if RuntimePaths.is_portable_mode():
             return RuntimePaths.get_portable_base_dir() / ".config"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager"
@@ -78,6 +90,9 @@ class RuntimePaths:
     @staticmethod
     def get_log_dir() -> Path:
         """取得應用程式的日誌存放目錄"""
+        override = os.environ.get("MSM_LOG_DIR")
+        if override:
+            return Path(override)
         if RuntimePaths.is_portable_mode():
             return RuntimePaths.get_portable_base_dir() / ".log"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager" / "log"

@@ -2,21 +2,14 @@
 負責管理 Minecraft 伺服器的模組，提供啟用/停用、移除等功能。
 """
 
-import contextlib
-import re
-import tomllib
-import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-TomlDecodeError = tomllib.TOMLDecodeError
 from ..utils import (
     LocalProviderEnsureResult,
     ModIndexManager,
     PathUtils,
     ProviderMetadataRecord,
-    ServerDetectionUtils,
-    ServerDetectionVersionUtils,
     ensure_local_mod_provider_record,
     get_logger,
     record_and_mark,
@@ -94,69 +87,11 @@ class ModManager:
             resolver = ModProviderResolver(
                 index_manager=self.index_manager,
                 modrinth_identity_cache=self._modrinth_identity_cache,
-                read_json_from_jar=self._read_json_from_jar,
+                read_json_from_jar=LocalModScanner.read_json_from_jar,
                 quarantine_file=self._quarantine_file,
             )
             self._provider_resolver = resolver
         return resolver
-
-    @staticmethod
-    def _success_mutation_result(
-        message: str = "",
-        *,
-        final_path: Path | None = None,
-        affected_count: int = 0,
-    ) -> LocalModMutationResult:
-        """建立成功的本地模組異動結果。"""
-        return LocalModMutationResult(
-            status="completed", message=message, final_path=final_path, affected_count=affected_count
-        )
-
-    @staticmethod
-    def _failure_mutation_result(
-        title: str,
-        message: str,
-        *,
-        missing_ids: tuple[str, ...] = (),
-    ) -> LocalModMutationResult:
-        """建立失敗的本地模組異動結果。"""
-        return LocalModMutationResult(status="failed", title=title, message=message, missing_ids=missing_ids)
-
-    @staticmethod
-    def _normalize_expected_hash(expected_hash: str | None) -> tuple[str, str]:
-        return ModFileInstaller.normalize_expected_hash(expected_hash)
-
-    @staticmethod
-    def _is_operation_cancelled(cancel_check: Callable[[], bool] | None) -> bool:
-        if cancel_check is None:
-            return False
-        try:
-            return bool(cancel_check())
-        except Exception as e:
-            logger.exception(f"取消檢查回呼失敗: {e}")
-            return False
-
-    def _restore_backup_to_path(self, original_path: Path | None, backup_path: Path | None) -> bool:
-        return self._get_mod_file_installer().restore_backup_to_path(original_path, backup_path)
-
-    def _rollback_replaced_mod_file(
-        self,
-        *,
-        old_path: Path | None,
-        installed_path: Path | None,
-        final_path: Path | None,
-        backup_path: Path | None,
-        cancelled: bool,
-        operation_name: str,
-    ) -> ModFileOperationResult:
-        return self._get_mod_file_installer().rollback_replaced_mod_file(
-            old_path=old_path,
-            installed_path=installed_path,
-            final_path=final_path,
-            backup_path=backup_path,
-            cancelled=cancelled,
-            operation_name=operation_name,
-        )
 
     def _install_remote_mod_file_result(
         self,
@@ -265,13 +200,6 @@ class ModManager:
         """
         return self._resolve_modrinth_project_identity(identifier)
 
-    def _parse_file_info(self, file_path: Path) -> tuple[str, bool, str]:
-        """解析基本檔案資訊與啟用/停用狀態"""
-        filename = file_path.name
-        enabled = not filename.endswith(".jar.disabled")
-        base_name = filename.removesuffix(".jar.disabled").removesuffix(".jar")
-        return (filename, enabled, base_name)
-
     def _quarantine_file(self, file_path: Path, reason: str) -> None:
         """標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動。
 
@@ -291,334 +219,15 @@ class ModManager:
                 details={"file": str(file_path), "context": "_quarantine_file", "reason": reason},
             )
 
-    def _get_manifest_version(self, jar) -> str | None:
-        """從 MANIFEST.MF 檔案中提取版本資訊"""
-        try:
-            if "META-INF/MANIFEST.MF" in jar.namelist():
-                with jar.open("META-INF/MANIFEST.MF") as mf:
-                    for line in mf.read().decode(errors="ignore").splitlines():
-                        if line.startswith("Implementation-Version:"):
-                            v = line.split(":", 1)[1].strip()
-                            if v and v != "${projectversion}":
-                                return v
-        except (zipfile.BadZipFile, OSError) as e:
-            logger.exception(f"讀取 MANIFEST.MF 版本資訊失敗（IO/ZIP）: {e}")
-        return None
-
-    def _extract_metadata_from_jar(self, file_path: Path, mod_data: dict) -> None:
-        """根據模組載入器類型從 jar 檔案中提取元資料"""
-        try:
-            with zipfile.ZipFile(file_path, "r") as jar:
-                metadata_extractors = [
-                    ("fabric.mod.json", self._extract_fabric_metadata),
-                    ("META-INF/mods.toml", self._extract_forge_metadata),
-                    ("mcmod.info", self._extract_legacy_forge_metadata),
-                ]
-                for metadata_file, extractor in metadata_extractors:
-                    try:
-                        jar.getinfo(metadata_file)
-                        extractor(jar, mod_data)
-                        break
-                    except KeyError:
-                        continue
-                    except (ValueError, TomlDecodeError) as e:
-                        logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {e}")
-                        continue
-                    except TypeError as e:
-                        logger.debug(f"讀取 {metadata_file} 時發生型別/編碼錯誤: {e}")
-                        continue
-                    except Exception as e:
-                        with contextlib.suppress(Exception):
-                            record_and_mark(
-                                e,
-                                marker_path=file_path,
-                                reason="extract_metadata_unexpected",
-                                details={"metadata_file": metadata_file},
-                            )
-                        logger.exception(f"讀取 {metadata_file} 時發生未預期錯誤: {e}")
-                        continue
-        except (zipfile.BadZipFile, OSError) as e:
-            record_and_mark(
-                e,
-                marker_path=file_path,
-                reason="io_or_bad_zip_extract",
-                details={"context": "_extract_metadata_from_jar"},
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "io_or_bad_zip_extract")
-        except Exception as e:
-            record_and_mark(
-                e,
-                marker_path=file_path,
-                reason="unexpected_extract_error",
-                details={"context": "_extract_metadata_from_jar"},
-            )
-            with contextlib.suppress(Exception):
-                self._quarantine_file(file_path, "unexpected_extract_error")
-
-    def _extract_fabric_metadata(self, jar, mod_data: dict) -> None:
-        """從 Fabric 模組中提取元資料"""
-        try:
-            meta = self._read_json_from_jar(jar, "fabric.mod.json")
-            if not meta or not isinstance(meta, dict):
-                return
-            mod_data["name"] = meta.get("name", mod_data["name"])
-            mod_data["version"] = self._resolve_version(jar, meta.get("version", mod_data["version"]))
-            mod_data["description"] = meta.get("description", mod_data["description"])
-            mod_data["author"] = self._process_authors(meta.get("authors", []))
-            mod_data["loader_type"] = "Fabric"
-            depends = meta.get("depends", {})
-            if isinstance(depends, dict):
-                mc_version = depends.get("minecraft", mod_data["mc_version"])
-                mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
-        except (TypeError, ValueError) as e:
-            logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {e}", "ModManager")
-
-    def _extract_forge_metadata(self, jar, mod_data: dict) -> None:
-        """從 Forge 模組中提取元資料"""
-        try:
-            meta = self._read_toml_from_jar(jar, "META-INF/mods.toml")
-            if not meta or not isinstance(meta, dict):
-                return
-            modlist = meta.get("mods", [])
-            if modlist and isinstance(modlist, list):
-                modmeta = modlist[0]
-                if not isinstance(modmeta, dict):
-                    return
-                mod_data["name"] = modmeta.get("displayName", mod_data["name"])
-                mod_data["version"] = self._resolve_version(jar, modmeta.get("version", mod_data["version"]))
-                mod_data["description"] = modmeta.get("description", mod_data["description"])
-                mod_data["author"] = self._process_authors(modmeta.get("authors", mod_data["author"]))
-            mod_data["loader_type"] = "Forge"
-            if "dependencies" in meta:
-                for dep in meta["dependencies"].values():
-                    if isinstance(dep, list):
-                        for d in dep:
-                            if not isinstance(d, dict):
-                                continue
-                            if d.get("modId") == "minecraft":
-                                mc_version = d.get("versionRange", mod_data["mc_version"])
-                                mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
-                                break
-        except (KeyError, TomlDecodeError, ValueError) as e:
-            logger.debug(f"解析 Forge 元資料失敗（解析/格式）: {e}")
-        except TypeError as e:
-            logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {e}")
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="extract_forge_metadata_unexpected",
-                    details={"context": "_extract_forge_metadata"},
-                )
-            logger.exception(f"解析 Forge 元資料時發生未預期錯誤: {e}")
-
-    def _extract_legacy_forge_metadata(self, jar, mod_data: dict) -> None:
-        """從舊版 Forge 模組（mcmod.info）提取元資料"""
-        try:
-            info = self._read_json_from_jar(jar, "mcmod.info")
-            if not info:
-                return
-            if isinstance(info, list):
-                if not info:
-                    return
-                info = info[0]
-            if not isinstance(info, dict):
-                return
-            mod_data["name"] = info.get("name", mod_data["name"])
-            mod_data["version"] = info.get("version", mod_data["version"])
-            mod_data["description"] = info.get("description", mod_data["description"])
-            authors = info.get("authorList") or info.get("author", mod_data["author"])
-            mod_data["author"] = self._process_authors(authors)
-            mod_data["mc_version"] = info.get("mcversion", mod_data["mc_version"])
-            mod_data["loader_type"] = "Forge"
-        except (ValueError, TypeError) as e:
-            logger.debug(f"解析 legacy Forge mcmod.info 失敗（格式/型別）: {e}")
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="extract_legacy_forge_metadata_unexpected",
-                    details={"context": "_extract_legacy_forge_metadata"},
-                )
-            logger.exception(f"解析 legacy Forge mcmod.info 時發生未預期錯誤: {e}")
-
-    def _read_json_from_jar(self, jar, file_path: str) -> dict | list | None:
-        """
-        從 JAR 檔案中讀取 JSON"""
-        try:
-            with jar.open(file_path) as f:
-                return PathUtils.from_json_str(f.read().decode("utf-8"))
-        except (KeyError, OSError, ValueError) as e:
-            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {e}")
-            return None
-
-    def _read_toml_from_jar(self, jar, file_path: str) -> dict | None:
-        """從 JAR 檔案中讀取 TOML"""
-        try:
-            with jar.open(file_path) as f:
-                toml_txt = f.read().decode(errors="ignore")
-                return tomllib.loads(toml_txt)
-        except (KeyError, TomlDecodeError) as e:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {e}")
-            return None
-        except (OSError, UnicodeDecodeError) as e:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗（IO/編碼）{file_path}: {e}")
-            return None
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="read_toml_from_jar_unexpected",
-                    details={"file": file_path},
-                )
-            logger.exception(f"讀取 JAR 中的 TOML 時發生未預期錯誤 {file_path}: {e}")
-            return None
-
-    def _resolve_version(self, jar, version: str) -> str:
-        """解析版本號，處理佔位符 ${file.jarVersion}"""
-        if version == "${file.jarVersion}":
-            manifest_version = self._get_manifest_version(jar)
-            return manifest_version if manifest_version else version
-        return version
-
-    def _process_authors(self, authors) -> str:
-        """處理並清理作者資訊"""
-        if isinstance(authors, list) and authors:
-            return ", ".join(
-                [
-                    str(a)
-                    for a in authors
-                    if a and str(a).strip().lower() not in ["", "unknown", "author", "example author", "example"]
-                ]
-            )
-        if isinstance(authors, str):
-            return authors
-        return ""
-
-    def _apply_fallback_logic(self, base_name: str, mod_data: dict) -> None:
-        """套用後備邏輯來填充模組資料"""
-        mod_data["author"] = self._clean_author(mod_data["author"])
-        if not mod_data["name"] or mod_data["name"] == "未知":
-            mod_data["name"] = self._extract_name_from_filename(base_name)
-        if not mod_data["version"] or mod_data["version"] == "未知":
-            mod_data["version"] = self._extract_version_from_filename(base_name)
-        if not mod_data["mc_version"] or str(mod_data["mc_version"]).strip() in ["", "未知"]:
-            mod_data["mc_version"] = self._extract_mc_version_from_filename(base_name)
-        if mod_data["loader_type"] == "未知":
-            mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_text(base_name)
-
-    def _extract_name_from_filename(self, base_name: str) -> str:
-        """解析檔名以提取模組名稱"""
-        clean_base = base_name
-        clean_base = re.sub("(?i)[-_]?(forge|fabric|litemod|mc\\d+\\.\\d+\\.\\d+|mc\\d+\\.\\d+)", "", clean_base)
-        clean_base = re.sub(
-            "(?i)[-_]?(api|mod|core|library|lib|addon|additions|compat|integration|essentials|tools|generators|reforged|restored|beta|alpha|snapshot|universal|common|b\\d*)$",
-            "",
-            clean_base,
-        )
-        clean_base = clean_base.strip("-_")
-        parts = clean_base.split("-")
-        if len(parts) > 1:
-            for i, p in enumerate(parts):
-                if any(c.isdigit() for c in p):
-                    return "-".join(parts[:i]) if i > 0 else clean_base
-            return clean_base
-        return clean_base
-
-    def _extract_version_from_filename(self, base_name: str) -> str:
-        """解析檔名以提取版本"""
-        parts = base_name.split("-")
-        if len(parts) > 1:
-            for i, p in enumerate(parts):
-                if any(c.isdigit() for c in p):
-                    version = "-".join(parts[i:])
-                    return ServerDetectionUtils.clean_version(version)
-        return "未知"
-
-    def _extract_mc_version_from_filename(self, base_name: str) -> str:
-        """解析檔名以提取 Minecraft 版本"""
-        patterns = ["mc(\\d+\\.\\d+\\.\\d+)", "(\\d+\\.\\d+\\.\\d+)", "mc(\\d+\\.\\d+)", "(\\d+\\.\\d+)"]
-        for pattern in patterns:
-            m = re.search(pattern, base_name, re.IGNORECASE)
-            if m:
-                return m.group(1)
-        return "未知"
-
-    def _apply_server_config_overrides(self, mod_data: dict) -> None:
-        """套用伺服器配置覆寫"""
-        if not self.server_config:
-            return
-        loader_type = getattr(self.server_config, "loader_type", mod_data["loader_type"])
-        mc_version_fallback = getattr(self.server_config, "minecraft_version", mod_data["mc_version"])
-        if (
-            not mod_data["mc_version"]
-            or str(mod_data["mc_version"]).strip() in ["", "未知"]
-            or (not re.match("^\\d+\\.\\d+", str(mod_data["mc_version"])))
-        ):
-            mod_data["mc_version"] = mc_version_fallback
-        loader_mapping = {"unknown": "未知", "fabric": "Fabric", "forge": "Forge", "vanilla": "原版"}
-        mod_data["loader_type"] = loader_mapping.get(loader_type.lower(), loader_type)
-
     def _detect_platform_info(
         self, file_path: Path, name: str, base_name: str, filename: str
     ) -> tuple[ModPlatform, str, str]:
         """從檔案路徑、名稱、基礎名稱和檔案名稱中偵測模組的平台和平台 ID"""
         return self._get_provider_resolver().detect_platform_info(file_path, name, base_name, filename)
 
-    def _extract_platform_id_from_fabric(self, jar) -> str:
-        """解析 Fabric 模組元資料以提取平台 ID"""
-        try:
-            meta = self._read_json_from_jar(jar, "fabric.mod.json")
-            if meta and isinstance(meta, dict):
-                return meta.get("id", "")
-            return ""
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="extract_platform_id_from_fabric_failed",
-                    details={"context": "_extract_platform_id_from_fabric"},
-                )
-            logger.exception(f"解析 fabric.mod.json 取得平台 ID 失敗: {e}")
-            return ""
-
-    def _extract_platform_id_from_forge(self, jar) -> str:
-        """解析 Forge 模組元資料以提取平台 ID"""
-        try:
-            with jar.open("META-INF/mods.toml") as f:
-                toml_txt = f.read().decode(errors="ignore")
-                if "modrinth" in toml_txt.lower():
-                    m = re.search('(modrinth|project_id)\\s*=\\s*"([^"]+)"', toml_txt, re.IGNORECASE)
-                    if m:
-                        return m.group(2)
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    e,
-                    marker_path=None,
-                    reason="extract_platform_id_from_forge_failed",
-                    details={"context": "_extract_platform_id_from_forge"},
-                )
-            logger.exception(f"解析 mods.toml 取得平台 ID 失敗: {e}")
-        return ""
-
     def _search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
         """在 Modrinth API 上搜索模組"""
         return search_on_modrinth_candidates(name, base_name, filename)
-
-    def _clean_author(self, author: str) -> str:
-        """清理作者字串"""
-        if not author:
-            return ""
-        author = str(author).strip()
-        if author.lower() in ["", "unknown", "author", "example author", "example"]:
-            return ""
-        return author
 
     def set_mod_state_result(self, mod_id: str, enable: bool) -> LocalModMutationResult:
         """

@@ -1,4 +1,4 @@
-name: github-actions CI-Tests
+name: CI-Tests
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

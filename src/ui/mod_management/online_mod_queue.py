@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 # 直接內嵌原 runtime_typing 內容，避免循環依賴
+import contextlib
 import queue
 import re
-import tkinter
-import tkinter.ttk as ttk
 import traceback
 from typing import Any
-
-import customtkinter as ctk
 
 from ...core import AppException
 from ...utils import (
@@ -20,6 +17,7 @@ from ...utils import (
     Spacing,
     UIUtils,
 )
+from ...utils.ui_support import qt_widgets as qt
 from .. import (
     DialogUtils,
     FontManager,
@@ -41,12 +39,12 @@ class ModManagementRuntimeBase:
     current_server: Any | None
     mod_manager: Any | None
     notebook: Any | None
-    browse_tree: ttk.Treeview | None
+    browse_tree: qt.Treeview | None
     browse_filter_label: Any | None
     browse_results_label: Any | None
     browse_sort_var: Any
     browse_sort_options: dict[str, str]
-    local_tree: ttk.Treeview | None
+    local_tree: qt.Treeview | None
     local_mods: list[Any]
     online_mods: list[Any]
     pending_online_installs: list[PendingOnlineInstall]
@@ -95,14 +93,14 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         """建立線上模組瀏覽/搜尋提示文字。"""
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         if not self.current_server:
-            return "請先選擇伺服器並輸入關鍵字後搜尋；僅支援 Fabric / Forge。"
+            return "請先選擇伺服器並輸入關鍵字後搜尋；僅支援 Fabric / Forge / Quilt / NeoForge。"
         loader_display = loader_type or "未設定"
         info_parts = [f"MC {minecraft_version or '未設定'}", loader_display]
         if loader_version:
             info_parts.append(loader_version)
         hint = "條件：" + " / ".join(info_parts)
         if not loader_type or loader_type.lower() not in SUPPORTED_ONLINE_MOD_LOADERS:
-            return hint + "｜僅支援 Fabric / Forge"
+            return hint + "｜僅支援 Fabric / Forge / Quilt / NeoForge"
         return hint + "｜請輸入關鍵字後搜尋"
 
     def _get_online_version_dialog_hint_text(self) -> str:
@@ -266,13 +264,13 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         has_selection, _, _ = self._get_selected_online_mod_context()
         if not has_selection:
             return
-        menu = tkinter.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        menu = qt.PopupMenu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="⬇️ 安裝模組", command=self.install_online_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_online_mod_info)
         menu.add_command(label="🌐 開啟模組頁面", command=self.open_mod_webpage)
         try:
-            menu.tk_popup(event.x_root, event.y_root)
+            menu.popup_at(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
@@ -355,67 +353,55 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             bind_icon=True,
             center_on_parent=True,
             delay_ms=250,
-            min_width=1000,
-            min_height=860,
-            max_width=FontManager.get_dpi_scaled_size(1400),
-            max_height=FontManager.get_dpi_scaled_size(1080),
-            native_window=True,
-            use_transient_for_modal=False,
+            min_width=750,
+            min_height=645,
         )
-        main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
-        title = ctk.CTkLabel(
+        main_frame = qt.Frame(dialog)
+        main_frame.attach(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
+        title = qt.Label(
             main_frame,
             text=f"選擇要安裝的版本：{mod.name}",
             font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
         )
-        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL_PLUS))
-        filter_label = ctk.CTkLabel(
+        title.attach(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL_PLUS))
+        filter_label = qt.Label(
             main_frame,
             text=self._get_online_version_dialog_hint_text(),
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(760),
+            wraplength=Sizes.ONLINE_VERSION_HINT_WRAP_LENGTH,
         )
-        filter_label.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
-        tree_container = ctk.CTkFrame(main_frame)
-        tree_container.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
-        tree_style = TreeUtils.configure_treeview_list_style(
-            "OnlineVersionList",
-            body_font=FontManager.get_font(size=FontSize.INPUT),
-            heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            rowheight=int(25 * FontManager.get_scale_factor()),
-        )
+        filter_label.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        tree_container = qt.Frame(main_frame)
+        tree_container.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
         columns = ("version", "type", "minecraft", "loader", "status", "date")
-        version_tree = ttk.Treeview(
-            tree_container, columns=columns, show="headings", height=Spacing.MEDIUM, style=tree_style
-        )
+        version_tree = qt.Treeview(tree_container, columns=columns, show="headings", height=Spacing.MEDIUM)
         column_config = {
-            "version": ("版本", 150),
-            "type": ("類型", 70),
-            "minecraft": ("Minecraft", 150),
-            "loader": ("Loader", 120),
-            "status": ("狀態", 140),
-            "date": ("發布時間", 170),
+            "version": ("版本", 75),
+            "type": ("類型", 35),
+            "minecraft": ("Minecraft", 75),
+            "loader": ("Loader", 60),
+            "status": ("狀態", 70),
+            "date": ("發布時間", 85),
         }
         for col, (text, width) in column_config.items():
             version_tree.heading(col, text=text, anchor="w")
             is_stretch = col == "date"
-            version_tree.column(col, width=width, minwidth=width if is_stretch else 60, anchor="w", stretch=is_stretch)
+            version_tree.column(col, width=width, minwidth=width if is_stretch else 30, anchor="w", stretch=is_stretch)
         TreeUtils.bind_treeview_header_auto_fit(
             version_tree,
             heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             body_font=FontManager.get_font(size=FontSize.INPUT),
             stretch_columns={"date"},
         )
-        version_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=version_tree.yview)
+        version_scroll = qt.Scrollbar(tree_container, orient="vertical", command=version_tree.yview)
         version_tree.configure(yscrollcommand=version_scroll.set)
-        version_tree.grid(row=0, column=0, sticky="nsew")
-        version_scroll.grid(row=0, column=1, sticky="ns")
-        tree_container.grid_rowconfigure(0, weight=1)
-        tree_container.grid_columnconfigure(0, weight=1)
+        version_tree.attach_matrix(row=0, column=0, sticky="nsew")
+        version_scroll.attach_matrix(row=0, column=1, sticky="ns")
+        tree_container.set_grid_row_stretch(0, weight=1)
+        tree_container.set_grid_column_stretch(0, weight=1)
         for index, version in enumerate(versions):
             published = str(getattr(version, "date_published", "") or "")
             report = None
@@ -440,14 +426,14 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         if versions:
             version_tree.selection_set("0")
         TreeUtils.refresh_treeview_alternating_rows(version_tree)
-        summary_label = ctk.CTkLabel(
+        summary_label = qt.Label(
             main_frame, text="版本分析", font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold")
         )
-        summary_label.pack(anchor="w", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        summary_label.attach(anchor="w", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
         summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
-        install_button = ctk.CTkButton(
+        button_frame = qt.Frame(main_frame, fg_color="transparent")
+        button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        install_button = qt.Button(
             button_frame,
             text="➕ 加入安裝清單",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
@@ -458,8 +444,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        install_button.pack(side="left")
-        open_button = ctk.CTkButton(
+        install_button.attach(side="left")
+        open_button = qt.Button(
             button_frame,
             text="🧺 查看清單",
             font=FontManager.get_font(size=FontSize.LARGE),
@@ -470,9 +456,9 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        open_button.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
+        open_button.attach(side="left", padx=(Spacing.SMALL_PLUS, 0))
         project_page_url = self._resolve_online_mod_project_page_url(mod)
-        project_page_button = ctk.CTkButton(
+        project_page_button = qt.Button(
             button_frame,
             text="🌐 專案頁面",
             font=FontManager.get_font(size=FontSize.LARGE),
@@ -484,8 +470,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             height=Sizes.BUTTON_HEIGHT,
             state="normal" if project_page_url else "disabled",
         )
-        project_page_button.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
-        close_button = ctk.CTkButton(
+        project_page_button.attach(side="left", padx=(Spacing.SMALL_PLUS, 0))
+        close_button = qt.Button(
             button_frame,
             text="關閉",
             font=FontManager.get_font(size=FontSize.LARGE),
@@ -496,7 +482,7 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        close_button.pack(side="right")
+        close_button.attach(side="right")
 
         def refresh_version_report(_event=None) -> None:
             selection = version_tree.selection()
@@ -507,23 +493,22 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             report = None
             if version_reports and selected_index < len(version_reports):
                 report = version_reports[selected_index]
-            summary_box.configure(state="normal")
+            summary_box.setReadOnly(False)
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_online_version_report(selected_version, report))
-            summary_box.configure(state="disabled")
+            summary_box.setReadOnly(True)
             install_button.configure(
                 state="normal" if report is None or getattr(report, "compatible", True) else "disabled"
             )
 
-        version_tree.bind("<<TreeviewSelect>>", refresh_version_report)
+        version_tree.connect_event("selection_changed", refresh_version_report)
         refresh_version_report()
         DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
-            min_width=1000,
-            min_height=860,
-            max_width=FontManager.get_dpi_scaled_size(1400),
-            max_height=FontManager.get_dpi_scaled_size(1080),
+            min_width=750,
+            min_height=645,
             parent=self.parent,
+            preserve_current_size=False,
         )
 
     def copy_online_mod_info(self) -> None:
@@ -540,9 +525,15 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             f"支援環境: {self._format_online_environment_text(mod)}\n"
             f"頁面: {getattr(mod, 'url', '')}"
         )
-        self.parent.clipboard_clear()
-        self.parent.clipboard_append(info)
-        self.parent.update()
+        try:
+            app = qt.ensure_app()
+            app.clipboard().setText(info)
+            with contextlib.suppress(Exception):
+                app.processEvents()
+        except Exception as e:
+            logger.error(f"複製線上模組資訊失敗: {e}")
+            UIUtils.show_error("複製失敗", f"無法將模組資訊複製到剪貼簿：{e}", self.parent)
+            return
         self.update_status("線上模組資訊已複製到剪貼簿")
 
     def open_mod_webpage(self) -> None:

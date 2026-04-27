@@ -95,6 +95,7 @@ class LoaderVersion:
     url: str | None = None
     stable: bool | None = None
     mc_version: str | None = None
+    game_versions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -111,6 +112,8 @@ class ServerConfig:
     eula_accepted: bool = False
     properties: dict[str, str] | None = None
     backup_path: str | None = None
+    jvm_args: list[str] = field(default_factory=list)
+    performance_profile: str = ""
 
     @property
     def memory_mb(self) -> int:

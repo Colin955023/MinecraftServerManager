@@ -10,8 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from ...ui import DialogUtils, TaskUtils
-from .. import PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, shutdown_logging
+from .. import PathUtils, RuntimePaths, SubprocessUtils, get_logger, shutdown_logging
 
 logger = get_logger().bind(component="AppRestart")
 
@@ -435,7 +434,7 @@ class AppRestart:
                     logger.exception(f"重啟失敗: {e}")
                     restart_error.set()
 
-            TaskUtils.run_async(delayed_restart)
+            threading.Thread(target=delayed_restart, daemon=True).start()
             max_wait_time = delay + 2.0
             if restart_success.wait(timeout=max_wait_time):
                 return True
@@ -460,24 +459,37 @@ class AppRestart:
                 if parent_window:
                     try:
 
+                        def _close_parent_window() -> None:
+                            for method_name in ("quit", "close", "destroy"):
+                                close_method = getattr(parent_window, method_name, None)
+                                if callable(close_method):
+                                    with contextlib.suppress(Exception):
+                                        close_method()
+                                    return
+                            logger.debug("找不到可用的關閉方法，略過父視窗關閉")
+
                         def delayed_close():
                             try:
-                                parent_window.quit()
-                                parent_window.destroy()
+                                _close_parent_window()
                             except Exception as e:
                                 logger.exception(f"關閉視窗時發生錯誤: {e}")
                             shutdown_logging()
                             time.sleep(0.5)
                             sys.exit(0)
 
-                        UIUtils.schedule_debounce(
-                            parent_window, "_restart_close_job", 100, delayed_close, owner=parent_window
-                        )
+                        if hasattr(parent_window, "schedule"):
+                            parent_window.schedule(100, delayed_close)
+                        else:
+                            delayed_close()
                     except Exception as e:
                         logger.exception(f"安排視窗關閉時發生錯誤: {e}")
                         try:
-                            parent_window.quit()
-                            parent_window.destroy()
+                            for method_name in ("quit", "close", "destroy"):
+                                close_method = getattr(parent_window, method_name, None)
+                                if callable(close_method):
+                                    with contextlib.suppress(Exception):
+                                        close_method()
+                                    break
                         except Exception as e2:
                             logger.exception(f"直接關閉視窗失敗: {e2}")
                         shutdown_logging()
@@ -493,6 +505,6 @@ class AppRestart:
                     _supported, details = AppRestart.get_restart_diagnostics()
                 except Exception:
                     _supported, details = (False, "無法取得重啟診斷。")
-                DialogUtils.show_manual_restart_dialog(parent_window or None, details)
+                logger.error(f"重啟失敗，請手動重新啟動程式。診斷資訊: {details}")
         except Exception as e:
             logger.exception(f"重啟程式失敗: {e}")

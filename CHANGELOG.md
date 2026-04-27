@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.7.1 - 2026-05-06
+
+### 新增
+- **新增載入器支援**：全面支援 Quilt (1.14+) 及 NeoForge (1.20.1+) 模組載入器，包含下載、快取、伺服器偵測與相容性過濾功能。
+- **UI 底層重構**：導入原生 PySide6 封裝（`qt_widgets`、`qt_runtime`）及生命週期管理機制，提升畫面渲染與內部執行緒排程穩定性。
+- **擴充自動化測試**：增加針對 HTTP 下載、Qt UI 版面配置 (`test_qt_widget_layout_smoke.py`)、主監控畫面 (`test_server_monitor_window_players.py`) 等層級的最新測試模組。
+
+### 調整
+- **UI 框架遷移**：全面將所有視窗結構與管理工具 (`main_window`, `manage_server_frame`, `mod_management` 等) 移植至 Qt 環境，並刪除與舊版 CustomTkinter 綁定的遺留檔案（例如 `virtual_list.py`）。
+- **網路核心優化**：移除了 `async_http_utils.py`，統一下載行為至 `http_utils.py` 並支援 40 字元的 SHA-1 雜湊校驗（適用於 Maven 來源下載）。
+- **I/O 與工具層簡化**：移除過多的工具拆分模組（如 `checksum_utils.py`、`json_io.py` 及 `safe_path_ops.py`），將邏輯直接整併進路徑檢查與儲存機制內。
+
+### 修正
+- 修正 Quilt 與 NeoForge 線上模組過濾問題：移除原先的相容別名擴展邏輯（alias logic），改採單一核心及原生 API 解析。
+- 修正不同執行緒存取 UI 時可能造成的崩潰問題（透過 Qt `invoke_later` 與工作排程等統一控管）。
+- 修正主題切換行為：主題預設改為「依照系統設定」，並在每次啟動及系統深淺色變更時自動同步套用 UI 主題。
+- 修正 Java 版本支援政策 (`server_runtime_utils_jvm_policy`) 計算基準，以強化啟動環境相容判斷。
+
+### 重大變更
+- **UI 底層更迭**：原有的視窗控制介接完全被 PySide6 邏輯取代，捨棄舊版 Tk 圖形系統。
+- **載入器關聯定義**：不再允許 Modrinth 跨平台相容替用判定，所有模組相容定義嚴格追隨各別的 loader 原生要求。
+
 ## v1.7.0 - 2026-04-03
 
 ### 新增

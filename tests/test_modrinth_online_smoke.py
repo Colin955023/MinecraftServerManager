@@ -26,7 +26,6 @@ def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: ob
         monkeypatch.setattr(module, name, value, raising=False)
 
 
-@pytest.mark.smoke
 def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return {
@@ -61,7 +60,6 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
     assert results[0].client_side == "optional"
 
 
-@pytest.mark.smoke
 def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
@@ -89,7 +87,6 @@ def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
     assert contract.expected_hash == "a" * 128
 
 
-@pytest.mark.smoke
 def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
@@ -112,7 +109,6 @@ def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> No
     assert contract.expected_hash == "c" * 64
 
 
-@pytest.mark.smoke
 def test_search_mods_online_passes_category_facets(monkeypatch) -> None:
     captured_params: dict[str, object] = {}
 
@@ -132,9 +128,10 @@ def test_search_mods_online_passes_category_facets(monkeypatch) -> None:
     assert "categories:optimization" in str(captured_params.get("facets", ""))
     assert "server_side:required" in str(captured_params.get("facets", ""))
     assert "server_side:optional" in str(captured_params.get("facets", ""))
+    assert "versions:1.21" in str(captured_params.get("facets", ""))
+    assert "game_versions:1.21" not in str(captured_params.get("facets", ""))
 
 
-@pytest.mark.smoke
 def test_search_mods_online_supports_browse_mode_without_query(monkeypatch) -> None:
     captured_params: dict[str, object] = {}
 
@@ -171,7 +168,6 @@ def test_search_mods_online_supports_browse_mode_without_query(monkeypatch) -> N
     assert "categories:optimization" in str(captured_params.get("facets", ""))
 
 
-@pytest.mark.smoke
 def test_search_mods_online_filters_out_pure_client_hits(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return {
@@ -202,7 +198,6 @@ def test_search_mods_online_filters_out_pure_client_hits(monkeypatch) -> None:
     assert [mod.project_id for mod in results] == ["server-mod"]
 
 
-@pytest.mark.smoke
 def test_get_mod_versions_filters_and_selects_primary_file(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return [
@@ -239,8 +234,7 @@ def test_get_mod_versions_filters_and_selects_primary_file(monkeypatch) -> None:
     assert versions[0].primary_file["filename"] == "example.jar"
 
 
-@pytest.mark.smoke
-def test_get_mod_versions_accepts_fabric_alias_for_quilt_loader(monkeypatch) -> None:
+def test_get_mod_versions_requires_exact_quilt_loader(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return [
             {
@@ -265,11 +259,10 @@ def test_get_mod_versions_accepts_fabric_alias_for_quilt_loader(monkeypatch) -> 
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="quilt")
 
-    assert [version.version_id for version in versions] == ["ver-fabric"]
+    assert versions == []
 
 
-@pytest.mark.smoke
-def test_get_mod_versions_accepts_forge_alias_for_neoforge_on_1_20_1(monkeypatch) -> None:
+def test_get_mod_versions_requires_exact_neoforge_loader(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return [
             {
@@ -298,10 +291,9 @@ def test_get_mod_versions_accepts_forge_alias_for_neoforge_on_1_20_1(monkeypatch
         loader="neoforge",
     )
 
-    assert [version.version_id for version in versions] == ["ver-forge"]
+    assert versions == []
 
 
-@pytest.mark.smoke
 def test_get_mod_versions_skips_prerelease_entries(monkeypatch) -> None:
     def fake_get_json(**_kwargs):
         return [
@@ -338,7 +330,6 @@ def test_get_mod_versions_skips_prerelease_entries(monkeypatch) -> None:
     assert [version.version_id for version in versions] == ["beta1", "release1"]
 
 
-@pytest.mark.smoke
 def test_get_recommended_mod_version_returns_none_when_only_prerelease_exists(monkeypatch) -> None:
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
@@ -351,7 +342,6 @@ def test_get_recommended_mod_version_returns_none_when_only_prerelease_exists(mo
     )
 
 
-@pytest.mark.smoke
 def test_get_mod_versions_preserves_project_id_case_for_api(monkeypatch) -> None:
     captured_url = {"value": ""}
 
@@ -366,7 +356,6 @@ def test_get_mod_versions_preserves_project_id_case_for_api(monkeypatch) -> None
     assert captured_url["value"].endswith("/project/P7dR8mSH/version")
 
 
-@pytest.mark.smoke
 def test_get_mod_versions_retries_single_request_after_transient_failure(monkeypatch) -> None:
     call_counter = {"count": 0}
 
@@ -396,7 +385,6 @@ def test_get_mod_versions_retries_single_request_after_transient_failure(monkeyp
     assert [version.version_id for version in versions] == ["ver1"]
 
 
-@pytest.mark.smoke
 def test_get_mod_version_details_retries_single_request_after_transient_failure(monkeypatch) -> None:
     call_counter = {"count": 0}
 
@@ -426,7 +414,6 @@ def test_get_mod_version_details_retries_single_request_after_transient_failure(
     assert version.version_id == "ver1"
 
 
-@pytest.mark.smoke
 def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkeypatch) -> None:
     captured_request: dict[str, object] = {}
 
@@ -469,8 +456,7 @@ def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkey
     assert results["abc123"].version.version_id == "ver1"
 
 
-@pytest.mark.smoke
-def test_get_modrinth_latest_versions_by_hashes_expands_loader_aliases_for_quilt(monkeypatch) -> None:
+def test_get_modrinth_latest_versions_by_hashes_uses_exact_quilt_loader(monkeypatch) -> None:
     captured_request: dict[str, object] = {}
 
     def fake_post_json(**kwargs):
@@ -489,12 +475,11 @@ def test_get_modrinth_latest_versions_by_hashes_expands_loader_aliases_for_quilt
         "hashes": ["abc123"],
         "algorithm": "sha512",
         "game_versions": ["1.21.1"],
-        "loaders": ["quilt", "fabric"],
+        "loaders": ["quilt"],
     }
 
 
-@pytest.mark.smoke
-def test_get_modrinth_latest_versions_by_hashes_expands_loader_aliases_for_neoforge_1_20_1(monkeypatch) -> None:
+def test_get_modrinth_latest_versions_by_hashes_uses_exact_neoforge_loader(monkeypatch) -> None:
     captured_request: dict[str, object] = {}
 
     def fake_post_json(**kwargs):
@@ -513,11 +498,10 @@ def test_get_modrinth_latest_versions_by_hashes_expands_loader_aliases_for_neofo
         "hashes": ["abc123"],
         "algorithm": "sha512",
         "game_versions": ["1.20.1"],
-        "loaders": ["neoforge", "forge"],
+        "loaders": ["neoforge"],
     }
 
 
-@pytest.mark.smoke
 def test_get_modrinth_current_versions_by_hashes_splits_failed_batch_into_single_retries(monkeypatch) -> None:
     call_chunks: list[list[str]] = []
 
@@ -546,7 +530,6 @@ def test_get_modrinth_current_versions_by_hashes_splits_failed_batch_into_single
     assert any(chunk == ["hash-b"] for chunk in call_chunks)
 
 
-@pytest.mark.smoke
 def test_resolve_modrinth_project_names_splits_failed_batch_and_recovers(monkeypatch) -> None:
     call_ids_payloads: list[str] = []
 
@@ -570,8 +553,7 @@ def test_resolve_modrinth_project_names_splits_failed_batch_and_recovers(monkeyp
     assert any("P7dR8mSH" in payload and "AANobbMI" in payload for payload in call_ids_payloads)
 
 
-@pytest.mark.smoke
-def test_search_mods_online_expands_loader_alias_facets_for_quilt(monkeypatch) -> None:
+def test_search_mods_online_uses_exact_quilt_loader_facet(monkeypatch) -> None:
     captured_params: dict[str, object] = {}
 
     def fake_get_json(**kwargs):
@@ -584,10 +566,9 @@ def test_search_mods_online_expands_loader_alias_facets_for_quilt(monkeypatch) -
 
     facets_text = str(captured_params.get("facets", ""))
     assert "categories:quilt" in facets_text
-    assert "categories:fabric" in facets_text
+    assert "categories:fabric" not in facets_text
 
 
-@pytest.mark.smoke
 def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monkeypatch) -> None:
     requested_urls: list[str] = []
 
@@ -622,7 +603,6 @@ def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monk
     assert requested_urls == ["https://api.modrinth.com/v2/project/fabric-api"]
 
 
-@pytest.mark.smoke
 def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> None:
     _patch_mod_search_attr(
         monkeypatch,
@@ -651,7 +631,6 @@ def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> No
     assert enhanced is None
 
 
-@pytest.mark.smoke
 def test_enhance_local_mod_prefers_cached_slug_identifier_resolver_before_fuzzy_search(monkeypatch) -> None:
     resolver_calls: list[str] = []
 
@@ -684,7 +663,6 @@ def test_enhance_local_mod_prefers_cached_slug_identifier_resolver_before_fuzzy_
     assert resolver_calls == ["inventoryprofilesnext"]
 
 
-@pytest.mark.smoke
 def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     searched_terms: list[str] = []
@@ -739,7 +717,6 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
     assert searched_terms == []
 
 
-@pytest.mark.smoke
 def test_enhance_local_mod_returns_stale_fallback_when_revalidation_fails(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
 
@@ -760,7 +737,6 @@ def test_enhance_local_mod_returns_stale_fallback_when_revalidation_fails(monkey
     assert enhanced.slug == "inventoryprofilesnext"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     next_retry_epoch_ms = int(time.time() * 1000) + (10 * 60 * 1000)
@@ -799,7 +775,6 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
     assert any("invalidated" in item for item in candidate.hard_errors)
 
 
-@pytest.mark.smoke
 def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
     version = mod_search_service_module.OnlineModVersion(
         version_id="ver1",
@@ -826,8 +801,7 @@ def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
     assert any("0.16.0" in item for item in loader_rule_messages)
 
 
-@pytest.mark.smoke
-def test_analyze_mod_version_compatibility_accepts_fabric_version_on_quilt_server() -> None:
+def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_server() -> None:
     version = mod_search_service_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
@@ -845,10 +819,9 @@ def test_analyze_mod_version_compatibility_accepts_fabric_version_on_quilt_serve
         loader="quilt",
     )
 
-    assert not any("載入器" in item for item in report.hard_errors)
+    assert any("載入器" in item for item in report.hard_errors)
 
 
-@pytest.mark.smoke
 def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
     version = mod_search_service_module.OnlineModVersion(
         version_id="ver1",
@@ -892,14 +865,14 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
         },
     )
 
-    assert report.compatible is True
+    assert report.compatible is False
     assert report.already_installed == ["Example Mod"]
     assert report.missing_required_dependencies == ["Cloth Config"]
     assert report.optional_dependencies == ["Mod Menu"]
     assert report.incompatible_installed == ["Legacy Conflict"]
+    assert any("不相容模組" in item for item in report.hard_errors)
 
 
-@pytest.mark.smoke
 def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatch(monkeypatch) -> None:
     dependency_version = mod_search_service_module.OnlineModVersion(
         version_id="dep-v2",
@@ -956,7 +929,6 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
     assert "需求版本 2.0.0" in report.installed_version_mismatches[0]
 
 
-@pytest.mark.smoke
 def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_installed(monkeypatch) -> None:
     dependency_version = mod_search_service_module.OnlineModVersion(
         version_id="dep-v2",
@@ -1005,7 +977,6 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
     assert "Cloth Config（需求版本：2.0.0） 可能已存在本地相近檔名，系統已先採安全略過策略。" in report.notes
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_resolves_version_id_dependency(monkeypatch) -> None:
     dependency_version = mod_search_service_module.OnlineModVersion(
         version_id="dep-v2",
@@ -1056,7 +1027,6 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
     assert plan.items[0].version_id == "dep-v2"
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_marks_maybe_installed_dependency_as_unresolved(monkeypatch) -> None:
     dependency_version = mod_search_service_module.OnlineModVersion(
         version_id="dep-v2",
@@ -1111,7 +1081,6 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     assert any("已預設略過自動安裝" in note for note in plan.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch) -> None:
     captured_project_ids: list[str] = []
     local_mod = SimpleNamespace(
@@ -1159,7 +1128,6 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
     assert plan.candidates == []
 
 
-@pytest.mark.smoke
 def test_resolve_local_mod_project_info_normalizes_camel_case_local_names(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
@@ -1190,7 +1158,6 @@ def test_resolve_local_mod_project_info_normalizes_camel_case_local_names(monkey
     assert "inventory-profiles-next" in attempted_identifiers
 
 
-@pytest.mark.smoke
 def test_resolve_local_mod_project_info_uses_platform_slug_when_project_id_missing(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -1221,7 +1188,6 @@ def test_resolve_local_mod_project_info_uses_platform_slug_when_project_id_missi
     assert attempted_identifiers[0] == "inventory-profiles-next"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -1267,7 +1233,6 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
     assert plan.candidates[0].recommendation_confidence == "blocked"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
@@ -1337,7 +1302,6 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
     assert update_plan.candidates[0].target_version_name == "2.2.2"
 
 
-@pytest.mark.smoke
 def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
     captured_params: dict[str, object] = {}
 
@@ -1352,7 +1316,6 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
     assert captured_params["query"] == "letsdo API"
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_collects_recursive_dependencies(monkeypatch) -> None:
     root_version = mod_search_service_module.OnlineModVersion(
         version_id="root-v1",
@@ -1422,7 +1385,6 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
     assert [item.project_name for item in plan.items] == ["Cloth Config", "Fabric API"]
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_allows_prism_like_recursion_depth(monkeypatch) -> None:
     chain_length = 10
     dependency_ids = [f"dep-{index}" for index in range(chain_length)]
@@ -1484,7 +1446,6 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
     assert len(plan.items) == chain_length
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_preserves_dependency_project_id_case_for_api(monkeypatch) -> None:
     root_version = mod_search_service_module.OnlineModVersion(
         version_id="root-v1",
@@ -1520,8 +1481,7 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
     assert captured_project_ids == ["P7dR8mSH", "P7dR8mSH"]
 
 
-@pytest.mark.smoke
-def test_build_required_dependency_install_plan_overrides_quilt_dependency_to_fabric_for_fabric_loader(
+def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fabric_loader(
     monkeypatch,
 ) -> None:
     root_version = mod_search_service_module.OnlineModVersion(
@@ -1575,13 +1535,12 @@ def test_build_required_dependency_install_plan_overrides_quilt_dependency_to_fa
         root_project_name="Root Mod",
     )
 
-    assert captured_project_ids == ["P7dR8mSH"]
+    assert captured_project_ids == ["qvIfYCYJ"]
     assert len(plan.items) == 1
-    assert plan.items[0].project_id == "P7dR8mSH"
-    assert plan.items[0].project_name == "Fabric API"
+    assert plan.items[0].project_id == "qvIfYCYJ"
+    assert plan.items[0].project_name == "QSL"
 
 
-@pytest.mark.smoke
 def test_build_required_dependency_install_plan_does_not_apply_quilt_override_for_forge_loader(
     monkeypatch,
 ) -> None:
@@ -1642,7 +1601,6 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
     assert plan.items[0].project_name == "QSL"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="proj123",
@@ -1706,7 +1664,6 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
     assert candidate.target_version is recommended_version
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "example-mod.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
@@ -1816,7 +1773,6 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     assert candidate.update_available is True
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> None:
     cached_hash = "abc123cached"
     latest_version = mod_search_service_module.OnlineModVersion(
@@ -1903,7 +1859,6 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
     assert candidate.recommendation_confidence == "high"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_fallback(monkeypatch) -> None:
     cached_hash = "hash-current-only"
     current_version = mod_search_service_module.OnlineModVersion(
@@ -1971,7 +1926,6 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
     assert update_plan.candidates == []
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_missing(monkeypatch) -> None:
     cached_hash = "hash-without-mapping"
     latest_version = mod_search_service_module.OnlineModVersion(
@@ -2033,7 +1987,6 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
     assert update_plan.candidates[0].recommendation_confidence == "advisory"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> None:
     local_mod_cached = SimpleNamespace(
         platform_id="inventoryprofilesnext",
@@ -2107,7 +2060,6 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
     assert any("metadata ensure 結果" in note for note in plan.metadata_summary.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     attempted_identifiers: list[str] = []
@@ -2171,7 +2123,6 @@ def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(m
     assert any("freshness TTL" in note for note in plan.metadata_summary.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_metadata(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -2204,7 +2155,6 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
     assert candidate.hard_errors == ["metadata 未識別，暫時無法自動檢查更新。"]
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryable(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     local_mod = SimpleNamespace(
@@ -2243,7 +2193,6 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
     assert any("可重試" in note for note in plan.metadata_summary.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_due(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     local_mod = SimpleNamespace(
@@ -2293,7 +2242,6 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
     assert resolve_calls["search"] == 0
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_reached(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     original_limit = mod_search_service_module.PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN
@@ -2351,7 +2299,6 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_
     _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", original_limit)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_adaptive_revalidation_batch_shrinks_on_high_failure(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
 
@@ -2397,7 +2344,6 @@ def test_build_local_mod_update_plan_adaptive_revalidation_batch_shrinks_on_high
     assert any("重查觀測摘要" in note for note in plan.metadata_summary.notes)
 
 
-@pytest.mark.smoke
 def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
 
@@ -2425,7 +2371,6 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
     assert installed_path.read_bytes() == b"jar-bytes"
 
 
-@pytest.mark.smoke
 def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     target_path = tmp_path / "mods" / "example.jar"
@@ -2448,7 +2393,6 @@ def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, m
     assert installed_path.read_bytes() == b"jar-bytes"
 
 
-@pytest.mark.smoke
 def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
 
@@ -2476,7 +2420,6 @@ def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, mo
     assert (tmp_path / "mods" / "example.jar").exists() is False
 
 
-@pytest.mark.smoke
 def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
@@ -2529,7 +2472,6 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
     assert old_path.exists() is False
 
 
-@pytest.mark.smoke
 def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     external_dir = tmp_path.parents[0] / f"{tmp_path.name}-external"
@@ -2582,7 +2524,6 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
     assert old_path.exists() is True
 
 
-@pytest.mark.smoke
 def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
 
@@ -2606,7 +2547,6 @@ def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Pa
     assert (tmp_path / "mods" / "example.jar").exists() is False
 
 
-@pytest.mark.smoke
 def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
@@ -2651,7 +2591,6 @@ def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_pa
     assert new_path.exists() is False
 
 
-@pytest.mark.smoke
 def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(tmp_path: Path, monkeypatch) -> None:
     manager = mod_manager_module.ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example.jar"
@@ -2693,7 +2632,6 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
     assert old_path.read_bytes() == b"old-bytes"
 
 
-@pytest.mark.smoke
 def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads() -> None:
     version = mod_search_service_module.OnlineModVersion(
         version_id="ver-1",
@@ -2759,7 +2697,6 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
     assert prompt_hosts == expected_hosts
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "uncached.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
@@ -2809,7 +2746,6 @@ def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monke
     assert all(total == 2 for _, total in progress_events)
 
 
-@pytest.mark.smoke
 def test_analyze_local_mod_file_compatibility_does_not_flag_lossy_mc_version_metadata() -> None:
     local_mod = SimpleNamespace(
         name="Example Mod",
@@ -2819,17 +2755,12 @@ def test_analyze_local_mod_file_compatibility_does_not_flag_lossy_mc_version_met
         loader_type="Fabric",
     )
 
-    issues = mod_search_service_module.analyze_local_mod_file_compatibility(
-        local_mod,
-        minecraft_version="1.21.1",
-        loader="fabric",
-    )
+    issues = mod_search_service_module.analyze_local_mod_file_compatibility(local_mod, loader="fabric")
 
     assert issues == []
 
 
-@pytest.mark.smoke
-def test_analyze_local_mod_file_compatibility_accepts_fabric_mod_on_quilt_server() -> None:
+def test_analyze_local_mod_file_compatibility_reports_loader_mismatch_on_quilt_server() -> None:
     local_mod = SimpleNamespace(
         name="Fabric API",
         filename="fabric-api.jar",
@@ -2838,16 +2769,12 @@ def test_analyze_local_mod_file_compatibility_accepts_fabric_mod_on_quilt_server
         loader_type="Fabric",
     )
 
-    issues = mod_search_service_module.analyze_local_mod_file_compatibility(
-        local_mod,
-        minecraft_version="1.21.1",
-        loader="quilt",
-    )
+    issues = mod_search_service_module.analyze_local_mod_file_compatibility(local_mod, loader="quilt")
 
-    assert issues == []
+    assert issues
+    assert any("載入器" in issue for issue in issues)
 
 
-@pytest.mark.smoke
 def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(monkeypatch) -> None:
     _patch_mod_search_attr(
         monkeypatch,
@@ -2868,7 +2795,6 @@ def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(mo
     assert resolved is None
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_loader(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -2919,7 +2845,6 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
     assert any("已略過" in note and "paper" in note for note in plan.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_online_version(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -2961,7 +2886,6 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
     assert any("僅作提示，不影響更新判定" in note for note in plan.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candidate(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -3023,7 +2947,6 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
     assert any(note == "本地 metadata 提示：提示 A" for note in candidate.notes)
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_prefers_provider_current_version_over_local_version(monkeypatch) -> None:
     local_hash = "hash-001"
     current_version = mod_search_service_module.OnlineModVersion(
@@ -3109,7 +3032,6 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
     assert plan.candidates[0].recommendation_confidence == "high"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisory(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="proj123",
@@ -3173,7 +3095,6 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
     assert plan.candidates[0].recommendation_confidence == "advisory"
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkeypatch) -> None:
     """混合情境：一個模組 hash 命中（enabled），一個 provider metadata 完全無法解析（unknown）。
     兩者應在同一 LocalModUpdatePlan 中，且分配到不同 recommendation_confidence。
@@ -3261,7 +3182,6 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         assert mystery_candidates[0].recommendation_confidence in ("blocked", "retryable")
 
 
-@pytest.mark.smoke
 def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolved(monkeypatch) -> None:
     """混合情境：一個模組 metadata 已過期（retryable），一個有 dependency 無法解析的正常模組。
     確認兩者共存在同一 plan，且 stale 模組被分配 RECOMMENDATION_CONFIDENCE_RETRYABLE。
@@ -3325,7 +3245,6 @@ def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolve
     assert "stale metadata" in (stale_candidates[0].metadata_note or "")
 
 
-@pytest.mark.smoke
 def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields() -> None:
     plan = mod_search_service_module.OnlineDependencyInstallPlan(
         items=[
@@ -3410,7 +3329,6 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     assert restored.advisory_items[0].expected_hash == "b" * 64
 
 
-@pytest.mark.smoke
 def test_migrate_online_dependency_install_plan_payload_recovers_missing_graph_edges() -> None:
     legacy_payload = {
         "schema_version": 1,

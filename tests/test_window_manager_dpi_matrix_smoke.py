@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import pytest
+from typing import Any, cast
+
 import src.utils.ui_support.window_manager as window_manager_module
 
 
 class _StubSettings:
-    def __init__(self, dpi_scaling: float, adaptive: bool = False):
-        self._dpi_scaling = dpi_scaling
+    def __init__(self, adaptive: bool = False):
         self._adaptive = adaptive
 
     def is_adaptive_sizing_enabled(self) -> bool:
         return self._adaptive
-
-    def get_dpi_scaling(self) -> float:
-        return self._dpi_scaling
 
 
 class _StubWindow:
@@ -24,22 +21,28 @@ class _StubWindow:
         self._y = y
         self._state = state
 
-    def update_idletasks(self) -> None:
-        return None
-
     def state(self) -> str:
         return self._state
 
-    def winfo_width(self) -> int:
+    def isMinimized(self) -> bool:
+        return self._state == "iconic"
+
+    def isMaximized(self) -> bool:
+        return self._state == "zoomed"
+
+    def geometry(self):
+        return self
+
+    def width(self) -> int:
         return self._width
 
-    def winfo_height(self) -> int:
+    def height(self) -> int:
         return self._height
 
-    def winfo_x(self) -> int:
+    def x(self) -> int:
         return self._x
 
-    def winfo_y(self) -> int:
+    def y(self) -> int:
         return self._y
 
 
@@ -51,43 +54,26 @@ class _StubWindowSettings:
         return True
 
     def get_main_window_settings(self) -> dict[str, int | None | bool]:
-        return {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False}
+        return {"width": 600, "height": 400, "x": None, "y": None, "maximized": False}
 
     def set_main_window_settings(self, width: int, height: int, x: int | None, y: int | None, maximized: bool) -> None:
         self.saved = (width, height, x, y, maximized)
 
 
-@pytest.mark.smoke
-def test_window_manager_dpi_matrix_fixed_layout(monkeypatch) -> None:
+def test_window_manager_fixed_layout_uses_qt_device_independent_pixels(monkeypatch) -> None:
     screen_info = {
         "width": 1920,
         "height": 1080,
         "usable_width": 1800,
         "usable_height": 1000,
     }
-    matrix = {
-        1.0: (1200, 800),
-        1.25: (1500, 1000),
-        1.5: (1800, 1000),
-    }
-    results: list[tuple[int, int]] = []
 
-    for dpi_scale, expected in matrix.items():
-        monkeypatch.setattr(
-            window_manager_module,
-            "get_settings_manager",
-            lambda s=dpi_scale: _StubSettings(dpi_scaling=s, adaptive=False),
-        )
-        size = window_manager_module.WindowManager.calculate_optimal_size(screen_info)
-        assert size == expected
-        results.append(size)
+    monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: _StubSettings(adaptive=False))
 
-    widths = [w for w, _ in results]
-    assert widths == sorted(widths)
+    assert window_manager_module.WindowManager.calculate_optimal_size(screen_info) == (1350, 820)
 
 
-@pytest.mark.smoke
-def test_window_manager_dpi_matrix_adaptive_layout_stays_within_usable(monkeypatch) -> None:
+def test_window_manager_adaptive_layout_stays_within_usable(monkeypatch) -> None:
     screen_info = {
         "width": 1366,
         "height": 768,
@@ -95,36 +81,44 @@ def test_window_manager_dpi_matrix_adaptive_layout_stays_within_usable(monkeypat
         "usable_height": 720,
     }
 
-    for dpi_scale in (1.0, 1.25, 1.5):
-        monkeypatch.setattr(
-            window_manager_module,
-            "get_settings_manager",
-            lambda s=dpi_scale: _StubSettings(dpi_scaling=s, adaptive=True),
-        )
-        width, height = window_manager_module.WindowManager.calculate_optimal_size(screen_info)
-        assert width <= screen_info["usable_width"]
-        assert height <= screen_info["usable_height"]
-        assert width >= 1000
-        assert height >= 700
+    monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: _StubSettings(adaptive=True))
+
+    width, height = window_manager_module.WindowManager.calculate_optimal_size(screen_info)
+    assert width <= screen_info["usable_width"]
+    assert height <= screen_info["usable_height"]
+    assert width >= 900
+    assert height >= 600
 
 
-@pytest.mark.smoke
 def test_save_main_window_state_skips_transient_small_size(monkeypatch) -> None:
     settings = _StubWindowSettings()
     monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: settings)
+    alive_ids: set[int] = set()
+
+    def is_qobject_alive_stub(window: Any) -> bool:
+        return id(window) in alive_ids
+
+    monkeypatch.setattr(window_manager_module, "is_qobject_alive", is_qobject_alive_stub)
 
     small_window = _StubWindow(width=200, height=200)
-    window_manager_module.WindowManager.save_main_window_state(small_window)
+    window_manager_module.WindowManager.save_main_window_state(cast(Any, small_window))
 
     assert settings.saved is None
 
 
-@pytest.mark.smoke
 def test_save_main_window_state_persists_valid_size(monkeypatch) -> None:
     settings = _StubWindowSettings()
     monkeypatch.setattr(window_manager_module, "get_settings_manager", lambda: settings)
+    alive_ids: set[int] = set()
 
-    valid_window = _StubWindow(width=1400, height=900, x=50, y=60)
-    window_manager_module.WindowManager.save_main_window_state(valid_window)
+    def is_qobject_alive_stub(window: Any) -> bool:
+        return id(window) in alive_ids
 
-    assert settings.saved == (1400, 900, 50, 60, False)
+    monkeypatch.setattr(window_manager_module, "is_qobject_alive", is_qobject_alive_stub)
+
+    valid_window = _StubWindow(width=900, height=600, x=50, y=60)
+    # 註冊 valid_window 為存活，模擬可安全存取的情況
+    alive_ids.add(id(valid_window))
+    window_manager_module.WindowManager.save_main_window_state(cast(Any, valid_window))
+
+    assert settings.saved == (900, 600, 50, 60, False)

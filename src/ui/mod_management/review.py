@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import re
-import tkinter.ttk as ttk
 import traceback
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-
-import customtkinter as ctk
 
 from ...utils import (
     LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
@@ -52,6 +49,7 @@ from ...utils import (
     serialize_online_dependency_install_plan,
     validate_online_dependency_install_plan_payload,
 )
+from ...utils.ui_support import qt_widgets as qt
 from .. import (
     DialogUtils,
     FontManager,
@@ -448,16 +446,16 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         UIUtils.open_external(clean_url)
 
     @staticmethod
-    def _create_review_summary_box(parent: Any, *, height: int) -> ctk.CTkTextbox:
+    def _create_review_summary_box(parent: Any, *, height: int) -> qt.TextBox:
         return InstallReviewDialogBuilder.create_review_summary_box(parent, height=height)
 
     @classmethod
     def _bind_vertical_mousewheel(cls, widget: Any, *, scroll_callback: Callable[..., Any]) -> None:
         try:
-            widget.bind(
-                "<MouseWheel>",
+            widget.connect_event(
+                "wheel",
                 lambda event: cls._scroll_widget_vertical(event, scroll_callback=scroll_callback),
-                add="+",
+                append=True,
             )
         except Exception:
             return
@@ -576,11 +574,11 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return normalized[: max(0, max_length - 3)].rstrip() + "..."
 
     @staticmethod
-    def _collect_selected_root_keys(tree: ttk.Treeview) -> set[str]:
+    def _collect_selected_root_keys(tree: qt.Treeview) -> set[str]:
         return ModManagementReviewMixin._collect_selected_root_keys_from(tree, None)
 
     @staticmethod
-    def _collect_selected_root_keys_from(tree: ttk.Treeview, valid_keys: set[str] | None) -> set[str]:
+    def _collect_selected_root_keys_from(tree: qt.Treeview, valid_keys: set[str] | None) -> set[str]:
         selected_root_keys: set[str] = set()
         for item_id in tree.selection():
             current_item = item_id
@@ -599,7 +597,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return selected_root_keys
 
     @staticmethod
-    def _get_selected_review_key(tree: ttk.Treeview, valid_keys: set[str]) -> str:
+    def _get_selected_review_key(tree: qt.Treeview, valid_keys: set[str]) -> str:
         selected_root_keys = ModManagementReviewMixin._collect_selected_root_keys_from(tree, valid_keys)
         if selected_root_keys:
             return next(iter(sorted(selected_root_keys)))
@@ -1219,7 +1217,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
 
     @staticmethod
     def _set_selected_advisory_dependency_items_enabled(
-        tree: ttk.Treeview, entry_map: dict[str, Any], enabled: bool
+        tree: qt.Treeview, entry_map: dict[str, Any], enabled: bool
     ) -> bool:
         changed = False
         for item_id in tree.selection():
@@ -1768,7 +1766,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         self._append_review_section(lines, "預檢補充：", plan_notes, max_items=max_items)
 
     @staticmethod
-    def _configure_review_action_button(button: ctk.CTkButton, review_entries: list[Any], action_label: str) -> None:
+    def _configure_review_action_button(button: qt.Button, review_entries: list[Any], action_label: str) -> None:
         runnable_enabled = ModManagementReviewMixin._count_enabled_runnable_entries(review_entries)
         button.configure(
             text=f"⬇️ {action_label} {runnable_enabled} 個已啟用項目", state="normal" if runnable_enabled else "disabled"
@@ -1777,7 +1775,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
     def _toggle_review_selection(
         self,
         *,
-        tree: ttk.Treeview,
+        tree: qt.Treeview,
         entry_map: dict[str, Any],
         review_root_keys: set[str],
         enabled: bool,
@@ -1816,8 +1814,8 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         padx: tuple[int, int] | None = None,
         side: str = "left",
         bold: bool = False,
-    ) -> ctk.CTkButton:
-        button = ctk.CTkButton(
+    ) -> qt.Button:
+        button = qt.Button(
             parent,
             text=text,
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold" if bold else "normal"),
@@ -1831,10 +1829,10 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         pack_kwargs: dict[str, Any] = {"side": side}
         if padx is not None:
             pack_kwargs["padx"] = padx
-        button.pack(**pack_kwargs)
+        button.attach(**pack_kwargs)
         return button
 
-    def _render_review_task_tree(self, tree: ttk.Treeview, nodes: list[ReviewTaskNode], column_count: int) -> None:
+    def _render_review_task_tree(self, tree: qt.Treeview, nodes: list[ReviewTaskNode], column_count: int) -> None:
         selected_key = self._get_selected_review_key(
             tree, {node.root_key for node in nodes if node.node_kind == "root"}
         )
@@ -1859,6 +1857,12 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 open=node.node_kind in {"root", "dependency-group"},
                 tags=(node.node_kind, node.root_key, node.group_key),
             )
+
+        for group_id in group_parent_ids.values():
+            tree.item(group_id, open=True)
+        for node in nodes:
+            if node.node_kind in {"root", "dependency-group"}:
+                tree.item(node.node_id, open=True)
         TreeUtils.refresh_treeview_alternating_rows(tree)
         if selected_key and tree.exists(selected_key):
             tree.selection_set(selected_key)
@@ -1928,7 +1932,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 getattr(getattr(getattr(entry, "pending", None), "version", None), "version_id", ""),
             ),
             get_group_key=self._get_online_install_review_group_key,
-            get_title=lambda _entry: "模組",
+            get_title=lambda entry: str(getattr(getattr(entry, "pending", None), "project_name", "") or "模組"),
             get_status_text=self._build_online_review_root_status_text,
             get_root_values=lambda entry, status_text: (
                 "是" if entry.enabled else "否",
@@ -2046,7 +2050,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         self._append_plan_note_section(lines, dependency_plan)
         return "\n".join(lines)
 
-    def _create_review_shared_ui(self, main_frame: ctk.CTkFrame, wraplength: int) -> tuple[ctk.CTkLabel, ctk.CTkFrame]:
+    def _create_review_shared_ui(self, main_frame: qt.Frame, wraplength: int) -> tuple[qt.Label, qt.Frame]:
         """建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
 
         Args:
@@ -2073,85 +2077,59 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             for entry in review_entries
         }
         global_review_notes = self._collect_online_review_global_notes(review_entries)
-        dialog = DialogUtils.create_toplevel_dialog(
-            self.parent,
-            "安裝清單 Review",
-            width=Sizes.DIALOG_LARGE_WIDTH,
-            height=Sizes.DIALOG_LARGE_HEIGHT,
-            make_modal=True,
-            bind_icon=True,
-            center_on_parent=True,
-            delay_ms=250,
-            min_width=1000,
-            min_height=820,
-            max_width=FontManager.get_dpi_scaled_size(1280),
-            max_height=FontManager.get_dpi_scaled_size(960),
-            native_window=True,
-            use_transient_for_modal=False,
-        )
-        main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
-        title = ctk.CTkLabel(
-            main_frame,
-            text="待安裝模組與依賴檢查",
-            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-        )
-        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
-        subtitle = ctk.CTkLabel(
-            main_frame,
-            text=self._build_online_install_review_subtitle(
+        shell = self._get_install_review_dialog_builder().create_review_dialog_shell(
+            dialog_title="安裝清單 Review",
+            heading="待安裝模組與依賴檢查",
+            subtitle_text=self._build_online_install_review_subtitle(
                 sum(1 for entry in review_entries if entry.actionable),
                 self._count_blocked_entries(review_entries),
                 advisory_count=self._count_online_install_review_groups(review_entries).get("advisory", 0),
                 migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
             ),
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
-            text_color=Colors.TEXT_SECONDARY,
-            justify="left",
-            anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(860),
+            subtitle_wraplength=645,
+            overview_wraplength=430,
+            summary_height=Sizes.SERVER_TREE_COL_LOADER,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
+            min_width=750,
+            min_height=615,
         )
-        subtitle.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
-        overview_label, tree_container = self._create_review_shared_ui(main_frame, 860)
-        queue_tree = ttk.Treeview(
+        dialog = shell.dialog
+        subtitle = shell.subtitle
+        overview_label = shell.overview_label
+        tree_container = shell.tree_container
+        try:
+            queue_banner = qt.Label(
+                tree_container,
+                text=f"安裝清單：共 {len(review_entries)} 項（可安裝 {sum(1 for e in review_entries if e.actionable)}）",
+                font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
+                text_color=Colors.TEXT_SECONDARY,
+                justify="left",
+                anchor="w",
+            )
+            queue_banner.attach_matrix(row=0, column=0, columnspan=2, sticky="ew", pady=(0, Spacing.TINY))
+        except Exception:
+            logger.exception("建立安裝清單橫幅失敗")
+        summary_box = shell.summary_box
+        button_frame = shell.button_frame
+        queue_tree = self._get_install_review_dialog_builder().create_review_tree(
             tree_container,
+            tree_heading="項目",
             columns=("run", "source", "name", "version", "channel", "status"),
-            show="tree headings",
-            height=Spacing.MEDIUM,
-            style=TreeUtils.configure_treeview_list_style(
-                "InstallQueueList",
-                body_font=FontManager.get_font(size=FontSize.INPUT),
-                heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-                rowheight=int(25 * FontManager.get_scale_factor()),
-            ),
+            column_specs=[
+                ("run", "執行", Sizes.BUTTON_WIDTH_COMPACT, 45, False, "center"),
+                ("source", "來源", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
+                ("name", "名稱", Sizes.CONSOLE_PANEL_HEIGHT, 120, True, "w"),
+                ("version", "版本", Sizes.DIALOG_SMALL_HEIGHT, 90, False, "w"),
+                ("channel", "類型", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
+                ("status", "狀態", Sizes.SERVER_TREE_COL_LOADER + 10, 98, False, "w"),
+            ],
+            tree_column_width=Sizes.BUTTON_WIDTH_SECONDARY,
+            tree_column_minwidth=68,
+            tree_column_stretch=False,
+            tree_row=1,
+            stretch_columns={"name"},
         )
-        queue_tree.heading("#0", text="項目")
-        queue_tree.column("#0", width=Sizes.BUTTON_WIDTH_SECONDARY, minwidth=90, anchor="w", stretch=False)
-        queue_tree.heading("run", text="執行")
-        queue_tree.column("run", width=Sizes.BUTTON_WIDTH_COMPACT, minwidth=60, anchor="center", stretch=False)
-        queue_tree.heading("source", text="來源")
-        queue_tree.column("source", width=Sizes.BUTTON_WIDTH_SMALL, minwidth=80, anchor="w", stretch=False)
-        queue_tree.heading("name", text="名稱")
-        queue_tree.column("name", width=Sizes.CONSOLE_PANEL_HEIGHT, minwidth=160, anchor="w", stretch=False)
-        queue_tree.heading("version", text="版本")
-        queue_tree.column("version", width=Sizes.DIALOG_SMALL_HEIGHT, minwidth=120, anchor="w", stretch=False)
-        queue_tree.heading("channel", text="類型")
-        queue_tree.column("channel", width=Sizes.BUTTON_WIDTH_SMALL, minwidth=80, anchor="w", stretch=False)
-        queue_tree.heading("status", text="狀態")
-        queue_tree.column("status", width=Sizes.SERVER_TREE_COL_LOADER + 20, minwidth=130, anchor="w", stretch=True)
-        TreeUtils.bind_treeview_header_auto_fit(
-            queue_tree,
-            include_tree_column=True,
-            heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            body_font=FontManager.get_font(size=FontSize.INPUT),
-            stretch_columns={"status"},
-        )
-        queue_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=queue_tree.yview)
-        queue_tree.configure(yscrollcommand=queue_scroll.set)
-        queue_tree.grid(row=0, column=0, sticky="nsew")
-        queue_scroll.grid(row=0, column=1, sticky="ns")
-        tree_container.grid_rowconfigure(0, weight=1)
-        tree_container.grid_columnconfigure(0, weight=1)
         review_root_keys = set(review_entry_map)
 
         def refresh_queue_tree() -> None:
@@ -2159,7 +2137,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 queue_tree, self._build_online_review_task_nodes(review_entries), column_count=6
             )
 
-        summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
         self._bind_vertical_mousewheel(queue_tree, scroll_callback=queue_tree.yview_scroll)
         summary_text_widget = getattr(summary_box, "_textbox", summary_box)
         self._bind_vertical_mousewheel(summary_box, scroll_callback=summary_text_widget.yview_scroll)
@@ -2194,12 +2171,12 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             review_entry = review_entry_map.get(selected_root_key)
             if not review_entry:
                 return
-            summary_box.configure(state="normal")
+            summary_box.setReadOnly(False)
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_pending_install_review_text(review_entry))
             with contextlib.suppress(Exception):
                 summary_box.yview_moveto(0.0)
-            summary_box.configure(state="disabled")
+            summary_box.setReadOnly(True)
 
         def open_selected_queue_project_page() -> None:
             selected_root_key = self._get_selected_review_key(queue_tree, review_root_keys)
@@ -2209,11 +2186,33 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             )
             self._open_project_page(project_page_url, dialog)
 
-        queue_tree.bind("<<TreeviewSelect>>", refresh_queue_summary)
+        queue_tree.connect_event("selection_changed", refresh_queue_summary)
         refresh_queue_tree()
         refresh_queue_summary()
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        try:
+            if review_entries and not queue_tree.get_children():
+                logger.warning("安裝清單節點建構完成但 Treeview 未顯示任何項目：review_count=%d", len(review_entries))
+                with contextlib.suppress(Exception):
+                    queue_banner.configure(
+                        text=f"清單顯示異常：應有 {len(review_entries)} 項，但列表未顯示。請關閉後重新開啟安裝清單或查看右側摘要。",
+                        text_color=Colors.TEXT_WARNING,
+                    )
+        except Exception:
+            logger.exception("檢查 queue_tree child 時發生例外")
+        # 若樹狀視圖沒有任何列出項目，提供一個回退的摘要顯示，避免對話框看起來空白
+        try:
+            if not queue_tree.get_children():
+                summary_box.setReadOnly(False)
+                summary_box.delete("1.0", "end")
+                summary_box.insert("1.0", "目前無法直接在列表中顯示安裝項目；以下為回退顯示：\n\n")
+                for entry in review_entries:
+                    pending = getattr(entry, "pending", None)
+                    name = str(getattr(pending, "project_name", "未知模組") or "未知模組")
+                    version = str(getattr(getattr(pending, "version", None), "display_name", "未知版本") or "未知版本")
+                    summary_box.insert("end", f"- {name} — {version}\n")
+                summary_box.setReadOnly(True)
+        except Exception:
+            logger.exception("填充回退安裝清單摘要失敗")
         install_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -2273,14 +2272,13 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         refresh_queue_status_banner()
         refresh_queue_action_button()
         refresh_queue_project_page_button()
-        queue_tree.bind("<<TreeviewSelect>>", refresh_queue_project_page_button, add="+")
+        queue_tree.connect_event("selection_changed", refresh_queue_project_page_button, append=True)
         DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
-            min_width=1000,
-            min_height=820,
-            max_width=FontManager.get_dpi_scaled_size(1280),
-            max_height=FontManager.get_dpi_scaled_size(960),
+            min_width=750,
+            min_height=615,
             parent=self.parent,
+            preserve_current_size=False,
         )
 
     def _ensure_local_mod_project_ids(self, local_mods: list[Any]) -> None:
@@ -2503,34 +2501,11 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             entry_map = {self._build_local_update_review_key(entry.candidate): entry for entry in review_entries}
             review_root_keys = set(entry_map)
 
-        dialog = DialogUtils.create_toplevel_dialog(
-            self.parent,
-            "本地模組更新檢查",
-            width=Sizes.DIALOG_LARGE_WIDTH,
-            height=Sizes.DIALOG_LARGE_HEIGHT,
-            make_modal=True,
-            bind_icon=True,
-            center_on_parent=True,
-            delay_ms=250,
-            min_width=1060,
-            min_height=860,
-            max_width=FontManager.get_dpi_scaled_size(1280),
-            max_height=FontManager.get_dpi_scaled_size(980),
-            native_window=True,
-            use_transient_for_modal=False,
-        )
-        main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
-        title = ctk.CTkLabel(
-            main_frame,
-            text="本地模組更新與相容性 Review",
-            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-        )
-        title.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
         local_group_counts = self._count_local_update_review_groups(review_entries)
-        subtitle = ctk.CTkLabel(
-            main_frame,
-            text=self._build_local_update_review_subtitle(
+        shell = self._get_install_review_dialog_builder().create_review_dialog_shell(
+            dialog_title="本地模組更新檢查",
+            heading="本地模組更新與相容性 Review",
+            subtitle_text=self._build_local_update_review_subtitle(
                 scope_text,
                 self._count_enabled_runnable_entries(review_entries),
                 local_group_counts["blocked"],
@@ -2539,57 +2514,40 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 unknown_count=local_group_counts["unknown"],
                 migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
             ),
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
-            text_color=Colors.TEXT_SECONDARY,
-            justify="left",
-            anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(880),
+            subtitle_wraplength=660,
+            overview_wraplength=440,
+            summary_height=Sizes.SERVER_TREE_COL_LOADER,
+            width=Sizes.DIALOG_LARGE_WIDTH,
+            height=Sizes.DIALOG_LARGE_HEIGHT,
+            min_width=795,
+            min_height=645,
         )
-        subtitle.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
-        overview_label, tree_container = self._create_review_shared_ui(main_frame, 880)
-        update_tree = ttk.Treeview(
+        dialog = shell.dialog
+        subtitle = shell.subtitle
+        overview_label = shell.overview_label
+        tree_container = shell.tree_container
+        summary_box = shell.summary_box
+        button_frame = shell.button_frame
+        update_tree = self._get_install_review_dialog_builder().create_review_tree(
             tree_container,
+            tree_heading="模組",
             columns=("run", "current", "target", "source", "status"),
-            show="tree headings",
-            height=Spacing.MEDIUM,
-            style=TreeUtils.configure_treeview_list_style(
-                "LocalUpdateList",
-                body_font=FontManager.get_font(size=FontSize.INPUT),
-                heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-                rowheight=int(25 * FontManager.get_scale_factor()),
-            ),
-        )
-        update_tree.heading("#0", text="模組")
-        update_tree.column("#0", width=Sizes.SERVER_TREE_COL_NAME - 50, minwidth=170, anchor="w", stretch=False)
-        update_tree.heading("run", text="套用")
-        update_tree.column("run", width=Spacing.XXL, minwidth=48, anchor="center", stretch=False)
-        update_tree.heading("current", text="目前版本")
-        update_tree.column("current", width=Sizes.BUTTON_WIDTH_SECONDARY, minwidth=96, anchor="w", stretch=False)
-        update_tree.heading("target", text="建議版本")
-        update_tree.column("target", width=Sizes.SERVER_TREE_COL_LOADER + 5, minwidth=120, anchor="w", stretch=False)
-        update_tree.heading("source", text="來源 / 識別")
-        update_tree.column("source", width=Sizes.SERVER_TREE_COL_LOADER + 20, minwidth=130, anchor="w", stretch=False)
-        update_tree.heading("status", text="檢查狀態")
-        update_tree.column("status", width=Sizes.INPUT_WIDTH, minwidth=240, anchor="w", stretch=True)
-        TreeUtils.bind_treeview_header_auto_fit(
-            update_tree,
-            include_tree_column=True,
-            heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            body_font=FontManager.get_font(size=FontSize.INPUT),
+            column_specs=[
+                ("run", "套用", Spacing.XXL, 36, False, "center"),
+                ("current", "目前版本", Sizes.BUTTON_WIDTH_SECONDARY, 72, False, "w"),
+                ("target", "建議版本", Sizes.SERVER_TREE_COL_LOADER + 3, 90, False, "w"),
+                ("source", "來源 / 識別", Sizes.SERVER_TREE_COL_LOADER + 10, 98, False, "w"),
+                ("status", "檢查狀態", Sizes.INPUT_WIDTH, 180, True, "w"),
+            ],
+            tree_column_width=Sizes.SERVER_TREE_COL_NAME - 25,
+            tree_column_minwidth=128,
+            tree_column_stretch=False,
             stretch_columns={"status"},
         )
-        update_scroll = ttk.Scrollbar(tree_container, orient="vertical", command=update_tree.yview)
-        update_tree.configure(yscrollcommand=update_scroll.set)
-        update_tree.grid(row=0, column=0, sticky="nsew")
-        update_scroll.grid(row=0, column=1, sticky="ns")
-        tree_container.grid_rowconfigure(0, weight=1)
-        tree_container.grid_columnconfigure(0, weight=1)
 
         def refresh_update_tree() -> None:
             nodes = self._build_local_update_task_nodes(review_entries)
             self._render_review_task_tree(update_tree, nodes, column_count=5)
-
-        summary_box = self._create_review_summary_box(main_frame, height=Sizes.SERVER_TREE_COL_LOADER)
 
         def refresh_update_status_banner() -> None:
             review_nodes = self._build_local_update_task_nodes(review_entries)
@@ -2617,10 +2575,10 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             review_entry = entry_map.get(selected_key)
             if not review_entry:
                 return
-            summary_box.configure(state="normal")
+            summary_box.setReadOnly(False)
             summary_box.delete("1.0", "end")
             summary_box.insert("1.0", self._format_local_update_review_text(review_entry))
-            summary_box.configure(state="disabled")
+            summary_box.setReadOnly(True)
 
         def toggle_update_selection(enabled: bool) -> None:
             self._toggle_review_selection(
@@ -2641,11 +2599,9 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             project_page_url = self._resolve_local_update_review_project_page_url(review_entry) if review_entry else ""
             self._open_project_page(project_page_url, dialog)
 
-        update_tree.bind("<<TreeviewSelect>>", refresh_update_summary)
+        update_tree.connect_event("selection_changed", refresh_update_summary)
         refresh_update_tree()
         refresh_update_summary()
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
         update_button = self._create_review_action_button(
             button_frame,
             text="",
@@ -2699,17 +2655,16 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             command=dialog.destroy,
             side="right",
         )
-        update_tree.bind("<<TreeviewSelect>>", refresh_update_project_page_button, add="+")
+        update_tree.connect_event("selection_changed", refresh_update_project_page_button, append=True)
         refresh_update_status_banner()
         refresh_update_action_button()
         refresh_update_project_page_button()
         DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
-            min_width=1060,
-            min_height=860,
-            max_width=FontManager.get_dpi_scaled_size(1280),
-            max_height=FontManager.get_dpi_scaled_size(980),
+            min_width=795,
+            min_height=645,
             parent=self.parent,
+            preserve_current_size=False,
         )
 
     def check_local_mod_updates(self) -> None:

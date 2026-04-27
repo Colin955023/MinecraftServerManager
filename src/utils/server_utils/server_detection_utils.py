@@ -2,20 +2,71 @@
 提供伺服器型態、版本、啟動檔與記憶體相關偵測能力。
 """
 
+import json
 import re
+import zipfile
 from pathlib import Path
 
 from ...models import ServerConfig
-from .. import PathUtils, ServerDetectionVersionUtils, UIUtils, get_logger
+from .. import JvmOptionPolicy, PathUtils, ServerDetectionVersionUtils, get_logger
+from .server_constants import STARTUP_SCRIPT_CANDIDATES
 
 logger = get_logger().bind(component="ServerDetectionUtils")
 __all__ = ["ServerDetectionUtils"]
 FABRIC_JAR_NAMES = ["fabric-server-launch.jar", "fabric-server-launcher.jar"]
+QUILT_JAR_NAMES = ["quilt-server-launch.jar", "quilt-server-launcher.jar"]
 FORGE_LIBRARY_PATH = "libraries/net/minecraftforge/forge"
+NEOFORGE_LIBRARY_PATH = "libraries/net/neoforged/neoforge"
 
 
 class ServerDetectionUtils:
     """伺服器檢測工具類別，提供各種伺服器相關的檢測和驗證功能"""
+
+    @staticmethod
+    def _extract_mc_version_from_jar_file(jar_path: Path) -> str | None:
+        """從伺服器 JAR 內的版本 metadata 讀取 Minecraft 版本。"""
+        try:
+            with zipfile.ZipFile(jar_path) as jar_file:
+                names = set(jar_file.namelist())
+                if "version.json" in names:
+                    with jar_file.open("version.json") as version_file:
+                        payload = json.loads(version_file.read().decode("utf-8", errors="replace"))
+                    if isinstance(payload, dict):
+                        for key in ("id", "name", "release_target"):
+                            detected = ServerDetectionVersionUtils.extract_mc_version_from_text(
+                                str(payload.get(key, ""))
+                            )
+                            if detected:
+                                return detected
+                if "META-INF/MANIFEST.MF" in names:
+                    with jar_file.open("META-INF/MANIFEST.MF") as manifest_file:
+                        manifest = manifest_file.read().decode("utf-8", errors="replace")
+                    return ServerDetectionVersionUtils.extract_mc_version_from_text(manifest)
+        except (OSError, zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.debug(f"讀取 JAR 版本 metadata 失敗 {jar_path}: {e}")
+        return None
+
+    @staticmethod
+    def _find_loader_args_file(server_path: Path, library_path: str, server_config=None) -> Path | None:
+        loader_lib_dir = server_path / library_path
+        if not loader_lib_dir.is_dir():
+            return None
+        if (
+            server_config
+            and server_config.minecraft_version
+            and server_config.loader_version
+            and (server_config.minecraft_version.lower() != "unknown")
+            and (server_config.loader_version.lower() != "unknown")
+        ):
+            folder_name = f"{server_config.minecraft_version}-{server_config.loader_version}"
+            args_path = loader_lib_dir / folder_name / "win_args.txt"
+            if args_path.exists():
+                return args_path
+        arg_files = list(loader_lib_dir.rglob("win_args.txt"))
+        if arg_files:
+            arg_files.sort(key=lambda p: len(p.parts), reverse=True)
+            return arg_files[0]
+        return None
 
     @staticmethod
     def detect_loader_type(server_path: Path, jar_names: list[str]) -> str:
@@ -31,15 +82,36 @@ class ServerDetectionUtils:
         for fabric_jar in FABRIC_JAR_NAMES:
             if (server_path / fabric_jar).exists():
                 return "fabric"
+        for quilt_jar in QUILT_JAR_NAMES:
+            if (server_path / quilt_jar).exists():
+                return "quilt"
         if (server_path / FORGE_LIBRARY_PATH).is_dir():
             return "forge"
+        if (server_path / NEOFORGE_LIBRARY_PATH).is_dir():
+            return "neoforge"
         jar_names_lower = [n.lower() for n in jar_names]
         for name in jar_names_lower:
             if "fabric" in name:
                 return "fabric"
-            if "forge" in name:
+            if "quilt" in name:
+                return "quilt"
+            if "forge" in name and "neo" not in name:
                 return "forge"
+            if "neoforge" in name.replace("-", "").replace("_", ""):
+                return "neoforge"
         return "vanilla"
+
+    @staticmethod
+    def detect_loader_from_text(text: str) -> str:
+        """相容層：從文字中偵測載入器類型。
+
+        Args:
+            text: 待分析的文字內容。
+
+        Returns:
+            偵測結果；找不到時回傳 `unknown`。
+        """
+        return ServerDetectionVersionUtils.detect_loader_from_text(text)
 
     @staticmethod
     def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
@@ -63,12 +135,27 @@ class ServerDetectionUtils:
                 except ValueError:
                     return f"@{args_file.name}"
             for jar_file in server_path.glob("*.jar"):
-                if "forge" in jar_file.name.lower():
+                if "forge" in jar_file.name.lower() and "neo" not in jar_file.name.lower():
+                    return jar_file.name
+        elif loader_type == "neoforge":
+            args_file = ServerDetectionUtils.find_neoforge_args_file(server_path, server_config)
+            if args_file and args_file.exists():
+                try:
+                    relative_path = args_file.relative_to(server_path)
+                    return f"@{relative_path.as_posix()}"
+                except ValueError:
+                    return f"@{args_file.name}"
+            for jar_file in server_path.glob("*.jar"):
+                if "neoforge" in jar_file.name.lower().replace("-", "").replace("_", ""):
                     return jar_file.name
         elif loader_type == "fabric":
             for fabric_jar in FABRIC_JAR_NAMES:
                 if (server_path / fabric_jar).exists():
                     return fabric_jar
+        elif loader_type == "quilt":
+            for quilt_jar in QUILT_JAR_NAMES:
+                if (server_path / quilt_jar).exists():
+                    return quilt_jar
         for jar_name in ["server.jar", "minecraft_server.jar"]:
             if (server_path / jar_name).exists():
                 return jar_name
@@ -87,8 +174,7 @@ class ServerDetectionUtils:
         Returns:
             找到時回傳啟動腳本 Path，否則回傳 None。
         """
-        script_candidates = ["start_server.bat", "run.bat", "start.bat", "server.bat"]
-        for script_name in script_candidates:
+        for script_name in STARTUP_SCRIPT_CANDIDATES:
             candidate_path = server_path / script_name
             if candidate_path.exists():
                 return candidate_path
@@ -101,7 +187,13 @@ class ServerDetectionUtils:
         if not (folder_path / "server.jar").exists() and (
             not any(
                 (folder_path / f).exists()
-                for f in ["minecraft_server.jar", "fabric-server-launch.jar", "fabric-server-launcher.jar"]
+                for f in [
+                    "minecraft_server.jar",
+                    "fabric-server-launch.jar",
+                    "fabric-server-launcher.jar",
+                    "quilt-server-launch.jar",
+                    "quilt-server-launcher.jar",
+                ]
             )
         ):
             missing.append("server.jar 或同等主程式 JAR")
@@ -149,6 +241,9 @@ class ServerDetectionUtils:
         content = PathUtils.read_text_file(file_path, errors="ignore")
         if not content:
             return ("", False, None, None)
+        if content.startswith("\ufeff"):
+            content = content.removeprefix("\ufeff")
+            modified = True
         for line in content.splitlines(keepends=True):
             line_stripped = line.strip().lower()
             if line_stripped in ["pause", "@pause", "pause.", "@pause."]:
@@ -177,7 +272,7 @@ class ServerDetectionUtils:
                 script_content, modified, max_m, min_m = ServerDetectionUtils._process_startup_script(file_path)
                 if modified:
                     try:
-                        PathUtils.write_text_file(file_path, script_content)
+                        PathUtils.write_text_file(file_path, script_content, encoding="utf-8")
                         logger.info(f"已優化啟動腳本: {file_path.name}")
                     except Exception as e:
                         logger.warning(f"無法更新腳本 {file_path}: {e}")
@@ -201,16 +296,26 @@ class ServerDetectionUtils:
             config: 伺服器設定物件。
         """
         user_jvm_args_path = server_path / "user_jvm_args.txt"
-        lines = []
+        lines: list[str] = []
+        custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(config, "jvm_args", []))
+        java_major = getattr(config, "java_major", None) or getattr(config, "java_major_version", None)
+        performance_profile = str(getattr(config, "performance_profile", "") or "")
+        lines.extend(
+            f"{arg}\n"
+            for arg in JvmOptionPolicy.recommend_gc_args(
+                memory_max_mb=int(config.memory_max_mb or 0),
+                java_major=int(java_major) if java_major else None,
+                performance_profile=performance_profile,
+                existing_args=custom_jvm_args,
+            )
+        )
+        lines.extend(f"{arg}\n" for arg in custom_jvm_args)
         if config.memory_min_mb:
             lines.append(f"-Xms{config.memory_min_mb}M\n")
         if config.memory_max_mb:
             lines.append(f"-Xmx{config.memory_max_mb}M\n")
-        try:
-            PathUtils.write_text_file(user_jvm_args_path, "".join(lines))
-        except Exception as e:
-            logger.exception(f"寫入失敗: {e}")
-            UIUtils.show_error("寫入失敗", f"無法更新 {user_jvm_args_path} 檔案。請檢查權限或磁碟空間。錯誤: {e}")
+        if not PathUtils.write_text_file(user_jvm_args_path, "".join(lines)):
+            logger.error(f"無法更新 {user_jvm_args_path} 檔案，請檢查權限或磁碟空間。")
 
     @staticmethod
     def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:
@@ -222,17 +327,18 @@ class ServerDetectionUtils:
         """
         memory_sources = [
             [("user_jvm_args.txt", False), ("jvm.args", False)],
-            [("start_server.bat", True), ("start.bat", True)],
         ]
+        startup_scripts = [(script_name, True) for script_name in STARTUP_SCRIPT_CANDIDATES]
+        memory_sources.append(startup_scripts)
         max_mem = None
         min_mem = None
         for source_group in memory_sources:
             for source_file, is_script in source_group:
                 fpath = server_path / source_file
                 max_m, min_m = ServerDetectionUtils._detect_memory_from_file(fpath, is_script)
-                if max_m is not None:
+                if max_m is not None and max_mem is None:
                     max_mem = max_m
-                if min_m is not None:
+                if min_m is not None and min_mem is None:
                     min_mem = min_m
                 if max_mem is not None and min_mem is not None:
                     logger.debug(f"從 {source_file} 偵測到記憶體: {min_mem}M - {max_mem}M")
@@ -241,7 +347,7 @@ class ServerDetectionUtils:
                 break
         if max_mem is None or min_mem is None:
             for script in server_path.glob("*.bat"):
-                if script.name in ["start_server.bat", "start.bat"]:
+                if script.name in STARTUP_SCRIPT_CANDIDATES:
                     continue
                 max_m, min_m = ServerDetectionUtils._detect_memory_from_file(script, is_script=True)
                 if max_m:
@@ -277,12 +383,26 @@ class ServerDetectionUtils:
             if detected_loader == "fabric":
                 detected_file = next((f for f in FABRIC_JAR_NAMES if (server_path / f).exists()), None)
                 detection_source["loader_type"] = f"檔案 {detected_file}" if detected_file else "Fabric 檔案"
+            elif detected_loader == "quilt":
+                detected_file = next((f for f in QUILT_JAR_NAMES if (server_path / f).exists()), None)
+                detection_source["loader_type"] = f"檔案 {detected_file}" if detected_file else "Quilt 檔案"
             elif detected_loader == "forge":
                 if (server_path / FORGE_LIBRARY_PATH).is_dir():
                     detection_source["loader_type"] = f"目錄 {FORGE_LIBRARY_PATH}"
                 else:
-                    detected_file = next((name for name in jar_names if "forge" in name.lower()), None)
+                    detected_file = next(
+                        (name for name in jar_names if "forge" in name.lower() and "neo" not in name.lower()), None
+                    )
                     detection_source["loader_type"] = f"JAR 檔案 {detected_file}" if detected_file else "Forge JAR"
+            elif detected_loader == "neoforge":
+                if (server_path / NEOFORGE_LIBRARY_PATH).is_dir():
+                    detection_source["loader_type"] = f"目錄 {NEOFORGE_LIBRARY_PATH}"
+                else:
+                    detected_file = next(
+                        (name for name in jar_names if "neoforge" in name.lower().replace("-", "").replace("_", "")),
+                        None,
+                    )
+                    detection_source["loader_type"] = f"JAR 檔案 {detected_file}" if detected_file else "NeoForge JAR"
             elif detected_loader == "vanilla":
                 detected_file = next(
                     (name for name in jar_names if name.lower() in ("server.jar", "minecraft_server.jar")), None
@@ -329,12 +449,19 @@ class ServerDetectionUtils:
         """
         if not folder_path.is_dir():
             return False
-        server_jars = ["server.jar", "minecraft_server.jar", "fabric-server-launch.jar", "fabric-server-launcher.jar"]
+        server_jars = [
+            "server.jar",
+            "minecraft_server.jar",
+            "fabric-server-launch.jar",
+            "fabric-server-launcher.jar",
+            "quilt-server-launch.jar",
+            "quilt-server-launcher.jar",
+        ]
         if any((folder_path / jar_name).exists() for jar_name in server_jars):
             return True
         for file in folder_path.glob("*.jar"):
             jar_name = file.name.lower()
-            if any(pattern in jar_name for pattern in ["forge", "server", "minecraft"]):
+            if any(pattern in jar_name for pattern in ["forge", "neoforge", "server", "minecraft"]):
                 return True
         server_indicators = ["server.properties", "eula.txt"]
         return bool(any((folder_path / indicator).exists() for indicator in server_indicators))
@@ -478,6 +605,22 @@ class ServerDetectionUtils:
                 ):
                     break
 
+        def detect_from_jar_metadata():
+            preferred_names = ["server.jar", "minecraft_server.jar"]
+            preferred_jars = [server_path / name for name in preferred_names if (server_path / name).exists()]
+            other_jars = [
+                jar
+                for jar in server_path.glob("*.jar")
+                if jar not in preferred_jars and "installer" not in jar.name.lower()
+            ]
+            for jar in [*preferred_jars, *other_jars]:
+                mc_ver = ServerDetectionUtils._extract_mc_version_from_jar_file(jar)
+                if mc_ver:
+                    set_if_unknown("minecraft_version", mc_ver)
+                    if detection_source and "mc_version" not in detection_source:
+                        detection_source["mc_version"] = f"JAR metadata {jar.name}"
+                    return
+
         def detect_from_version_json():
             fp = server_path / "version.json"
             data = PathUtils.load_json(fp)
@@ -494,6 +637,7 @@ class ServerDetectionUtils:
         if loader == "forge":
             detect_from_forge_lib()
         detect_from_jars()
+        detect_from_jar_metadata()
         detect_from_version_json()
         if is_unknown(config.loader_type) and is_unknown(config.loader_version):
             config.loader_type = "unknown"
@@ -509,25 +653,28 @@ class ServerDetectionUtils:
         Returns:
             找到時回傳參數檔 Path，否則回傳 None。
         """
-        forge_lib_dir = server_path / "libraries" / "net" / "minecraftforge" / "forge"
-        if not forge_lib_dir.is_dir():
-            return None
-        if (
-            server_config
-            and server_config.minecraft_version
-            and server_config.loader_version
-            and (server_config.minecraft_version.lower() != "unknown")
-            and (server_config.loader_version.lower() != "unknown")
-        ):
-            folder_name = f"{server_config.minecraft_version}-{server_config.loader_version}"
-            args_path = forge_lib_dir / folder_name / "win_args.txt"
-            if args_path.exists():
-                return args_path
-        arg_files = list(forge_lib_dir.rglob("win_args.txt"))
-        if arg_files:
-            arg_files.sort(key=lambda p: len(p.parts), reverse=True)
-            return arg_files[0]
-        return None
+        return ServerDetectionUtils._find_loader_args_file(
+            server_path,
+            FORGE_LIBRARY_PATH,
+            server_config,
+        )
+
+    @staticmethod
+    def find_neoforge_args_file(server_path: Path, server_config=None) -> Path | None:
+        """尋找 NeoForge 的 `win_args.txt` 啟動參數檔。
+
+        Args:
+            server_path: 伺服器資料夾路徑。
+            server_config: 伺服器設定物件。
+
+        Returns:
+            找到時回傳參數檔 Path，否則回傳 None。
+        """
+        return ServerDetectionUtils._find_loader_args_file(
+            server_path,
+            NEOFORGE_LIBRARY_PATH,
+            server_config,
+        )
 
     @staticmethod
     def _parse_forge_args_file(args_path: Path) -> dict[str, str | list[str] | None]:

@@ -2,18 +2,18 @@
 提供常用的界面元件和工具函數，避免重複程式碼。
 """
 
-import contextlib
 import os
+import threading
 import time
 import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import customtkinter as ctk
-
 from ...ui import DialogUtils, FontManager
 from .. import Colors, PathUtils, SubprocessUtils, get_logger
+from . import qt_widgets as qt
+from .qt_runtime import QtCore, QtWidgets, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -22,34 +22,18 @@ def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]
     """取得按鈕樣式配置
 
     Args:
-        button_type: 按鈕類型 ("primary", "warning", "danger")
+        button_type: 按鈕類型 ("primary", "secondary", "warning", "danger")
 
     Returns:
         包含 fg_color 和 hover_color 的字典
     """
     styles = {
         "primary": {"fg_color": Colors.BUTTON_PRIMARY, "hover_color": Colors.BUTTON_PRIMARY_HOVER},
+        "secondary": {"fg_color": Colors.BUTTON_SECONDARY, "hover_color": Colors.BUTTON_SECONDARY_HOVER},
         "warning": {"fg_color": Colors.BUTTON_WARNING, "hover_color": Colors.BUTTON_WARNING_HOVER},
         "danger": {"fg_color": Colors.BUTTON_DANGER, "hover_color": Colors.BUTTON_DANGER_HOVER},
     }
     return styles.get(button_type, styles["primary"])
-
-
-def get_dropdown_style() -> dict[str, tuple[str, str]]:
-    """取得下拉選單樣式配置
-
-    Returns:
-        包含所有下拉選單顏色的字典
-    """
-    return {
-        "fg_color": Colors.DROPDOWN_BG,
-        "button_color": Colors.DROPDOWN_BUTTON,
-        "button_hover_color": Colors.DROPDOWN_BUTTON_HOVER,
-        "dropdown_fg_color": Colors.DROPDOWN_BG,
-        "dropdown_hover_color": Colors.DROPDOWN_HOVER,
-        "dropdown_text_color": Colors.TEXT_PRIMARY,
-        "text_color": Colors.TEXT_PRIMARY,
-    }
 
 
 def compute_adaptive_pool_limit(
@@ -125,16 +109,22 @@ class UIUtils:
             pady: 垂直邊距。
         """
         if padx is None:
-            padx = FontManager.get_dpi_scaled_size(15)
+            padx = 12
         if pady is None:
-            pady = FontManager.get_dpi_scaled_size(15)
-        frame.pack(fill="both", expand=True, padx=padx, pady=pady)
+            pady = 12
+        if isinstance(frame, QtWidgets.QWidget):
+            frame.setContentsMargins(padx, pady, padx, pady)
+            frame.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
+            if hasattr(frame, "attach"):
+                frame.attach(fill="both", expand=True)
+            return
+        frame.attach(fill="both", expand=True, padx=padx, pady=pady)
 
     @staticmethod
     def get_mousewheel_units(delta: int) -> int:
         """將原生 MouseWheel 的 delta 轉為視窗滾動單位。
 
-        回傳值符合 Tkinter 的 `yview_scroll(units, 'units')` 所需格式。
+        回傳值符合清單滾動介面的單位格式。
         """
         if delta == 0:
             return 0
@@ -145,7 +135,7 @@ class UIUtils:
 
     @staticmethod
     def cancel_scheduled_job(widget, job_attr: str, *, owner: Any | None = None) -> None:
-        """取消指定的 `after` / `after_idle` 排程工作。
+        """取消指定的排程工作。
 
         Args:
             widget: 排程所在的 widget。
@@ -158,17 +148,34 @@ class UIUtils:
             setattr(holder, job_attr, None)
             return
         try:
-            if widget and hasattr(widget, "after_cancel"):
-                widget.after_cancel(job_id)
+            if isinstance(job_id, QtCore.QTimer):
+                cancel_timer(job_id)
+            elif widget and hasattr(widget, "cancel_schedule"):
+                widget.cancel_schedule(job_id)
         except Exception as e:
             logger.debug(f"取消排程失敗 {job_attr}={job_id}: {e}")
         finally:
             setattr(holder, job_attr, None)
 
     @staticmethod
+    def _is_schedulable_widget(widget: Any, holder: Any, job_attr: str) -> bool:
+        if not widget:
+            return False
+        try:
+            if isinstance(widget, QtCore.QObject) and not is_qobject_alive(widget):
+                setattr(holder, job_attr, None)
+                return False
+            if hasattr(widget, "is_alive") and not widget.is_alive():
+                setattr(holder, job_attr, None)
+                return False
+        except Exception:
+            return False
+        return True
+
+    @staticmethod
     def schedule_debounce(
         widget, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
-    ) -> str | None:
+    ) -> Any | None:
         """以 debounce 方式排程：新的呼叫會覆蓋尚未執行的舊工作。
 
         Args:
@@ -182,13 +189,7 @@ class UIUtils:
             建立的 job id，失敗時回傳 None。
         """
         holder = owner if owner is not None else widget
-        if not widget or not hasattr(widget, "after"):
-            return None
-        try:
-            if hasattr(widget, "winfo_exists") and (not widget.winfo_exists()):
-                setattr(holder, job_attr, None)
-                return None
-        except Exception:
+        if not UIUtils._is_schedulable_widget(widget, holder, job_attr):
             return None
         UIUtils.cancel_scheduled_job(widget, job_attr, owner=holder)
 
@@ -200,7 +201,12 @@ class UIUtils:
                 logger.exception(f"執行 debounce callback 失敗 {job_attr}: {e}")
 
         try:
-            job_id = widget.after(max(0, int(delay_ms)), _runner)
+            if isinstance(widget, QtCore.QObject):
+                job_id = invoke_later(max(0, int(delay_ms)), _runner, parent=widget)
+            elif hasattr(widget, "schedule"):
+                job_id = widget.schedule(max(0, int(delay_ms)), _runner)
+            else:
+                return None
             setattr(holder, job_attr, job_id)
             return job_id
         except Exception as e:
@@ -211,8 +217,8 @@ class UIUtils:
     @staticmethod
     def schedule_coalesced_idle(
         widget, job_attr: str, callback: Callable[[], Any], *, owner: Any | None = None
-    ) -> str | None:
-        """合併多次請求為單次 `after_idle` 執行。
+    ) -> Any | None:
+        """合併多次請求為單次 `schedule_idle` 執行。
 
         Args:
             widget: 排程所在的 widget。
@@ -226,13 +232,7 @@ class UIUtils:
         holder = owner if owner is not None else widget
         if getattr(holder, job_attr, None):
             return getattr(holder, job_attr, None)
-        if not widget or not hasattr(widget, "after_idle"):
-            return None
-        try:
-            if hasattr(widget, "winfo_exists") and (not widget.winfo_exists()):
-                setattr(holder, job_attr, None)
-                return None
-        except Exception:
+        if not UIUtils._is_schedulable_widget(widget, holder, job_attr):
             return None
 
         def _runner() -> None:
@@ -243,7 +243,14 @@ class UIUtils:
                 logger.exception(f"執行 idle callback 失敗 {job_attr}: {e}")
 
         try:
-            job_id = widget.after_idle(_runner)
+            if isinstance(widget, QtCore.QObject):
+                job_id = invoke_later(0, _runner, parent=widget)
+            elif hasattr(widget, "schedule_idle"):
+                job_id = widget.schedule_idle(_runner)
+            elif hasattr(widget, "schedule"):
+                job_id = widget.schedule(0, _runner)
+            else:
+                return None
             setattr(holder, job_attr, job_id)
             return job_id
         except Exception as e:
@@ -283,7 +290,9 @@ class UIUtils:
         if last_run_attr is None:
             last_run_attr = f"{job_attr}_last_run_ms"
         try:
-            if hasattr(widget, "winfo_exists") and (not widget.winfo_exists()):
+            if isinstance(widget, QtCore.QObject) and not is_qobject_alive(widget):
+                return False
+            if hasattr(widget, "is_alive") and (not widget.is_alive()):
                 return False
         except Exception:
             return False
@@ -310,7 +319,12 @@ class UIUtils:
                 _run_now()
 
             try:
-                setattr(holder, job_attr, widget.after(remaining, _runner))
+                if isinstance(widget, QtCore.QObject):
+                    setattr(holder, job_attr, invoke_later(remaining, _runner, parent=widget))
+                elif hasattr(widget, "schedule"):
+                    setattr(holder, job_attr, widget.schedule(remaining, _runner))
+                else:
+                    return False
             except Exception as e:
                 logger.debug(f"建立 throttle 排程失敗 {job_attr}: {e}")
                 setattr(holder, job_attr, None)
@@ -318,25 +332,25 @@ class UIUtils:
         return False
 
     @staticmethod
-    def bind_tooltip(
+    def attach_tooltip(
         widget,
         text: str,
         *,
         bg: str = "#2b2b2b",
         fg: str = "white",
         font=None,
-        padx: int = 8,
-        pady: int = 4,
+        padx: int = 4,
+        pady: int = 2,
         wraplength: int | None = None,
         justify: str = "left",
         borderwidth: int = 0,
         relief: str = "flat",
-        offset_x: int = 10,
-        offset_y: int = 10,
+        offset_x: int = 5,
+        offset_y: int = 5,
         show_delay_ms: int = 0,
         auto_hide_ms: int | None = None,
     ) -> None:
-        """替 widget 綁定滑鼠提示泡泡。
+        """替 widget 綁定原生 Qt tooltip。
 
         Args:
             widget: 要綁定提示的 widget。
@@ -355,99 +369,16 @@ class UIUtils:
             show_delay_ms: 顯示延遲毫秒數。
             auto_hide_ms: 自動隱藏毫秒數。
         """
+        _ = (bg, fg, font, padx, pady, wraplength, justify, borderwidth, relief, offset_x, offset_y, show_delay_ms)
         if not widget:
             return
-
-        def _destroy_tooltip() -> None:
-            tip = getattr(widget, "_msm_tooltip", None)
-            if tip is not None:
-                try:
-                    if tip.winfo_exists():
-                        tip.destroy()
-                except Exception as e:
-                    logger.debug(f"銷毀 tooltip 失敗: {e}", "UIUtils")
-            try:
-                widget._msm_tooltip = None
-            except Exception as e:
-                logger.debug(f"重置 _msm_tooltip 屬性失敗: {e}", "UIUtils")
-            job = getattr(widget, "_msm_tooltip_job", None)
-            if job is not None:
-                try:
-                    widget.after_cancel(job)
-                except Exception as e:
-                    logger.debug(f"取消 tooltip job 失敗: {e}", "UIUtils")
-            try:
-                widget._msm_tooltip_job = None
-            except Exception as e:
-                logger.debug(f"重置 _msm_tooltip_job 屬性失敗: {e}", "UIUtils")
-            show_job = getattr(widget, "_msm_tooltip_show_job", None)
-            if show_job is not None:
-                try:
-                    widget.after_cancel(show_job)
-                except Exception as e:
-                    logger.debug(f"取消 tooltip show job 失敗: {e}", "UIUtils")
-            try:
-                widget._msm_tooltip_show_job = None
-            except Exception as e:
-                logger.debug(f"重置 _msm_tooltip_show_job 屬性失敗: {e}", "UIUtils")
-
-        def _show_tooltip_at(x_root: int, y_root: int) -> None:
-            try:
-                _destroy_tooltip()
-                tip = DialogUtils.create_tooltip_window(
-                    widget,
-                    text or "",
-                    bg=bg,
-                    fg=fg,
-                    font=font,
-                    padx=padx,
-                    pady=pady,
-                    wraplength=wraplength,
-                    justify=justify,
-                    borderwidth=borderwidth,
-                    relief=relief,
-                    offset_x=offset_x,
-                    offset_y=offset_y,
-                    x_root=x_root,
-                    y_root=y_root,
-                )
-                if tip is None:
-                    return
-                widget._msm_tooltip = tip
-                if auto_hide_ms:
-                    try:
-                        widget._msm_tooltip_job = tip.after(auto_hide_ms, _destroy_tooltip)
-                    except Exception as e:
-                        logger.debug(f"設定 tooltip 自動隱藏失敗: {e}", "UIUtils")
-            except Exception as e:
-                logger.exception(f"顯示 tooltip 失敗: {e}")
-
-        def _show_tooltip(event) -> None:
-            x_root = int(getattr(event, "x_root", 0))
-            y_root = int(getattr(event, "y_root", 0))
-            delay = max(0, int(show_delay_ms))
-            if delay <= 0:
-                _show_tooltip_at(x_root, y_root)
-                return
-            _destroy_tooltip()
-
-            def _delayed_show() -> None:
-                with contextlib.suppress(Exception):
-                    widget._msm_tooltip_show_job = None
-                _show_tooltip_at(x_root, y_root)
-
-            try:
-                widget._msm_tooltip_show_job = widget.after(delay, _delayed_show)
-            except Exception as e:
-                logger.debug(f"設定 tooltip 延遲顯示失敗: {e}", "UIUtils")
-                _show_tooltip_at(x_root, y_root)
-
-        def _hide_tooltip(_event=None) -> None:
-            _destroy_tooltip()
-
         try:
-            widget.bind("<Enter>", _show_tooltip)
-            widget.bind("<Leave>", _hide_tooltip)
+            if hasattr(widget, "setToolTip"):
+                widget.setToolTip(text or "")
+                if auto_hide_ms and hasattr(widget, "setToolTipDuration"):
+                    widget.setToolTipDuration(int(auto_hide_ms))
+                return
+            widget._tooltip_text = text or ""
         except Exception as e:
             logger.exception(f"綁定 tooltip 事件失敗: {e}")
 
@@ -461,7 +392,10 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils.show_error(title, message, parent, topmost)
+        if threading.current_thread() is threading.main_thread():
+            DialogUtils.show_error(title, message, parent, topmost)
+            return
+        run_on_ui_thread(lambda: DialogUtils.show_error(title, message, parent, topmost), timeout=None)
 
     @staticmethod
     def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
@@ -473,7 +407,10 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils.show_warning(title, message, parent, topmost)
+        if threading.current_thread() is threading.main_thread():
+            DialogUtils.show_warning(title, message, parent, topmost)
+            return
+        run_on_ui_thread(lambda: DialogUtils.show_warning(title, message, parent, topmost), timeout=None)
 
     @staticmethod
     def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
@@ -485,7 +422,10 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils.show_info(title, message, parent, topmost)
+        if threading.current_thread() is threading.main_thread():
+            DialogUtils.show_info(title, message, parent, topmost)
+            return
+        run_on_ui_thread(lambda: DialogUtils.show_info(title, message, parent, topmost), timeout=None)
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
@@ -580,45 +520,19 @@ class UIUtils:
         Returns:
             使用者選擇結果，或在無法判斷時回傳 None。
         """
-        return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
+        if threading.current_thread() is threading.main_thread():
+            return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
+        return run_on_ui_thread(
+            lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None
+        )
 
     @staticmethod
-    def apply_unified_dropdown_styling(dropdown_widget) -> None:
-        """套用統一的下拉選單樣式。
+    def sync_bool_string_state(bool_var, string_var) -> None:
+        """建立 BoolState 與 TextState 的雙向綁定（用於 server.properties 等場景）
 
         Args:
-            dropdown_widget: 要套用樣式的下拉選單元件。
-        """
-        style_config = get_dropdown_style()
-        dropdown_widget.configure(**style_config)
-
-        def on_mouse_wheel(event):
-            try:
-                current_value = dropdown_widget.get()
-                values = dropdown_widget.cget("values")
-                if values and current_value in values:
-                    current_index = values.index(current_value)
-                    if event.delta > 0 and current_index > 0:
-                        new_index = current_index - 1
-                    elif event.delta < 0 and current_index < len(values) - 1:
-                        new_index = current_index + 1
-                    else:
-                        return
-                    dropdown_widget.set(values[new_index])
-                    if hasattr(dropdown_widget, "_command") and dropdown_widget._command:
-                        dropdown_widget._command(values[new_index])
-            except Exception as e:
-                logger.exception(f"滑鼠滾輪處理錯誤: {e}")
-
-        dropdown_widget.bind("<MouseWheel>", on_mouse_wheel)
-
-    @staticmethod
-    def bind_bool_string_var(bool_var, string_var) -> None:
-        """建立 BooleanVar 與 StringVar 的雙向綁定（用於 server.properties 等場景）
-
-        Args:
-            bool_var: tkinter.BooleanVar 布林變數
-            string_var: tkinter.StringVar 字串變數（"true"/"false"）
+            bool_var: qt.BoolState 布林變數
+            string_var: qt.TextState 字串變數（"true"/"false"）
         """
         in_sync = False
 
@@ -660,7 +574,7 @@ class UIUtils:
         string_var.trace_add("write", update_bool_var)
 
     @staticmethod
-    def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> ctk.CTkButton:
+    def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> qt.Button:
         """建立統一樣式的按鈕。
 
         Args:
@@ -668,49 +582,48 @@ class UIUtils:
             text: 按鈕文字。
             command: 按鈕點擊回呼。
             button_type: 按鈕樣式類型。
-            **kwargs: 額外的 `CTkButton` 參數。
+            **kwargs: 額外的 `QtButton` 參數。
 
         Returns:
-            建立完成的 `CTkButton`。
+            建立完成的 `QtButton`。
         """
-        scale_factor = FontManager.get_scale_factor()
         if button_type == "primary":
             button_style = {
                 "fg_color": ("#1f4e79", "#0f2a44"),
                 "hover_color": ("#0f2a44", "#071925"),
                 "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=18, weight="bold"),
-                "width": int(180 * scale_factor),
-                "height": int(60 * scale_factor),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=14, weight="bold"),
+                "width": 135,
+                "height": 45,
             }
         elif button_type == "secondary":
             button_style = {
                 "fg_color": ("#2d3748", "#1a202c"),
                 "hover_color": ("#1a202c", "#0d1117"),
                 "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
-                "width": int(120 * scale_factor),
-                "height": int(42 * scale_factor),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
+                "width": 90,
+                "height": 32,
             }
         elif button_type == "small":
             button_style = {
                 "fg_color": ("#4a5568", "#2d3748"),
                 "hover_color": ("#2d3748", "#1a202c"),
                 "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
-                "width": int(80 * scale_factor),
-                "height": int(30 * scale_factor),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
+                "width": 60,
+                "height": 23,
             }
         elif button_type == "cancel":
             button_style = {
                 "fg_color": ("#dc2626", "#991b1b"),
                 "hover_color": ("#991b1b", "#7f1d1d"),
                 "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=18),
-                "width": int(120 * scale_factor),
-                "height": int(48 * scale_factor),
+                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
+                "width": 90,
+                "height": 36,
             }
         else:
             button_style = {}
         final_style = {**button_style, **kwargs}
-        return ctk.CTkButton(parent, text=text, command=command, **final_style)
+        return qt.Button(parent, text=text, command=command, **final_style)

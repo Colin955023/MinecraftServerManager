@@ -7,16 +7,138 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Protocol, TypeVar
 
-import markdown as _markdown
 from packaging.version import Version
 
-from ...ui import TaskUtils
-from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, UpdateParsing, get_logger
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UpdateParsing, get_logger
+from ..ui_support.qt_runtime import is_qobject_alive
 
 logger = get_logger().bind(component="UpdateChecker")
+_UpdateResultT = TypeVar("_UpdateResultT")
+
+
+class UpdateCheckerInteraction(Protocol):
+    """更新流程需要的 UI 與排程互動介面。"""
+
+    def run_async(self, work: Callable[[], None]) -> None:
+        """在背景執行更新檢查工作。"""
+
+    def call_on_ui(self, parent: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
+        """在 UI 執行緒執行 callback 並回傳結果。
+
+        Args:
+            parent: 排程用 UI parent。
+            callback: 要執行的函式。
+
+        Returns:
+            callback 的回傳值。
+        """
+
+    def schedule_debounce(
+        self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
+    ) -> Any:
+        """安排延遲 UI 工作。
+
+        Args:
+            widget: 排程所在 widget。
+            job_attr: 儲存 job id 的屬性名稱。
+            delay_ms: 延遲毫秒數。
+            callback: 到期後執行的函式。
+            owner: 可選的 job holder。
+
+        Returns:
+            底層排程器回傳值。
+        """
+
+    def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
+        """詢問使用者是否同意更新流程。
+
+        Args:
+            title: 對話框標題。
+            message: 對話框訊息。
+            **kwargs: UI adapter 選項。
+
+        Returns:
+            使用者選擇；取消或無法判斷時回傳 None。
+        """
+
+    def show_info(self, title: str, message: str, **kwargs: Any) -> None:
+        """顯示資訊訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
+
+    def show_error(self, title: str, message: str, **kwargs: Any) -> None:
+        """顯示錯誤訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
+
+    def open_external(self, target: str) -> None:
+        """開啟外部連結或路徑。
+
+        Args:
+            target: URL 或檔案路徑。
+        """
+
+
+class _DirectUpdateCheckerInteraction:
+    """沒有 UI adapter 時使用的安全後備互動實作。"""
+
+    def run_async(self, work: Callable[[], None]) -> None:
+        thread = threading.Thread(target=work, daemon=True, name="UpdateChecker")
+        thread.start()
+
+    def call_on_ui(self, parent: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
+        _ = parent
+        return callback()
+
+    def schedule_debounce(
+        self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
+    ) -> Any:
+        _ = (job_attr, owner)
+        if widget is not None and hasattr(widget, "schedule"):
+            try:
+                alive = False
+                if hasattr(widget, "is_alive") and callable(widget.is_alive):
+                    alive = bool(widget.is_alive())
+                else:
+                    alive = is_qobject_alive(widget)
+                if alive:
+                    return widget.schedule(max(0, int(delay_ms)), callback)
+            except Exception:
+                logger.debug("使用 widget.schedule 安排工作失敗，將回退到 threading.Timer", exc_info=True)
+        timer = threading.Timer(max(0, int(delay_ms)) / 1000, callback)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
+        _ = (message, kwargs)
+        logger.info(f"略過需要 UI 確認的更新動作：{title}")
+        return False
+
+    def show_info(self, title: str, message: str, **kwargs: Any) -> None:
+        _ = kwargs
+        logger.info(f"{title}: {message}")
+
+    def show_error(self, title: str, message: str, **kwargs: Any) -> None:
+        _ = kwargs
+        logger.error(f"{title}: {message}")
+
+    def open_external(self, target: str) -> None:
+        logger.info(f"略過開啟外部連結：{target}")
 
 
 class UpdateChecker:
@@ -143,13 +265,17 @@ class UpdateChecker:
         return "\n".join(lines) + "\n"
 
     @staticmethod
-    def _launch_installer(installer_path: Path, parent=None) -> None:
+    def _launch_installer(
+        installer_path: Path, parent=None, interaction: UpdateCheckerInteraction | None = None
+    ) -> None:
         """啟動安裝程式
 
         Args:
             installer_path: 安裝程式檔案路徑
             parent: 父視窗物件，用於在主執行緒顯示 UI 對話框
+            interaction: 更新流程互動介面。
         """
+        installer_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
         try:
             try:
                 temp_dir = Path(tempfile.gettempdir()).resolve(strict=True)
@@ -164,9 +290,9 @@ class UpdateChecker:
                 logger.error(f"安裝程式路徑不在允許的暫存目錄中：{resolved_path}")
                 return
             if resolved_path.is_file():
-                confirm = TaskUtils.call_on_ui(
+                confirm = installer_interaction.call_on_ui(
                     parent,
-                    lambda: UIUtils.ask_yes_no_cancel(
+                    lambda: installer_interaction.ask_yes_no_cancel(
                         "執行安裝程式",
                         f"即將執行安裝程式：\n{resolved_path}\n\n是否確定要執行？",
                         parent=parent,
@@ -192,19 +318,21 @@ class UpdateChecker:
             logger.exception(f"安裝程式啟動失敗: {e}")
 
     @staticmethod
-    def _graceful_exit(parent, delay_ms: int = 100) -> None:
+    def _graceful_exit(parent, delay_ms: int = 100, interaction: UpdateCheckerInteraction | None = None) -> None:
         """優雅地關閉應用程式
 
         Args:
             parent: 父視窗物件
             delay_ms: 延遲關閉的毫秒數
+            interaction: 更新流程互動介面。
         """
+        exit_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
         try:
-            if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
+            if parent is not None and hasattr(parent, "schedule") and hasattr(parent, "is_alive") and parent.is_alive():
 
                 def _close():
                     try:
-                        if parent.winfo_exists():
+                        if parent.is_alive():
                             parent.quit()
                             parent.destroy()
                     except Exception as e:
@@ -212,7 +340,7 @@ class UpdateChecker:
                     finally:
                         sys.exit(0)
 
-                UIUtils.schedule_debounce(
+                exit_interaction.schedule_debounce(
                     parent, "_update_graceful_exit_job", max(0, int(delay_ms)), _close, owner=parent
                 )
                 return
@@ -251,12 +379,7 @@ class UpdateChecker:
                 continue
             kept_lines.append(clean_line)
         text = "\n".join(kept_lines)
-        try:
-            html = _markdown.markdown(text)
-            text_only = re.sub("<[^<]+?>", "", html)
-            decoded = _html.unescape(text_only)
-        except Exception:
-            decoded = text
+        decoded = UpdateChecker._markdown_to_safe_text(text)
         final_lines = [x for x in decoded.splitlines() if x.strip()]
         if len(final_lines) > 15:
             final_lines = final_lines[:15]
@@ -264,8 +387,30 @@ class UpdateChecker:
         return "\n".join(final_lines)
 
     @staticmethod
+    def _markdown_to_safe_text(text: str) -> str:
+        """將遠端 Markdown 轉為純文字，避免引入 HTML 渲染面。"""
+        if not text:
+            return ""
+        safe_text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+        safe_text = re.sub(r"`([^`]*)`", r"\1", safe_text)
+        safe_text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", safe_text)
+        safe_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe_text)
+        safe_text = re.sub(r"<[^>]+>", "", safe_text)
+        safe_text = re.sub(r"^\s{0,3}#{1,6}\s*", "", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s{0,3}>\s?", "", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s*[-*+]\s+", "- ", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s*\d+[.)]\s+", "- ", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"[*_~]{1,3}", "", safe_text)
+        return _html.unescape(safe_text)
+
+    @staticmethod
     def check_and_prompt_update(
-        current_version: str, owner: str, repo: str, show_up_to_date_message: bool = True, parent=None
+        current_version: str,
+        owner: str,
+        repo: str,
+        show_up_to_date_message: bool = True,
+        parent=None,
+        interaction: UpdateCheckerInteraction | None = None,
     ) -> None:
         """檢查最新版本並在需要時提示使用者進行更新。
 
@@ -275,7 +420,50 @@ class UpdateChecker:
             repo: GitHub repository 名稱。
             show_up_to_date_message: 是否在已是最新版本時顯示提示。
             parent: 父視窗物件。
+            interaction: UI 層注入的互動介面；未提供時只記錄訊息並略過需要確認的動作。
         """
+        update_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
+
+        class TaskUtils:
+            """將舊呼叫點轉接到注入的更新互動介面。"""
+
+            @staticmethod
+            def call_on_ui(parent_obj: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
+                return update_interaction.call_on_ui(parent_obj, callback)
+
+            @staticmethod
+            def run_async(work: Callable[[], None]) -> None:
+                update_interaction.run_async(work)
+
+        class UIUtils:
+            """將舊 UI 呼叫點轉接到注入的更新互動介面。"""
+
+            @staticmethod
+            def schedule_debounce(
+                widget: Any,
+                job_attr: str,
+                delay_ms: int,
+                callback: Callable[[], Any],
+                *,
+                owner: Any | None = None,
+            ) -> Any:
+                return update_interaction.schedule_debounce(widget, job_attr, delay_ms, callback, owner=owner)
+
+            @staticmethod
+            def ask_yes_no_cancel(title: str, message: str, **kwargs: Any) -> bool | None:
+                return update_interaction.ask_yes_no_cancel(title, message, **kwargs)
+
+            @staticmethod
+            def show_info(title: str, message: str, **kwargs: Any) -> None:
+                update_interaction.show_info(title, message, **kwargs)
+
+            @staticmethod
+            def show_error(title: str, message: str, **kwargs: Any) -> None:
+                update_interaction.show_error(title, message, **kwargs)
+
+            @staticmethod
+            def open_external(target: str) -> None:
+                update_interaction.open_external(target)
 
         def _work() -> None:
             temp_files_to_cleanup: list[Path] = []
@@ -592,7 +780,8 @@ class UpdateChecker:
                     )
                     apply_script = temp_root / "apply_update.ps1"
                     try:
-                        apply_script.write_text(script, encoding="utf-8")
+                        if not PathUtils.write_text_file(apply_script, script, encoding="utf-8"):
+                            raise OSError(f"無法寫入更新腳本: {apply_script}")
                     except Exception:
                         logger.exception("寫入 PowerShell 更新腳本失敗")
                         TaskUtils.call_on_ui(
@@ -643,7 +832,7 @@ class UpdateChecker:
                         temp_files_to_cleanup.remove(extracted_dir)
                     _cleanup_temp_files(temp_files_to_cleanup)
                     time.sleep(close_delay_seconds)
-                    UpdateChecker._graceful_exit(parent)
+                    UpdateChecker._graceful_exit(parent, interaction=update_interaction)
                     return
                 logger.info("[安全檢查] 正在線上查詢安裝程式的 SHA256 驗證資訊...")
                 try:
@@ -691,7 +880,7 @@ class UpdateChecker:
                         _handle_checksum_mismatch(asset.get("name") or "unknown")
                         return
                     logger.info(f"[驗證通過] SHA256 驗證成功：{asset.get('name')}")
-                    UpdateChecker._launch_installer(dest, parent=parent)
+                    UpdateChecker._launch_installer(dest, parent=parent, interaction=update_interaction)
                     logger.info("安裝程式已啟動（獨立進程）")
                     if dest in temp_files_to_cleanup:
                         temp_files_to_cleanup.remove(dest)
@@ -707,7 +896,7 @@ class UpdateChecker:
                     )
                     time.sleep(2)
                     logger.info("準備關閉當前程式以完成更新")
-                    UpdateChecker._graceful_exit(parent)
+                    UpdateChecker._graceful_exit(parent, interaction=update_interaction)
                 else:
                     TaskUtils.call_on_ui(
                         parent,

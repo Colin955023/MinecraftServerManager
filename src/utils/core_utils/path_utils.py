@@ -14,10 +14,10 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
-from typing import Any, ClassVar
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any, ClassVar, cast
 
-from .atomic_writer import atomic_write_json, best_effort_fsync
+from .atomic_writer import atomic_write_bytes, atomic_write_json, atomic_write_text
 from .logger import get_logger
 
 _windll = getattr(ctypes, "windll", None)
@@ -129,13 +129,19 @@ class PathUtils:
         try:
             if not member_name:
                 return None
-            p = PurePosixPath(str(member_name))
-            # 移除空、 '.' 與 '..' 元件
-            parts = [part for part in p.parts if part and part not in (".", "..")]
-            if not parts:
+            normalized_name = str(member_name).replace("\\", "/")
+            if PureWindowsPath(normalized_name).drive:
+                return None
+            p = PurePosixPath(normalized_name)
+            if p.is_absolute():
+                return None
+            parts = p.parts
+            if not parts or any(part in ("", ".", "..") for part in parts):
                 return None
             return Path(*parts)
-        except Exception:
+        except TypeError:
+            return None
+        except ValueError:
             return None
 
     @staticmethod
@@ -349,8 +355,7 @@ class PathUtils:
                 content = kwargs.get("content", "")
                 encoding = kwargs.get("encoding", "utf-8")
                 errors = kwargs.get("errors")
-                path.write_text(content, encoding=encoding, errors=errors)
-                return True
+                return atomic_write_text(path, content, encoding=encoding, errors=errors)
             if operation == "read_bytes":
                 if not path.exists():
                     return None
@@ -358,8 +363,7 @@ class PathUtils:
             if operation == "write_bytes":
                 path.parents[0].mkdir(parents=True, exist_ok=True)
                 content = kwargs.get("content", b"")
-                path.write_bytes(content)
-                return True
+                return atomic_write_bytes(path, content)
         except OSError:
             return None if operation.startswith("read") else False
         else:
@@ -393,12 +397,7 @@ class PathUtils:
             若寫入成功則回傳 True，否則回傳 False。
         """
         try:
-            path.parents[0].mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding=encoding, errors=errors) as f:
-                f.write(content)
-                f.flush()
-                best_effort_fsync(f)
-            return True
+            return atomic_write_text(path, content, encoding=encoding, errors=errors)
         except OSError:
             return False
 
@@ -750,17 +749,20 @@ class PathUtils:
             # 讀取既有聚合檔並 append
             lock = PathUtils._get_json_path_lock(agg_marker)
             with lock:
-                existing = None
+                existing: dict[str, Any] | None = None
                 if agg_marker.exists():
                     try:
                         with open(agg_marker, encoding="utf-8") as f:
-                            existing = json.load(f)
+                            loaded = json.load(f)
+                        if isinstance(loaded, dict):
+                            existing = loaded
                     except (OSError, json.JSONDecodeError) as _:
                         existing = None
                 if not existing or not isinstance(existing, dict):
                     payload = {"path": str(p), "entries": [entry], "last_updated": now}
                 else:
-                    entries = existing.get("entries") if isinstance(existing.get("entries"), list) else []
+                    entries_raw = existing.get("entries")
+                    entries: list[Any] = cast(list[Any], entries_raw) if isinstance(entries_raw, list) else []
                     entries.append(entry)
                     existing["entries"] = entries
                     existing["last_updated"] = now
@@ -888,8 +890,9 @@ class PathUtils:
                             continue
                     continue
 
-                entries = data.get("entries") if isinstance(data.get("entries"), list) else []
-                new_entries = [e for e in entries if int(e.get("timestamp", 0)) >= cutoff]
+                entries_raw = data.get("entries")
+                entries: list[Any] = cast(list[Any], entries_raw) if isinstance(entries_raw, list) else []
+                new_entries = [e for e in entries if isinstance(e, dict) and int(e.get("timestamp", 0)) >= cutoff]
                 if len(new_entries) != len(entries):
                     # 更新或刪除該聚合檔
                     if new_entries:

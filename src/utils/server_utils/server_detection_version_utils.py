@@ -100,17 +100,21 @@ class ServerDetectionVersionUtils:
             標準化後的載入器類型。
         """
         lt_low = loader_type.lower()
-        if lt_low in ["fabric", "forge", "vanilla", "原版"]:
+        if lt_low in ["fabric", "forge", "quilt", "neoforge", "vanilla", "原版"]:
             return "vanilla" if lt_low in ["vanilla", "原版"] else lt_low
         if lt_low in ["unknown", "未知"]:
             if loader_version and loader_version.replace(".", "").isdigit():
                 return "forge"
             if loader_version and "fabric" in loader_version.lower():
                 return "fabric"
+            if loader_version and "quilt" in loader_version.lower():
+                return "quilt"
+            if loader_version and "neoforge" in loader_version.lower():
+                return "neoforge"
             return "unknown"
         if "vanilla" in lt_low or "official" in lt_low:
             return "vanilla"
-        if lt_low in ["fabric", "forge"]:
+        if lt_low in ["fabric", "forge", "quilt", "neoforge"]:
             return lt_low
         return "unknown"
 
@@ -201,8 +205,12 @@ class ServerDetectionVersionUtils:
             return "vanilla"
         if re.search("\\bfabric\\b", text_lower):
             return "fabric"
+        if re.search("\\bneoforge\\b", text_lower):
+            return "neoforge"
         if re.search("\\bforge\\b", text_lower):
             return "forge"
+        if re.search("\\bquilt\\b", text_lower):
+            return "quilt"
         return "unknown"
 
     @staticmethod

@@ -11,7 +11,6 @@ from ...utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,
     dependency_maybe_installed_by_filename,
-    expand_target_loader_aliases,
     is_supported_modrinth_update_loader,
     normalize_identifier,
     normalize_local_loader,
@@ -26,7 +25,6 @@ def resolve_dependency_reference_with_provider_context(
     dependency: dict[str, Any],
     dependency_names: dict[str, str],
     *,
-    loader: str | None = None,
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] | None = None,
     get_mod_version_details_fn: Callable[[str], tuple[str, OnlineModVersion | None]] | None = None,
     fetch_project_name_fn: Callable[[str], str | None] | None = None,
@@ -36,7 +34,6 @@ def resolve_dependency_reference_with_provider_context(
     Args:
         dependency: 原始依賴描述資料。
         dependency_names: 依賴名稱對照表。
-        loader: 目標載入器類型。
         version_details_cache: 版本詳情快取，避免重複查詢。
         get_mod_version_details_fn: 由呼叫端注入的版本詳情查詢函式。
         fetch_project_name_fn: 由呼叫端注入的專案名稱查詢函式。
@@ -47,7 +44,6 @@ def resolve_dependency_reference_with_provider_context(
     return resolve_dependency_reference(
         dependency,
         dependency_names,
-        loader=loader,
         version_details_cache=version_details_cache,
         get_mod_version_details=get_mod_version_details_fn or get_mod_version_details,
         fetch_project_name=fetch_project_name_fn or fetch_modrinth_project_name,
@@ -120,7 +116,8 @@ def analyze_mod_version_compatibility(
     report = OnlineModCompatibilityReport()
     dependency_name_map = dependency_names or {}
     normalized_minecraft_version = normalize_identifier(minecraft_version)
-    compatible_loaders = expand_target_loader_aliases(loader, minecraft_version)
+    normalized_loader = normalize_local_loader(loader)
+    compatible_loaders = {normalized_loader} if normalized_loader else set()
     version_game_versions = {normalize_identifier(entry) for entry in version.game_versions if entry}
     version_loaders = {normalize_identifier(entry) for entry in version.loaders if entry}
     if (
@@ -153,7 +150,6 @@ def analyze_mod_version_compatibility(
         resolved_dependency = resolve_dependency_reference_with_provider_context(
             dependency,
             dependency_name_map,
-            loader=loader,
             version_details_cache=version_details_cache,
             get_mod_version_details_fn=get_mod_version_details_fn,
             fetch_project_name_fn=fetch_project_name_fn,
@@ -197,7 +193,9 @@ def analyze_mod_version_compatibility(
         elif dependency_type == "incompatible":
             if is_installed:
                 report.incompatible_installed.append(dependency_label)
-                report.warnings.append(f"偵測到已安裝的不相容模組：{dependency_label}")
+                incompatible_message = f"偵測到已安裝的不相容模組：{dependency_label}"
+                report.hard_errors.append(incompatible_message)
+                report.warnings.append(incompatible_message)
         elif dependency_type == "embedded":
             report.embedded_dependencies.append(dependency_label)
         elif not is_installed:
@@ -205,14 +203,11 @@ def analyze_mod_version_compatibility(
     return report
 
 
-def analyze_local_mod_file_compatibility(
-    local_mod: Any, minecraft_version: str | None = None, loader: str | None = None
-) -> list[str]:
+def analyze_local_mod_file_compatibility(local_mod: Any, loader: str | None = None) -> list[str]:
     """以本地模組已知 metadata 產生輔助提示。
 
     Args:
         local_mod: 本地模組物件。
-        minecraft_version: 目標 Minecraft 版本。
         loader: 目標載入器類型。
 
     Returns:
@@ -228,12 +223,12 @@ def analyze_local_mod_file_compatibility(
     local_loader = str(getattr(local_mod, "loader_type", "") or "").strip()
     local_version = str(getattr(local_mod, "version", "") or "").strip()
     normalized_local_loader = normalize_local_loader(local_loader)
-    compatible_target_loaders = expand_target_loader_aliases(loader, minecraft_version)
+    normalized_target_loader = normalize_local_loader(loader)
     if (
         normalized_local_loader
         and normalized_local_loader not in {"", "未知", "unknown"}
-        and compatible_target_loaders
-        and (normalized_local_loader not in compatible_target_loaders)
+        and normalized_target_loader
+        and (normalized_local_loader != normalized_target_loader)
     ):
         advisories.append(f"{local_name} 目前本地 metadata 顯示載入器為 {local_loader}，與伺服器的 {loader} 不一致。")
     if not local_version or local_version == "未知":

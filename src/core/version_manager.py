@@ -12,7 +12,6 @@ from ..utils import (
     PathUtils,
     RuntimePaths,
     Singleton,
-    UIUtils,
     atomic_write_json,
     get_logger,
     record_and_mark,
@@ -136,7 +135,6 @@ class MinecraftVersionManager(Singleton):
                     details={"context": "fetch_versions"},
                 )
                 logger.exception(f"無法取得版本資訊: {e}")
-                UIUtils.show_error("取得版本失敗", f"無法從官方 API 獲取版本資訊: {e}")
                 return self.get_versions(force_fetch=False)
 
     def get_server_download_url(self, version_id: str) -> str | None:
@@ -190,5 +188,4 @@ class MinecraftVersionManager(Singleton):
                 e, marker_path=Path(self.cache_file), reason="get_versions failed", details={"context": "get_versions"}
             )
             logger.exception(f"獲取版本時發生錯誤: {e}")
-            UIUtils.show_error("獲取版本失敗", f"無法從快取獲取版本資訊: {e}")
             return []

@@ -1,6 +1,6 @@
 import json
 
-from src.utils import atomic_write_json
+from src.utils import atomic_write_bytes, atomic_write_json, atomic_write_text
 
 
 def test_atomic_write_json_creates_file(tmp_path):
@@ -23,3 +23,17 @@ def test_atomic_write_json_overwrite(tmp_path):
     with open(target, encoding="utf-8") as f:
         data = json.load(f)
     assert data == payload2
+
+
+def test_atomic_write_text_overwrite(tmp_path):
+    target = tmp_path / "start_server.bat"
+    assert atomic_write_text(target, "echo first\n", encoding="utf-8") is True
+    assert atomic_write_text(target, "echo second\n", encoding="utf-8") is True
+    assert target.read_text(encoding="utf-8") == "echo second\n"
+
+
+def test_atomic_write_bytes_overwrite(tmp_path):
+    target = tmp_path / "server.jar"
+    assert atomic_write_bytes(target, b"first") is True
+    assert atomic_write_bytes(target, b"second") is True
+    assert target.read_bytes() == b"second"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import tkinter.ttk as ttk
+import contextlib
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +19,7 @@ from ...utils import (
     UIUtils,
     extract_primary_file_hash,
 )
+from ...utils.ui_support import qt_widgets as qt
 from ..task_utils import TaskUtils
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
 from .models import LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
@@ -36,13 +37,22 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         normalized_loader = raw_loader.lower()
         if normalized_loader not in SUPPORTED_ONLINE_MOD_LOADERS:
             loader_display = raw_loader or "未設定"
-            return (None, f"線上模組功能目前僅支援 Fabric 與 Forge，當前伺服器載入器為：{loader_display}")
+            return (
+                None,
+                f"線上模組功能目前僅支援 Fabric / Forge / Quilt / NeoForge，當前伺服器載入器為：{loader_display}",
+            )
         return (normalized_loader, None)
 
     def _refresh_online_queue_button(self) -> None:
         """更新安裝清單按鈕文字。"""
+        try:
+            logger.debug("刷新安裝清單按鈕: pending_count=%d", len(getattr(self, "pending_online_installs", [])))
+        except Exception:
+            logger.debug("刷新安裝清單按鈕: 無法取得 pending_online_installs 長度")
         if hasattr(self, "online_queue_button") and self.online_queue_button:
-            self.online_queue_button.configure(text=f"🧺 安裝清單 ({len(self.pending_online_installs)})")
+            self.online_queue_button.configure(
+                text=f"🧺 安裝清單 ({len(getattr(self, 'pending_online_installs', []))})"
+            )
 
     @staticmethod
     def _build_pending_install_key(project_id: str, version_id: str) -> str:
@@ -152,17 +162,38 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
             UIUtils.show_warning("無法加入安裝清單", blocking_reason, self.parent)
             return False
         pending_key = self._build_pending_install_key(pending.project_id, getattr(pending.version, "version_id", ""))
+        logger.debug("準備加入安裝清單: key=%s project=%s", pending_key, getattr(pending, "project_name", ""))
         remaining_items = [
             item
-            for item in self.pending_online_installs
+            for item in getattr(self, "pending_online_installs", [])
             if self._build_pending_install_key(item.project_id, getattr(item.version, "version_id", "")) != pending_key
         ]
         remaining_items.append(pending)
-        self.pending_online_installs = remaining_items
-        self._refresh_online_queue_button()
-        self.update_status(
+        # 更新記憶體清單，並盡量原地修改，避免外部已持有的列表參照失效
+        if hasattr(self, "pending_online_installs") and isinstance(self.pending_online_installs, list):
+            self.pending_online_installs[:] = remaining_items
+        else:
+            self.pending_online_installs = list(remaining_items)
+        logger.debug(
+            "已更新記憶體 pending_online_installs: new_count=%d", len(getattr(self, "pending_online_installs", []))
+        )
+        try:
+            if hasattr(self, "ui_queue") and self.ui_queue is not None:
+                self.ui_queue.put(self._refresh_online_queue_button)
+            else:
+                self._refresh_online_queue_button()
+        except Exception:
+            # 在極少數情況下直接嘗試也可以保底
+            with contextlib.suppress(Exception):
+                self._refresh_online_queue_button()
+        # 使用 thread-safe 的狀態更新接口；在測試或極早期初始化時回退成同步更新
+        status_message = (
             f"已加入安裝清單：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
         )
+        if hasattr(self, "ui_queue") and getattr(self, "ui_queue", None) is not None:
+            self.update_status_safe(status_message)
+        else:
+            self.update_status(status_message)
         return True
 
     def _prepare_online_install_review_entries(self) -> list[PendingInstallReviewEntry]:
@@ -255,7 +286,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         self,
         mod: Any,
         versions: list[Any],
-        version_tree: ttk.Treeview,
+        version_tree: qt.Treeview,
         dialog,
         version_reports: list[Any] | None = None,
     ) -> None:
@@ -307,13 +338,17 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
             UIUtils.show_warning("提示", "請先選擇要移除的模組項目", dialog)
             return
         before_count = len(self.pending_online_installs)
-        self.pending_online_installs = [
+        retained_items = [
             item
             for item in self.pending_online_installs
             if self._build_pending_install_key(item.project_id, getattr(item.version, "version_id", ""))
             not in selected_root_keys
         ]
-        removed_count = before_count - len(self.pending_online_installs)
+        if isinstance(self.pending_online_installs, list):
+            self.pending_online_installs[:] = retained_items
+        else:
+            self.pending_online_installs = retained_items
+        removed_count = before_count - len(retained_items)
         if removed_count <= 0:
             UIUtils.show_warning("提示", "目前選取項目不可移除，請選擇模組根項目後再試一次", dialog)
             return
@@ -325,7 +360,10 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
 
     def _clear_pending_online_installs(self, dialog) -> None:
         """清空待安裝清單。"""
-        self.pending_online_installs = []
+        if isinstance(getattr(self, "pending_online_installs", None), list):
+            self.pending_online_installs.clear()
+        else:
+            self.pending_online_installs = []
         self._refresh_online_queue_button()
         dialog.destroy()
 
@@ -473,12 +511,16 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
                     succeeded_keys.add(
                         self._build_pending_install_key(pending.project_id, getattr(pending.version, "version_id", ""))
                     )
-                self.pending_online_installs = [
+                retained_items = [
                     item
                     for item in self.pending_online_installs
                     if self._build_pending_install_key(item.project_id, getattr(item.version, "version_id", ""))
                     not in succeeded_keys
                 ]
+                if isinstance(self.pending_online_installs, list):
+                    self.pending_online_installs[:] = retained_items
+                else:
+                    self.pending_online_installs = retained_items
                 self._refresh_online_queue_button()
                 self.update_progress_safe(1.0)
                 self.update_status_safe(

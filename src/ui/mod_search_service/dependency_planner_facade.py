@@ -123,7 +123,6 @@ class DependencyPlanningService:
         return resolve_dependency_reference_with_provider_context(
             dependency,
             dependency_names,
-            loader=self.loader,
             version_details_cache=self.version_details_cache,
             get_mod_version_details_fn=get_mod_version_details,
             fetch_project_name_fn=fetch_modrinth_project_name,
@@ -382,7 +381,7 @@ def build_local_mod_update_plan(
     supports_online_loader_updates = is_supported_modrinth_update_loader(loader)
     if normalized_target_loader and (not supports_online_loader_updates):
         plan.notes.append(
-            f"目前本地更新的線上比對僅支援 Fabric / Forge 生態（含相容 alias），已略過 {loader} 的版本更新判定。"
+            f"目前本地更新的線上比對僅支援 Fabric / Forge / Quilt / NeoForge，已略過 {loader} 的版本更新判定。"
         )
     hash_algorithm = MODRINTH_PREFERRED_HASH_ALGORITHM
     project_ids: list[str] = []
@@ -620,7 +619,7 @@ def build_local_mod_update_plan(
             or str(getattr(local_mod, "name", "") or project_id).strip()
         )
         current_version = str(getattr(local_mod, "version", "") or "").strip()
-        local_metadata_advisories = analyze_local_mod_file_compatibility(local_mod, minecraft_version, loader)
+        local_metadata_advisories = analyze_local_mod_file_compatibility(local_mod)
         local_hash = local_hashes_by_filename.get(filename_key, "")
         current_match = current_versions_by_hash.get(local_hash)
         latest_match = latest_versions_by_hash.get(local_hash)

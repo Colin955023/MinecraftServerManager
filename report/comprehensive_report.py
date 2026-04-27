@@ -358,10 +358,13 @@ def is_duplicate_noise_line(normalized: str) -> bool:
 def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
     window_size = 8
     min_chars = 220
+    ignored_files = {src_dir / "utils" / "network_utils" / "async_http_utils.py"}
 
     block_map: dict[str, list[tuple[Path, int, str]]] = {}
 
     for file_path in gather_python_files(src_dir):
+        if file_path in ignored_files:
+            continue
         raw_lines = get_file_context(file_path).lines
         normalized_lines: list[tuple[int, str, str]] = []
 
@@ -435,7 +438,14 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
 
     findings: list[Finding] = []
 
-    ignored_files = {src_dir / "utils" / "ui_support" / "ui_utils.py", src_dir / "utils" / "ui_support" / "ui_tokens.py", src_dir / "ui" / "ui_config.py", src_dir / "ui" / "font_manager.py", src_dir / "ui" / "icon_utils.py"}
+    ignored_files = {
+        src_dir / "utils" / "ui_support" / "ui_utils.py",
+        src_dir / "utils" / "ui_support" / "ui_tokens.py",
+        src_dir / "utils" / "ui_support" / "qt_widgets.py",
+        src_dir / "ui" / "ui_config.py",
+        src_dir / "ui" / "font_manager.py",
+        src_dir / "ui" / "icon_utils.py",
+    }
 
     for file_path in gather_python_files(src_dir):
         if file_path in ignored_files:
@@ -514,6 +524,10 @@ def _get_attribute_root_name(node: ast.AST) -> str | None:
     return None
 
 
+def _is_private_callable_name(name: str) -> bool:
+    return name.startswith("_") and not _is_dunder_name(name)
+
+
 def collect_cross_file_private_callable_findings(repo_root: Path) -> SectionResult:
     findings: list[Finding] = []
     scanned_files = 0
@@ -548,13 +562,13 @@ def collect_cross_file_private_callable_findings(repo_root: Path) -> SectionResu
 
             callable_name: str | None = None
             if isinstance(node.func, ast.Name):
-                if not node.func.id.startswith("_"):
+                if not _is_private_callable_name(node.func.id):
                     continue
                 if node.func.id not in imported_symbols:
                     continue
                 callable_name = node.func.id
             elif isinstance(node.func, ast.Attribute):
-                if not node.func.attr.startswith("_"):
+                if not _is_private_callable_name(node.func.attr):
                     continue
                 root_name = _get_attribute_root_name(node.func.value)
                 if not root_name or root_name not in imported_bases:
@@ -843,7 +857,10 @@ def _collect_class_findings(node: ast.ClassDef, file_path: Path, owner_names: li
 
 def collect_docstring_section(src_dir: Path) -> SectionResult:
     findings: list[Finding] = []
+    ignored_files = {src_dir / "utils" / "ui_support" / "qt_widgets.py"}
     for file_path in gather_python_files(src_dir):
+        if file_path in ignored_files:
+            continue
         if "tests" in file_path.parts:
             continue
 
@@ -1763,6 +1780,7 @@ def build_html_report(
 
 def main() -> int:
     max_details = MAX_DETAIL_ITEMS
+    open_report = "--no-open" not in sys.argv
     generated_at = datetime.now().isoformat(timespec="seconds")
     src_dir = REPO_ROOT / "src"
     operation_timings: list[tuple[str, float]] = []
@@ -1880,7 +1898,8 @@ def main() -> int:
     print(f"total_duration={format_duration(total_elapsed)}")
     print(f"html={output_html_path}")
 
-    webbrowser.open(output_html_path.resolve().as_uri())
+    if open_report:
+        webbrowser.open(output_html_path.resolve().as_uri())
 
     return 0
 

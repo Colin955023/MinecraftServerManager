@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .. import atomic_write_json, compute_file_hash, get_logger
+from .. import PathUtils, atomic_write_json, compute_file_hash, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
@@ -42,7 +42,7 @@ class ModIndexManager:
                     "這個目錄由 Minecraft Server Manager 用於快取模組索引與檔案hash。\n"
                     "可安全刪除，程式會在下次掃描/啟動時重建索引，但刪除會造成下次掃描較慢。\n"
                 )
-                readme.write_text(readme_content, encoding="utf-8")
+                PathUtils.write_text_file(readme, readme_content, encoding="utf-8")
             if os.name == "nt":
                 try:
                     FILE_ATTRIBUTE_HIDDEN = 0x02

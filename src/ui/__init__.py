@@ -74,7 +74,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_search_service.dependency_planner_facade",
         "DependencyPlanningService",
     ),
-    "AsyncHTTPUtils": ("..utils", "AsyncHTTPUtils"),
     "build_required_dependency_install_plan": (
         ".mod_search_service.dependency_planner_facade",
         "build_required_dependency_install_plan",
@@ -117,8 +116,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerMonitorWindow": (".server_monitor_window", "ServerMonitorWindow"),
     "ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
     "TaskUtils": (".task_utils", "TaskUtils"),
+    "QtUpdateCheckerInteraction": (".update_checker_adapter", "QtUpdateCheckerInteraction"),
     "TreeUtils": (".tree_utils", "TreeUtils"),
-    "VirtualList": (".virtual_list", "VirtualList"),
     "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
     "resolve_local_mod_project_info": (".mod_search_service.modrinth_service", "resolve_local_mod_project_info"),
     "resolve_modrinth_provider_record": ("..utils", "resolve_modrinth_provider_record"),

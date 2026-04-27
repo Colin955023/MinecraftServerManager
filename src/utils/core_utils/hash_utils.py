@@ -4,27 +4,14 @@
 """
 
 import asyncio
-import concurrent.futures
 import hashlib
-import os
 from functools import lru_cache
 from pathlib import Path
 
+from ..runtime_utils.worker_pool import get_shared_worker_pool, submit_to_worker_pool
 from .logger import get_logger
 
 logger = get_logger().bind(component="HashUtils")
-
-_HASH_EXECUTOR: concurrent.futures.ThreadPoolExecutor | None = None
-_DEFAULT_HASH_WORKERS = 4
-
-
-def _get_hash_executor() -> concurrent.futures.ThreadPoolExecutor:
-    global _HASH_EXECUTOR
-    if _HASH_EXECUTOR is None:
-        # 硬體感知：根據 CPU 核心數設定並行數量
-        workers = min(_DEFAULT_HASH_WORKERS, max(1, os.cpu_count() or _DEFAULT_HASH_WORKERS))
-        _HASH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="hash_worker")
-    return _HASH_EXECUTOR
 
 
 def compute_file_hash_sync(file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024) -> str:
@@ -67,8 +54,7 @@ def _compute_file_hash_cached_internal(
     透過快取避免重複計算，並發派任務到 ThreadPoolExecutor 防止阻塞主執行緒。
     """
     del mtime_ns, file_size  # 用於快取鍵值
-    executor = _get_hash_executor()
-    future = executor.submit(compute_file_hash_sync, file_path, algorithm, chunk_size)
+    future = submit_to_worker_pool(compute_file_hash_sync, file_path, algorithm, chunk_size)
     return future.result()
 
 
@@ -91,8 +77,7 @@ def compute_file_hash(
         return ""
 
     if not use_cache:
-        executor = _get_hash_executor()
-        future = executor.submit(compute_file_hash_sync, normalized_path, str(algorithm), int(chunk_size))
+        future = submit_to_worker_pool(compute_file_hash_sync, normalized_path, str(algorithm), int(chunk_size))
         return future.result()
 
     try:
@@ -120,4 +105,12 @@ async def compute_file_hash_async(
     Returns:
         計算後的雜湊字串；失敗時回傳空字串。
     """
-    return await asyncio.to_thread(compute_file_hash, str(file_path), algorithm, chunk_size, use_cache)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        get_shared_worker_pool(),
+        compute_file_hash,
+        str(file_path),
+        algorithm,
+        chunk_size,
+        use_cache,
+    )
