@@ -48,6 +48,7 @@ class LoaderManager(Singleton):
 
     _initialized: bool = False
     LOADER_CACHE_TTL_SECONDS: int = 12 * 60 * 60
+    SECURE_CHECKSUM_SUFFIXES: tuple[tuple[str, str], ...] = (("sha256", ".sha256"), ("sha512", ".sha512"))
 
     def __init__(self):
         if self._initialized:
@@ -157,7 +158,7 @@ class LoaderManager(Singleton):
         if user_java_path and Path(user_java_path).exists():
             java_path = user_java_path
         else:
-            java_path = JavaUtils.get_best_java_path(minecraft_version, ask_download=True)
+            java_path = JavaUtils.get_best_java_path(minecraft_version, ask_download=False)
             java_path_auto = True
         if not java_path:
             return False
@@ -473,7 +474,14 @@ class LoaderManager(Singleton):
             vanilla_start, vanilla_end = (0, 0)
             install_start = 25
         if not self._download_file_with_progress(
-            installer_url, installer_path, progress_callback, dl_start, dl_end, "下載安裝器...", cancel_flag
+            installer_url,
+            installer_path,
+            progress_callback,
+            dl_start,
+            dl_end,
+            "下載安裝器...",
+            cancel_flag,
+            require_secure_hash=True,
         ):
             return False
         if need_vanilla and (
@@ -684,8 +692,46 @@ class LoaderManager(Singleton):
         if progress_callback:
             progress_callback(20, "下載 Minecraft 伺服器...")
         return self._download_file_with_progress(
-            server_url, download_path, progress_callback, 20, 100, "下載 Minecraft 伺服器...", cancel_flag
+            server_url,
+            download_path,
+            progress_callback,
+            20,
+            100,
+            "下載 Minecraft 伺服器...",
+            cancel_flag,
+            require_secure_hash=False,
         )
+
+    @staticmethod
+    def _parse_remote_checksum_payload(payload: bytes | str | None, algorithm: str) -> str:
+        """解析遠端 checksum 檔案內容。"""
+        if payload is None:
+            return ""
+        text = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else str(payload)
+        expected_length = 64 if algorithm == "sha256" else 128 if algorithm == "sha512" else 0
+        if expected_length <= 0:
+            return ""
+        for token in text.replace("*", " ").split():
+            normalized = token.strip().lower()
+            if len(normalized) == expected_length and all(ch in "0123456789abcdef" for ch in normalized):
+                return normalized
+        return ""
+
+    @classmethod
+    def _fetch_secure_checksum(cls, url: str) -> tuple[str, str] | None:
+        """從常見 sidecar checksum URL 取得 SHA-256 / SHA-512。"""
+        for algorithm, suffix in cls.SECURE_CHECKSUM_SUFFIXES:
+            checksum_url = f"{url}{suffix}"
+            try:
+                payload = HTTPUtils.get_content(checksum_url, timeout=10)
+            except Exception as exc:
+                logger.debug(f"讀取 checksum sidecar 失敗: {checksum_url} | {exc}")
+                payload = None
+            checksum = cls._parse_remote_checksum_payload(payload, algorithm)
+            if checksum:
+                logger.info(f"已取得下載檔案 checksum: algorithm={algorithm}, url={checksum_url}")
+                return (algorithm, checksum)
+        return None
 
     def _download_file_with_progress(
         self,
@@ -696,6 +742,7 @@ class LoaderManager(Singleton):
         end_percent: int,
         status_text: str,
         cancel_flag: dict | CancellationToken | None,
+        require_secure_hash: bool = False,
     ) -> bool:
         """下載檔案並顯示進度。"""
 
@@ -710,8 +757,20 @@ class LoaderManager(Singleton):
                 self._fail(progress_callback, "已取消下載")
             return cancelled
 
+        checksum = self._fetch_secure_checksum(url)
+        if checksum is None and require_secure_hash:
+            logger.error(f"下載失敗：找不到 SHA-256 / SHA-512 checksum sidecar，拒絕下載 {url}")
+            return self._fail(progress_callback, "下載失敗：缺少 SHA-256 / SHA-512 驗證資訊")
+        if checksum is None:
+            logger.warning(f"下載檔案未找到 SHA-256 / SHA-512 sidecar，將僅使用既有來源保護: {url}")
+        expected_hash = checksum[1] if checksum else None
         if HTTPUtils.download_file(
-            url, dest_path, progress_callback=on_progress, timeout=30, cancel_check=check_cancel
+            url,
+            dest_path,
+            progress_callback=on_progress,
+            timeout=30,
+            cancel_check=check_cancel,
+            expected_hash=expected_hash,
         ):
             return True
         return self._fail(progress_callback, "下載失敗：無法獲取檔案")

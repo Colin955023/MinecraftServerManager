@@ -129,7 +129,7 @@ class CreateServerFrame(ctk.CTkFrame):
             if not mc_version:
                 UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
                 return
-            java_path = JavaUtils.get_best_java_path(mc_version)
+            java_path = JavaUtils.get_best_java_path(mc_version, interaction=UIUtils)
             if java_path:
                 java_path_win = str(Path(java_path))
                 self.java_path_var.set(java_path_win)

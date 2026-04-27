@@ -55,7 +55,7 @@ Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟�
 
 ## 開發環境
 
-**需求：** Python 3.10+、[uv](https://github.com/astral-sh/uv)
+**需求：** Python 3.14、[uv](https://github.com/astral-sh/uv)
 
 ```bash
 git clone https://github.com/Colin955023/MinecraftServerManager.git

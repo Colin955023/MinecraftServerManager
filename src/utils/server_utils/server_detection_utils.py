@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from ...models import ServerConfig
-from .. import PathUtils, ServerDetectionVersionUtils, UIUtils, get_logger
+from .. import JvmOptionPolicy, PathUtils, ServerDetectionVersionUtils, get_logger
 
 logger = get_logger().bind(component="ServerDetectionUtils")
 __all__ = ["ServerDetectionUtils"]
@@ -201,16 +201,26 @@ class ServerDetectionUtils:
             config: 伺服器設定物件。
         """
         user_jvm_args_path = server_path / "user_jvm_args.txt"
-        lines = []
+        lines: list[str] = []
+        custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(config, "jvm_args", []))
+        java_major = getattr(config, "java_major", None) or getattr(config, "java_major_version", None)
+        performance_profile = str(getattr(config, "performance_profile", "") or "")
+        lines.extend(
+            f"{arg}\n"
+            for arg in JvmOptionPolicy.recommend_gc_args(
+                memory_max_mb=int(config.memory_max_mb or 0),
+                java_major=int(java_major) if java_major else None,
+                performance_profile=performance_profile,
+                existing_args=custom_jvm_args,
+            )
+        )
+        lines.extend(f"{arg}\n" for arg in custom_jvm_args)
         if config.memory_min_mb:
             lines.append(f"-Xms{config.memory_min_mb}M\n")
         if config.memory_max_mb:
             lines.append(f"-Xmx{config.memory_max_mb}M\n")
-        try:
-            PathUtils.write_text_file(user_jvm_args_path, "".join(lines))
-        except Exception as e:
-            logger.exception(f"寫入失敗: {e}")
-            UIUtils.show_error("寫入失敗", f"無法更新 {user_jvm_args_path} 檔案。請檢查權限或磁碟空間。錯誤: {e}")
+        if not PathUtils.write_text_file(user_jvm_args_path, "".join(lines)):
+            logger.error(f"無法更新 {user_jvm_args_path} 檔案，請檢查權限或磁碟空間。")
 
     @staticmethod
     def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:

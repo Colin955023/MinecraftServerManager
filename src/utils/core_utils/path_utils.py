@@ -17,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Any, ClassVar
 
-from .atomic_writer import atomic_write_json, best_effort_fsync
+from .atomic_writer import atomic_write_bytes, atomic_write_json, atomic_write_text
 from .logger import get_logger
 
 _windll = getattr(ctypes, "windll", None)
@@ -349,8 +349,7 @@ class PathUtils:
                 content = kwargs.get("content", "")
                 encoding = kwargs.get("encoding", "utf-8")
                 errors = kwargs.get("errors")
-                path.write_text(content, encoding=encoding, errors=errors)
-                return True
+                return atomic_write_text(path, content, encoding=encoding, errors=errors)
             if operation == "read_bytes":
                 if not path.exists():
                     return None
@@ -358,8 +357,7 @@ class PathUtils:
             if operation == "write_bytes":
                 path.parents[0].mkdir(parents=True, exist_ok=True)
                 content = kwargs.get("content", b"")
-                path.write_bytes(content)
-                return True
+                return atomic_write_bytes(path, content)
         except OSError:
             return None if operation.startswith("read") else False
         else:
@@ -393,12 +391,7 @@ class PathUtils:
             若寫入成功則回傳 True，否則回傳 False。
         """
         try:
-            path.parents[0].mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding=encoding, errors=errors) as f:
-                f.write(content)
-                f.flush()
-                best_effort_fsync(f)
-            return True
+            return atomic_write_text(path, content, encoding=encoding, errors=errors)
         except OSError:
             return False
 

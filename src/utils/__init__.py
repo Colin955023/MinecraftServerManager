@@ -21,7 +21,9 @@ _register_exports(
 )
 _register_exports(
     ".core_utils.atomic_writer",
+    "atomic_write_bytes",
     "atomic_write_json",
+    "atomic_write_text",
     "best_effort_fsync",
 )
 _register_exports(
@@ -31,6 +33,15 @@ _register_exports(
     "run_async_in_background",
     "CancellationToken",
     "get_shared_manager",
+)
+_register_exports(
+    ".runtime_utils.worker_pool",
+    "DEFAULT_WORKER_COUNT",
+    "get_shared_worker_pool",
+    "resolve_worker_count",
+    "run_blocking_io",
+    "shutdown_shared_worker_pool",
+    "submit_to_worker_pool",
 )
 _register_exports(
     ".network_utils.request_retry_utils",
@@ -223,6 +234,7 @@ _register_exports(
 )
 _register_exports(
     ".server_utils.server_runtime_utils",
+    "JvmOptionPolicy",
     "ServerCommands",
     "ServerOperations",
 )

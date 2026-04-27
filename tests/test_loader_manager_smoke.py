@@ -106,6 +106,36 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
 
 
 @pytest.mark.smoke
+def test_parse_remote_checksum_payload_accepts_sha256() -> None:
+    checksum = "a" * 64
+    payload = f"{checksum}  installer.jar\n".encode()
+
+    assert LoaderManager._parse_remote_checksum_payload(payload, "sha256") == checksum
+
+
+@pytest.mark.smoke
+def test_download_file_with_progress_requires_secure_hash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    manager = LoaderManager.__new__(LoaderManager)
+    errors: list[str] = []
+
+    monkeypatch.setattr(manager, "_fetch_secure_checksum", lambda _url: None)
+
+    result = manager._download_file_with_progress(
+        "https://example.invalid/installer.jar",
+        str(tmp_path / "installer.jar"),
+        lambda _percent, message: errors.append(str(message)),
+        0,
+        100,
+        "下載安裝器...",
+        None,
+        require_secure_hash=True,
+    )
+
+    assert result is False
+    assert errors[-1] == "下載失敗：缺少 SHA-256 / SHA-512 驗證資訊"
+
+
+@pytest.mark.smoke
 def test_download_and_run_installer_cleans_process_when_cancelled(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = LoaderManager.__new__(LoaderManager)
     test_root = Path("tests") / ".tmp_loader_manager_cancelled"

@@ -44,6 +44,7 @@ from . import (
     ManageServerFrame,
     ModManagementFrame,
     TaskUtils,
+    TkUpdateCheckerInteraction,
     WindowPreferencesDialog,
 )
 
@@ -290,7 +291,12 @@ class MinecraftServerManager:
         """檢查更新"""
         try:
             UpdateChecker.check_and_prompt_update(
-                APP_VERSION, GITHUB_OWNER, GITHUB_REPO, show_up_to_date_message=show_msg, parent=self.root
+                APP_VERSION,
+                GITHUB_OWNER,
+                GITHUB_REPO,
+                show_up_to_date_message=show_msg,
+                parent=self.root,
+                interaction=TkUpdateCheckerInteraction(),
             )
         except Exception as e:
             logger.error(f"自動更新檢查失敗: {e}\n{traceback.format_exc()}")

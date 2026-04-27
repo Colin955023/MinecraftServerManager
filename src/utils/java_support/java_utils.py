@@ -10,13 +10,29 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Protocol
 
 from ...core import MinecraftVersionManager
-from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, get_logger
 from .java_downloader import JavaDownloader
 
 logger = get_logger().bind(component="JavaUtils")
+
+
+class JavaInstallInteraction(Protocol):
+    """Java 自動安裝流程需要的使用者互動介面。"""
+
+    @staticmethod
+    def ask_yes_no_cancel(title: str, message: str, **kwargs) -> bool | None:
+        """詢問使用者是否同意動作。"""
+
+    @staticmethod
+    def show_info(title: str, message: str, **kwargs) -> None:
+        """顯示資訊訊息。"""
+
+    @staticmethod
+    def show_error(title: str, message: str, **kwargs) -> None:
+        """顯示錯誤訊息。"""
 
 
 class JavaUtils:
@@ -262,13 +278,19 @@ class JavaUtils:
         return final_results
 
     @staticmethod
-    def get_best_java_path(mc_version: str, required_major: int | None = None, ask_download: bool = True) -> str | None:
+    def get_best_java_path(
+        mc_version: str,
+        required_major: int | None = None,
+        ask_download: bool = True,
+        interaction: JavaInstallInteraction | None = None,
+    ) -> str | None:
         """為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑。
 
         Args:
             mc_version: Minecraft 版本字串。
             required_major: 指定的 Java major 版本；未提供時會自動推導。
             ask_download: 找不到符合版本時是否詢問自動安裝。
+            interaction: UI 層注入的互動介面；未提供時不會在工具層直接顯示對話框。
 
         Returns:
             找到時回傳 `javaw.exe` 路徑，否則回傳 None。
@@ -278,9 +300,12 @@ class JavaUtils:
         for path, major in candidates:
             if major == required_major:
                 return path
-        if ask_download:
+        if ask_download and interaction is None:
+            logger.info(f"找不到 Java {required_major}，但工具層未提供互動介面，因此不執行自動安裝提示。")
+            return None
+        if ask_download and interaction is not None:
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
-            res = UIUtils.ask_yes_no_cancel(
+            res = interaction.ask_yes_no_cancel(
                 "Java 未找到",
                 (
                     f"未找到合適的 Java {required_major}。是否由程式自動安裝 {vendor}？\n\n"
@@ -297,7 +322,7 @@ class JavaUtils:
                     candidates = JavaUtils.get_all_local_java_candidates()
                     for path, major in candidates:
                         if major == required_major:
-                            UIUtils.show_info(
+                            interaction.show_info(
                                 title=f"Java {required_major} 安裝成功",
                                 message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe。",
                                 topmost=True,
@@ -305,13 +330,13 @@ class JavaUtils:
                             return path
                 except Exception as e:
                     logger.exception(f"自動下載 Microsoft JDK {required_major} 失敗：{e}")
-                    UIUtils.show_error(
+                    interaction.show_error(
                         "Java 下載失敗",
                         f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑。",
                         topmost=True,
                     )
             else:
-                UIUtils.show_info(
+                interaction.show_info(
                     "請手動下載 Java",
                     f"請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等。",
                     topmost=True,

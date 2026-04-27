@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .atomic_writer import atomic_write_json
+
 
 class JsonIO:
     """JSON 讀寫與序列化工具。"""
@@ -42,12 +44,7 @@ class JsonIO:
             bool: 保存成功返回 True，否則返回 False。
         """
         try:
-            p = Path(path)
-            p.parents[0].mkdir(parents=True, exist_ok=True)
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=indent, ensure_ascii=False)
-                f.flush()
-            return True
+            return atomic_write_json(Path(path), data, indent=indent)
         except Exception:
             return False
 

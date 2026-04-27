@@ -117,6 +117,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerMonitorWindow": (".server_monitor_window", "ServerMonitorWindow"),
     "ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
     "TaskUtils": (".task_utils", "TaskUtils"),
+    "TkUpdateCheckerInteraction": (".update_checker_adapter", "TkUpdateCheckerInteraction"),
     "TreeUtils": (".tree_utils", "TreeUtils"),
     "VirtualList": (".virtual_list", "VirtualList"),
     "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),

@@ -1763,6 +1763,7 @@ def build_html_report(
 
 def main() -> int:
     max_details = MAX_DETAIL_ITEMS
+    open_report = "--no-open" not in sys.argv
     generated_at = datetime.now().isoformat(timespec="seconds")
     src_dir = REPO_ROOT / "src"
     operation_timings: list[tuple[str, float]] = []
@@ -1880,7 +1881,8 @@ def main() -> int:
     print(f"total_duration={format_duration(total_elapsed)}")
     print(f"html={output_html_path}")
 
-    webbrowser.open(output_html_path.resolve().as_uri())
+    if open_report:
+        webbrowser.open(output_html_path.resolve().as_uri())
 
     return 0
 
