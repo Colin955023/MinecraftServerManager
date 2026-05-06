@@ -866,6 +866,10 @@ class CreateServerFrame(QtWidgets.QWidget):
                 name = f"Fabric {mc_version}"
             elif loader_type == "Forge":
                 name = f"Forge {mc_version}"
+            elif loader_type == "Quilt":
+                name = f"Quilt {mc_version}"
+            elif loader_type == "NeoForge":
+                name = f"NeoForge {mc_version}"
             self.server_name_var.set(name)
         config = ServerConfig(
             name=name,
@@ -913,7 +917,7 @@ class CreateServerFrame(QtWidgets.QWidget):
             if not config.minecraft_version or config.minecraft_version == "unknown":
                 progress_dialog.close()
                 raise Exception(f"偵測失敗：minecraft_version 無法判斷，config={config}")
-            if config.loader_type.lower() in ["forge", "fabric"] and (
+            if config.loader_type.lower() in ["forge", "fabric", "quilt", "neoforge"] and (
                 not config.loader_version or config.loader_version == "unknown"
             ):
                 progress_dialog.close()
@@ -1085,7 +1089,7 @@ class CreateServerFrame(QtWidgets.QWidget):
             return False
         if not config.minecraft_version or config.minecraft_version == "unknown":
             return False
-        requires_loader_version = loader_type in ["forge", "fabric"]
+        requires_loader_version = loader_type in ["forge", "fabric", "quilt", "neoforge"]
         return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
 
     def destroy(self, destroyWindow: bool = True, destroySubWindows: bool = True) -> None:
