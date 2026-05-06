@@ -2,6 +2,7 @@
 提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
 """
 
+import asyncio
 import concurrent.futures
 import contextlib
 import hashlib
@@ -19,9 +20,8 @@ from requests import HTTPError, RequestException
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ...version_info import APP_NAME, APP_VERSION
+from ...version_info import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from .. import get_logger
-from .async_http_utils import AsyncHTTPUtils
 
 logger = get_logger().bind(component="HTTPUtils")
 
@@ -140,7 +140,7 @@ class HTTPUtils:
     @staticmethod
     def get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
         """獲取包含預設 User-Agent 的標頭"""
-        default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (colin955023@gmail.com)"}
+        default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"}
         if headers:
             default_headers.update(headers)
         return default_headers
@@ -230,7 +230,12 @@ class HTTPUtils:
 
     @classmethod
     def get_content(
-        cls, url: str, timeout: int = 30, stream: bool = False, headers: dict[str, str] | None = None
+        cls,
+        url: str,
+        timeout: int = 30,
+        stream: bool = False,
+        headers: dict[str, str] | None = None,
+        log_errors: bool = True,
     ) -> bytes | None:
         """發送 HTTP GET 請求並回傳完整的回應內容。
 
@@ -254,7 +259,10 @@ class HTTPUtils:
             resp.raise_for_status()
             return resp.content
         except RequestException as e:
-            logger.exception(f"HTTP GET 請求失敗 ({url}): {e}")
+            if log_errors:
+                logger.exception(f"HTTP GET 請求失敗 ({url}): {e}")
+            else:
+                logger.debug(f"HTTP GET 請求未成功 ({url}): {e}")
             return None
 
     @classmethod
@@ -337,8 +345,7 @@ class HTTPUtils:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))
                 downloaded = 0
-                # 在寫入時同時計算檔案雜湊，以便驗證
-                hasher = hashlib.new(expected_hash_algorithm or "sha256")
+                hasher = hashlib.new(expected_hash_algorithm) if normalized_expected_hash else None
                 with open(temp_path_obj, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
@@ -349,22 +356,21 @@ class HTTPUtils:
                         if not chunk:
                             continue
                         f.write(chunk)
-                        hasher.update(chunk)
+                        if hasher is not None:
+                            hasher.update(chunk)
                         downloaded += len(chunk)
                         if progress_callback:
                             progress_callback(downloaded, total_size)
-                # 若提供預期 hash，檢查是否吻合
-                computed = hasher.hexdigest().lower()
-                if normalized_expected_hash and computed != normalized_expected_hash:
-                    logger.error(
-                        f"下載檔案的雜湊不符: algorithm={expected_hash_algorithm} expected={normalized_expected_hash} computed={computed}"
-                    )
-                    with contextlib.suppress(OSError):
-                        if temp_path_obj.exists():
-                            temp_path_obj.unlink()
-                    return False
-            with contextlib.suppress(OSError):
-                local_path_obj.unlink(missing_ok=True)
+                if normalized_expected_hash and hasher is not None:
+                    computed = hasher.hexdigest().lower()
+                    if computed != normalized_expected_hash:
+                        logger.error(
+                            f"下載檔案的雜湊不符: algorithm={expected_hash_algorithm} expected={normalized_expected_hash} computed={computed}"
+                        )
+                        with contextlib.suppress(OSError):
+                            if temp_path_obj.exists():
+                                temp_path_obj.unlink()
+                        return False
             temp_path_obj.replace(local_path_obj)
             try:
                 fd = os.open(str(local_path_obj.parents[0]), os.O_RDONLY)
@@ -409,24 +415,24 @@ class HTTPUtils:
 
     @classmethod
     async def get_json_async(cls, *args, **kwargs):
-        """使用 aiohttp 非同步取得 JSON 回應。"""
+        """使用共用 requests 實作在線程中取得 JSON 回應。"""
 
-        return await AsyncHTTPUtils.get_json(*args, **kwargs)
+        return await asyncio.to_thread(cls.get_json, *args, **kwargs)
 
     @classmethod
     async def post_json_async(cls, *args, **kwargs):
-        """使用 aiohttp 非同步送出 JSON POST 請求。"""
+        """使用共用 requests 實作在線程中送出 JSON POST 請求。"""
 
-        return await AsyncHTTPUtils.post_json(*args, **kwargs)
+        return await asyncio.to_thread(cls.post_json, *args, **kwargs)
 
     @classmethod
     async def get_content_async(cls, *args, **kwargs):
-        """使用 aiohttp 非同步取得完整回應內容。"""
+        """使用共用 requests 實作在線程中取得完整回應內容。"""
 
-        return await AsyncHTTPUtils.get_content(*args, **kwargs)
+        return await asyncio.to_thread(cls.get_content, *args, **kwargs)
 
     @classmethod
     async def download_file_async(cls, *args, **kwargs):
-        """使用 aiohttp 非同步下載檔案。"""
+        """使用共用 requests 實作在線程中下載檔案。"""
 
-        return await AsyncHTTPUtils.download_file(*args, **kwargs)
+        return await asyncio.to_thread(cls.download_file, *args, **kwargs)

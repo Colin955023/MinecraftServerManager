@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import pytest
 from src.core import ServerManager
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper
 
 
-@pytest.mark.smoke
 def test_load_properties_parses_escaped_delimiters(tmp_path) -> None:
     props_file = tmp_path / "server.properties"
     props_file.write_text(
@@ -20,7 +18,6 @@ def test_load_properties_parses_escaped_delimiters(tmp_path) -> None:
     assert loaded["server-ip"] == " 127.0.0.1"
 
 
-@pytest.mark.smoke
 def test_save_properties_round_trip_preserves_values(tmp_path) -> None:
     props_file = tmp_path / "server.properties"
     original = {
@@ -37,7 +34,6 @@ def test_save_properties_round_trip_preserves_values(tmp_path) -> None:
     assert reloaded["level-name"] == original["level-name"]
 
 
-@pytest.mark.smoke
 def test_server_manager_update_server_properties_persists_empty_values_and_updates_config(tmp_path) -> None:
     manager = ServerManager(str(tmp_path))
     server_dir = tmp_path / "demo"
@@ -66,7 +62,6 @@ def test_server_manager_update_server_properties_persists_empty_values_and_updat
     assert manager.load_server_properties("demo") == {"motd": "", "server-ip": ""}
 
 
-@pytest.mark.smoke
 def test_load_server_properties_skips_config_write_when_properties_unchanged(tmp_path, monkeypatch) -> None:
     manager = ServerManager(str(tmp_path))
     server_dir = tmp_path / "demo"
@@ -102,7 +97,6 @@ def test_load_server_properties_skips_config_write_when_properties_unchanged(tmp
     assert write_calls == []
 
 
-@pytest.mark.smoke
 def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, monkeypatch) -> None:
     manager = ServerManager(str(tmp_path))
 
@@ -141,7 +135,6 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, mo
     assert write_calls == []
 
 
-@pytest.mark.smoke
 def test_server_manager_rejects_outside_path_on_start(tmp_path, monkeypatch) -> None:
     manager = ServerManager(str(tmp_path))
     outside_path = tmp_path.parents[0] / "escape"

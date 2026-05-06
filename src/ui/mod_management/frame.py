@@ -4,16 +4,11 @@ from __future__ import annotations
 
 import queue
 import re
-import tkinter
-import tkinter.filedialog as filedialog
-import tkinter.ttk as ttk
 import traceback
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-import customtkinter as ctk
 
 from ...core import AppException, MinecraftVersionManager, ModManager, ModStatus
 from ...utils import (
@@ -24,11 +19,13 @@ from ...utils import (
     Spacing,
     UIUtils,
 )
+from ...utils.ui_support import qt_widgets as qt
 from ..custom_dropdown import CustomDropdown
 from ..dialog_utils import DialogUtils
 from ..font_manager import FontManager
 from ..mod_search_service.models import LocalModUpdatePlan
 from ..task_utils import TaskUtils
+from ..ui_config import resolve_color
 from .constants import logger
 from .install_executor import ModManagementInstallExecutorMixin
 from .local_mod_list_presenter import LocalModListPresenter
@@ -63,16 +60,16 @@ class ModManagementFrame(
         self.all_selected = False
         self.selected_mods: set[str] = set()
         self.VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
-        self.main_frame: ctk.CTkFrame | None = None
-        self.notebook: ttk.Notebook | None = None
-        self.local_tab: ctk.CTkFrame | None = None
-        self.browse_tab: ctk.CTkFrame | None = None
-        self.browse_tree: ttk.Treeview | None = None
-        self.browse_filter_label: ctk.CTkLabel | None = None
-        self.browse_results_label: ctk.CTkLabel | None = None
-        self.local_tree: ttk.Treeview | None = None
-        self.local_v_scrollbar: ttk.Scrollbar | None = None
-        self.local_h_scrollbar: ttk.Scrollbar | None = None
+        self.main_frame: qt.Frame | None = None
+        self.notebook: qt.Notebook | None = None
+        self.local_tab: qt.Frame | None = None
+        self.browse_tab: qt.Frame | None = None
+        self.browse_tree: qt.Treeview | None = None
+        self.browse_filter_label: qt.Label | None = None
+        self.browse_results_label: qt.Label | None = None
+        self.local_tree: qt.Treeview | None = None
+        self.local_v_scrollbar: qt.Scrollbar | None = None
+        self.local_h_scrollbar: qt.Scrollbar | None = None
         self.local_tree_state = LocalTreeVirtualizationState()
         self.local_tree_state.apply_to_frame(self)
         self.local_mod_list_presenter = LocalModListPresenter(self)
@@ -104,7 +101,7 @@ class ModManagementFrame(
         self._pending_status_message: str = ""
         self.ui_queue: queue.Queue = queue.Queue()
         self.create_widgets()
-        host = self.main_frame if self.main_frame and self.main_frame.winfo_exists() else self.parent
+        host = self.main_frame if qt.is_alive(self.main_frame) else self.parent
         TaskUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
@@ -132,8 +129,8 @@ class ModManagementFrame(
         """
         self._pending_status_message = str(message)
         try:
-            if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
-                if hasattr(self, "parent") and self.parent and self.parent.winfo_exists():
+            if hasattr(self, "status_label") and qt.is_alive(self.status_label):
+                if qt.is_alive(getattr(self, "parent", None)):
                     UIUtils.schedule_coalesced_idle(
                         self.parent, "_status_update_job", self._apply_status_label_update, owner=self
                     )
@@ -150,7 +147,7 @@ class ModManagementFrame(
     def _apply_status_label_update(self) -> None:
         """套用合併後的狀態文字。"""
         self._status_update_job = None
-        if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+        if hasattr(self, "status_label") and self.status_label and self.status_label.is_alive():
             self.status_label.configure(text=self._pending_status_message)
 
     def update_status_safe(self, message: str) -> None:
@@ -184,7 +181,7 @@ class ModManagementFrame(
     def _apply_local_toggle_success(
         self,
         *,
-        tree: ttk.Treeview | None,
+        tree: qt.Treeview | None,
         item_id: str,
         mod_id: str,
         mod_obj: Any,
@@ -212,7 +209,7 @@ class ModManagementFrame(
             and (new_filename not in self.enhanced_mods_cache)
         ):
             self.enhanced_mods_cache[new_filename] = self.enhanced_mods_cache[old_filename]
-        if not tree or not tree.winfo_exists():
+        if not tree or not tree.is_alive():
             return
         row_values = list(tree.item(item_id, "values") or [])
         if row_values:
@@ -224,7 +221,7 @@ class ModManagementFrame(
 
     def create_widgets(self) -> None:
         """建立 UI 元件"""
-        self.main_frame = ctk.CTkFrame(self.parent)
+        self.main_frame = qt.Frame(self.parent)
         self.create_header()
         self.create_server_selection()
         self.create_status_bar()
@@ -232,23 +229,23 @@ class ModManagementFrame(
 
     def create_server_selection(self) -> None:
         """建立伺服器選擇區域"""
-        server_frame = ctk.CTkFrame(self.main_frame)
-        server_frame.pack(fill="x", padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
-        inner_frame = ctk.CTkFrame(server_frame, fg_color="transparent")
-        inner_frame.pack(fill="x", padx=Spacing.LARGE_MINUS, pady=Spacing.SMALL_PLUS)
-        ctk.CTkLabel(
+        server_frame = qt.Frame(self.main_frame)
+        server_frame.attach(fill="x", padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
+        inner_frame = qt.Frame(server_frame, fg_color="transparent")
+        inner_frame.attach(fill="x", padx=Spacing.LARGE_MINUS, pady=Spacing.SMALL_PLUS)
+        qt.Label(
             inner_frame, text="📁 伺服器:", font=FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold")
-        ).pack(side="left")
-        self.server_var = tkinter.StringVar()
+        ).attach(side="left")
+        self.server_var = qt.TextState()
         self.server_combo = CustomDropdown(
             inner_frame,
             variable=self.server_var,
             values=["載入中..."],
             command=self.on_server_changed,
-            width=FontManager.get_dpi_scaled_size(200),
+            width=Sizes.DROPDOWN_COMPACT_WIDTH,
         )
-        self.server_combo.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
-        refresh_btn = ctk.CTkButton(
+        self.server_combo.attach(side="left", padx=(Spacing.SMALL_PLUS, 0))
+        refresh_btn = qt.Button(
             inner_frame,
             text="🔄 重新整理",
             font=FontManager.get_font(size=FontSize.MEDIUM),
@@ -256,29 +253,31 @@ class ModManagementFrame(
             width=Sizes.BUTTON_WIDTH_SECONDARY,
             height=Sizes.INPUT_HEIGHT,
         )
-        refresh_btn.pack(side="left", padx=(Spacing.SMALL_PLUS, 0))
+        refresh_btn.attach(side="left", padx=(Spacing.SMALL_PLUS, 0))
 
     def create_header(self) -> None:
         """建立標題區域"""
-        header_frame = ctk.CTkFrame(self.main_frame)
-        header_frame.pack(fill="x", padx=Spacing.XL, pady=(Spacing.XL, Spacing.SMALL_PLUS))
-        title_label = ctk.CTkLabel(
+        header_frame = qt.Frame(self.main_frame)
+        header_frame.attach(fill="x", padx=Spacing.XL, pady=(Spacing.XL, Spacing.SMALL_PLUS))
+        self.title_label = qt.Label(
             header_frame, text="🧩 模組管理", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
         )
-        title_label.pack(side="left", padx=Spacing.LARGE_MINUS, pady=Spacing.LARGE_MINUS)
-        desc_label = ctk.CTkLabel(
+        self.title_label.attach(side="left", padx=Spacing.LARGE_MINUS, pady=Spacing.LARGE_MINUS)
+        self.description_label = qt.Label(
             header_frame,
             text="參考 Prism Launcher 的模組管理流程",
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             text_color=Colors.TEXT_SECONDARY,
         )
-        desc_label.pack(side="left", padx=(Spacing.LARGE_MINUS, Spacing.LARGE_MINUS), pady=Spacing.LARGE_MINUS)
+        self.description_label.attach(
+            side="left", padx=(Spacing.LARGE_MINUS, Spacing.LARGE_MINUS), pady=Spacing.LARGE_MINUS
+        )
 
     def create_local_mods_tab(self) -> None:
         """建立本地模組頁面"""
         if not self.notebook:
             return
-        self.local_tab = ctk.CTkFrame(self.notebook)
+        self.local_tab = qt.Frame(self.notebook)
         self.notebook.add(self.local_tab, text="📁 本地模組")
         self.create_local_toolbar()
         self.create_local_mod_list()
@@ -287,7 +286,7 @@ class ModManagementFrame(
         """建立線上瀏覽頁面。"""
         if not self.notebook:
             return
-        self.browse_tab = ctk.CTkFrame(self.notebook)
+        self.browse_tab = qt.Frame(self.notebook)
         self.notebook.add(self.browse_tab, text="🌐 瀏覽模組")
         self.create_browse_search()
         self.create_browse_mod_list()
@@ -302,13 +301,62 @@ class ModManagementFrame(
 
     def create_notebook(self) -> None:
         """建立頁籤介面"""
-        self.notebook = ttk.Notebook(self.main_frame)
-        style = ttk.Style()
-        style.configure("Tab", font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE, "bold"))
-        self.notebook.pack(fill="both", expand=True, padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
+        self.notebook = qt.Notebook(self.main_frame)
+        self._apply_notebook_style()
+        self.notebook.attach(fill="both", expand=True, padx=Spacing.XL, pady=(0, Spacing.SMALL_PLUS))
         self.create_local_mods_tab()
         self.create_browse_mods_tab()
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+        self.notebook.connect_event("tab_changed", self.on_tab_changed)
+
+    def _apply_notebook_style(self) -> None:
+        if not self.notebook:
+            return
+        tab_bg = resolve_color(Colors.BUTTON_LIGHT)
+        tab_hover = resolve_color(Colors.BUTTON_LIGHT_HOVER)
+        tab_text = Colors.TEXT_ON_LIGHT
+        border = resolve_color(Colors.BORDER_LIGHT)
+        panel = resolve_color(Colors.BG_PRIMARY)
+        self.notebook.setStyleSheet(
+            "QTabWidget::pane {"
+            f"background: {panel}; border: 1px solid {border};"
+            "}"
+            "QTabBar::tab {"
+            f"background: {tab_bg}; color: {tab_text}; border: 1px solid {border};"
+            "border-bottom: 0; padding: 6px 14px; margin-right: 2px;"
+            "}"
+            f"QTabBar::tab:hover {{ background: {tab_hover}; }}"
+            f"QTabBar::tab:selected {{ background: {tab_hover}; color: {tab_text}; }}"
+        )
+
+    def apply_theme_styles(self) -> None:
+        """重新套用模組管理頁面主題色。"""
+        self._apply_notebook_style()
+        if hasattr(self, "main_frame") and self.main_frame:
+            self.main_frame.setStyleSheet("QFrame { background: transparent; border: 0; }")
+        if hasattr(self, "title_label") and self.title_label:
+            self.title_label.configure(text_color=Colors.TEXT_HEADING)
+        if hasattr(self, "description_label") and self.description_label:
+            self.description_label.configure(text_color=Colors.TEXT_SECONDARY)
+        if hasattr(self, "status_label") and self.status_label:
+            self.status_label.configure(text_color=Colors.TEXT_PRIMARY)
+        if hasattr(self, "status_frame") and self.status_frame:
+            self._apply_status_bar_style()
+        for tree in (getattr(self, "local_tree", None), getattr(self, "browse_tree", None)):
+            if tree and hasattr(tree, "apply_theme_style"):
+                tree.apply_theme_style()
+        if getattr(self, "local_tree", None):
+            self._get_local_mod_list_presenter().apply_local_tree_theme()
+
+    def _apply_status_bar_style(self) -> None:
+        if not getattr(self, "status_frame", None):
+            return
+        bg = resolve_color((Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_DARK))
+        fg = resolve_color(Colors.TEXT_PRIMARY)
+        border = resolve_color(Colors.BORDER_LIGHT)
+        self.status_frame.setStyleSheet(
+            f"QFrame {{ background: {bg}; color: {fg}; border: 1px solid {border}; border-radius: 3px; }}"
+            f"QLabel {{ color: {fg}; background: transparent; border: 0; }}"
+        )
 
     def on_tab_changed(self, _event=None) -> None:
         """頁籤切換時同步目前頁面的資料狀態。
@@ -362,49 +410,47 @@ class ModManagementFrame(
                 height=Sizes.DIALOG_LARGE_HEIGHT,
                 min_width=Sizes.DIALOG_LARGE_WIDTH,
                 min_height=Sizes.DIALOG_LARGE_HEIGHT,
-                max_width=FontManager.get_dpi_scaled_size(1280),
-                max_height=FontManager.get_dpi_scaled_size(960),
                 delay_ms=250,
             )
-            main_frame = ctk.CTkFrame(dialog)
-            main_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
-            title_label = ctk.CTkLabel(
+            main_frame = qt.Frame(dialog)
+            main_frame.attach(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
+            title_label = qt.Label(
                 main_frame, text="匯出模組列表", font=FontManager.get_font(size=FontSize.HEADING_XLARGE, weight="bold")
             )
-            title_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.XL))
-            fmt_frame = ctk.CTkFrame(main_frame)
-            fmt_frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
-            fmt_inner = ctk.CTkFrame(fmt_frame, fg_color="transparent")
-            fmt_inner.pack(fill="x", padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
-            ctk.CTkLabel(
+            title_label.attach(pady=(Spacing.SMALL_PLUS, Spacing.XL))
+            fmt_frame = qt.Frame(main_frame)
+            fmt_frame.attach(fill="x", pady=(0, Spacing.LARGE_MINUS))
+            fmt_inner = qt.Frame(fmt_frame, fg_color="transparent")
+            fmt_inner.attach(fill="x", padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
+            qt.Label(
                 fmt_inner, text="選擇匯出格式:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
-            ).pack(side="left", padx=(0, Spacing.LARGE_MINUS))
-            fmt_var = tkinter.StringVar(value="text")
-            text_radio = ctk.CTkRadioButton(
+            ).attach(side="left", padx=(0, Spacing.LARGE_MINUS))
+            fmt_var = qt.TextState(value="text")
+            text_radio = qt.RadioButton(
                 fmt_inner, text="純文字", variable=fmt_var, value="text", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            text_radio.pack(side="left", padx=Spacing.TINY)
-            json_radio = ctk.CTkRadioButton(
+            text_radio.attach(side="left", padx=Spacing.TINY)
+            json_radio = qt.RadioButton(
                 fmt_inner, text="JSON", variable=fmt_var, value="json", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            json_radio.pack(side="left", padx=Spacing.TINY)
-            html_radio = ctk.CTkRadioButton(
+            json_radio.attach(side="left", padx=Spacing.TINY)
+            html_radio = qt.RadioButton(
                 fmt_inner, text="HTML", variable=fmt_var, value="html", font=FontManager.get_font(size=FontSize.LARGE)
             )
-            html_radio.pack(side="left", padx=Spacing.TINY)
-            preview_frame = ctk.CTkFrame(main_frame)
-            preview_frame.pack(fill="both", expand=True, pady=(0, Spacing.LARGE_MINUS))
-            preview_label = ctk.CTkLabel(
+            html_radio.attach(side="left", padx=Spacing.TINY)
+            preview_frame = qt.Frame(main_frame)
+            preview_frame.attach(fill="both", expand=True, pady=(0, Spacing.LARGE_MINUS))
+            preview_label = qt.Label(
                 preview_frame, text="預覽:", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold")
             )
-            preview_label.pack(anchor="w", padx=Spacing.LARGE_MINUS, pady=(Spacing.LARGE_MINUS, Spacing.TINY))
-            text_widget = ctk.CTkTextbox(
+            preview_label.attach(anchor="w", padx=Spacing.LARGE_MINUS, pady=(Spacing.LARGE_MINUS, Spacing.TINY))
+            text_widget = qt.TextBox(
                 preview_frame,
                 font=FontManager.get_font(size=FontSize.LARGE),
-                height=Sizes.PREVIEW_TEXTBOX_HEIGHT,
+                min_height=Sizes.PREVIEW_TEXTBOX_HEIGHT,
                 wrap="word",
             )
-            text_widget.pack(fill="both", expand=True, padx=Spacing.LARGE_MINUS, pady=(0, Spacing.LARGE_MINUS))
+            text_widget.attach(fill="both", expand=True, padx=Spacing.LARGE_MINUS, pady=(0, Spacing.LARGE_MINUS))
 
             def update_preview(*_):
                 manager = self.mod_manager
@@ -418,8 +464,8 @@ class ModManagementFrame(
 
             fmt_var.trace_add("write", update_preview)
             update_preview()
-            btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-            btn_frame.pack(pady=(0, Spacing.SMALL_PLUS))
+            btn_frame = qt.Frame(main_frame, fg_color="transparent")
+            btn_frame.attach(pady=(0, Spacing.SMALL_PLUS))
 
             def do_save():
                 manager = self.mod_manager
@@ -430,7 +476,7 @@ class ModManagementFrame(
                 ext = {"text": "txt", "json": "json", "html": "html"}[fmt]
                 server_name = getattr(self.current_server, "name", "server")
                 default_name = f"{server_name}_模組列表.{ext}"
-                file_path = filedialog.asksaveasfilename(
+                file_path = qt.get_save_file_name(
                     title="儲存模組列表",
                     defaultextension=f".{ext}",
                     filetypes=[("所有檔案", "*.*"), ("純文字", "*.txt"), ("JSON", "*.json"), ("HTML", "*.html")],
@@ -454,36 +500,35 @@ class ModManagementFrame(
                         )
                         UIUtils.show_error("開啟檔案失敗", f"無法開啟檔案: {e}", parent=dialog)
 
-            save_btn = ctk.CTkButton(
+            save_btn = qt.Button(
                 btn_frame,
                 text="儲存到檔案",
                 command=do_save,
                 font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
                 fg_color=Colors.BUTTON_PRIMARY,
                 hover_color=Colors.BUTTON_PRIMARY_HOVER,
-                width=FontManager.get_dpi_scaled_size(180),
-                height=int(40 * FontManager.get_scale_factor()),
+                width=Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH,
+                height=Sizes.BUTTON_HEIGHT_LARGE,
             )
-            save_btn.pack(side="left", padx=(0, Spacing.SMALL_PLUS))
-            close_btn = ctk.CTkButton(
+            save_btn.attach(side="left", padx=(0, Spacing.SMALL_PLUS))
+            close_btn = qt.Button(
                 btn_frame,
                 text="關閉",
                 command=dialog.destroy,
                 font=FontManager.get_font(size=FontSize.LARGE),
                 fg_color=Colors.BUTTON_SECONDARY,
                 hover_color=Colors.BUTTON_SECONDARY_HOVER,
-                width=FontManager.get_dpi_scaled_size(150),
-                height=int(40 * FontManager.get_scale_factor()),
+                width=Sizes.MOD_EXPORT_CLOSE_BUTTON_WIDTH,
+                height=Sizes.BUTTON_HEIGHT_LARGE,
             )
-            close_btn.pack(side="left")
-            dialog.bind("<Escape>", lambda _e: dialog.destroy())
+            close_btn.attach(side="left")
+            dialog.connect_event("escape_pressed", lambda _e: dialog.destroy())
             DialogUtils.schedule_toplevel_layout_refresh(
                 dialog,
                 min_width=Sizes.DIALOG_LARGE_WIDTH,
                 min_height=Sizes.DIALOG_LARGE_HEIGHT,
-                max_width=FontManager.get_dpi_scaled_size(1280),
-                max_height=FontManager.get_dpi_scaled_size(960),
                 parent=self.parent,
+                preserve_current_size=False,
             )
         except Exception as e:
             logger.error(f"匯出對話框錯誤: {e}\n{traceback.format_exc()}")
@@ -491,26 +536,28 @@ class ModManagementFrame(
 
     def create_status_bar(self) -> None:
         """建立狀態列"""
-        status_frame = ctk.CTkFrame(self.main_frame, height=int(40 * FontManager.get_scale_factor()))
-        status_frame.pack(side="bottom", fill="x", padx=Spacing.XL, pady=(0, Spacing.XL))
-        status_frame.pack_propagate(False)
-        self.status_label = ctk.CTkLabel(
+        status_frame = qt.Frame(self.main_frame, height=Sizes.BUTTON_HEIGHT_LARGE)
+        self.status_frame = status_frame
+        status_frame.attach(side="bottom", fill="x", padx=Spacing.XL, pady=(0, Spacing.XL))
+        status_frame.set_box_layout_propagation(False)
+        self._apply_status_bar_style()
+        self.status_label = qt.Label(
             status_frame,
             text="請選擇伺服器開始管理模組",
             font=FontManager.get_font(size=FontSize.HEADING_MEDIUM),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         )
-        self.status_label.pack(side="left", padx=Spacing.SMALL_PLUS, pady=int(6 * FontManager.get_scale_factor()))
-        self.progress_var = tkinter.DoubleVar()
-        self.progress_bar = ctk.CTkProgressBar(
+        self.status_label.attach(side="left", padx=Spacing.SMALL_PLUS, pady=Spacing.TINY)
+        self.progress_var = qt.FloatState()
+        self.progress_bar = qt.ProgressBar(
             status_frame,
             variable=self.progress_var,
-            width=FontManager.get_dpi_scaled_size(300),
-            height=int(20 * FontManager.get_scale_factor()),
+            width=Sizes.INPUT_WIDTH,
+            height=Sizes.MOD_PROGRESS_HEIGHT,
             progress_color=Colors.PROGRESS_ACCENT,
             fg_color=Colors.PROGRESS_TRACK,
         )
-        self.progress_bar.pack(side="right", padx=Spacing.SMALL_PLUS, pady=int(6 * FontManager.get_scale_factor()))
+        self.progress_bar.attach(side="right", padx=Spacing.SMALL_PLUS, pady=Spacing.TINY)
 
     def load_servers(self) -> None:
         """載入伺服器列表"""
@@ -616,7 +663,7 @@ class ModManagementFrame(
         selection = tree.selection()
         if not selection:
             return
-        menu = tkinter.Menu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
+        menu = qt.PopupMenu(self.parent, tearoff=0, font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE))
         menu.add_command(label="🔄 切換啟用狀態", command=self.toggle_local_mod)
         menu.add_separator()
         menu.add_command(label="📋 複製模組資訊", command=self.copy_mod_info)
@@ -624,7 +671,7 @@ class ModManagementFrame(
         menu.add_separator()
         menu.add_command(label="🗑️ 刪除模組", command=self.delete_local_mod)
         try:
-            menu.tk_popup(event.x_root, event.y_root)
+            menu.popup_at(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
@@ -634,7 +681,7 @@ class ModManagementFrame(
             UIUtils.show_warning("警告", "請先選擇伺服器", self.parent)
             return
         filetypes = [("JAR files", "*.jar"), ("All files", "*.*")]
-        filename = filedialog.askopenfilename(filetypes=filetypes)
+        filename = qt.get_open_file_name(filetypes=filetypes)
         if filename:
             if not self.mod_manager:
                 UIUtils.show_error("錯誤", "模組管理器未初始化", self.parent)
@@ -673,13 +720,13 @@ class ModManagementFrame(
             values = self._get_tree_item_values(tree, item)
             if values and len(values) >= 4:
                 info = f"模組名稱: {values[1]}\n版本: {values[2]}\n狀態: {values[0]}\n檔案: {(values[3] if len(values) > 3 else 'N/A')}"
-                self.parent.clipboard_clear()
-                self.parent.clipboard_append(info)
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                app = qt.ensure_app()
+                app.clipboard().setText(info)
+                if hasattr(self, "status_label") and self.status_label.is_alive():
                     self.update_status("模組資訊已複製到剪貼板")
         except Exception as e:
             logger.error(f"複製模組資訊失敗: {e}\n{traceback.format_exc()}")
-            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.is_alive():
                 self.status_label.configure(text=f"複製失敗: {e}")
 
     def show_in_explorer(self) -> None:
@@ -706,15 +753,15 @@ class ModManagementFrame(
                         UIUtils.reveal_in_explorer(mod_file)
                     except Exception as e:
                         logger.error(f"無法打開檔案總管顯示檔案: {e}")
-                    if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                    if hasattr(self, "status_label") and self.status_label.is_alive():
                         self.status_label.configure(text=f"已在檔案總管中顯示: {mod_file.name}")
-                elif hasattr(self, "status_label") and self.status_label.winfo_exists():
+                elif hasattr(self, "status_label") and self.status_label.is_alive():
                     self.status_label.configure(text="找不到要顯示的模組檔案")
-            elif hasattr(self, "status_label") and self.status_label.winfo_exists():
+            elif hasattr(self, "status_label") and self.status_label.is_alive():
                 self.status_label.configure(text="無法識別模組檔案")
         except Exception as e:
             logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
-            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.is_alive():
                 self.status_label.configure(text=f"開啟檔案總管失敗: {e}")
 
     def delete_local_mod(self) -> None:
@@ -755,7 +802,7 @@ class ModManagementFrame(
         missing_names = [mod_name_by_id.get(mod_id, mod_id) for mod_id in result.missing_ids]
         if deleted_count > 0:
             self.load_local_mods()
-            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.is_alive():
                 self.status_label.configure(text=f"已刪除 {deleted_count} 個模組")
             if result.completed and len(selected_mods) == 1:
                 UIUtils.show_info("成功", f"模組 '{selected_mods[0][1]}' 已刪除", self.parent)
@@ -768,11 +815,11 @@ class ModManagementFrame(
                 else:
                     UIUtils.show_info("成功", summary, self.parent)
         else:
-            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.is_alive():
                 self.status_label.configure(text=result.message or "刪除失敗")
             UIUtils.show_warning(result.title or "提示", result.message or "沒有成功刪除任何模組", self.parent)
 
-    def get_frame(self) -> ctk.CTkFrame | None:
+    def get_frame(self) -> qt.Frame | None:
         """獲取主框架"""
         if hasattr(self, "main_frame") and self.main_frame:
             return self.main_frame
@@ -800,25 +847,25 @@ class ModManagementFrame(
         """
         self._get_local_mod_list_presenter().on_tree_selection_changed(_event)
 
-    def pack(self, **kwargs) -> None:
-        """將主框架以 pack 方式放入父容器。
+    def attach(self, **kwargs) -> None:
+        """將主框架加入父容器的線性版面。
 
         Args:
-            kwargs: 傳給 pack 的版面配置參數。
+            kwargs: 版面配置參數。
         """
         if hasattr(self, "main_frame") and self.main_frame:
-            self.main_frame.pack(**kwargs)
+            self.main_frame.attach(**kwargs)
         else:
             logger.debug("主框架未初始化，無法打包", "ModManagementFrame")
 
-    def grid(self, **kwargs) -> None:
-        """將主框架以 grid 方式放入父容器。
+    def attach_matrix(self, **kwargs) -> None:
+        """將主框架加入父容器的矩陣版面。
 
         Args:
-            kwargs: 傳給 grid 的版面配置參數。
+            kwargs: 版面配置參數。
         """
         if hasattr(self, "main_frame") and self.main_frame:
-            self.main_frame.grid(**kwargs)
+            self.main_frame.attach_matrix(**kwargs)
         else:
             logger.debug("主框架未初始化，無法佈局", "ModManagementFrame")
 

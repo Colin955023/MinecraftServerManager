@@ -7,7 +7,6 @@ import src.utils.core_utils.path_utils as path_utils_module
 from src.utils import PathUtils
 
 
-@pytest.mark.smoke
 def test_save_json_roundtrip_immediate(tmp_path) -> None:
     target = tmp_path / "state.json"
     payload = {"server": "alpha", "ports": [25565, 25566], "enabled": True}
@@ -16,7 +15,6 @@ def test_save_json_roundtrip_immediate(tmp_path) -> None:
     assert PathUtils.load_json(target) == payload
 
 
-@pytest.mark.smoke
 def test_save_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypatch) -> None:
     target = tmp_path / "state.json"
     replace_call_count = 0
@@ -41,7 +39,6 @@ def test_save_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypat
     assert replace_call_count == count_before_change + 1
 
 
-@pytest.mark.smoke
 def test_save_json_keeps_existing_file_when_new_payload_not_serializable(tmp_path) -> None:
     target = tmp_path / "state.json"
     original = {"ok": True}
@@ -51,7 +48,6 @@ def test_save_json_keeps_existing_file_when_new_payload_not_serializable(tmp_pat
     assert PathUtils.load_json(target) == original
 
 
-@pytest.mark.smoke
 def test_safe_extract_zip_reports_progress(tmp_path) -> None:
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
@@ -85,7 +81,21 @@ def test_safe_extract_zip_reports_progress(tmp_path) -> None:
     assert all(total == expected_total for _done, total in progress_events)
 
 
-@pytest.mark.smoke
+@pytest.mark.parametrize("member_name", ["../evil.txt", "mods/../evil.txt", "/absolute/evil.txt", r"..\evil.txt"])
+def test_safe_extract_zip_rejects_unsafe_member_names(tmp_path, member_name: str) -> None:
+    zip_path = tmp_path / "server.zip"
+    extract_dir = tmp_path / "extracted"
+    extract_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr(member_name, b"evil")
+
+    with pytest.raises(ValueError):
+        PathUtils.safe_extract_zip(zip_path, extract_dir)
+
+    assert not (tmp_path / "evil.txt").exists()
+
+
 def test_copy_dir_reports_progress(tmp_path) -> None:
     source_dir = tmp_path / "source"
     target_dir = tmp_path / "target"
@@ -107,7 +117,6 @@ def test_copy_dir_reports_progress(tmp_path) -> None:
     assert [done for done, _total in progress_events] == sorted(done for done, _total in progress_events)
 
 
-@pytest.mark.smoke
 def test_delete_within_blocks_paths_outside_base(tmp_path) -> None:
     base_dir = tmp_path / "servers_root"
     base_dir.mkdir(parents=True, exist_ok=True)

@@ -1,17 +1,14 @@
-"""進度對話框元件。
-
-提供可取消的進度視窗，供長時間 UI 作業共用。
-"""
+"""原生 Qt 進度對話框。"""
 
 from __future__ import annotations
 
 import threading
 from typing import Any
 
-import customtkinter as ctk
-
-from ..utils import Colors, Sizes, Spacing, get_logger
+from ..utils import FontSize, Sizes, Spacing, get_logger
+from ..utils.ui_support.qt_runtime import QtCore, QtWidgets, invoke_later, is_qobject_alive
 from . import DialogUtils, FontManager
+from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ProgressDialog")
 
@@ -20,45 +17,49 @@ class ProgressDialog:
     """顯示可取消的進度對話框。"""
 
     def __init__(self, parent: Any, title: str = "進度", show_cancel: bool = True) -> None:
-        """建立進度對話框。"""
         self.dialog = DialogUtils.create_toplevel_dialog(
             parent,
             title,
-            width=Sizes.INPUT_WIDTH,
-            height=Sizes.DIALOG_SMALL_HEIGHT,
-            resizable=False,
+            width=Sizes.DIALOG_PROGRESS_WIDTH,
+            height=Sizes.DIALOG_PROGRESS_HEIGHT,
             bind_icon=True,
             center_on_parent=True,
             make_modal=True,
-            delay_ms=250,
-            autosize_to_content=True,
-            min_width=300,
-            min_height=120,
-            reveal_after_setup=False,
+            min_width=560,
+            min_height=240,
+            reveal_after_setup=True,
         )
-        content_frame = ctk.CTkFrame(self.dialog)
-        content_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
-        self.status_label = ctk.CTkLabel(content_frame, text="準備中...", font=FontManager.get_font(size=12))
-        self.status_label.pack(pady=(Spacing.SMALL_PLUS, Spacing.LARGE_MINUS))
-        self.progress = ctk.CTkProgressBar(content_frame, width=350, height=Spacing.XL)
-        self.progress.pack(pady=(0, Spacing.LARGE_MINUS))
-        self.progress.set(0)
-        self.percent_label = ctk.CTkLabel(content_frame, text="0%", font=FontManager.get_font(size=11))
-        self.percent_label.pack()
+        self.dialog.setStyleSheet(NativeQtStyle.progress_dialog)
+
+        layout = QtWidgets.QVBoxLayout(self.dialog)
+        margin = Spacing.XL
+        layout.setContentsMargins(margin, margin, margin, margin)
+        layout.setSpacing(Spacing.LARGE_MINUS)
+        self.status_label = QtWidgets.QLabel("準備中...", self.dialog)
+        self.status_label.setFont(FontManager.get_font(size=FontSize.LARGE, weight="bold"))
+        self.status_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        self.progress = QtWidgets.QProgressBar(self.dialog)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setMinimumHeight(38)
+        self.progress.setFont(FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold"))
+        self.progress.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.progress.setTextVisible(True)
+        layout.addWidget(self.progress)
+
+        self.cancel_button: QtWidgets.QPushButton | None = None
         if show_cancel:
-            self.cancel_button = ctk.CTkButton(
-                content_frame,
-                text="取消",
-                command=self.cancel,
-                fg_color=(Colors.TEXT_ERROR[0], Colors.BUTTON_DANGER[0]),
-                hover_color=("#dc2626", Colors.BUTTON_DANGER_HOVER[1]),
-                font=FontManager.get_font(size=12),
-                width=Sizes.BUTTON_WIDTH_COMPACT,
-                height=Sizes.BUTTON_HEIGHT_LARGE,
-            )
-            self.cancel_button.pack(pady=(Spacing.LARGE_MINUS, 0))
+            self.cancel_button = QtWidgets.QPushButton("取消", self.dialog)
+            self.cancel_button.setFont(FontManager.get_font(size=FontSize.NORMAL))
+            self.cancel_button.setMinimumSize(Sizes.BUTTON_WIDTH_COMPACT, Sizes.BUTTON_HEIGHT_LARGE)
+            self.cancel_button.setStyleSheet(NativeQtStyle.create_button(kind="secondary"))
+            self.cancel_button.clicked.connect(self.cancel)
+            layout.addWidget(self.cancel_button, 0, QtCore.Qt.AlignmentFlag.AlignCenter)
+
         self.cancelled = False
-        self._last_ui_pump = 0.0
         self._pending_update = False
         self._last_percent: float = -1.0
         self._last_status = ""
@@ -71,56 +72,49 @@ class ProgressDialog:
             status_text: 要顯示的狀態文字。
 
         Returns:
-            若對話框尚未取消則回傳 True，否則回傳 False。
+            成功排程或完成更新時回傳 True；已取消時回傳 False。
         """
         if self.cancelled:
             return False
-        current_percent = getattr(self, "_last_percent", -1)
-        current_status = getattr(self, "_last_status", "")
-        if current_percent == percent and current_status == status_text:
+        if self._last_percent == percent and self._last_status == status_text:
             return True
         self._last_percent = percent
         self._last_status = status_text
 
         def _update() -> None:
-            if self.cancelled:
+            if self.cancelled or not is_qobject_alive(self.dialog):
                 return
             try:
-                self.progress.set(percent / 100.0)
-                self.status_label.configure(text=status_text)
-                self.percent_label.configure(text=f"{percent:.1f}%")
+                clamped = max(0.0, min(100.0, float(percent)))
+                self.progress.setValue(round(clamped))
+                self.status_label.setText(status_text)
             except Exception as exc:
                 logger.exception(f"更新進度 UI 失敗: {exc}")
 
         if threading.current_thread() is threading.main_thread():
             _update()
-            if not getattr(self, "_pending_update", False):
-                self._pending_update = True
-                self.dialog.after_idle(self._do_idle_update)
         else:
-            self.dialog.after(0, _update)
+            invoke_later(0, _update, parent=self.dialog)
         return True
-
-    def _do_idle_update(self) -> None:
-        """在 idle 時刷新控制項。"""
-        try:
-            if self.cancelled or not self.dialog.winfo_exists():
-                return
-            self.dialog.update_idletasks()
-        except Exception as exc:
-            logger.exception(f"進度對話框 idle 更新失敗: {exc}")
-        finally:
-            self._pending_update = False
 
     def cancel(self) -> None:
         """取消並關閉對話框。"""
         self.cancelled = True
-        self.dialog.destroy()
+        self.close()
 
     def close(self) -> None:
         """關閉對話框。"""
+
+        def _close() -> None:
+            if is_qobject_alive(self.dialog):
+                self.dialog.close()
+                self.dialog.deleteLater()
+
         try:
-            self.dialog.destroy()
+            if threading.current_thread() is threading.main_thread():
+                _close()
+            else:
+                invoke_later(0, _close, parent=self.dialog)
         except Exception as exc:
             logger.exception(f"關閉進度對話框失敗: {exc}")
 

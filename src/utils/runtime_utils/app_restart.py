@@ -459,25 +459,37 @@ class AppRestart:
                 if parent_window:
                     try:
 
+                        def _close_parent_window() -> None:
+                            for method_name in ("quit", "close", "destroy"):
+                                close_method = getattr(parent_window, method_name, None)
+                                if callable(close_method):
+                                    with contextlib.suppress(Exception):
+                                        close_method()
+                                    return
+                            logger.debug("找不到可用的關閉方法，略過父視窗關閉")
+
                         def delayed_close():
                             try:
-                                parent_window.quit()
-                                parent_window.destroy()
+                                _close_parent_window()
                             except Exception as e:
                                 logger.exception(f"關閉視窗時發生錯誤: {e}")
                             shutdown_logging()
                             time.sleep(0.5)
                             sys.exit(0)
 
-                        if hasattr(parent_window, "after"):
-                            parent_window.after(100, delayed_close)
+                        if hasattr(parent_window, "schedule"):
+                            parent_window.schedule(100, delayed_close)
                         else:
                             delayed_close()
                     except Exception as e:
                         logger.exception(f"安排視窗關閉時發生錯誤: {e}")
                         try:
-                            parent_window.quit()
-                            parent_window.destroy()
+                            for method_name in ("quit", "close", "destroy"):
+                                close_method = getattr(parent_window, method_name, None)
+                                if callable(close_method):
+                                    with contextlib.suppress(Exception):
+                                        close_method()
+                                    break
                         except Exception as e2:
                             logger.exception(f"直接關閉視窗失敗: {e2}")
                         shutdown_logging()

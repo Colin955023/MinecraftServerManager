@@ -7,7 +7,6 @@ import src.utils.runtime_utils.settings_manager as settings_module
 from src.core import ConfigurationError
 
 
-@pytest.mark.smoke
 def test_settings_manager_read_write_roundtrip(tmp_path, monkeypatch) -> None:
     user_data_dir = tmp_path / "user_data"
     monkeypatch.setattr(
@@ -20,12 +19,10 @@ def test_settings_manager_read_write_roundtrip(tmp_path, monkeypatch) -> None:
     expected_servers_root = str(tmp_path / "servers_root")
     manager.set_servers_root(expected_servers_root)
     manager.set_auto_update_enabled(False)
-    manager.set_dpi_scaling(1.75)
 
     reloaded = settings_module.SettingsManager()
     assert reloaded.get_servers_root() == expected_servers_root
     assert reloaded.is_auto_update_enabled() is False
-    assert reloaded.get_dpi_scaling() == pytest.approx(1.75)
 
     settings_path = user_data_dir / "user_settings.json"
     stored = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -33,7 +30,40 @@ def test_settings_manager_read_write_roundtrip(tmp_path, monkeypatch) -> None:
     assert stored["auto_update_enabled"] is False
 
 
-@pytest.mark.smoke
+def test_window_preferences_defaults_enabled_and_persist_to_user_settings(tmp_path, monkeypatch) -> None:
+    user_data_dir = tmp_path / "user_data"
+    monkeypatch.setattr(
+        settings_module.RuntimePaths,
+        "get_user_data_dir",
+        staticmethod(lambda: user_data_dir),
+    )
+
+    manager = settings_module.SettingsManager()
+    assert manager.is_remember_size_position_enabled() is True
+    assert manager.is_auto_center_enabled() is True
+    assert manager.is_adaptive_sizing_enabled() is True
+    assert manager.get_theme_mode() == "system"
+
+    manager.set_remember_size_position(False)
+    manager.set_auto_center(False)
+    manager.set_adaptive_sizing(False)
+    manager.set_theme_mode("dark")
+
+    reloaded = settings_module.SettingsManager()
+    assert reloaded.is_remember_size_position_enabled() is False
+    assert reloaded.is_auto_center_enabled() is False
+    assert reloaded.is_adaptive_sizing_enabled() is False
+    assert reloaded.get_theme_mode() == "dark"
+
+    settings_path = user_data_dir / "user_settings.json"
+    stored = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert stored["window_preferences"]["remember_size_position"] is False
+    assert stored["window_preferences"]["auto_center"] is False
+    assert stored["window_preferences"]["adaptive_sizing"] is False
+    assert stored["window_preferences"]["theme_mode"] == "dark"
+    assert "debug_settings" not in stored
+
+
 def test_settings_manager_normalizes_servers_folder_and_validates_root(tmp_path, monkeypatch) -> None:
     user_data_dir = tmp_path / "user_data"
     monkeypatch.setattr(
@@ -51,7 +81,6 @@ def test_settings_manager_normalizes_servers_folder_and_validates_root(tmp_path,
     assert validated_root.is_dir() is True
 
 
-@pytest.mark.smoke
 def test_settings_manager_set_servers_root_then_validate_creates_missing_servers_folder(tmp_path, monkeypatch) -> None:
     user_data_dir = tmp_path / "user_data"
     monkeypatch.setattr(
@@ -70,7 +99,6 @@ def test_settings_manager_set_servers_root_then_validate_creates_missing_servers
     assert validated_root.is_dir() is True
 
 
-@pytest.mark.smoke
 def test_settings_manager_validated_servers_root_requires_configuration(tmp_path, monkeypatch) -> None:
     user_data_dir = tmp_path / "user_data"
     monkeypatch.setattr(
@@ -86,7 +114,6 @@ def test_settings_manager_validated_servers_root_requires_configuration(tmp_path
         manager.get_validated_servers_root_path(create=False)
 
 
-@pytest.mark.smoke
 def test_settings_manager_validated_servers_root_create_true_builds_missing_servers_folder(
     tmp_path, monkeypatch
 ) -> None:

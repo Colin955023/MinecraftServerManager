@@ -95,6 +95,7 @@ class LoaderVersion:
     url: str | None = None
     stable: bool | None = None
     mc_version: str | None = None
+    game_versions: list[str] = field(default_factory=list)
 
 
 @dataclass

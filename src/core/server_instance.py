@@ -5,13 +5,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..utils import SubprocessUtils, get_logger
+from ..utils import SubprocessUtils, SystemUtils, get_logger
 
 if TYPE_CHECKING:
     # 僅在型別檢查時引入以避免執行時依賴循環
@@ -134,6 +135,7 @@ class ServerInstance:
             proc = SubprocessUtils.popen_checked(
                 cmd, cwd=str(cwd), env=env, stdout=SubprocessUtils.PIPE, stderr=SubprocessUtils.PIPE
             )
+            SystemUtils.register_managed_process(cwd, proc.pid)
             return self.attach_process(proc)
 
     def stop(self, timeout: float = 5.0) -> bool:
@@ -176,6 +178,8 @@ class ServerInstance:
                         exc_info=True,
                     )
             finally:
+                with contextlib.suppress(Exception):
+                    SystemUtils.unregister_managed_process(self.path, self.process.pid)
                 self.clear_process()
             return True
 

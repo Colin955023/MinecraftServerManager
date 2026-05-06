@@ -25,7 +25,7 @@ class JavaDownloader:
         if winget_str:
             return Path(winget_str)
 
-        # 2. 針對 Nuitka 環境或 PATH 遺失情況，手動檢查預設別名路徑
+        # 2. 針對打包環境或 PATH 遺失情況，手動檢查預設別名路徑
         local_app_data = os.environ.get("LOCALAPPDATA")
         if local_app_data:
             # 使用 pathlib 的 / 運算子串接路徑
@@ -96,7 +96,7 @@ class JavaDownloader:
         else:
             raise Exception(f"不支援自動安裝 Java 主要版本 {major}，請手動前往官網下載。")
 
-        # 執行安裝指令
+        # 執行安裝指令（顯示 CLI 介面讓用戶看到安裝進度）
         winget_cmd = ["winget", "install", "--accept-package-agreements", "--accept-source-agreements", pkg]
 
         try:
@@ -105,11 +105,8 @@ class JavaDownloader:
                 winget_cmd,
                 check=True,
                 stdin=SubprocessUtils.DEVNULL,
-                stdout=SubprocessUtils.PIPE,
-                stderr=SubprocessUtils.PIPE,
-                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
             )
-            logger.info(f"Java {major} ({pkg}) 安裝程序已觸發。")
+            logger.info(f"Java {major} ({pkg}) 安裝程序已完成。")
         except Exception as e:
             logger.exception(f"winget 安裝過程發生異常: {e}")
             raise Exception(f"透過 winget 安裝 {pkg} 失敗。建議手動開啟終端機執行：\nwinget install {pkg}") from e

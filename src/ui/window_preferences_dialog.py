@@ -4,13 +4,11 @@ Window preferences dialog for configuring window behavior and appearance.
 
 import traceback
 from collections.abc import Callable
-
-import customtkinter as ctk
+from typing import ClassVar
 
 from ..utils import (
-    AppRestart,
+    Colors,
     FontSize,
-    RuntimePaths,
     Sizes,
     Spacing,
     UIUtils,
@@ -19,7 +17,9 @@ from ..utils import (
     get_logger,
     get_settings_manager,
 )
-from . import DialogUtils, FontManager
+from ..utils.ui_support import qt_widgets as qt
+from . import CustomDropdown, DialogUtils, FontManager, ui_config
+from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="WindowPreferencesDialog")
 
@@ -27,14 +27,19 @@ logger = get_logger().bind(component="WindowPreferencesDialog")
 class WindowPreferencesDialog:
     """視窗偏好設定對話框"""
 
+    THEME_LABELS: ClassVar[dict[str, str]] = {"system": "依照系統設定", "light": "淺色", "dark": "深色"}
+    THEME_MODES: ClassVar[dict[str, str]] = {label: mode for mode, label in THEME_LABELS.items()}
+
     def _get_live_main_window_size(self) -> tuple[int, int] | None:
         """優先取得目前主視窗真實尺寸；若視窗尚未完成佈局則回傳 None。"""
         if not self.parent:
             return None
         try:
-            self.parent.update_idletasks()
-            width = self.parent.winfo_width()
-            height = self.parent.winfo_height()
+            app = qt.ensure_app()
+            if app is not None:
+                app.processEvents()
+            width = int(self.parent.width())
+            height = int(self.parent.height())
             if WindowManager.is_valid_main_window_size(width, height):
                 return (width, height)
         except Exception as e:
@@ -56,147 +61,151 @@ class WindowPreferencesDialog:
             bind_icon=True,
             delay_ms=250,
         )
+        self.dialog.setStyleSheet(NativeQtStyle.preferences_dialog)
         self._create_widgets()
         self._load_current_settings()
 
+    def _theme_mode_to_label(self, mode: str) -> str:
+        return self.THEME_LABELS.get(str(mode or "system").lower(), self.THEME_LABELS["system"])
+
+    def _theme_label_to_mode(self, label: str) -> str:
+        return self.THEME_MODES.get(str(label or "").strip(), "system")
+
     def _create_widgets(self) -> None:
         """建立介面元件"""
-        main_frame = ctk.CTkScrollableFrame(self.dialog)
-        main_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
-        title_label = ctk.CTkLabel(
+        main_frame = qt.ScrollableFrame(self.dialog)
+        main_frame.attach(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
+        title_label = qt.Label(
             main_frame, text="🖥️ 視窗偏好設定", font=FontManager.get_font(size=FontSize.LARGE, weight="bold")
         )
-        title_label.pack(pady=(0, Spacing.XL))
+        title_label.attach(pady=(0, Spacing.XL))
         self._create_general_section(main_frame)
         self._create_main_window_section(main_frame)
         self._create_display_section(main_frame)
         self._create_button_section(main_frame)
 
-    def _create_section_frame(self, parent, title: str, emoji: str = "") -> ctk.CTkFrame:
+    def _create_section_frame(self, parent, title: str, emoji: str = "") -> qt.Frame:
         """建立設定區域框架"""
-        frame = ctk.CTkFrame(parent)
-        frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
+        frame = qt.Frame(parent)
+        frame.attach(fill="x", pady=(0, Spacing.LARGE_MINUS))
         section_title = f"{emoji} {title}" if emoji else title
-        ctk.CTkLabel(frame, text=section_title, font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")).pack(
+        qt.Label(frame, text=section_title, font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold")).attach(
             anchor="w", padx=Spacing.LARGE_MINUS, pady=(Spacing.LARGE_MINUS, Spacing.SMALL_PLUS)
         )
         return frame
 
-    def _create_checkbox(self, parent, text: str, variable: ctk.BooleanVar) -> ctk.CTkCheckBox:
+    def _create_checkbox(self, parent, text: str, variable: qt.BoolState) -> qt.CheckBox:
         """建立複選框"""
-        checkbox = ctk.CTkCheckBox(
-            parent, text=text, variable=variable, font=FontManager.get_font(size=FontSize.NORMAL)
-        )
-        checkbox.pack(anchor="w", padx=25, pady=(0, Spacing.SMALL_PLUS))
+        checkbox = qt.CheckBox(parent, text=text, variable=variable, font=FontManager.get_font(size=FontSize.NORMAL))
+        checkbox.attach(anchor="w", padx=20, pady=(0, Spacing.SMALL_PLUS))
         return checkbox
 
     def _create_general_section(self, parent) -> None:
         """建立一般設定區域"""
         general_frame = self._create_section_frame(parent, "一般設定", "📋")
-        self.remember_size_var = ctk.BooleanVar()
+        self.remember_size_var = qt.BoolState(self.settings.is_remember_size_position_enabled())
         self._create_checkbox(general_frame, "記住主視窗大小和位置", self.remember_size_var)
-        self.auto_center_var = ctk.BooleanVar()
+        self.auto_center_var = qt.BoolState(self.settings.is_auto_center_enabled())
         self._create_checkbox(general_frame, "自動置中新的對話框視窗", self.auto_center_var)
-        self.adaptive_sizing_var = ctk.BooleanVar()
+        self.adaptive_sizing_var = qt.BoolState(self.settings.is_adaptive_sizing_enabled())
         self._create_checkbox(general_frame, "啟用自適應視窗大小調整", self.adaptive_sizing_var)
-        should_show_debug = not RuntimePaths.is_packaged()
-        if should_show_debug:
-            self.debug_logging_var = ctk.BooleanVar()
-            checkbox = self._create_checkbox(general_frame, "啟用除錯日誌輸出", self.debug_logging_var)
-            checkbox.pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
-        else:
-            self.debug_logging_var = ctk.BooleanVar()
-            self.debug_logging_var.set(False)
 
     def _create_main_window_section(self, parent) -> None:
         """建立主視窗設定區域"""
         main_window_frame = self._create_section_frame(parent, "主視窗設定", "🏠")
         screen_info = WindowManager.get_screen_info(self.dialog)
         current_settings = self.settings.get_main_window_settings()
+        default_settings = self.settings.get_default_main_window_settings()
         live_size = self._get_live_main_window_size()
         current_width, current_height = live_size or (
-            current_settings.get("width", 1200),
-            current_settings.get("height", 800),
+            current_settings.get("width", default_settings["width"]),
+            current_settings.get("height", default_settings["height"]),
         )
         info_text = f"目前螢幕解析度: {screen_info['width']} × {screen_info['height']}\n目前主視窗大小: {current_width} × {current_height}"
-        ctk.CTkLabel(
+        qt.Label(
             main_window_frame, text=info_text, font=FontManager.get_font(size=FontSize.NORMAL), justify="left"
-        ).pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
-        scale_factor = get_settings_manager().get_dpi_scaling()
-        reset_button = ctk.CTkButton(
+        ).attach(anchor="w", padx=20, pady=(0, Spacing.LARGE_MINUS))
+        reset_button = qt.Button(
             main_window_frame,
             text="重設為預設大小",
             command=self._reset_to_default_size,
             font=FontManager.get_font(size=FontSize.NORMAL),
-            width=int(150 * scale_factor),
-            height=int(32 * scale_factor),
+            width=Sizes.BUTTON_WIDTH_SMALL,
+            height=Sizes.PREFERENCES_RESET_BUTTON_HEIGHT,
         )
-        reset_button.pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
+        reset_button.attach(anchor="w", padx=20, pady=(0, Spacing.LARGE_MINUS))
 
     def _create_display_section(self, parent) -> None:
         """建立顯示設定區域"""
         display_frame = self._create_section_frame(parent, "顯示設定", "🎨")
-        dpi_frame = ctk.CTkFrame(display_frame, fg_color="transparent")
-        dpi_frame.pack(fill="x", padx=25, pady=(0, Spacing.LARGE_MINUS))
-        ctk.CTkLabel(dpi_frame, text="DPI 縮放因子:", font=FontManager.get_font(size=FontSize.NORMAL)).pack(side="left")
-        scale_factor = get_settings_manager().get_dpi_scaling()
-        self.dpi_scale_var = ctk.DoubleVar()
-        self.dpi_scale_slider = ctk.CTkSlider(
-            dpi_frame,
-            from_=0.5,
-            to=3.0,
-            number_of_steps=25,
-            variable=self.dpi_scale_var,
-            width=int(200 * scale_factor),
-            command=self._on_dpi_scale_changed,
+        theme_frame = qt.Frame(display_frame, fg_color="transparent")
+        theme_frame.attach(fill="x", padx=20, pady=(0, Spacing.LARGE_MINUS))
+        qt.Label(theme_frame, text="主題模式:", font=FontManager.get_font(size=FontSize.NORMAL)).attach(side="left")
+        self.theme_mode_var = qt.TextState(self._theme_mode_to_label(self.settings.get_theme_mode()))
+        self.theme_mode_dropdown = CustomDropdown(
+            theme_frame,
+            variable=self.theme_mode_var,
+            values=list(self.THEME_MODES.keys()),
+            width=Sizes.DROPDOWN_COMPACT_WIDTH,
+            font_size=FontSize.NORMAL,
+            state="readonly",
         )
-        self.dpi_scale_slider.pack(side="left", padx=(Spacing.SMALL_PLUS, Spacing.SMALL_PLUS))
-        self.dpi_scale_label = ctk.CTkLabel(
-            dpi_frame, text="1.0x", font=FontManager.get_font(size=FontSize.NORMAL), width=int(40 * scale_factor)
-        )
-        self.dpi_scale_label.pack(side="left")
-        ctk.CTkLabel(
+        self.theme_mode_dropdown.attach(side="left", padx=(Spacing.SMALL_PLUS, 0))
+        qt.Label(
             display_frame,
-            text="調整此設定以適應高解析度螢幕或改善視覺效果",
+            text="介面縮放會跟隨 Windows 顯示比例與 Qt 高 DPI 設定",
             font=FontManager.get_font(size=FontSize.NORMAL),
-            text_color="gray",
-        ).pack(anchor="w", padx=25, pady=(0, Spacing.LARGE_MINUS))
+            text_color=Colors.TEXT_SECONDARY,
+        ).attach(anchor="w", padx=20, pady=(0, Spacing.LARGE_MINUS))
 
     def _create_button_section(self, parent) -> None:
         """建立按鈕區域"""
-        button_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        button_frame.pack(fill="x", pady=(Spacing.XL, 0))
-        buttons = [
-            ("恢復預設", self._reset_all_settings, "left", get_button_style("danger")),
-            ("套用設定", self._apply_settings, "right", get_button_style("primary")),
-            ("取消", self._cancel, "right", {"fg_color": "gray", "hover_color": ("gray70", "gray30")}),
-        ]
-        for text, command, side, style in buttons:
-            btn_config = {
-                "text": text,
-                "command": command,
-                "font": FontManager.get_font(size=FontSize.NORMAL, weight="bold" if text == "套用設定" else "normal"),
-                "width": 100,
-                "height": 35,
-                **style,
-            }
-            button = ctk.CTkButton(button_frame, **btn_config)
-            padding = (10, 0) if side == "right" else (0, 0)
-            button.pack(side=side, padx=padding)
+        button_frame = qt.Frame(parent, fg_color=Colors.BG_SECONDARY)
+        button_frame.attach(fill="x", pady=(Spacing.XL, 0), padx=(-Spacing.XL, -Spacing.XL))
+        left_button_frame = qt.Frame(button_frame, fg_color="transparent")
+        left_button_frame.attach(side="left", padx=(Spacing.XL, 0), pady=Spacing.LARGE_MINUS)
+        right_button_frame = qt.Frame(button_frame, fg_color="transparent")
+        right_button_frame.attach(side="right", padx=(0, Spacing.XL), pady=Spacing.LARGE_MINUS)
+
+        reset_button = qt.Button(
+            left_button_frame,
+            text="恢復預設",
+            command=self._reset_all_settings,
+            font=FontManager.get_font(size=FontSize.NORMAL, weight="normal"),
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_SMALL,
+            **get_button_style("danger"),
+        )
+        reset_button.attach(side="left", padx=0)
+
+        apply_button = qt.Button(
+            right_button_frame,
+            text="套用設定",
+            command=self._apply_settings,
+            font=FontManager.get_font(size=FontSize.NORMAL, weight="bold"),
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_SMALL,
+            **get_button_style("primary"),
+        )
+        apply_button.attach(side="right", padx=(0, Spacing.SMALL_PLUS))
+
+        cancel_button = qt.Button(
+            right_button_frame,
+            text="取消",
+            command=self._cancel,
+            font=FontManager.get_font(size=FontSize.NORMAL, weight="normal"),
+            width=Sizes.BUTTON_WIDTH_COMPACT,
+            height=Sizes.BUTTON_HEIGHT_SMALL,
+            **get_button_style("secondary"),
+        )
+        cancel_button.attach(side="right", padx=0)
 
     def _load_current_settings(self) -> None:
         """載入當前設定"""
         self.remember_size_var.set(self.settings.is_remember_size_position_enabled())
         self.auto_center_var.set(self.settings.is_auto_center_enabled())
         self.adaptive_sizing_var.set(self.settings.is_adaptive_sizing_enabled())
-        self.debug_logging_var.set(self.settings.is_debug_logging_enabled())
-        current_dpi = self.settings.get_dpi_scaling()
-        self.dpi_scale_var.set(current_dpi)
-        self.dpi_scale_label.configure(text=f"{current_dpi:.1f}x")
-
-    def _on_dpi_scale_changed(self, value) -> None:
-        """DPI 縮放變更事件"""
-        self.dpi_scale_label.configure(text=f"{value:.1f}x")
+        self.theme_mode_var.set(self._theme_mode_to_label(self.settings.get_theme_mode()))
 
     def _get_setting_changes(self) -> dict:
         """取得設定變更"""
@@ -205,88 +214,43 @@ class WindowPreferencesDialog:
                 "remember": self.settings.is_remember_size_position_enabled(),
                 "auto_center": self.settings.is_auto_center_enabled(),
                 "adaptive": self.settings.is_adaptive_sizing_enabled(),
-                "debug": self.settings.is_debug_logging_enabled(),
-                "dpi": self.settings.get_dpi_scaling(),
+                "theme": self.settings.get_theme_mode(),
             },
             "new": {
                 "remember": self.remember_size_var.get(),
                 "auto_center": self.auto_center_var.get(),
                 "adaptive": self.adaptive_sizing_var.get(),
-                "debug": self.debug_logging_var.get(),
-                "dpi": self.dpi_scale_var.get(),
+                "theme": self._theme_label_to_mode(self.theme_mode_var.get()),
             },
         }
-
-    def _has_important_changes(self, changes: dict) -> bool:
-        """檢查是否有重要變更需要重啟"""
-        old, new = (changes["old"], changes["new"])
-        dpi_changed = abs(old["dpi"] - new["dpi"]) > 0.01
-        return (
-            old["remember"] != new["remember"]
-            or old["auto_center"] != new["auto_center"]
-            or old["adaptive"] != new["adaptive"]
-            or dpi_changed
-        )
 
     def _reset_to_default_size(self) -> None:
         """重設主視窗為預設大小"""
         if UIUtils.ask_yes_no_cancel(
             "確認重設", "確定要將主視窗重設為預設大小嗎？\n這將立即應用變更。", parent=self.dialog, show_cancel=False
         ):
-            self.settings.set_main_window_settings(1200, 800, None, None, False)
+            defaults = self.settings.get_default_main_window_settings()
+            self.settings.set_main_window_settings(defaults["width"], defaults["height"], None, None, False)
             if self.parent:
                 WindowManager.setup_main_window(self.parent, force_defaults=True)
             UIUtils.show_info("重設完成", "主視窗大小已重設為預設值", parent=self.dialog)
 
     def _reset_all_settings(self) -> None:
-        """恢復所有設定為預設值，並比對是否有重要變更需要重啟"""
+        """恢復所有視窗偏好為預設值。"""
         if UIUtils.ask_yes_no_cancel(
             "確認恢復預設", "確定要恢復所有視窗設定為預設值嗎？", parent=self.dialog, show_cancel=False
         ):
-            changes_before = self._get_setting_changes()
             self.settings.set_remember_size_position(True)
             self.settings.set_auto_center(True)
             self.settings.set_adaptive_sizing(True)
-            self.settings.set_debug_logging(False)
-            self.settings.set_dpi_scaling(1.0)
-            self.settings.set_main_window_settings(1200, 800, None, None, False)
+            self.settings.set_theme_mode("system")
+            ui_config.initialize_ui_theme("system")
+            self.dialog.setStyleSheet(NativeQtStyle.preferences_dialog)
+            self.theme_mode_dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
+            defaults = self.settings.get_default_main_window_settings()
+            self.settings.set_main_window_settings(defaults["width"], defaults["height"], None, None, False)
             self._load_current_settings()
-            changes_after = self._get_setting_changes()
-            compare_changes = {"old": changes_before["old"], "new": changes_after["new"]}
-            important_changes = self._has_important_changes(compare_changes)
-            msg = "所有視窗設定已恢復為預設值"
-            if important_changes:
-                msg += "\n\n部分設定（如 DPI、視窗記憶、自適應等）需要重新啟動程式才能完全套用。"
-            UIUtils.show_info("恢復完成", msg, parent=self.dialog)
-            if important_changes:
-                supported = AppRestart.can_restart()
-                supported_diag = None
-                if not supported:
-                    try:
-                        _, supported_diag = AppRestart.get_restart_diagnostics()
-                    except Exception:
-                        supported_diag = None
-                if supported:
-                    if UIUtils.ask_yes_no_cancel(
-                        "重新啟動程式",
-                        "設定已恢復為預設值！\n\n為了確保所有變更完全生效，建議重新啟動程式。\n\n是否要立即重新啟動？",
-                        parent=self.dialog,
-                        show_cancel=False,
-                    ):
-                        try:
-                            self.dialog.destroy()
-                            AppRestart.schedule_restart_and_exit(self.parent, delay=0.5)
-                            return
-                        except Exception as restart_error:
-                            logger.error(f"重啟失敗: {restart_error}\n{traceback.format_exc()}")
-                            UIUtils.show_error(
-                                "重啟失敗",
-                                f"無法重新啟動應用程式: {restart_error}\n\n設定已恢復，請手動重新啟動程式以套用所有變更。",
-                                parent=self.dialog,
-                            )
-                else:
-                    detail_text = supported_diag if supported_diag else None
-                    DialogUtils.show_manual_restart_dialog(self.dialog, detail_text)
+            UIUtils.show_info("恢復完成", "所有視窗設定已恢復為預設值。", parent=self.dialog)
 
     def _apply_settings(self) -> None:
         """套用設定"""
@@ -296,41 +260,15 @@ class WindowPreferencesDialog:
             self.settings.set_remember_size_position(new_settings["remember"])
             self.settings.set_auto_center(new_settings["auto_center"])
             self.settings.set_adaptive_sizing(new_settings["adaptive"])
-            self.settings.set_debug_logging(new_settings["debug"])
-            self.settings.set_dpi_scaling(new_settings["dpi"])
-            dpi_changed = abs(changes["old"]["dpi"] - new_settings["dpi"]) > 0.01
-            if dpi_changed:
-                FontManager.set_scale_factor(new_settings["dpi"])
+            self.settings.set_theme_mode(new_settings["theme"])
+            theme_changed = changes["old"]["theme"] != new_settings["theme"]
+            if theme_changed:
+                ui_config.initialize_ui_theme(new_settings["theme"])
+                self.dialog.setStyleSheet(NativeQtStyle.preferences_dialog)
+                self.theme_mode_dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
             if self.on_settings_changed:
                 self.on_settings_changed()
-            important_changes = self._has_important_changes(changes)
-            success_msg = "視窗偏好設定已成功儲存並套用！"
-            if important_changes:
-                success_msg += "\n\n設定已生效，部分變更可能需要重新啟動程式才能完全套用。"
-            UIUtils.show_info("設定套用成功", success_msg, parent=self.dialog)
-            if important_changes and AppRestart.can_restart():
-                if UIUtils.ask_yes_no_cancel(
-                    "重新啟動程式",
-                    "設定已成功套用！\n\n為了確保所有變更完全生效，建議重新啟動程式。\n\n是否要立即重新啟動？",
-                    parent=self.dialog,
-                    show_cancel=False,
-                ):
-                    try:
-                        AppRestart.schedule_restart_and_exit(self.parent, delay=0.5)
-                        return
-                    except Exception as restart_error:
-                        logger.error(f"重啟失敗: {restart_error}\n{traceback.format_exc()}")
-                        UIUtils.show_error(
-                            "重啟失敗",
-                            f"無法重新啟動應用程式: {restart_error}\n\n設定已儲存，請手動重新啟動程式以套用所有變更。",
-                            parent=self.dialog,
-                        )
-            elif important_changes and (not AppRestart.can_restart()):
-                try:
-                    _, diag = AppRestart.get_restart_diagnostics()
-                except Exception:
-                    diag = None
-                DialogUtils.show_manual_restart_dialog(self.dialog, diag)
+            UIUtils.show_info("設定套用成功", "視窗偏好設定已成功儲存並套用！", parent=self.dialog)
             self.dialog.destroy()
         except Exception as e:
             logger.error(f"儲存失敗: {e}\n{traceback.format_exc()}")

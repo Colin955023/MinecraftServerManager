@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import pytest
 import src.ui.create_server_frame as create_server_module
 
 
@@ -58,7 +57,6 @@ def _make_frame(
     return frame
 
 
-@pytest.mark.integration
 def test_server_name_keeps_manual_suffix_when_switching_loader(monkeypatch) -> None:
     monkeypatch.setattr(create_server_module.threading, "Thread", _NoopThread)
     frame = _make_frame("1.21.1 我的服")
@@ -77,7 +75,6 @@ def test_server_name_keeps_manual_suffix_when_switching_loader(monkeypatch) -> N
     assert frame.server_name_var.get() == "1.21.1 我的服"
 
 
-@pytest.mark.integration
 def test_server_name_keeps_manual_suffix_when_mc_version_changes(monkeypatch) -> None:
     monkeypatch.setattr(create_server_module.threading, "Thread", _NoopThread)
     frame = _make_frame("Fabric 1.21.1 我的服", loader_type="Fabric", mc_version="1.20.6")

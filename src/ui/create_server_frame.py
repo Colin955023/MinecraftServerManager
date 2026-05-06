@@ -2,18 +2,16 @@
 負責建立新 Minecraft 伺服器的使用者介面。
 """
 
+from __future__ import annotations
+
 import concurrent.futures
 import contextlib
 import queue
 import threading
-import tkinter
-import tkinter.filedialog as filedialog
 import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-import customtkinter as ctk
 
 from ..core import LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
@@ -23,19 +21,41 @@ from ..utils import (
     FontSize,
     JavaUtils,
     Sizes,
-    Spacing,
     SystemUtils,
     UIUtils,
     get_logger,
     get_shared_manager,
     record_and_mark,
 )
+from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ValueState, is_qobject_alive
 from . import CustomDropdown, FontManager, ProgressDialog, TaskUtils
+from .ui_config import NativeQtStyle, resolve_color
 
 logger = get_logger().bind(component="CreateServerFrame")
 
 
-class CreateServerFrame(ctk.CTkFrame):
+def _qt_font(font: Any) -> QtGui.QFont:
+    return getattr(font, "font", font)
+
+
+def _qt_color(color: Any) -> str:
+    if getattr(NativeQtStyle, "_dark", False) and color in {
+        Colors.TEXT_PRIMARY,
+        Colors.TEXT_PRIMARY_CONTRAST,
+        Colors.TEXT_HEADING,
+        Colors.TEXT_SECONDARY,
+        Colors.TEXT_MUTED,
+        Colors.TEXT_TERTIARY,
+    }:
+        return Colors.TEXT_ON_DARK
+    return resolve_color(color)
+
+
+def _set_layout_margins(layout: QtWidgets.QLayout, *margins: int) -> None:
+    layout.setContentsMargins(*(int(value) for value in margins))
+
+
+class CreateServerFrame(QtWidgets.QWidget):
     """建立伺服器頁面"""
 
     @staticmethod
@@ -62,7 +82,7 @@ class CreateServerFrame(ctk.CTkFrame):
             max_memory_str = self.max_memory_var.get().strip()
             min_memory_str = self.min_memory_var.get().strip()
             if not max_memory_str:
-                self.memory_warning_label.configure(text="")
+                self._set_warning_text("")
                 return
             max_memory = int(max_memory_str)
             min_memory = int(min_memory_str)
@@ -70,27 +90,62 @@ class CreateServerFrame(ctk.CTkFrame):
             half_system_memory = system_memory // 2
             if (max_memory > system_memory or min_memory > system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
+                self._set_warning_text(warning_text, Colors.TEXT_ERROR)
             elif (max_memory > half_system_memory or min_memory > half_system_memory) and min_memory >= 1024:
                 warning_text = f"⚠️ 警告：設定記憶體超過系統記憶體的一半 ({half_system_memory}MB)"
-                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_WARNING)
+                self._set_warning_text(warning_text, Colors.TEXT_WARNING)
             elif min_memory > max_memory:
                 warning_text = "⚠️ 警告：最小記憶體必須小於最大記憶體"
-                self.memory_warning_label.configure(text=warning_text, text_color=Colors.TEXT_ERROR)
+                self._set_warning_text(warning_text, Colors.TEXT_ERROR)
             else:
-                self.memory_warning_label.configure(text="")
+                self._set_warning_text("")
         except ValueError:
             if not min_memory_str:
-                self.memory_warning_label.configure(text="")
+                self._set_warning_text("")
             else:
-                self.memory_warning_label.configure(
-                    text="⚠️ 警告：記憶體設定必須為有效的整數", text_color=Colors.TEXT_ERROR
-                )
+                self._set_warning_text("⚠️ 警告：記憶體設定必須為有效的整數", Colors.TEXT_ERROR)
         except Exception as e:
             with __import__("contextlib").suppress(Exception):
                 record_and_mark(e, marker_path=Path(__file__), reason="update_memory_warning_failed")
             logger.bind(component="").error(f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame")
-            UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.winfo_toplevel())
+            UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.window())
+
+    def _set_warning_text(self, text: str, color: Any = Colors.TEXT_ERROR) -> None:
+        self.memory_warning_label.setText(text)
+        self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(color)))
+
+    def _make_label(self, text: str, *, muted: bool = False, bold: bool = True) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel(text)
+        label.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold" if bold else "normal"))
+        label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED if muted else Colors.TEXT_PRIMARY)))
+        label.setMinimumWidth(143)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        return label
+
+    def _style_control(self, widget, *, height: int = 20) -> None:
+        widget.setMinimumHeight(height)
+        widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+
+    def _make_button(self, text: str, command: Callable[[], Any], *, kind: str = "secondary") -> QtWidgets.QPushButton:
+        button = QtWidgets.QPushButton(text)
+        button.setProperty("msm_button_kind", kind)
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
+        button.setMinimumHeight(30)
+        button.clicked.connect(lambda _checked=False: command())
+        button.setStyleSheet(NativeQtStyle.create_button(kind=kind))
+        return button
+
+    def _bind_entry(self, entry: QtWidgets.QLineEdit, variable: ValueState) -> None:
+        entry.setText(str(variable.get()))
+        entry.textChanged.connect(variable.set)
+
+        def _sync_from_var(value: object) -> None:
+            text = str(value or "")
+            if entry.text() != text:
+                entry.setText(text)
+
+        variable.changed.connect(_sync_from_var)
 
     def create_java_path_field(self, parent, row) -> None:
         """建立 Java 路徑欄位（可手動輸入/瀏覽）。
@@ -99,43 +154,38 @@ class CreateServerFrame(ctk.CTkFrame):
             parent: 父容器。
             row: 要放置的表單列號。
         """
-        ctk.CTkLabel(
-            parent,
-            text="Java 執行檔路徑 (可選):",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=row, column=0, sticky="w", pady=Spacing.TINY)
-        self.java_path_var = tkinter.StringVar(value="")
-        java_path_entry = ctk.CTkEntry(
-            parent,
-            textvariable=self.java_path_var,
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=Sizes.INPUT_WIDTH,
-        )
-        java_path_entry.grid(row=row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
+        parent.addWidget(self._make_label("Java 執行檔路徑 (可選):"), row, 0)
+        self.java_path_var = ValueState("")
+        java_path_entry = QtWidgets.QLineEdit(self.form_panel)
+        java_path_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
+        self._bind_entry(java_path_entry, self.java_path_var)
+        self._style_control(java_path_entry)
+        parent.addWidget(java_path_entry, row, 1)
 
         def browse_java():
-            path = filedialog.askopenfilename(
-                title="選擇 javaw.exe", filetypes=[("Java 執行檔", "javaw.exe"), ("所有檔案", "*")]
+            path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+                self.window(), "選擇 javaw.exe", "", "Java 執行檔 (javaw.exe);;所有檔案 (*)"
             )
             if path:
                 self.java_path_var.set(path)
 
-        browse_btn = UIUtils.create_styled_button(parent, "瀏覽...", browse_java, "small")
-        browse_btn.grid(row=row, column=2, padx=(Spacing.SMALL, 0), pady=Spacing.TINY)
+        browse_btn = self._make_button("瀏覽...", browse_java)
+        browse_btn.setFixedWidth(72)
+        parent.addWidget(browse_btn, row, 2)
 
         def auto_detect():
             mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
             if not mc_version:
-                UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.winfo_toplevel())
+                UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.window())
                 return
             java_path = JavaUtils.get_best_java_path(mc_version, interaction=UIUtils)
             if java_path:
                 java_path_win = str(Path(java_path))
                 self.java_path_var.set(java_path_win)
 
-        auto_btn = UIUtils.create_styled_button(parent, "自動偵測", auto_detect, "small")
-        auto_btn.grid(row=row, column=3, padx=(Spacing.SMALL, 0), pady=Spacing.TINY)
+        auto_btn = self._make_button("自動偵測", auto_detect)
+        auto_btn.setFixedWidth(75)
+        parent.addWidget(auto_btn, row, 3)
 
     def __init__(
         self,
@@ -156,6 +206,7 @@ class CreateServerFrame(ctk.CTkFrame):
         self._create_server_progress_job = None
         self._create_server_success_job = None
         self._create_server_error_job = None
+        self.server_name_var = ValueState("")
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
         self.bg_tasks = get_shared_manager()
         TaskUtils.start_ui_queue_pump(self, self.ui_queue)
@@ -166,7 +217,7 @@ class CreateServerFrame(ctk.CTkFrame):
         """透過主執行緒佇列建立 debounce 排程。"""
 
         def _schedule() -> None:
-            if not self.winfo_exists():
+            if not is_qobject_alive(self):
                 return
             UIUtils.schedule_debounce(self, job_attr, delay_ms, callback, owner=self)
 
@@ -179,38 +230,106 @@ class CreateServerFrame(ctk.CTkFrame):
 
     def create_widgets(self) -> None:
         """建立介面元件"""
-        main_container = ctk.CTkFrame(self, fg_color="transparent")
-        main_container.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.LARGE_MINUS)
-        title_label = ctk.CTkLabel(
-            main_container,
-            text="建立新伺服器",
-            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-            text_color=Colors.TEXT_HEADING,
-        )
-        title_label.pack(pady=(0, Spacing.LARGE_MINUS))
-        eula_frame = ctk.CTkFrame(main_container, fg_color=Colors.BG_ALERT)
-        eula_frame.pack(pady=(0, Spacing.MEDIUM), fill="x")
-        eula_frame.grid_columnconfigure(1, weight=1)
-        eula_icon = ctk.CTkLabel(
+        self.setObjectName("CreateServerFrame")
+        self.setStyleSheet(NativeQtStyle.create_page)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        _set_layout_margins(main_layout, 0, 0, 0, 0)
+        main_layout.setSpacing(11)
+
+        self.scroll_area = QtWidgets.QScrollArea(self)
+        self.scroll_area.setObjectName("CreateServerScrollArea")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet(NativeQtStyle.create_page)
+        self.content_widget = QtWidgets.QWidget()
+        self.content_widget.setObjectName("CreateServerContent")
+        self.content_widget.setStyleSheet(NativeQtStyle.create_page)
+        content_layout = QtWidgets.QVBoxLayout(self.content_widget)
+        _set_layout_margins(content_layout, 0, 0, 0, 0)
+        content_layout.setSpacing(11)
+        self.scroll_area.setWidget(self.content_widget)
+        main_layout.addWidget(self.scroll_area, 1)
+
+        title_label = QtWidgets.QLabel("建立新伺服器", self.content_widget)
+        self.title_label = title_label
+        title_label.setFont(_qt_font(FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")))
+        title_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_HEADING)))
+        content_layout.addWidget(title_label)
+
+        eula_frame = QtWidgets.QFrame(self.content_widget)
+        self.eula_frame = eula_frame
+        eula_frame.setObjectName("EulaNotice")
+        eula_frame.setStyleSheet(NativeQtStyle.eula_notice)
+        eula_layout = QtWidgets.QHBoxLayout(eula_frame)
+        _set_layout_margins(eula_layout, 6, 5, 6, 5)
+        eula_layout.setSpacing(8)
+        eula_icon = QtWidgets.QLabel("⚠️", eula_frame)
+        self.eula_icon = eula_icon
+        eula_icon.setFont(_qt_font(FontManager.get_font(size=FontSize.LARGE, weight="bold")))
+        eula_icon.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.BUTTON_WARNING_HOVER)))
+        eula_layout.addWidget(eula_icon, 0, QtCore.Qt.AlignmentFlag.AlignTop)
+        eula_link = QtWidgets.QLabel(
+            "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n"
+            "點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
             eula_frame,
-            text="⚠️",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            text_color=Colors.BUTTON_WARNING_HOVER,
         )
-        eula_icon.grid(row=0, column=0, rowspan=2, sticky="nsw", padx=(Spacing.SMALL, Spacing.XS), pady=Spacing.TINY)
-        eula_link = ctk.CTkLabel(
-            eula_frame,
-            text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True),
-            text_color=Colors.TEXT_WARNING,
-            cursor="hand2",
-        )
-        eula_link.grid(row=0, column=1, sticky="ew", padx=(0, Spacing.SMALL), pady=Spacing.TINY)
-        eula_link.bind("<Button-1>", lambda _e: UIUtils.open_external("https://aka.ms/MinecraftEULA"))
-        content_container = ctk.CTkFrame(main_container, fg_color="transparent")
-        content_container.pack(fill="x", expand=False, pady=(0, Spacing.SMALL))
-        self.create_form(content_container)
-        self.create_buttons(main_container)
+        self.eula_link = eula_link
+        eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True)))
+        eula_link.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_WARNING)))
+        eula_link.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        eula_link.mousePressEvent = lambda _event: UIUtils.open_external("https://aka.ms/MinecraftEULA")  # type: ignore[method-assign]
+        eula_layout.addWidget(eula_link, 1)
+        content_layout.addWidget(eula_frame)
+
+        self.form_panel = QtWidgets.QFrame(self.content_widget)
+        self.form_panel.setObjectName("CreateFormPanel")
+        self.form_panel.setStyleSheet(NativeQtStyle.create_form_panel)
+        form_layout = QtWidgets.QGridLayout(self.form_panel)
+        _set_layout_margins(form_layout, 0, 3, 0, 0)
+        form_layout.setHorizontalSpacing(8)
+        form_layout.setVerticalSpacing(8)
+        form_layout.setColumnStretch(1, 1)
+        self.create_form(form_layout)
+        content_layout.addWidget(self.form_panel)
+        content_layout.addStretch(1)
+        self.create_buttons(main_layout)
+
+    def apply_theme_styles(self) -> None:
+        """重新套用目前主題到建立伺服器頁。"""
+        self.setStyleSheet(NativeQtStyle.create_page)
+        if hasattr(self, "scroll_area"):
+            self.scroll_area.setStyleSheet(NativeQtStyle.create_page)
+        if hasattr(self, "content_widget"):
+            self.content_widget.setStyleSheet(NativeQtStyle.create_page)
+        if hasattr(self, "title_label"):
+            self.title_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_HEADING)))
+        if hasattr(self, "eula_frame"):
+            self.eula_frame.setStyleSheet(NativeQtStyle.eula_notice)
+        if hasattr(self, "eula_icon"):
+            self.eula_icon.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.BUTTON_WARNING_HOVER)))
+        if hasattr(self, "eula_link"):
+            self.eula_link.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_WARNING)))
+        if hasattr(self, "form_panel"):
+            self.form_panel.setStyleSheet(NativeQtStyle.create_form_panel)
+        if hasattr(self, "actions_frame"):
+            self.actions_frame.setStyleSheet(NativeQtStyle.create_actions)
+        if hasattr(self, "memory_warning_label"):
+            self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_ERROR)))
+        special_labels = {
+            getattr(self, "eula_icon", None),
+            getattr(self, "eula_link", None),
+            getattr(self, "memory_warning_label", None),
+        }
+        for label in self.findChildren(QtWidgets.QLabel):
+            if label in special_labels:
+                continue
+            label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_PRIMARY)))
+        for dropdown in self.findChildren(CustomDropdown):
+            dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
+        for button in self.findChildren(QtWidgets.QPushButton):
+            kind = str(button.property("msm_button_kind") or "secondary")
+            button.setStyleSheet(NativeQtStyle.create_button(kind=kind))
 
     def create_form(self, parent) -> None:
         """建立表單。
@@ -218,44 +337,28 @@ class CreateServerFrame(ctk.CTkFrame):
         Args:
             parent: 父容器。
         """
-        form_frame = ctk.CTkFrame(parent)
-        form_frame.pack(fill="x", pady=(0, Spacing.LARGE_MINUS))
-        content_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=Spacing.XL, pady=Spacing.XL)
+        content_frame = parent
         self.create_field(content_frame, 0, "伺服器名稱:", "我的伺服器", "server_name")
         self.create_java_path_field(content_frame, 1)
-        ctk.CTkLabel(
-            content_frame,
-            text="模組載入器:",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=2, column=0, sticky="w", pady=Spacing.TINY)
-        self.loader_type_var = tkinter.StringVar(value="Vanilla")
+        content_frame.addWidget(self._make_label("模組載入器:"), 2, 0)
+        self.loader_type_var = ValueState("Vanilla")
         self.loader_type_combo = CustomDropdown(
-            content_frame,
+            self.form_panel,
             variable=self.loader_type_var,
-            values=["Vanilla", "Fabric", "Forge"],
+            values=["Vanilla", "Fabric", "Forge", "Quilt", "NeoForge"],
             width=Sizes.DROPDOWN_WIDTH,
             font_size=FontSize.MEDIUM,
             dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self.loader_type_combo.grid(row=2, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
+        self._style_control(self.loader_type_combo)
+        content_frame.addWidget(self.loader_type_combo, 2, 1)
         self.loader_type_var.trace_add("write", lambda *_args: self.update_server_config_ui())
         loader_version_row = 3
-        ctk.CTkLabel(
-            content_frame,
-            text="載入器版本:",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=loader_version_row, column=0, sticky="w", pady=Spacing.TINY)
-        loader_version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        loader_version_frame.grid(
-            row=loader_version_row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY
-        )
-        self.loader_version_var = tkinter.StringVar(value="無")
+        content_frame.addWidget(self._make_label("載入器版本:"), loader_version_row, 0)
+        self.loader_version_var = ValueState("無")
         self.loader_version_combo = CustomDropdown(
-            loader_version_frame,
+            self.form_panel,
             variable=self.loader_version_var,
             values=["無"],
             width=Sizes.DROPDOWN_WIDTH,
@@ -263,24 +366,15 @@ class CreateServerFrame(ctk.CTkFrame):
             dropdown_font_size=FontSize.MEDIUM,
             state="disabled",
         )
-        self.loader_version_combo.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SMALL))
-        loader_reload_btn = UIUtils.create_styled_button(
-            loader_version_frame, text="⟳", command=self.reload_loader_versions, button_type="small"
-        )
-        loader_reload_btn.pack(side="left")
-        version_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        version_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=Spacing.SMALL_PLUS)
-        ctk.CTkLabel(
-            version_frame,
-            text="Minecraft 版本:",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).pack(anchor="w")
-        mc_version_frame = ctk.CTkFrame(version_frame, fg_color="transparent")
-        mc_version_frame.pack(fill="x")
-        self.mc_version_var = tkinter.StringVar()
+        self._style_control(self.loader_version_combo)
+        content_frame.addWidget(self.loader_version_combo, loader_version_row, 1)
+        loader_reload_btn = self._make_button("⟳", self.reload_loader_versions)
+        loader_reload_btn.setFixedWidth(72)
+        content_frame.addWidget(loader_reload_btn, loader_version_row, 2)
+        content_frame.addWidget(self._make_label("Minecraft 版本:"), 4, 0)
+        self.mc_version_var = ValueState("")
         self.mc_version_combo = CustomDropdown(
-            mc_version_frame,
+            self.form_panel,
             variable=self.mc_version_var,
             values=["載入中..."],
             command=self.update_server_config_ui,
@@ -289,67 +383,68 @@ class CreateServerFrame(ctk.CTkFrame):
             dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self.mc_version_combo.pack(side="left", fill="x", expand=True, padx=(0, Spacing.SMALL))
-        mc_reload_btn = UIUtils.create_styled_button(
-            mc_version_frame, text="⟳", command=self.reload_mc_versions, button_type="small"
-        )
-        mc_reload_btn.pack(side="left")
-        memory_frame = ctk.CTkFrame(content_frame, fg_color="transparent")
-        memory_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=Spacing.SMALL_PLUS)
-        ctk.CTkLabel(
-            memory_frame,
-            text="記憶體設定 (MB):",
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).pack(anchor="w")
-        memory_input_frame = ctk.CTkFrame(memory_frame, fg_color="transparent")
-        memory_input_frame.pack(fill="x", pady=(Spacing.TINY, 0))
-        min_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        min_memory_frame.pack(side="left", fill="x", expand=True, padx=(0, Spacing.TINY))
-        ctk.CTkLabel(
-            min_memory_frame,
-            text="最小記憶體:",
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=Colors.TEXT_MUTED,
-        ).pack(anchor="w")
-        self.min_memory_var = tkinter.StringVar(value="1024")
-        self.min_memory_entry = ctk.CTkEntry(
-            min_memory_frame, textvariable=self.min_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
-        )
-        self.min_memory_entry.pack(fill="x", pady=(Spacing.XS, 0))
-        max_memory_frame = ctk.CTkFrame(memory_input_frame, fg_color="transparent")
-        max_memory_frame.pack(side="left", fill="x", expand=True, padx=(Spacing.TINY, 0))
-        ctk.CTkLabel(
-            max_memory_frame,
-            text="最大記憶體:",
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=Colors.TEXT_MUTED,
-        ).pack(anchor="w")
-        self.max_memory_var = tkinter.StringVar(value="2048")
-        self.max_memory_entry = ctk.CTkEntry(
-            max_memory_frame, textvariable=self.max_memory_var, font=FontManager.get_font(size=FontSize.MEDIUM)
-        )
-        self.max_memory_entry.pack(fill="x", pady=(Spacing.XS, 0))
+        self._style_control(self.mc_version_combo)
+        content_frame.addWidget(self.mc_version_combo, 4, 1)
+        mc_reload_btn = self._make_button("⟳", self.reload_mc_versions)
+        mc_reload_btn.setFixedWidth(72)
+        content_frame.addWidget(mc_reload_btn, 4, 2)
+
+        memory_title = self._make_label("記憶體設定 (MB):")
+        content_frame.addWidget(memory_title, 5, 0)
+        memory_container = QtWidgets.QWidget(self.form_panel)
+        memory_layout = QtWidgets.QVBoxLayout(memory_container)
+        _set_layout_margins(memory_layout, 0, 0, 0, 0)
+        memory_layout.setSpacing(5)
+        memory_input_layout = QtWidgets.QHBoxLayout()
+        memory_input_layout.setSpacing(8)
+        self.min_memory_var = ValueState("1024")
+        min_memory_frame = QtWidgets.QWidget(memory_container)
+        min_layout = QtWidgets.QVBoxLayout(min_memory_frame)
+        _set_layout_margins(min_layout, 0, 0, 0, 0)
+        min_layout.setSpacing(3)
+        min_label = QtWidgets.QLabel("最小記憶體:", min_memory_frame)
+        min_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
+        min_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
+        min_layout.addWidget(min_label)
+        self.min_memory_entry = QtWidgets.QLineEdit(min_memory_frame)
+        self.min_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
+        self._bind_entry(self.min_memory_entry, self.min_memory_var)
+        self._style_control(self.min_memory_entry)
+        min_layout.addWidget(self.min_memory_entry)
+        memory_input_layout.addWidget(min_memory_frame, 1)
+
+        self.max_memory_var = ValueState("2048")
+        max_memory_frame = QtWidgets.QWidget(memory_container)
+        max_layout = QtWidgets.QVBoxLayout(max_memory_frame)
+        _set_layout_margins(max_layout, 0, 0, 0, 0)
+        max_layout.setSpacing(3)
+        max_label = QtWidgets.QLabel("最大記憶體:", max_memory_frame)
+        max_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
+        max_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
+        max_layout.addWidget(max_label)
+        self.max_memory_entry = QtWidgets.QLineEdit(max_memory_frame)
+        self.max_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
+        self._bind_entry(self.max_memory_entry, self.max_memory_var)
+        self._style_control(self.max_memory_entry)
+        max_layout.addWidget(self.max_memory_entry)
+        memory_input_layout.addWidget(max_memory_frame, 1)
+        memory_layout.addLayout(memory_input_layout)
         self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
         self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-        memory_tip = ctk.CTkLabel(
-            memory_frame,
-            text="最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            text_color=Colors.TEXT_MUTED,
-            wraplength=Sizes.WRAP_LENGTH_WIDE,
-            justify="left",
+        memory_tip = QtWidgets.QLabel(
+            "最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
+            memory_container,
         )
-        memory_tip.pack(anchor="w", pady=(Spacing.TINY, 0))
-        self.memory_warning_label = ctk.CTkLabel(
-            memory_frame,
-            text="",
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
-            text_color=Colors.TEXT_ERROR,
-            wraplength=Sizes.WRAP_LENGTH_MEDIUM,
-        )
-        self.memory_warning_label.pack(anchor="w", pady=(Spacing.XS, 0))
-        content_frame.columnconfigure(1, weight=1)
+        memory_tip.setFont(FontManager.get_font(size=FontSize.MEDIUM))
+        memory_tip.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
+        memory_tip.setWordWrap(True)
+        memory_layout.addWidget(memory_tip)
+        self.memory_warning_label = QtWidgets.QLabel("", memory_container)
+        self.memory_warning_label.setFont(FontManager.get_font(size=FontSize.SMALL_PLUS))
+        self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_ERROR)))
+        self.memory_warning_label.setWordWrap(True)
+        memory_layout.addWidget(self.memory_warning_label)
+        content_frame.addWidget(memory_container, 5, 1, 1, 2)
 
     def _update_combo_state(self, combo, var=None, message="載入中...", state="disabled") -> None:
         """統一更新下拉選單狀態"""
@@ -427,7 +522,7 @@ class CreateServerFrame(ctk.CTkFrame):
                 versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
 
             def update_ui():
-                if not self.loader_version_combo.winfo_exists():
+                if not is_qobject_alive(self.loader_version_combo):
                     return
                 if versions:
                     v_names = []
@@ -465,20 +560,16 @@ class CreateServerFrame(ctk.CTkFrame):
             var_name: 要建立的變數名稱前綴。
 
         Returns:
-            `(StringVar, CTkEntry)` 元組。
+            `(ValueState, QLineEdit)` 元組。
         """
-        ctk.CTkLabel(
-            parent,
-            text=label_text,
-            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold"),
-            text_color=Colors.TEXT_PRIMARY_CONTRAST,
-        ).grid(row=row, column=0, sticky="w", pady=Spacing.TINY)
-        var = tkinter.StringVar(value=default_value)
+        parent.addWidget(self._make_label(label_text), row, 0)
+        var = ValueState(default_value)
         setattr(self, f"{var_name}_var", var)
-        entry = ctk.CTkEntry(
-            parent, textvariable=var, font=FontManager.get_font(size=FontSize.MEDIUM), width=Sizes.INPUT_WIDTH
-        )
-        entry.grid(row=row, column=1, sticky="ew", padx=(Spacing.LARGE_MINUS, 0), pady=Spacing.TINY)
+        entry = QtWidgets.QLineEdit(self.form_panel)
+        entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
+        self._bind_entry(entry, var)
+        self._style_control(entry)
+        parent.addWidget(entry, row, 1, 1, 3)
         setattr(self, f"{var_name}_entry", entry)
         return (var, entry)
 
@@ -488,28 +579,20 @@ class CreateServerFrame(ctk.CTkFrame):
         Args:
             parent: 父容器。
         """
-        button_container = ctk.CTkFrame(parent, fg_color="transparent")
-        button_container.pack(fill="x", side="bottom")
-        button_frame = ctk.CTkFrame(button_container, fg_color="transparent")
-        button_frame.pack(anchor="e")
-        self.create_button = UIUtils.create_styled_button(
-            button_frame,
-            text="建立伺服器",
-            command=self.create_server,
-            button_type="primary",
-            width=Sizes.BUTTON_WIDTH_PRIMARY,
-            height=Sizes.BUTTON_HEIGHT_LARGE,
-        )
-        self.create_button.pack(side="left", padx=(0, Spacing.LARGE_MINUS))
-        reset_button = UIUtils.create_styled_button(
-            button_frame,
-            text="重設表單",
-            command=self.reset_form,
-            button_type="secondary",
-            width=Sizes.BUTTON_WIDTH_SECONDARY,
-            height=Sizes.BUTTON_HEIGHT_LARGE,
-        )
-        reset_button.pack(side="left")
+        self.actions_frame = QtWidgets.QFrame(self)
+        self.actions_frame.setObjectName("CreateServerActions")
+        self.actions_frame.setStyleSheet(NativeQtStyle.create_actions)
+        button_layout = QtWidgets.QHBoxLayout(self.actions_frame)
+        _set_layout_margins(button_layout, 0, 4, 0, 0)
+        button_layout.addStretch(1)
+        self.create_button = self._make_button("建立伺服器", self.create_server, kind="primary")
+        self.create_button.setFixedWidth(Sizes.BUTTON_WIDTH_PRIMARY)
+        reset_button = self._make_button("重設表單", self.reset_form)
+        reset_button.setFixedWidth(Sizes.BUTTON_WIDTH_SECONDARY)
+        button_layout.addWidget(self.create_button)
+        button_layout.addSpacing(8)
+        button_layout.addWidget(reset_button)
+        parent.addWidget(self.actions_frame, 0)
 
     def reset_form(self):
         """重設表單到預設值"""
@@ -530,12 +613,12 @@ class CreateServerFrame(ctk.CTkFrame):
             self.update_version_list()
             self.min_memory_var.set("1024")
             self.max_memory_var.set("2048")
-            UIUtils.show_info("重設完成", "表單已重設為預設值", self.winfo_toplevel())
+            UIUtils.show_info("重設完成", "表單已重設為預設值", self.window())
         except Exception as e:
             with __import__("contextlib").suppress(Exception):
                 record_and_mark(e, marker_path=Path(__file__), reason="reset_form_failed")
             logger.error(f"重設表單失敗: {e}\n{traceback.format_exc()}")
-            UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.winfo_toplevel())
+            UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.window())
 
     def update_versions(self, versions: list) -> None:
         """更新版本列表，並預設選擇最新版本。
@@ -573,7 +656,7 @@ class CreateServerFrame(ctk.CTkFrame):
     def _compose_server_name(loader_type: str, mc_version: str, suffix: str = "") -> str:
         """依載入器類型與版本組合標準伺服器名稱。"""
         base_name = f"{mc_version}{suffix}"
-        if loader_type in ("Fabric", "Forge"):
+        if loader_type in ("Fabric", "Forge", "Quilt", "NeoForge"):
             return f"{loader_type} {base_name}"
         return base_name
 
@@ -583,7 +666,7 @@ class CreateServerFrame(ctk.CTkFrame):
         normalized = name.strip()
         if not normalized:
             return None
-        for prefix in ("Fabric ", "Forge "):
+        for prefix in ("Fabric ", "Forge ", "Quilt ", "NeoForge "):
             if normalized.startswith(prefix):
                 normalized = normalized[len(prefix) :]
                 break
@@ -607,6 +690,8 @@ class CreateServerFrame(ctk.CTkFrame):
             self._compose_server_name("Fabric", mc_version),
             self._compose_server_name("Forge", mc_version),
             self._compose_server_name("Vanilla", mc_version),
+            self._compose_server_name("Quilt", mc_version),
+            self._compose_server_name("NeoForge", mc_version),
         ]
         old_version = getattr(self, "old_mc_version", None)
         self.old_mc_version = mc_version
@@ -643,7 +728,7 @@ class CreateServerFrame(ctk.CTkFrame):
         try:
 
             def set_loading():
-                if self.loader_version_combo.winfo_exists():
+                if is_qobject_alive(self.loader_version_combo):
                     self._update_combo_state(
                         self.loader_version_combo,
                         self.loader_version_var,
@@ -657,7 +742,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
             def update_ui():
                 try:
-                    if not self.loader_version_combo.winfo_exists():
+                    if not is_qobject_alive(self.loader_version_combo):
                         return
                     current_type = self.loader_type_var.get()
                     current_version = self.mc_version_var.get()
@@ -693,7 +778,7 @@ class CreateServerFrame(ctk.CTkFrame):
 
             def handle_error():
                 try:
-                    if self.loader_version_combo.winfo_exists():
+                    if is_qobject_alive(self.loader_version_combo):
                         self._update_combo_state(
                             self.loader_version_combo, self.loader_version_var, "載入失敗", "disabled"
                         )
@@ -712,56 +797,56 @@ class CreateServerFrame(ctk.CTkFrame):
         """
         server_name = self.server_name_var.get().strip()
         if not server_name:
-            UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.winfo_toplevel())
+            UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.window())
             return False
         servers_root = self.server_manager.servers_root
         if (servers_root / server_name).exists():
             UIUtils.show_error(
-                "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.winfo_toplevel()
+                "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.window()
             )
             return False
         if self.server_manager.server_exists(server_name) and (
             not UIUtils.ask_yes_no_cancel(
                 "名稱衝突",
                 f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
-                self.winfo_toplevel(),
+                self.window(),
                 show_cancel=False,
             )
         ):
             return False
         if not self.mc_version_var.get():
-            UIUtils.show_error("錯誤", "請選擇 Minecraft 版本", self.winfo_toplevel())
+            UIUtils.show_error("錯誤", "請選擇 Minecraft 版本", self.window())
             return False
         max_memory = self.max_memory_var.get().strip()
         if not max_memory:
-            UIUtils.show_error("錯誤", "請輸入最大記憶體", self.winfo_toplevel())
+            UIUtils.show_error("錯誤", "請輸入最大記憶體", self.window())
             return False
         try:
             max_mem_int = int(max_memory)
             if max_mem_int < 1024:
-                UIUtils.show_error("錯誤", "最大記憶體不能少於 1024MB", self.winfo_toplevel())
+                UIUtils.show_error("錯誤", "最大記憶體不能少於 1024MB", self.window())
                 return False
             system_memory = self.get_system_memory_mb()
             if max_mem_int >= system_memory:
                 UIUtils.show_error(
                     "記憶體超出限制",
                     f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n已自動調整為 {system_memory - 1}MB",
-                    self.winfo_toplevel(),
+                    self.window(),
                 )
                 self.max_memory_var.set(str(system_memory - 1))
                 return False
         except ValueError:
-            UIUtils.show_error("錯誤", "最大記憶體必須是數字", self.winfo_toplevel())
+            UIUtils.show_error("錯誤", "最大記憶體必須是數字", self.window())
             return False
         min_memory = self.min_memory_var.get().strip()
         if min_memory:
             try:
                 min_mem_int = int(min_memory)
                 if min_mem_int >= max_mem_int:
-                    UIUtils.show_error("錯誤", "最小記憶體必須小於最大記憶體", self.winfo_toplevel())
+                    UIUtils.show_error("錯誤", "最小記憶體必須小於最大記憶體", self.window())
                     return False
             except ValueError:
-                UIUtils.show_error("錯誤", "最小記憶體必須是數字", self.winfo_toplevel())
+                UIUtils.show_error("錯誤", "最小記憶體必須是數字", self.window())
                 return False
         return True
 
@@ -800,7 +885,7 @@ class CreateServerFrame(ctk.CTkFrame):
         Args:
             config: 伺服器建立設定。
         """
-        parent_window = self.winfo_toplevel()
+        parent_window = self.window()
         progress_dialog = None
         progress_ready = threading.Event()
         try:
@@ -837,7 +922,9 @@ class CreateServerFrame(ctk.CTkFrame):
             if not progress_dialog.update_progress(15, "下載伺服器核心檔案..."):
                 return
             try:
-                self.download_server_files(config, progress_dialog, server_path)
+                if not self.download_server_files(config, progress_dialog, server_path):
+                    progress_dialog.close()
+                    return
                 self.server_manager.create_launch_script(config)
             except Exception as e:
                 with __import__("contextlib").suppress(Exception):
@@ -853,10 +940,10 @@ class CreateServerFrame(ctk.CTkFrame):
                 error_message = str(e)
 
                 def _show_download_error() -> None:
-                    UIUtils.show_error("錯誤", f"下載伺服器檔案失敗: {error_message}", self.winfo_toplevel())
+                    UIUtils.show_error("下載失敗", f"下載伺服器檔案失敗: {error_message}", self.window())
 
                 self.ui_queue.put(_show_download_error)
-                raise
+                raise Exception(error_message) from None
             if not progress_dialog.update_progress(100, "伺服器建立完成！"):
                 return
 
@@ -874,23 +961,49 @@ class CreateServerFrame(ctk.CTkFrame):
                 f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}", "CreateServerFrame"
             )
 
-            def on_error(error=error):
+            error_str = str(error)
+            if "下載" in error_str or "下載失敗" in error_str:
                 if progress_dialog:
                     progress_dialog.close()
-                UIUtils.show_error("建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window)
+            else:
 
-            self._schedule_ui_job("_create_server_error_job", 0, on_error)
+                def on_error(error=error):
+                    if progress_dialog:
+                        progress_dialog.close()
+                    UIUtils.show_error("建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window)
 
-    def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> None:
+                self._schedule_ui_job("_create_server_error_job", 0, on_error)
+
+    def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> bool:
         """下載伺服器檔案。
 
         Args:
             config: 伺服器建立設定。
             progress_dialog: 進度對話框。
             server_path: 伺服器資料夾路徑。
+
+        Returns:
+            下載與建立流程是否成功。
         """
         loader_type = config.loader_type.lower()
         download_path = str(server_path / "server.jar")
+
+        installer_url = self.loader_manager.get_installer_download_url(
+            loader_type,
+            config.minecraft_version,
+            config.loader_version,
+        )
+        if installer_url:
+            checksum = self.loader_manager._fetch_secure_checksum(installer_url)
+            if checksum is None:
+                proceed = UIUtils.ask_yes_no_cancel(
+                    "缺少驗證資訊",
+                    (f"{config.loader_type} 安裝器目前找不到 SHA-256 / SHA-512 驗證資訊。\n仍要繼續建立伺服器嗎？"),
+                    parent=self.window(),
+                    show_cancel=False,
+                )
+                if proceed is not True:
+                    return False
 
         # [1] 建立 server_path 後 sleep 0.3 秒，確保目錄完全建立
         with contextlib.suppress(Exception):
@@ -960,14 +1073,11 @@ class CreateServerFrame(ctk.CTkFrame):
                 log_details.append(f"[installer.log 讀取失敗: {e}]")
             msg = "伺服器下載失敗，參數如下：\n" + "\n".join(log_details)
 
-            def _show_download_failed_message() -> None:
-                UIUtils.show_error("下載失敗", msg, topmost=True)
-
-            self.ui_queue.put(_show_download_failed_message)
             logger.bind(component="").error(
                 f"server_path: {server_path}\nconfig: {config}\n{msg}\n{traceback.format_exc()}", "CreateServerFrame"
             )
             raise Exception(msg)
+        return True
 
     def _validate_download_parameters(self, loader_type: str, config) -> bool:
         """驗證下載參數"""
@@ -978,7 +1088,12 @@ class CreateServerFrame(ctk.CTkFrame):
         requires_loader_version = loader_type in ["forge", "fabric"]
         return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
 
-    def destroy(self) -> None:
-        """銷毀頁面前先清理待執行排程工作。"""
+    def destroy(self, destroyWindow: bool = True, destroySubWindows: bool = True) -> None:
+        """銷毀頁面前先清理待執行排程工作。
+
+        Args:
+            destroyWindow: 是否銷毀目前 Qt 視窗。
+            destroySubWindows: 是否一併銷毀子視窗。
+        """
         self._cancel_create_server_jobs()
-        super().destroy()
+        super().destroy(destroyWindow, destroySubWindows)

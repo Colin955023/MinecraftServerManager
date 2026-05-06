@@ -9,17 +9,17 @@
 Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟動監控到模組安裝更新，全程在圖形介面內完成，模組操作均附帶可審查的 Review 步驟。
 
 > **僅支援 Windows 10 / 11（64-bit）**
+> 介面使用 PySide6 / Qt Widgets，顯示縮放跟隨 Windows 與 Qt 高 DPI 行為。
 
 ---
 
 ## 功能特色
 
-- **建立伺服器** — Vanilla／Fabric／Forge 精靈式設定流程
+- **建立伺服器** — Vanilla／Fabric／Forge／Quilt／NeoForge 精靈式設定流程
 - **Java 管理** — 自動偵測已安裝 Java，缺少時可引導 winget 或手動安裝
 - **即時監控** — 控制台輸出、記憶體、運行狀態與玩家資訊集中顯示
 - **模組管理** — 本地掃描 + Modrinth 線上搜尋，安裝前 Review 確認
 - **模組更新** — Hash-first 批次比對，相依套件自動規劃
-- **Modrinth 相容策略** — 搜尋與更新建議時支援 Quilt → Fabric、NeoForge 1.20.1 → Forge alias
 - **匯入伺服器** — 掃描既有資料夾或壓縮檔快速匯入
 - **兩種發佈格式** — 可攜版（免安裝）與安裝版
 
@@ -91,7 +91,7 @@ src/
 docs/        文件
 tests/       自動化測試
 scripts/     建置與品質腳本
-reports/     產生的品質報告
+report/      產生綜合報告的腳本與輸出
 ```
 
 ---

@@ -13,10 +13,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
-import markdown as _markdown
 from packaging.version import Version
 
 from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UpdateParsing, get_logger
+from ..ui_support.qt_runtime import is_qobject_alive
 
 logger = get_logger().bind(component="UpdateChecker")
 _UpdateResultT = TypeVar("_UpdateResultT")
@@ -29,24 +29,68 @@ class UpdateCheckerInteraction(Protocol):
         """在背景執行更新檢查工作。"""
 
     def call_on_ui(self, parent: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
-        """在 UI 執行緒執行 callback 並回傳結果。"""
+        """在 UI 執行緒執行 callback 並回傳結果。
+
+        Args:
+            parent: 排程用 UI parent。
+            callback: 要執行的函式。
+
+        Returns:
+            callback 的回傳值。
+        """
 
     def schedule_debounce(
         self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any:
-        """安排延遲 UI 工作。"""
+        """安排延遲 UI 工作。
+
+        Args:
+            widget: 排程所在 widget。
+            job_attr: 儲存 job id 的屬性名稱。
+            delay_ms: 延遲毫秒數。
+            callback: 到期後執行的函式。
+            owner: 可選的 job holder。
+
+        Returns:
+            底層排程器回傳值。
+        """
 
     def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
-        """詢問使用者是否同意更新流程。"""
+        """詢問使用者是否同意更新流程。
+
+        Args:
+            title: 對話框標題。
+            message: 對話框訊息。
+            **kwargs: UI adapter 選項。
+
+        Returns:
+            使用者選擇；取消或無法判斷時回傳 None。
+        """
 
     def show_info(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示資訊訊息。"""
+        """顯示資訊訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
 
     def show_error(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示錯誤訊息。"""
+        """顯示錯誤訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
 
     def open_external(self, target: str) -> None:
-        """開啟外部連結或路徑。"""
+        """開啟外部連結或路徑。
+
+        Args:
+            target: URL 或檔案路徑。
+        """
 
 
 class _DirectUpdateCheckerInteraction:
@@ -64,8 +108,17 @@ class _DirectUpdateCheckerInteraction:
         self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any:
         _ = (job_attr, owner)
-        if widget is not None and hasattr(widget, "after"):
-            return widget.after(max(0, int(delay_ms)), callback)
+        if widget is not None and hasattr(widget, "schedule"):
+            try:
+                alive = False
+                if hasattr(widget, "is_alive") and callable(widget.is_alive):
+                    alive = bool(widget.is_alive())
+                else:
+                    alive = is_qobject_alive(widget)
+                if alive:
+                    return widget.schedule(max(0, int(delay_ms)), callback)
+            except Exception:
+                logger.debug("使用 widget.schedule 安排工作失敗，將回退到 threading.Timer", exc_info=True)
         timer = threading.Timer(max(0, int(delay_ms)) / 1000, callback)
         timer.daemon = True
         timer.start()
@@ -275,11 +328,11 @@ class UpdateChecker:
         """
         exit_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
         try:
-            if parent is not None and hasattr(parent, "after") and hasattr(parent, "winfo_exists"):
+            if parent is not None and hasattr(parent, "schedule") and hasattr(parent, "is_alive") and parent.is_alive():
 
                 def _close():
                     try:
-                        if parent.winfo_exists():
+                        if parent.is_alive():
                             parent.quit()
                             parent.destroy()
                     except Exception as e:
@@ -326,17 +379,29 @@ class UpdateChecker:
                 continue
             kept_lines.append(clean_line)
         text = "\n".join(kept_lines)
-        try:
-            html = _markdown.markdown(text)
-            text_only = re.sub("<[^<]+?>", "", html)
-            decoded = _html.unescape(text_only)
-        except Exception:
-            decoded = text
+        decoded = UpdateChecker._markdown_to_safe_text(text)
         final_lines = [x for x in decoded.splitlines() if x.strip()]
         if len(final_lines) > 15:
             final_lines = final_lines[:15]
             final_lines.append("... (完整內容請查看發行頁面)")
         return "\n".join(final_lines)
+
+    @staticmethod
+    def _markdown_to_safe_text(text: str) -> str:
+        """將遠端 Markdown 轉為純文字，避免引入 HTML 渲染面。"""
+        if not text:
+            return ""
+        safe_text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+        safe_text = re.sub(r"`([^`]*)`", r"\1", safe_text)
+        safe_text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", safe_text)
+        safe_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe_text)
+        safe_text = re.sub(r"<[^>]+>", "", safe_text)
+        safe_text = re.sub(r"^\s{0,3}#{1,6}\s*", "", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s{0,3}>\s?", "", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s*[-*+]\s+", "- ", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"^\s*\d+[.)]\s+", "- ", safe_text, flags=re.MULTILINE)
+        safe_text = re.sub(r"[*_~]{1,3}", "", safe_text)
+        return _html.unescape(safe_text)
 
     @staticmethod
     def check_and_prompt_update(

@@ -4,12 +4,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import pytest
 from src.core import ModManager, ModPlatform
 from src.utils import ModIndexManager, compute_file_hash
 
 
-@pytest.mark.smoke
 def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
     manager = ModIndexManager(str(tmp_path))
     mods_dir = tmp_path / "mods"
@@ -42,7 +40,6 @@ def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_
     assert manager.get_cached_hash(file_path, "sha512") == "abc123"
 
 
-@pytest.mark.smoke
 def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: Path, monkeypatch) -> None:
     server_path = tmp_path / "server"
     mods_dir = server_path / "mods"
@@ -88,7 +85,6 @@ def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: P
     assert mod_info.hash_algorithm == "sha512"
 
 
-@pytest.mark.smoke
 def test_mod_index_manager_ensure_cached_hash_defaults_to_sha512(tmp_path: Path) -> None:
     manager = ModIndexManager(str(tmp_path))
     mods_dir = tmp_path / "mods"
@@ -103,7 +99,6 @@ def test_mod_index_manager_ensure_cached_hash_defaults_to_sha512(tmp_path: Path)
     assert manager.get_cached_hash(file_path, "sha512") == computed_hash
 
 
-@pytest.mark.smoke
 def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tmp_path: Path, monkeypatch) -> None:
     manager = ModManager(str(tmp_path))
 
@@ -131,7 +126,6 @@ def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tm
     assert slug == "fabric-api"
 
 
-@pytest.mark.smoke
 def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_lookup_404(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -156,7 +150,6 @@ def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_look
     assert slug == "ferrite-core"
 
 
-@pytest.mark.smoke
 def test_compute_file_hash_recomputes_when_file_content_changes(tmp_path: Path) -> None:
     ModIndexManager(str(tmp_path))
     file_path = tmp_path / "mods" / "cached.jar"
@@ -173,7 +166,6 @@ def test_compute_file_hash_recomputes_when_file_content_changes(tmp_path: Path) 
     assert second_hash != first_hash
 
 
-@pytest.mark.smoke
 def test_mod_index_manager_thread_safe_parallel_updates(tmp_path: Path) -> None:
     manager = ModIndexManager(str(tmp_path))
     mods_dir = tmp_path / "mods"
@@ -197,7 +189,6 @@ def test_mod_index_manager_thread_safe_parallel_updates(tmp_path: Path) -> None:
     assert manager.get_statistics()["total_cached"] == len(files)
 
 
-@pytest.mark.smoke
 def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) -> None:
     mods_dir = tmp_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)
@@ -232,7 +223,6 @@ def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) ->
     assert "legacy.jar" in payload["entries"]
 
 
-@pytest.mark.smoke
 def test_mod_index_manager_repairs_invalid_entry_shapes_on_load(tmp_path: Path) -> None:
     mods_dir = tmp_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)

@@ -182,7 +182,7 @@ def get_modrinth_latest_versions_by_hashes(
     json_body: dict[str, Any] = {"hashes": normalized_hashes, "algorithm": normalize_hash_algorithm(algorithm)}
     if minecraft_version:
         json_body["game_versions"] = [str(minecraft_version).strip()]
-    loader_filters = get_modrinth_loader_filters(loader, minecraft_version)
+    loader_filters = get_modrinth_loader_filters(loader)
     if loader_filters:
         json_body["loaders"] = loader_filters
 
@@ -630,8 +630,8 @@ def search_mods_online(
         logger.debug(f"Modrinth 搜尋字串正規化: {raw_query} -> {normalized_query}")
     facets = [["project_type:mod"], ["server_side:required", "server_side:optional"]]
     if minecraft_version:
-        facets.append([f"game_versions:{minecraft_version}"])
-    loader_categories = get_modrinth_loader_filters(loader, minecraft_version)
+        facets.append([f"versions:{minecraft_version}"])
+    loader_categories = get_modrinth_loader_filters(loader)
     if loader_categories:
         facets.append([f"categories:{loader_category}" for loader_category in loader_categories])
     if categories:
@@ -695,7 +695,7 @@ def get_mod_versions(
         return []
     if attempts_used > 1:
         logger.debug(f"Modrinth project versions 重試成功: {clean_project_id}, attempts={attempts_used}")
-    loader_filters = set(get_modrinth_loader_filters(loader, minecraft_version))
+    loader_filters = set(get_modrinth_loader_filters(loader))
     versions: list[OnlineModVersion] = []
     for item in response:
         if not isinstance(item, dict):

@@ -2,15 +2,29 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
-import customtkinter as ctk
-
 from ...utils import Colors, FontSize, Sizes, Spacing
+from ...utils.ui_support import qt_widgets as qt
 from ..dialog_utils import DialogUtils
 from ..font_manager import FontManager
+from ..tree_utils import TreeUtils
 from .models import LocalUpdateReviewEntry, PendingInstallReviewEntry
 from .presenter_delegate_mixin import PresenterDelegateMixin
+
+
+@dataclass(slots=True)
+class ReviewDialogShell:
+    """包含 Review 對話框中共用 UI 元件的容器。"""
+
+    dialog: Any
+    main_frame: qt.Frame
+    subtitle: qt.Label
+    overview_label: qt.Label
+    tree_container: qt.Frame
+    summary_box: qt.TextBox
+    button_frame: qt.Frame
 
 
 class InstallReviewDialogBuilder(PresenterDelegateMixin):
@@ -20,7 +34,21 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         super().__init__(frame)
 
     @staticmethod
-    def create_review_summary_box(parent: Any, *, height: int) -> ctk.CTkTextbox:
+    def _create_dialog_main_frame(dialog: Any) -> qt.Frame:
+        """
+        建立對話框的主要容器並設定邊距與填滿模式。
+
+        Args:
+            dialog: 對話框實例。
+        Returns:
+            設定完成的 qt.Frame 實例。
+        """
+        main_frame = qt.Frame(dialog)
+        main_frame.attach(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
+        return main_frame
+
+    @staticmethod
+    def create_review_summary_box(parent: Any, *, height: int) -> qt.TextBox:
         """
         建立 Review 右側/下方摘要文字框。
 
@@ -28,19 +56,19 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
             parent: 摘要框的父容器。
             height: 摘要框的高度（像素）。寬度會自動調整以填滿父容器。
         Returns:
-            建立完成的 ctk.CTkTextbox 實例，已設定為唯讀模式。
+            建立完成的 qt.TextBox 實例，已設定為唯讀模式。
         """
-        summary_box = ctk.CTkTextbox(
+        summary_box = qt.TextBox(
             parent,
-            height=FontManager.get_dpi_scaled_size(height),
+            height=height,
             font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
             wrap="word",
         )
-        summary_box.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
-        summary_box.configure(state="disabled")
+        summary_box.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        summary_box.setReadOnly(True)
         return summary_box
 
-    def create_review_shared_ui(self, main_frame: ctk.CTkFrame, wraplength: int) -> tuple[ctk.CTkLabel, ctk.CTkFrame]:
+    def create_review_shared_ui(self, main_frame: qt.Frame, wraplength: int) -> tuple[qt.Label, qt.Frame]:
         """
         建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
 
@@ -50,19 +78,163 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             包含概覽標籤與樹狀視圖容器的元組。
         """
-        overview_label = ctk.CTkLabel(
+        overview_label = qt.Label(
             main_frame,
             text="",
             font=FontManager.get_font(size=FontSize.NORMAL),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=FontManager.get_dpi_scaled_size(wraplength),
+            wraplength=wraplength,
         )
-        overview_label.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
-        tree_container = ctk.CTkFrame(main_frame)
-        tree_container.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        overview_label.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        tree_container = qt.Frame(main_frame)
+        tree_container.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
         return overview_label, tree_container
+
+    @staticmethod
+    def _create_dialog_title(parent: Any, heading: str) -> qt.Label:
+        title_label = qt.Label(
+            parent,
+            text=heading,
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
+        )
+        title_label.attach(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
+        return title_label
+
+    def create_review_dialog_shell(
+        self,
+        *,
+        dialog_title: str,
+        heading: str,
+        subtitle_text: str,
+        subtitle_wraplength: int,
+        overview_wraplength: int,
+        summary_height: int,
+        width: int,
+        height: int,
+        min_width: int,
+        min_height: int,
+    ) -> ReviewDialogShell:
+        """
+        建立 Review 對話框的共用骨架。
+
+        Args:
+            dialog_title: 對話框的標題文字。
+            heading: 對話框內部的主要標題文字。
+            subtitle_text: 對話框內部的副標題文字。
+            subtitle_wraplength: 副標題的文字換行長度（像素）。
+            overview_wraplength: 概覽標籤的文字換行長度（像素）。
+            summary_height: 摘要框的高度（像素）。
+            width: 對話框的初始寬度（像素）。
+            height: 對話框的初始高度（像素）。
+            min_width: 對話框的最小寬度（像素）。
+            min_height: 對話框的最小高度（像素）。
+        Returns:
+            包含對話框及其共用 UI 元件的 ReviewDialogShell 實例。
+        """
+        dialog = DialogUtils.create_toplevel_dialog(
+            self.parent,
+            dialog_title,
+            width=width,
+            height=height,
+            make_modal=True,
+            bind_icon=True,
+            center_on_parent=True,
+            delay_ms=250,
+            min_width=min_width,
+            min_height=min_height,
+        )
+        main_frame = self._create_dialog_main_frame(dialog)
+        self._create_dialog_title(main_frame, heading)
+        subtitle = qt.Label(
+            main_frame,
+            text=subtitle_text,
+            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            text_color=Colors.TEXT_SECONDARY,
+            justify="left",
+            anchor="w",
+            wraplength=subtitle_wraplength,
+        )
+        subtitle.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        overview_label, tree_container = self.create_review_shared_ui(main_frame, overview_wraplength)
+        summary_box = self.create_review_summary_box(main_frame, height=summary_height)
+        button_frame = qt.Frame(main_frame, fg_color="transparent")
+        button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        return ReviewDialogShell(
+            dialog=dialog,
+            main_frame=main_frame,
+            subtitle=subtitle,
+            overview_label=overview_label,
+            tree_container=tree_container,
+            summary_box=summary_box,
+            button_frame=button_frame,
+        )
+
+    def create_review_tree(
+        self,
+        tree_container: qt.Frame,
+        *,
+        tree_heading: str,
+        columns: tuple[str, ...],
+        column_specs: list[tuple[str, str, int, int, bool, str]],
+        tree_column_width: int,
+        tree_column_minwidth: int,
+        tree_column_stretch: bool,
+        tree_row: int = 0,
+        stretch_columns: set[str],
+        include_tree_column: bool = True,
+    ) -> qt.Treeview:
+        """
+        建立帶有自動欄寬調整與捲軸的 Review Treeview。
+
+        Args:
+            tree_container: Treeview 的父容器。
+            tree_heading: Treeview 樹狀欄的標題文字。
+            columns: Treeview 的欄位識別名稱元組（不包含樹狀欄）。
+            column_specs: 包含每個欄位設定的列表，每個元素為 (column_name, text, width, minwidth, stretch, anchor)。
+            tree_column_width: 樹狀欄的初始寬度（像素）。
+            tree_column_minwidth: 樹狀欄的最小寬度（像素）。
+            tree_column_stretch: 樹狀欄是否允許伸展以填滿剩餘空間。
+            tree_row: 樹狀視圖在容器格線中的列號。
+            stretch_columns: 允許伸展的欄位名稱集合。
+            include_tree_column: 是否將樹狀欄包含在自動欄寬調整中。
+        Returns:
+            建立完成的 qt.Treeview 實例，已配置好自動欄寬調整與垂直捲軸。
+        """
+        tree = qt.Treeview(
+            tree_container,
+            columns=columns,
+            show="tree headings",
+            height=Spacing.MEDIUM,
+        )
+        tree.setRootIsDecorated(True)
+        tree.setItemsExpandable(True)
+        tree.heading("#0", text=tree_heading)
+        tree.column(
+            "#0",
+            width=tree_column_width,
+            minwidth=tree_column_minwidth,
+            anchor="w",
+            stretch=tree_column_stretch,
+        )
+        for column_name, text, width, minwidth, stretch, anchor in column_specs:
+            tree.heading(column_name, text=text, anchor="w")
+            tree.column(column_name, width=width, minwidth=minwidth, anchor=anchor, stretch=stretch)
+        TreeUtils.bind_treeview_header_auto_fit(
+            tree,
+            include_tree_column=include_tree_column,
+            heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            body_font=FontManager.get_font(size=FontSize.INPUT),
+            stretch_columns=stretch_columns,
+        )
+        scrollbar = qt.Scrollbar(tree_container, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.attach_matrix(row=tree_row, column=0, sticky="nsew")
+        scrollbar.attach_matrix(row=tree_row, column=1, sticky="ns")
+        tree_container.set_grid_row_stretch(tree_row, weight=1)
+        tree_container.set_grid_column_stretch(0, weight=1)
+        return tree
 
     def build_review_dialog(self, review_entry: PendingInstallReviewEntry | LocalUpdateReviewEntry) -> Any:
         """
@@ -96,30 +268,22 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
             bind_icon=True,
             center_on_parent=True,
             delay_ms=150,
-            min_width=FontManager.get_dpi_scaled_size(720),
-            min_height=FontManager.get_dpi_scaled_size(560),
-            native_window=True,
-            use_transient_for_modal=False,
+            min_width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH + Sizes.CONSOLE_PANEL_HEIGHT,
+            min_height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT + Sizes.CONSOLE_PANEL_HEIGHT + Sizes.BUTTON_WIDTH_COMPACT,
         )
-        main_frame = ctk.CTkFrame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
-        title_label = ctk.CTkLabel(
-            main_frame,
-            text=heading,
-            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
-        )
-        title_label.pack(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
-        summary_box = ctk.CTkTextbox(
+        main_frame = self._create_dialog_main_frame(dialog)
+        self._create_dialog_title(main_frame, heading)
+        summary_box = qt.TextBox(
             main_frame,
             font=FontManager.get_font(size=FontSize.SMALL_PLUS),
             wrap="word",
         )
-        summary_box.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        summary_box.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
         summary_box.insert("1.0", body)
-        summary_box.configure(state="disabled")
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
-        project_button = ctk.CTkButton(
+        summary_box.setReadOnly(True)
+        button_frame = qt.Frame(main_frame, fg_color="transparent")
+        button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        project_button = qt.Button(
             button_frame,
             text="開啟專案頁面",
             font=FontManager.get_font(size=FontSize.LARGE),
@@ -130,8 +294,8 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
             command=lambda: self._open_project_page(project_page_url, dialog),
             state="normal" if project_page_url else "disabled",
         )
-        project_button.pack(side="left")
-        close_button = ctk.CTkButton(
+        project_button.attach(side="left")
+        close_button = qt.Button(
             button_frame,
             text="關閉",
             font=FontManager.get_font(size=FontSize.LARGE),
@@ -141,12 +305,13 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
             width=Sizes.BUTTON_WIDTH_COMPACT,
             command=dialog.destroy,
         )
-        close_button.pack(side="right")
+        close_button.attach(side="right")
         DialogUtils.schedule_toplevel_layout_refresh(
             dialog,
-            min_width=FontManager.get_dpi_scaled_size(720),
-            min_height=FontManager.get_dpi_scaled_size(560),
+            min_width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH + Sizes.CONSOLE_PANEL_HEIGHT,
+            min_height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT + Sizes.CONSOLE_PANEL_HEIGHT + Sizes.BUTTON_WIDTH_COMPACT,
             parent=self.parent,
+            preserve_current_size=False,
         )
         return dialog
 

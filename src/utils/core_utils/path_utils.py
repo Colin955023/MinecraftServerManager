@@ -14,7 +14,7 @@ import threading
 import time
 import zipfile
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, ClassVar
 
 from .atomic_writer import atomic_write_bytes, atomic_write_json, atomic_write_text
@@ -129,13 +129,19 @@ class PathUtils:
         try:
             if not member_name:
                 return None
-            p = PurePosixPath(str(member_name))
-            # 移除空、 '.' 與 '..' 元件
-            parts = [part for part in p.parts if part and part not in (".", "..")]
-            if not parts:
+            normalized_name = str(member_name).replace("\\", "/")
+            if PureWindowsPath(normalized_name).drive:
+                return None
+            p = PurePosixPath(normalized_name)
+            if p.is_absolute():
+                return None
+            parts = p.parts
+            if not parts or any(part in ("", ".", "..") for part in parts):
                 return None
             return Path(*parts)
-        except Exception:
+        except TypeError:
+            return None
+        except ValueError:
             return None
 
     @staticmethod

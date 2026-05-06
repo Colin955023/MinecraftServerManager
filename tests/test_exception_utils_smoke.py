@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from src.utils import PathUtils, record_and_mark
 
 
-@pytest.mark.smoke
 def test_record_and_mark_without_marker_path_still_writes_runtime_issue_marker() -> None:
     try:
         raise RuntimeError("runtime marker smoke")

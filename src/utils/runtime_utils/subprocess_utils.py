@@ -75,6 +75,10 @@ class SubprocessUtils:
         if normalized_kwargs.get("shell", False):
             logger.debug("忽略 shell=True，強制使用 shell=False for safety")
         normalized_kwargs["shell"] = False
+        if (normalized_kwargs.get("text") or normalized_kwargs.get("universal_newlines")) and normalized_kwargs.get(
+            "errors"
+        ) is None:
+            normalized_kwargs["errors"] = "replace"
         if normalized_kwargs.get("executable") is not None:
             raise ValueError("不允許覆寫 executable；請將可執行檔放在 cmd[0]")
         return normalized_kwargs

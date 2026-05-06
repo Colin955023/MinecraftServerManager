@@ -2,12 +2,8 @@
 提供視覺化的 server.properties 編輯介面
 """
 
-import tkinter
-import tkinter.ttk as ttk
 import traceback
 from typing import Any, ClassVar
-
-import customtkinter as ctk
 
 from ..core import ServerConfig, ServerManager
 from ..utils import (
@@ -21,7 +17,9 @@ from ..utils import (
     get_button_style,
     get_logger,
 )
+from ..utils.ui_support import qt_widgets as qt
 from . import CustomDropdown, DialogUtils, FontManager
+from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
 
@@ -92,23 +90,21 @@ class ServerPropertiesDialog:
         self.dialog = DialogUtils.create_toplevel_dialog(
             parent,
             f"伺服器設定 - {server_config.name}",
-            width=int(800 * FontManager.get_scale_factor()),
-            height=int(600 * FontManager.get_scale_factor()),
-            native_window=True,
+            width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH,
+            height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT,
             center_on_parent=True,
             make_modal=True,
             delay_ms=250,
         )
         self.setup_dialog()
-        self.property_vars: dict[str, tkinter.StringVar] = {}
-        self.property_widgets: dict[str, tkinter.Widget] = {}
-        self._property_bool_vars: dict[str, tkinter.BooleanVar] = {}
+        self.property_vars: dict[str, Any] = {}
+        self.property_widgets: dict[str, Any] = {}
+        self._property_bool_vars: dict[str, Any] = {}
         self._property_bool_bound: set[str] = set()
         self._property_value_cache: dict[str, str] = {}
-        self._tab_content_frames: dict[str, ttk.Frame] = {}
-        self._tab_canvases: dict[str, tkinter.Canvas] = {}
+        self._tab_content_frames: dict[str, Any] = {}
+        self._tab_canvases: dict[str, Any] = {}
         self._tab_properties: dict[str, tuple[str, ...]] = {}
-        self._tab_scroll_regions: dict[str, tuple[int, int, int, int]] = {}
         self._tab_render_positions: dict[str, int] = {}
         self._tab_rendering: set[str] = set()
         self._tab_render_job_attrs: dict[str, str] = {}
@@ -119,139 +115,78 @@ class ServerPropertiesDialog:
 
     def setup_dialog(self) -> None:
         """設定對話框"""
-        self.dialog.title(f"伺服器設定 - {self.server_config.name}")
-        min_width = int(1000 * FontManager.get_scale_factor())
-        min_height = int(600 * FontManager.get_scale_factor())
-        self.dialog.minsize(min_width, min_height)
-        self.dialog.resizable(True, True)
+        self.dialog.setWindowTitle(f"伺服器設定 - {self.server_config.name}")
+        min_width = Sizes.SERVER_PROPERTIES_DIALOG_MIN_WIDTH
+        min_height = Sizes.SERVER_PROPERTIES_DIALOG_MIN_HEIGHT
+        self.dialog.setMinimumSize(min_width, min_height)
         try:
-            self.dialog.configure(bg=Colors.BG_PRIMARY[0])
+            self.dialog.setStyleSheet(NativeQtStyle.server_properties_dialog)
         except Exception as e:
             logger.error(f"應用對話框主題失敗: {e}\n{traceback.format_exc()}")
 
     def create_widgets(self) -> None:
         """建立介面元件"""
-        main_frame = ttk.Frame(self.dialog)
+        main_frame = qt.Frame(self.dialog)
         UIUtils.pack_main_frame(main_frame)
-        title_label = ttk.Label(
+        title_label = qt.Label(
             main_frame,
             text=f"🛠️ {self.server_config.name} - server.properties",
             font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_MEDIUM, "bold"),
         )
-        title_label.pack(pady=(0, FontManager.get_dpi_scaled_size(15)))
-        style = ttk.Style()
-        style.configure(
-            "ServerProps.TNotebook.Tab", font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT, "bold")
-        )
-        self.notebook = ttk.Notebook(main_frame, style="ServerProps.TNotebook")
-        self.notebook.pack(fill="both", expand=True, pady=(0, FontManager.get_dpi_scaled_size(15)))
+        title_label.setObjectName("ServerPropertiesTitle")
+        title_label.attach(pady=(0, Spacing.LARGE))
+        self.notebook = qt.Notebook(main_frame, style="ServerProps.TNotebook")
+        self.notebook.attach(fill="both", expand=True, pady=(0, Spacing.LARGE))
         self.create_property_tabs()
-        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill="x")
-        button_width = int(100 * FontManager.get_scale_factor())
-        button_height = int(32 * FontManager.get_scale_factor())
-        button_font_size = int(18 * FontManager.get_scale_factor())
-        ctk.CTkButton(
-            button_frame,
-            text="💾 儲存",
-            command=self.save_properties,
-            width=button_width,
-            height=button_height,
-            font=FontManager.get_font(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
-            **get_button_style("primary"),
-        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
-        ctk.CTkButton(
-            button_frame,
-            text="🔄 重設",
-            command=self.reset_properties,
-            width=button_width,
-            height=button_height,
-            font=FontManager.get_font(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
-            **get_button_style("warning"),
-        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
-        ctk.CTkButton(
-            button_frame,
-            text="❌ 取消",
-            command=self.dialog.destroy,
-            width=button_width,
-            height=button_height,
-            font=FontManager.get_font(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
-            **get_button_style("danger"),
-        ).pack(side="right", padx=(FontManager.get_dpi_scaled_size(8), 0))
-        help_label = ctk.CTkLabel(
-            button_frame,
+        footer_frame = qt.Frame(main_frame, fg_color="transparent")
+        footer_frame.attach(fill="x")
+        info_frame = qt.Frame(footer_frame, fg_color="transparent")
+        info_frame.attach(side="left")
+        button_frame = qt.Frame(footer_frame, fg_color="transparent")
+        button_frame.attach(side="right")
+        button_width = Sizes.BUTTON_WIDTH_SMALL
+        button_height = 24
+        button_font_size = FontSize.LARGE
+        help_label = qt.Label(
+            info_frame,
             text="💡 將滑鼠移到設定項目上可查看詳細說明",
             font=FontManager.get_font(size=FontSize.INPUT),
-            text_color=("gray60", "gray50"),
+            text_color=Colors.TEXT_SECONDARY,
         )
-        help_label.pack(side="left")
-        link_label = ctk.CTkLabel(
-            button_frame,
+        help_label.attach(side="left")
+        link_label = qt.Label(
+            info_frame,
             text="【官方設定說明】",
             font=FontManager.get_font(size=FontSize.INPUT, underline=True),
             text_color=Colors.TEXT_LINK,
             cursor="hand2",
         )
-        link_label.pack(side="left", padx=(Spacing.TINY, 0))
-        link_label.bind("<Button-1>", lambda _: UIUtils.open_external("https://zh.minecraft.wiki/w/Server.properties"))
+        link_label.attach(side="left", padx=(Spacing.TINY, 0))
+        link_label.connect_event(
+            "mouse_left_press", lambda _: UIUtils.open_external("https://zh.minecraft.wiki/w/Server.properties")
+        )
 
-    def _apply_scrollregion(self, canvas: tkinter.Canvas) -> None:
-        """更新分頁 canvas 的捲動區域。"""
-        try:
-            if not canvas.winfo_exists():
-                return
-            bbox = canvas.bbox("all")
-            if not bbox:
-                return
-            x0, y0, x1, y1 = bbox
-            height = max(y1 - y0, canvas.winfo_height())
-            region: tuple[int, int, int, int] = (x0, y0, x1, y0 + height)
-            canvas_key = str(canvas)
-            last_region = self._tab_scroll_regions.get(canvas_key)
-            if region != last_region:
-                canvas.configure(scrollregion=region)
-                self._tab_scroll_regions[canvas_key] = region
-        except Exception:
-            return
-
-    def _schedule_scrollregion_update(self, canvas: tkinter.Canvas) -> None:
-        """合併排程 scrollregion 更新，避免連續重算。"""
-        try:
-            UIUtils.schedule_coalesced_idle(
-                canvas, "_server_props_scroll_job", lambda c=canvas: self._apply_scrollregion(c)
-            )
-        except Exception as e:
-            logger.exception(f"排程 scrollregion 更新失敗: {e}")
-
-    def _scroll_canvas_with_mousewheel(self, event, target_canvas: tkinter.Canvas):
-        units = UIUtils.get_mousewheel_units(int(getattr(event, "delta", 0)))
-        if units == 0:
-            return None
-        target_canvas.yview_scroll(units, "units")
-        return "break"
-
-    def _bind_widget_mousewheel_to_canvas(self, widget: Any, target_canvas: tkinter.Canvas) -> None:
-        try:
-            if not widget.winfo_exists():
-                return
-        except Exception:
-            return
-        try:
-            widget.bind(
-                "<MouseWheel>",
-                lambda event, canvas=target_canvas: self._scroll_canvas_with_mousewheel(event, canvas),
-                add="+",
-            )
-        except Exception:
-            return
-        for child in widget.winfo_children():
-            self._bind_widget_mousewheel_to_canvas(child, target_canvas)
+        button_specs = [
+            ("❌ 取消", self.dialog.destroy, get_button_style("danger")),
+            ("🔄 重設", self.reset_properties, get_button_style("warning")),
+            ("💾 儲存", self.save_properties, get_button_style("primary")),
+        ]
+        button_gap = max(1, Spacing.XS - 1)
+        for index, (text, command, style_config) in enumerate(button_specs):
+            padding = (0, 0) if index == len(button_specs) - 1 else (0, button_gap)
+            qt.Button(
+                button_frame,
+                text=text,
+                command=command,
+                width=button_width,
+                height=button_height,
+                font=FontManager.get_font(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
+                **style_config,
+            ).attach(side="left", padx=padding)
 
     def _compute_property_render_batch_size(self, total_props: int) -> int:
         """計算屬性控制項分段建構的批次大小。"""
-        scale = max(1.0, float(FontManager.get_scale_factor()))
-        base_batch = 16 if total_props <= 80 else 12
-        return max(6, int(base_batch / scale))
+        return 16 if total_props <= 80 else 12
 
     def _get_tab_render_job_attr(self, tab_name: str) -> str:
         """取得 tab 專用 render job attr 名稱。"""
@@ -284,7 +219,7 @@ class ServerPropertiesDialog:
             self._tab_rendering.discard(tab_name)
             return
         try:
-            if not content_frame.winfo_exists():
+            if not content_frame.is_alive():
                 self._tab_rendering.discard(tab_name)
                 return
         except Exception:
@@ -304,10 +239,6 @@ class ServerPropertiesDialog:
         end_index = min(total_props, start_index + batch_size)
         self.create_property_controls(content_frame, properties[start_index:end_index])
         self._tab_render_positions[tab_name] = end_index
-        canvas = self._tab_canvases.get(tab_name)
-        if canvas is not None:
-            self._bind_widget_mousewheel_to_canvas(content_frame, canvas)
-            self._schedule_scrollregion_update(canvas)
         if end_index < total_props:
             self._schedule_tab_render_batch(tab_name)
             return
@@ -352,47 +283,21 @@ class ServerPropertiesDialog:
         self._tab_content_frames.clear()
         self._tab_canvases.clear()
         self._tab_properties.clear()
-        self._tab_scroll_regions.clear()
         self._tab_render_positions.clear()
         self._tab_rendering.clear()
         self._tab_render_job_attrs.clear()
         self._materialized_tabs.clear()
 
         def _add_scrollable_tab(tab_name: str, properties: list[str] | tuple[str, ...]) -> None:
-            tab_frame = ttk.Frame(self.notebook)
+            tab_frame = qt.Frame(self.notebook)
             self.notebook.add(tab_frame, text=tab_name)
-            canvas = tkinter.Canvas(tab_frame, highlightthickness=0, bd=0)
-            scrollbar = ttk.Scrollbar(tab_frame, orient="vertical", command=canvas.yview)
-            scrollable_frame = ttk.Frame(canvas)
-            window_item = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-            def _request_scrollregion_update(_event=None, target_canvas=canvas) -> None:
-                self._schedule_scrollregion_update(target_canvas)
-
-            scrollable_frame.bind("<Configure>", _request_scrollregion_update)
-
-            def _on_canvas_configure(event, target_canvas=canvas, target_window_item=window_item) -> None:
-                try:
-                    target_canvas.itemconfigure(target_window_item, width=max(1, int(event.width)))
-                except Exception:
-                    return
-                self._schedule_scrollregion_update(target_canvas)
-
-            canvas.bind("<Configure>", _on_canvas_configure)
-            canvas.configure(yscrollcommand=scrollbar.set)
-            canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-
-            def _on_mousewheel(event, target_canvas=canvas):
-                return self._scroll_canvas_with_mousewheel(event, target_canvas)
-
-            canvas.bind("<MouseWheel>", _on_mousewheel)
-            scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
-            self._bind_widget_mousewheel_to_canvas(tab_frame, canvas)
-            self._tab_content_frames[tab_name] = scrollable_frame
-            self._tab_canvases[tab_name] = canvas
+            scroll_area = qt.ScrollableFrame(tab_frame)
+            scroll_area.attach(fill="both", expand=True)
+            layout = scroll_area._ensure_layout("vbox")
+            layout.setAlignment(qt.QtCore.Qt.AlignmentFlag.AlignTop | qt.QtCore.Qt.AlignmentFlag.AlignLeft)
+            self._tab_content_frames[tab_name] = scroll_area
+            self._tab_canvases[tab_name] = scroll_area
             self._tab_properties[tab_name] = tuple(properties)
-            self._schedule_scrollregion_update(canvas)
 
         categories = self.properties_helper.get_property_categories()
         categorized_keys: set[str] = set()
@@ -411,15 +316,15 @@ class ServerPropertiesDialog:
             _add_scrollable_tab(category_name, properties)
         if uncategorized_keys:
             _add_scrollable_tab("其他", uncategorized_keys)
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed, add="+")
+        self.notebook.connect_event("tab_changed", self._on_tab_changed, append=True)
         self._on_tab_changed()
 
-    def _get_or_create_property_var(self, prop_name: str) -> tkinter.StringVar:
-        """取得或建立屬性對應的 StringVar，並同步到 cache。"""
+    def _get_or_create_property_var(self, prop_name: str) -> Any:
+        """取得或建立屬性對應的 TextState，並同步到 cache。"""
         existing = self.property_vars.get(prop_name)
         if existing is not None:
             return existing
-        var = tkinter.StringVar()
+        var = qt.TextState()
         cached_value = self._property_value_cache.get(prop_name)
         if cached_value is not None:
             var.set(cached_value)
@@ -431,35 +336,45 @@ class ServerPropertiesDialog:
         self.property_vars[prop_name] = var
         return var
 
-    def _create_property_control(self, parent, prop_name: str, before=None) -> ttk.Frame:
+    def _create_property_control(self, parent, prop_name: str, before=None) -> Any:
         """建立單一屬性控制項列。"""
-        prop_frame = ttk.Frame(parent)
+        prop_frame = qt.Frame(parent)
         pack_kwargs = {
             "fill": "x",
-            "padx": FontManager.get_dpi_scaled_size(15),
-            "pady": FontManager.get_dpi_scaled_size(8),
+            "padx": Spacing.LARGE,
+            "pady": 6,
         }
         if before is not None:
-            prop_frame.pack(before=before, **pack_kwargs)
+            prop_frame.attach(before=before, **pack_kwargs)
         else:
-            prop_frame.pack(**pack_kwargs)
-        label = ttk.Label(
+            prop_frame.attach(**pack_kwargs)
+        prop_frame.setSizePolicy(
+            qt.QtWidgets.QSizePolicy.Policy.Expanding,
+            qt.QtWidgets.QSizePolicy.Policy.Maximum,
+        )
+        label = qt.Label(
             prop_frame,
             text=f"{prop_name}:",
             font=FontManager.get_font("Microsoft JhengHei", FontSize.HEADING_SMALL, "bold"),
             cursor="hand2",
         )
-        label.pack(anchor="w")
+        label.attach(anchor="w")
 
         def copy_name(_event, name=prop_name):
-            self.dialog.clipboard_clear()
-            self.dialog.clipboard_append(name)
-            self.dialog.update_idletasks()
+            app = qt.ensure_app()
+            if app is not None:
+                try:
+                    app.clipboard().setText(name)
+                    app.processEvents()
+                except Exception as e:
+                    logger.exception(f"複製屬性名稱失敗: {e}")
 
-        label.bind("<Button-1>", copy_name)
+        label.connect_event("mouse_left_press", copy_name)
         var = self._get_or_create_property_var(prop_name)
         widget = self.create_property_widget(prop_frame, prop_name, var)
         self.property_widgets[prop_name] = widget
+        self.create_tooltip(prop_frame, prop_name)
+        self.create_tooltip(label, prop_name)
         self.create_tooltip(widget, prop_name)
         return prop_frame
 
@@ -473,7 +388,7 @@ class ServerPropertiesDialog:
         for prop_name in properties:
             self._create_property_control(parent, prop_name)
 
-    def create_property_widget(self, parent, prop_name: str, var: tkinter.StringVar) -> tkinter.Widget:
+    def create_property_widget(self, parent, prop_name: str, var: Any) -> Any:
         """根據屬性類型建立控制項。
 
         Args:
@@ -484,26 +399,27 @@ class ServerPropertiesDialog:
         Returns:
             建立完成的 widget。
         """
+        widget: Any
         if prop_name in self.BOOLEAN_PROPS:
             bool_var = self._property_bool_vars.get(prop_name)
             if bool_var is None:
-                bool_var = tkinter.BooleanVar()
+                bool_var = qt.BoolState()
                 self._property_bool_vars[prop_name] = bool_var
             normalized = var.get().strip().lower() in ("true", "1", "yes", "on")
             if bool_var.get() != normalized:
                 bool_var.set(normalized)
             if prop_name not in self._property_bool_bound:
-                UIUtils.bind_bool_string_var(bool_var, var)
+                UIUtils.sync_bool_string_state(bool_var, var)
                 self._property_bool_bound.add(prop_name)
-            widget = ctk.CTkCheckBox(
+            widget = qt.CheckBox(
                 parent,
                 variable=bool_var,
                 text="啟用",
                 font=FontManager.get_font(size=FontSize.INPUT),
-                width=FontManager.get_dpi_scaled_size(180),
-                height=FontManager.get_dpi_scaled_size(36),
+                width=Sizes.SERVER_PROPERTY_BOOL_WIDTH,
+                height=Sizes.SERVER_PROPERTY_BOOL_HEIGHT,
             )
-            widget.pack(anchor="w", pady=FontManager.get_dpi_scaled_size(3))
+            widget.attach(anchor="w", pady=Spacing.TINY)
         elif prop_name in self.CHOICE_PROPS:
             widget = CustomDropdown(
                 parent,
@@ -514,26 +430,32 @@ class ServerPropertiesDialog:
                 dropdown_font_size=FontSize.MEDIUM,
                 state="readonly",
             )
-            widget.pack(anchor="w", pady=FontManager.get_dpi_scaled_size(3))
+            widget.attach(anchor="w", pady=Spacing.TINY)
         elif prop_name in self.RANGE_PROPS:
             min_val, max_val = self.RANGE_PROPS[prop_name]
-            widget = tkinter.Spinbox(
+            widget = qt.Spinbox(
                 parent,
                 textvariable=var,
                 from_=min_val,
                 to=max_val,
                 width=Sizes.SPINBOX_WIDTH_CHARS,
                 font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
+                fg_color=Colors.BG_PRIMARY,
+                border_color=Colors.BORDER_LIGHT,
+                corner_radius=Sizes.INPUT_CORNER_RADIUS,
             )
-            widget.pack(anchor="w")
+            widget.attach(anchor="w")
         else:
-            widget = ttk.Entry(
+            widget = qt.Entry(
                 parent,
                 textvariable=var,
                 font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
-                width=Sizes.INPUT_FIELD_WIDTH_CHARS,
+                width=Sizes.SERVER_PROPERTY_TEXT_INPUT_WIDTH,
+                fg_color=Colors.BG_PRIMARY,
+                border_color=Colors.BORDER_LIGHT,
+                corner_radius=Sizes.INPUT_CORNER_RADIUS,
             )
-            widget.pack(anchor="w")
+            widget.attach(anchor="w")
         return widget
 
     def create_tooltip(self, widget, prop_name: str) -> None:
@@ -544,7 +466,7 @@ class ServerPropertiesDialog:
             prop_name: 屬性名稱。
         """
         description = self.properties_helper.get_property_description(prop_name)
-        UIUtils.bind_tooltip(
+        UIUtils.attach_tooltip(
             widget,
             description,
             bg="lightyellow",
@@ -552,9 +474,9 @@ class ServerPropertiesDialog:
             font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
             padx=Spacing.SMALL,
             pady=Spacing.XS,
-            wraplength=FontManager.get_dpi_scaled_size(600),
+            wraplength=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH,
             justify="left",
-            borderwidth=1,
+            borderwidth=2,
             relief="solid",
             offset_x=10,
             offset_y=10,
@@ -612,8 +534,9 @@ class ServerPropertiesDialog:
 
     def show_dialog(self) -> None:
         """顯示對話框"""
-        self.dialog.focus_set()
-        self.dialog.wait_window()
+        self.dialog.setFocus()
+        self.dialog.activateWindow()
+        self.dialog.exec()
 
     def reset_properties(self) -> None:
         """重設所有屬性為預設值"""

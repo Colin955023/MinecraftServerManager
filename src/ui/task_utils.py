@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import concurrent.futures
-import contextlib
 import queue
 import threading
 from collections.abc import Callable
 from typing import Any
 
 from ..utils import get_logger, run_in_background
+from ..utils.ui_support.qt_runtime import QtCore, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="TaskUtils")
 
@@ -22,68 +22,18 @@ class TaskUtils:
         """在 UI 執行緒執行函數，若目前不在主執行緒則排程並等待結果。
 
         Args:
-            parent: 可用來排程 after 的 UI 元件。
+            parent: 可用來排程 UI 工作的元件。
             func: 要在 UI 執行緒執行的函式。
             timeout: 等待執行完成的秒數，None 表示一直等待。
 
         Returns:
             函式執行結果。
         """
-        try:
-            if (
-                parent is not None
-                and hasattr(parent, "after")
-                and hasattr(parent, "winfo_exists")
-                and parent.winfo_exists()
-            ):
-                if threading.current_thread() is threading.main_thread():
-                    return func()
-                result: dict[str, Any] = {"value": None, "exc": None, "cancelled": False}
-                done = threading.Event()
-                after_id = None
-
-                def _runner() -> None:
-                    if result["cancelled"]:
-                        done.set()
-                        return
-                    try:
-                        result["value"] = func()
-                    except Exception as exc:
-                        result["exc"] = exc
-                    finally:
-                        done.set()
-
-                try:
-                    after_id = parent.after(0, _runner)
-                    if timeout is None:
-                        done.wait()
-                    elif not done.wait(timeout=timeout):
-                        result["cancelled"] = True
-                        if after_id is not None:
-                            with contextlib.suppress(Exception):
-                                parent.after_cancel(after_id)
-                        logger.warning(f"UI 任務等待逾時 ({timeout}秒)")
-                        if not parent.winfo_exists():
-                            logger.debug("視窗已關閉")
-                        raise TimeoutError(f"UI 任務等待逾時 ({timeout}秒)")
-                except TimeoutError:
-                    raise
-                except (AttributeError, RuntimeError) as exc:
-                    result["cancelled"] = True
-                    logger.debug(f"排程 UI 任務時發生暫時性例外 (可能視窗已關閉): {exc}")
-                    return func()
-                except Exception:
-                    result["cancelled"] = True
-                    logger.exception("排程 UI 任務時發生例外，回退到直接呼叫")
-                    return func()
-                if isinstance(result["exc"], Exception):
-                    raise result["exc"]
-                return result["value"]
-        except TimeoutError:
-            raise
-        except Exception as exc:
-            logger.debug(f"UI 排程執行失敗，回退至直接呼叫: {exc}")
-        return func()
+        if parent is not None and not isinstance(parent, QtCore.QObject):
+            raise TypeError("TaskUtils.call_on_ui 只支援原生 Qt QObject parent")
+        if isinstance(parent, QtCore.QObject) and not is_qobject_alive(parent):
+            raise RuntimeError("Qt parent 已被銷毀，無法排程 UI 任務")
+        return run_on_ui_thread(func, timeout=timeout)
 
     @staticmethod
     def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
@@ -96,7 +46,11 @@ class TaskUtils:
             **kwargs: 傳給 update_func 的關鍵字參數。
         """
         try:
-            if widget and widget.winfo_exists():
+            if widget is None:
+                return
+            if not isinstance(widget, QtCore.QObject):
+                raise TypeError("TaskUtils.safe_update_widget 只支援原生 Qt QObject")
+            if is_qobject_alive(widget):
                 update_func(widget, *args, **kwargs)
         except Exception as exc:
             logger.exception(f"更新 widget 失敗: {exc}")
@@ -114,25 +68,24 @@ class TaskUtils:
         """啟動 UI queue pump，將背景執行緒送入的任務分批送到主執行緒。
 
         Args:
-            widget: 提供 after / winfo_exists 的 UI 元件。
+            widget: 原生 Qt QObject UI 元件。
             task_queue: 要處理的任務佇列。
             interval_ms: 佇列空閒時的輪詢間隔。
             busy_interval_ms: 佇列繁忙時的輪詢間隔。
             max_tasks_per_tick: 每次輪詢最多執行的任務數。
-            job_attr: 儲存 after job id 的屬性名稱。
+            job_attr: 儲存 scheduled job id 的屬性名稱。
         """
+        if not isinstance(widget, QtCore.QObject):
+            raise TypeError("TaskUtils.start_ui_queue_pump 只支援原生 Qt QObject widget")
 
         def _alive() -> bool:
-            try:
-                return bool(widget) and widget.winfo_exists()
-            except Exception:
-                return False
+            return isinstance(widget, QtCore.QObject) and is_qobject_alive(widget)
 
         def _cancel_existing() -> None:
             try:
                 job_id = getattr(widget, job_attr, None)
-                if job_id:
-                    widget.after_cancel(job_id)
+                if isinstance(job_id, QtCore.QTimer):
+                    cancel_timer(job_id)
             except Exception as exc:
                 logger.debug(f"取消舊的 UI queue pump job 失敗（視窗可能已關閉）: {exc}")
             try:
@@ -162,7 +115,7 @@ class TaskUtils:
                 has_backlog = False
             next_delay = busy_interval_ms if has_backlog else interval_ms
             try:
-                setattr(widget, job_attr, widget.after(next_delay, _tick))
+                setattr(widget, job_attr, invoke_later(next_delay, _tick, parent=widget))
             except Exception as exc:
                 logger.exception(f"排程下一次 UI queue pump 失敗（視窗可能正在銷毀）: {exc}")
 
@@ -221,14 +174,15 @@ class TaskUtils:
                     logger.debug(f"ui_queue put 失敗: {exc}")
             if widget is not None:
                 try:
-                    widget.after(0, cb)
+                    if isinstance(widget, QtCore.QObject):
+                        invoke_later(0, cb, parent=widget)
                     return
                 except Exception as exc:
-                    logger.debug(f"widget.after 失敗: {exc}")
+                    logger.debug(f"Qt UI callback 排程失敗: {exc}")
             try:
-                cb()
+                run_on_ui_thread(cb, timeout=5.0)
             except Exception as exc:
-                logger.debug(f"直接執行 callback 失敗: {exc}")
+                logger.debug(f"Qt UI callback 回派失敗: {exc}")
 
         def _wrapper() -> None:
             try:

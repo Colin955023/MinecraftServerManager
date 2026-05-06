@@ -10,6 +10,27 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+QT_PLUGIN_FAMILY_EXCLUDES = (
+    "iconengines",
+    "printsupport",
+    "tls",
+)
+QT_PLUGIN_DLL_EXCLUDES = (
+    "PySide6/qt-plugins/imageformats/qgif.dll",
+    "PySide6/qt-plugins/imageformats/qicns.dll",
+    "PySide6/qt-plugins/imageformats/qjpeg.dll",
+    "PySide6/qt-plugins/imageformats/qpdf.dll",
+    "PySide6/qt-plugins/imageformats/qsvg.dll",
+    "PySide6/qt-plugins/imageformats/qtga.dll",
+    "PySide6/qt-plugins/imageformats/qtiff.dll",
+    "PySide6/qt-plugins/imageformats/qwbmp.dll",
+    "PySide6/qt-plugins/imageformats/qwebp.dll",
+    "PySide6/qt-plugins/platforms/qdirect2d.dll",
+    "PySide6/qt-plugins/platforms/qminimal.dll",
+    "PySide6/qt-plugins/platforms/qoffscreen.dll",
+)
+QT_PLUGIN_INCLUDE_FAMILIES = "platforms,imageformats"
+
 
 def print_error_and_exit(msg: str, exit_code: int = 1):
     logging.error(msg)
@@ -68,11 +89,11 @@ def main():
         "nuitka",
         "--quiet",
         "--standalone",
+        "--enable-plugin=pyside6",
         "--assume-yes-for-downloads",
         "--remove-output",
         "--output-dir=dist",
         "--output-filename=MinecraftServerManager.exe",
-        "--enable-plugin=tk-inter",
         "--include-package=src",
         "--include-data-dir=assets=assets",
         "--include-data-file=README.md=README.md",
@@ -80,6 +101,15 @@ def main():
         "--python-flag=no_docstrings",
         "--python-flag=no_asserts",
         "--windows-console-mode=attach",
+        "--noinclude-qt-translations",
+        f"--include-qt-plugins={QT_PLUGIN_INCLUDE_FAMILIES}",
+        "--noinclude-setuptools-mode=nofollow",
+        "--noinclude-pytest-mode=nofollow",
+        "--noinclude-unittest-mode=nofollow",
+        "--noinclude-pydoc-mode=nofollow",
+        "--noinclude-IPython-mode=nofollow",
+        *[f"--noinclude-qt-plugins={family}" for family in QT_PLUGIN_FAMILY_EXCLUDES],
+        *[f"--noinclude-dlls={pattern}" for pattern in QT_PLUGIN_DLL_EXCLUDES],
         "--windows-icon-from-ico=assets/icon.ico",
         f"--file-version={APP_VERSION}",
         f"--product-version={APP_VERSION}",
@@ -115,6 +145,19 @@ def main():
 
     if not (dist_target / "MinecraftServerManager.exe").exists():
         print_error_and_exit("找不到已編譯的執行檔")
+
+    required_qt_plugins = [
+        dist_target / "PySide6" / "qt-plugins" / "platforms" / "qwindows.dll",
+        dist_target / "PySide6" / "qt-plugins" / "imageformats" / "qico.dll",
+    ]
+    missing_qt_plugins = [
+        str(plugin.relative_to(dist_target)) for plugin in required_qt_plugins if not plugin.exists()
+    ]
+    if missing_qt_plugins:
+        error_msg = "Qt runtime 外掛遺失，打包後可能無法啟動：\n" + "\n".join(
+            [f" - {plugin}" for plugin in missing_qt_plugins]
+        )
+        print_error_and_exit(error_msg)
 
     logging.info("Step 4: 封裝安裝程式 (Inno Setup)...")
     iscc = shutil.which("iscc") or r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"

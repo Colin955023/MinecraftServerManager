@@ -24,15 +24,36 @@ class JavaInstallInteraction(Protocol):
 
     @staticmethod
     def ask_yes_no_cancel(title: str, message: str, **kwargs) -> bool | None:
-        """詢問使用者是否同意動作。"""
+        """詢問使用者是否同意動作。
+
+        Args:
+            title: 對話框標題。
+            message: 對話框訊息。
+            **kwargs: UI adapter 選項。
+
+        Returns:
+            使用者選擇；取消或無法判斷時回傳 None。
+        """
 
     @staticmethod
     def show_info(title: str, message: str, **kwargs) -> None:
-        """顯示資訊訊息。"""
+        """顯示資訊訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
 
     @staticmethod
     def show_error(title: str, message: str, **kwargs) -> None:
-        """顯示錯誤訊息。"""
+        """顯示錯誤訊息。
+
+        Args:
+            title: 訊息標題。
+            message: 訊息內容。
+            **kwargs: UI adapter 選項。
+        """
 
 
 class JavaUtils:

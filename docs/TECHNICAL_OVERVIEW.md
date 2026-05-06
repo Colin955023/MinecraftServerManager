@@ -5,7 +5,7 @@
 | 類別 | 使用套件／工具 |
 |------|----------------|
 | 語言 | Python 3.14 |
-| GUI | CustomTkinter + Tkinter |
+| GUI | PySide6 / Qt Widgets |
 | 打包 | Nuitka（可執行檔）、Inno Setup（安裝精靈） |
 | 網路 | requests + urllib3 Retry（集中 timeout / retry policy） |
 | 版本解析 | packaging |
@@ -27,7 +27,7 @@ src/main.py
      ├── core/mod_file_installer.py 模組檔案安裝、替換、回滾與刪改
      ├── core/mod_provider_resolver.py provider metadata 與 Modrinth 身分解析
      ├── core/version_manager.py  Minecraft 版本查詢
-     ├── core/loader_manager.py   Fabric／Forge 版本查詢與快取
+     ├── core/loader_manager.py   Fabric／Forge／Quilt／NeoForge 版本查詢與快取
      ├── ui/mod_management/*      本地模組列表、Review、安裝清單與同步顯示
      ├── ui/mod_search_service/*  Modrinth 搜尋、相容性分析、依賴規劃
      └── utils/update_checker.py  更新檢查、下載與套用流程
@@ -66,7 +66,7 @@ src/main.py
 |------|------|
 | `settings_manager.py` | 設定讀寫與共享設定管理器存取 |
 | `http_utils.py` | requests session，集中 timeout／retry |
-| `window_manager.py` | DPI 感知、視窗定位、狀態持久化 |
+| `window_manager.py` | Qt 視窗定位與狀態持久化 |
 | `logger.py` | 集中日誌初始化 |
 | `java_utils.py` / `java_downloader.py` | Java 自動偵測；必要時在背景透過 winget 安裝官方 JDK / JRE 並自動同意授權 |
 | `path_utils.py` / `runtime_paths.py` | 路徑解析（安裝版 vs. 可攜版） |
@@ -85,6 +85,8 @@ src/main.py
 
 視窗偏好（位置、大小）由 `window_manager` 持久化至設定檔。可調整視窗不強制設定 `maxsize`；主視窗狀態僅在可見時追蹤。模組相關 Treeview 支援雙擊欄位標題自動調整欄寬。
 
+高解析度顯示縮放交由 Qt 6 與 Windows 原生設定處理。Qt Widgets 使用 device-independent pixels，Qt 6 在 Windows 會自動套用使用者的顯示比例，因此專案內不再保存或套用額外的 UI 縮放倍率。
+
 ---
 
 ## 5. 效能設計
@@ -95,29 +97,22 @@ src/main.py
 - **列表差異更新**：Treeview 只更新變動列，不整批重繪。
 - **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
 
-## 6. Modrinth Loader 相容策略（Prism 風格）
+## 6. 支援的模組載入器
 
-搜尋、版本過濾、hash 批次更新與相容性分析會採用 Prism Launcher 風格的 loader 擴展策略。
+本專案支援以下四種模組載入器：
 
-這些邏輯僅用於 **Modrinth 搜尋、過濾與更新規劃**，不代表建立伺服器 UI 額外支援 Quilt 或 NeoForge 選項；建立流程目前仍以 Vanilla／Fabric／Forge 為主。
-
-### Loader Alias 擴展（`_expand_target_loader_aliases`）
-
-| 伺服器 Loader | 額外帶入的 filter | 說明 |
+| 載入器 | 支援版本 | 說明 |
 |---|---|---|
-| Quilt | `fabric` | Modrinth 上許多 Quilt 相容模組只標記 `fabric`，因此會一併納入候選 |
-| NeoForge 1.20.1 | `forge` | 僅在 1.20.1 的搜尋與更新規劃中額外納入 Forge 候選；1.20.2+ 不擴展 |
+| Vanilla（原版） | 所有版本 | 官方 Minecraft 伺服器，無模組載入器 |
+| Fabric | 1.14+ | 輕量級模組載入器，廣泛支援 1.16+ 版本 |
+| Quilt | 1.14+ | 基於 Fabric 的改進版本，提供更好的相容性 |
+| Forge | 1.5+ | 功能豐富的老牌模組載入器，支援 1.5 到最新版本 |
+| NeoForge | 1.20.1+ | Forge 的現代化分支，在 1.20.1+ 上支援 |
 
-### Dependency Project ID Override（`MODRINTH_LOADER_DEPENDENCY_OVERRIDES`，僅 Fabric loader）
+### 版本管理
 
-當 Fabric 環境的模組依賴 Quilt 專屬套件時，自動重定向：
-
-| 原始 Project ID | 套件名稱 | 重定向目標 |
-|---|---|---|
-| `qvIfYCYJ` | Quilt API / QSL | `P7dR8mSH`（Fabric API） |
-| `lwVhp9o5` | Quilt Standard Libraries | `Ha28R6CL`（Fabric Language Kotlin / FSL） |
-
-NeoForge / Forge loader 不套用此重定向。
+- **Fabric / Quilt**：從官方 Fabric / Quilt Meta API 取得穩定版本清單，支援依 Minecraft 版本過濾
+- **Forge / NeoForge**：從 Maven metadata 解析穩定版本，每個 Minecraft 版本保留最新 10 個版本
 
 ## 7. 資料與設定路徑
 

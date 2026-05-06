@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from tkinter import ttk
 from typing import Any, cast
 
 import pytest
@@ -8,7 +7,7 @@ import src.ui.manage_server_frame as manage_server_frame_module
 from src.models import ServerConfig
 
 
-class FakeTreeview(ttk.Treeview):
+class FakeTreeview:
     def __init__(self) -> None:
         self.updated: list[tuple[str, tuple[Any, ...]]] = []
         self.fail_item_ids: set[str] = set()
@@ -27,7 +26,6 @@ class FakeTreeview(ttk.Treeview):
         return None
 
 
-@pytest.mark.smoke
 def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> None:
     server_data = [
         ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
@@ -42,7 +40,6 @@ def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> Non
     assert server_rows["Beta"] == tuple(server_data[2])
 
 
-@pytest.mark.smoke
 def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
     server_data = [
         ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
@@ -55,7 +52,6 @@ def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
     assert server_rows["Alpha"] == tuple(server_data[1])
 
 
-@pytest.mark.smoke
 def test_build_server_refresh_payload_combines_signature_order_and_rows() -> None:
     server_data = [
         ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
@@ -75,7 +71,6 @@ def test_build_server_refresh_payload_combines_signature_order_and_rows() -> Non
     }
 
 
-@pytest.mark.smoke
 def test_should_apply_server_refresh_updates_hash_only_when_changed() -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame.__dict__["_last_server_data_hash"] = None
@@ -90,7 +85,6 @@ def test_should_apply_server_refresh_updates_hash_only_when_changed() -> None:
     assert frame._last_server_data_hash == first_hash
 
 
-@pytest.mark.smoke
 def test_begin_server_refresh_cycle_cancels_old_job_and_increments_token(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame._server_refresh_token = 3
@@ -111,7 +105,6 @@ def test_begin_server_refresh_cycle_cancels_old_job_and_increments_token(monkeyp
     assert frame._server_refresh_token == 4
 
 
-@pytest.mark.smoke
 def test_remove_stale_server_items_recycles_and_prunes_names(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame._server_item_by_name = {"Alpha": "item-a", "Beta": "item-b", "Gamma": "item-c"}
@@ -134,7 +127,6 @@ def test_remove_stale_server_items_recycles_and_prunes_names(monkeypatch: pytest
     assert frame._server_item_by_name == {"Alpha": "item-a", "Gamma": "item-c"}
 
 
-@pytest.mark.smoke
 def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame._server_item_by_name = {"Alpha": "item-a", "Beta": "item-b"}
@@ -172,7 +164,6 @@ def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending(mon
     ]
 
 
-@pytest.mark.smoke
 def test_build_server_display_row_formats_unknown_mc_version_with_loader_version() -> None:
     config = ServerConfig(
         name="Alpha",
@@ -194,7 +185,6 @@ def test_build_server_display_row_formats_unknown_mc_version_with_loader_version
     assert row == ["Alpha", "未知", "Fabric v0.16.10", "已停止", "未備份", "servers\\Alpha"]
 
 
-@pytest.mark.smoke
 def test_build_server_display_row_formats_vanilla_loader() -> None:
     config = ServerConfig(
         name="Beta",
@@ -216,7 +206,6 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
     assert row == ["Beta", "1.21.1", "原版", "運行中", "已備份", "servers\\Beta"]
 
 
-@pytest.mark.smoke
 def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -233,7 +222,6 @@ def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
     assert plan.refresh_context is None
 
 
-@pytest.mark.smoke
 def test_build_server_refresh_execution_plan_returns_refresh_context_when_changed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -252,7 +240,6 @@ def test_build_server_refresh_execution_plan_returns_refresh_context_when_change
     assert plan.refresh_context == expected_context
 
 
-@pytest.mark.smoke
 def test_refresh_servers_callback_applies_payload_with_execution_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame.server_tree = cast(Any, object())

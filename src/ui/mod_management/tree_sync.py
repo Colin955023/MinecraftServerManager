@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import tkinter.ttk as ttk
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,7 @@ from ...utils import (
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
 )
+from ...utils.ui_support import qt_widgets as qt
 from ..tree_utils import TreeUtils
 from .constants import logger
 from .online_mod_queue import ModManagementRuntimeBase
@@ -35,7 +35,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         """依列索引回傳交錯底色 tag。"""
         return "odd" if index % 2 == 0 else "even"
 
-    def _extract_or_compute_parity_tag(self, tree: ttk.Treeview, item_id: str) -> str:
+    def _extract_or_compute_parity_tag(self, tree: qt.Treeview, item_id: str) -> str:
         """優先沿用現有奇偶 tag，否則依樹狀索引重新計算。"""
         current_tags = list(tree.item(item_id, "tags") or [])
         if len(current_tags) > 1:
@@ -43,17 +43,17 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         return self._get_parity_tag(tree.index(item_id))
 
     @staticmethod
-    def _get_tree_item_values(tree: ttk.Treeview, item_id: str) -> tuple[Any, ...]:
+    def _get_tree_item_values(tree: qt.Treeview, item_id: str) -> tuple[Any, ...]:
         """安全取得 Treeview item 的 values。"""
         return tuple(tree.item(item_id, "values") or [])
 
     @staticmethod
-    def _get_tree_item_tags(tree: ttk.Treeview, item_id: str) -> tuple[Any, ...]:
+    def _get_tree_item_tags(tree: qt.Treeview, item_id: str) -> tuple[Any, ...]:
         """安全取得 Treeview item 的 tags。"""
         return tuple(tree.item(item_id, "tags") or [])
 
     @classmethod
-    def _get_tree_item_mod_id(cls, tree: ttk.Treeview, item_id: str) -> str:
+    def _get_tree_item_mod_id(cls, tree: qt.Treeview, item_id: str) -> str:
         """從 Treeview item 的 tags 取得模組識別。"""
         tags = cls._get_tree_item_tags(tree, item_id)
         if not tags:
@@ -61,7 +61,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         return str(tags[0] or "").strip()
 
     @classmethod
-    def _get_tree_item_mod_name(cls, tree: ttk.Treeview, item_id: str) -> str:
+    def _get_tree_item_mod_name(cls, tree: qt.Treeview, item_id: str) -> str:
         """從 Treeview item 的 values 取得模組名稱。"""
         values = cls._get_tree_item_values(tree, item_id)
         if len(values) < 2:
@@ -136,7 +136,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             if getattr(self, "_online_tree_render_locked", False):
                 return
             try:
-                parent.grid_propagate(False)
+                parent.set_grid_layout_propagation(False)
                 self._online_tree_render_locked = True
             except Exception as e:
                 logger.debug(f"鎖定線上模組列表渲染失敗: {e}", "ModManagement")
@@ -144,7 +144,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         if not getattr(self, "_online_tree_render_locked", False):
             return
         try:
-            parent.grid_propagate(True)
+            parent.set_grid_layout_propagation(True)
         except Exception as e:
             logger.debug(f"解除線上模組列表渲染鎖失敗: {e}", "ModManagement")
         finally:
@@ -164,7 +164,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     def _purge_orphan_online_tree_items(self, expected_item_ids: set[str]) -> None:
         """刪除線上瀏覽 Treeview 中不屬於目前資料的孤兒列。"""
         tree = self.browse_tree
-        if not tree or not tree.winfo_exists():
+        if not tree or not tree.is_alive():
             return
         for item_id in list(tree.get_children("")):
             if item_id in expected_item_ids:
@@ -191,7 +191,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         """重新整理線上模組列表（差異更新，避免整棵重建）。"""
         self._refresh_online_results_summary()
         tree = self.browse_tree
-        if not tree or not tree.winfo_exists():
+        if not tree or not tree.is_alive():
             return
         self._cancel_online_refresh_job()
         self._online_refresh_token += 1
@@ -249,7 +249,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
 
         def _finalize_online() -> None:
             try:
-                if tree and tree.winfo_exists():
+                if tree and tree.is_alive():
                     for order_index, row_key in enumerate(mod_order):
                         if tree.exists(row_key):
                             tree.move(row_key, "", order_index)
@@ -417,7 +417,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             if getattr(self, "_local_tree_render_locked", False):
                 return
             try:
-                parent.grid_propagate(False)
+                parent.set_grid_layout_propagation(False)
                 self._local_tree_render_locked = True
             except Exception as e:
                 logger.debug(f"鎖定 local tree 渲染失敗: {e}", "ModManagement")
@@ -425,7 +425,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         if not getattr(self, "_local_tree_render_locked", False):
             return
         try:
-            parent.grid_propagate(True)
+            parent.set_grid_layout_propagation(True)
         except Exception as e:
             logger.debug(f"解除 local tree 渲染鎖失敗: {e}", "ModManagement")
         finally:
@@ -486,7 +486,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     def _purge_orphan_local_tree_items(self, expected_item_ids: set[str]) -> None:
         """刪除 Treeview 中不屬於目前映射表的孤兒列，避免重複顯示。"""
         tree = self.local_tree
-        if not tree or not tree.winfo_exists():
+        if not tree or not tree.is_alive():
             return
         recycled_pool = set(self._local_recycled_item_ids)
         active_children = list(tree.get_children(""))
@@ -511,7 +511,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     ) -> None:
         """以差異更新本地模組 Treeview，避免整棵重建。"""
         tree = self.local_tree
-        if not tree or not tree.winfo_exists():
+        if not tree or not tree.is_alive():
             self._set_local_tree_render_lock(False)
             return
         for mod_id, stale_item_id in list(self._local_item_by_mod_id.items()):

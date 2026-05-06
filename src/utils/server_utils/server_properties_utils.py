@@ -2,8 +2,7 @@
 提供 server.properties 載入/儲存與驗證相關工具。
 """
 
-import importlib
-import re
+import ipaddress
 import types
 from pathlib import Path
 from typing import Any, ClassVar
@@ -12,17 +11,6 @@ from .. import PathUtils, get_logger
 
 logger = get_logger().bind(component="ServerPropertiesUtils")
 __all__ = ["ServerPropertiesHelper", "ServerPropertiesValidator"]
-
-
-def _load_javaproperties_module() -> Any | None:
-    """延遲載入 javaproperties；無法載入時回傳 None。"""
-    try:
-        return importlib.import_module("javaproperties")
-    except Exception:
-        return None
-
-
-_JAVAPROPERTIES = _load_javaproperties_module()
 
 
 class ServerPropertiesHelper:
@@ -91,7 +79,7 @@ class ServerPropertiesHelper:
             "resource-pack-id": "資源包的 UUID。用於客戶端識別資源包快取。",
             "resource-pack-prompt": "自訂資源包提示訊息。 (僅在 require-resource-pack 為 true 時有效)",
             "resource-pack-sha1": "資源包的 SHA-1 雜湊值 (小寫十六進制)。用於驗證完整性。",
-            "server-ip": "伺服器綁定 IP。 (建議留空) 留空則綁定所有可用介面。",
+            "server-ip": "伺服器綁定 IP。 (建議留空) 留空則綁定所有可用介面；也可輸入有效的 IPv4 / IPv6 位址。",
             "server-port": "伺服器監聽端口。 (1-65534, 預設: 25565)",
             "simulation-distance": "模擬距離 (3-32)。玩家周圍進行實體/作物更新的區塊半徑。",
             "spawn-monsters": "是否生成怪物。 (true/false)",
@@ -235,6 +223,156 @@ class ServerPropertiesHelper:
         return normalized
 
     @staticmethod
+    def _logical_property_lines(content: str) -> list[str]:
+        """合併 Java properties 續行。"""
+        logical_lines: list[str] = []
+        pending = ""
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip("\r\n")
+            if pending:
+                line = line.lstrip()
+            slash_count = 0
+            for char in reversed(line):
+                if char == "\\":
+                    slash_count += 1
+                else:
+                    break
+            continued = slash_count % 2 == 1
+            if continued:
+                pending += line[:-1]
+                continue
+            logical_lines.append(pending + line)
+            pending = ""
+        if pending:
+            logical_lines.append(pending)
+        return logical_lines
+
+    @staticmethod
+    def _split_property_line(line: str) -> tuple[str, str] | None:
+        """切出 Java properties key/value。"""
+        if not line:
+            return None
+        stripped = line.lstrip()
+        if not stripped or stripped[0] in {"#", "!"}:
+            return None
+        offset = len(line) - len(stripped)
+        escaped = False
+        separator_index: int | None = None
+        separator_is_space = False
+        for index in range(offset, len(line)):
+            char = line[index]
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\":
+                escaped = True
+                continue
+            if char in {"=", ":"}:
+                separator_index = index
+                break
+            if char.isspace():
+                separator_index = index
+                separator_is_space = True
+                break
+        if separator_index is None:
+            return (line[offset:], "")
+        key = line[offset:separator_index]
+        value_start = separator_index + 1
+        if separator_is_space:
+            while value_start < len(line) and line[value_start].isspace():
+                value_start += 1
+            if value_start < len(line) and line[value_start] in {"=", ":"}:
+                value_start += 1
+        while value_start < len(line) and line[value_start].isspace():
+            value_start += 1
+        return (key, line[value_start:])
+
+    @staticmethod
+    def _unescape_property(token: str) -> str:
+        """還原 Java properties 跳脫序列。"""
+        result: list[str] = []
+        index = 0
+        while index < len(token):
+            char = token[index]
+            if char != "\\":
+                result.append(char)
+                index += 1
+                continue
+            index += 1
+            if index >= len(token):
+                result.append("\\")
+                break
+            escaped = token[index]
+            index += 1
+            if escaped == "t":
+                result.append("\t")
+            elif escaped == "n":
+                result.append("\n")
+            elif escaped == "r":
+                result.append("\r")
+            elif escaped == "f":
+                result.append("\x0c")
+            elif escaped == "u" and index + 4 <= len(token):
+                hex_digits = token[index : index + 4]
+                try:
+                    result.append(chr(int(hex_digits, 16)))
+                    index += 4
+                except ValueError:
+                    result.append("u")
+            else:
+                result.append(escaped)
+        return "".join(result)
+
+    @staticmethod
+    def _escape_property_key(raw_key: str) -> str:
+        """跳脫 Java properties key。"""
+        result: list[str] = []
+        for index, char in enumerate(raw_key):
+            if char == "\\":
+                result.append("\\\\")
+            elif char == "\t":
+                result.append("\\t")
+            elif char == "\n":
+                result.append("\\n")
+            elif char == "\r":
+                result.append("\\r")
+            elif char == "\x0c":
+                result.append("\\f")
+            elif char in {"=", ":", "#", "!"} or char.isspace():
+                if char == " ":
+                    result.append("\\ ")
+                else:
+                    result.append("\\" + char)
+            elif index == 0 and char == " ":
+                result.append("\\ ")
+            else:
+                result.append(char)
+        return "".join(result)
+
+    @staticmethod
+    def _escape_property_value(raw_value: str) -> str:
+        """跳脫 Java properties value。"""
+        result: list[str] = []
+        for index, char in enumerate(raw_value):
+            if char == "\\":
+                result.append("\\\\")
+            elif char == "\t":
+                result.append("\\t")
+            elif char == "\n":
+                result.append("\\n")
+            elif char == "\r":
+                result.append("\\r")
+            elif char == "\x0c":
+                result.append("\\f")
+            elif char in {"=", ":"}:
+                result.append("\\" + char)
+            elif char == " " and index == 0:
+                result.append("\\ ")
+            else:
+                result.append(char)
+        return "".join(result)
+
+    @staticmethod
     def load_properties(file_path) -> dict[str, str]:
         """從 `server.properties` 檔案讀取屬性配置並解析為字典。
 
@@ -249,46 +387,15 @@ class ServerPropertiesHelper:
             properties_file = Path(file_path)
             if not properties_file.exists():
                 return properties
-            if _JAVAPROPERTIES is not None:
-                try:
-                    content = PathUtils.read_text_file(properties_file)
-                    if content is None:
-                        return properties
-                    parsed = _JAVAPROPERTIES.loads(content)
-                    return ServerPropertiesHelper._normalize_properties_map(parsed)
-                except Exception as e:
-                    logger.debug(f"使用 javaproperties 載入失敗，回退手動解析: {e}")
             content = PathUtils.read_text_file(properties_file)
-
-            def _unescape_property(token: str) -> str:
-                """還原 Java properties 風格的跳脫字元（鍵/值）。
-
-                處理以下跳脫序列：
-                - \\: (:), \\= (=), \\  (空格), \\\\ (\\)
-                - \\t (制表符), \\n (換行), \\r (回車), \\f (換頁)
-                """
-                if token is None:
-                    return ""
-                token = token.strip()
-                result = token
-                result = result.replace("\\t", "\t")
-                result = result.replace("\\n", "\n")
-                result = result.replace("\\r", "\r")
-                result = result.replace("\\f", "\x0c")
-                return re.sub("\\\\([:=\\s\\\\])", lambda m: m.group(1), result)
-
             if content:
-                for line in content.splitlines():
-                    line = line.strip()
-                    if not line or line.startswith("#"):
+                for line in ServerPropertiesHelper._logical_property_lines(content):
+                    split_line = ServerPropertiesHelper._split_property_line(line)
+                    if split_line is None:
                         continue
-                    match = re.search("(?<!\\\\)(=|:)", line)
-                    if not match:
-                        continue
-                    key_part = line[: match.start()]
-                    value_part = line[match.end() :]
-                    key = _unescape_property(key_part)
-                    value = _unescape_property(value_part)
+                    key_part, value_part = split_line
+                    key = ServerPropertiesHelper._unescape_property(key_part)
+                    value = ServerPropertiesHelper._unescape_property(value_part)
                     if key and key.strip():
                         properties[key] = value
         except Exception as e:
@@ -311,90 +418,12 @@ class ServerPropertiesHelper:
             normalized_props: dict[str, str] = {
                 str(key): "" if value is None else str(value) for key, value in (properties or {}).items()
             }
-            if _JAVAPROPERTIES is not None:
-                try:
-                    payload = _JAVAPROPERTIES.dumps(
-                        normalized_props,
-                        separator="=",
-                        comments="Minecraft server properties\nGenerated by Minecraft Server Manager",
-                        timestamp=False,
-                        sort_keys=False,
-                        ensure_ascii=False,
-                    )
-                    if not payload.endswith("\n"):
-                        payload += "\n"
-                    temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
-                    if not PathUtils.write_text_file(temp_path, payload):
-                        raise OSError("write temp server.properties failed")
-                    if not PathUtils.move_within(properties_file.parents[0], temp_path, properties_file):
-                        raise OSError("move temp server.properties failed")
-                    logger.debug(
-                        f"已使用 javaproperties 儲存 server.properties: path={properties_file}, property_count={len(normalized_props)}"
-                    )
-                    return True
-                except Exception as e:
-                    logger.debug(f"使用 javaproperties 儲存失敗，回退手動序列化: {e}")
             lines = ["# Minecraft server properties", "# Generated by Minecraft Server Manager", ""]
 
-            def _escape_property_value(raw_value: str) -> str:
-                """跳脫 Java properties 屬性值中的特殊字元。
-
-                處理以下字元：
-                - \\ -> \\\\
-                -
- -> \\n
-                - \r -> \\r
-                - 	 -> \\t
-                - \x0c -> \\f
-                - : -> \\: (需正確處理已跳脫的反斜線)
-                - = -> \\= (前導 = 號)
-                - 前導空格 -> \\
-                """
-                if not raw_value:
-                    return raw_value
-                result: list[str] = []
-                for i, ch in enumerate(raw_value):
-                    if ch == "\\":
-                        result.append(ch)
-                        continue
-                    if ch == ":" or ch == "=":
-                        backslash_count = 0
-                        j = i - 1
-                        while j >= 0 and raw_value[j] == "\\":
-                            backslash_count += 1
-                            j -= 1
-                        if ch == ":":
-                            if backslash_count % 2 == 0:
-                                result.append("\\:")
-                            else:
-                                result.append(":")
-                            continue
-                        if i == 0 or backslash_count % 2 == 0:
-                            result.append("\\=")
-                        else:
-                            result.append("=")
-                        continue
-                    if ch == " " and i == 0:
-                        result.append("\\ ")
-                        continue
-                    if ch == "\n":
-                        result.append("\\n")
-                        continue
-                    if ch == "\r":
-                        result.append("\\r")
-                        continue
-                    if ch == "\t":
-                        result.append("\\t")
-                        continue
-                    if ch == "\x0c":
-                        result.append("\\f")
-                        continue
-                    result.append(ch)
-                return "".join(result)
-
             for key, value in normalized_props.items():
-                val_str = _escape_property_value(str(value))
-                lines.append(f"{key}={val_str}")
+                key_str = ServerPropertiesHelper._escape_property_key(str(key))
+                val_str = ServerPropertiesHelper._escape_property_value(str(value))
+                lines.append(f"{key_str}={val_str}")
             lines.append("")
             payload = "\n".join(lines)
             temp_path = properties_file.with_suffix(properties_file.suffix + ".tmp")
@@ -508,7 +537,14 @@ class ServerPropertiesValidator:
         Returns:
             `(是否通過, 錯誤訊息)` 的驗證結果。
         """
-        if not prop_name or not value:
+        normalized_value = str(value or "").strip()
+        if not prop_name or not normalized_value:
+            return (True, "")
+        if prop_name == "server-ip":
+            try:
+                ipaddress.ip_address(normalized_value)
+            except ValueError:
+                return (False, f"{prop_name}: 必須為空白或有效 IP 位址（IPv4 / IPv6）（目前：{normalized_value}）")
             return (True, "")
         rules = ServerPropertiesValidator.VALIDATION_RULES.get(prop_name)
         if not rules:
@@ -516,18 +552,18 @@ class ServerPropertiesValidator:
         prop_type, min_val, max_val, allowed = rules
         try:
             if prop_type == "int":
-                int_val = int(value)
+                int_val = int(normalized_value)
                 if min_val is not None and int_val < min_val:
                     return (False, f"{prop_name}: 值不能小於 {min_val}（目前：{int_val}）")
                 if max_val is not None and int_val > max_val:
                     return (False, f"{prop_name}: 值不能大於 {max_val}（目前：{int_val}）")
                 return (True, "")
             if prop_type == "bool":
-                if value.lower() not in ["true", "false"]:
+                if normalized_value.lower() not in ["true", "false"]:
                     return (False, f"{prop_name}: 必須為 true 或 false（目前：{value}）")
                 return (True, "")
             if prop_type == "enum":
-                if allowed is not None and value not in allowed:
+                if allowed is not None and normalized_value not in allowed:
                     return (False, f"{prop_name}: 無效的值。允許值為：{', '.join(allowed)}（目前：{value}）")
                 return (True, "")
             if prop_type == "str":

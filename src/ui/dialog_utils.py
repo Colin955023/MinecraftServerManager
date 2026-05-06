@@ -2,22 +2,162 @@
 
 from __future__ import annotations
 
-import contextlib
-import tkinter
-import tkinter.messagebox as messagebox
-import tkinter.scrolledtext as scrolledtext
+import threading
+from dataclasses import dataclass
 from typing import Any
 
-import customtkinter as ctk
-
-from ..utils import Colors, Sizes, Spacing, WindowManager, get_logger
-from . import FontManager, IconUtils
+from ..utils import Sizes, Spacing, WindowManager, get_logger
+from ..utils.ui_support import qt_widgets as qt
+from ..utils.ui_support.qt_runtime import (
+    QtCore,
+    QtWidgets,
+    ensure_application,
+    invoke_later,
+    is_qobject_alive,
+    set_modal,
+    set_topmost,
+    show_window,
+)
+from . import IconUtils
+from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="DialogUtils")
 
 
+class _NativeDialog(QtWidgets.QDialog):
+    """原生 QDialog，補上專案共用的關閉與鍵盤事件管理。"""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._exists = True
+        self._force_destroy = False
+        self._close_callback = None
+        self._event_handlers: dict[str, Any] = {}
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowSystemMenuHint, True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowCloseButtonHint, True)
+        self.installEventFilter(self)
+
+    def set_close_callback(self, callback) -> None:
+        self._close_callback = callback
+
+    def closeEvent(self, event) -> None:
+        if self._force_destroy:
+            self._exists = False
+            event.accept()
+            return
+        callback = self._close_callback
+        if callback is None:
+            self._exists = False
+            event.accept()
+            return
+        result = callback()
+        if result is False:
+            event.ignore()
+            return
+        if not self._force_destroy and self.isVisible():
+            event.ignore()
+            return
+        self._exists = False
+        event.accept()
+
+    def destroy(self, *_args, **_kwargs) -> None:
+        self._force_destroy = True
+        self._exists = False
+        self.close()
+        self.deleteLater()
+
+    def is_alive(self) -> bool:
+        return bool(self._exists) and is_qobject_alive(self)
+
+    def configure(self, **kwargs: Any) -> None:
+        bg = kwargs.get("bg") or kwargs.get("background") or kwargs.get("fg_color")
+        if bg is not None:
+            if isinstance(bg, tuple):
+                index = 1 if qt.is_dark_color_scheme() and len(bg) > 1 else 0
+                bg = bg[index]
+            self.setStyleSheet(f"QDialog {{ background: {bg}; }}{NativeQtStyle.dialog_controls}")
+
+    config = configure
+
+    def connect_event(self, event_name: str, callback, *, append: bool = False) -> str:
+        if append and event_name in self._event_handlers:
+            previous = self._event_handlers[event_name]
+
+            def chained(event) -> Any:
+                previous(event)
+                return callback(event)
+
+            self._event_handlers[event_name] = chained
+            return str(id(chained))
+        self._event_handlers[event_name] = callback
+        return str(id(callback))
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is not self or event.type() != QtCore.QEvent.Type.KeyPress:
+            return False
+        event_name = ""
+        if event.key() in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter):
+            event_name = "return_pressed"
+        elif event.key() == QtCore.Qt.Key.Key_Escape:
+            event_name = "escape_pressed"
+        callback = self._event_handlers.get(event_name)
+        if callback is None:
+            return False
+        return callback(event) == "break"
+
+    def clipboard_clear(self) -> None:
+        ensure_application().clipboard().clear()
+
+    def clipboard_append(self, text: str) -> None:
+        ensure_application().clipboard().setText(str(text))
+
+
+@dataclass(frozen=True)
+class _DialogWindowOptions:
+    width: int | None
+    height: int | None
+    bind_icon: bool
+    center_on_parent: bool
+    make_modal: bool
+    delay_ms: int
+    topmost: bool
+    autosize_to_content: bool
+    min_width: int | None
+    min_height: int | None
+    start_maximized: bool
+    reveal_after_setup: bool
+
+
 class DialogUtils:
-    """集中管理對話框建立、置中、縮放與顯示流程。"""
+    """集中管理對話框建立、置中與顯示流程。"""
+
+    @staticmethod
+    def apply_standard_dialog_style(window: QtWidgets.QWidget) -> None:
+        """套用新視窗共用控制項樣式。
+
+        Args:
+            window: 要套用對話框共用樣式的 Qt 視窗。
+        """
+        try:
+            window.setStyleSheet(NativeQtStyle.generic_dialog)
+        except Exception as e:
+            logger.debug(f"套用對話框共用樣式失敗: {e}", "DialogUtils")
+
+    @staticmethod
+    def _setup_dialog_geometry(window: Any, parent: Any, options: _DialogWindowOptions) -> tuple[int, int]:
+        WindowManager.setup_dialog_window(
+            window,
+            parent=parent,
+            width=options.width,
+            height=options.height,
+            center_on_parent=options.center_on_parent,
+        )
+        return (
+            int(options.min_width) if options.min_width else 0,
+            int(options.min_height) if options.min_height else 0,
+        )
 
     @staticmethod
     def setup_window_properties(
@@ -33,12 +173,8 @@ class DialogUtils:
         autosize_to_content: bool = False,
         min_width: int | None = None,
         min_height: int | None = None,
-        max_width: int | None = None,
-        max_height: int | None = None,
         start_maximized: bool = False,
-        use_transient_for_modal: bool = True,
         reveal_after_setup: bool = True,
-        enforce_max_size_limits: bool = False,
     ) -> None:
         """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能。
 
@@ -49,74 +185,62 @@ class DialogUtils:
             height: 初始高度。
             其他參數: 控制圖示、模態、最大尺寸與顯示行為。
         """
-        WindowManager.setup_dialog_window(
-            window, parent=parent, width=width, height=height, center_on_parent=center_on_parent
+        options = _DialogWindowOptions(
+            width=width,
+            height=height,
+            bind_icon=bind_icon,
+            center_on_parent=center_on_parent,
+            make_modal=make_modal,
+            delay_ms=delay_ms,
+            topmost=topmost,
+            autosize_to_content=autosize_to_content,
+            min_width=min_width,
+            min_height=min_height,
+            start_maximized=start_maximized,
+            reveal_after_setup=reveal_after_setup,
         )
-        scaled_min_width = FontManager.get_dpi_scaled_size(int(min_width)) if min_width else 0
-        scaled_min_height = FontManager.get_dpi_scaled_size(int(min_height)) if min_height else 0
-        scaled_max_width = FontManager.get_dpi_scaled_size(int(max_width)) if max_width else 0
-        scaled_max_height = FontManager.get_dpi_scaled_size(int(max_height)) if max_height else 0
+        if not isinstance(window, QtWidgets.QWidget):
+            logger.debug("略過非 Qt widget 的視窗屬性設定", "DialogUtils")
+            return
+        DialogUtils._setup_native_window_properties(window=window, parent=parent, options=options)
+
+    @staticmethod
+    def _setup_native_window_properties(
+        *,
+        window: QtWidgets.QWidget,
+        parent=None,
+        options: _DialogWindowOptions,
+    ) -> None:
+        """設定原生 Qt 視窗屬性。"""
+        # 為所有視窗類型設定視窗控制按鈕
+        window.setWindowFlag(QtCore.Qt.WindowType.WindowSystemMenuHint, True)
+        window.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+        window.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, True)
+        window.setWindowFlag(QtCore.Qt.WindowType.WindowCloseButtonHint, True)
+
+        scaled_min_width, scaled_min_height = DialogUtils._setup_dialog_geometry(window, parent, options)
         if scaled_min_width or scaled_min_height:
-            try:
-                window.minsize(max(1, scaled_min_width), max(1, scaled_min_height))
-            except Exception as e:
-                logger.debug(f"設定對話框最小尺寸失敗: {e}", "DialogUtils")
-        if enforce_max_size_limits and (scaled_max_width or scaled_max_height):
-            try:
-                max_width_value = max(1, scaled_max_width or window.winfo_screenwidth())
-                max_height_value = max(1, scaled_max_height or window.winfo_screenheight())
-                window.maxsize(max_width_value, max_height_value)
-            except Exception as e:
-                logger.debug(f"設定對話框最大尺寸失敗: {e}", "DialogUtils")
-
-        def finalize_dialog_visibility() -> None:
-            if make_modal and parent:
-                try:
-                    if use_transient_for_modal:
-                        window.transient(parent)
-                    window.grab_set()
-                    window.focus_set()
-                except Exception as e:
-                    logger.exception(f"設定模態視窗失敗: {e}")
-            if topmost:
-                try:
-                    window.attributes("-topmost", True)
-                except Exception as e:
-                    logger.debug(f"設定視窗置頂失敗: {e}", "DialogUtils")
-            if reveal_after_setup:
-                try:
-                    window.deiconify()
-                    window.lift()
-                    window.update_idletasks()
-                except Exception as e:
-                    logger.debug(f"顯示對話框失敗: {e}", "DialogUtils")
-
-        if bind_icon:
-            IconUtils.set_window_icon(window, delay_ms)
-        if autosize_to_content:
-            try:
-                window.after_idle(
-                    lambda: DialogUtils.autosize_toplevel_to_content(
-                        window,
-                        min_width=int(min_width or width or 0),
-                        min_height=int(min_height or height or 0),
-                        max_width=max_width,
-                        max_height=max_height,
-                        parent=parent,
-                    )
-                )
-            except Exception as e:
-                logger.debug(f"排程自動調整視窗大小失敗: {e}", "DialogUtils")
-        if start_maximized:
-            try:
-                window.after(max(0, int(delay_ms)), lambda: DialogUtils.maximize_window(window))
-            except Exception as e:
-                logger.debug(f"排程視窗最大化失敗: {e}", "DialogUtils")
-        try:
-            window.after_idle(finalize_dialog_visibility)
-        except Exception as e:
-            logger.debug(f"排程顯示對話框失敗: {e}", "DialogUtils")
-            finalize_dialog_visibility()
+            window.setMinimumSize(max(1, scaled_min_width), max(1, scaled_min_height))
+        if options.make_modal and isinstance(window, QtWidgets.QDialog):
+            set_modal(window, parent if isinstance(parent, QtWidgets.QWidget) else None)
+        set_topmost(window, options.topmost)
+        if options.bind_icon:
+            IconUtils.set_window_icon(window, options.delay_ms)
+        if options.autosize_to_content:
+            invoke_later(
+                0,
+                lambda: DialogUtils.autosize_toplevel_to_content(
+                    window,
+                    min_width=int(options.min_width or options.width or 0),
+                    min_height=int(options.min_height or options.height or 0),
+                    parent=parent,
+                ),
+                parent=window,
+            )
+        if options.start_maximized:
+            invoke_later(max(0, int(options.delay_ms)), lambda: DialogUtils.maximize_window(window), parent=window)
+        if options.reveal_after_setup:
+            invoke_later(0, lambda: show_window(window), parent=window)
 
     @staticmethod
     def maximize_window(window) -> None:
@@ -128,18 +252,8 @@ class DialogUtils:
 
         if not window:
             return
-        with contextlib.suppress(Exception):
-            window.maxsize(window.winfo_screenwidth(), window.winfo_screenheight())
-        try:
-            if hasattr(window, "state"):
-                window.state("zoomed")
-                return
-        except Exception as e:
-            logger.debug(f"使用 state('zoomed') 最大化失敗: {e}", "DialogUtils")
-        try:
-            window.attributes("-zoomed", True)
-        except Exception as e:
-            logger.debug(f"使用 -zoomed 最大化失敗: {e}", "DialogUtils")
+        if isinstance(window, QtWidgets.QWidget):
+            window.showMaximized()
 
     @staticmethod
     def create_toplevel_dialog(
@@ -157,14 +271,9 @@ class DialogUtils:
         autosize_to_content: bool = False,
         min_width: int | None = None,
         min_height: int | None = None,
-        max_width: int | None = None,
-        max_height: int | None = None,
-        start_maximized: bool = False,
-        native_window: bool = False,
-        use_transient_for_modal: bool = True,
         reveal_after_setup: bool = True,
-        enforce_max_size_limits: bool = False,
-    ) -> tkinter.Toplevel | ctk.CTkToplevel:
+        start_maximized: bool = False,
+    ) -> Any:
         """建立並套用專案一致的 dialog 視窗屬性。
 
         Args:
@@ -175,14 +284,19 @@ class DialogUtils:
         Returns:
             建立好的對話框視窗物件。
         """
-        dialog = tkinter.Toplevel(parent) if native_window else ctk.CTkToplevel(parent)
+        dialog: Any = _NativeDialog(parent if isinstance(parent, QtWidgets.QWidget) else None)
         if reveal_after_setup:
             try:
-                dialog.withdraw()
+                dialog.hide()
             except Exception as e:
                 logger.debug(f"建立對話框時預先隱藏失敗: {e}", "DialogUtils")
-        dialog.title(title)
-        dialog.resizable(resizable, resizable)
+        dialog.setWindowTitle(title)
+        dialog.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+        dialog.setWindowFlag(QtCore.Qt.WindowType.WindowMaximizeButtonHint, resizable)
+        dialog.setWindowFlag(QtCore.Qt.WindowType.WindowCloseButtonHint, True)
+        DialogUtils.apply_standard_dialog_style(dialog)
+        size_policy = QtWidgets.QSizePolicy.Policy.Expanding if resizable else QtWidgets.QSizePolicy.Policy.Fixed
+        dialog.setSizePolicy(size_policy, size_policy)
         DialogUtils.setup_window_properties(
             window=dialog,
             parent=parent,
@@ -196,12 +310,8 @@ class DialogUtils:
             autosize_to_content=autosize_to_content,
             min_width=min_width,
             min_height=min_height,
-            max_width=max_width,
-            max_height=max_height,
             start_maximized=start_maximized,
-            use_transient_for_modal=use_transient_for_modal,
             reveal_after_setup=reveal_after_setup,
-            enforce_max_size_limits=enforce_max_size_limits,
         )
         return dialog
 
@@ -211,8 +321,6 @@ class DialogUtils:
         *,
         min_width: int = 0,
         min_height: int = 0,
-        max_width: int | None = None,
-        max_height: int | None = None,
         parent=None,
         delays_ms: tuple[int, ...] = (0, 120),
         preserve_current_size: bool = True,
@@ -223,8 +331,6 @@ class DialogUtils:
             dialog: 要重新整理的對話框。
             min_width: 最小寬度。
             min_height: 最小高度。
-            max_width: 最大寬度。
-            max_height: 最大高度。
             parent: 父視窗。
             delays_ms: 要排程的延遲時間序列。
             preserve_current_size: 是否保留目前大小。
@@ -232,22 +338,17 @@ class DialogUtils:
         if not dialog:
             return
         for delay_ms in delays_ms:
-            try:
-                dialog.after(
-                    max(0, int(delay_ms)),
-                    lambda: DialogUtils.autosize_toplevel_to_content(
-                        dialog,
-                        min_width=min_width,
-                        min_height=min_height,
-                        max_width=max_width,
-                        max_height=max_height,
-                        parent=parent,
-                        preserve_current_size=preserve_current_size,
-                    ),
-                )
-            except Exception as e:
-                logger.debug(f"排程對話框尺寸刷新失敗: {e}", "DialogUtils")
-                break
+            invoke_later(
+                max(0, int(delay_ms)),
+                lambda: DialogUtils.autosize_toplevel_to_content(
+                    dialog,
+                    min_width=min_width,
+                    min_height=min_height,
+                    parent=parent,
+                    preserve_current_size=preserve_current_size,
+                ),
+                parent=dialog if isinstance(dialog, QtWidgets.QWidget) else None,
+            )
 
     @staticmethod
     def autosize_toplevel_to_content(
@@ -255,8 +356,6 @@ class DialogUtils:
         *,
         min_width: int = 0,
         min_height: int = 0,
-        max_width: int | None = None,
-        max_height: int | None = None,
         parent=None,
         preserve_current_size: bool = True,
     ) -> None:
@@ -266,84 +365,75 @@ class DialogUtils:
             dialog: 要調整大小的對話框。
             min_width: 最小寬度。
             min_height: 最小高度。
-            max_width: 最大寬度。
-            max_height: 最大高度。
             parent: 父視窗。
             preserve_current_size: 是否保留目前大小。
         """
         if not dialog:
             return
-        try:
-            dialog.update_idletasks()
-            requested_width = int(dialog.winfo_reqwidth())
-            requested_height = int(dialog.winfo_reqheight())
-            current_width = int(dialog.winfo_width())
-            current_height = int(dialog.winfo_height())
-            target_width = max(int(min_width), requested_width)
-            target_height = max(int(min_height), requested_height)
-            if preserve_current_size:
-                if current_width > 1:
-                    target_width = max(target_width, current_width)
-                if current_height > 1:
-                    target_height = max(target_height, current_height)
-            if max_width is not None:
-                target_width = min(target_width, int(max_width))
-            if max_height is not None:
-                target_height = min(target_height, int(max_height))
-            logger.debug(
-                f"依內容調整對話框大小: req={requested_width}x{requested_height}, current={current_width}x{current_height}, target={target_width}x{target_height}",
-                "DialogUtils",
-            )
-            WindowManager.setup_dialog_window(
-                dialog, parent=parent, width=target_width, height=target_height, center_on_parent=True
-            )
-        except Exception as e:
-            logger.debug(f"依內容調整對話框大小失敗: {e}", "DialogUtils")
+        if not isinstance(dialog, QtWidgets.QWidget):
+            return
+        hint = dialog.sizeHint()
+        current = dialog.size()
+        target_width = max(int(min_width), hint.width())
+        target_height = max(int(min_height), hint.height())
+        if preserve_current_size:
+            target_width = max(target_width, current.width())
+            target_height = max(target_height, current.height())
+        WindowManager.setup_dialog_window(
+            dialog, parent=parent, width=target_width, height=target_height, center_on_parent=True
+        )
 
     @staticmethod
-    def _show_messagebox(
-        message_func,
+    def _show_qt_messagebox(
         title: str,
         message: str,
         parent=None,
         topmost: bool = False,
         log_level: str = "error",
     ) -> None:
-        """統一的訊息對話框顯示方法。"""
+        """Qt 專用的訊息對話框顯示方法。"""
         log_msg = f"{title}: {message}"
         if log_level == "error":
             logger.error(log_msg)
         elif log_level == "warning":
             logger.warning(log_msg)
         else:
-            logger.info(log_msg)
-        try:
-            if parent is None:
-                root = tkinter.Tk()
-                root.withdraw()
+            logger.debug(log_msg)
+
+        def _show() -> None:
+            try:
+                icon = {
+                    "error": QtWidgets.QMessageBox.Icon.Critical,
+                    "warning": QtWidgets.QMessageBox.Icon.Warning,
+                }.get(log_level, QtWidgets.QMessageBox.Icon.Information)
+                parent_widget = parent if isinstance(parent, QtWidgets.QWidget) and is_qobject_alive(parent) else None
+                box = QtWidgets.QMessageBox(parent_widget)
+                box.setWindowTitle(title)
+                box.setText(message)
+                box.setIcon(icon)
+                box.setStyleSheet(NativeQtStyle.message_box)
                 if topmost:
-                    root.attributes("-topmost", True)
-                DialogUtils.setup_window_properties(
-                    root,
-                    parent=None,
-                    width=Sizes.INPUT_WIDTH,
-                    height=Sizes.SERVER_TREE_COL_LOADER,
-                    bind_icon=True,
-                    center_on_parent=True,
-                    make_modal=True,
-                    delay_ms=50,
-                    reveal_after_setup=False,
-                )
-                message_func(title, message, parent=root)
-                root.destroy()
-            else:
-                message_func(title, message, parent=parent)
-        except Exception as e:
-            logger.exception(f"顯示訊息對話框失敗: {e}")
-            if log_level == "error":
-                logger.error(f"錯誤: {title} - {message}")
-            elif log_level == "warning":
-                logger.warning(f"警告: {title} - {message}")
+                    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                IconUtils.set_window_icon(box, 25)
+                box.exec()
+            except Exception as e:
+                logger.exception(f"顯示訊息對話框失敗: {e}")
+                if log_level == "error":
+                    logger.error(f"錯誤: {title} - {message}")
+                elif log_level == "warning":
+                    logger.warning(f"警告: {title} - {message}")
+
+        try:
+            app = ensure_application()
+            if QtCore.QThread.currentThread() != app.thread():
+                invoke_later(0, _show, parent=parent if isinstance(parent, QtWidgets.QWidget) else None)
+                return
+            _show()
+        except Exception:
+            try:
+                _show()
+            except Exception as e:
+                logger.exception(f"顯示訊息對話框失敗(備援): {e}")
 
     @staticmethod
     def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
@@ -355,7 +445,7 @@ class DialogUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils._show_messagebox(messagebox.showerror, title, message, parent, topmost, "error")
+        DialogUtils._show_qt_messagebox(title, message, parent, topmost, "error")
 
     @staticmethod
     def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
@@ -367,7 +457,7 @@ class DialogUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils._show_messagebox(messagebox.showwarning, title, message, parent, topmost, "warning")
+        DialogUtils._show_qt_messagebox(title, message, parent, topmost, "warning")
 
     @staticmethod
     def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
@@ -379,7 +469,7 @@ class DialogUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        DialogUtils._show_messagebox(messagebox.showinfo, title, message, parent, topmost, "info")
+        DialogUtils._show_qt_messagebox(title, message, parent, topmost, "info")
 
     @staticmethod
     def ask_yes_no_cancel(
@@ -397,89 +487,54 @@ class DialogUtils:
         Returns:
             使用者選擇結果；是/否 對應 True/False，取消時回傳 None。
         """
-        try:
-            if parent is None:
-                root = tkinter.Tk()
-                root.withdraw()
-                if topmost:
-                    root.attributes("-topmost", True)
-                DialogUtils.setup_window_properties(
-                    root,
-                    parent=None,
-                    width=Sizes.INPUT_WIDTH,
-                    height=Sizes.SERVER_TREE_COL_LOADER,
-                    bind_icon=True,
-                    center_on_parent=True,
-                    make_modal=False,
-                    delay_ms=50,
-                    reveal_after_setup=False,
-                )
+
+        def _ask() -> bool | None:
+            try:
+                parent_widget = parent if isinstance(parent, QtWidgets.QWidget) and is_qobject_alive(parent) else None
+                buttons = QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
                 if show_cancel:
-                    result = messagebox.askyesnocancel(title, message, parent=root)
-                else:
-                    result = messagebox.askyesno(title, message, parent=root)
-                root.destroy()
-                return result
-            if show_cancel:
-                return messagebox.askyesnocancel(title, message, parent=parent)
-            return messagebox.askyesno(title, message, parent=parent)
-        except Exception as e:
-            logger.exception(f"顯示確認對話框失敗: {e}")
-            return False if not show_cancel else None
+                    buttons |= QtWidgets.QMessageBox.StandardButton.Cancel
+                box = QtWidgets.QMessageBox(parent_widget)
+                box.setWindowTitle(title)
+                box.setText(message)
+                box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+                box.setStandardButtons(buttons)
+                box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
+                box.setStyleSheet(NativeQtStyle.message_box)
+                if topmost:
+                    box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                IconUtils.set_window_icon(box, 25)
+                result = box.exec()
+                if result == QtWidgets.QMessageBox.StandardButton.Yes:
+                    return True
+                if result == QtWidgets.QMessageBox.StandardButton.No:
+                    return False
+                return None
+            except Exception as e:
+                logger.exception(f"顯示確認對話框失敗: {e}")
+                return False if not show_cancel else None
 
-    @staticmethod
-    def create_tooltip_window(
-        parent,
-        text: str,
-        *,
-        bg: str = Colors.BG_LISTBOX_DARK,
-        fg: str = "white",
-        font=None,
-        padx: int = 8,
-        pady: int = 4,
-        wraplength: int | None = None,
-        justify: str = "left",
-        borderwidth: int = 0,
-        relief: str = "flat",
-        offset_x: int = 10,
-        offset_y: int = 10,
-        x_root: int = 0,
-        y_root: int = 0,
-    ):
-        """建立 tooltip 彈出視窗。
+        try:
+            app = ensure_application()
+            if QtCore.QThread.currentThread() != app.thread():
+                ev = threading.Event()
+                result_container: dict[str, bool | None] = {"res": False if not show_cancel else None}
 
-        Args:
-            parent: 觸發 tooltip 的元件。
-            text: 要顯示的文字。
-            其他參數: 控制外觀與位置偏移。
+                def _worker():
+                    try:
+                        result_container["res"] = _ask()
+                    finally:
+                        ev.set()
 
-        Returns:
-            建立好的 tooltip 視窗，若無法建立則回傳 None。
-        """
-        owner = parent.winfo_toplevel() if parent is not None and hasattr(parent, "winfo_toplevel") else parent
-        if owner is None:
-            return None
-        tip = tkinter.Toplevel(owner)
-        tip.wm_overrideredirect(True)
-        tip.configure(bg=bg)
-        tip.wm_geometry(f"+{x_root + offset_x}+{y_root + offset_y}")
-        label_kwargs: dict[str, Any] = {
-            "text": text or "",
-            "bg": bg,
-            "fg": fg,
-            "padx": padx,
-            "pady": pady,
-            "borderwidth": borderwidth,
-            "relief": relief,
-        }
-        if font is not None:
-            label_kwargs["font"] = font
-        if wraplength is not None:
-            label_kwargs["wraplength"] = wraplength
-        if justify is not None:
-            label_kwargs["justify"] = justify
-        tkinter.Label(tip, **label_kwargs).pack()
-        return tip
+                invoke_later(0, _worker, parent=parent if isinstance(parent, QtWidgets.QWidget) else None)
+                ev.wait()
+                return result_container["res"]
+            return _ask()
+        except Exception:
+            try:
+                return _ask()
+            except Exception:
+                return False if not show_cancel else None
 
     @staticmethod
     def show_manual_restart_dialog(parent, details: str | None) -> None:
@@ -497,25 +552,28 @@ class DialogUtils:
                 height=Sizes.DIALOG_SMALL_HEIGHT,
                 make_modal=True,
             )
-            tkinter.Label(dialog, text="設定已變更，但需要手動重新啟動應用程式。", anchor="w").pack(
+            qt.Label(dialog, text="設定已變更，但需要手動重新啟動應用程式。", anchor="w").attach(
                 fill="x", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.TINY)
             )
-            text_box = scrolledtext.ScrolledText(dialog, wrap="word", height=Spacing.MEDIUM)
-            text_box.pack(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+            text_box = qt.TextBox(dialog, wrap="word", height=Spacing.MEDIUM)
+            text_box.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
             text_box.insert("1.0", details or "")
-            text_box.configure(state="disabled")
+            text_box.setReadOnly(True)
 
             def _copy() -> None:
                 try:
-                    dialog.clipboard_clear()
-                    dialog.clipboard_append(details or "")
+                    app = qt.ensure_app()
+                    if app is not None:
+                        with qt.context_suppress():
+                            app.clipboard().setText(details or "")
+                            app.processEvents()
                 except Exception as exc:
                     logger.debug(f"複製診斷內容失敗: {exc}")
 
-            button_frame = tkinter.Frame(dialog)
-            button_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
-            tkinter.Button(button_frame, text="複製診斷", command=_copy).pack(side="left")
-            tkinter.Button(button_frame, text="我會手動重啟", command=dialog.destroy).pack(side="right")
+            button_frame = qt.Frame(dialog)
+            button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+            qt.Button(button_frame, text="複製診斷", command=_copy).attach(side="left")
+            qt.Button(button_frame, text="我會手動重啟", command=dialog.destroy).attach(side="right")
         except Exception:
             DialogUtils.show_info("需要手動重啟", f"設定已變更，但自動重啟失敗。\n\n診斷：\n{details}", parent=parent)
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from src.utils import (
     PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN,
     ProviderMetadataRecord,
@@ -27,7 +26,6 @@ class _StubIndexManager:
         self.cached_payloads.append(dict(payload))
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_provider_record_uses_cached_pair_without_resolver() -> None:
     result = ensure_local_mod_provider_record(
         platform_id="AANobbMI",
@@ -41,7 +39,6 @@ def test_ensure_local_mod_provider_record_uses_cached_pair_without_resolver() ->
     assert result.record.slug == "sodium"
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_provider_record_prefers_identifier_resolver_over_fallback() -> None:
     calls = {"identifier": 0, "fallback": 0}
 
@@ -77,7 +74,6 @@ def test_ensure_local_mod_provider_record_prefers_identifier_resolver_over_fallb
     assert calls == {"identifier": 1, "fallback": 0}
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_provider_record_uses_fallback_when_cached_identifier_absent() -> None:
     calls = {"fallback": 0}
 
@@ -103,7 +99,6 @@ def test_ensure_local_mod_provider_record_uses_fallback_when_cached_identifier_a
     assert calls["fallback"] == 1
 
 
-@pytest.mark.smoke
 def test_register_provider_revalidation_failure_sets_retrying_backoff() -> None:
     payload = register_provider_revalidation_failure(
         {"project_id": "P7dR8mSH", "slug": "fabric-api", "stale_revalidation_failures": "1"},
@@ -116,7 +111,6 @@ def test_register_provider_revalidation_failure_sets_retrying_backoff() -> None:
     assert payload["last_revalidation_failed_at_epoch_ms"] == "1000"
 
 
-@pytest.mark.smoke
 def test_register_provider_revalidation_failure_sets_invalidated_after_threshold() -> None:
     payload = register_provider_revalidation_failure(
         {"project_id": "P7dR8mSH", "slug": "fabric-api", "stale_revalidation_failures": "3"},
@@ -127,7 +121,6 @@ def test_register_provider_revalidation_failure_sets_invalidated_after_threshold
     assert payload["lifecycle_state"] == "invalidated"
 
 
-@pytest.mark.smoke
 def test_register_provider_revalidation_failure_ignores_manual_override_field() -> None:
     payload = register_provider_revalidation_failure(
         {
@@ -143,7 +136,6 @@ def test_register_provider_revalidation_failure_ignores_manual_override_field() 
     assert payload["stale_revalidation_failures"] == "2"
 
 
-@pytest.mark.smoke
 def test_register_provider_revalidation_success_resets_backoff_fields() -> None:
     payload = register_provider_revalidation_success(
         {
@@ -164,7 +156,6 @@ def test_register_provider_revalidation_success_resets_backoff_fields() -> None:
     assert payload["resolved_at_epoch_ms"] == "5000"
 
 
-@pytest.mark.smoke
 def test_cache_provider_metadata_record_always_writes_latest_auto_resolve_payload() -> None:
     index = _StubIndexManager(cached_provider={"manual_override": True, "project_id": "MANUAL1", "slug": "foo"})
 
@@ -179,7 +170,6 @@ def test_cache_provider_metadata_record_always_writes_latest_auto_resolve_payloa
     assert index.cached_payloads[0]["project_id"] == "AUTO1"
 
 
-@pytest.mark.smoke
 def test_is_provider_revalidation_retry_due_follows_retry_window() -> None:
     raw = {"next_retry_not_before_epoch_ms": "2000"}
 
@@ -187,14 +177,12 @@ def test_is_provider_revalidation_retry_due_follows_retry_window() -> None:
     assert is_provider_revalidation_retry_due(raw, now_epoch_ms=2_000) is True
 
 
-@pytest.mark.smoke
 def test_compute_provider_revalidation_backoff_seconds_uses_exponential_growth_with_cap() -> None:
     assert compute_provider_revalidation_backoff_seconds(1) == 60
     assert compute_provider_revalidation_backoff_seconds(2) == 120
     assert compute_provider_revalidation_backoff_seconds(10) == 1800
 
 
-@pytest.mark.smoke
 def test_should_attempt_provider_revalidation_returns_false_when_retry_not_due() -> None:
     should_attempt, reason = should_attempt_provider_revalidation(
         {"next_retry_not_before_epoch_ms": "2000"},
@@ -206,7 +194,6 @@ def test_should_attempt_provider_revalidation_returns_false_when_retry_not_due()
     assert reason == "backoff"
 
 
-@pytest.mark.smoke
 def test_should_attempt_provider_revalidation_returns_false_when_batch_limit_reached() -> None:
     should_attempt, reason = should_attempt_provider_revalidation(
         {"next_retry_not_before_epoch_ms": "0"},
@@ -218,7 +205,6 @@ def test_should_attempt_provider_revalidation_returns_false_when_batch_limit_rea
     assert reason == "batch_limit"
 
 
-@pytest.mark.smoke
 def test_should_attempt_provider_revalidation_returns_true_when_due_and_within_batch() -> None:
     should_attempt, reason = should_attempt_provider_revalidation(
         {"next_retry_not_before_epoch_ms": "1000"},

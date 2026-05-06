@@ -82,43 +82,6 @@
       }
     },
     {
-      "name": "fabric_loader_override_resets_version_binding",
-      "dependency": {
-        "project_id": "qvIfYCYJ",
-        "version_id": "legacy-v"
-      },
-      "dependency_names": {},
-      "loader": "fabric",
-      "version_details": {
-        "legacy-v": {
-          "project_id": "qvIfYCYJ",
-          "version": {
-            "version_id": "legacy-v",
-            "version_number": "0.0.1",
-            "display_name": "0.0.1"
-          }
-        }
-      },
-      "project_names": {},
-      "repeat": 1,
-      "expected": {
-        "project_id": "P7dR8mSH",
-        "project_name": "",
-        "version_id": "",
-        "version_name": "",
-        "resolution_source": "loader_override",
-        "resolution_confidence": "fallback",
-        "compare_project_id": "p7dr8msh",
-        "label": "未知模組（project id: P7dR8mSH）",
-        "version": null
-      },
-      "expected_calls": {
-        "version_details": 1,
-        "project_name": 1
-      },
-      "expected_dependency_names": {}
-    },
-    {
       "name": "filename_only_dependency_uses_safe_fallback_label",
       "dependency": {
         "file_name": "optional-lib.jar"

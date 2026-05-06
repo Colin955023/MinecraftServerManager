@@ -9,8 +9,7 @@ import sys
 import traceback
 from contextlib import suppress
 from pathlib import Path
-
-import customtkinter as ctk
+from typing import Any, cast
 
 if __name__ == "__main__" and __package__ is None:
     project_root = Path(__file__).resolve().parents[1]
@@ -18,10 +17,40 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, str(project_root))
 
 from src.core import LoaderManager, MinecraftVersionManager
-from src.ui import FontManager, MinecraftServerManager, ui_config
+from src.ui import MinecraftServerManager, ui_config
 from src.utils import PathUtils, UIUtils, get_logger, get_settings_manager, record_and_mark
+from src.utils.ui_support.qt_runtime import QtCore, QtWidgets, ensure_application
 
 logger = get_logger().bind(component="Main")
+
+
+def _install_global_exception_logging() -> None:
+    """Log uncaught Qt slot exceptions that happen after app.exec() starts."""
+    previous_hook = sys.excepthook
+
+    def _hook(exc_type, exc_value, exc_traceback):
+        logger.error(
+            "未處理例外",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
+        previous_hook(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = _hook
+
+
+def _install_qt_warning_filter() -> None:
+    """Suppress a known harmless Qt stylesheet parse warning emitted by combo-box subclasses."""
+
+    def _handler(_mode, _context, message):
+        msg_str = str(message or "")
+        if msg_str == "Could not parse application stylesheet":
+            logger.debug(f"已抑制 Qt 樣式表警告: {msg_str}")
+            return
+        stderr = sys.__stderr__
+        if stderr is not None:
+            stderr.write(f"{message}\n")
+
+    QtCore.qInstallMessageHandler(_handler)
 
 
 def show_message(title, message, message_type="error"):
@@ -49,6 +78,8 @@ def show_message(title, message, message_type="error"):
 
 def start_application():
     """初始化應用程式並啟動主視窗"""
+    _install_global_exception_logging()
+    _install_qt_warning_filter()
     _initialize_managers()
     try:
         settings = get_settings_manager()
@@ -75,19 +106,31 @@ def _initialize_managers():
 
 def _setup_ui_environment():
     """設定 UI 環境和主題"""
-    # 初始化 customtkinter 主題配置
-    ui_config.initialize_ui_theme()
-
     settings = get_settings_manager()
-    dpi_scaling = settings.get_dpi_scaling()
-    FontManager.set_scale_factor(dpi_scaling)
+    ui_config.initialize_ui_theme(settings.get_theme_mode())
 
 
 def _launch_main_window():
     """建立並啟動主應用程式視窗"""
-    root = ctk.CTk()
-    MinecraftServerManager(root)
-    root.mainloop()
+    app = ensure_application()
+    root = _ApplicationRoot()
+    manager = MinecraftServerManager(root)
+    root_any = cast(Any, root)
+    root_any._msm_manager = manager
+    root.show()
+    app.exec()
+
+
+class _ApplicationRoot(QtWidgets.QWidget):
+    """主應用程式根視窗。"""
+
+    def closeEvent(self, event) -> None:
+        manager = getattr(self, "_msm_manager", None)
+        if manager is None or getattr(self, "_msm_closing", False):
+            event.accept()
+            return
+        event.ignore()
+        manager.on_closing()
 
 
 def main():

@@ -1,8 +1,7 @@
 """設定管理器模組
-提供統一的使用者設定管理功能，包含自動更新、視窗偏好與除錯設定等。
+提供統一的使用者設定管理功能，包含自動更新與視窗偏好等。
 """
 
-import contextlib
 import time
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -30,14 +29,7 @@ class WindowPreferences(TypedDict):
     main_window: MainWindowSettings
     auto_center: bool
     adaptive_sizing: bool
-    dpi_scaling: float
-
-
-class DebugSettings(TypedDict):
-    """除錯相關設定。"""
-
-    enable_debug_logging: bool
-    enable_window_state_logging: bool
+    theme_mode: str
 
 
 class UserSettings(TypedDict):
@@ -47,24 +39,23 @@ class UserSettings(TypedDict):
     auto_update_enabled: bool
     first_run_completed: bool
     window_preferences: WindowPreferences
-    debug_settings: DebugSettings
 
 
 DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
     "remember_size_position": True,
-    "main_window": {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False},
+    "main_window": {"width": 1350, "height": 820, "x": None, "y": None, "maximized": False},
     "auto_center": True,
     "adaptive_sizing": True,
-    "dpi_scaling": 1.0,
+    "theme_mode": "system",
 }
-DEFAULT_DEBUG_SETTINGS: DebugSettings = {"enable_debug_logging": False, "enable_window_state_logging": False}
 _BOOL_SETTINGS = {"auto_update_enabled": True, "first_run_completed": False}
 _WINDOW_PREF_KEYS = {
     "remember_size_position": "remember_size_position",
     "auto_center": "auto_center",
     "adaptive_sizing": "adaptive_sizing",
-    "dpi_scaling": "dpi_scaling",
+    "theme_mode": "theme_mode",
 }
+_THEME_MODES = {"system", "light", "dark"}
 
 
 def _copy_window_preferences() -> WindowPreferences:
@@ -75,27 +66,19 @@ def _copy_window_preferences() -> WindowPreferences:
             "main_window": dict(DEFAULT_WINDOW_PREFERENCES["main_window"]),
             "auto_center": DEFAULT_WINDOW_PREFERENCES["auto_center"],
             "adaptive_sizing": DEFAULT_WINDOW_PREFERENCES["adaptive_sizing"],
-            "dpi_scaling": DEFAULT_WINDOW_PREFERENCES["dpi_scaling"],
+            "theme_mode": DEFAULT_WINDOW_PREFERENCES["theme_mode"],
         },
     )
 
 
-def _get_default_debug_settings(*, enabled: bool) -> DebugSettings:
-    debug_settings = dict(DEFAULT_DEBUG_SETTINGS)
-    debug_settings["enable_debug_logging"] = enabled
-    return cast(DebugSettings, debug_settings)
-
-
 def _get_default_settings() -> dict[str, Any]:
     """取得預設設定（根據環境動態計算）"""
-    default_debug_logging = not RuntimePaths.is_packaged()
     return {
         "servers_root": "",
         "auto_update_enabled": True,
         "first_run_completed": False,
         "auto_prune_markers_on_startup": False,
         "window_preferences": _copy_window_preferences(),
-        "debug_settings": _get_default_debug_settings(enabled=default_debug_logging),
     }
 
 
@@ -162,10 +145,9 @@ class SettingsManager:
             normalized_window["adaptive_sizing"] = bool(
                 window_preferences.get("adaptive_sizing", normalized_window["adaptive_sizing"])
             )
-            with contextlib.suppress(TypeError, ValueError):
-                normalized_window["dpi_scaling"] = float(
-                    window_preferences.get("dpi_scaling", normalized_window["dpi_scaling"])
-                )
+            normalized_window["theme_mode"] = self._normalize_theme_mode(
+                window_preferences.get("theme_mode", normalized_window["theme_mode"])
+            )
             main_window = window_preferences.get("main_window")
             if isinstance(main_window, dict):
                 normalized_window["main_window"] = {
@@ -176,17 +158,6 @@ class SettingsManager:
                     "maximized": bool(main_window.get("maximized", normalized_window["main_window"]["maximized"])),
                 }
             normalized["window_preferences"] = normalized_window
-        debug_settings = settings.get("debug_settings")
-        if isinstance(debug_settings, dict):
-            default_debug = normalized["debug_settings"]
-            normalized["debug_settings"] = {
-                "enable_debug_logging": bool(
-                    debug_settings.get("enable_debug_logging", default_debug["enable_debug_logging"])
-                ),
-                "enable_window_state_logging": bool(
-                    debug_settings.get("enable_window_state_logging", default_debug["enable_window_state_logging"])
-                ),
-            }
         return normalized
 
     def _load_settings(self) -> dict[str, Any]:
@@ -271,6 +242,11 @@ class SettingsManager:
         prefs[key] = value
         self.set("window_preferences", prefs)
 
+    @staticmethod
+    def _normalize_theme_mode(mode: Any) -> str:
+        normalized = str(mode or DEFAULT_WINDOW_PREFERENCES["theme_mode"]).strip().lower()
+        return normalized if normalized in _THEME_MODES else DEFAULT_WINDOW_PREFERENCES["theme_mode"]
+
     def get_servers_root(self) -> str:
         """取得使用者設定的伺服器主資料夾路徑。"""
         return str(self._settings.get("servers_root", "")).strip()
@@ -335,8 +311,15 @@ class SettingsManager:
 
     def get_main_window_settings(self) -> MainWindowSettings:
         """取得主視窗的大小、位置和狀態設定"""
-        default_settings: MainWindowSettings = {"width": 1200, "height": 800, "x": None, "y": None, "maximized": False}
-        return cast(MainWindowSettings, self.get_window_preferences().get("main_window", default_settings))
+        return cast(
+            MainWindowSettings,
+            self.get_window_preferences().get("main_window", self.get_default_main_window_settings()),
+        )
+
+    @staticmethod
+    def get_default_main_window_settings() -> MainWindowSettings:
+        """取得主視窗預設大小，供重設與顯示目前值共用。"""
+        return cast(MainWindowSettings, dict(DEFAULT_WINDOW_PREFERENCES["main_window"]))
 
     def set_main_window_settings(
         self, width: int, height: int, x: int | None = None, y: int | None = None, maximized: bool = False
@@ -364,32 +347,16 @@ class SettingsManager:
         key = _WINDOW_PREF_KEYS["adaptive_sizing"]
         self._update_window_pref(key, enabled)
 
-    def get_dpi_scaling(self) -> float:
-        """取得當前設定的 DPI 縮放因子，預設為 1.0"""
-        return float(cast(Any, self.get_window_preferences().get(_WINDOW_PREF_KEYS["dpi_scaling"], 1.0)))
+    def get_theme_mode(self) -> str:
+        """取得 UI 主題模式。"""
+        return self._normalize_theme_mode(
+            self.get_window_preferences().get(_WINDOW_PREF_KEYS["theme_mode"], DEFAULT_WINDOW_PREFERENCES["theme_mode"])
+        )
 
-    def set_dpi_scaling(self, scaling: float) -> None:
-        """設定 DPI 縮放因子，會自動限制在合理範圍內（0.5-3.0）"""
-        validated_scaling = max(0.5, min(3.0, scaling))
-        key = _WINDOW_PREF_KEYS["dpi_scaling"]
-        self._update_window_pref(key, validated_scaling)
-
-    def get_debug_settings(self) -> DebugSettings:
-        """取得所有除錯相關的設定"""
-        value = self._settings.get("debug_settings", dict(DEFAULT_DEBUG_SETTINGS))
-        if isinstance(value, dict):
-            return cast(DebugSettings, value)
-        return cast(DebugSettings, dict(DEFAULT_DEBUG_SETTINGS))
-
-    def is_debug_logging_enabled(self) -> bool:
-        """檢查是否啟用除錯日誌輸出功能"""
-        return self.get_debug_settings().get("enable_debug_logging", False)
-
-    def set_debug_logging(self, enabled: bool) -> None:
-        """設定除錯日誌輸出功能的開關"""
-        debug_settings = self.get_debug_settings()
-        debug_settings["enable_debug_logging"] = enabled
-        self.set("debug_settings", debug_settings)
+    def set_theme_mode(self, mode: str) -> None:
+        """設定 UI 主題模式。"""
+        key = _WINDOW_PREF_KEYS["theme_mode"]
+        self._update_window_pref(key, self._normalize_theme_mode(mode))
 
 
 _settings_manager = None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from src.core.local_mod_scanner import LocalModScanner
 from src.utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,
@@ -60,3 +61,7 @@ def test_collect_installed_mod_versions_groups_by_project_id() -> None:
     versions_by_project = collect_installed_mod_versions(installed_mods)
 
     assert versions_by_project == {"p7dr8msh": {"1.0.0"}, "qvifycyj": {"0.15.0"}}
+
+
+def test_local_mod_scanner_extract_version_uses_clean_version() -> None:
+    assert LocalModScanner.extract_version_from_filename("Connector-1.0.0-beta.46+1.20.1") == "1.0.0"

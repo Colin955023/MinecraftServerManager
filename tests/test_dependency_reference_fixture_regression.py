@@ -81,7 +81,6 @@ def test_dependency_reference_regression_with_offline_fixture() -> None:
             resolved = resolve_dependency_reference(
                 dependency=dict(case.get("dependency", {}) or {}),
                 dependency_names=dependency_names,
-                loader=case.get("loader"),
                 version_details_cache=version_details_cache,
                 get_mod_version_details=_get_mod_version_details,
                 fetch_project_name=_fetch_project_name,

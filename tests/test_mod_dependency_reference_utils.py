@@ -67,20 +67,19 @@ def test_resolve_dependency_reference_uses_version_detail_cache() -> None:
     assert calls == {"version": 1, "name": 1}
 
 
-def test_resolve_dependency_reference_applies_loader_override() -> None:
+def test_resolve_dependency_reference_keeps_original_project_id_without_loader_override() -> None:
     version = OnlineModVersion(version_id="legacy-v", version_number="0.0.1", display_name="0.0.1")
 
     resolved = resolve_dependency_reference(
         {"project_id": "qvIfYCYJ", "version_id": "legacy-v"},
         {},
-        loader="fabric",
         get_mod_version_details=lambda _: ("qvIfYCYJ", version),
         fetch_project_name=lambda _: None,
     )
 
-    assert resolved.project_id == "P7dR8mSH"
-    assert resolved.version_id == ""
-    assert resolved.version_name == ""
-    assert resolved.version is None
-    assert resolved.resolution_source == "loader_override"
-    assert resolved.resolution_confidence == "fallback"
+    assert resolved.project_id == "qvIfYCYJ"
+    assert resolved.version_id == "legacy-v"
+    assert resolved.version_name == "0.0.1"
+    assert resolved.version == version
+    assert resolved.resolution_source == "project_id"
+    assert resolved.resolution_confidence == "direct"

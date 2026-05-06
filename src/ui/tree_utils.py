@@ -2,71 +2,28 @@
 
 from __future__ import annotations
 
-import tkinter
-import tkinter.font as tkfont
-import tkinter.ttk as ttk
 from collections.abc import Callable
 from typing import Any
 
-import customtkinter as ctk
-
 from ..utils import Colors, FontSize, get_logger
+from ..utils.ui_support import qt_widgets as qt
 from .font_manager import FontManager
 
 logger = get_logger().bind(component="TreeUtils")
 
 
+def _theme_index() -> int:
+    return 1 if qt.is_dark_color_scheme() else 0
+
+
+def _theme_pair_color(color: tuple[str, str] | str) -> str:
+    if isinstance(color, tuple):
+        return color[_theme_index()]
+    return color
+
+
 class TreeUtils:
-    """集中處理 Treeview / Listbox 樣式、欄位與批次更新工具。"""
-
-    @staticmethod
-    def configure_treeview_list_style(
-        style_name: str, *, body_font=None, heading_font=None, rowheight: int | None = None
-    ) -> str:
-        """建立統一的 Treeview 清單樣式並回傳樣式名稱。
-
-        Args:
-            style_name: 樣式前綴名稱。
-            body_font: 內容字型。
-            heading_font: 標題字型。
-            rowheight: 列高。
-
-        Returns:
-            產生的 Treeview 樣式名稱。
-        """
-        style = ttk.Style()
-        treeview_style = f"{style_name}.Treeview"
-        heading_style = f"{treeview_style}.Heading"
-        scaled_rowheight = int(rowheight or FontManager.get_dpi_scaled_size(25))
-        body_font = body_font or FontManager.get_font(size=FontSize.INPUT)
-        heading_font = heading_font or FontManager.get_font(size=FontSize.LARGE, weight="bold")
-        style.configure(
-            treeview_style,
-            font=body_font,
-            rowheight=scaled_rowheight,
-            background=Colors.BG_LISTBOX_LIGHT,
-            fieldbackground=Colors.BG_LISTBOX_LIGHT,
-            foreground=Colors.TEXT_PRIMARY[0],
-            bordercolor=Colors.BORDER_LIGHT[0],
-            lightcolor=Colors.BORDER_LIGHT[0],
-            darkcolor=Colors.BORDER_LIGHT[0],
-        )
-        style.configure(
-            heading_style,
-            font=heading_font,
-            background=Colors.BG_SECONDARY[0],
-            foreground=Colors.TEXT_HEADING[0],
-            relief="flat",
-        )
-        style.map(
-            treeview_style, background=[("selected", Colors.SELECT_BG)], foreground=[("selected", Colors.TEXT_ON_DARK)]
-        )
-        style.map(
-            heading_style,
-            background=[("active", Colors.BG_SECONDARY[0])],
-            foreground=[("active", Colors.TEXT_HEADING[0])],
-        )
-        return treeview_style
+    """集中處理 Treeview / Listbox 欄位與批次更新工具。"""
 
     @staticmethod
     def _iter_treeview_items(treeview, parent: str = ""):
@@ -139,7 +96,7 @@ class TreeUtils:
             for column_id in candidate_columns:
                 try:
                     width = int(treeview.column(column_id, "width"))
-                except (tkinter.TclError, TypeError, ValueError) as _:
+                except (Exception, TypeError, ValueError) as _:
                     continue
                 columns.append(column_id)
                 widths.append(width)
@@ -151,17 +108,17 @@ class TreeUtils:
                 xview = treeview.xview()
                 if xview and len(xview) >= 1:
                     xview_start = float(xview[0])
-            except (tkinter.TclError, TypeError, ValueError) as _:
+            except (Exception, TypeError, ValueError) as _:
                 xview_start = 0.0
             logical_x = int(x + xview_start * total_width)
-            threshold = FontManager.get_dpi_scaled_size(6)
+            threshold = 5
             boundary = 0
             for index, width in enumerate(widths):
                 boundary += width
                 if abs(logical_x - boundary) <= threshold:
                     return columns[index]
             return None
-        threshold = FontManager.get_dpi_scaled_size(4)
+        threshold = 3
         left_column = TreeUtils._get_treeview_column_from_x(
             treeview, max(0, int(x) - threshold), include_tree_column=include_tree_column
         )
@@ -191,11 +148,11 @@ class TreeUtils:
         normalized_column_id = str(column_id).strip()
         if not normalized_column_id:
             return
-        heading_font_obj = tkfont.Font(font=heading_font or FontManager.get_font(size=FontSize.LARGE, weight="bold"))
-        body_font_obj = tkfont.Font(font=body_font or FontManager.get_font(size=FontSize.INPUT))
-        base_padding = FontManager.get_dpi_scaled_size(10)
-        tree_extra_padding = FontManager.get_dpi_scaled_size(4)
-        safety_min_width = FontManager.get_dpi_scaled_size(12)
+        heading_font_obj = qt.Font(font=heading_font or FontManager.get_font(size=FontSize.LARGE, weight="bold"))
+        body_font_obj = qt.Font(font=body_font or FontManager.get_font(size=FontSize.INPUT))
+        base_padding = 8
+        tree_extra_padding = 3
+        safety_min_width = 9
         configured_stretch_columns = set(stretch_columns or set())
         heading_text = str(treeview.heading(normalized_column_id, "text") or normalized_column_id)
         max_width = heading_font_obj.measure(heading_text)
@@ -204,9 +161,7 @@ class TreeUtils:
         for item_id in TreeUtils._iter_treeview_items(treeview):
             if normalized_column_id == "#0":
                 cell_value = treeview.item(item_id, "text") or ""
-                depth_padding = TreeUtils._get_treeview_item_depth(treeview, item_id) * FontManager.get_dpi_scaled_size(
-                    16
-                ) + FontManager.get_dpi_scaled_size(16)
+                depth_padding = TreeUtils._get_treeview_item_depth(treeview, item_id) * 16 + 12
                 measured_width = body_font_obj.measure(str(cell_value or "")) + depth_padding
             else:
                 values = treeview.item(item_id, "values") or ()
@@ -288,7 +243,7 @@ class TreeUtils:
                 return on_row_double_click(event)
             return None
 
-        treeview.bind("<Double-1>", _handle_double_click)
+        treeview.connect_event("mouse_double_click", _handle_double_click)
 
     @staticmethod
     def refresh_treeview_alternating_rows(treeview) -> None:
@@ -299,26 +254,23 @@ class TreeUtils:
         """
         if not treeview:
             return
-        is_dark = ctk.get_appearance_mode() == "Dark"
+        is_dark = qt.is_dark_color_scheme()
         odd_bg = Colors.BG_ROW_SOFT_LIGHT if not is_dark else Colors.BG_LISTBOX_DARK
         even_bg = Colors.BG_LISTBOX_ALT_LIGHT if not is_dark else Colors.BG_LISTBOX_ALT_DARK
+        fg = Colors.TEXT_ON_DARK if is_dark else "#0f172a"
         try:
-            treeview.tag_configure("odd", background=odd_bg)
-            treeview.tag_configure("even", background=even_bg)
-        except (tkinter.TclError, AttributeError, RuntimeError) as e:
+            treeview.tag_configure("odd", background=odd_bg, foreground=fg)
+            treeview.tag_configure("even", background=even_bg, foreground=fg)
+        except (Exception, AttributeError, RuntimeError) as e:
             logger.debug(f"設定 Treeview 交錯列樣式暫時性失敗: {e}", "TreeUtils")
-        except Exception:
-            logger.exception("設定 Treeview 交錯列樣式失敗", "TreeUtils")
             return
         for index, item_id in enumerate(treeview.get_children("")):
             try:
                 existing_tags = tuple(tag for tag in treeview.item(item_id, "tags") if tag not in {"odd", "even"})
                 parity_tag = "odd" if index % 2 == 0 else "even"
                 treeview.item(item_id, tags=(*existing_tags, parity_tag))
-            except (tkinter.TclError, AttributeError, RuntimeError) as e:
+            except (Exception, AttributeError, RuntimeError) as e:
                 logger.debug(f"更新 Treeview 交錯列暫時性失敗 item={item_id}: {e}", "TreeUtils")
-            except Exception:
-                logger.exception(f"更新 Treeview 交錯列失敗 item={item_id}", "TreeUtils")
 
     @staticmethod
     def apply_listbox_alternating_rows(listbox, *, item_count: int | None = None) -> None:
@@ -330,10 +282,10 @@ class TreeUtils:
         """
         if not listbox:
             return
-        is_dark = ctk.get_appearance_mode() == "Dark"
+        is_dark = qt.is_dark_color_scheme()
         odd_bg = Colors.BG_LISTBOX_LIGHT if not is_dark else Colors.BG_LISTBOX_DARK
         even_bg = Colors.BG_LISTBOX_ALT_LIGHT if not is_dark else Colors.BG_LISTBOX_ALT_DARK
-        fg_color = Colors.TEXT_PRIMARY[0] if not is_dark else Colors.TEXT_ON_DARK
+        fg_color = _theme_pair_color(Colors.TEXT_PRIMARY)
         total_items = int(item_count if item_count is not None else listbox.size())
         for index in range(max(0, total_items)):
             try:
@@ -344,11 +296,8 @@ class TreeUtils:
                     selectbackground=Colors.SELECT_BG,
                     selectforeground=Colors.TEXT_ON_DARK,
                 )
-            except (tkinter.TclError, AttributeError, RuntimeError) as e:
+            except (Exception, AttributeError, RuntimeError) as e:
                 logger.debug(f"設定 Listbox 交錯列暫時性失敗 index={index}: {e}", "TreeUtils")
-                break
-            except Exception:
-                logger.exception(f"設定 Listbox 交錯列失敗 index={index}", "TreeUtils")
                 break
 
     @staticmethod
@@ -404,7 +353,7 @@ class TreeUtils:
                 if current_job_id:
                     set_refresh_job(None)
                 return
-            if not tree or not getattr(tree, "winfo_exists", lambda: False)():
+            if not tree or not getattr(tree, "is_alive", lambda: False)():
                 if current_job_id:
                     set_refresh_job(None)
                 return
@@ -427,7 +376,7 @@ class TreeUtils:
                     def _run_next() -> None:
                         insert_batch(end_index, current_job_id=next_job_id)
 
-                    next_job_id = tree.after(1, _run_next)
+                    next_job_id = tree.schedule(1, _run_next)
                     set_refresh_job(next_job_id)
                     return
                 order = get_order()

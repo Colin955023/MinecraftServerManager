@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 import src.ui as mod_management_module
+import src.ui.mod_management.online_mod_queue as online_mod_queue_module
 import src.utils as meta_module
 import src.utils.ui_support.ui_utils as ui_utils_module
 
@@ -19,7 +20,7 @@ class _StubTree:
         self.children = ["keep", "orphan"]
         self.deleted: list[str] = []
 
-    def winfo_exists(self) -> bool:
+    def is_alive(self) -> bool:
         return True
 
     def get_children(self, _item: str = "") -> list[str]:
@@ -52,7 +53,7 @@ class _StatusLabel:
     def __init__(self) -> None:
         self.text = ""
 
-    def winfo_exists(self) -> bool:
+    def is_alive(self) -> bool:
         return True
 
     def configure(self, **kwargs) -> None:
@@ -133,7 +134,7 @@ class _BrowseRefreshTree:
         self.moved: list[tuple[str, int]] = []
         self._selection = selection
 
-    def winfo_exists(self) -> bool:
+    def is_alive(self) -> bool:
         return True
 
     def get_children(self, _item: str = "") -> list[str]:
@@ -194,9 +195,9 @@ class _BrowseRefreshTree:
     def selection_set(self, *items: str) -> None:
         self._selection = tuple(items)
 
-    def after(self, _delay_ms: int, callback):
+    def schedule(self, _delay_ms: int, callback):
         callback()
-        return "after-id"
+        return "schedule-id"
 
 
 def _pending_install(project_id: str, project_name: str, version_id: str) -> mod_management_module.PendingOnlineInstall:
@@ -207,7 +208,6 @@ def _pending_install(project_id: str, project_name: str, version_id: str) -> mod
     )
 
 
-@pytest.mark.smoke
 def test_local_row_palette_uses_distinct_tokens() -> None:
     light_odd, light_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=False)
     dark_odd, dark_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=True)
@@ -220,7 +220,6 @@ def test_local_row_palette_uses_distinct_tokens() -> None:
     assert dark_odd != dark_even
 
 
-@pytest.mark.smoke
 def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -238,7 +237,6 @@ def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
     assert warning_message == "請先輸入關鍵字再搜尋模組。"
 
 
-@pytest.mark.smoke
 def test_get_online_version_dialog_hint_text_uses_server_context() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame.current_server = cast(
@@ -252,7 +250,6 @@ def test_get_online_version_dialog_hint_text_uses_server_context() -> None:
     assert "留空" not in hint_text
 
 
-@pytest.mark.smoke
 def test_on_online_browse_filters_changed_refreshes_hint_and_reloads(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     called: list[tuple[bool, bool] | str] = []
@@ -270,7 +267,6 @@ def test_on_online_browse_filters_changed_refreshes_hint_and_reloads(monkeypatch
     assert called == ["hint", "summary", (True, False)]
 
 
-@pytest.mark.smoke
 def test_build_online_results_summary_text_shows_mode_sort_and_count() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -283,7 +279,6 @@ def test_build_online_results_summary_text_shows_mode_sort_and_count() -> None:
     assert summary == "搜尋 sodium｜2 筆｜排序 下載量"
 
 
-@pytest.mark.smoke
 def test_build_online_results_summary_text_prompts_keyword_when_query_empty() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -296,7 +291,6 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
     assert summary == "請輸入關鍵字搜尋｜0 筆｜排序 相關性"
 
 
-@pytest.mark.smoke
 def test_refresh_browse_list_uses_incremental_updates_and_row_key_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -382,7 +376,6 @@ def test_refresh_browse_list_uses_incremental_updates_and_row_key_fallback(monke
     assert selected_mod is row_key_only_gamma
 
 
-@pytest.mark.smoke
 def test_build_online_browse_row_includes_prism_style_metadata() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -408,7 +401,6 @@ def test_build_online_browse_row_includes_prism_style_metadata() -> None:
     )
 
 
-@pytest.mark.smoke
 def test_build_online_browse_row_keeps_full_description() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -434,7 +426,45 @@ def test_build_online_browse_row_keeps_full_description() -> None:
     )
 
 
-@pytest.mark.smoke
+def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame_any = cast(Any, frame)
+    selected_mod = SimpleNamespace(
+        name="Fabric API",
+        author="FabricMC",
+        download_count=1234,
+        source="modrinth",
+        url="https://example.invalid/fabric-api",
+    )
+    frame_any.parent = SimpleNamespace()
+    frame_any.update_status = lambda _message: None
+    frame_any._format_online_environment_text = lambda _mod: "Fabric / server"
+    frame_any._get_selected_online_mod_context = lambda: (True, "fabric-api", selected_mod)
+
+    class _BrokenClipboard:
+        def setText(self, _text: str) -> None:
+            raise RuntimeError("clipboard unavailable")
+
+    class _BrokenApp:
+        def clipboard(self):
+            return _BrokenClipboard()
+
+        def processEvents(self) -> None:
+            raise RuntimeError("processEvents unavailable")
+
+    errors: list[tuple[str, str]] = []
+    monkeypatch.setattr(online_mod_queue_module.qt, "ensure_app", lambda: _BrokenApp())
+    monkeypatch.setattr(
+        mod_management_module.UIUtils,
+        "show_error",
+        lambda title, message, _parent=None: errors.append((title, message)),
+    )
+
+    frame.copy_online_mod_info()
+
+    assert errors == [("複製失敗", "無法將模組資訊複製到剪貼簿：clipboard unavailable")]
+
+
 def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -489,7 +519,6 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
     assert values[7] == "Core API module providing key hooks and intercompatibility. No truncation should happen."
 
 
-@pytest.mark.smoke
 def test_select_tree_item_for_context_menu_updates_selection_to_clicked_row() -> None:
     tree = _ContextMenuTree()
     event = SimpleNamespace(y=24)
@@ -502,7 +531,6 @@ def test_select_tree_item_for_context_menu_updates_selection_to_clicked_row() ->
     assert tree.seen == "row-2"
 
 
-@pytest.mark.smoke
 def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded_calls: list[list[str]] = []
 
@@ -520,7 +548,6 @@ def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.Mon
     assert recorded_calls == [["explorer.exe", "/select,", "C:\\servers\\Alpha\\mods\\example.jar"]]
 
 
-@pytest.mark.smoke
 def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_metadata_messages() -> None:
     """驗證簡化版本：扁平列表結構、去重、按優先度排序"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -558,7 +585,6 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
     assert root_node.group_key == "unknown"
 
 
-@pytest.mark.smoke
 def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -613,7 +639,6 @@ def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None
     assert "將繼續更新其餘 2 個可更新項目" in prompt
 
 
-@pytest.mark.smoke
 def test_build_local_update_execution_prompt_returns_none_for_advisory_only() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -629,7 +654,6 @@ def test_build_local_update_execution_prompt_returns_none_for_advisory_only() ->
     assert frame._build_local_update_execution_prompt(entries) is None
 
 
-@pytest.mark.smoke
 def test_get_online_version_status_text_distinguishes_key_states() -> None:
     assert mod_management_module.ModManagementFrame._get_online_version_status_text(None) == "未分析"
 
@@ -666,7 +690,6 @@ def test_get_online_version_status_text_distinguishes_key_states() -> None:
     assert mod_management_module.ModManagementFrame._get_online_version_status_text(clean_report) == "可安裝"
 
 
-@pytest.mark.smoke
 def test_sort_online_versions_for_server_prefers_compatible_then_stable_then_newer() -> None:
     versions = [
         SimpleNamespace(version_id="beta-new", version_type="beta", date_published="2026-03-03T10:00:00Z"),
@@ -690,7 +713,6 @@ def test_sort_online_versions_for_server_prefers_compatible_then_stable_then_new
     ]
 
 
-@pytest.mark.smoke
 def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
     versions = [
         SimpleNamespace(version_id="v1", version_type="beta", date_published="2026-03-02T10:00:00Z"),
@@ -710,7 +732,6 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
     assert [report.marker for report in cast(list[Any], sorted_reports)] == ["report-v2", "report-v1"]
 
 
-@pytest.mark.smoke
 def test_purge_orphan_local_tree_items_removes_untracked_visible_rows() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame.local_tree = cast(Any, _StubTree())
@@ -723,7 +744,6 @@ def test_purge_orphan_local_tree_items_removes_untracked_visible_rows() -> None:
     assert frame._local_recycled_item_ids == ["keep"]
 
 
-@pytest.mark.smoke
 def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is_fuzzy() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     local_mod = cast(Any, type("LocalMod", (), {"name": "Fabric API", "platform_id": "fabric-api"})())
@@ -734,7 +754,6 @@ def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is
     assert display_name == "Fabric API"
 
 
-@pytest.mark.smoke
 def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unknown() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     local_mod = cast(Any, type("LocalMod", (), {"name": "Unknown Mod", "platform_id": "fabric-api"})())
@@ -747,7 +766,6 @@ def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unkno
     assert display_name == "Fabric API"
 
 
-@pytest.mark.smoke
 def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path, monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     deleted_ids: list[list[str]] = []
@@ -798,7 +816,6 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
     assert frame.status_label.text == "已刪除 2 個模組"
 
 
-@pytest.mark.smoke
 def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     shown_messages: list[str] = []
@@ -840,7 +857,6 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
     assert frame.status_label.text == "刪除模組失敗: permission denied"
 
 
-@pytest.mark.smoke
 def test_set_review_entries_enabled_toggles_flags() -> None:
     enabled_entry = mod_management_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
@@ -866,7 +882,6 @@ def test_set_review_entries_enabled_toggles_flags() -> None:
     assert disabled_entry.enabled is False
 
 
-@pytest.mark.smoke
 def test_review_entry_counters_distinguish_enabled_and_blocked_items() -> None:
     runnable_enabled = mod_management_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
@@ -894,7 +909,6 @@ def test_review_entry_counters_distinguish_enabled_and_blocked_items() -> None:
     assert mod_management_module.ModManagementFrame._count_blocked_entries(entries) == 1
 
 
-@pytest.mark.smoke
 def test_collect_selected_root_keys_from_grouped_tree_returns_review_roots() -> None:
     tree = _GroupedSelectionTree(
         {
@@ -916,7 +930,6 @@ def test_collect_selected_root_keys_from_grouped_tree_returns_review_roots() -> 
     assert selected == {"fabric-api", "lithium"}
 
 
-@pytest.mark.smoke
 def test_set_selected_advisory_dependency_items_enabled_supports_optional_parent_node() -> None:
     root_key = "fabric-api::v1"
     advisory_a = SimpleNamespace(project_name="Mod Menu", enabled=False)
@@ -939,7 +952,6 @@ def test_set_selected_advisory_dependency_items_enabled_supports_optional_parent
     assert advisory_b.enabled is True
 
 
-@pytest.mark.smoke
 def test_build_online_review_task_nodes_include_grouped_children() -> None:
     """驗證簡化版本：扁平列表結構、正確分組"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -971,7 +983,6 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
     assert any(node.node_kind == "root" and node.group_key == "advisory" for node in nodes), "應該被分組為 advisory"
 
 
-@pytest.mark.smoke
 def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     dependency = SimpleNamespace(
@@ -1013,7 +1024,6 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
     assert all("required-by：Fabric API、Lithium" in node.detail for node in dependency_nodes)
 
 
-@pytest.mark.smoke
 def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     dependency = SimpleNamespace(
@@ -1057,7 +1067,6 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
     assert "Lithium" not in disabled_dependency.detail
 
 
-@pytest.mark.smoke
 def test_build_online_review_task_nodes_marks_advisory_dependency_as_skipped() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     entry = mod_management_module.PendingInstallReviewEntry(
@@ -1087,11 +1096,10 @@ def test_build_online_review_task_nodes_marks_advisory_dependency_as_skipped() -
 
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該有一個根級節點"
-    assert root_nodes[0].title == "模組"
+    assert root_nodes[0].title == "Fabric API"
     assert root_nodes[0].values[2] == "Fabric API"
 
 
-@pytest.mark.smoke
 def test_build_dependency_status_text_uses_resolution_fallback_label() -> None:
     dependency = SimpleNamespace(
         resolution_source="version_detail",
@@ -1110,7 +1118,6 @@ def test_build_dependency_status_text_uses_resolution_fallback_label() -> None:
     assert status_text == "required-by：Fabric API｜解析：版本詳情回補（中）｜處理：將自動安裝"
 
 
-@pytest.mark.smoke
 def test_build_online_review_root_status_text_summarizes_dependencies_warnings_and_blockers() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     entry = mod_management_module.PendingInstallReviewEntry(
@@ -1134,7 +1141,6 @@ def test_build_online_review_root_status_text_summarizes_dependencies_warnings_a
     assert status_text == "需先處理｜依賴 1｜可選 1｜提醒 1｜阻擋 1"
 
 
-@pytest.mark.smoke
 def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     pending = mod_management_module.PendingOnlineInstall(
@@ -1158,7 +1164,6 @@ def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column(
     assert root_node.values[5] == "建議確認｜依賴 1｜提醒 1"
 
 
-@pytest.mark.smoke
 def test_install_pending_online_install_queue_deduplicates_shared_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -1269,7 +1274,6 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     assert any("已合併 1 個重複項目，避免重複下載。" in message for _title, message in shown_messages)
 
 
-@pytest.mark.smoke
 def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_from_enabled_roots(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     first_version = SimpleNamespace(
@@ -1337,7 +1341,6 @@ def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_fr
     assert len(review_entries[1].dependency_plan.items) == 0
 
 
-@pytest.mark.smoke
 def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     client_only_version = SimpleNamespace(
@@ -1382,7 +1385,6 @@ def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatc
     assert any("僅 client 端" in message for message in review_entries[0].blocking_reasons)
 
 
-@pytest.mark.smoke
 def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     unknown_side_version = SimpleNamespace(
@@ -1427,11 +1429,8 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
     assert any("未明確標示 server 端支援" in message for message in review_entries[0].warning_messages)
 
 
-@pytest.mark.smoke
-def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder(monkeypatch) -> None:
+def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder() -> None:
     tree = _HeaderAutoFitTree()
-
-    monkeypatch.setattr(mod_management_module.FontManager, "get_dpi_scaled_size", lambda value: value)
 
     column_id = mod_management_module.TreeUtils._get_treeview_separator_column_from_x(tree, 140)
 
@@ -1439,7 +1438,6 @@ def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder(mon
     assert tree.requested_columns == ["name", "version"]
 
 
-@pytest.mark.smoke
 def test_build_local_update_task_nodes_include_blocking_items() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1467,7 +1465,6 @@ def test_build_local_update_task_nodes_include_blocking_items() -> None:
     assert root_node.values[3] == "Modrinth"
 
 
-@pytest.mark.smoke
 def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_child_node() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1499,7 +1496,6 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
     assert root_node.values[4] == "需先識別"
 
 
-@pytest.mark.smoke
 def test_build_local_update_task_nodes_groups_advisory_candidate_separately() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1529,7 +1525,6 @@ def test_build_local_update_task_nodes_groups_advisory_candidate_separately() ->
     assert root_node.values[4] == "建議確認"
 
 
-@pytest.mark.smoke
 def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1560,7 +1555,6 @@ def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -
     assert root_node.values[4] == "可重試"
 
 
-@pytest.mark.smoke
 def test_build_local_update_review_subtitle_includes_failure_matrix_counts() -> None:
     text = mod_management_module.ModManagementFrame._build_local_update_review_subtitle(
         "全部模組",
@@ -1574,7 +1568,6 @@ def test_build_local_update_review_subtitle_includes_failure_matrix_counts() -> 
     assert text == "範圍：全部模組｜可執行更新 2 項｜建議確認 1 項｜可重試 1 項｜待識別 1 項｜阻擋 1 項"
 
 
-@pytest.mark.smoke
 def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -1611,7 +1604,6 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
     ]
 
 
-@pytest.mark.smoke
 def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -1637,7 +1629,6 @@ def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> N
     assert frame_any.pending_online_installs[0].project_name == "Fabric API Updated"
 
 
-@pytest.mark.smoke
 def test_build_local_update_review_subtitle_includes_migrated_snapshot_count() -> None:
     text = mod_management_module.ModManagementFrame._build_local_update_review_subtitle(
         "全部模組",
@@ -1649,7 +1640,6 @@ def test_build_local_update_review_subtitle_includes_migrated_snapshot_count() -
     assert text == "範圍：全部模組｜可執行更新 1 項｜快照遷移 2 項"
 
 
-@pytest.mark.smoke
 def test_build_dependency_snapshot_migration_note_formats_summary_line() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame._dependency_snapshot_migration_totals = {
@@ -1664,7 +1654,6 @@ def test_build_dependency_snapshot_migration_note_formats_summary_line() -> None
     assert note == "依賴快照遷移觀測：檢查 3、自動遷移 1、成功回放 2、回放失敗改重建 1。"
 
 
-@pytest.mark.smoke
 def test_build_local_update_review_key_is_unique_for_same_project_id_with_different_files() -> None:
     candidate_a = SimpleNamespace(
         project_id="Ha28R6CL",
@@ -1683,7 +1672,6 @@ def test_build_local_update_review_key_is_unique_for_same_project_id_with_differ
     assert key_b.startswith("project::Ha28R6CL::")
 
 
-@pytest.mark.smoke
 def test_format_review_overview_text_includes_preflight_notes() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     entries = [
@@ -1728,7 +1716,6 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
     assert "預檢：已完成 metadata 預檢" in text
 
 
-@pytest.mark.smoke
 def test_format_completion_notes_deduplicates_messages() -> None:
     text = mod_management_module.ModManagementFrame._format_completion_notes(
         ["建議先備份", "建議先備份", "需重啟伺服器"]
@@ -1738,7 +1725,6 @@ def test_format_completion_notes_deduplicates_messages() -> None:
     assert "需重啟伺服器" in text
 
 
-@pytest.mark.smoke
 def test_format_online_version_report_includes_provider_and_changelog() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     version = cast(
@@ -1767,7 +1753,6 @@ def test_format_online_version_report_includes_provider_and_changelog() -> None:
     assert "Fixed crash when syncing registry state." in report_text
 
 
-@pytest.mark.smoke
 def test_format_local_update_review_text_includes_metadata_source() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1798,7 +1783,6 @@ def test_format_local_update_review_text_includes_metadata_source() -> None:
     assert "更新建議可信度：高" in text
 
 
-@pytest.mark.smoke
 def test_format_pending_install_review_text_includes_summary_lines() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     version = cast(
@@ -1845,7 +1829,6 @@ def test_format_pending_install_review_text_includes_summary_lines() -> None:
     assert "- 目前有 1 個阻擋原因需先處理" in text
 
 
-@pytest.mark.smoke
 def test_format_pending_install_review_text_includes_client_install_reminder_for_server_and_client_mod() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     version = cast(
@@ -1886,7 +1869,6 @@ def test_format_pending_install_review_text_includes_client_install_reminder_for
     assert "提醒：此模組同時支援 client 端" in text
 
 
-@pytest.mark.smoke
 def test_format_local_update_review_text_includes_unresolved_metadata_state() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1919,7 +1901,6 @@ def test_format_local_update_review_text_includes_unresolved_metadata_state() ->
     assert "Metadata 狀態：metadata ensure 失敗" in text
 
 
-@pytest.mark.smoke
 def test_format_local_update_review_text_includes_client_install_reminder_for_server_and_client_mod() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1950,7 +1931,6 @@ def test_format_local_update_review_text_includes_client_install_reminder_for_se
     assert "提醒：此模組同時支援 client 端" in text
 
 
-@pytest.mark.smoke
 def test_cache_local_provider_metadata_uses_shared_provider_contract() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
@@ -1980,7 +1960,6 @@ def test_cache_local_provider_metadata_uses_shared_provider_contract() -> None:
     assert captured["provider_metadata"].get("project_name") == "Sodium"
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_project_ids_backfills_missing_slug() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
@@ -2033,7 +2012,6 @@ def test_ensure_local_mod_project_ids_backfills_missing_slug() -> None:
     assert captured["provider_metadata"].get("project_name") == "Sodium"
 
 
-@pytest.mark.smoke
 def test_build_local_update_review_key_falls_back_to_file_path_when_project_id_missing() -> None:
     candidate = SimpleNamespace(
         project_id="",
@@ -2046,7 +2024,6 @@ def test_build_local_update_review_key_falls_back_to_file_path_when_project_id_m
     assert key == "local::C:/servers/demo/mods/unknown-mod.jar"
 
 
-@pytest.mark.smoke
 def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() -> None:
     review_entry = mod_management_module.PendingInstallReviewEntry(
         pending=mod_management_module.PendingOnlineInstall(
@@ -2066,7 +2043,6 @@ def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() 
     )
 
 
-@pytest.mark.smoke
 def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id() -> None:
     review_entry = mod_management_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
@@ -2082,7 +2058,6 @@ def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id(
     )
 
 
-@pytest.mark.smoke
 def test_resolve_local_update_review_project_page_url_skips_unresolved_candidates() -> None:
     review_entry = mod_management_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
@@ -2095,7 +2070,6 @@ def test_resolve_local_update_review_project_page_url_skips_unresolved_candidate
     assert mod_management_module.ModManagementFrame._resolve_local_update_review_project_page_url(review_entry) == ""
 
 
-@pytest.mark.smoke
 def test_cache_local_dependency_plan_snapshot_persists_provider_aware_payload() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
@@ -2154,7 +2128,6 @@ def test_cache_local_dependency_plan_snapshot_persists_provider_aware_payload() 
     assert payload["graph_edges"][0]["depth"] == 1
 
 
-@pytest.mark.smoke
 def test_prepare_local_update_review_entries_replays_cached_dependency_plan_snapshot(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -2248,7 +2221,6 @@ def test_prepare_local_update_review_entries_replays_cached_dependency_plan_snap
     assert review_entries[0].enabled is False
 
 
-@pytest.mark.smoke
 def test_prepare_local_update_review_entries_rebuilds_when_cached_snapshot_version_mismatch(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -2319,7 +2291,6 @@ def test_prepare_local_update_review_entries_rebuilds_when_cached_snapshot_versi
     assert review_entries[0].dependency_plan.items[0].project_id == "rebuilt"
 
 
-@pytest.mark.smoke
 def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persists(monkeypatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured_writes: list[dict[str, Any]] = []
@@ -2406,7 +2377,6 @@ def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persis
     assert telemetry.get("fallback_rebuild", 0) == 0
 
 
-@pytest.mark.smoke
 def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_enabled_state() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
@@ -2460,7 +2430,6 @@ def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_
     assert payload["advisory_items"][0]["enabled"] is True
 
 
-@pytest.mark.smoke
 def test_persist_local_update_plan_metadata_marks_stale_revalidation_failure() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     path_key = str(Path("C:/servers/Fabric/mods/sodium.jar"))
@@ -2513,7 +2482,6 @@ def test_persist_local_update_plan_metadata_marks_stale_revalidation_failure() -
     ) in ("0", "")
 
 
-@pytest.mark.smoke
 def test_persist_local_update_plan_metadata_resets_revalidation_on_success() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     path_key = str(Path("C:/servers/Fabric/mods/sodium.jar"))
@@ -2569,7 +2537,6 @@ def test_persist_local_update_plan_metadata_resets_revalidation_on_success() -> 
     assert cached_provider["next_retry_not_before_epoch_ms"] == "0"
 
 
-@pytest.mark.smoke
 def test_get_online_install_review_group_key_classifies_all_states() -> None:
     """線上安裝 review 分組應正確對應 enabled/advisory/disabled/blocked 四種狀態。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -2610,7 +2577,6 @@ def test_get_online_install_review_group_key_classifies_all_states() -> None:
     assert frame._get_online_install_review_group_key(blocked_entry) == "blocked"
 
 
-@pytest.mark.smoke
 def test_count_online_install_review_groups_aggregates_correctly() -> None:
     """_count_online_install_review_groups 應正確統計各 group 數量。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -2650,7 +2616,6 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
     assert counts.get("disabled", 0) == 0
 
 
-@pytest.mark.smoke
 def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
     """_build_online_install_execution_prompt 應對 advisory/blocked 項目提供摘要文字。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -2686,7 +2651,6 @@ def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
     assert "將繼續安裝其餘 2 個可安裝項目" in prompt
 
 
-@pytest.mark.smoke
 def test_build_online_install_execution_prompt_returns_none_for_clean_queue() -> None:
     """所有項目均為 enabled（無提醒）時，prompt 應為 None——不需要確認對話框。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -2705,7 +2669,6 @@ def test_build_online_install_execution_prompt_returns_none_for_clean_queue() ->
     assert frame._build_online_install_execution_prompt(entries) is None
 
 
-@pytest.mark.smoke
 def test_build_online_install_execution_prompt_returns_none_for_advisory_only() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
@@ -2723,7 +2686,6 @@ def test_build_online_install_execution_prompt_returns_none_for_advisory_only() 
     assert frame._build_online_install_execution_prompt(entries) is None
 
 
-@pytest.mark.smoke
 def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
     """_build_online_review_root_status_text 根節點標籤應與 group key 映射一致。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
@@ -2756,7 +2718,6 @@ def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
     assert "需先處理" in frame._build_online_review_root_status_text(blocked_entry)
 
 
-@pytest.mark.smoke
 def test_derive_provider_lifecycle_state_fresh_within_ttl() -> None:
     now_ms = int(time.time() * 1000)
     raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(now_ms - 60_000)}
@@ -2764,7 +2725,6 @@ def test_derive_provider_lifecycle_state_fresh_within_ttl() -> None:
     assert meta_module.derive_provider_lifecycle_state(raw) == meta_module.PROVIDER_LIFECYCLE_FRESH
 
 
-@pytest.mark.smoke
 def test_derive_provider_lifecycle_state_stale_past_ttl() -> None:
     expired_ms = 1_000
     raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(expired_ms)}
@@ -2772,7 +2732,6 @@ def test_derive_provider_lifecycle_state_stale_past_ttl() -> None:
     assert meta_module.derive_provider_lifecycle_state(raw, ttl_seconds=3600) == meta_module.PROVIDER_LIFECYCLE_STALE
 
 
-@pytest.mark.smoke
 def test_derive_provider_lifecycle_state_missing_when_no_data() -> None:
     assert meta_module.derive_provider_lifecycle_state(None) == meta_module.PROVIDER_LIFECYCLE_MISSING
     assert meta_module.derive_provider_lifecycle_state({}) == meta_module.PROVIDER_LIFECYCLE_MISSING
@@ -2782,7 +2741,6 @@ def test_derive_provider_lifecycle_state_missing_when_no_data() -> None:
     )
 
 
-@pytest.mark.smoke
 def test_derive_provider_lifecycle_state_ignores_manual_override_flag() -> None:
     expired_ms = 1_000
     raw = {
@@ -2795,7 +2753,6 @@ def test_derive_provider_lifecycle_state_ignores_manual_override_flag() -> None:
     assert meta_module.derive_provider_lifecycle_state(raw, ttl_seconds=3600) == meta_module.PROVIDER_LIFECYCLE_STALE
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_provider_record_sets_lifecycle_fresh_when_both_ids_present() -> None:
     result = meta_module.ensure_local_mod_provider_record(
         platform_id="sodium",
@@ -2806,7 +2763,6 @@ def test_ensure_local_mod_provider_record_sets_lifecycle_fresh_when_both_ids_pre
     assert result.lifecycle_state == meta_module.PROVIDER_LIFECYCLE_FRESH
 
 
-@pytest.mark.smoke
 def test_ensure_local_mod_provider_record_sets_lifecycle_missing_when_unresolved() -> None:
     result = meta_module.ensure_local_mod_provider_record(
         platform_id="",

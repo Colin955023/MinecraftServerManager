@@ -527,7 +527,7 @@ class LocalModScanner:
             for index, part in enumerate(parts):
                 if any(char.isdigit() for char in part):
                     version = "-".join(parts[index:])
-                    return ServerDetectionUtils.clean_version(version)
+                    return ServerDetectionVersionUtils.clean_version(version)
         return "未知"
 
     @staticmethod

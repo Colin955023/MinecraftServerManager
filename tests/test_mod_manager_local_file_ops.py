@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from src.core import ModManager
 from src.utils import (
     build_non_official_source_warning,
@@ -11,7 +10,6 @@ from src.utils import (
 )
 
 
-@pytest.mark.smoke
 def test_import_local_mod_file_result_copies_mod_and_notifies(tmp_path: Path) -> None:
     server_path = tmp_path / "server"
     source_path = tmp_path / "downloads" / "example.jar"
@@ -31,7 +29,6 @@ def test_import_local_mod_file_result_copies_mod_and_notifies(tmp_path: Path) ->
     assert notifications == ["changed"]
 
 
-@pytest.mark.smoke
 def test_delete_local_mods_result_deletes_existing_files_and_reports_missing(tmp_path: Path) -> None:
     server_path = tmp_path / "server"
     manager = ModManager(str(server_path))
@@ -54,7 +51,6 @@ def test_delete_local_mods_result_deletes_existing_files_and_reports_missing(tmp
     assert notifications == ["changed"]
 
 
-@pytest.mark.smoke
 def test_download_source_policy_flags_non_official_hosts_only() -> None:
     assert get_non_official_download_host("https://cdn.modrinth.com/data/example.jar", "modrinth") == ""
     # 測試 mirror.example.com

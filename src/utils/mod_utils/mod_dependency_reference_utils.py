@@ -13,7 +13,6 @@ def resolve_dependency_reference(
     dependency: dict[str, Any],
     dependency_names: dict[str, str],
     *,
-    loader: str | None = None,
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] | None = None,
     get_mod_version_details: Callable[[str], tuple[str, OnlineModVersion | None]],
     fetch_project_name: Callable[[str], str | None],
@@ -23,7 +22,6 @@ def resolve_dependency_reference(
     Args:
         dependency: 原始依賴資料。
         dependency_names: 依賴名稱快取（key 為 normalize 後 project id）。
-        loader: 目前載入器名稱，用於套用 loader-specific override。
         version_details_cache: 版本詳情快取，避免重複查詢 version id。
         get_mod_version_details: 依 version id 取得 `(project_id, version)` 的函式。
         fetch_project_name: 依 project id 查詢專案名稱的函式。
@@ -51,7 +49,7 @@ def resolve_dependency_reference(
             resolved.project_id = version_project_id
             resolved.resolution_source = "version_detail"
             resolved.resolution_confidence = "fallback"
-    overridden_project_id = apply_loader_specific_dependency_override(resolved.project_id, loader)
+    overridden_project_id = apply_loader_specific_dependency_override(resolved.project_id)
     if overridden_project_id and normalize_identifier(overridden_project_id) != resolved.compare_project_id:
         resolved.project_id = overridden_project_id
         resolved.project_name = ""

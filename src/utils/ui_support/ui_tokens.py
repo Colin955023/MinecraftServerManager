@@ -9,21 +9,21 @@ from typing import Final
 class FontSize:
     """字型大小定義，單位為 pt (points)"""
 
-    TINY: Final[int] = 10
-    SMALL: Final[int] = 11
+    TINY: Final[int] = 9
+    SMALL: Final[int] = 10
     NORMAL: Final[int] = 12
-    SMALL_PLUS: Final[int] = 13
-    MEDIUM: Final[int] = 14
-    NORMAL_PLUS: Final[int] = 15
-    INPUT: Final[int] = 16
-    LARGE: Final[int] = 18
-    HEADING_SMALL: Final[int] = 20
-    HEADING_MEDIUM: Final[int] = 21
-    HEADING_SMALL_PLUS: Final[int] = 22
-    HEADING_LARGE: Final[int] = 24
-    HEADING_XLARGE: Final[int] = 27
-    CONSOLE: Final[int] = 11
-    ICON: Final[int] = 21
+    SMALL_PLUS: Final[int] = 11
+    MEDIUM: Final[int] = 12
+    NORMAL_PLUS: Final[int] = 13
+    INPUT: Final[int] = 12
+    LARGE: Final[int] = 14
+    HEADING_SMALL: Final[int] = 15
+    HEADING_MEDIUM: Final[int] = 17
+    HEADING_SMALL_PLUS: Final[int] = 17
+    HEADING_LARGE: Final[int] = 18
+    HEADING_XLARGE: Final[int] = 21
+    CONSOLE: Final[int] = 9
+    ICON: Final[int] = 17
 
 
 class Colors:
@@ -45,6 +45,8 @@ class Colors:
     # --- 灰色系 (Secondary) ---
     BUTTON_SECONDARY: Final[tuple[str, str]] = ("#6b7280", "#4b5563")
     BUTTON_SECONDARY_HOVER: Final[tuple[str, str]] = ("#4b5563", "#374151")
+    BUTTON_LIGHT: Final[tuple[str, str]] = ("#e2e8f0", "#d1d5db")
+    BUTTON_LIGHT_HOVER: Final[tuple[str, str]] = ("#cbd5e1", "#e5e7eb")
 
     # --- 紫色系 (Purple / Accent) ---
     BUTTON_PURPLE: Final[tuple[str, str]] = ("#8b5cf6", "#7c3aed")
@@ -105,69 +107,88 @@ class Spacing:
     """間距定義，單位為 px (pixels)"""
 
     TINY: Final[int] = 5
-    XS: Final[int] = 4
-    SMALL: Final[int] = 8
-    SMALL_PLUS: Final[int] = 10
-    MEDIUM: Final[int] = 12
-    LARGE_MINUS: Final[int] = 15
-    LARGE: Final[int] = 16
-    XL: Final[int] = 20
-    XXL: Final[int] = 24
+    XS: Final[int] = 3
+    SMALL: Final[int] = 6
+    SMALL_PLUS: Final[int] = 8
+    MEDIUM: Final[int] = 9
+    LARGE_MINUS: Final[int] = 12
+    LARGE: Final[int] = 12
+    XL: Final[int] = 15
+    XXL: Final[int] = 18
 
 
 class Sizes:
     """尺寸定義，單位為 px (pixels)"""
 
     # === 按鈕 ===
-    BUTTON_HEIGHT: Final[int] = 36
-    BUTTON_HEIGHT_MEDIUM: Final[int] = 35
-    BUTTON_HEIGHT_LARGE: Final[int] = 40
-    BUTTON_HEIGHT_SMALL: Final[int] = 28
-    BUTTON_WIDTH_PRIMARY: Final[int] = 140
-    BUTTON_WIDTH_SECONDARY: Final[int] = 120
-    BUTTON_WIDTH_COMPACT: Final[int] = 80
-    BUTTON_WIDTH_SMALL: Final[int] = 100
-    BUTTON_HEIGHT_EXPORT: Final[int] = 25
-    ICON_BUTTON: Final[int] = 20
+    BUTTON_HEIGHT: Final[int] = 27
+    BUTTON_HEIGHT_MEDIUM: Final[int] = 27
+    BUTTON_HEIGHT_LARGE: Final[int] = 30
+    BUTTON_HEIGHT_SMALL: Final[int] = 21
+    BUTTON_WIDTH_PRIMARY: Final[int] = 105
+    BUTTON_WIDTH_SECONDARY: Final[int] = 90
+    BUTTON_WIDTH_COMPACT: Final[int] = 60
+    BUTTON_WIDTH_SMALL: Final[int] = 75
+    BUTTON_HEIGHT_EXPORT: Final[int] = 20
+    ICON_BUTTON: Final[int] = 15
 
     # === 輸入與選單 ===
-    INPUT_HEIGHT: Final[int] = 32
-    INPUT_WIDTH: Final[int] = 300
-    INPUT_FIELD_WIDTH_CHARS: Final[int] = 32
-    SPINBOX_WIDTH_CHARS: Final[int] = 14
-    WRAP_LENGTH_MEDIUM: Final[int] = 400
-    WRAP_LENGTH_WIDE: Final[int] = 900
-    DROPDOWN_HEIGHT: Final[int] = 30
-    DROPDOWN_WIDTH: Final[int] = 280
-    DROPDOWN_COMPACT_WIDTH: Final[int] = 200
-    DROPDOWN_FILTER_WIDTH: Final[int] = 100
-    DROPDOWN_MAX_HEIGHT: Final[int] = 200
-    DROPDOWN_ITEM_HEIGHT: Final[int] = 30
+    INPUT_HEIGHT: Final[int] = 24
+    INPUT_WIDTH: Final[int] = 225
+    INPUT_FIELD_WIDTH_CHARS: Final[int] = 24
+    SPINBOX_WIDTH_CHARS: Final[int] = 11
+    WRAP_LENGTH_MEDIUM: Final[int] = 300
+    WRAP_LENGTH_WIDE: Final[int] = 675
+    DROPDOWN_HEIGHT: Final[int] = 23
+    DROPDOWN_WIDTH: Final[int] = 210
+    SERVER_PROPERTY_TEXT_INPUT_WIDTH: Final[int] = 315
+    DROPDOWN_COMPACT_WIDTH: Final[int] = 150
+    DROPDOWN_FILTER_WIDTH: Final[int] = 75
+    DROPDOWN_MAX_HEIGHT: Final[int] = 150
+    DROPDOWN_ITEM_HEIGHT: Final[int] = 23
 
     # === TreeView 欄寬 ===
-    SERVER_TREE_COL_NAME: Final[int] = 300
-    SERVER_TREE_COL_VERSION: Final[int] = 75
-    SERVER_TREE_COL_LOADER: Final[int] = 150
-    SERVER_TREE_COL_STATUS: Final[int] = 110
-    SERVER_TREE_COL_BACKUP: Final[int] = 110
-    SERVER_TREE_COL_PATH: Final[int] = 200
+    SERVER_TREE_COL_NAME: Final[int] = 225
+    SERVER_TREE_COL_VERSION: Final[int] = 57
+    SERVER_TREE_COL_LOADER: Final[int] = 113
+    SERVER_TREE_COL_STATUS: Final[int] = 83
+    SERVER_TREE_COL_BACKUP: Final[int] = 83
+    SERVER_TREE_COL_PATH: Final[int] = 150
 
     # === 視窗對話框版面 ===
-    DIALOG_SMALL_WIDTH: Final[int] = 400
-    DIALOG_SMALL_HEIGHT: Final[int] = 200
-    DIALOG_MEDIUM_WIDTH: Final[int] = 600
-    DIALOG_MEDIUM_HEIGHT: Final[int] = 400
-    DIALOG_LARGE_WIDTH: Final[int] = 800
-    DIALOG_LARGE_HEIGHT: Final[int] = 600
-    DIALOG_PREFERENCES_WIDTH: Final[int] = 500
-    DIALOG_PREFERENCES_HEIGHT: Final[int] = 600
-    DIALOG_FIRST_RUN_WIDTH: Final[int] = 480
-    DIALOG_FIRST_RUN_HEIGHT: Final[int] = 250
-    DIALOG_IMPORT_WIDTH: Final[int] = 450
-    DIALOG_IMPORT_HEIGHT: Final[int] = 280
-    DIALOG_ABOUT_WIDTH: Final[int] = 600
-    DIALOG_ABOUT_HEIGHT: Final[int] = 650
-    CONSOLE_PANEL_HEIGHT: Final[int] = 240
-    PREVIEW_TEXTBOX_HEIGHT: Final[int] = 300
-    TREEVIEW_VISIBLE_ROWS: Final[int] = 15
-    APP_HEADER_HEIGHT: Final[int] = 60
+    DIALOG_SMALL_WIDTH: Final[int] = 300
+    DIALOG_SMALL_HEIGHT: Final[int] = 150
+    DIALOG_MEDIUM_WIDTH: Final[int] = 450
+    DIALOG_MEDIUM_HEIGHT: Final[int] = 300
+    DIALOG_PROGRESS_WIDTH: Final[int] = 600
+    DIALOG_PROGRESS_HEIGHT: Final[int] = 270
+    DIALOG_LARGE_WIDTH: Final[int] = 600
+    DIALOG_LARGE_HEIGHT: Final[int] = 450
+    DIALOG_PREFERENCES_WIDTH: Final[int] = 480
+    DIALOG_PREFERENCES_HEIGHT: Final[int] = 540
+    DIALOG_FIRST_RUN_WIDTH: Final[int] = 360
+    DIALOG_FIRST_RUN_HEIGHT: Final[int] = 188
+    DIALOG_IMPORT_WIDTH: Final[int] = 338
+    DIALOG_IMPORT_HEIGHT: Final[int] = 210
+    DIALOG_ABOUT_WIDTH: Final[int] = 450
+    DIALOG_ABOUT_HEIGHT: Final[int] = 488
+    SERVER_PROPERTIES_DIALOG_WIDTH: Final[int] = 900
+    SERVER_PROPERTIES_DIALOG_HEIGHT: Final[int] = 600
+    SERVER_PROPERTIES_DIALOG_MIN_WIDTH: Final[int] = 900
+    SERVER_PROPERTIES_DIALOG_MIN_HEIGHT: Final[int] = 600
+    CONSOLE_PANEL_HEIGHT: Final[int] = 180
+    CONSOLE_OUTPUT_HEIGHT: Final[int] = 240
+    PREVIEW_TEXTBOX_HEIGHT: Final[int] = 225
+    TREEVIEW_VISIBLE_ROWS: Final[int] = 12
+    PLAYER_LIST_VISIBLE_ROWS: Final[int] = 5
+    MOD_EXPORT_SAVE_BUTTON_WIDTH: Final[int] = 135
+    MOD_EXPORT_CLOSE_BUTTON_WIDTH: Final[int] = 113
+    MOD_PROGRESS_HEIGHT: Final[int] = 15
+    ONLINE_HINT_WRAP_LENGTH: Final[int] = 735
+    ONLINE_VERSION_HINT_WRAP_LENGTH: Final[int] = 570
+    SERVER_PROPERTY_BOOL_WIDTH: Final[int] = 270
+    SERVER_PROPERTY_BOOL_HEIGHT: Final[int] = 54
+    PREFERENCES_RESET_BUTTON_HEIGHT: Final[int] = 16
+    CARD_CORNER_RADIUS: Final[int] = 6
+    INPUT_CORNER_RADIUS: Final[int] = 3
+    APP_HEADER_HEIGHT: Final[int] = 45

@@ -11,7 +11,6 @@ from typing import Any
 
 from ..models import ServerConfig
 from ..utils import (
-    MemoryUtils,
     PathUtils,
     ServerCommands,
     ServerDetectionUtils,
@@ -77,6 +76,9 @@ class ServerManager:
         """清除執行中伺服器的 runtime 狀態。"""
         instance = self.running_servers.pop(server_name, None)
         if instance is not None:
+            process = instance.get_process()
+            if process is not None:
+                SystemUtils.unregister_managed_process(instance.path, process.pid)
             instance.clear_process()
             instance.clear_output_buffer()
 
@@ -87,6 +89,8 @@ class ServerManager:
             try:
                 if process.poll() is None:
                     cleaned = bool(SystemUtils.kill_process_tree(process.pid)) or cleaned
+                if server_path is not None:
+                    SystemUtils.unregister_managed_process(server_path, process.pid)
             except Exception as e:
                 logger.warning(f"清理伺服器進程樹失敗: {server_name} | {e}")
         try:
@@ -286,76 +290,65 @@ class ServerManager:
         for directory in directories:
             (path / directory).mkdir(exist_ok=True)
 
-    def create_launch_script(self, config: ServerConfig) -> None:
+    def create_launch_script(self, config: ServerConfig, java_command_override: str | None = None) -> None:
         """建立伺服器啟動腳本。
 
         Args:
             config: 伺服器設定與啟動參數來源。
+            java_command_override: 匯入既有伺服器時保留的原始 Java 啟動命令。
         """
         server_path = Path(config.path)
-        max_memory = config.memory_max_mb
-        min_memory = config.memory_min_mb
-        if min_memory:
-            memory_display = (
-                f"最小 {MemoryUtils.format_memory_mb(min_memory)}, 最大 {MemoryUtils.format_memory_mb(max_memory)}"
-            )
+        if java_command_override:
+            java_command_str = java_command_override.strip()
         else:
-            memory_display = f"Java自行取用-{MemoryUtils.format_memory_mb(max_memory)}"
-        java_cmd_list = ServerCommands.build_java_command(config, return_list=True)
-        logger.debug(f"Java 命令列表: {java_cmd_list}")
-        java_exe = java_cmd_list[0]
-        if " " in java_exe and (not (java_exe.startswith('"') and java_exe.endswith('"'))):
-            java_exe = f'"{java_exe}"'
-        uses_args_file = len(java_cmd_list) >= 2 and java_cmd_list[1].startswith("@")
-        if uses_args_file:
-            args_spec = java_cmd_list[1]
-            args_rel_path = args_spec[1:]
-            args_path = server_path / args_rel_path
-            if args_path.exists():
-                java_command_str = f"{java_exe} {args_spec} nogui"
-            else:
-                logger.warning(f"參數檔案不存在: {args_path}")
-                java_command_str = f"{java_exe} {args_spec} nogui"
-        else:
-            cmd_parts = [java_exe]
-            i = 1
-            while i < len(java_cmd_list):
-                arg = java_cmd_list[i]
-                if arg == "-jar" and i + 1 < len(java_cmd_list):
-                    cmd_parts.append(arg)
-                    jar_spec = java_cmd_list[i + 1]
-                    jar_path = server_path / jar_spec
-                    if jar_path.exists():
-                        cmd_parts.append(f'"{jar_path.resolve()}"')
-                    else:
-                        cmd_parts.append(f'"{jar_spec}"')
-                    i += 2
+            java_cmd_list = ServerCommands.build_java_command(config, return_list=True)
+            logger.debug(f"Java 命令列表: {java_cmd_list}")
+            java_exe = java_cmd_list[0]
+            if " " in java_exe and (not (java_exe.startswith('"') and java_exe.endswith('"'))):
+                java_exe = f'"{java_exe}"'
+            uses_args_file = len(java_cmd_list) >= 2 and java_cmd_list[1].startswith("@")
+            if uses_args_file:
+                args_spec = java_cmd_list[1]
+                args_rel_path = args_spec[1:]
+                args_path = server_path / args_rel_path
+                if args_path.exists():
+                    java_command_str = f"{java_exe} {args_spec} nogui"
                 else:
-                    cmd_parts.append(arg)
-                    i += 1
-            java_command_str = " ".join(cmd_parts)
+                    logger.warning(f"參數檔案不存在: {args_path}")
+                    java_command_str = f"{java_exe} {args_spec} nogui"
+            else:
+                cmd_parts = [java_exe]
+                i = 1
+                while i < len(java_cmd_list):
+                    arg = java_cmd_list[i]
+                    if arg == "-jar" and i + 1 < len(java_cmd_list):
+                        cmd_parts.append(arg)
+                        jar_spec = java_cmd_list[i + 1]
+                        jar_path = server_path / jar_spec
+                        if jar_path.exists():
+                            cmd_parts.append(f'"{jar_path.resolve()}"')
+                        else:
+                            cmd_parts.append(f'"{jar_spec}"')
+                        i += 2
+                    else:
+                        cmd_parts.append(arg)
+                        i += 1
+                java_command_str = " ".join(cmd_parts)
         bat_lines = [
             "@echo off",
-            f"title {config.name} Minecraft Server",
-            "echo ===============================================",
-            f"echo 正在啟動 {config.name} 伺服器",
-            f"echo Minecraft 版本: {config.minecraft_version}",
-            f"echo 模組載入器: {config.loader_type}",
-            f"echo 記憶體配置: {memory_display}",
-            "echo ===============================================",
-            "echo.",
+            "chcp 65001 >nul",
+            'cd /d "%~dp0"',
             "",
             java_command_str,
-            "",
-            "echo.",
-            "echo 伺服器已停止運行",
         ]
         bat_content = "\n".join(bat_lines)
         start_script_path = server_path / "start_server.bat"
         try:
             if start_script_path.exists():
-                existing_content = PathUtils.read_text_file(start_script_path, encoding="gbk", errors="ignore")
-                if existing_content == bat_content:
+                existing_bytes = start_script_path.read_bytes()
+                existing_has_bom = existing_bytes.startswith(b"\xef\xbb\xbf")
+                existing_content = existing_bytes.decode("utf-8-sig", errors="ignore")
+                if existing_content == bat_content and not existing_has_bom:
                     logger.debug("啟動腳本內容未變更，跳過寫入")
                     return
         except Exception as e:
@@ -367,7 +360,7 @@ class ServerManager:
                     details={"server": getattr(config, "name", None)},
                 )
             logger.debug(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
-        PathUtils.write_text_file(start_script_path, bat_content, encoding="gbk", errors="replace")
+        PathUtils.write_text_file(start_script_path, bat_content, encoding="utf-8", errors="replace")
 
     def update_server_properties(self, server_name: str, properties: dict[str, str]) -> bool:
         """更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值。
@@ -424,6 +417,16 @@ class ServerManager:
             )
             return False
 
+    def _resolve_startup_script_for_run(self, config: ServerConfig, server_path: Path) -> Path | None:
+        """啟動前取得實際要執行的啟動腳本。"""
+        script_path = ServerDetectionUtils.find_startup_script(server_path)
+        if script_path is not None:
+            logger.debug(f"使用既有啟動腳本，啟動前確認 Java 路徑: {script_path}")
+            ServerCommands.repair_startup_script_java_command(script_path, config)
+            return script_path
+        self.create_launch_script(config)
+        return ServerDetectionUtils.find_startup_script(server_path)
+
     def start_server_result(self, server_name: str) -> ServerOperationResult:
         """啟動伺服器。
 
@@ -443,14 +446,13 @@ class ServerManager:
                 return validation_result
             if server_path is None:
                 return self._failure_result("啟動失敗", f"無法解析伺服器路徑: {server_name}", server_name=server_name)
-            self.create_launch_script(config)
-            script_path = ServerDetectionUtils.find_startup_script(server_path)
+            script_path = self._resolve_startup_script_for_run(config, server_path)
             if script_path:
                 logger.info(f"找到啟動腳本: {script_path}")
             else:
                 return self._failure_result(
                     "啟動腳本未找到",
-                    "找不到啟動腳本 (start_server.bat, run.bat, start.bat, server.bat)",
+                    "找不到啟動腳本 (run.bat, start.bat, server.bat, start_server.bat)",
                     server_name=server_name,
                 )
             logger.debug(f"準備啟動伺服器: {server_name}")
@@ -470,10 +472,12 @@ class ServerManager:
                     stderr=SubprocessUtils.STDOUT,
                     text=True,
                     encoding="utf-8",
+                    errors="replace",
                     bufsize=0,
                     universal_newlines=True,
                     creationflags=SubprocessUtils.CREATE_NO_WINDOW,
                 )
+                SystemUtils.register_managed_process(abs_server_path, process.pid)
                 process.create_time = time.time()
                 if self._wait_for_process_exit(process, self.STARTUP_CHECK_DELAY):
                     poll_result = process.poll()
@@ -732,6 +736,90 @@ class ServerManager:
         """
         return name in self.servers
 
+    @staticmethod
+    def _collect_imported_startup_scripts(server_path: Path) -> list[Path]:
+        server_root = server_path.resolve(strict=False)
+        managed_name = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
+        scripts: list[Path] = []
+        seen: set[Path] = set()
+
+        def append_script(script_path: Path) -> None:
+            resolved_path = script_path.resolve(strict=False)
+            if resolved_path in seen or resolved_path.parent != server_root or not script_path.is_file():
+                return
+            scripts.append(script_path)
+            seen.add(resolved_path)
+
+        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+            if script_name.lower() == managed_name:
+                continue
+            append_script(server_path / script_name)
+
+        for script_path in sorted(server_path.glob("*.bat")):
+            if script_path.name.lower() == managed_name:
+                continue
+            resolved_path = script_path.resolve(strict=False)
+            if resolved_path in seen:
+                continue
+            startup_command = ServerCommands.extract_startup_script_command(script_path)
+            if startup_command.has_java_command:
+                append_script(script_path)
+        return scripts
+
+    @staticmethod
+    def _extract_imported_startup_command(config: ServerConfig, script_path: Path) -> str | None:
+        startup_command = ServerCommands.extract_startup_script_command(script_path)
+        if not startup_command.has_java_command:
+            return None
+        if startup_command.memory_max_mb is not None:
+            config.memory_max_mb = startup_command.memory_max_mb
+        if startup_command.memory_min_mb is not None:
+            config.memory_min_mb = startup_command.memory_min_mb
+        return ServerCommands.replace_startup_command_java_path(startup_command.command_line, config)
+
+    @staticmethod
+    def _delete_root_startup_script(server_path: Path, script_path: Path) -> bool:
+        server_root = server_path.resolve(strict=False)
+        resolved_path = script_path.resolve(strict=False)
+        if resolved_path.parent != server_root or not script_path.is_file():
+            return False
+        script_path.unlink()
+        return True
+
+    def _prepare_imported_startup_scripts(self, config: ServerConfig) -> None:
+        """匯入伺服器時轉移原始腳本設定，並只留下程式管理的標準啟動腳本。"""
+        server_path = Path(config.path)
+        managed_script = server_path / ServerCommands.MANAGED_STARTUP_SCRIPT_NAME
+        try:
+            imported_scripts = self._collect_imported_startup_scripts(server_path)
+            setting_sources = imported_scripts or ([managed_script] if managed_script.is_file() else [])
+            java_command_override = None
+            command_source = ""
+            for script_path in setting_sources:
+                java_command_override = self._extract_imported_startup_command(config, script_path)
+                if java_command_override:
+                    command_source = script_path.name
+                    break
+            if command_source:
+                logger.info(f"已從匯入啟動腳本保留啟動命令: {command_source}")
+
+            removed_scripts: list[str] = []
+            for script_path in [*imported_scripts, managed_script]:
+                if not script_path.exists():
+                    continue
+                try:
+                    if self._delete_root_startup_script(server_path, script_path):
+                        removed_scripts.append(script_path.name)
+                except Exception as exc:
+                    logger.warning(f"無法刪除匯入啟動腳本 {script_path.name}: {exc}")
+            if removed_scripts:
+                logger.info("已移除匯入啟動腳本: " + ", ".join(removed_scripts))
+
+            self.create_launch_script(config, java_command_override=java_command_override)
+            logger.info(f"匯入伺服器已建立/更新標準啟動腳本 start_server.bat: {config.name}")
+        except Exception as exc:
+            logger.warning(f"匯入伺服器啟動腳本整理失敗，保留原始檔案: {exc}")
+
     def add_server(self, config: ServerConfig) -> bool:
         """添加伺服器配置（用於匯入）。
 
@@ -742,6 +830,7 @@ class ServerManager:
             成功寫入設定時回傳 True，失敗時回傳 False。
         """
         try:
+            self._prepare_imported_startup_scripts(config)
             self.servers[config.name] = config
             self.write_servers_config()
             return True

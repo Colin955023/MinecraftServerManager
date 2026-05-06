@@ -69,10 +69,6 @@ _register_exports(
     "compute_file_hash",
 )
 _register_exports(
-    ".network_utils.async_http_utils",
-    "AsyncHTTPUtils",
-)
-_register_exports(
     ".network_utils.http_utils",
     "HTTPUtils",
 )
@@ -271,7 +267,6 @@ _register_exports(
     "compute_adaptive_pool_limit",
     "compute_exponential_moving_average",
     "get_button_style",
-    "get_dropdown_style",
 )
 _register_exports(
     ".update_utils.update_checker",

@@ -1,13 +1,12 @@
 """系統工具模組
-提供系統資訊查詢與進程管理功能，使用原生 Windows API 以減少對 psutil 的依賴。
+提供系統資訊查詢與進程管理功能，使用原生 Windows API 與受管理 PID 清理。
 """
 
 import ctypes
 import ctypes.wintypes as wintypes
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, ClassVar
-
-import psutil
 
 from .. import SubprocessUtils, get_logger
 
@@ -77,9 +76,50 @@ class PROCESS_MEMORY_COUNTERS_EX(Structure):
 class SystemUtils:
     """系統工具類別"""
 
+    _managed_processes_by_path: ClassVar[dict[str, set[int]]] = {}
+
+    @staticmethod
+    def _normalize_managed_path(path) -> str:
+        try:
+            return str(Path(path).resolve(strict=False)).casefold()
+        except Exception:
+            return str(path or "").casefold()
+
+    @classmethod
+    def register_managed_process(cls, path, pid: int) -> None:
+        """記錄由本程式啟動、可安全用 taskkill /T 清理的 process。
+
+        Args:
+            path: process 所屬的伺服器或安裝工作目錄。
+            pid: process ID。
+        """
+        try:
+            normalized_path = cls._normalize_managed_path(path)
+            if not normalized_path:
+                return
+            cls._managed_processes_by_path.setdefault(normalized_path, set()).add(int(pid))
+        except Exception as exc:
+            logger.debug(f"記錄受管理 process 失敗: {exc}")
+
+    @classmethod
+    def unregister_managed_process(cls, path, pid: int) -> None:
+        """移除已結束或已清理的受管理 process。
+
+        Args:
+            path: process 所屬的伺服器或安裝工作目錄。
+            pid: process ID。
+        """
+        normalized_path = cls._normalize_managed_path(path)
+        pids = cls._managed_processes_by_path.get(normalized_path)
+        if not pids:
+            return
+        pids.discard(int(pid))
+        if not pids:
+            cls._managed_processes_by_path.pop(normalized_path, None)
+
     @staticmethod
     def kill_java_processes_in_path(path) -> bool:
-        """嘗試終止指定路徑下所有 java/javaw 進程（根據 cwd）。
+        """終止本程式在指定路徑啟動過的 Java/啟動腳本 process tree。
 
         Args:
             path: 目標資料夾。
@@ -89,22 +129,15 @@ class SystemUtils:
         """
         killed = False
         try:
-            abs_path = str(path)
-            snapshot = SystemUtils._iterate_process_snapshot()
-            for entry in snapshot:
-                name = SystemUtils._decode_process_name(entry).lower()
-                if name not in ("java.exe", "javaw.exe"):
+            normalized_path = SystemUtils._normalize_managed_path(path)
+            tracked_pids = set(SystemUtils._managed_processes_by_path.get(normalized_path, set()))
+            for pid in tracked_pids:
+                if not SystemUtils.is_process_running(pid):
+                    SystemUtils.unregister_managed_process(path, pid)
                     continue
-                pid = int(entry.th32ProcessID)
-                # 嘗試取得該進程的工作目錄
-                try:
-                    p = psutil.Process(pid)
-                    cwd = p.cwd()
-                    if abs_path in cwd:
-                        p.terminate()
-                        killed = True
-                except Exception:
-                    logger.warning(f"無法訪問進程 {pid} 的工作目錄，跳過檢查: {SystemUtils.get_process_name(pid)}")
+                if SystemUtils.kill_process_tree(pid):
+                    killed = True
+                SystemUtils.unregister_managed_process(path, pid)
         except Exception as e:
             logger.error(f"kill_java_processes_in_path 失敗: {e}")
         return killed
@@ -295,26 +328,3 @@ class SystemUtils:
         finally:
             if h_process:
                 _kernel32.CloseHandle(h_process)
-
-    @staticmethod
-    def set_process_dpi_aware() -> None:
-        """設定進程 DPI 感知"""
-        try:
-            _user32.SetProcessDPIAware()
-        except Exception as e:
-            logger.error(f"設定進程 DPI 感知失敗: {e}")
-
-    @staticmethod
-    def get_system_metrics(index: int) -> int:
-        """獲取系統指標。
-
-        Args:
-            index: Windows 系統指標編號。
-
-        Returns:
-            系統指標值；失敗時回傳 0。
-        """
-        try:
-            return _user32.GetSystemMetrics(index)
-        except Exception:
-            return 0

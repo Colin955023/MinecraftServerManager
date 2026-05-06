@@ -3,29 +3,20 @@
 from __future__ import annotations
 
 import time
-import tkinter
-import tkinter.ttk as ttk
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import customtkinter as ctk
-
 from ...core import ModStatus
-from ...utils import (
-    Colors,
-    FontSize,
-    Sizes,
-    Spacing,
-    UIUtils,
-)
+from ...utils import Colors, FontSize, Sizes, Spacing, UIUtils
+from ...utils.ui_support import qt_widgets as qt
 from ..custom_dropdown import CustomDropdown
 from ..font_manager import FontManager
 from ..mod_search_service.modrinth_service import enhance_local_mod
 from ..task_utils import TaskUtils
 from ..tree_utils import TreeUtils
-from .constants import logger
+from .constants import MOD_TOOL_BUTTON_STYLE, logger
 from .presenter_delegate_mixin import PresenterDelegateMixin
 
 
@@ -55,99 +46,87 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列。"""
-        toolbar_frame = ctk.CTkFrame(self.local_tab)
-        toolbar_frame.pack(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
-        left_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
-        left_frame.pack(side="left", padx=Spacing.SMALL)
-        import_btn = ctk.CTkButton(
+        toolbar_frame = qt.Frame(self.local_tab)
+        toolbar_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
+        left_frame = qt.Frame(toolbar_frame, fg_color="transparent")
+        left_frame.attach(side="left", padx=Spacing.SMALL)
+        import_btn = qt.Button(
             left_frame,
             text="📁 匯入模組",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.import_mod_file,
-            fg_color=Colors.BUTTON_SUCCESS,
-            hover_color=Colors.BUTTON_SUCCESS_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        import_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-        refresh_mod_list_btn = ctk.CTkButton(
+        import_btn.attach(side="left", padx=(0, 12))
+        refresh_mod_list_btn = qt.Button(
             left_frame,
             text="🔄 重新整理",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.refresh_mod_list_force,
-            fg_color=Colors.BUTTON_INFO,
-            hover_color=Colors.BUTTON_INFO_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        refresh_mod_list_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-        update_btn = ctk.CTkButton(
+        refresh_mod_list_btn.attach(side="left", padx=(0, 12))
+        update_btn = qt.Button(
             left_frame,
             text="🔄 檢查更新",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.check_local_mod_updates,
-            fg_color=Colors.BUTTON_PRIMARY,
-            hover_color=Colors.BUTTON_PRIMARY_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        update_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-        self.select_all_btn = ctk.CTkButton(
+        update_btn.attach(side="left", padx=(0, 12))
+        self.select_all_btn = qt.Button(
             left_frame,
             text="☑️ 全選",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.toggle_select_all,
-            fg_color=Colors.BUTTON_WARNING,
-            hover_color=Colors.BUTTON_WARNING_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        self.select_all_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-        self.batch_toggle_btn = ctk.CTkButton(
+        self.select_all_btn.attach(side="left", padx=(0, 12))
+        self.batch_toggle_btn = qt.Button(
             left_frame,
             text="🔄 批量切換",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.batch_toggle_selected,
-            fg_color=Colors.BUTTON_PURPLE,
-            hover_color=Colors.BUTTON_PURPLE_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        self.batch_toggle_btn.pack(side="left", padx=(0, FontManager.get_dpi_scaled_size(15)))
-        folder_btn = ctk.CTkButton(
+        self.batch_toggle_btn.attach(side="left", padx=(0, 12))
+        folder_btn = qt.Button(
             left_frame,
             text="📂 開啟資料夾",
             font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
             command=self.open_mods_folder,
-            fg_color=Colors.BUTTON_PURPLE_DARK,
-            hover_color=Colors.BUTTON_PURPLE_DARK_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT,
         )
-        folder_btn.pack(side="left")
-        right_frame = ctk.CTkFrame(toolbar_frame, fg_color="transparent")
-        right_frame.pack(side="right", padx=Spacing.LARGE_MINUS)
-        search_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
-        search_frame.pack(side="left", padx=(0, Spacing.LARGE_MINUS))
-        search_label = ctk.CTkLabel(search_frame, text="🔍", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM))
-        search_label.pack(side="left")
-        self.local_search_var = tkinter.StringVar()
-        search_entry = ctk.CTkEntry(
+        folder_btn.attach(side="left")
+        right_frame = qt.Frame(toolbar_frame, fg_color="transparent")
+        right_frame.attach(side="right", padx=Spacing.LARGE_MINUS)
+        search_frame = qt.Frame(right_frame, fg_color="transparent")
+        search_frame.attach(side="left", padx=(0, Spacing.LARGE_MINUS))
+        search_label = qt.Label(search_frame, text="🔍", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM))
+        search_label.attach(side="left")
+        self.local_search_var = qt.TextState()
+        search_entry = qt.Entry(
             search_frame,
             textvariable=self.local_search_var,
             font=FontManager.get_font(size=FontSize.MEDIUM),
             width=Sizes.DROPDOWN_COMPACT_WIDTH,
             height=Sizes.INPUT_HEIGHT,
         )
-        search_entry.pack(side="left", padx=(FontManager.get_dpi_scaled_size(8), 0))
+        search_entry.attach(side="left", padx=(6, 0))
         self.local_search_var.trace("w", self.filter_local_mods)
-        self.local_filter_var = tkinter.StringVar(value="所有")
+        self.local_filter_var = qt.TextState(value="所有")
         filter_combo = CustomDropdown(
             right_frame,
             variable=self.local_filter_var,
@@ -156,7 +135,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
             width=Sizes.DROPDOWN_FILTER_WIDTH,
             height=Sizes.INPUT_HEIGHT,
         )
-        filter_combo.pack(side="left")
+        filter_combo.attach(side="left")
 
     def on_filter_changed(self, _value: str) -> None:
         """
@@ -190,66 +169,57 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
     def create_local_mod_list(self) -> None:
         """建立本地模組列表。"""
-        list_frame = ctk.CTkFrame(self.local_tab)
-        list_frame.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
-        export_btn = ctk.CTkButton(
+        list_frame = qt.Frame(self.local_tab)
+        list_frame.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
+        export_btn = qt.Button(
             list_frame,
             text="匯出模組列表",
             font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
-            fg_color=Colors.BUTTON_PRIMARY,
-            hover_color=Colors.BUTTON_PRIMARY_HOVER,
-            text_color=Colors.TEXT_ON_DARK,
+            **MOD_TOOL_BUTTON_STYLE,
             command=self.export_mod_list_dialog,
             width=Sizes.BUTTON_WIDTH_COMPACT,
             height=Sizes.BUTTON_HEIGHT_EXPORT,
         )
-        export_btn.pack(anchor="ne", pady=(Spacing.SMALL_PLUS, Spacing.TINY), padx=Spacing.SMALL_PLUS)
-        tree_container = ctk.CTkFrame(list_frame)
-        tree_container.pack(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
-        style = ttk.Style()
-        style.configure(
-            "ModList.Treeview",
-            font=FontManager.get_font(size=FontSize.INPUT),
-            rowheight=int(25 * FontManager.get_scale_factor()),
-        )
-        style.configure("ModList.Treeview.Heading", font=FontManager.get_font(size=FontSize.LARGE, weight="bold"))
+        export_btn.attach(anchor="ne", pady=(Spacing.SMALL_PLUS, Spacing.TINY), padx=Spacing.SMALL_PLUS)
+        tree_container = qt.Frame(list_frame)
+        tree_container.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
         columns = ("status", "name", "version", "author", "loader", "size", "mtime", "description")
-        self.local_tree = ttk.Treeview(
+        self.local_tree = qt.Treeview(
             tree_container,
             columns=columns,
             show="headings",
             height=Sizes.TREEVIEW_VISIBLE_ROWS,
             selectmode="extended",
-            style="ModList.Treeview",
         )
         column_config = {
-            "status": ("狀態", 80),
-            "name": ("模組名稱", 200),
-            "version": ("版本", 100),
-            "author": ("作者", 120),
-            "loader": ("載入器", 80),
-            "size": ("檔案大小", 100),
-            "mtime": ("修改時間", 120),
-            "description": ("描述", 460),
+            "status": ("狀態", 40),
+            "name": ("模組名稱", 100),
+            "version": ("版本", 50),
+            "author": ("作者", 60),
+            "loader": ("載入器", 40),
+            "size": ("檔案大小", 50),
+            "mtime": ("修改時間", 60),
+            "description": ("描述", 230),
         }
         for col, (text, width) in column_config.items():
             self.local_tree.heading(col, text=text, anchor="w")
             is_stretch = col == "description"
-            self.local_tree.column(col, width=width, minwidth=width if is_stretch else 50, stretch=is_stretch)
-        v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
-        h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
+            self.local_tree.column(col, width=width, minwidth=width if is_stretch else 25, stretch=is_stretch)
+        v_scrollbar = qt.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
+        h_scrollbar = qt.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
         self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
         self.local_v_scrollbar = v_scrollbar
         self.local_h_scrollbar = h_scrollbar
-        self.local_tree.grid(row=0, column=0, sticky="nsew")
-        v_scrollbar.grid(row=0, column=1, sticky="ns")
-        h_scrollbar.grid(row=1, column=0, sticky="ew")
-        is_dark = ctk.get_appearance_mode() == "Dark"
+        self.local_tree.attach_matrix(row=0, column=0, sticky="nsew")
+        v_scrollbar.attach_matrix(row=0, column=1, sticky="ns")
+        h_scrollbar.attach_matrix(row=1, column=0, sticky="ew")
+        is_dark = qt.is_dark_color_scheme()
         bg_odd, bg_even = self._get_local_row_palette(is_dark)
-        self.local_tree.tag_configure("odd", background=bg_odd)
-        self.local_tree.tag_configure("even", background=bg_even)
-        tree_container.grid_rowconfigure(0, weight=1)
-        tree_container.grid_columnconfigure(0, weight=1)
+        fg = Colors.TEXT_ON_DARK if is_dark else Colors.TEXT_HEADING[0]
+        self.local_tree.tag_configure("odd", background=bg_odd, foreground=fg)
+        self.local_tree.tag_configure("even", background=bg_even, foreground=fg)
+        tree_container.set_grid_row_stretch(0, weight=1)
+        tree_container.set_grid_column_stretch(0, weight=1)
         TreeUtils.bind_treeview_header_auto_fit(
             self.local_tree,
             on_row_double_click=self.toggle_local_mod,
@@ -257,8 +227,20 @@ class LocalModListPresenter(PresenterDelegateMixin):
             body_font=FontManager.get_font(size=FontSize.INPUT),
             stretch_columns={"description"},
         )
-        self.local_tree.bind("<Button-3>", self.show_local_context_menu)
-        self.local_tree.bind("<<TreeviewSelect>>", self.on_tree_selection_changed)
+        self.local_tree.connect_event("mouse_right_press", self.show_local_context_menu)
+        self.local_tree.connect_event("selection_changed", self.on_tree_selection_changed)
+
+    def apply_local_tree_theme(self) -> None:
+        """重新套用本地模組清單的主題色與交錯列文字色。"""
+        if not self.local_tree:
+            return
+        if hasattr(self.local_tree, "apply_theme_style"):
+            self.local_tree.apply_theme_style()
+        is_dark = qt.is_dark_color_scheme()
+        bg_odd, bg_even = self._get_local_row_palette(is_dark)
+        fg = Colors.TEXT_ON_DARK if is_dark else Colors.TEXT_HEADING[0]
+        self.local_tree.tag_configure("odd", background=bg_odd, foreground=fg)
+        self.local_tree.tag_configure("even", background=bg_even, foreground=fg)
 
     def load_local_mods(self) -> None:
         """載入本地模組，並同步清空增強 cache，確保顯示一致。"""
@@ -379,6 +361,10 @@ class LocalModListPresenter(PresenterDelegateMixin):
         """
         if not self.local_tree:
             return
+        if _event is not None and hasattr(_event, "y"):
+            clicked_item = self.local_tree.identify_row(int(_event.y))
+            if clicked_item:
+                self.local_tree.selection_set(clicked_item)
         selection = self.local_tree.selection()
         if not selection:
             return
@@ -394,7 +380,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
             tags = self.local_tree.item(item, "tags")
             mod_id = tags[0] if tags and len(tags) > 0 else None
             if not mod_id:
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                if hasattr(self, "status_label") and self.status_label.is_alive():
                     self.update_status(f"無法識別模組: {mod_name}")
                 return
             mods_by_base_name: dict[str, Any] = {}
@@ -405,7 +391,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
                     mods_by_base_name[base_name] = m
             found_mod = mods_by_base_name.get(mod_id)
             if not found_mod:
-                if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                if hasattr(self, "status_label") and self.status_label.is_alive():
                     self.update_status(f"找不到模組檔案: {mod_id}")
                 return
             manager = self.mod_manager
@@ -441,11 +427,11 @@ class LocalModListPresenter(PresenterDelegateMixin):
                                 old_filename=old_filename,
                                 old_file_path=old_file_path,
                             )
-                            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                            if hasattr(self, "status_label") and self.status_label.is_alive():
                                 self.update_status(result.message or f"已{action}模組: {mod_name}")
                         else:
                             failure_message = result.message or f"{action}模組失敗: {mod_name}"
-                            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+                            if hasattr(self, "status_label") and self.status_label.is_alive():
                                 self.update_status(failure_message)
                             UIUtils.show_error(result.title or "錯誤", failure_message, self.parent)
                     finally:
@@ -456,7 +442,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
             TaskUtils.run_async(do_toggle)
         except Exception as e:
-            if hasattr(self, "status_label") and self.status_label.winfo_exists():
+            if hasattr(self, "status_label") and self.status_label.is_alive():
                 self.update_status(f"操作失敗: {e}")
             logger.error(f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}")
 
@@ -484,7 +470,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
             if not items:
                 return
             if self.all_selected:
-                self.local_tree.selection_remove(*items)
+                self.local_tree.selection_remove(items)
                 self.selected_mods.clear()
                 self.all_selected = False
                 try:
@@ -493,7 +479,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
             else:
-                self.local_tree.selection_set(*items)
+                self.local_tree.selection_set(items)
                 self.selected_mods.clear()
                 for item in items:
                     mod_name = self._get_tree_item_mod_name(self.local_tree, item)
