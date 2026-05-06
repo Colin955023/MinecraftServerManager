@@ -117,8 +117,12 @@ def test_get_installer_download_url_supports_known_loaders() -> None:
         "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-54.0.10/forge-1.21.1-54.0.10-installer.jar"
     )
     assert manager.get_installer_download_url("neoforge", "1.21.1", "21.1.165") == (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1.21.1.165-beta/"
-        "neoforge-1.21.1.21.1.165-beta-installer.jar"
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.165/"
+        "neoforge-21.1.165-installer.jar"
+    )
+    assert manager.get_installer_download_url("neoforge", "1.21.5", "21.5.52-beta") == (
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.5.52-beta/"
+        "neoforge-21.5.52-beta-installer.jar"
     )
     assert manager.get_installer_download_url("quilt", "1.21.1", "0.26.0") == (
         "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.12.1/quilt-installer-0.12.1.jar"
@@ -160,10 +164,40 @@ def test_neoforge_compatible_versions_recover_old_short_cache_entries(tmp_path: 
 
 
 def test_normalize_neoforge_metadata_versions_groups_by_minecraft_version() -> None:
-    versions = LoaderManager._normalize_version_strings(["21.1.165", "1.21.1.21.1.166-beta"])
+    versions = LoaderManager._normalize_version_strings(["21.1.165", "1.21.1.21.1.166-beta", "21.5.52-beta"])
 
     assert "1.21.1-21.1.165" in versions
-    assert "1.21.1-21.1.166" in versions
+    assert "1.21.1-21.1.166-beta" in versions
+    assert "1.21.5-21.5.52-beta" in versions
+
+
+def test_neoforge_beta_metadata_uses_minecraft_version_key(tmp_path: Path) -> None:
+    manager = LoaderManager.__new__(LoaderManager)
+    manager._version_cache = {}
+    manager.fabric_cache_file = str(tmp_path / "fabric_versions_cache.json")
+    manager.forge_cache_file = str(tmp_path / "forge_versions_cache.json")
+    manager.neoforge_cache_file = str(tmp_path / "neoforge_versions_cache.json")
+    Path(manager.fabric_cache_file).write_text("[]", encoding="utf-8")
+    Path(manager.forge_cache_file).write_text("{}", encoding="utf-8")
+    metadata = b"""<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<metadata>
+    <versioning>
+        <versions>
+            <version>21.5.52-beta</version>
+        </versions>
+    </versioning>
+</metadata>
+"""
+    version_dict = manager._build_loader_version_dict_from_metadata(metadata, allow_prerelease=True)
+    Path(manager.neoforge_cache_file).write_text(
+        '{"1.21.5": ["1.21.5-21.5.52-beta"]}',
+        encoding="utf-8",
+    )
+
+    versions = manager.get_compatible_loader_versions("1.21.5", "neoforge")
+
+    assert version_dict == {"1.21.5": ["1.21.5-21.5.52-beta"]}
+    assert [version.version for version in versions] == ["21.5.52-beta"]
 
 
 def test_parse_remote_checksum_payload_accepts_sha256() -> None:

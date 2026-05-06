@@ -196,7 +196,7 @@ class LoaderManager(Singleton):
         支援格式：
         - Forge: 'X.Y.Z-A.B.C' → 'X.Y.Z-A.B.C' (保持完整)
         - NeoForge: '21.1.165' → '1.21.1-21.1.165'
-        - NeoForge (完整+後綴): '1.21.1.21.1.165-beta' → '1.21.1-21.1.165'
+        - NeoForge (完整+後綴): '1.21.1.21.1.165-beta' → '1.21.1-21.1.165-beta'
         - Fabric/其他: 根據實際格式調整
         """
         normalized_versions: list[str] = []
@@ -210,22 +210,44 @@ class LoaderManager(Singleton):
                 suffix_clean = re.sub("[^0-9.]", "", suffix_part).rstrip(".")
                 mc_parts = [part for part in mc_clean.split(".") if part]
 
-                if mc_clean and suffix_clean:
-                    # 兩邊都有數字：使用 Forge 格式保持完整 (e.g., "26.1.2-64.0.7")
-                    normalized_versions.append(f"{mc_clean}-{suffix_clean}")
+                suffix_text = suffix_part.strip().rstrip(".")
+                suffix_has_label = bool(re.search("[A-Za-z]", suffix_text))
+
+                if (
+                    mc_clean
+                    and suffix_clean
+                    and mc_parts
+                    and mc_parts[0] == "1"
+                    and len(mc_parts) <= 3
+                ):
+                    # 已是 MC-loader 格式，保留 loader 端的 beta/rc 標籤。
+                    normalized_versions.append(f"{mc_clean}-{suffix_text}")
                 elif mc_clean and len(mc_parts) > 3:
                     # NeoForge 可能把 MC 版本與 loader 版本接在同一段，再用 beta/rc 作後綴。
                     if mc_parts[0] == "1" and len(mc_parts) >= 6:
-                        normalized_versions.append(f"{'.'.join(mc_parts[:3])}-{'.'.join(mc_parts[3:])}")
+                        loader_version = ".".join(mc_parts[3:])
+                        if suffix_text:
+                            loader_version = f"{loader_version}-{suffix_text}"
+                        normalized_versions.append(f"{'.'.join(mc_parts[:3])}-{loader_version}")
                     elif mc_parts[0] in {"20", "21"} and len(mc_parts) >= 3:
-                        normalized_versions.append(f"1.{mc_parts[0]}.{mc_parts[1]}-{'.'.join(mc_parts)}")
+                        loader_version = ".".join(mc_parts)
+                        if suffix_text:
+                            loader_version = f"{loader_version}-{suffix_text}"
+                        normalized_versions.append(f"1.{mc_parts[0]}.{mc_parts[1]}-{loader_version}")
+                elif mc_clean and mc_parts and mc_parts[0] in {"20", "21"} and len(mc_parts) >= 3 and suffix_has_label:
+                    normalized_versions.append(f"1.{mc_parts[0]}.{mc_parts[1]}-{mc_clean}-{suffix_text}")
+                elif mc_clean and suffix_clean:
+                    # 兩邊都有數字：使用 Forge 格式保持完整 (e.g., "26.1.2-64.0.7")
+                    normalized_versions.append(f"{mc_clean}-{suffix_clean}")
                 elif mc_clean:
                     normalized_versions.append(version)
             else:
                 version_clean = re.sub("[^0-9.]", "", version).rstrip(".")
                 if version_clean:
                     parts = version_clean.split(".")
-                    if len(parts) >= 3 and parts[0] in {"20", "21"}:
+                    if len(parts) >= 6 and parts[0] == "1":
+                        normalized_versions.append(f"{'.'.join(parts[:3])}-{'.'.join(parts[3:])}")
+                    elif len(parts) >= 3 and parts[0] in {"20", "21"}:
                         normalized_versions.append(f"1.{parts[0]}.{parts[1]}-{version_clean}")
                     elif len(parts) >= 3:
                         mc_version = f"{parts[0]}.{parts[1]}"
@@ -420,7 +442,7 @@ class LoaderManager(Singleton):
                 f"forge-{minecraft_version}-{loader_version}-installer.jar"
             )
         if lt == "neoforge":
-            full_version = f"{minecraft_version}.{loader_version}-beta"
+            full_version = loader_version.strip()
             return (
                 f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{full_version}/"
                 f"neoforge-{full_version}-installer.jar"
