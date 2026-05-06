@@ -117,12 +117,10 @@ def test_get_installer_download_url_supports_known_loaders() -> None:
         "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-54.0.10/forge-1.21.1-54.0.10-installer.jar"
     )
     assert manager.get_installer_download_url("neoforge", "1.21.1", "21.1.165") == (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.165/"
-        "neoforge-21.1.165-installer.jar"
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.165/neoforge-21.1.165-installer.jar"
     )
     assert manager.get_installer_download_url("neoforge", "1.21.5", "21.5.52-beta") == (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.5.52-beta/"
-        "neoforge-21.5.52-beta-installer.jar"
+        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.5.52-beta/neoforge-21.5.52-beta-installer.jar"
     )
     assert manager.get_installer_download_url("quilt", "1.21.1", "0.26.0") == (
         "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.12.1/quilt-installer-0.12.1.jar"

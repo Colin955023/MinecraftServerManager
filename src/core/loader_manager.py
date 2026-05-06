@@ -213,13 +213,7 @@ class LoaderManager(Singleton):
                 suffix_text = suffix_part.strip().rstrip(".")
                 suffix_has_label = bool(re.search("[A-Za-z]", suffix_text))
 
-                if (
-                    mc_clean
-                    and suffix_clean
-                    and mc_parts
-                    and mc_parts[0] == "1"
-                    and len(mc_parts) <= 3
-                ):
+                if mc_clean and suffix_clean and mc_parts and mc_parts[0] == "1" and len(mc_parts) <= 3:
                     # 已是 MC-loader 格式，保留 loader 端的 beta/rc 標籤。
                     normalized_versions.append(f"{mc_clean}-{suffix_text}")
                 elif mc_clean and len(mc_parts) > 3:
