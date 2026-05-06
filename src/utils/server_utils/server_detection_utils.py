@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ...models import ServerConfig
 from .. import JvmOptionPolicy, PathUtils, ServerDetectionVersionUtils, get_logger
+from .server_constants import STARTUP_SCRIPT_CANDIDATES
 
 logger = get_logger().bind(component="ServerDetectionUtils")
 __all__ = ["ServerDetectionUtils"]
@@ -173,9 +174,7 @@ class ServerDetectionUtils:
         Returns:
             找到時回傳啟動腳本 Path，否則回傳 None。
         """
-        from .server_runtime_utils import ServerCommands
-
-        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+        for script_name in STARTUP_SCRIPT_CANDIDATES:
             candidate_path = server_path / script_name
             if candidate_path.exists():
                 return candidate_path
@@ -329,9 +328,7 @@ class ServerDetectionUtils:
         memory_sources = [
             [("user_jvm_args.txt", False), ("jvm.args", False)],
         ]
-        from .server_runtime_utils import ServerCommands
-
-        startup_scripts = [(script_name, True) for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES]
+        startup_scripts = [(script_name, True) for script_name in STARTUP_SCRIPT_CANDIDATES]
         memory_sources.append(startup_scripts)
         max_mem = None
         min_mem = None
@@ -350,7 +347,7 @@ class ServerDetectionUtils:
                 break
         if max_mem is None or min_mem is None:
             for script in server_path.glob("*.bat"):
-                if script.name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+                if script.name in STARTUP_SCRIPT_CANDIDATES:
                     continue
                 max_m, min_m = ServerDetectionUtils._detect_memory_from_file(script, is_script=True)
                 if max_m:

@@ -167,22 +167,21 @@ class WindowManager:
             height = int(window_settings.get("height", 820))
             if not WindowManager.is_valid_main_window_size(width, height):
                 width, height = WindowManager.calculate_optimal_size(screen_info)
-                x_setting = None
-                y_setting = None
+                x, y = WindowManager.calculate_center_position(screen_info, width, height)
             else:
                 x_setting = window_settings.get("x")
                 y_setting = window_settings.get("y")
-            if (
-                x_setting is None
-                or y_setting is None
-                or int(x_setting) < 0
-                or int(y_setting) < 0
-                or int(x_setting) + width > screen_info["width"]
-                or int(y_setting) + height > screen_info["height"]
-            ):
-                x, y = WindowManager.calculate_center_position(screen_info, width, height)
-            else:
-                x, y = int(x_setting), int(y_setting)
+                if (
+                    x_setting is None
+                    or y_setting is None
+                    or int(x_setting) < 0
+                    or int(y_setting) < 0
+                    or int(x_setting) + width > screen_info["width"]
+                    or int(y_setting) + height > screen_info["height"]
+                ):
+                    x, y = WindowManager.calculate_center_position(screen_info, width, height)
+                else:
+                    x, y = int(x_setting), int(y_setting)
         try:
             window.setMinimumSize(WindowManager._min_tracked_width, WindowManager._min_tracked_height)
             window.resize(width, height)

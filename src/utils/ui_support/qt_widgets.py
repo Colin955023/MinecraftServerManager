@@ -926,11 +926,11 @@ class CheckBox(WidgetMixin, QtWidgets.QCheckBox):
         checked = bool(self._variable.get())
         if self.isChecked() == checked:
             return
-        blocker = QtCore.QSignalBlocker(self)
+        was_blocked = self.blockSignals(True)
         try:
             self.setChecked(checked)
         finally:
-            del blocker
+            self.blockSignals(was_blocked)
 
 
 class RadioButton(WidgetMixin, QtWidgets.QRadioButton):
@@ -982,11 +982,11 @@ class Slider(WidgetMixin, QtWidgets.QSlider):
         raw_value = int(float(self._variable.get()) * self._scale)
         if self.value() == raw_value:
             return
-        blocker = QtCore.QSignalBlocker(self)
+        was_blocked = self.blockSignals(True)
         try:
             self.setValue(raw_value)
         finally:
-            del blocker
+            self.blockSignals(was_blocked)
 
     def _on_value_changed(self, value: int) -> None:
         scaled_value = value / self._scale
@@ -1614,7 +1614,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
     def bbox(self, item: str, _column: str | None = None):
         index = self._model.index_for_id(str(item), self._column_index(_column or 0))
         if not index.isValid():
-            return ()
+            return ""
         rect = self.visualRect(index)
         return (rect.x(), rect.y(), rect.width(), rect.height())
 

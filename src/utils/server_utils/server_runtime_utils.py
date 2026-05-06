@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from .. import JavaUtils, PathUtils, get_logger
+from .server_constants import (
+    MANAGED_STARTUP_SCRIPT_NAME as DEFAULT_MANAGED_STARTUP_SCRIPT_NAME,
+)
+from .server_constants import (
+    STARTUP_SCRIPT_CANDIDATES as DEFAULT_STARTUP_SCRIPT_CANDIDATES,
+)
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
 __all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]
@@ -124,13 +130,8 @@ class JvmOptionPolicy:
 class ServerCommands:
     """伺服器指令工具類別。"""
 
-    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = "start_server.bat"
-    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = (
-        MANAGED_STARTUP_SCRIPT_NAME,
-        "run.bat",
-        "start.bat",
-        "server.bat",
-    )
+    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = DEFAULT_MANAGED_STARTUP_SCRIPT_NAME
+    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = DEFAULT_STARTUP_SCRIPT_CANDIDATES
 
     @staticmethod
     def _quote_windows_arg(arg: str) -> str:

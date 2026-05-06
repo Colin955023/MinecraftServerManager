@@ -179,7 +179,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         )
         try:
             if hasattr(self, "ui_queue") and self.ui_queue is not None:
-                self.ui_queue.put(lambda: self._refresh_online_queue_button())
+                self.ui_queue.put(self._refresh_online_queue_button)
             else:
                 self._refresh_online_queue_button()
         except Exception:
