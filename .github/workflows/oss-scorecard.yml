@@ -2,7 +2,7 @@ name: "Google OSS 安全性打分"
 
 on:
   workflow_run:
-    workflows: ["github-actions CI-Tests"]
+    workflows: ["CI-Tests"]
     types: [completed]
   workflow_dispatch:
   schedule:

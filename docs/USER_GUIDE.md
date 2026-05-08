@@ -43,7 +43,7 @@
 
 1. 前往「**建立伺服器**」頁面
 2. 輸入名稱、選擇 Minecraft 版本
-3. 選擇載入器：Vanilla／Fabric／Forge
+3. 選擇載入器：Vanilla／Fabric／Forge／Quilt／NeoForge
 4. 設定記憶體用量
 5. 按下「**建立**」，程式會自動下載所需檔案
 

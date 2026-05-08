@@ -47,7 +47,7 @@ src/main.py
 | `mod_file_installer.py` | 模組下載、原子替換、回滾、匯入、刪除、啟停 |
 | `mod_provider_resolver.py` | provider metadata、slug / project id 正規化與搜尋 fallback |
 | `version_manager.py` | Minecraft 版本列表查詢 |
-| `loader_manager.py` | Fabric／Forge 版本查詢與 TTL 快取 |
+| `loader_manager.py` | Fabric／Forge／Quilt／NeoForge 版本查詢與 TTL 快取 |
 
 ### `src/ui/`
 
