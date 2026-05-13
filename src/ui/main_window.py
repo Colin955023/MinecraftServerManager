@@ -1208,7 +1208,7 @@ class MinecraftServerManager:
         if RuntimePaths.is_portable_mode():
             add_label("📦 便攜模式", size=FontSize.HEADING_LARGE, weight="bold")
             add_label(
-                "您正在使用便攜版本。\n如需更新，請從 Releases 下載新版 portable ZIP，或使用內建的檢查更新功能。",
+                "您正在使用便攜模式。\n如需更新，請使用內建的檢查更新功能，或從 Releases 下載安裝程式 exe 後選擇可攜式安裝。",
                 size=FontSize.NORMAL_PLUS,
             )
         prefs_btn = QtWidgets.QPushButton("視窗偏好設定", scroll_content)

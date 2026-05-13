@@ -75,68 +75,36 @@ class UpdateParsing:
             選中的 installer 資源，找不到時回傳空字典。
         """
         assets = release.get("assets") or []
-        exe_assets = []
+        installer_assets = []
         for asset in assets:
             try:
                 name = (asset.get("name") or "").lower()
-                if name.endswith(".exe") and asset.get("browser_download_url"):
-                    exe_assets.append(asset)
+                if (
+                    name.endswith(".exe")
+                    and ("setup" in name or "installer" in name)
+                    and asset.get("browser_download_url")
+                ):
+                    installer_assets.append(asset)
             except Exception as e:
                 logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
                 continue
-        if not exe_assets:
+        if not installer_assets:
             return {}
-        for asset in exe_assets:
-            name = (asset.get("name") or "").lower()
-            if "setup" in name or "installer" in name:
-                return asset
-        return exe_assets[0]
+        return installer_assets[0]
 
     @staticmethod
-    def choose_portable_asset(release: dict[str, Any]) -> dict[str, Any]:
-        """挑選 portable.zip 更新檔。
+    def select_update_asset(release: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """挑選更新資產，並回傳選擇策略。
 
         Args:
             release: GitHub release 資料。
-
-        Returns:
-            選中的 portable 資源，找不到時回傳空字典。
-        """
-        assets = release.get("assets") or []
-        for asset in assets:
-            try:
-                name_l = (asset.get("name") or "").lower()
-                if name_l.endswith(".zip") and "portable" in name_l and asset.get("browser_download_url"):
-                    return asset
-            except Exception as e:
-                logger.debug(f"檢查可攜式資源時發生錯誤，跳過此資源: {e}")
-                continue
-        return {}
-
-    @staticmethod
-    def select_update_asset(release: dict[str, Any], portable_mode: bool) -> tuple[dict[str, Any], str]:
-        """根據執行模式挑選更新資產，並回傳選擇策略。
-
-        Args:
-            release: GitHub release 資料。
-            portable_mode: 是否為可攜式模式。
 
         Returns:
             (asset, mode)
             mode:
-              - portable: portable 模式且找到 portable zip
-              - installer: installer 模式，使用 installer exe
-              - installer_fallback: portable 模式找不到 zip，回退 installer exe
+              - installer: 使用 installer exe
               - none: 找不到可用更新資源
         """
-        if portable_mode:
-            portable_asset = UpdateParsing.choose_portable_asset(release)
-            if portable_asset:
-                return (portable_asset, "portable")
-            installer_asset = UpdateParsing.choose_installer_asset(release)
-            if installer_asset:
-                return (installer_asset, "installer_fallback")
-            return ({}, "none")
         installer_asset = UpdateParsing.choose_installer_asset(release)
         if installer_asset:
             return (installer_asset, "installer")
@@ -168,7 +136,5 @@ class UpdateParsing:
         algorithm = algorithm.strip().lower()
         checksum = checksum.strip().lower()
         if algorithm == "sha256" and UpdateParsing._is_hex_hash(checksum, 64):
-            return (algorithm, checksum)
-        if algorithm == "sha512" and UpdateParsing._is_hex_hash(checksum, 128):
             return (algorithm, checksum)
         return None

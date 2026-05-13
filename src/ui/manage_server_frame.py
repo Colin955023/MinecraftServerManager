@@ -1231,6 +1231,28 @@ class ManageServerFrame:
         else:
             self.info_label.configure(text="✨ 選擇一個伺服器以查看詳細資訊")
 
+    @staticmethod
+    def _show_existing_monitor_window(window: Any, *, bring_to_front: bool) -> None:
+        """顯示已存在的監控視窗，並選擇性地帶出到前面。"""
+        if bring_to_front:
+            show_normal = getattr(window, "showNormal", None)
+            if callable(show_normal):
+                with contextlib.suppress(Exception):
+                    show_normal()
+            else:
+                with contextlib.suppress(Exception):
+                    window.show()
+            for method_name in ("raise_", "activateWindow", "setFocus"):
+                method = getattr(window, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except Exception as e:
+                        logger.debug(f"帶出監控視窗失敗 method={method_name}: {e}", "ManageServerFrame")
+            return
+
+        window.show()
+
     def start_server(self) -> None:
         """啟動/停止伺服器"""
         if not self.selected_server:
@@ -1246,7 +1268,7 @@ class ManageServerFrame:
         else:
             start_result = self.server_manager.start_server_result(self.selected_server)
             if start_result.success:
-                self.monitor_server()
+                self.monitor_server(bring_to_front=False)
             else:
                 UIUtils.show_error(
                     start_result.title or "錯誤",
@@ -1265,7 +1287,7 @@ class ManageServerFrame:
         self.update_selection()
         self.refresh_servers()
 
-    def monitor_server(self) -> None:
+    def monitor_server(self, *, bring_to_front: bool = True) -> None:
         """監控伺服器"""
         if not self.selected_server:
             return
@@ -1277,10 +1299,7 @@ class ManageServerFrame:
         if self.selected_server in self._monitor_windows:
             old_win = self._monitor_windows[self.selected_server]
             if old_win and hasattr(old_win, "window") and old_win.window and old_win.window.is_alive():
-                old_win.window.show()
-                old_win.window.raise_()
-                old_win.window.activateWindow()
-                old_win.window.setFocus()
+                self._show_existing_monitor_window(old_win.window, bring_to_front=bring_to_front)
                 return
 
         monitor_window = ServerMonitorWindow(self.top_level_widget(), self.server_manager, self.selected_server)

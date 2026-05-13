@@ -6,7 +6,7 @@
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
-Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟動監控到模組安裝更新，全程在圖形介面內完成，模組操作均附帶可審查的 Review 步驟。
+Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟動監控到模組安裝更新，主要流程都可在圖形介面內完成；線上模組安裝與本地更新提供可審查的 Review 步驟。
 
 > **僅支援 Windows 10 / 11（64-bit）**
 > 介面使用 PySide6 / Qt Widgets，顯示縮放跟隨 Windows 與 Qt 高 DPI 行為。
@@ -18,25 +18,22 @@ Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟�
 - **建立伺服器** — Vanilla／Fabric／Forge／Quilt／NeoForge 精靈式設定流程
 - **Java 管理** — 自動偵測已安裝 Java，缺少時可引導 winget 或手動安裝
 - **即時監控** — 控制台輸出、記憶體、運行狀態與玩家資訊集中顯示
-- **模組管理** — 本地掃描 + Modrinth 線上搜尋，安裝前 Review 確認
+- **模組管理** — 本地掃描 + Modrinth 線上搜尋，線上安裝前 Review 確認
 - **模組更新** — Hash-first 批次比對，相依套件自動規劃
 - **匯入伺服器** — 掃描既有資料夾或壓縮檔快速匯入
-- **兩種發佈格式** — 可攜版（免安裝）與安裝版
+- **兩種安裝模式** — 同一個 installer 支援一般安裝與可攜式安裝
 
 ---
 
 ## 安裝
 
-**可攜版（推薦初次使用）**
+1. 前往 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新的 `*-Setup-*.exe`
+2. 執行安裝程式
+3. 選擇一般安裝，或選擇可攜式安裝並指定目標資料夾
 
-1. 前往 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新的 `*-portable.zip`
-2. 解壓縮至任意資料夾
-3. 執行 `MinecraftServerManager.exe`
+一般安裝會使用 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。可攜式安裝會在指定資料夾內建立 `.portable` 標記，並把資料寫入該資料夾下的 `.config` 與 `.log`。
 
-**安裝版**
-
-1. 下載最新的 `*-installer.exe`
-2. 執行安裝程式，完成後由開始功能表啟動
+可攜式安裝不會建立 Windows 解除安裝項目；如要移除，請關閉程式後直接刪除整個指定資料夾。
 
 ---
 
@@ -100,7 +97,7 @@ report/      產生綜合報告的腳本與輸出
 
 - [使用者手冊](docs/USER_GUIDE.md)
 - [技術手冊](docs/TECHNICAL_OVERVIEW.md)
-- [Portable / Installer 差異矩陣](docs/PORTABLE_INSTALLER_MATRIX.md)
+- [可攜式 / 一般安裝差異矩陣](docs/PORTABLE_INSTALLER_MATRIX.md)
 
 ---
 

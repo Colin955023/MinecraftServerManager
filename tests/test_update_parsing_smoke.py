@@ -28,37 +28,56 @@ def test_get_latest_release_can_include_prerelease(monkeypatch) -> None:
     assert latest["tag_name"] == "v1.7.0-rc1"
 
 
-def test_select_update_asset_prefers_portable_zip() -> None:
+def test_select_update_asset_prefers_installer_exe() -> None:
     release = {
         "assets": [
-            {"name": "MinecraftServerManager-Setup-1.6.7.exe", "browser_download_url": "https://example/installer.exe"},
+            {"name": "notes.txt", "browser_download_url": "https://example/notes.txt"},
             {
-                "name": "MinecraftServerManager-v1.6.7-portable.zip",
-                "browser_download_url": "https://example/portable.zip",
+                "name": "MinecraftServerManager-v1.6.7.zip",
+                "browser_download_url": "https://example/archive.zip",
+            },
+            {"name": "MinecraftServerManager-Setup-1.6.7.exe", "browser_download_url": "https://example/installer.exe"},
+        ]
+    }
+
+    asset, mode = UpdateParsing.select_update_asset(release)
+    assert mode == "installer"
+    assert asset["name"].endswith(".exe")
+
+
+def test_select_update_asset_returns_none_when_installer_missing() -> None:
+    release = {
+        "assets": [
+            {
+                "name": "MinecraftServerManager-v1.6.7.zip",
+                "browser_download_url": "https://example/archive.zip",
             },
         ]
     }
 
-    asset, mode = UpdateParsing.select_update_asset(release, portable_mode=True)
-    assert mode == "portable"
-    assert asset["name"].endswith("-portable.zip")
+    asset, mode = UpdateParsing.select_update_asset(release)
+    assert mode == "none"
+    assert asset == {}
 
 
-def test_select_update_asset_falls_back_to_installer_when_portable_missing() -> None:
+def test_select_update_asset_ignores_non_installer_exe() -> None:
     release = {
         "assets": [
-            {"name": "MinecraftServerManager-Setup-1.6.7.exe", "browser_download_url": "https://example/installer.exe"},
+            {
+                "name": "MinecraftServerManager.exe",
+                "browser_download_url": "https://example/app.exe",
+            },
         ]
     }
 
-    asset, mode = UpdateParsing.select_update_asset(release, portable_mode=True)
-    assert mode == "installer_fallback"
-    assert asset["name"].endswith(".exe")
+    asset, mode = UpdateParsing.select_update_asset(release)
+    assert mode == "none"
+    assert asset == {}
 
 
 def test_select_update_asset_returns_none_when_no_valid_asset() -> None:
     release = {"assets": [{"name": "notes.txt"}]}
-    asset, mode = UpdateParsing.select_update_asset(release, portable_mode=False)
+    asset, mode = UpdateParsing.select_update_asset(release)
     assert asset == {}
     assert mode == "none"
 
@@ -79,3 +98,4 @@ def test_parse_asset_digest_returns_none_when_missing_or_invalid() -> None:
     assert UpdateParsing.parse_asset_digest({}) is None
     assert UpdateParsing.parse_asset_digest({"digest": ""}) is None
     assert UpdateParsing.parse_asset_digest({"digest": "md5:abcd"}) is None
+    assert UpdateParsing.parse_asset_digest({"digest": f"sha512:{'a' * 128}"}) is None

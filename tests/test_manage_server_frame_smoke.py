@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -24,6 +25,29 @@ class FakeTreeview:
         elif isinstance(values, list):
             self.updated.append((item_id, tuple(values)))
         return None
+
+
+class FakeMonitorWindow:
+    def __init__(self) -> None:
+        self.show_calls = 0
+        self.raise_calls = 0
+        self.activate_calls = 0
+        self.focus_calls = 0
+
+    def is_alive(self) -> bool:
+        return True
+
+    def show(self) -> None:
+        self.show_calls += 1
+
+    def raise_(self) -> None:
+        self.raise_calls += 1
+
+    def activateWindow(self) -> None:
+        self.activate_calls += 1
+
+    def setFocus(self) -> None:
+        self.focus_calls += 1
 
 
 def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> None:
@@ -103,6 +127,34 @@ def test_begin_server_refresh_cycle_cancels_old_job_and_increments_token(monkeyp
     assert context.refresh_token == 4
     assert context.previous_selection == "Alpha"
     assert frame._server_refresh_token == 4
+
+
+def test_monitor_server_reuses_existing_window_for_user_click_and_brings_to_front() -> None:
+    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
+    frame.selected_server = "Alpha"
+    fake_window = FakeMonitorWindow()
+    frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
+
+    frame.monitor_server()
+
+    assert fake_window.show_calls == 1
+    assert fake_window.raise_calls == 1
+    assert fake_window.activate_calls == 1
+    assert fake_window.focus_calls == 1
+
+
+def test_monitor_server_auto_reuses_existing_window_without_forcing_focus() -> None:
+    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
+    frame.selected_server = "Alpha"
+    fake_window = FakeMonitorWindow()
+    frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
+
+    frame.monitor_server(bring_to_front=False)
+
+    assert fake_window.show_calls == 1
+    assert fake_window.raise_calls == 0
+    assert fake_window.activate_calls == 0
+    assert fake_window.focus_calls == 0
 
 
 def test_remove_stale_server_items_recycles_and_prunes_names(monkeypatch: pytest.MonkeyPatch) -> None:

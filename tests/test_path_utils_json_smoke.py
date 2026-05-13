@@ -51,7 +51,6 @@ def test_save_json_keeps_existing_file_when_new_payload_not_serializable(tmp_pat
 def test_safe_extract_zip_reports_progress(tmp_path) -> None:
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
-    extract_dir.mkdir(parents=True, exist_ok=True)
     data_a = b"a" * 4096
     data_b = b"b" * 2048
 
@@ -79,6 +78,19 @@ def test_safe_extract_zip_reports_progress(tmp_path) -> None:
     assert any(done > 0 for done in done_values[1:])
     assert all(0 <= done <= total for done, total in progress_events)
     assert all(total == expected_total for _done, total in progress_events)
+
+
+def test_safe_extract_zip_rejects_excessive_uncompressed_size(tmp_path) -> None:
+    zip_path = tmp_path / "server.zip"
+    extract_dir = tmp_path / "extracted"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("mods/huge.jar", b"x" * 2048)
+
+    with pytest.raises(ValueError, match="大小超過安全上限"):
+        PathUtils.safe_extract_zip(zip_path, extract_dir, max_total_uncompressed_bytes=1024)
+
+    assert not (extract_dir / "mods" / "huge.jar").exists()
 
 
 @pytest.mark.parametrize("member_name", ["../evil.txt", "mods/../evil.txt", "/absolute/evil.txt", r"..\evil.txt"])

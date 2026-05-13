@@ -341,6 +341,7 @@ class HTTPUtils:
             temp_path_obj = local_path_obj.with_name(local_path_obj.name + ".part")
         try:
             final_headers = cls.get_default_headers()
+            _rate_limiter.wait(urlparse(url).netloc)
             with cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))

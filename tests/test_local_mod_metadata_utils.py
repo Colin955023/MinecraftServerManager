@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import zipfile
 from types import SimpleNamespace
 
 from src.core.local_mod_scanner import LocalModScanner
@@ -65,3 +66,13 @@ def test_collect_installed_mod_versions_groups_by_project_id() -> None:
 
 def test_local_mod_scanner_extract_version_uses_clean_version() -> None:
     assert LocalModScanner.extract_version_from_filename("Connector-1.0.0-beta.46+1.20.1") == "1.0.0"
+
+
+def test_local_mod_scanner_rejects_oversized_json_metadata(tmp_path) -> None:
+    jar_path = tmp_path / "oversized.jar"
+    with zipfile.ZipFile(jar_path, "w") as jar:
+        jar.writestr("fabric.mod.json", '{"name":"Example"}')
+
+    with zipfile.ZipFile(jar_path, "r") as jar:
+        assert LocalModScanner.read_json_from_jar(jar, "fabric.mod.json", max_bytes=8) is None
+        assert LocalModScanner.read_json_from_jar(jar, "fabric.mod.json", max_bytes=128) == {"name": "Example"}

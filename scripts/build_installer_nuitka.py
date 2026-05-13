@@ -30,6 +30,7 @@ QT_PLUGIN_DLL_EXCLUDES = (
     "PySide6/qt-plugins/platforms/qoffscreen.dll",
 )
 QT_PLUGIN_INCLUDE_FAMILIES = "platforms,imageformats"
+EXECUTABLE_NAME = "MinecraftServerManager.exe"
 
 
 def print_error_and_exit(msg: str, exit_code: int = 1):
@@ -42,8 +43,6 @@ def main():
     project_root = script_dir.parents[0]
     os.chdir(project_root)
 
-    is_ci = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
-
     logging.info("Step 0: 讀取版本資訊...")
     try:
         sys.path.insert(0, str(project_root))
@@ -55,7 +54,7 @@ def main():
 
     logging.info("Step 1: 清理舊產物與鎖定進程...")
     subprocess.run(
-        ["taskkill", "/F", "/T", "/IM", f"{APP_NAME}.exe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ["taskkill", "/F", "/T", "/IM", EXECUTABLE_NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
 
     clean_dirs = ["build", "dist", "main.dist", "main.build"]
@@ -73,10 +72,14 @@ def main():
         subprocess.run([sys.executable, "-m", "pip", "install", "uv"], check=True)
 
     venv_path = project_root / ".venv"
-    if not is_ci and venv_path.exists():
+    recreate_venv = os.environ.get("MSM_RECREATE_VENV", "").strip().lower() in {"1", "true", "yes", "y"}
+    if recreate_venv and venv_path.exists():
         shutil.rmtree(venv_path, ignore_errors=True)
 
-    subprocess.run(["uv", "venv", ".venv", "--clear"], check=True)
+    if recreate_venv or not (venv_path / "pyvenv.cfg").exists():
+        subprocess.run(["uv", "venv", ".venv", "--clear"], check=True)
+    else:
+        logging.info("重用既有 .venv；若需完全重建，請設定 MSM_RECREATE_VENV=1")
     subprocess.run(["uv", "sync", "--group", "build", "--frozen"], check=True)
 
     logging.info("Step 3: Nuitka 高效編譯...")
@@ -93,7 +96,7 @@ def main():
         "--assume-yes-for-downloads",
         "--remove-output",
         "--output-dir=dist",
-        "--output-filename=MinecraftServerManager.exe",
+        f"--output-filename={EXECUTABLE_NAME}",
         "--include-package=src",
         "--include-data-dir=assets=assets",
         "--include-data-file=README.md=README.md",
@@ -143,16 +146,14 @@ def main():
     if not dist_target.exists():
         print_error_and_exit(f"找不到 Nuitka 輸出目錄，預期 {dist_main_dist} 或 {dist_msm_dist}")
 
-    if not (dist_target / "MinecraftServerManager.exe").exists():
+    if not (dist_target / EXECUTABLE_NAME).exists():
         print_error_and_exit("找不到已編譯的執行檔")
 
     required_qt_plugins = [
         dist_target / "PySide6" / "qt-plugins" / "platforms" / "qwindows.dll",
         dist_target / "PySide6" / "qt-plugins" / "imageformats" / "qico.dll",
     ]
-    missing_qt_plugins = [
-        str(plugin.relative_to(dist_target)) for plugin in required_qt_plugins if not plugin.exists()
-    ]
+    missing_qt_plugins = [str(plugin.relative_to(dist_target)) for plugin in required_qt_plugins if not plugin.exists()]
     if missing_qt_plugins:
         error_msg = "Qt runtime 外掛遺失，打包後可能無法啟動：\n" + "\n".join(
             [f" - {plugin}" for plugin in missing_qt_plugins]
@@ -175,32 +176,13 @@ def main():
         check=True,
     )
 
-    logging.info("Step 5: 封裝免安裝版...")
-    pwsh = shutil.which("pwsh") or "powershell"
-    subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            "scripts/package-portable.ps1",
-            "-Version",
-            APP_VERSION,
-        ],
-        check=True,
-    )
-
-    logging.info("Step 6: 驗證建置產物...")
+    logging.info("Step 5: 驗證建置產物...")
     dist_dir = project_root / "dist"
     setup_file = dist_dir / f"{APP_NAME}-Setup-{APP_VERSION}.exe"
-    portable_file = dist_dir / f"MinecraftServerManager-v{APP_VERSION}-portable.zip"
 
     missing_artifacts = []
     if not setup_file.exists():
         missing_artifacts.append(f"安裝程式 ({setup_file.name})")
-    if not portable_file.exists():
-        missing_artifacts.append(f"免安裝版 ({portable_file.name})")
 
     if missing_artifacts:
         error_msg = "遺失建置產物：\n" + "\n".join([f" - {a}" for a in missing_artifacts])
@@ -211,8 +193,7 @@ def main():
     logging.info("========================================================")
     logging.info("")
     logging.info(f"安裝程式：{setup_file.relative_to(project_root)}")
-    logging.info(f"免安裝版：{portable_file.relative_to(project_root)}")
-    logging.info("SHA256 將由 GitHub Release asset 的 digest 提供")
+    logging.info("SHA-256 將由 GitHub Release asset 的 digest 提供")
     logging.info("========================================================")
     logging.info("")
 

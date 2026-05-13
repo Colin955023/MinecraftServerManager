@@ -3,6 +3,7 @@
 """
 
 from collections.abc import Callable
+from html import escape
 from pathlib import Path
 
 from ..utils import (
@@ -410,6 +411,10 @@ class ModManager:
                 )
             return PathUtils.to_json_str(export_data, indent=2)
         if format_type == "html":
+
+            def _html(value: object) -> str:
+                return escape(str(value or ""), quote=True)
+
             html = [
                 "<!DOCTYPE html>",
                 '<html lang="zh-TW">',
@@ -422,7 +427,13 @@ class ModManager:
             ]
             for mod in mods:
                 html.append(
-                    f"<tr><td>{('✅' if mod.status == ModStatus.ENABLED else '❌')}</td><td>{mod.name}</td><td>{mod.version}</td><td>{mod.author}</td><td>{mod.description}</td></tr>"
+                    "<tr>"
+                    f"<td>{'✅' if mod.status == ModStatus.ENABLED else '❌'}</td>"
+                    f"<td>{_html(mod.name)}</td>"
+                    f"<td>{_html(mod.version)}</td>"
+                    f"<td>{_html(mod.author)}</td>"
+                    f"<td>{_html(mod.description)}</td>"
+                    "</tr>"
                 )
             html.append("</table></body></html>")
             return "\n".join(html)

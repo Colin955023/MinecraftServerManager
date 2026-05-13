@@ -29,7 +29,7 @@
 - **模組索引管線**：新增 `mod_index_manager`、`mod_provider_metadata` 與 `mod_semantics`，支援增量掃描與 provider 資料整併功能。
 - **伺服器實例工具組**：新增 `server_instance` 及拆分後的 `server_detection_utils`、`server_detection_version_utils`、`server_properties_utils` 與 `server_runtime_utils` 以落實職責分離。
 - **通用基礎設施**：新增 `background_task`（背景任務）、`atomic_writer`（原子寫入）、`exception_utils`（例外處理）、`update_parsing` 與 `virtual_list`（虛擬列表）等工具模組。
-- **自動化測試測試**：新增並擴充 Smoke 與整合測試，涵蓋模組管理、版本解析、設定檔 I/O 及 UI DPI 適應行為。
+- **自動化測試**：新增並擴充 Smoke 與整合測試，涵蓋模組管理、版本解析、設定檔 I/O 及 UI DPI 適應行為。
 
 ### 調整
 - **架構重構**：重構 `mod_management`、`manage_server_frame` 與 `main_window` UI 架構，降低模組間耦合度並改善操作流暢度。

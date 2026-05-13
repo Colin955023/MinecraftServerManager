@@ -205,9 +205,6 @@ def test_parse_remote_checksum_payload_accepts_sha256() -> None:
     assert LoaderManager._parse_remote_checksum_payload(payload, "sha256") == checksum
 
 
-# SHA-1 is intentionally unsupported; only SHA-256 / SHA-512 are accepted.
-
-
 def test_download_file_with_progress_requires_secure_hash(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     manager = LoaderManager.__new__(LoaderManager)
     errors: list[str] = []

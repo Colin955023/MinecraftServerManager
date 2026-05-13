@@ -132,6 +132,7 @@ class ServerMonitorWindow:
             height=Sizes.DIALOG_LARGE_HEIGHT,
             center_on_parent=False,
             make_modal=False,
+            topmost=False,
             delay_ms=250,
         )
         self.window.setObjectName("ServerMonitorWindow")
@@ -185,9 +186,6 @@ class ServerMonitorWindow:
         finally:
             try:
                 self.window.show()
-                self.window.raise_()
-                self.window.activateWindow()
-                self.window.setFocus()
             except Exception as e:
                 logger.debug(f"顯示監控視窗失敗: {e}", "ServerMonitorWindow")
 
@@ -939,9 +937,6 @@ class ServerMonitorWindow:
             self.start_console_flusher()
         if self.window:
             self.window.show()
-            self.window.raise_()
-            self.window.activateWindow()
-            self.window.setFocus()
 
     def handle_server_ready(self):
         """伺服器啟動完成後的 UI 處理"""

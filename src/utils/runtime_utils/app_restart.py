@@ -154,7 +154,7 @@ class AppRestart:
 
     @staticmethod
     def _find_exe_fallback() -> Path | None:
-        """尋找可能的可執行檔（可攜版 exe）作為重啟備援，回傳第一個存在的 Path 或 None。"""
+        """尋找可能的可執行檔（可攜式 exe）作為重啟備援，回傳第一個存在的 Path 或 None。"""
         try:
             candidates = [
                 Path.cwd() / "MinecraftServerManager.exe",
@@ -331,7 +331,7 @@ class AppRestart:
             if not supported:
                 exe_fallback = AppRestart._find_exe_fallback()
                 if exe_fallback:
-                    details = f"模式=打包(備援); 執行檔={str(exe_fallback)!r}; 是否存在=True; 是否是檔案=True; 備註='找到可攜版 exe 備援'"
+                    details = f"模式=打包(備援); 執行檔={str(exe_fallback)!r}; 是否存在=True; 是否是檔案=True; 備註='找到可攜式 exe 備援'"
                     return (True, details)
             details = f"模式=腳本; 腳本路徑={script_path!r}; 解析後腳本={str(script_resolved)!r}; 是否存在={exists}; 是否是檔案={is_file}"
             return (supported, details)
