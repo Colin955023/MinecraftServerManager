@@ -197,8 +197,9 @@ class SubprocessUtils:
             QProcess 的結束代碼、輸出與取消狀態。
         """
 
-        if not isinstance(QtWidgets.QApplication.instance(), QtWidgets.QApplication):
-            _app = QtWidgets.QApplication([])  # 建立 QApplication 避免後續 UI 初始化失敗
+        app = QtWidgets.QApplication.instance()
+        if not isinstance(app, QtWidgets.QApplication):
+            app = QtWidgets.QApplication([])
 
         process = SubprocessUtils.create_qprocess_checked(cmd, cwd=cwd)
         stdout_chunks: list[str] = []
