@@ -319,7 +319,7 @@ class ServerManager:
                     # 回滾時只移除本次建立的伺服器資料夾，避免殘留半成品。
                     PathUtils.delete_within(self.servers_root, server_path)
             except Exception:
-                server_path = server_path
+                pass
             # 嘗試終止殘留 Java 進程
             try:
                 killed = False

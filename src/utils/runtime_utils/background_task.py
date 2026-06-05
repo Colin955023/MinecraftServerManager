@@ -180,7 +180,7 @@ class _QtRunnable(QtCore.QRunnable):
             return
         try:
             result = self.call()
-        except BaseException as exc:
+        except Exception as exc:
             self.future.set_exception(exc)
             return
         self.future.set_result(result)

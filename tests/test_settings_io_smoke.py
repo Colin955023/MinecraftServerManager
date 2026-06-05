@@ -159,14 +159,14 @@ def test_settings_manager_concurrent_window_pref_updates_preserve_snapshot_integ
 
     monkeypatch.setattr(settings_module.SettingsManager, "_save_settings", fake_save_settings)
 
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
     start = threading.Barrier(2)
 
     def _run(work) -> None:
         try:
             start.wait(timeout=5)
             work()
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
 
     threads = [
