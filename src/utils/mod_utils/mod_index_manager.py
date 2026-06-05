@@ -48,8 +48,8 @@ class ModIndexManager:
                     FILE_ATTRIBUTE_HIDDEN = 0x02
                     ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
                 except (AttributeError, OSError) as _:
-                    # 無法設為隱藏則忽略
-                    logger.debug("無法設定資料夾隱藏屬性，忽略")
+                    # 無法設為隱藏時直接略過。
+                    logger.debug("無法設定資料夾隱藏屬性，已略過")
         except OSError as e:
             logger.debug(f"初始化索引目錄時發生 OSError: {e}")
         self._index_lock = threading.RLock()

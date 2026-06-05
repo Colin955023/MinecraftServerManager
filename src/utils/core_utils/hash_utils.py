@@ -1,6 +1,6 @@
 """檔案雜湊工具。
 
-提供同步與非同步的檔案雜湊計算，並使用背景 worker pool 避免阻塞主執行緒。
+提供同步與非同步的檔案雜湊計算，並使用背景工作池避免阻塞主執行緒。
 """
 
 import asyncio
@@ -8,7 +8,7 @@ import hashlib
 from functools import lru_cache
 from pathlib import Path
 
-from ..runtime_utils.worker_pool import get_shared_worker_pool, submit_to_worker_pool
+from ..runtime_utils.worker_pool import submit_to_worker_pool
 from .logger import get_logger
 
 logger = get_logger().bind(component="HashUtils")
@@ -51,7 +51,7 @@ def _compute_file_hash_cached_internal(
     file_path: str, algorithm: str, mtime_ns: int, file_size: int, chunk_size: int
 ) -> str:
     """
-    透過快取避免重複計算，並發派任務到 ThreadPoolExecutor 防止阻塞主執行緒。
+    透過快取避免重複計算，並發派任務到 Qt 工作池防止阻塞主執行緒。
     """
     del mtime_ns, file_size  # 用於快取鍵值
     future = submit_to_worker_pool(compute_file_hash_sync, file_path, algorithm, chunk_size)
@@ -105,12 +105,5 @@ async def compute_file_hash_async(
     Returns:
         計算後的雜湊字串；失敗時回傳空字串。
     """
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        get_shared_worker_pool(),
-        compute_file_hash,
-        str(file_path),
-        algorithm,
-        chunk_size,
-        use_cache,
-    )
+    future = submit_to_worker_pool(compute_file_hash, str(file_path), algorithm, chunk_size, use_cache)
+    return await asyncio.wrap_future(future)

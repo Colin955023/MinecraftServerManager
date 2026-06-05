@@ -1,6 +1,6 @@
 """背景任務工具與取消標記
 
-提供一個簡單的背景任務執行器（基於 ThreadPoolExecutor）與協作式取消（CancellationToken），
+提供一個簡單的背景任務執行器（基於 QThreadPool）與協作式取消（CancellationToken），
 供 UI 與 core 層在不阻塞主執行緒下執行長時間任務。
 
 規範：若任務支援取消，應接受名為 `cancel_token` 的參數並自行檢查其狀態。
@@ -12,9 +12,10 @@ import asyncio
 import concurrent.futures
 import functools
 import inspect
-import threading
 from collections.abc import Callable
 from typing import Any
+
+from PySide6 import QtCore
 
 from .. import get_logger
 
@@ -30,7 +31,7 @@ __all__ = [
 
 
 class CancellationToken:
-    """簡易的取消標記，用於協作式取消（cooperative cancellation）。"""
+    """簡易的取消標記，用於協作式取消。"""
 
     def __init__(self):
         self._cancelled = False
@@ -50,7 +51,8 @@ class BackgroundTaskManager:
     """簡單的背景任務執行器，支援取消 token 與回呼"""
 
     def __init__(self, max_workers: int = 4):
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self._pool = QtCore.QThreadPool()
+        self._pool.setMaxThreadCount(max(1, int(max_workers)))
 
     def run(
         self,
@@ -60,7 +62,7 @@ class BackgroundTaskManager:
         cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> concurrent.futures.Future:
-        """提交背景任務，完成後若提供 callback 會在背景執行緒呼叫 callback(result)。
+        """提交背景任務，完成後若提供 callback 會在背景執行緒呼叫。
 
         Args:
             fn: 要執行的函式。
@@ -74,7 +76,9 @@ class BackgroundTaskManager:
         """
         if cancel_token is not None and "cancel_token" not in kwargs:
             kwargs["cancel_token"] = cancel_token
-        future = self._executor.submit(fn, *args, **kwargs)
+        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+        runnable = _QtRunnable(future, functools.partial(fn, *args, **kwargs))
+        self._pool.start(runnable)
         if callback:
 
             def _on_done(f: concurrent.futures.Future):
@@ -103,10 +107,10 @@ class BackgroundTaskManager:
         cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> asyncio.Task:
-        """以 coroutine 介面執行任務。
+        """以協程介面執行任務。
 
         Args:
-            fn: 要執行的函式或 coroutine function。
+            fn: 要執行的函式或協程函式。
             *args: 傳入函式的位置參數。
             callback: 任務完成後的回呼。
             cancel_token: 協作式取消標記。
@@ -121,12 +125,13 @@ class BackgroundTaskManager:
         if inspect.iscoroutinefunction(fn):
             task = loop.create_task(fn(*args, **kwargs))
         else:
-            call = functools.partial(fn, *args, **kwargs)
+            future = self.run(fn, *args, callback=callback, cancel_token=cancel_token, **kwargs)
 
-            async def _run_in_executor():
-                return await loop.run_in_executor(self._executor, call)
+            async def _await_future():
+                return await asyncio.wrap_future(future)
 
-            task = loop.create_task(_run_in_executor())
+            task = loop.create_task(_await_future())
+            callback = None
 
         if callback:
 
@@ -149,13 +154,36 @@ class BackgroundTaskManager:
         return task
 
     def shutdown(self, wait: bool = True) -> None:
-        """關閉 executor，必要時等待既有任務完成。
+        """關閉 Qt 工作池，必要時等待既有任務完成。
 
         Args:
             wait: 是否等待既有任務完成。
         """
 
-        self._executor.shutdown(wait=wait)
+        if wait:
+            self._pool.waitForDone()
+        else:
+            self._pool.clear()
+
+
+class _QtRunnable(QtCore.QRunnable):
+    """在 QThreadPool 中執行 Python callable，並同步完成 Future。"""
+
+    def __init__(self, future: concurrent.futures.Future[Any], call: Callable[[], Any]) -> None:
+        super().__init__()
+        self.future = future
+        self.call = call
+        self.setAutoDelete(True)
+
+    def run(self) -> None:
+        if not self.future.set_running_or_notify_cancel():
+            return
+        try:
+            result = self.call()
+        except Exception as exc:
+            self.future.set_exception(exc)
+            return
+        self.future.set_result(result)
 
 
 _shared_manager: BackgroundTaskManager | None = None
@@ -180,33 +208,25 @@ def run_in_background(
     """使用共享 BackgroundTaskManager 的便利函式。
 
     若無法使用共享 manager（例：初始化失敗或其他稀有例外），
-    會回退到在新的 daemon thread 中直接啟動函式以保持向後相容性。
+    會同步完成一個 Future 以保持錯誤可觀測。
     """
     try:
         return get_shared_manager().run(fn, *args, callback=callback, **kwargs)
     except Exception as exc:
-        logger.warning(f"Shared BackgroundTaskManager unavailable, falling back to daemon thread: {exc}")
-
-        def _fallback_runner() -> None:
-            try:
-                res = fn(*args, **kwargs)
-            except Exception:
-                logger.exception("Background fallback thread raised an exception")
-                if callback:
-                    try:
-                        callback(None)
-                    except Exception:
-                        logger.exception("Background fallback callback raised an exception while handling failure")
-                return
+        logger.warning(f"Shared BackgroundTaskManager unavailable, running fallback Future synchronously: {exc}")
+        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as run_exc:
+            future.set_exception(run_exc)
+            logger.exception("Background fallback raised an exception")
             if callback:
-                try:
-                    callback(res)
-                except Exception:
-                    logger.exception("Background fallback callback raised an exception")
-
-        thread = threading.Thread(target=_fallback_runner, daemon=True)
-        thread.start()
-        return None
+                callback(None)
+        else:
+            future.set_result(result)
+            if callback:
+                callback(result)
+        return future
 
 
 def run_async_in_background(
@@ -214,7 +234,7 @@ def run_async_in_background(
 ) -> concurrent.futures.Future[Any] | asyncio.Task[Any]:
     """若在 asyncio loop 中，使用共享 manager 的 run_async；否則回傳 concurrent.futures.Future。
 
-    注意：呼叫者在 asyncio context 中應直接呼叫 `await get_shared_manager().run_async(...)`。
+    注意：呼叫者在 asyncio 環境中應直接呼叫 `await get_shared_manager().run_async(...)`。
     此函式提供在不確定執行環境時的便利層級。
     """
     try:

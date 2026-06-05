@@ -10,7 +10,7 @@
 | 網路 | requests + urllib3 Retry（集中 timeout / retry policy） |
 | 版本解析 | packaging |
 | XML 解析 | defusedxml（防止 XXE 攻擊） |
-| Release Notes 解析 | markdown |
+| Release Notes 清理 | 內建正規表示式與 HTML entity 解碼，轉為純文字後顯示 |
 | 測試 | pytest（smoke、integration） |
 | 靜態檢查 | ruff、mypy、bandit |
 
@@ -30,7 +30,7 @@ src/main.py
      ├── core/loader_manager.py   Fabric／Forge／Quilt／NeoForge 版本查詢與快取
      ├── ui/mod_management/*      本地模組列表、Review、安裝清單與同步顯示
      ├── ui/mod_search_service/*  Modrinth 搜尋、相容性分析、依賴規劃
-     └── utils/update_checker.py  更新檢查、下載與套用流程
+     └── utils/update_utils/*     更新檢查、資產選擇、下載與套用流程
 ```
 
 ---
@@ -64,26 +64,26 @@ src/main.py
 
 | 檔案 | 職責 |
 |------|------|
-| `settings_manager.py` | 設定讀寫與共享設定管理器存取 |
-| `http_utils.py` | requests session，集中 timeout／retry |
-| `window_manager.py` | Qt 視窗定位與狀態持久化 |
-| `logger.py` | 集中日誌初始化 |
-| `java_utils.py` / `java_downloader.py` | Java 自動偵測；必要時在背景透過 winget 安裝官方 JDK / JRE 並自動同意授權 |
-| `path_utils.py` / `runtime_paths.py` | 路徑解析（安裝版 vs. 可攜版） |
-| `update_checker.py` / `update_parsing.py` | GitHub Releases 更新檢查、資產選擇與驗證 |
+| `runtime_utils/settings_manager.py` | 設定讀寫與共享設定管理器存取 |
+| `network_utils/http_utils.py` | requests session，集中 timeout／retry |
+| `ui_support/window_manager.py` | Qt 視窗定位與狀態持久化 |
+| `core_utils/logger.py` | 集中日誌初始化 |
+| `java_support/java_utils.py` / `java_support/java_downloader.py` | Java 自動偵測；必要時透過 winget 安裝 Oracle JRE 8 或 Microsoft OpenJDK 並帶入授權接受參數 |
+| `core_utils/path_utils.py` / `runtime_utils/runtime_paths.py` | 安全路徑操作與執行模式資料路徑解析 |
+| `update_utils/update_checker.py` / `update_utils/update_parsing.py` | GitHub Releases 更新檢查、資產選擇與 digest 驗證 |
 
 ---
 
 ## 4. 視窗生命週期
 
-主視窗與大多數對話框採固定的顯示順序，避免初始化時出現閃爍：
+主視窗與大多數對話框採 Qt 視窗生命週期，避免在元件尚未完成佈局時顯示：
 
-1. `withdraw()` — 先隱藏
-2. 建立並佈置元件
-3. `geometry()` / `minsize()` 設定尺寸
-4. `deiconify()` — 完成後再顯示
+1. 建立 Qt widget 與 layout。
+2. 透過 `WindowManager` 計算螢幕、尺寸與置中位置。
+3. 呼叫 `resize()`、`move()`、`setMinimumSize()` 套用視窗幾何。
+4. 元件完成後再呼叫 `show()`；需要最大化時延後呼叫 `showMaximized()`。
 
-視窗偏好（位置、大小）由 `window_manager` 持久化至設定檔。可調整視窗不強制設定 `maxsize`；主視窗狀態僅在可見時追蹤。模組相關 Treeview 支援雙擊欄位標題自動調整欄寬。
+視窗偏好（位置、大小與最大化狀態）由 `ui_support/window_manager.py` 持久化至設定檔。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `qt.Treeview` 支援雙擊欄位標題自動調整欄寬。
 
 高解析度顯示縮放交由 Qt 6 與 Windows 原生設定處理。Qt Widgets 使用 device-independent pixels，Qt 6 在 Windows 會自動套用使用者的顯示比例，因此專案內不再保存或套用額外的 UI 縮放倍率。
 
@@ -97,31 +97,31 @@ src/main.py
 - **列表差異更新**：Treeview 只更新變動列，不整批重繪。
 - **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
 
-## 6. 支援的模組載入器
+## 6. 支援的伺服器類型與載入器
 
-本專案支援以下四種模組載入器：
+本專案支援原版伺服器與四種模組載入器：
 
 | 載入器 | 支援版本 | 說明 |
 |---|---|---|
 | Vanilla（原版） | 所有版本 | 官方 Minecraft 伺服器，無模組載入器 |
 | Fabric | 1.14+ | 輕量級模組載入器，廣泛支援 1.16+ 版本 |
-| Quilt | 1.14+ | 基於 Fabric 的改進版本，提供更好的相容性 |
-| Forge | 1.5+ | 功能豐富的老牌模組載入器，支援 1.5 到最新版本 |
-| NeoForge | 1.20.1+ | Forge 的現代化分支，在 1.20.1+ 上支援 |
+| Quilt | 1.14+ | 與 Fabric 生態相近的模組載入器，使用 Quilt Meta API 查詢版本 |
+| Forge | 1.5+ | 老牌模組載入器；可用版本以 Maven metadata 可解析結果為準 |
+| NeoForge | 1.20.1+ | Forge 生態的現代分支；可用版本以 NeoForge Maven metadata 為準 |
 
 ### 版本管理
 
 - **Fabric / Quilt**：從官方 Fabric / Quilt Meta API 取得穩定版本清單，支援依 Minecraft 版本過濾
-- **Forge / NeoForge**：從 Maven metadata 解析穩定版本，每個 Minecraft 版本保留最新 10 個版本
+- **Forge / NeoForge**：從 Maven metadata 解析版本，每個 Minecraft 版本保留最新 10 個版本
 
 ## 7. 資料與設定路徑
 
 | 模式 | 設定 | 日誌 | 快取 |
 |------|------|------|------|
-| 安裝版 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
-| 可攜版 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
+| 一般安裝 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
+| 可攜式安裝 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
 
-設定由 `settings_manager` 模組統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
+設定由 `runtime_utils/settings_manager.py` 統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
 
 ## 8. 開發指令
 
@@ -151,4 +151,4 @@ uv run report\comprehensive_report.py
 3. `src/core/server_manager.py` — 伺服器核心邏輯
 4. `src/core/mod_manager.py` — 模組服務
 5. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
-6. `src/utils/window_manager.py` — 視窗管理慣例
+6. `src/utils/ui_support/window_manager.py` — 視窗管理慣例

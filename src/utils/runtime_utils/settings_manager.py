@@ -2,6 +2,7 @@
 提供統一的使用者設定管理功能，包含自動更新與視窗偏好等。
 """
 
+import threading
 import time
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -86,6 +87,7 @@ class SettingsManager:
     """統一管理所有使用者設定的管理器類別"""
 
     def __init__(self):
+        self._lock = threading.RLock()
         self.settings_path = RuntimePaths.ensure_dir(RuntimePaths.get_user_data_dir()) / "user_settings.json"
         self._settings = self._load_settings()
         self._no_change_skip_count = 0
@@ -126,6 +128,38 @@ class SettingsManager:
 
         return (Path(base_dir).expanduser() / "servers").resolve()
 
+    @staticmethod
+    def _normalize_int_value(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except TypeError, ValueError:
+            return default
+
+    def _normalize_window_preferences(self, window_preferences: dict[str, Any]) -> WindowPreferences:
+        normalized_window = _copy_window_preferences()
+        normalized_window["remember_size_position"] = bool(
+            window_preferences.get("remember_size_position", normalized_window["remember_size_position"])
+        )
+        normalized_window["auto_center"] = bool(window_preferences.get("auto_center", normalized_window["auto_center"]))
+        normalized_window["adaptive_sizing"] = bool(
+            window_preferences.get("adaptive_sizing", normalized_window["adaptive_sizing"])
+        )
+        normalized_window["theme_mode"] = self._normalize_theme_mode(
+            window_preferences.get("theme_mode", normalized_window["theme_mode"])
+        )
+        main_window = window_preferences.get("main_window")
+        if isinstance(main_window, dict):
+            normalized_window["main_window"] = {
+                "width": self._normalize_int_value(main_window.get("width"), normalized_window["main_window"]["width"]),
+                "height": self._normalize_int_value(
+                    main_window.get("height"), normalized_window["main_window"]["height"]
+                ),
+                "x": main_window.get("x"),
+                "y": main_window.get("y"),
+                "maximized": bool(main_window.get("maximized", normalized_window["main_window"]["maximized"])),
+            }
+        return normalized_window
+
     def _normalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(_get_default_settings())
         normalized["servers_root"] = self.normalize_servers_base_dir(
@@ -135,64 +169,45 @@ class SettingsManager:
             normalized[key] = bool(settings.get(key, default))
         window_preferences = settings.get("window_preferences")
         if isinstance(window_preferences, dict):
-            normalized_window = _copy_window_preferences()
-            normalized_window["remember_size_position"] = bool(
-                window_preferences.get("remember_size_position", normalized_window["remember_size_position"])
-            )
-            normalized_window["auto_center"] = bool(
-                window_preferences.get("auto_center", normalized_window["auto_center"])
-            )
-            normalized_window["adaptive_sizing"] = bool(
-                window_preferences.get("adaptive_sizing", normalized_window["adaptive_sizing"])
-            )
-            normalized_window["theme_mode"] = self._normalize_theme_mode(
-                window_preferences.get("theme_mode", normalized_window["theme_mode"])
-            )
-            main_window = window_preferences.get("main_window")
-            if isinstance(main_window, dict):
-                normalized_window["main_window"] = {
-                    "width": int(main_window.get("width", normalized_window["main_window"]["width"])),
-                    "height": int(main_window.get("height", normalized_window["main_window"]["height"])),
-                    "x": main_window.get("x"),
-                    "y": main_window.get("y"),
-                    "maximized": bool(main_window.get("maximized", normalized_window["main_window"]["maximized"])),
-                }
-            normalized["window_preferences"] = normalized_window
+            normalized["window_preferences"] = self._normalize_window_preferences(window_preferences)
         return normalized
 
     def _load_settings(self) -> dict[str, Any]:
-        if not self.settings_path.exists():
-            default_settings = _get_default_settings()
-            self._save_settings(default_settings)
-            return default_settings
-        settings = PathUtils.load_json(self.settings_path)
-        if not settings:
-            return _get_default_settings()
-        if not isinstance(settings, dict):
-            return _get_default_settings()
-        return self._normalize_settings(settings)
+        with self._lock:
+            if not self.settings_path.exists():
+                default_settings = _get_default_settings()
+                self._save_settings(default_settings)
+                return default_settings
+            settings = PathUtils.load_json(self.settings_path)
+            if not settings:
+                return _get_default_settings()
+            if not isinstance(settings, dict):
+                return _get_default_settings()
+            return self._normalize_settings(settings)
 
     def _save_settings(self, settings: dict[str, Any]) -> None:
         # 若設定內容未變更則略過寫入以減少不必要的 I/O
-        try:
-            if self.settings_path.exists():
-                current = PathUtils.load_json(self.settings_path)
-                if isinstance(current, dict) and current == settings:
-                    self._no_change_skip_count += 1
-                    now_monotonic = time.monotonic()
-                    if (
-                        self._no_change_last_log_monotonic <= 0
-                        or (now_monotonic - self._no_change_last_log_monotonic) >= self._no_change_log_interval_seconds
-                    ):
-                        logger.debug(f"settings 未變更，跳過寫入（最近累計 {self._no_change_skip_count} 次）")
-                        self._no_change_skip_count = 0
-                        self._no_change_last_log_monotonic = now_monotonic
-                    return
-        except OSError as e:
-            logger.debug(f"比對 settings 檔案時發生 I/O 錯誤，改為直接寫入: {e}")
+        with self._lock:
+            try:
+                if self.settings_path.exists():
+                    current = PathUtils.load_json(self.settings_path)
+                    if isinstance(current, dict) and current == settings:
+                        self._no_change_skip_count += 1
+                        now_monotonic = time.monotonic()
+                        if (
+                            self._no_change_last_log_monotonic <= 0
+                            or (now_monotonic - self._no_change_last_log_monotonic)
+                            >= self._no_change_log_interval_seconds
+                        ):
+                            logger.debug(f"settings 未變更，跳過寫入（最近累計 {self._no_change_skip_count} 次）")
+                            self._no_change_skip_count = 0
+                            self._no_change_last_log_monotonic = now_monotonic
+                        return
+            except OSError as e:
+                logger.debug(f"比對 settings 檔案時發生 I/O 錯誤，改為直接寫入: {e}")
 
-        if not atomic_write_json(self.settings_path, settings):
-            logger.error("無法寫入 user_settings.json")
+            if not atomic_write_json(self.settings_path, settings):
+                logger.error("無法寫入 user_settings.json")
 
     def get(self, key: str, default: Any = None) -> Any:
         """取得指定鍵值的設定資料。
@@ -204,7 +219,11 @@ class SettingsManager:
         Returns:
             對應的設定值。
         """
-        return self._settings.get(key, default)
+        with self._lock:
+            value = self._settings.get(key, default)
+            if key == "window_preferences" and isinstance(value, dict):
+                return self._normalize_window_preferences(value)
+            return value
 
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
         """設定指定鍵值的資料。
@@ -214,9 +233,10 @@ class SettingsManager:
             value: 要寫入的設定值。
             immediate_save: 是否立即儲存到磁碟。
         """
-        self._settings[key] = value
-        if immediate_save:
-            self._save_settings(self._settings)
+        with self._lock:
+            self._settings[key] = value
+            if immediate_save:
+                self._save_settings(self._settings)
 
     def update_batch(self, updates: dict) -> None:
         """批次更新多個設定值並一次性儲存。
@@ -224,8 +244,9 @@ class SettingsManager:
         Args:
             updates: 要合併寫入的設定更新項目。
         """
-        self._settings.update(updates)
-        self._save_settings(self._settings)
+        with self._lock:
+            self._settings.update(updates)
+            self._save_settings(self._settings)
 
     def _get_bool_setting(self, key: str) -> bool:
         """通用的布林設定取得方法（內部使用）"""
@@ -248,8 +269,13 @@ class SettingsManager:
         return normalized if normalized in _THEME_MODES else DEFAULT_WINDOW_PREFERENCES["theme_mode"]
 
     def get_servers_root(self) -> str:
-        """取得使用者設定的伺服器主資料夾路徑。"""
-        return str(self._settings.get("servers_root", "")).strip()
+        """取得使用者設定的伺服器主資料夾路徑。
+
+        Returns:
+            目前設定的伺服器主資料夾根路徑字串；若尚未設定則回傳空字串。
+        """
+        with self._lock:
+            return str(self._settings.get("servers_root", "")).strip()
 
     def set_servers_root(self, path: str | Path) -> None:
         normalized_path = self.normalize_servers_base_dir(path)
@@ -297,10 +323,16 @@ class SettingsManager:
         self._set_bool_setting("first_run_completed", True)
 
     def get_window_preferences(self) -> WindowPreferences:
-        value = self._settings.get("window_preferences", _copy_window_preferences())
-        if isinstance(value, dict):
-            return cast(WindowPreferences, value)
-        return _copy_window_preferences()
+        """取得視窗偏好設定。
+
+        Returns:
+            已正規化且可安全讀取的視窗偏好設定。
+        """
+        with self._lock:
+            value = self._settings.get("window_preferences", _copy_window_preferences())
+            if isinstance(value, dict):
+                return self._normalize_window_preferences(value)
+            return _copy_window_preferences()
 
     def is_remember_size_position_enabled(self) -> bool:
         return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["remember_size_position"], True))
@@ -310,11 +342,16 @@ class SettingsManager:
         self._update_window_pref(key, enabled)
 
     def get_main_window_settings(self) -> MainWindowSettings:
-        """取得主視窗的大小、位置和狀態設定"""
-        return cast(
-            MainWindowSettings,
-            self.get_window_preferences().get("main_window", self.get_default_main_window_settings()),
-        )
+        """取得主視窗的大小、位置和狀態設定。
+
+        Returns:
+            主視窗尺寸、位置與最大化狀態設定。
+        """
+        with self._lock:
+            return cast(
+                MainWindowSettings,
+                dict(self.get_window_preferences().get("main_window", self.get_default_main_window_settings())),
+            )
 
     @staticmethod
     def get_default_main_window_settings() -> MainWindowSettings:
@@ -324,10 +361,19 @@ class SettingsManager:
     def set_main_window_settings(
         self, width: int, height: int, x: int | None = None, y: int | None = None, maximized: bool = False
     ) -> None:
-        """設定主視窗的大小、位置和最大化狀態"""
-        prefs: dict[str, Any] = dict(self.get_window_preferences())
-        prefs["main_window"] = {"width": width, "height": height, "x": x, "y": y, "maximized": maximized}
-        self.set("window_preferences", prefs)
+        """設定主視窗的大小、位置和最大化狀態。
+
+        Args:
+            width: 主視窗寬度。
+            height: 主視窗高度。
+            x: 主視窗左上角 X 座標，若不指定則保留為空。
+            y: 主視窗左上角 Y 座標，若不指定則保留為空。
+            maximized: 是否以最大化狀態儲存。
+        """
+        with self._lock:
+            prefs: dict[str, Any] = dict(self.get_window_preferences())
+            prefs["main_window"] = {"width": width, "height": height, "x": x, "y": y, "maximized": maximized}
+            self.set("window_preferences", prefs)
 
     def is_auto_center_enabled(self) -> bool:
         """檢查是否啟用自動置中新視窗的功能"""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 from typing import cast
 
@@ -100,3 +101,13 @@ def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_
 def test_validate_cmd_rejects_blank_executable() -> None:
     with pytest.raises(ValueError, match="cmd\\[0\\] 不得為空"):
         subprocess_utils_module.SubprocessUtils._validate_cmd(["   "])
+
+
+def test_run_qprocess_checked_collects_stdout() -> None:
+    result = subprocess_utils_module.SubprocessUtils.run_qprocess_checked(
+        [sys.executable, "-c", "print('qprocess-ok')"]
+    )
+
+    assert result.returncode == 0
+    assert "qprocess-ok" in result.stdout
+    assert result.pid > 0

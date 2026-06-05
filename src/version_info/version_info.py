@@ -4,7 +4,7 @@ Version Information and Application Constants Definition
 Defines application version, name and related system constants
 """
 
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 APP_NAME = "Minecraft Server Manager"
 APP_DESCRIPTION = "Minecraft 伺服器管理器"
 GITHUB_OWNER = "Colin955023"

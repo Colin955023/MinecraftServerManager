@@ -12,6 +12,7 @@ from typing import Any, cast
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .. import get_logger
+from .fluent import FluentLineEdit, FluentProgressBar, FluentPushButton, FluentSearchLineEdit, SearchFilter
 from .qt_runtime import ValueState, is_qobject_alive
 
 logger = get_logger().bind(component="QtWidgets")
@@ -30,6 +31,7 @@ BOTH = "both"
 X = "x"
 Y = "y"
 INVALID_MODEL_INDEX = QtCore.QModelIndex()
+_QAbstractItemModel: Any = QtCore.QAbstractItemModel
 
 
 def ensure_app():
@@ -826,9 +828,13 @@ class Label(WidgetMixin, QtWidgets.QLabel):
         self.setAlignment(_align(kwargs.get("anchor")))
 
 
-class Button(WidgetMixin, QtWidgets.QPushButton):
+class Button(WidgetMixin, FluentPushButton):
     def __init__(self, parent: Any = None, text: str = "", command: Callable[..., Any] | None = None, **kwargs: Any):
-        QtWidgets.QPushButton.__init__(self, str(text), _native_parent(parent))
+        try:
+            FluentPushButton.__init__(self, str(text), _native_parent(parent))
+        except TypeError:
+            FluentPushButton.__init__(self, _native_parent(parent))
+            self.setText(str(text))
         self._command = command
         if command is not None:
             self.clicked.connect(self._invoke_command)
@@ -851,9 +857,9 @@ class Button(WidgetMixin, QtWidgets.QPushButton):
         super().configure(**kwargs)
 
 
-class Entry(WidgetMixin, QtWidgets.QLineEdit):
+class Entry(WidgetMixin, FluentLineEdit):
     def __init__(self, parent: Any = None, textvariable: Variable | None = None, **kwargs: Any) -> None:
-        QtWidgets.QLineEdit.__init__(self, _native_parent(parent))
+        FluentLineEdit.__init__(self, _native_parent(parent))
         self._variable = textvariable
         if textvariable is not None:
             self.setText(str(textvariable.get()))
@@ -877,6 +883,61 @@ class Entry(WidgetMixin, QtWidgets.QLineEdit):
     def select_range(self, start: int, end: Any) -> None:
         length = len(self.text()) if end == END else int(end) - int(start)
         self.setSelection(int(start), max(0, length))
+
+
+class SearchEntry(WidgetMixin, FluentSearchLineEdit):
+    """SearchLineEdit wrapper with project state binding and filter logic."""
+
+    def __init__(
+        self,
+        parent: Any = None,
+        textvariable: Variable | None = None,
+        search_command: Callable[..., Any] | None = None,
+        filter_logic: SearchFilter | None = None,
+        **kwargs: Any,
+    ) -> None:
+        FluentSearchLineEdit.__init__(self, _native_parent(parent))
+        self._variable = textvariable
+        self._search_command = search_command
+        self.filter_logic = filter_logic or SearchFilter()
+        if hasattr(self, "setClearButtonEnabled"):
+            with context_suppress():
+                self.setClearButtonEnabled(True)
+        if textvariable is not None:
+            self.setText(str(textvariable.get()))
+            self.textChanged.connect(textvariable.set)
+            textvariable.trace_add("write", lambda *_: self._sync_from_variable())
+        with context_suppress():
+            self.searchSignal.connect(self._on_search_signal)
+        with context_suppress():
+            self.clearSignal.connect(self._on_clear_signal)
+        self._init_native(parent, **kwargs)
+
+    def _sync_from_variable(self) -> None:
+        if self._variable is None:
+            return
+        value = str(self._variable.get())
+        if self.text() != value:
+            self.setText(value)
+
+    def _on_search_signal(self, *_args: Any) -> None:
+        if self._search_command is not None:
+            self._search_command()
+        self._dispatch_event("search")
+
+    def _on_clear_signal(self, *_args: Any) -> None:
+        if self._variable is not None:
+            self._variable.set("")
+        self._dispatch_event("clear")
+
+    def get(self) -> str:
+        return self.text()
+
+    def filter_text(self) -> str:
+        return self.filter_logic.normalize(self.text())
+
+    def matches(self, candidate: Any) -> bool:
+        return self.filter_logic.matches(candidate, self.text())
 
 
 class TextBox(WidgetMixin, QtWidgets.QTextEdit):
@@ -1002,14 +1063,60 @@ class Slider(WidgetMixin, QtWidgets.QSlider):
         return self.value() / self._scale
 
 
-class ProgressBar(WidgetMixin, QtWidgets.QProgressBar):
+class _ProgressSignalProxy(QtCore.QObject):
+    value_requested = QtCore.Signal(float)
+
+
+class ProgressBar(WidgetMixin, FluentProgressBar):
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QProgressBar.__init__(self, _native_parent(parent))
+        FluentProgressBar.__init__(self, _native_parent(parent))
         self.setRange(0, 100)
+        self.setTextVisible(True)
+        self.setFormat("%p%")
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self._progress_signal_proxy = _ProgressSignalProxy(self)
+        self._progress_signal_proxy.value_requested.connect(self._apply_progress_value)
         self._init_native(parent, **kwargs)
 
     def set(self, value: float) -> None:
+        self._progress_signal_proxy.value_requested.emit(float(value))
+
+    @QtCore.Slot(float)
+    def _apply_progress_value(self, value: float) -> None:
         self.setValue(int(float(value) * 100 if float(value) <= 1 else float(value)))
+
+    def paintEvent(self, event: Any) -> None:
+        super().paintEvent(event)
+        if not self.isTextVisible():
+            return
+        text = self.text()
+        if not text:
+            return
+
+        painter = QtGui.QPainter(self)
+        try:
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing, True)
+
+            font = QtGui.QFont(self.font())
+            font_size = max(8, min(12, max(8, int(self.height() * 0.58))))
+            if font.pointSize() > 0:
+                font.setPointSize(font_size)
+            else:
+                font.setPixelSize(font_size)
+            painter.setFont(font)
+
+            rect = self.rect().adjusted(4, 0, -4, 0)
+            alignment = QtCore.Qt.AlignmentFlag.AlignCenter
+            shadow = QtGui.QColor(0, 0, 0, 180)
+            text_color = QtGui.QColor("#f8fafc") if is_dark_color_scheme() else QtGui.QColor("#0f172a")
+            painter.setPen(shadow)
+            painter.drawText(rect.translated(1, 1), alignment, text)
+            painter.drawText(rect.translated(-1, 0), alignment, text)
+            painter.setPen(text_color)
+            painter.drawText(rect, alignment, text)
+        finally:
+            painter.end()
 
     def stop(self) -> None:
         return None
@@ -1102,7 +1209,7 @@ class _TreeRow:
         return QtGui.QBrush(QtGui.QColor(color)) if color else QtGui.QBrush()
 
 
-class _TreeModel(QtCore.QAbstractItemModel):
+class _TreeModel(_QAbstractItemModel):
     def __init__(self, columns: list[str], tag_styles: dict[str, dict[str, str]], parent: Any = None) -> None:
         super().__init__(parent)
         self.columns = list(columns)
@@ -1147,7 +1254,10 @@ class _TreeModel(QtCore.QAbstractItemModel):
         except IndexError:
             return QtCore.QModelIndex()
 
-    def parent(self, index: QtCore.QModelIndex) -> QtCore.QModelIndex:  # type: ignore[override]
+    def parent(
+        self,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+    ) -> QtCore.QModelIndex:
         if not index.isValid():
             return QtCore.QModelIndex()
         row = self._row_from_index(index)
@@ -1577,7 +1687,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         self._model.set_cell(str(item), idx, value)
         return None
 
-    def move(self, item: str, _parent: str = "", index: int = 0) -> None:  # type: ignore[override]
+    def move(self, item: Any, _parent: Any = "", index: Any = 0) -> None:
         self._model.move_item(str(item), str(_parent or ""), int(index))
 
     def index(self, item: str) -> int:
@@ -1782,7 +1892,7 @@ class Listbox(WidgetMixin, QtWidgets.QListWidget):
         if item is not None:
             self.scrollToItem(item)
 
-    def size(self) -> int:  # type: ignore[override]
+    def size(self) -> Any:
         return self.count()
 
     def get(self, index: int) -> str:

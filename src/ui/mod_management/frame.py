@@ -37,6 +37,10 @@ from .review import ModManagementReviewMixin
 from .tree_sync import ModManagementTreeSyncMixin
 
 
+class _ModManagementSignals(qt.QtCore.QObject):
+    progress_requested = qt.QtCore.Signal(float)
+
+
 class ModManagementFrame(
     ModManagementQueueMixin, ModManagementReviewMixin, ModManagementInstallExecutorMixin, ModManagementTreeSyncMixin
 ):
@@ -97,11 +101,15 @@ class ModManagementFrame(
         }
         self._last_mods_dir: str | None = None
         self._last_mods_dir_mtime: float | None = None
+        self._last_mods_dir_signature: tuple[tuple[str, int, int], ...] | None = None
+        self._local_mods_load_token = 0
         self._status_update_job = None
         self._pending_status_message: str = ""
         self.ui_queue: queue.Queue = queue.Queue()
         self.create_widgets()
         host = self.main_frame if qt.is_alive(self.main_frame) else self.parent
+        self._signals = _ModManagementSignals(host if qt.is_alive(host) else None)
+        self._signals.progress_requested.connect(self._apply_progress_value)
         TaskUtils.start_ui_queue_pump(host, self.ui_queue)
         self.load_servers()
 
@@ -159,24 +167,29 @@ class ModManagementFrame(
         self.ui_queue.put(lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
-        """將進度更新排入 UI 佇列執行。
+        """將進度更新交給 Qt signal 執行。
 
         Args:
             value: 介於 0 到 1 的進度值。
         """
+        signals = getattr(self, "_signals", None)
+        if signals is not None:
+            signals.progress_requested.emit(float(value))
+            return
 
-        def _update():
-            if hasattr(self, "progress_var") and self.progress_var:
-                try:
-                    self.progress_var.set(value)
-                except (AttributeError, RuntimeError) as e:
-                    logger.warning(f"更新進度遇到暫時性問題: {e}")
-                except AppException as e:
-                    logger.info(f"更新進度被應用例外攔截: {e}")
-                except Exception:
-                    logger.error("更新進度失敗: 未知錯誤\n" + traceback.format_exc())
+        self.ui_queue.put(lambda: self._apply_progress_value(float(value)))
 
-        self.ui_queue.put(_update)
+    @qt.QtCore.Slot(float)
+    def _apply_progress_value(self, value: float) -> None:
+        if hasattr(self, "progress_var") and self.progress_var:
+            try:
+                self.progress_var.set(value)
+            except (AttributeError, RuntimeError) as e:
+                logger.warning(f"更新進度遇到暫時性問題: {e}")
+            except AppException as e:
+                logger.info(f"更新進度被應用例外攔截: {e}")
+            except Exception:
+                logger.error("更新進度失敗: 未知錯誤\n" + traceback.format_exc())
 
     def _apply_local_toggle_success(
         self,

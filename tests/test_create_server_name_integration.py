@@ -32,17 +32,6 @@ class _Combo:
         self.selected = value
 
 
-class _NoopThread:
-    def __init__(self, target=None, args=(), daemon=None) -> None:
-        self.target = target
-        self.args = args
-        self.daemon = daemon
-
-    def start(self) -> None:
-        # 測試命名流程時不需要真正啟動背景載入。
-        return
-
-
 def _make_frame(
     name: str, loader_type: str = "Vanilla", mc_version: str = "1.21.1"
 ) -> create_server_module.CreateServerFrame:
@@ -58,7 +47,7 @@ def _make_frame(
 
 
 def test_server_name_keeps_manual_suffix_when_switching_loader(monkeypatch) -> None:
-    monkeypatch.setattr(create_server_module.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(create_server_module.TaskUtils, "run_async", lambda *_args, **_kwargs: None)
     frame = _make_frame("1.21.1 我的服")
     frame.old_mc_version = "1.21.1"
 
@@ -76,7 +65,7 @@ def test_server_name_keeps_manual_suffix_when_switching_loader(monkeypatch) -> N
 
 
 def test_server_name_keeps_manual_suffix_when_mc_version_changes(monkeypatch) -> None:
-    monkeypatch.setattr(create_server_module.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(create_server_module.TaskUtils, "run_async", lambda *_args, **_kwargs: None)
     frame = _make_frame("Fabric 1.21.1 我的服", loader_type="Fabric", mc_version="1.20.6")
     frame.old_mc_version = "1.21.1"
 

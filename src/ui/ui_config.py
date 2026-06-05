@@ -6,6 +6,7 @@
 
 from typing import Any, ClassVar
 
+from ..utils.ui_support.fluent import apply_fluent_theme
 from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ensure_application
 
 
@@ -107,7 +108,48 @@ def _dialog_control_stylesheet(
         f"background: {panel_2}; }}"
         f"{_scope_selector('QComboBox QAbstractItemView', scope)} {{ background: {input_bg}; color: {text}; "
         f"selection-background-color: {selection}; selection-color: {text}; }}"
-        f"{_scope_selector('QCheckBox, QRadioButton', scope)} {{ color: {text}; spacing: 6px; background: transparent; }}"
+        + _checkbox_stylesheet(
+            text=text,
+            unchecked_fill=input_bg,
+            unchecked_border=input_border,
+            checked_fill=primary,
+            checked_border=primary_hover,
+            hover_fill=panel_2,
+            checked_hover_fill=primary_hover,
+            disabled_fill=panel_2,
+            disabled_border=disabled_button,
+            scope=scope,
+        )
+        + f"{_scope_selector('QRadioButton', scope)} {{ color: {text}; spacing: 6px; background: transparent; }}"
+    )
+
+
+def _checkbox_stylesheet(
+    *,
+    text: str,
+    unchecked_fill: str,
+    unchecked_border: str,
+    checked_fill: str,
+    checked_border: str,
+    hover_fill: str,
+    checked_hover_fill: str,
+    disabled_fill: str,
+    disabled_border: str,
+    scope: str | None = None,
+) -> str:
+    checkbox = _scope_selector("QCheckBox", scope)
+    indicator = _scope_selector("QCheckBox::indicator", scope)
+    unchecked_indicator = _scope_selector("QCheckBox::indicator:unchecked", scope)
+    checked_indicator = _scope_selector("QCheckBox::indicator:checked", scope)
+    return (
+        f"{checkbox} {{ color: {text}; spacing: 8px; background: transparent; }}"
+        f"{indicator} {{ width: 18px; height: 18px; border-radius: 5px; border: 2px solid {unchecked_border}; "
+        f"background: {unchecked_fill}; }}"
+        f"{unchecked_indicator}:hover {{ border-color: {checked_border}; background: {hover_fill}; }}"
+        f"{checked_indicator} {{ border-color: {checked_border}; background: {checked_fill}; }}"
+        f"{checked_indicator}:hover {{ border-color: {checked_border}; background: {checked_hover_fill}; }}"
+        f"{unchecked_indicator}:disabled {{ border-color: {disabled_border}; background: {disabled_fill}; }}"
+        f"{checked_indicator}:disabled {{ border-color: {disabled_border}; background: {disabled_border}; }}"
     )
 
 
@@ -418,6 +460,7 @@ def initialize_ui_theme(mode: str = "light") -> None:
     app.styleHints().setColorScheme(_requested_scheme(mode))
     dark = _is_dark_scheme(app)
     _refresh_native_styles(dark)
+    apply_fluent_theme(dark=dark, accent_color="#1d4ed8" if dark else "#2563eb")
 
     colors = {
         "window": "#0b0b0b" if dark else "#f3f4f6",
@@ -454,7 +497,7 @@ def initialize_ui_theme(mode: str = "light") -> None:
     font_family = ui_font.family().replace("'", "\\'")
     app.setStyleSheet(
         f"QWidget {{ font-family: '{font_family}'; color: {colors['text']}; }}"
-        f"QLabel, QCheckBox, QRadioButton, QGroupBox, QTabWidget, QTreeView {{ color: {colors['text']}; }}"
+        f"QLabel, QRadioButton, QGroupBox, QTabWidget, QTreeView {{ color: {colors['text']}; }}"
         "QToolTip { background: #000000; color: #ffffff; border: 1px solid #ffffff; padding: 5px; }"
         "QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {"
         f"background: {colors['base']}; color: {colors['text']}; border: 2px solid {colors['input_border']}; "
@@ -466,7 +509,18 @@ def initialize_ui_theme(mode: str = "light") -> None:
         f"background: {colors['alternate_base']}; }}"
         f"QComboBox QAbstractItemView {{ background: {colors['base']}; color: {colors['text']}; "
         f"selection-background-color: {colors['highlight']}; selection-color: #ffffff; }}"
-        f"QTreeView {{ background: {colors['base']}; color: {colors['text']}; "
+        + _checkbox_stylesheet(
+            text=colors["text"],
+            unchecked_fill=colors["alternate_base"] if dark else colors["base"],
+            unchecked_border="#cbd5e1" if dark else colors["input_border"],
+            checked_fill=colors["button"],
+            checked_border="#bfdbfe" if dark else colors["button"],
+            hover_fill="#334155" if dark else colors["alternate_base"],
+            checked_hover_fill="#1e40af" if dark else "#1d4ed8",
+            disabled_fill=colors["alternate_base"],
+            disabled_border=colors["disabled_button"],
+        )
+        + f"QTreeView {{ background: {colors['base']}; color: {colors['text']}; "
         f"alternate-background-color: {colors['tree_alt']}; border: 1px solid {colors['tree_border']}; "
         "padding: 0px; margin: 0px; }}"
         f"QTreeView::item {{ padding-left: 0px; margin-left: 0px; color: {colors['text']}; }}"

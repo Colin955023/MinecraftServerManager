@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,12 +57,13 @@ from ...utils import (
     resolve_modrinth_provider_record,
     select_best_mod_version,
 )
+from ...utils.runtime_utils.background_task import get_shared_manager
 from .compatibility_analyzer import (
     analyze_local_mod_file_compatibility,
     analyze_mod_version_compatibility,
     resolve_dependency_reference_with_provider_context,
 )
-from .constants import LOCAL_HASH_MAX_WORKERS, logger
+from .constants import logger
 from .models import (
     LocalModUpdateCandidate,
     LocalModUpdatePlan,
@@ -428,19 +428,20 @@ def build_local_mod_update_plan(
             local_mod_obj, filename_key_obj, file_path_obj = job
             return (local_mod_obj, filename_key_obj, compute_file_hash(file_path_obj, hash_algorithm))
 
-        max_workers = min(LOCAL_HASH_MAX_WORKERS, len(hash_compute_jobs))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for local_mod, filename_key, local_hash in executor.map(_compute_local_hash, hash_compute_jobs):
-                if not local_hash:
-                    hash_progress_done += 1
-                    _emit_hash_progress()
-                    continue
-                local_mod.current_hash = local_hash
-                local_mod.hash_algorithm = hash_algorithm
-                if filename_key:
-                    local_hashes_by_filename[filename_key] = local_hash
+        manager = get_shared_manager()
+        futures = [manager.run(_compute_local_hash, job) for job in hash_compute_jobs]
+        for future in futures:
+            local_mod, filename_key, local_hash = future.result()
+            if not local_hash:
                 hash_progress_done += 1
                 _emit_hash_progress()
+                continue
+            local_mod.current_hash = local_hash
+            local_mod.hash_algorithm = hash_algorithm
+            if filename_key:
+                local_hashes_by_filename[filename_key] = local_hash
+            hash_progress_done += 1
+            _emit_hash_progress()
     known_hashes = list(local_hashes_by_filename.values())
     current_versions_by_hash = get_modrinth_current_versions_by_hashes(known_hashes, hash_algorithm)
     latest_versions_by_hash: dict[str, ModrinthVersionLookupResult] = {}

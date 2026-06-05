@@ -3,14 +3,15 @@
 提供安全的應用程式重啟功能，支援打包執行檔與 Python 腳本模式
 """
 
+import concurrent.futures
 import contextlib
 import os
 import sys
-import threading
 import time
 from pathlib import Path
 
 from .. import PathUtils, RuntimePaths, SubprocessUtils, get_logger, shutdown_logging
+from .background_task import run_in_background
 
 logger = get_logger().bind(component="AppRestart")
 
@@ -154,7 +155,7 @@ class AppRestart:
 
     @staticmethod
     def _find_exe_fallback() -> Path | None:
-        """尋找可能的可執行檔（可攜版 exe）作為重啟備援，回傳第一個存在的 Path 或 None。"""
+        """尋找可能的可執行檔（可攜式 exe）作為重啟備援，回傳第一個存在的 Path 或 None。"""
         try:
             candidates = [
                 Path.cwd() / "MinecraftServerManager.exe",
@@ -331,7 +332,7 @@ class AppRestart:
             if not supported:
                 exe_fallback = AppRestart._find_exe_fallback()
                 if exe_fallback:
-                    details = f"模式=打包(備援); 執行檔={str(exe_fallback)!r}; 是否存在=True; 是否是檔案=True; 備註='找到可攜版 exe 備援'"
+                    details = f"模式=打包(備援); 執行檔={str(exe_fallback)!r}; 是否存在=True; 是否是檔案=True; 備註='找到可攜式 exe 備援'"
                     return (True, details)
             details = f"模式=腳本; 腳本路徑={script_path!r}; 解析後腳本={str(script_resolved)!r}; 是否存在={exists}; 是否是檔案={is_file}"
             return (supported, details)
@@ -351,12 +352,10 @@ class AppRestart:
         """
         try:
             executable_cmd, is_frozen, script_path = AppRestart._get_executable_info()
-            restart_success = threading.Event()
-            restart_error = threading.Event()
             script_parent = script_path.parents[0] if script_path is not None else None
             _ = str(script_path) if script_path is not None else None
 
-            def delayed_restart():
+            def delayed_restart() -> bool:
                 """延遲重啟函式（會在背景執行緒啟動新程式）。"""
                 try:
                     time.sleep(delay)
@@ -426,19 +425,19 @@ class AppRestart:
                                     logger.debug(f"以模組方式重啟: {use_cmd}, 指令={target_cwd}")
                         process = SubprocessUtils.popen_detached(use_cmd, cwd=target_cwd)
                     time.sleep(0.5)
-                    if process.poll() is None:
-                        restart_success.set()
-                    else:
-                        restart_error.set()
+                    return process.poll() is None
                 except Exception as e:
                     logger.exception(f"重啟失敗: {e}")
-                    restart_error.set()
+                    return False
 
-            threading.Thread(target=delayed_restart, daemon=True).start()
+            future = run_in_background(delayed_restart)
             max_wait_time = delay + 2.0
-            if restart_success.wait(timeout=max_wait_time):
+            if future is None:
                 return True
-            return not restart_error.is_set()
+            try:
+                return bool(future.result(timeout=max_wait_time))
+            except concurrent.futures.TimeoutError:
+                return True
         except Exception as e:
             logger.exception(f"準備重啟時發生錯誤: {e}")
             return False

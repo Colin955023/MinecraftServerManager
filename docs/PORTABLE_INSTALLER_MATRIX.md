@@ -1,22 +1,38 @@
-# Portable / Installer 差異矩陣
+# 可攜式 / 一般安裝差異矩陣
 
-本表格描述兩種發佈模式在路徑、更新、權限與回滾行為上的差異。  
-實際行為以 `src/utils/runtime_paths.py`、`src/utils/update_checker.py` 為準。
+本文件描述執行模式、資料路徑與自動更新流程的差異。實際行為以以下程式碼為準：
 
-| 項目 | Portable | Installer |
+- `src/utils/runtime_utils/runtime_paths.py`：模式判定與資料路徑
+- `src/utils/update_utils/update_parsing.py`：GitHub Release asset 選擇與 digest 解析
+- `src/utils/update_utils/update_checker.py`：下載、驗證、套用更新與關閉流程
+
+## 執行模式與資料路徑
+
+| 項目 | 可攜式安裝 / Portable | 一般安裝 / Installer |
 |---|---|---|
-| 程式主目錄 | `exe` 同層目錄（可搬移） | `%LOCALAPPDATA%\Programs\MinecraftServerManager` |
+| 程式主目錄 | 使用者在 installer 指定的資料夾；搬移後可執行 | `%LOCALAPPDATA%\Programs\MinecraftServerManager` |
+| 模式判定 | `<exe_dir>/.portable` 或 `<exe_dir>/.config` 存在時視為 portable | 不符合 portable 條件時採 installer 路徑 |
 | 設定檔路徑 | `<exe_dir>/.config/user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` |
 | 日誌路徑 | `<exe_dir>/.log/` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` |
 | 快取路徑 | `<exe_dir>/.config/Cache/` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
-| 模式判定 | `<exe_dir>/.portable` 或 `<exe_dir>/.config` 存在即視為 portable | 不符合 portable 條件時採 installer 模式 |
-| 更新資產優先順序 | 1. `*portable*.zip` 2. 回退 `*.exe` | 1. `*.exe` |
-| 更新流程 | 下載 zip -> 讀取 GitHub asset digest 驗證 checksum -> 解壓到暫存 -> 備份原目錄與 `.config/.log` -> 關閉程式後由批次檔套用 | 下載 exe -> 讀取 GitHub asset digest 驗證 checksum -> 啟動 installer -> 關閉主程式 |
-| 權限需求 | 須對程式目錄有讀寫刪除權限（覆寫與備份） | 須可在安裝目錄寫入，且可啟動 installer |
-| 回滾/回退行為 | 更新前建立完整備份，套用流程保留 `.config/.log`，若前置驗證失敗則不下載或不套用 | 若找不到 digest 或驗證失敗，更新直接取消；不覆寫既有程式 |
-| 失敗時安全策略 | digest / checksum 或路徑安全檢查任一失敗即中止，清理暫存 | digest / checksum 或下載失敗即中止，清理暫存 |
+| 目錄權限需求 | 程式目錄需允許建立、覆寫、刪除與備份檔案 | 應用程式需可寫入使用者資料、日誌與快取目錄；安裝程式本身的權限需求由 installer 決定 |
+| 移除方式 | 不建立 Windows 解除安裝項目；關閉程式後直接刪除整個指定資料夾 | 透過 Windows 已安裝應用程式或 Inno uninstaller 解除安裝 |
 
-## 備註
+## 更新資產與流程
 
-- 「回退判定」指 portable 模式下找不到 portable zip 時，回退使用 installer asset。
-- 兩種模式都優先採用 GitHub Release asset digest；若舊版 release 沒有 digest，才回退到 body/獨立 checksum 檔。
+| 項目 | Portable 流程 | Installer 流程 |
+|---|---|---|
+| 資產選擇 | 選擇 `.exe` asset；名稱含 `setup` 或 `installer` 時優先 | 同 portable |
+| digest 規格 | 讀取 GitHub Release asset 的 `digest` 欄位，接受 GitHub 產出的 `sha256:<hex>` | 同 portable |
+| 下載前安全檢查 | 缺少可解析 digest 時直接取消，且不下載安裝檔 | 同 portable |
+| 下載後驗證 | 以 digest 指定的演算法驗證 exe 檔雜湊 | 同 portable |
+| 套用方式 | 啟動驗證後的 installer，傳入 `/MSMPortable=1` 與 `/DIR=<exe_dir>` | 啟動驗證後的 installer，傳入 `/MSMPortable=0` |
+| 使用者資料保留 | installer 不打包 `.portable`、`.config`、`.log` 或 `user_settings.json`；portable 資料留在 `<exe_dir>` 下，移除時由使用者刪除整個資料夾 | installer 不打包 `user_settings.json`、`log` 或 `Cache`；資料留在 `%LOCALAPPDATA%\Programs\MinecraftServerManager` |
+| 自動回滾能力 | 更新器不覆寫既有程式；installer 的復原能力不在本文件範圍內 | 同 portable |
+| 暫存清理 | 下載失敗或驗證失敗會清理暫存；installer 啟動後保留 exe 交由安裝流程使用 | 同 portable |
+
+## 術語
+
+- `Portable` 與 `Installer` 是執行模式與資料路徑策略；release 仍只提供同一個 installer exe。
+- `digest` 指 GitHub Release asset metadata；`checksum` 或「雜湊」指本機下載後重新計算出的檔案雜湊。
+- 本文件描述應用程式更新器行為，不描述 Inno Setup installer 內部的安裝、權限提升或回滾能力。

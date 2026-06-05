@@ -168,7 +168,11 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         """取得目前線上模組輸入框文字。"""
         if not hasattr(self, "search_var"):
             return ""
-        return str(self.search_var.get() or "").strip()
+        query = self.search_var.get() or ""
+        search_filter = getattr(self, "online_search_filter", None)
+        if search_filter is not None:
+            return search_filter.normalize(query)
+        return str(query).strip()
 
     def _build_online_browse_request(self) -> tuple[OnlineBrowseRequest | None, str | None]:
         """建立目前的線上瀏覽/搜尋請求。"""

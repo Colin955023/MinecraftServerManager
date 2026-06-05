@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import contextlib
 import os
 import re
@@ -13,7 +12,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from ...core import MinecraftVersionManager
-from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, get_logger
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, get_logger, get_shared_manager
 from .java_downloader import JavaDownloader
 
 logger = get_logger().bind(component="JavaUtils")
@@ -182,15 +181,14 @@ class JavaUtils:
                 candidate_paths.add(javaw_exe)
         if not candidate_paths:
             return candidates
-        max_workers = min(8, max(2, os.cpu_count() or 4))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(JavaUtils._resolve_java_candidate, javaw_exe) for javaw_exe in sorted(candidate_paths)
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                resolved_candidate = future.result()
-                if resolved_candidate:
-                    candidates.append(resolved_candidate)
+        futures = [
+            get_shared_manager().run(JavaUtils._resolve_java_candidate, javaw_exe)
+            for javaw_exe in sorted(candidate_paths)
+        ]
+        for future in futures:
+            resolved_candidate = future.result()
+            if resolved_candidate:
+                candidates.append(resolved_candidate)
         seen = set()
         final_results = []
         for c_path, c_major in candidates:

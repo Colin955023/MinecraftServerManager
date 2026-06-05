@@ -601,15 +601,24 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         refresh_token = self._local_refresh_token
         selected_mod_ids = self._capture_selected_mod_ids()
         self._set_local_tree_render_lock(True)
-        search_text = self.local_search_var.get().lower() if hasattr(self, "local_search_var") else ""
+        search_text = self.local_search_var.get() if hasattr(self, "local_search_var") else ""
+        search_filter = getattr(self, "local_search_filter", None)
         filter_status = self.local_filter_var.get() if hasattr(self, "local_filter_var") else "所有"
         version_pattern = self.VERSION_PATTERN
         mod_order: list[str] = []
         mod_rows: dict[str, tuple[tuple[Any, ...], tuple[str, ...]]] = {}
         seen_mod_ids: set[str] = set()
         for mod in self.local_mods:
-            mod_name_lower = str(getattr(mod, "name", "") or "").lower()
-            if search_text and search_text not in mod_name_lower:
+            mod_name = str(getattr(mod, "name", "") or "")
+            search_candidate = (
+                mod_name,
+                getattr(mod, "filename", ""),
+                getattr(mod, "version", ""),
+                getattr(mod, "author", ""),
+            )
+            if search_text and search_filter is not None and not search_filter.matches(search_candidate, search_text):
+                continue
+            if search_text and search_filter is None and str(search_text).lower() not in mod_name.lower():
                 continue
             if filter_status != "所有" and (
                 (filter_status == "啟用" and mod.status != ModStatus.ENABLED)

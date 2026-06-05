@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +13,7 @@ from ..utils.ui_support.qt_runtime import (
     ensure_application,
     invoke_later,
     is_qobject_alive,
+    run_on_ui_thread,
     set_modal,
     set_topmost,
     show_window,
@@ -517,18 +517,7 @@ class DialogUtils:
         try:
             app = ensure_application()
             if QtCore.QThread.currentThread() != app.thread():
-                ev = threading.Event()
-                result_container: dict[str, bool | None] = {"res": False if not show_cancel else None}
-
-                def _worker():
-                    try:
-                        result_container["res"] = _ask()
-                    finally:
-                        ev.set()
-
-                invoke_later(0, _worker, parent=parent if isinstance(parent, QtWidgets.QWidget) else None)
-                ev.wait()
-                return result_container["res"]
+                return run_on_ui_thread(_ask)
             return _ask()
         except Exception:
             try:

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 from ...core import ModStatus
-from ...utils import Colors, FontSize, Sizes, Spacing, UIUtils
+from ...utils import Colors, FontSize, Sizes, Spacing, UIUtils, get_shared_manager
 from ...utils.ui_support import qt_widgets as qt
 from ..custom_dropdown import CustomDropdown
 from ..font_manager import FontManager
@@ -26,6 +25,40 @@ class LocalModListPresenter(PresenterDelegateMixin):
     def __init__(self, frame: Any):
         super().__init__(frame)
         self.all_selected: bool = False
+
+    @staticmethod
+    def _get_current_server_path_key(current_server: Any | None) -> str | None:
+        server_path = str(getattr(current_server, "path", "") or "").strip()
+        if not server_path:
+            return None
+        try:
+            return str(Path(server_path).resolve())
+        except Exception:
+            return server_path
+
+    @staticmethod
+    def _build_mods_dir_signature(mods_dir: Path | None) -> tuple[tuple[str, int, int], ...] | None:
+        if mods_dir is None or not mods_dir.exists():
+            return ()
+        try:
+            signature: list[tuple[str, int, int]] = []
+            for entry in mods_dir.iterdir():
+                if not entry.is_file():
+                    continue
+                try:
+                    stat_result = entry.stat()
+                except OSError:
+                    continue
+                signature.append((entry.name, int(stat_result.st_mtime_ns), int(stat_result.st_size)))
+            return tuple(sorted(signature))
+        except OSError:
+            return None
+
+    def _is_local_mods_scope_current(self, request_token: int, server_path_key: str | None) -> bool:
+        current_token = int(getattr(self, "_local_mods_load_token", 0))
+        if request_token != current_token:
+            return False
+        return self._get_current_server_path_key(getattr(self, "current_server", None)) == server_path_key
 
     def render_local_mods(self) -> None:
         """重新渲染目前本地模組列表。"""
@@ -114,17 +147,18 @@ class LocalModListPresenter(PresenterDelegateMixin):
         right_frame.attach(side="right", padx=Spacing.LARGE_MINUS)
         search_frame = qt.Frame(right_frame, fg_color="transparent")
         search_frame.attach(side="left", padx=(0, Spacing.LARGE_MINUS))
-        search_label = qt.Label(search_frame, text="🔍", font=FontManager.get_font(size=FontSize.HEADING_MEDIUM))
-        search_label.attach(side="left")
         self.local_search_var = qt.TextState()
-        search_entry = qt.Entry(
+        self.local_search_filter = qt.SearchFilter()
+        search_entry = qt.SearchEntry(
             search_frame,
             textvariable=self.local_search_var,
+            filter_logic=self.local_search_filter,
+            placeholder_text="搜尋本地模組",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             width=Sizes.DROPDOWN_COMPACT_WIDTH,
             height=Sizes.INPUT_HEIGHT,
         )
-        search_entry.attach(side="left", padx=(6, 0))
+        search_entry.attach(side="left")
         self.local_search_var.trace("w", self.filter_local_mods)
         self.local_filter_var = qt.TextState(value="所有")
         filter_combo = CustomDropdown(
@@ -247,8 +281,13 @@ class LocalModListPresenter(PresenterDelegateMixin):
         if not self.mod_manager:
             return
         manager = self.mod_manager
-        mods_dir = Path(self.current_server.path) / "mods" if self.current_server else None
+        request_token = int(getattr(self, "_local_mods_load_token", 0)) + 1
+        self._local_mods_load_token = request_token
+        current_server = getattr(self, "current_server", None)
+        server_path_key = self._get_current_server_path_key(current_server)
+        mods_dir = Path(server_path_key) / "mods" if server_path_key else None
         mods_dir_key = str(mods_dir.resolve()) if mods_dir else ""
+        mods_dir_signature = self._build_mods_dir_signature(mods_dir)
         try:
             mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
         except Exception:
@@ -256,8 +295,8 @@ class LocalModListPresenter(PresenterDelegateMixin):
         if (
             mods_dir_key
             and mods_dir_key == getattr(self, "_last_mods_dir", None)
-            and (mods_dir_mtime == getattr(self, "_last_mods_dir_mtime", None))
-            and self.local_mods
+            and (mods_dir_signature is not None)
+            and (mods_dir_signature == getattr(self, "_last_mods_dir_signature", None))
         ):
             self.update_status_safe(f"找到 {len(self.local_mods)} 個本地模組")
             self.ui_queue.put(self.refresh_local_list)
@@ -275,26 +314,40 @@ class LocalModListPresenter(PresenterDelegateMixin):
                         dedup[base_name] = mod
                 mods = list(dedup.values())
                 total = len(mods)
-                self.local_mods = []
-                self.enhanced_mods_cache = {}
+                new_local_mods: list[Any] = []
                 last_percent = -1
                 for idx, mod in enumerate(mods):
+                    if not self._is_local_mods_scope_current(request_token, server_path_key):
+                        logger.debug("略過過期的本地模組掃描結果", "ModManagementFrame")
+                        return
                     try:
                         mod._cached_mtime = Path(mod.file_path).stat().st_mtime
                     except Exception:
                         mod._cached_mtime = None
-                    self.local_mods.append(mod)
+                    new_local_mods.append(mod)
                     percent = (idx + 1) / total * 100 if total else 0
                     rounded_percent = int(percent)
                     if rounded_percent != last_percent:
                         last_percent = rounded_percent
                         self.update_progress_safe(percent)
+                current_signature = self._build_mods_dir_signature(mods_dir)
+                if current_signature is None:
+                    current_signature = mods_dir_signature
+                if not self._is_local_mods_scope_current(request_token, server_path_key):
+                    logger.debug("略過過期的本地模組掃描結果", "ModManagementFrame")
+                    return
+                if current_signature != mods_dir_signature:
+                    logger.debug("本地模組目錄在掃描期間已變更，略過過期結果", "ModManagementFrame")
+                    return
+                self.local_mods = new_local_mods
+                self.enhanced_mods_cache = {}
                 self._last_mods_dir = mods_dir_key
                 try:
                     self._last_mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
                 except Exception:
                     self._last_mods_dir_mtime = mods_dir_mtime
-                self.enhance_local_mods()
+                self._last_mods_dir_signature = current_signature
+                self.enhance_local_mods(request_token=request_token, server_path_key=server_path_key)
                 self.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
                 logger.error(f"掃描失敗: {e}\n{traceback.format_exc()}")
@@ -303,11 +356,25 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
         TaskUtils.run_async(load_thread)
 
-    def enhance_local_mods(self) -> None:
-        """查詢本地模組增強資訊，查詢完成後刷新列表。"""
+    def enhance_local_mods(self, request_token: int | None = None, server_path_key: str | None = None) -> None:
+        """查詢本地模組增強資訊，查詢完成後刷新列表。
+
+        Args:
+            request_token: 用來比對目前是否仍為同一輪載入的 token。
+            server_path_key: 目前伺服器路徑的正規化快照，用來避免伺服器切換後寫回舊結果。
+        """
+
+        if request_token is None:
+            request_token = int(getattr(self, "_local_mods_load_token", 0))
+        if server_path_key is None:
+            server_path_key = self._get_current_server_path_key(getattr(self, "current_server", None))
+        if not self._is_local_mods_scope_current(request_token, server_path_key):
+            return
 
         def enhance_single(mod):
             try:
+                if not self._is_local_mods_scope_current(request_token, server_path_key):
+                    return
                 if mod.filename in self.enhanced_mods_cache:
                     return
                 enhanced = enhance_local_mod(
@@ -317,6 +384,8 @@ class LocalModListPresenter(PresenterDelegateMixin):
                     local_name=getattr(mod, "name", ""),
                 )
                 if enhanced:
+                    if not self._is_local_mods_scope_current(request_token, server_path_key):
+                        return
                     resolved_project_id = str(getattr(enhanced, "project_id", "") or "").strip()
                     resolved_slug = str(getattr(enhanced, "slug", "") or "").strip()
                     if resolved_project_id:
@@ -332,8 +401,16 @@ class LocalModListPresenter(PresenterDelegateMixin):
                 )
 
         def enhance_thread():
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                executor.map(enhance_single, self.local_mods)
+            if not self._is_local_mods_scope_current(request_token, server_path_key):
+                return
+            futures = [get_shared_manager().run(enhance_single, mod) for mod in list(self.local_mods)]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.debug(f"模組增強背景工作失敗: {e}", "ModManagementFrame")
+            if not self._is_local_mods_scope_current(request_token, server_path_key):
+                return
             self.ui_queue.put(self.refresh_local_list)
 
         TaskUtils.run_async(enhance_thread)

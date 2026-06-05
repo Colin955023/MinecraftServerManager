@@ -36,7 +36,15 @@ from ..utils import (
     get_settings_manager,
 )
 from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, is_qobject_alive, show_window
+from ..utils.ui_support.fluent import FluentPushButton
+from ..utils.ui_support.qt_runtime import (
+    QtCore,
+    QtGui,
+    QtWidgets,
+    install_open_url_click,
+    is_qobject_alive,
+    show_window,
+)
 from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
     CreateServerFrame,
@@ -55,17 +63,17 @@ logger = get_logger().bind(component="MainWindow")
 
 
 def _qt_font(font: Any) -> QtGui.QFont:
-    """Return the native QFont stored by FontManager."""
+    """回傳 FontManager 內保存的原生 QFont。"""
     return getattr(font, "font", font)
 
 
 def _qt_color(color: Any) -> str:
-    """Return the light-theme color from project token tuples."""
+    """回傳專案色彩 token 對應的 Qt 色碼。"""
     return resolve_color(color)
 
 
 def _native_widget(widget: Any) -> QtWidgets.QWidget | None:
-    """Resolve adapter-backed objects to their native Qt widget."""
+    """將 adapter 物件解析為原生 Qt widget。"""
     if widget is None:
         return None
     return getattr(widget, "_qt_widget", widget)
@@ -73,6 +81,15 @@ def _native_widget(widget: Any) -> QtWidgets.QWidget | None:
 
 def _set_layout_margins(layout: QtWidgets.QLayout, *margins: int) -> None:
     layout.setContentsMargins(*(int(v) for v in margins))
+
+
+def _make_fluent_button(text: str, parent: QtWidgets.QWidget | None = None) -> QtWidgets.QPushButton:
+    try:
+        return FluentPushButton(text, parent)
+    except TypeError:
+        button = FluentPushButton(parent)
+        button.setText(text)
+        return button
 
 
 class MinecraftServerManager:
@@ -387,7 +404,7 @@ class MinecraftServerManager:
         _set_layout_margins(header_layout, 0, 0, 12, 0)
         header_layout.setSpacing(0)
 
-        self.sidebar_toggle_btn = QtWidgets.QPushButton("☰", header_frame)
+        self.sidebar_toggle_btn = _make_fluent_button("☰", header_frame)
         self.sidebar_toggle_btn.setObjectName("SidebarToggleButton")
         self.sidebar_toggle_btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         self.sidebar_toggle_btn.setFixedSize(36, 33)
@@ -567,7 +584,7 @@ class MinecraftServerManager:
         _set_layout_margins(btn_layout, 0, 0, 0, 0)
         btn_layout.setSpacing(3)
 
-        btn = QtWidgets.QPushButton(f"{icon}  {title}", btn_frame)
+        btn = _make_fluent_button(f"{icon}  {title}", btn_frame)
         btn.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         btn.setFont(_qt_font(FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold")))
         btn.setMinimumHeight(39)
@@ -1174,10 +1191,7 @@ class MinecraftServerManager:
         github_lbl = add_label("GitHub-MinecraftServerManager", size=FontSize.MEDIUM, color=_qt_color(Colors.TEXT_LINK))
         github_lbl.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
 
-        def open_github(_event: Any) -> None:
-            UIUtils.open_external(github_url)
-
-        github_lbl.mousePressEvent = open_github  # type: ignore[method-assign]
+        install_open_url_click(github_lbl, github_url)
         add_label("📄 授權條款", size=FontSize.HEADING_LARGE, weight="bold")
         add_label(
             "• 本專案採用 GNU General Public License v3.0 授權條款\n"
@@ -1194,7 +1208,7 @@ class MinecraftServerManager:
         auto_update_checkbox.setChecked(settings.is_auto_update_enabled())
         content_layout.addWidget(auto_update_checkbox)
 
-        manual_check_btn = QtWidgets.QPushButton("檢查更新", scroll_content)
+        manual_check_btn = _make_fluent_button("檢查更新", scroll_content)
         manual_check_btn.setFont(_qt_font(FontManager.get_font(size=FontSize.NORMAL)))
         manual_check_btn.clicked.connect(lambda _checked=False: self._manual_check_updates())
         manual_check_btn.setVisible(not settings.is_auto_update_enabled())
@@ -1208,16 +1222,16 @@ class MinecraftServerManager:
         if RuntimePaths.is_portable_mode():
             add_label("📦 便攜模式", size=FontSize.HEADING_LARGE, weight="bold")
             add_label(
-                "您正在使用便攜版本。\n如需更新，請從 Releases 下載新版 portable ZIP，或使用內建的檢查更新功能。",
+                "您正在使用便攜模式。\n如需更新，請使用內建的檢查更新功能，或從 Releases 下載安裝程式 exe 後選擇可攜式安裝。",
                 size=FontSize.NORMAL_PLUS,
             )
-        prefs_btn = QtWidgets.QPushButton("視窗偏好設定", scroll_content)
+        prefs_btn = _make_fluent_button("視窗偏好設定", scroll_content)
         prefs_btn.setFont(_qt_font(FontManager.get_font(size=FontSize.NORMAL)))
         prefs_btn.clicked.connect(lambda _checked=False: self._show_window_preferences())
         content_layout.addWidget(prefs_btn, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
         content_layout.addStretch(1)
 
-        close_btn = QtWidgets.QPushButton("關閉", about_dialog)
+        close_btn = _make_fluent_button("關閉", about_dialog)
         close_btn.setFont(_qt_font(FontManager.get_font(size=FontSize.NORMAL, weight="bold")))
         close_btn.clicked.connect(lambda _checked=False: about_dialog.close())
         outer_layout.addWidget(close_btn, 0, QtCore.Qt.AlignmentFlag.AlignCenter)
@@ -1313,6 +1327,7 @@ class ServerInitializationDialog:
         self.server_path = Path(server_config.path)
         self.completion_callback = completion_callback
         self.server_process: Any | None = None
+        self.server_process_pid: int = 0
         self.done_detected = False
         self.init_dialog: Any | None = None
         self.console_text: qt.TextBox | None = None
@@ -1320,6 +1335,8 @@ class ServerInitializationDialog:
         self.close_button: qt.Button | None = None
         self._console_queue: queue.Queue[str] = queue.Queue()
         self._console_pump_job = None
+        self._process_output_buffer = ""
+        self._stop_sent = False
 
     def _enqueue_console(self, text: str) -> None:
         try:
@@ -1478,8 +1495,8 @@ class ServerInitializationDialog:
             self._schedule_dialog_job("_init_timeout_job", 120000, self._timeout_force_close)
 
     def _start_server_thread(self) -> None:
-        """在背景執行緒中啟動伺服器"""
-        TaskUtils.run_async(self._run_server)
+        """使用 QProcess 啟動伺服器。"""
+        self._run_server()
 
     def _close_init_server(self) -> None:
         """關閉初始化伺服器。"""
@@ -1498,16 +1515,13 @@ class ServerInitializationDialog:
     def _terminate_server_process(self) -> None:
         """終止伺服器程式"""
         try:
-            if self.server_process and self.server_process.poll() is None:
+            if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
                 self.server_process.terminate()
-                try:
-                    self.server_process.wait(timeout=5)
-                except Exception as e:
-                    logger.exception(f"等待程式終止逾時/失敗，改用 kill: {e}")
+                if not self.server_process.waitForFinished(5000):
                     self.server_process.kill()
             if self.server_process is not None:
                 with contextlib.suppress(Exception):
-                    SystemUtils.unregister_managed_process(self.server_path, self.server_process.pid)
+                    SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
         except Exception as e:
             get_logger().bind(component="InitServerDialog").exception(f"終止伺服器程式失敗: {e}")
 
@@ -1526,7 +1540,7 @@ class ServerInitializationDialog:
             logger.exception("更新控制台輸出失敗")
 
     def _run_server(self) -> None:
-        """在背景執行緒中啟動伺服器"""
+        """以 QProcess 啟動伺服器並接上 signal。"""
         try:
             if self.init_dialog:
                 self._schedule_dialog_job(
@@ -1540,29 +1554,69 @@ class ServerInitializationDialog:
                 )
             self._enqueue_console("正在啟動 Minecraft 伺服器...\n")
             java_cmd = self._build_java_command()
-            self.server_process = SubprocessUtils.popen_checked(
+            process = SubprocessUtils.create_qprocess_checked(
                 java_cmd,
                 cwd=str(self.server_path),
-                stdout=SubprocessUtils.PIPE,
-                stderr=SubprocessUtils.STDOUT,
-                stdin=SubprocessUtils.PIPE,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
             )
-            SystemUtils.register_managed_process(self.server_path, self.server_process.pid)
-            self._monitor_server_output()
-            self._handle_server_completion()
+            self.server_process = process
+            process.started.connect(self._on_server_process_started)
+            process.readyReadStandardOutput.connect(self._on_server_process_output)
+            process.finished.connect(self._on_server_process_finished)
+            process.errorOccurred.connect(self._on_server_process_error)
+            process.start()
         except Exception as e:
             get_logger().bind(component="ServerInitializationDialog").error(
                 f"伺服器啟動失敗: {e}\n{traceback.format_exc()}"
             )
             self._handle_server_error(str(e))
-        finally:
-            if self.server_process is not None:
-                with contextlib.suppress(Exception):
-                    SystemUtils.unregister_managed_process(self.server_path, self.server_process.pid)
+
+    @QtCore.Slot()
+    def _on_server_process_started(self) -> None:
+        if self.server_process is None:
+            return
+        self.server_process_pid = int(self.server_process.processId())
+        SystemUtils.register_managed_process(self.server_path, self.server_process_pid)
+
+    @QtCore.Slot()
+    def _on_server_process_output(self) -> None:
+        if self.server_process is None:
+            return
+        try:
+            chunk = bytes(self.server_process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        except Exception as exc:
+            logger.exception(f"讀取 QProcess 輸出失敗: {exc}")
+            return
+        if not chunk:
+            return
+        self._enqueue_console(chunk)
+        self._process_output_buffer += chunk
+        lines = self._process_output_buffer.splitlines()
+        if self._process_output_buffer and not self._process_output_buffer.endswith(("\n", "\r")):
+            self._process_output_buffer = lines.pop() if lines else self._process_output_buffer
+        else:
+            self._process_output_buffer = ""
+        for line in lines:
+            self._process_server_output(line)
+            if self.done_detected and not self._stop_sent:
+                self._handle_server_ready(line)
+
+    @QtCore.Slot(int, QtCore.QProcess.ExitStatus)
+    def _on_server_process_finished(self, _exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
+        if self._process_output_buffer:
+            line = self._process_output_buffer
+            self._process_output_buffer = ""
+            self._process_server_output(line)
+            if self.done_detected and not self._stop_sent:
+                self._handle_server_ready(line)
+        with contextlib.suppress(Exception):
+            SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
+        self._handle_server_completion()
+
+    @QtCore.Slot(QtCore.QProcess.ProcessError)
+    def _on_server_process_error(self, _error: QtCore.QProcess.ProcessError) -> None:
+        if self.server_process is None:
+            return
+        self._handle_server_error(self.server_process.errorString())
 
     def _build_java_command(self) -> list[str]:
         """建立 Java 命令"""
@@ -1606,23 +1660,6 @@ class ServerInitializationDialog:
         except Exception as e:
             logger.exception(f"提取 Java 命令失敗: {e}")
         return None
-
-    def _monitor_server_output(self) -> None:
-        """監控伺服器輸出"""
-        if self.server_process is None or self.server_process.stdout is None:
-            return
-        while True:
-            output = self.server_process.stdout.readline()
-            if output == "" and self.server_process.poll() is not None:
-                break
-            if output:
-                self._enqueue_console(output)
-                self._process_server_output(output)
-                if self.done_detected:
-                    self._handle_server_ready(output)
-                    break
-        if self.server_process is not None:
-            self.server_process.wait()
 
     def _process_server_output(self, output: str) -> None:
         """處理伺服器輸出"""
@@ -1678,9 +1715,9 @@ class ServerInitializationDialog:
 
         if self.init_dialog:
             self._schedule_dialog_job("_init_closing_job", 0, update_closing_status)
-        if self.server_process and self.server_process.stdin:
-            self.server_process.stdin.write("stop\n")
-            self.server_process.stdin.flush()
+        if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
+            self._stop_sent = True
+            self.server_process.write(b"stop\n")
 
     def _handle_server_completion(self) -> None:
         """處理伺服器完成狀態"""

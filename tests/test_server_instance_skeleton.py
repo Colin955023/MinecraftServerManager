@@ -42,3 +42,24 @@ def test_to_dict(tmp_path):
     d = inst.to_dict()
     assert d["id"] == "s2"
     assert d["path"] == str(tmp_path)
+
+
+def test_server_manager_reads_buffer_before_stopped_process_cleanup(tmp_path):
+    from src.core.server_instance import ServerInstance
+    from src.core.server_manager import ServerManager
+
+    class StoppedProcess:
+        pid = 0
+
+        def poll(self):
+            return 0
+
+    manager = ServerManager(str(tmp_path))
+    inst = ServerInstance(id="srv", name="srv", path=tmp_path)
+    inst.attach_process(StoppedProcess())
+    inst.attach_output_buffer(10)
+    inst.append_output_line("last line")
+    manager.running_servers["srv"] = inst
+
+    assert manager.read_server_output("srv") == ["last line"]
+    assert "srv" not in manager.running_servers

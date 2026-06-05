@@ -257,7 +257,16 @@ class ModFileInstaller:
             )
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename
-                download_kwargs: dict[str, Any] = {"progress_callback": progress_callback}
+                download_failure_reason = ""
+
+                def _capture_download_failure(message: str) -> None:
+                    nonlocal download_failure_reason
+                    download_failure_reason = message
+
+                download_kwargs: dict[str, Any] = {
+                    "progress_callback": progress_callback,
+                    "failure_message_callback": _capture_download_failure,
+                }
                 if normalized_expected_hash:
                     download_kwargs["expected_hash"] = normalized_expected_hash
                 if cancel_check is not None:
@@ -267,8 +276,9 @@ class ModFileInstaller:
                     if self.is_operation_cancelled(cancel_check):
                         self.logger.info(f"遠端模組下載已取消: {safe_filename}", "ModFileInstaller")
                         return ModFileOperationResult(status="cancelled", message="cancelled_during_download")
-                    self.logger.warning(f"遠端模組下載未完成: {safe_filename}", "ModFileInstaller")
-                    return ModFileOperationResult(status="failed", message="download_incomplete")
+                    failure_message = download_failure_reason or "download_incomplete"
+                    self.logger.warning(f"遠端模組下載未完成: {safe_filename} | {failure_message}", "ModFileInstaller")
+                    return ModFileOperationResult(status="failed", message=failure_message)
                 if self.is_operation_cancelled(cancel_check):
                     PathUtils.delete_within(self.server_path, staging_path)
                     self.logger.info(f"遠端模組安裝在寫入前已取消: {safe_filename}", "ModFileInstaller")

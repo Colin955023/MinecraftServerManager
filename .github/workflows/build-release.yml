@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: write
       discussions: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -66,6 +67,12 @@ jobs:
             Write-Error "提取 release notes 失敗"
             exit $LASTEXITCODE
           }
+
+      - name: Sign release artifacts
+        uses: sigstore/gh-action-sigstore-python@04cffa1d795717b140764e8b640de88853c92acc # v3.3.0
+        with:
+          inputs: |
+            dist/*.exe
 
       - name: Create and push release tag
         shell: pwsh
@@ -117,7 +124,10 @@ jobs:
           $tag = $env:RELEASE_TAG
           $prereleaseArgs = @()
           if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
-          $assets = Get-ChildItem -Path 'dist' -File | Where-Object { $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.(exe|zip)$' } | ForEach-Object { $_.FullName }
+          $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
+              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe$' -or
+              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe\.sigstore\.json$'
+          } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
               Write-Host 'No release assets found in dist; aborting release creation'
               exit 1

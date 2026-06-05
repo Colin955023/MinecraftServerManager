@@ -30,7 +30,7 @@ class Singleton:
                 original_init(self, *args, **kwargs)
                 self._initialized = True
 
-        cls.__init__ = guarded_init  # type: ignore[method-assign]
+        type.__setattr__(cls, "__init__", guarded_init)
 
     def __new__(cls, *_args: object, **_kwargs: object) -> Singleton:
         with cls._instance_lock:

@@ -55,7 +55,7 @@ class ServerPropertiesHelper:
             "initial-enabled-packs": "建立世界時要啟用的數據包名稱 (逗號分隔)。",
             "level-name": "世界名稱及其資料夾名。 (預設: world) 也可用於讀取現有存檔。",
             "level-seed": "世界種子碼。留空則隨機生成。",
-            "level-type": "世界生成類型 ID。 (例如 minecraft:normal, minecraft:flat, minecraft:large_biomes, minecraft:amplified)",
+            "level-type": "世界生成類型 ID。可省略 minecraft: 前綴。 (minecraft:normal, minecraft:flat, minecraft:large_biomes, minecraft:amplified, minecraft:single_biome_surface)",
             "log-ips": "是否在伺服器日誌中記錄玩家 IP。 (true/false)",
             "max-chained-neighbor-updates": "限制連鎖方塊更新的數量。 (預設: 1000000) 負數為無限制。",
             "max-players": "伺服器最大玩家數量 (0-2147483647)。超過此數量新玩家無法加入 (OP除外，若設定允許)。",
@@ -64,7 +64,7 @@ class ServerPropertiesHelper:
             "motd": "伺服器列表顯示的訊息。支援樣式代碼。",
             "network-compression-threshold": "網路壓縮閾值。 (預設: 256) 封包大於此位元組時進行壓縮。-1 為停用壓縮。",
             "online-mode": "是否啟用線上驗證 (正版驗證)。 (true/false) true - 需正版帳號登入。",
-            "op-permission-level": "OP 管理員的預設權限等級 (1-4)。 1:繞過重生保護 2:單人作弊指令 3:多人管理指令 4:所有指令。",
+            "op-permission-level": "OP 管理員的預設權限等級 (0-4)。",
             "pause-when-empty-seconds": "伺服器無人時自動停止計算的等待秒數。 (預設: 60) 負數為不停止。",
             "player-idle-timeout": "玩家閒置踢出時間 (分鐘)。 (預設: 0) 0 為不踢出。",
             "prevent-proxy-connections": "是否阻止代理/VPN 連接。 (false/true) 伺服器會驗證來源 IP 是否與 Mojang 驗證伺服器一致。",
@@ -93,12 +93,12 @@ class ServerPropertiesHelper:
             "white-list": "是否啟用白名單。 (false/true) true - 只有 whitelist.json 中的玩家可加入。",
             "management-server-enabled": "是否啟用管理伺服器協定。",
             "management-server-host": "管理伺服器監聽的主機 (預設 localhost)。",
-            "management-server-port": "管理伺服器監聽的埠號 (預設 25585)。",
-            "management-server-secret": "管理伺服器使用的密鑰。",
+            "management-server-port": "管理伺服器監聽的埠號 (預設 0)。",
+            "management-server-secret": "管理伺服器使用的密鑰。留空時會由伺服器自動產生。",
             "management-server-tls-enabled": "是否啟用管理伺服器 TLS 加密。",
             "management-server-tls-keystore": "TLS 金鑰庫路徑。",
             "management-server-tls-keystore-password": "TLS 金鑰庫密碼。",
-            "management-server-allowed-origins": "管理伺服器允許的來源。",
+            "management-server-allowed-origins": "管理伺服器允許的來源清單。",
         }
         return types.MappingProxyType(cls._property_descriptions_cache)
 
@@ -157,7 +157,6 @@ class ServerPropertiesHelper:
                 "enable-jmx-monitoring",
                 "use-native-transport",
                 "sync-chunk-writes",
-                "status-heartbeat-interval",
             ],
             "網路設定": [
                 "network-compression-threshold",
@@ -186,6 +185,7 @@ class ServerPropertiesHelper:
                 "management-server-tls-keystore",
                 "management-server-tls-keystore-password",
                 "management-server-allowed-origins",
+                "status-heartbeat-interval",
             ],
             "效能設定": [
                 "view-distance",
@@ -459,11 +459,12 @@ class ServerPropertiesValidator:
         "view-distance": ("int", 3, 32, None),
         "spawn-protection": ("int", 0, None, None),
         "player-idle-timeout": ("int", 0, None, None),
-        "pause-when-empty-seconds": ("int", -1, None, None),
+        "pause-when-empty-seconds": ("int", None, None, None),
         "rate-limit": ("int", 0, None, None),
-        "text-filtering-version": ("int", 0, None, None),
+        "text-filtering-version": ("int", 0, 1, None),
         "status-heartbeat-interval": ("int", 0, None, None),
-        "management-server-port": ("int", 0, None, None),
+        "management-server-port": ("int", 0, 65535, None),
+        "enable-code-of-conduct": ("bool", None, None, None),
         "accepts-transfers": ("bool", None, None, None),
         "allow-flight": ("bool", None, None, None),
         "allow-nether": ("bool", None, None, None),
@@ -480,6 +481,8 @@ class ServerPropertiesValidator:
         "generate-structures": ("bool", None, None, None),
         "hardcore": ("bool", None, None, None),
         "hide-online-players": ("bool", None, None, None),
+        "management-server-enabled": ("bool", None, None, None),
+        "management-server-tls-enabled": ("bool", None, None, None),
         "log-ips": ("bool", None, None, None),
         "online-mode": ("bool", None, None, None),
         "prevent-proxy-connections": ("bool", None, None, None),
@@ -489,6 +492,11 @@ class ServerPropertiesValidator:
         "sync-chunk-writes": ("bool", None, None, None),
         "use-native-transport": ("bool", None, None, None),
         "white-list": ("bool", None, None, None),
+        "management-server-host": ("str", None, None, None),
+        "management-server-secret": ("str", None, None, None),
+        "management-server-tls-keystore": ("str", None, None, None),
+        "management-server-tls-keystore-password": ("str", None, None, None),
+        "management-server-allowed-origins": ("str", None, None, None),
         "gamemode": ("enum", None, None, ["survival", "creative", "adventure", "spectator", "0", "1", "2", "3"]),
         "difficulty": ("enum", None, None, ["peaceful", "easy", "normal", "hard", "0", "1", "2", "3"]),
         "level-type": (
@@ -501,15 +509,14 @@ class ServerPropertiesValidator:
                 "minecraft:large_biomes",
                 "minecraft:amplified",
                 "minecraft:single_biome_surface",
-                "default",
+                "normal",
                 "flat",
                 "large_biomes",
                 "amplified",
-                "buffet",
-                "customized",
+                "single_biome_surface",
             ],
         ),
-        "region-file-compression": ("enum", None, None, ["deflate", "none"]),
+        "region-file-compression": ("enum", None, None, ["deflate", "lz4", "none"]),
         "bug-report-link": ("str", None, None, None),
         "generator-settings": ("str", None, None, None),
         "initial-disabled-packs": ("str", None, None, None),
@@ -525,6 +532,19 @@ class ServerPropertiesValidator:
         "server-ip": ("str", None, None, None),
         "text-filtering-config": ("str", None, None, None),
     }
+
+    @classmethod
+    def is_boolean_property(cls, prop_name: str) -> bool:
+        """判斷指定屬性是否應以布林值處理。
+
+        Args:
+            prop_name: 屬性名稱。
+
+        Returns:
+            若屬性是布林型設定則回傳 True。
+        """
+        rules = cls.VALIDATION_RULES.get(prop_name)
+        return bool(rules and rules[0] == "bool")
 
     @staticmethod
     def validate_property(prop_name: str, value: str) -> tuple[bool, str]:

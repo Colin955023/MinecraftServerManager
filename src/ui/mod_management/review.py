@@ -2359,7 +2359,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         simulated_installed_mods = list(self._get_current_installed_mods())
         review_entries: list[LocalUpdateReviewEntry] = []
         for candidate in update_plan.candidates:
-            root_key = str(candidate.project_id or "").strip()
+            root_key = self._build_local_update_review_key(candidate)
             dependency_plan = SimpleNamespace(items=[], unresolved_required=[])
             blocking_reasons = [*list(getattr(candidate, "hard_errors", []) or [])]
             non_blocking_warnings = self._dedupe_review_messages(

@@ -7,7 +7,6 @@ import re
 import tomllib
 import zipfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -18,16 +17,20 @@ from ..utils import (
     ServerDetectionVersionUtils,
     derive_provider_lifecycle_state,
     get_logger,
+    get_shared_manager,
     record_and_mark,
 )
 from .mod_models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 
 TomlDecodeError = tomllib.TOMLDecodeError
 logger = get_logger().bind(component="LocalModScanner")
+MAX_JAR_METADATA_BYTES = 2 * 1024 * 1024
 
 
 class LocalModScanner:
     """掃描 mods 目錄並建立 `LocalModInfo`。"""
+
+    MAX_METADATA_BYTES = MAX_JAR_METADATA_BYTES
 
     def __init__(
         self,
@@ -61,8 +64,8 @@ class LocalModScanner:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled")
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        with ThreadPoolExecutor(max_workers=min(6, len(files_to_scan) or 1)) as executor:
-            results = executor.map(create_mod_info_from_file, files_to_scan)
+        futures = [get_shared_manager().run(create_mod_info_from_file, file_path) for file_path in files_to_scan]
+        results = [future.result() for future in futures]
         for mod_info in results:
             if mod_info:
                 mods.append(mod_info)
@@ -379,7 +382,37 @@ class LocalModScanner:
             logger.exception(f"解析 legacy Forge mcmod.info 時發生未預期錯誤: {exc}")
 
     @staticmethod
-    def read_json_from_jar(jar: Any, file_path: str) -> dict | list | None:
+    def read_zip_member_bytes(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> bytes | None:
+        """以大小上限讀取 JAR 內部檔案，避免惡意 metadata 造成記憶體暴增。
+
+        Args:
+            jar: 已開啟的 JAR/ZIP 物件。
+            file_path: JAR 內部檔案路徑。
+            max_bytes: 允許讀取的最大位元組數。
+
+        Returns:
+            讀取到的 bytes；找不到檔案、讀取失敗或超過上限時回傳 None。
+        """
+
+        try:
+            info = jar.getinfo(file_path)
+            if int(info.file_size) > max_bytes:
+                logger.warning(f"略過過大的 JAR metadata: {file_path} ({info.file_size} bytes)")
+                return None
+            with jar.open(info) as file_obj:
+                payload = file_obj.read(max_bytes + 1)
+            if len(payload) > max_bytes:
+                logger.warning(f"略過超過讀取上限的 JAR metadata: {file_path}")
+                return None
+            return payload
+        except KeyError:
+            return None
+        except (OSError, ValueError) as exc:
+            logger.debug(f"讀取 JAR 內部檔案失敗 {file_path}: {exc}")
+            return None
+
+    @staticmethod
+    def read_json_from_jar(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> dict | list | None:
         """讀取 JAR 內的 JSON 檔案並解析。
 
         Args:
@@ -391,14 +424,18 @@ class LocalModScanner:
         """
 
         try:
-            with jar.open(file_path) as file_obj:
-                return PathUtils.from_json_str(file_obj.read().decode("utf-8"))
+            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            if payload is None:
+                return None
+            return PathUtils.from_json_str(payload.decode("utf-8"))
         except (KeyError, OSError, ValueError) as exc:
             logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {exc}")
             return None
 
     @staticmethod
-    def read_toml_from_jar(jar: Any, file_path: str) -> dict[str, Any] | None:
+    def read_toml_from_jar(
+        jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES
+    ) -> dict[str, Any] | None:
         """讀取 JAR 內的 TOML 檔案並解析。
 
         Args:
@@ -410,9 +447,10 @@ class LocalModScanner:
         """
 
         try:
-            with jar.open(file_path) as file_obj:
-                toml_txt = file_obj.read().decode(errors="ignore")
-                return tomllib.loads(toml_txt)
+            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            if payload is None:
+                return None
+            return tomllib.loads(payload.decode(errors="ignore"))
         except (KeyError, TomlDecodeError) as exc:
             logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {exc}")
             return None

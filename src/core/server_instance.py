@@ -7,10 +7,13 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from PySide6 import QtCore
 
 from ..utils import SubprocessUtils, SystemUtils, get_logger
 
@@ -39,6 +42,7 @@ class ServerInstance:
     process: Any | None = field(default=None, init=False, repr=False)
     _output_buffer: deque[str] | None = field(default=None, init=False, repr=False)
     _output_lock: threading.Lock | None = field(default=None, init=False, repr=False)
+    _output_pending: str = field(default="", init=False, repr=False)
 
     def attach_process(self, process: Any) -> Any:
         """綁定新的執行中的 process。
@@ -69,12 +73,14 @@ class ServerInstance:
         with self._lock:
             self._output_buffer = deque(maxlen=max_size)
             self._output_lock = threading.Lock()
+            self._output_pending = ""
 
     def clear_output_buffer(self) -> None:
         """清除伺服器輸出緩衝。"""
         with self._lock:
             self._output_buffer = None
             self._output_lock = None
+            self._output_pending = ""
 
     def append_output_line(self, line: str) -> None:
         """將一行伺服器輸出寫入緩衝。
@@ -89,6 +95,41 @@ class ServerInstance:
             return
         with output_lock:
             output_buffer.append(line.rstrip("\r\n"))
+
+    def append_output_text(self, text: str) -> None:
+        """將 QProcess stdout/stderr 文字片段拆成行並寫入緩衝。
+
+        Args:
+            text: 來自 QProcess signal 的輸出文字片段。
+        """
+        if not text:
+            return
+        with self._lock:
+            output_buffer = self._output_buffer
+            output_lock = self._output_lock
+        if output_buffer is None or output_lock is None:
+            return
+        with output_lock:
+            combined = self._output_pending + text
+            lines = combined.splitlines()
+            if combined and not combined.endswith(("\n", "\r")):
+                self._output_pending = lines.pop() if lines else combined
+            else:
+                self._output_pending = ""
+            for line in lines:
+                output_buffer.append(line.rstrip("\r\n"))
+
+    def flush_output_pending(self) -> None:
+        """把尚未換行的輸出片段送入緩衝。"""
+        with self._lock:
+            output_buffer = self._output_buffer
+            output_lock = self._output_lock
+        if output_buffer is None or output_lock is None:
+            return
+        with output_lock:
+            if self._output_pending:
+                output_buffer.append(self._output_pending.rstrip("\r\n"))
+                self._output_pending = ""
 
     def consume_output_lines(self) -> list[str]:
         """取出並清空目前的伺服器輸出緩衝。
@@ -115,10 +156,69 @@ class ServerInstance:
         with self._lock:
             return self.process
 
-    def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> Any:
-        """啟動伺服器，回傳 subprocess.Popen 物件。
+    @staticmethod
+    def is_qprocess(process: Any) -> bool:
+        """判斷物件是否為 Qt 的 QProcess。
 
-        注意：此方法為同步呼叫（會立即 return Popen），若需非同步監控請使用 BackgroundTask。
+        Args:
+            process: 要檢查的程序物件。
+
+        Returns:
+            若物件為 `QProcess` 則回傳 True。
+        """
+        return isinstance(process, QtCore.QProcess)
+
+    @staticmethod
+    def process_pid(process: Any) -> int:
+        """取得 QProcess 或 subprocess 類物件的 PID。
+
+        Args:
+            process: 要讀取 PID 的程序物件。
+
+        Returns:
+            程序 PID；無法取得時回傳 0。
+        """
+        if isinstance(process, QtCore.QProcess):
+            stored_pid = process.property("_msm_pid")
+            if stored_pid:
+                return int(stored_pid)
+            return int(process.processId())
+        return int(getattr(process, "pid", 0) or 0)
+
+    @staticmethod
+    def process_is_running(process: Any) -> bool:
+        """判斷 QProcess 或 subprocess 類物件是否仍在執行。
+
+        Args:
+            process: 要檢查狀態的程序物件。
+
+        Returns:
+            程序尚未結束時回傳 True。
+        """
+        if isinstance(process, QtCore.QProcess):
+            return process.state() != QtCore.QProcess.ProcessState.NotRunning
+        return process.poll() is None
+
+    @staticmethod
+    def process_returncode(process: Any) -> int | None:
+        """取得 QProcess 或 subprocess 類物件的結束代碼。
+
+        Args:
+            process: 要讀取結束代碼的程序物件。
+
+        Returns:
+            程序仍在執行時回傳 None；已結束時回傳 exit code。
+        """
+        if isinstance(process, QtCore.QProcess):
+            if ServerInstance.process_is_running(process):
+                return None
+            return int(process.exitCode())
+        return process.poll()
+
+    def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> Any:
+        """啟動伺服器，回傳 QProcess 物件。
+
+        注意：此方法只負責啟動與綁定；輸出處理應由呼叫端接 QProcess signal。
 
         Args:
             cmd: 要執行的命令列。
@@ -126,16 +226,25 @@ class ServerInstance:
             env: 額外的環境變數。
 
         Returns:
-            啟動後的 subprocess.Popen 物件。
+            啟動後的 QProcess 物件。
         """
         with self._lock:
             if self.process is not None:
                 raise RuntimeError("伺服器已在執行中")
             cwd = cwd or self.path
-            proc = SubprocessUtils.popen_checked(
-                cmd, cwd=str(cwd), env=env, stdout=SubprocessUtils.PIPE, stderr=SubprocessUtils.PIPE
-            )
-            SystemUtils.register_managed_process(cwd, proc.pid)
+            proc = SubprocessUtils.create_qprocess_checked(cmd, cwd=str(cwd))
+            if env:
+                process_env = QtCore.QProcessEnvironment.systemEnvironment()
+                for key, value in env.items():
+                    process_env.insert(str(key), str(value))
+                proc.setProcessEnvironment(process_env)
+            proc.start()
+            if not proc.waitForStarted(10000):
+                raise RuntimeError(proc.errorString() or "QProcess 啟動失敗")
+            pid = int(proc.processId())
+            proc.setProperty("_msm_pid", pid)
+            proc.setProperty("_msm_create_time", time.time())
+            SystemUtils.register_managed_process(cwd, pid)
             return self.attach_process(proc)
 
     def stop(self, timeout: float = 5.0) -> bool:
@@ -150,14 +259,27 @@ class ServerInstance:
         with self._lock:
             if self.process is None:
                 return True
+            process = self.process
             try:
-                self.process.terminate()
-                self.process.wait(timeout=timeout)
+                if isinstance(process, QtCore.QProcess):
+                    if process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                        process.write(b"stop\n")
+                        process.waitForBytesWritten(1000)
+                        if not process.waitForFinished(max(1, int(timeout * 1000))):
+                            process.terminate()
+                        if process.state() != QtCore.QProcess.ProcessState.NotRunning and not process.waitForFinished(
+                            1000
+                        ):
+                            process.kill()
+                            process.waitForFinished(1000)
+                else:
+                    process.terminate()
+                    process.wait(timeout=timeout)
             except SubprocessUtils.TimeoutExpired:
                 # 逾時，嘗試強制終止
                 try:
-                    self.process.kill()
-                    self.process.wait(timeout=1)
+                    process.kill()
+                    process.wait(timeout=1)
                 except (SubprocessUtils.TimeoutExpired, OSError) as _:
                     logger.warning(
                         "強制終止超時伺服器進程失敗 (id=%s, name=%s).",
@@ -168,8 +290,8 @@ class ServerInstance:
             except OSError:
                 # I/O 相關錯誤（例如管線已關閉），嘗試強制終止以確保資源清理
                 try:
-                    self.process.kill()
-                    self.process.wait(timeout=1)
+                    process.kill()
+                    process.wait(timeout=1)
                 except (SubprocessUtils.TimeoutExpired, OSError) as _:
                     logger.warning(
                         "強制終止伺服器進程失敗 (id=%s, name=%s).",
@@ -179,14 +301,14 @@ class ServerInstance:
                     )
             finally:
                 with contextlib.suppress(Exception):
-                    SystemUtils.unregister_managed_process(self.path, self.process.pid)
+                    SystemUtils.unregister_managed_process(self.path, self.process_pid(process))
                 self.clear_process()
             return True
 
     def is_running(self) -> bool:
         """回傳是否有正在執行的 process。"""
         process = self.get_process()
-        return process is not None and process.poll() is None
+        return process is not None and self.process_is_running(process)
 
     def to_dict(self) -> dict[str, Any]:
         """序列化不含 process 的 instance 資料，用於儲存或 UI 顯示。

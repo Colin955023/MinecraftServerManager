@@ -4,10 +4,12 @@
 
 | 類型 | 適合對象 | 取得方式 |
 |------|----------|----------|
-| **可攜版**（推薦） | 初次使用、不想安裝 | 下載 `*-portable.zip`，解壓後直接執行 |
-| **安裝版** | 日常長期使用 | 下載 `*-installer.exe`，安裝後由開始功能表啟動 |
+| **可攜式安裝** | 初次使用或需要自訂安裝位置 | 下載 `*-Setup-*.exe`，選擇可攜式安裝並指定資料夾 |
+| **一般安裝** | 日常長期使用 | 下載 `*-Setup-*.exe`，選擇一般安裝 |
 
 從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新版本。
+
+可攜式安裝不會建立 Windows 解除安裝項目。若要移除可攜式安裝，請先關閉程式，再直接刪除整個指定資料夾。
 
 ---
 
@@ -60,9 +62,9 @@
 
 1. 前往「**模組管理**」，確認目前選中的伺服器
 2. 選擇任一方式：
-	- **本地匯入**：直接選擇 `.jar` 檔案
-	- **線上搜尋**：搜尋 Modrinth 後加入安裝清單，再至 Review 視窗確認
-3. 在 Review 視窗確認後執行安裝
+   - **本地匯入**：直接選擇 `.jar` 檔案
+   - **線上搜尋**：搜尋 Modrinth 後加入安裝清單，再至 Review 視窗確認
+3. 線上安裝清單會在 Review 視窗確認後執行安裝
 
 ### 更新已安裝的模組
 
@@ -80,7 +82,7 @@
 
 **建立伺服器載入器**：Vanilla、Fabric、Forge、Quilt、NeoForge
 
-本專案已新增對 Quilt 與 NeoForge 的完整支援，允許直接建立和管理搭載這些載入器的伺服器。每個載入器都擁有獨立的版本管理和下載流程。
+程式目前支援直接建立和管理 Vanilla 伺服器，以及 Fabric、Forge、Quilt、NeoForge 載入器伺服器。各載入器使用各自的版本查詢與下載流程。
 
 ---
 
@@ -94,7 +96,7 @@
 
 - 確認防毒軟體未封鎖 `MinecraftServerManager.exe`
 - 嘗試以系統管理員身分執行
-- 若使用可攜版且遇到啟動或 Java 偵測問題，可改用簡短英文路徑重新測試
+- 若使用可攜式安裝且遇到啟動或 Java 偵測問題，可改用簡短英文路徑重新測試
 
 ### 伺服器無法啟動
 
@@ -108,14 +110,20 @@
 - 檔案副檔名需為 `.jar` 或 `.jar.disabled`
 - 按「**重新整理**」手動刷新清單
 
+### 如何移除可攜式安裝
+
+可攜式安裝的程式、設定、日誌與快取都在安裝時指定的資料夾內。關閉程式後直接刪除整個資料夾即可。
+
 ---
 
 ## 資料位置
 
 | 模式 | 設定檔 | 日誌 | 快取 |
 |------|--------|------|------|
-| 安裝版 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | 同目錄 `log\` | 同目錄 `Cache\` |
-| 可攜版 | 程式目錄 `.config\user_settings.json` | 程式目錄 `.log\` | 程式目錄 `.config\Cache\` |
+| 一般安裝 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | 同目錄 `log\` | 同目錄 `Cache\` |
+| 可攜式安裝 | 程式目錄 `.config\user_settings.json` | 程式目錄 `.log\` | 程式目錄 `.config\Cache\` |
+
+可攜式 / 一般安裝路徑與更新流程差異請見 [可攜式 / 一般安裝差異矩陣](PORTABLE_INSTALLER_MATRIX.md)。
 
 ---
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import threading
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -11,7 +10,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 shiboken_is_valid: Callable[[Any], bool] | None
 
-try:  # pragma: no cover - depends on PySide6 binary package details.
+try:
     from shiboken6 import isValid as shiboken_is_valid
 except ImportError:
     shiboken_is_valid = None
@@ -111,6 +110,33 @@ def cancel_timer(timer: Any) -> None:
         return
 
 
+class _OpenUrlClickFilter(QtCore.QObject):
+    """把滑鼠點擊轉成開啟外部網址的 Qt event filter。"""
+
+    def __init__(self, url: str, parent: QtCore.QObject | None = None) -> None:
+        super().__init__(parent)
+        self._url = str(url)
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(self._url))
+            return True
+        return super().eventFilter(watched, event)
+
+
+def install_open_url_click(widget: QtWidgets.QWidget, url: str) -> None:
+    """讓 widget 被點擊時開啟指定外部網址。
+
+    Args:
+        widget: 要安裝點擊處理器的 Qt widget。
+        url: 點擊後要開啟的外部網址。
+    """
+
+    click_filter = _OpenUrlClickFilter(url, widget)
+    widget.installEventFilter(click_filter)
+    cast(Any, widget)._msm_open_url_click_filter = click_filter
+
+
 class _UiDispatcher(QtCore.QObject):
     dispatched = QtCore.Signal(object)
 
@@ -120,13 +146,13 @@ class _UiDispatcher(QtCore.QObject):
 
     @QtCore.Slot(object)
     def _run(self, payload: object) -> None:
-        func, done, result = cast(tuple[Callable[[], Any], threading.Event, dict[str, Any]], payload)
+        func, done, result = cast(tuple[Callable[[], Any], QtCore.QSemaphore, dict[str, Any]], payload)
         try:
             result["value"] = func()
         except Exception as exc:
             result["exc"] = exc
         finally:
-            done.set()
+            done.release()
 
 
 def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = None) -> Any:
@@ -140,17 +166,19 @@ def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = None) -> A
         callable 的回傳值。
     """
     app = ensure_application()
-    if QtCore.QThread.currentThread() is app.thread() or threading.current_thread() is threading.main_thread():
+    if QtCore.QThread.currentThread() is app.thread():
         return func()
 
     global _dispatcher
     if _dispatcher is None or not is_qobject_alive(_dispatcher):
         _dispatcher = _UiDispatcher()
         _dispatcher.moveToThread(app.thread())
-    done = threading.Event()
+    done = QtCore.QSemaphore(0)
     result: dict[str, Any] = {"value": None, "exc": None}
     _dispatcher.dispatched.emit((func, done, result))
-    if not done.wait(timeout=timeout):
+    if timeout is None:
+        done.acquire()
+    elif not done.tryAcquire(1, max(0, int(timeout * 1000))):
         raise TimeoutError(f"UI 任務等待逾時 ({timeout}秒)")
     if result["exc"] is not None:
         raise result["exc"]
@@ -249,6 +277,7 @@ __all__ = [
     "ValueState",
     "cancel_timer",
     "ensure_application",
+    "install_open_url_click",
     "invoke_later",
     "is_qobject_alive",
     "run_on_ui_thread",

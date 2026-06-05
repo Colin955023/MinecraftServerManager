@@ -7,7 +7,6 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import queue
-import threading
 import traceback
 from collections.abc import Callable
 from pathlib import Path
@@ -27,7 +26,8 @@ from ..utils import (
     get_shared_manager,
     record_and_mark,
 )
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ValueState, is_qobject_alive
+from ..utils.ui_support.fluent import FluentLineEdit, FluentPushButton
+from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ValueState, install_open_url_click, is_qobject_alive
 from . import CustomDropdown, FontManager, ProgressDialog, TaskUtils
 from .ui_config import NativeQtStyle, resolve_color
 
@@ -127,7 +127,11 @@ class CreateServerFrame(QtWidgets.QWidget):
         widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
 
     def _make_button(self, text: str, command: Callable[[], Any], *, kind: str = "secondary") -> QtWidgets.QPushButton:
-        button = QtWidgets.QPushButton(text)
+        try:
+            button = FluentPushButton(text, self)
+        except TypeError:
+            button = FluentPushButton(self)
+            button.setText(text)
         button.setProperty("msm_button_kind", kind)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
@@ -156,7 +160,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         """
         parent.addWidget(self._make_label("Java 執行檔路徑 (可選):"), row, 0)
         self.java_path_var = ValueState("")
-        java_path_entry = QtWidgets.QLineEdit(self.form_panel)
+        java_path_entry = FluentLineEdit(self.form_panel)
         java_path_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(java_path_entry, self.java_path_var)
         self._style_control(java_path_entry)
@@ -278,7 +282,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True)))
         eula_link.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_WARNING)))
         eula_link.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        eula_link.mousePressEvent = lambda _event: UIUtils.open_external("https://aka.ms/MinecraftEULA")  # type: ignore[method-assign]
+        install_open_url_click(eula_link, "https://aka.ms/MinecraftEULA")
         eula_layout.addWidget(eula_link, 1)
         content_layout.addWidget(eula_frame)
 
@@ -406,7 +410,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         min_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
         min_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
         min_layout.addWidget(min_label)
-        self.min_memory_entry = QtWidgets.QLineEdit(min_memory_frame)
+        self.min_memory_entry = FluentLineEdit(min_memory_frame)
         self.min_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(self.min_memory_entry, self.min_memory_var)
         self._style_control(self.min_memory_entry)
@@ -422,7 +426,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         max_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
         max_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
         max_layout.addWidget(max_label)
-        self.max_memory_entry = QtWidgets.QLineEdit(max_memory_frame)
+        self.max_memory_entry = FluentLineEdit(max_memory_frame)
         self.max_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(self.max_memory_entry, self.max_memory_var)
         self._style_control(self.max_memory_entry)
@@ -456,7 +460,7 @@ class CreateServerFrame(QtWidgets.QWidget):
 
     def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:
         """執行背景任務並處理錯誤"""
-        TaskUtils.run_in_daemon_thread(
+        TaskUtils.run_background_task(
             task_func,
             ui_queue=getattr(self, "ui_queue", None),
             widget=self,
@@ -565,7 +569,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         parent.addWidget(self._make_label(label_text), row, 0)
         var = ValueState(default_value)
         setattr(self, f"{var_name}_var", var)
-        entry = QtWidgets.QLineEdit(self.form_panel)
+        entry = FluentLineEdit(self.form_panel)
         entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(entry, var)
         self._style_control(entry)
@@ -716,7 +720,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         if hasattr(self, "_loading_key") and self._loading_key == current_key:
             return
         self._loading_key = current_key
-        threading.Thread(target=self.load_loader_versions, args=(loader_type, mc_version), daemon=True).start()
+        TaskUtils.run_async(self.load_loader_versions, loader_type, mc_version)
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
         """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）。
@@ -891,17 +895,12 @@ class CreateServerFrame(QtWidgets.QWidget):
         """
         parent_window = self.window()
         progress_dialog = None
-        progress_ready = threading.Event()
         try:
-
-            def create_progress():
-                nonlocal progress_dialog
-                progress_dialog = ProgressDialog(parent_window, "正在建立伺服器")
-                progress_ready.set()
-
-            self._schedule_ui_job("_create_server_progress_job", 0, create_progress)
-            if not progress_ready.wait(timeout=10):
-                raise Exception("建立進度對話框超時")
+            progress_dialog = TaskUtils.call_on_ui(
+                parent_window,
+                lambda: ProgressDialog(parent_window, "正在建立伺服器"),
+                timeout=10,
+            )
             if progress_dialog is None:
                 raise Exception("建立進度對話框失敗")
             if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):

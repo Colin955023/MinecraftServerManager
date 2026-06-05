@@ -27,6 +27,9 @@ logger = get_logger().bind(component="PathUtils")
 class PathUtils:
     """路徑處理工具類別，提供專案路徑管理和安全路徑操作"""
 
+    SAFE_ZIP_MAX_MEMBER_BYTES: ClassVar[int] = 512 * 1024 * 1024
+    SAFE_ZIP_MAX_TOTAL_BYTES: ClassVar[int] = 2 * 1024 * 1024 * 1024
+    SAFE_ZIP_MAX_COMPRESSION_RATIO: ClassVar[int] = 200
     _json_lock_registry_lock = threading.Lock()
     _json_path_locks: ClassVar[dict[str, threading.RLock]] = {}
     _json_write_retry_count = 3
@@ -145,6 +148,34 @@ class PathUtils:
             return None
 
     @staticmethod
+    def _is_zip_symlink(member: zipfile.ZipInfo) -> bool:
+        """檢查 zip entry 是否宣告為 Unix symlink。"""
+
+        return ((member.external_attr >> 16) & 0o170000) == 0o120000
+
+    @staticmethod
+    def _validate_zip_member_size(
+        member: zipfile.ZipInfo,
+        *,
+        max_member_uncompressed_bytes: int | None,
+        max_compression_ratio: int | None,
+    ) -> None:
+        """檢查單一 zip member 的大小與壓縮比例。"""
+
+        if member.is_dir():
+            return
+        file_size = max(0, int(member.file_size))
+        compressed_size = max(0, int(member.compress_size))
+        if max_member_uncompressed_bytes is not None and file_size > max_member_uncompressed_bytes:
+            raise ValueError(f"壓縮檔成員過大: {member.filename}")
+        if max_compression_ratio is None or file_size == 0:
+            return
+        if compressed_size == 0:
+            raise ValueError(f"壓縮檔成員壓縮比例異常: {member.filename}")
+        if file_size / compressed_size > max_compression_ratio:
+            raise ValueError(f"壓縮檔成員壓縮比例過高: {member.filename}")
+
+    @staticmethod
     def sanitize_filename(filename: str) -> str:
         """
         取得傳入字串的安全檔名（basename）。
@@ -161,7 +192,13 @@ class PathUtils:
 
     @staticmethod
     def safe_extract_zip(
-        zip_path: Path, dest_dir: Path, progress_callback: Callable[[int, int], None] | None = None
+        zip_path: Path,
+        dest_dir: Path,
+        progress_callback: Callable[[int, int], None] | None = None,
+        *,
+        max_total_uncompressed_bytes: int | None = SAFE_ZIP_MAX_TOTAL_BYTES,
+        max_member_uncompressed_bytes: int | None = SAFE_ZIP_MAX_MEMBER_BYTES,
+        max_compression_ratio: int | None = SAFE_ZIP_MAX_COMPRESSION_RATIO,
     ) -> None:
         """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞。
 
@@ -172,32 +209,56 @@ class PathUtils:
 
         progress_callback 會收到 (已解壓位元組數, 總位元組數)。
         """
-        dest_dir = dest_dir.resolve()
+        dest_dir = dest_dir.resolve(strict=False)
+        dest_dir.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             members = zf.infolist()
             total_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
-            extracted_bytes = 0
-            if progress_callback is not None:
-                progress_callback(0, total_bytes)
+            if max_total_uncompressed_bytes is not None and total_bytes > max_total_uncompressed_bytes:
+                raise ValueError("壓縮檔解壓後大小超過安全上限")
+            sanitized_members: list[tuple[zipfile.ZipInfo, Path]] = []
             for member in members:
-                # 先將 zip 內部名稱清理成安全的相對路徑，避免 Zip Slip
+                if PathUtils._is_zip_symlink(member):
+                    raise ValueError(f"壓縮檔包含不支援的符號連結: {member.filename}")
+                PathUtils._validate_zip_member_size(
+                    member,
+                    max_member_uncompressed_bytes=max_member_uncompressed_bytes,
+                    max_compression_ratio=max_compression_ratio,
+                )
                 sanitized = PathUtils._sanitize_archive_member_name(member.filename)
                 if sanitized is None:
                     raise ValueError(f"壓縮檔包含不安全的成員名稱: {member.filename}")
                 member_path = dest_dir / sanitized
                 if not PathUtils.is_path_within(dest_dir, member_path, strict=False):
                     raise ValueError(f"壓縮檔嘗試路徑遍歷: {member.filename}")
+                sanitized_members.append((member, sanitized))
+            extracted_bytes = 0
+            if progress_callback is not None:
+                progress_callback(0, total_bytes)
+            for member, sanitized in sanitized_members:
+                member_path = dest_dir / sanitized
                 if member.is_dir() or str(member.filename).endswith("/"):
                     member_path.mkdir(parents=True, exist_ok=True)
                     continue
                 member_path.parents[0].mkdir(parents=True, exist_ok=True)
+                member_extracted_bytes = 0
                 with zf.open(member, "r") as source, open(member_path, "wb") as target:
                     while True:
                         chunk = source.read(1024 * 1024)
                         if not chunk:
                             break
+                        next_member_bytes = member_extracted_bytes + len(chunk)
+                        next_total_bytes = extracted_bytes + len(chunk)
+                        if (
+                            max_member_uncompressed_bytes is not None
+                            and next_member_bytes > max_member_uncompressed_bytes
+                        ):
+                            raise ValueError(f"壓縮檔成員實際解壓大小超過安全上限: {member.filename}")
+                        if max_total_uncompressed_bytes is not None and next_total_bytes > max_total_uncompressed_bytes:
+                            raise ValueError("壓縮檔實際解壓大小超過安全上限")
                         target.write(chunk)
-                        extracted_bytes += len(chunk)
+                        member_extracted_bytes = next_member_bytes
+                        extracted_bytes = next_total_bytes
                         if progress_callback is not None and total_bytes > 0:
                             progress_callback(extracted_bytes, total_bytes)
             if progress_callback is not None:

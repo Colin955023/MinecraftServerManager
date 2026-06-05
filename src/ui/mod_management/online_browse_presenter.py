@@ -47,16 +47,18 @@ class OnlineBrowsePresenter(PresenterDelegateMixin):
             "最近更新": "updated",
             "名稱": "name",
         }
-        search_entry = qt.Entry(
+        self.online_search_filter = qt.SearchFilter()
+        search_entry = qt.SearchEntry(
             search_frame,
             textvariable=self.search_var,
+            search_command=self.search_online_mods,
+            filter_logic=self.online_search_filter,
             placeholder_text="請輸入關鍵字後搜尋，例如 sodium / lithium / worldedit",
             font=FontManager.get_font(size=FontSize.MEDIUM),
             width=Sizes.DIALOG_PROGRESS_WIDTH,
             height=Sizes.INPUT_HEIGHT,
         )
         search_entry.attach(side="left", padx=(Spacing.MEDIUM, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
-        search_entry.connect_event("return_pressed", self.search_online_mods)
         sort_dropdown = CustomDropdown(
             search_frame,
             variable=self.browse_sort_var,
