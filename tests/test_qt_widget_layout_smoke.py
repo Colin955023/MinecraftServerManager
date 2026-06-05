@@ -4,6 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6 import QtGui
 from src.ui import DialogUtils
 from src.ui.task_utils import TaskUtils
 from src.ui.ui_config import NativeQtStyle, initialize_ui_theme
@@ -94,6 +95,51 @@ def test_checkbox_state_tracks_bound_variable_in_both_directions() -> None:
         checkbox.deleteLater()
 
 
+def test_progress_bar_shows_percentage_text_by_default() -> None:
+    qt.ensure_app()
+    progress_bar = qt.ProgressBar(None)
+    try:
+        assert progress_bar.isTextVisible() is True
+        assert progress_bar.format() == "%p%"
+        assert progress_bar.text() == "0%"
+        progress_bar.set(0.25)
+        assert progress_bar.value() == 25
+        assert progress_bar.text() == "25%"
+    finally:
+        progress_bar.deleteLater()
+
+
+def test_progress_bar_renders_text_when_visibility_enabled() -> None:
+    app = qt.ensure_app()
+    progress_bar = qt.ProgressBar(None)
+    try:
+        progress_bar.resize(220, 28)
+        progress_bar.set(0.25)
+        app.processEvents()
+
+        def _render_snapshot(text_visible: bool) -> QtGui.QImage:
+            progress_bar.setTextVisible(text_visible)
+            image = QtGui.QImage(progress_bar.size(), QtGui.QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(QtGui.QColor(0, 0, 0, 0))
+            painter = QtGui.QPainter(image)
+            try:
+                progress_bar.render(painter, QtCore.QPoint(0, 0))
+            finally:
+                painter.end()
+            return image
+
+        hidden_image = _render_snapshot(False)
+        visible_image = _render_snapshot(True)
+        sample_points = [
+            (x, y)
+            for x in range(progress_bar.width() // 2 - 24, progress_bar.width() // 2 + 24, 4)
+            for y in range(progress_bar.height() // 2 - 6, progress_bar.height() // 2 + 6, 2)
+        ]
+        assert any(hidden_image.pixelColor(x, y) != visible_image.pixelColor(x, y) for x, y in sample_points)
+    finally:
+        progress_bar.deleteLater()
+
+
 def test_slider_state_tracks_bound_variable_in_both_directions() -> None:
     qt.ensure_app()
     variable = qt.FloatState(1.25)
@@ -163,6 +209,25 @@ def test_button_command_ignores_qt_checked_argument() -> None:
         button.deleteLater()
 
 
+def test_search_entry_binds_text_state_and_filter_logic() -> None:
+    qt.ensure_app()
+    variable = qt.TextState()
+    search = qt.SearchEntry(None, textvariable=variable, filter_logic=qt.SearchFilter())
+    try:
+        search.setText("  Sodium   Mod  ")
+
+        assert variable.get() == "  Sodium   Mod  "
+        assert search.filter_text() == "sodium mod"
+        assert search.matches("Install Sodium Mod")
+        assert search.matches({"name": "Sodium", "summary": "Rendering mod"})
+        assert not search.matches({"name": "Sodium", "summary": "Performance"})
+
+        variable.set("Lithium")
+        assert search.text() == "Lithium"
+    finally:
+        search.deleteLater()
+
+
 def test_dialog_utils_creates_resizable_dialog_with_standard_window_controls() -> None:
     qt.ensure_app()
     dialog = DialogUtils.create_toplevel_dialog(
@@ -199,6 +264,9 @@ def test_dialog_utils_applies_distinct_button_and_input_styles() -> None:
         assert "background: #f8fafc" in stylesheet
         assert "background: #ffffff" in stylesheet
         assert "background: #2563eb" in stylesheet
+        assert "QCheckBox::indicator" in stylesheet
+        assert "QCheckBox::indicator:checked" in stylesheet
+        assert "QCheckBox::indicator:unchecked" in stylesheet
     finally:
         dialog.destroy()
 
@@ -220,6 +288,8 @@ def test_native_dialog_styles_keep_controls_distinct_from_dialog_background() ->
         assert "background: #f8fafc" in stylesheet
         assert "background: #ffffff" in stylesheet
         assert "background: #2563eb" in stylesheet
+        assert "QCheckBox::indicator" in stylesheet
+        assert "QCheckBox::indicator:unchecked" in stylesheet
 
 
 def test_get_button_style_has_secondary_button_color() -> None:

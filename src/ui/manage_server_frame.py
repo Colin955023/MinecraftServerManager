@@ -22,7 +22,6 @@ from ..utils import (
     ServerOperations,
     Sizes,
     Spacing,
-    SubprocessUtils,
     UIUtils,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
@@ -30,6 +29,7 @@ from ..utils import (
     get_settings_manager,
 )
 from ..utils.ui_support import qt_widgets as qt
+from ..utils.ui_support.qt_runtime import QtCore
 from . import FontManager, ServerMonitorWindow, ServerPropertiesDialog, TaskUtils, TreeUtils
 
 logger = get_logger().bind(component="ManageServerFrame")
@@ -1288,7 +1288,12 @@ class ManageServerFrame:
         self.refresh_servers()
 
     def monitor_server(self, *, bring_to_front: bool = True) -> None:
-        """監控伺服器"""
+        """
+        監控伺服器
+
+        Args:
+            bring_to_front: 是否將監控視窗帶到前面。
+        """
         if not self.selected_server:
             return
 
@@ -1465,17 +1470,13 @@ class ManageServerFrame:
                     self.refresh_servers()
                     return
             try:
-                startupinfo = SubprocessUtils.STARTUPINFO()
-                startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
-                SubprocessUtils.popen_checked(
-                    [bat_file_path],
-                    stdin=SubprocessUtils.DEVNULL,
-                    stdout=SubprocessUtils.DEVNULL,
-                    stderr=SubprocessUtils.DEVNULL,
-                    close_fds=True,
-                    startupinfo=startupinfo,
-                )
+                program = bat_file_path
+                arguments: list[str] = []
+                if Path(bat_file_path).suffix.lower() in {".bat", ".cmd"}:
+                    program = "cmd.exe"
+                    arguments = ["/d", "/s", "/c", bat_file_path]
+                if not QtCore.QProcess.startDetached(program, arguments, backup_full_path):
+                    raise RuntimeError("QProcess 無法啟動備份批次檔")
                 UIUtils.show_info(
                     "備份開始", f"備份已開始執行，請稍候...\n備份位置：{backup_full_path}", self.top_level_widget()
                 )

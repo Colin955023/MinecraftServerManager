@@ -7,7 +7,6 @@ import re
 import tomllib
 import zipfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +17,7 @@ from ..utils import (
     ServerDetectionVersionUtils,
     derive_provider_lifecycle_state,
     get_logger,
+    get_shared_manager,
     record_and_mark,
 )
 from .mod_models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
@@ -64,8 +64,8 @@ class LocalModScanner:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled")
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        with ThreadPoolExecutor(max_workers=min(6, len(files_to_scan) or 1)) as executor:
-            results = executor.map(create_mod_info_from_file, files_to_scan)
+        futures = [get_shared_manager().run(create_mod_info_from_file, file_path) for file_path in files_to_scan]
+        results = [future.result() for future in futures]
         for mod_info in results:
             if mod_info:
                 mods.append(mod_info)

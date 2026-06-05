@@ -114,9 +114,11 @@ class LoaderManager(Singleton):
         """在 installer 失敗或取消時清理殘留進程。"""
         if process is None:
             return
+        pid = int(getattr(process, "pid", 0) or 0)
         try:
-            if process.poll() is None:
-                SystemUtils.kill_process_tree(process.pid)
+            is_running = process.poll() is None
+            if pid and (is_running or bool(getattr(process, "cancelled", False))):
+                SystemUtils.kill_process_tree(pid)
         except Exception as e:
             logger.warning(f"終止安裝器進程樹失敗: {e}")
         try:
@@ -124,7 +126,7 @@ class LoaderManager(Singleton):
         except Exception as e:
             logger.warning(f"清理安裝器殘留 Java 進程失敗: {e}")
         with suppress(Exception):
-            SystemUtils.unregister_managed_process(base_dir, process.pid)
+            SystemUtils.unregister_managed_process(base_dir, pid)
         with suppress(Exception):
             record_and_mark(
                 RuntimeError(reason),
@@ -978,44 +980,49 @@ class LoaderManager(Singleton):
             return self._fail(progress_callback, "執行安裝器失敗：無效的命令參數")
         process = None
         try:
-            process = SubprocessUtils.popen_checked(
+            output_buffer = ""
+
+            def _on_installer_started(pid: int) -> None:
+                SystemUtils.register_managed_process(base_dir, pid)
+
+            def _on_installer_output(chunk: str) -> None:
+                nonlocal output_buffer
+                output_buffer += chunk
+                if not progress_callback:
+                    return
+                lines = output_buffer.splitlines()
+                if output_buffer and not output_buffer.endswith(("\n", "\r")):
+                    output_buffer = lines.pop() if lines else output_buffer
+                else:
+                    output_buffer = ""
+                for raw_line in lines:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    if "Download" in line:
+                        progress_callback(install_start, f"安裝中: {line[:40]}...")
+                    elif "Processor" in line:
+                        progress_callback(install_start, f"處理中: {line[:40]}...")
+
+            process = SubprocessUtils.run_qprocess_checked(
                 cmd,
                 cwd=str(base_dir),
-                stdin=SubprocessUtils.DEVNULL,
-                stdout=SubprocessUtils.PIPE,
-                stderr=SubprocessUtils.STDOUT,
-                text=True,
                 encoding="utf-8",
-                errors="replace",
-                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
+                on_started=_on_installer_started,
+                on_stdout=_on_installer_output,
+                cancel_check=lambda: self._is_cancel_requested(cancel_flag),
             )
-            SystemUtils.register_managed_process(base_dir, process.pid)
-            if process.stdout is None:
-                with suppress(Exception):
-                    SystemUtils.unregister_managed_process(base_dir, process.pid)
-                return False
-            while True:
-                if self._is_cancel_requested(cancel_flag):
-                    self._cleanup_failed_installer_process(
-                        process,
-                        base_dir=base_dir,
-                        installer_path=installer_path,
-                        reason="installer_cancelled",
-                        details={"cmd": cmd},
-                    )
-                    return self._fail(progress_callback, "已取消安裝，並已清理殘留安裝程序")
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
-                if line:
-                    line = line.strip()
-                    if progress_callback and line:
-                        if "Download" in line:
-                            progress_callback(install_start, f"安裝中: {line[:40]}...")
-                        elif "Processor" in line:
-                            progress_callback(install_start, f"處理中: {line[:40]}...")
             with suppress(Exception):
                 SystemUtils.unregister_managed_process(base_dir, process.pid)
+            if process.cancelled:
+                self._cleanup_failed_installer_process(
+                    process,
+                    base_dir=base_dir,
+                    installer_path=installer_path,
+                    reason="installer_cancelled",
+                    details={"cmd": cmd},
+                )
+                return self._fail(progress_callback, "已取消安裝，並已清理殘留安裝程序")
             if process.returncode != 0:
                 logger.error(f"安裝器執行失敗 (Code {process.returncode})")
                 return self._fail(
@@ -1245,6 +1252,12 @@ class LoaderManager(Singleton):
         if checksum is None:
             logger.warning(f"下載檔案未找到 SHA-256 / SHA-512 sidecar，將僅使用既有來源保護: {url}")
         expected_hash = checksum[1] if checksum else None
+        download_failure_reason = ""
+
+        def _capture_download_failure(message: str) -> None:
+            nonlocal download_failure_reason
+            download_failure_reason = message
+
         if HTTPUtils.download_file(
             url,
             dest_path,
@@ -1252,9 +1265,10 @@ class LoaderManager(Singleton):
             timeout=30,
             cancel_check=check_cancel,
             expected_hash=expected_hash,
+            failure_message_callback=_capture_download_failure,
         ):
             return True
-        return self._fail(progress_callback, "下載失敗：無法獲取檔案")
+        return self._fail(progress_callback, download_failure_reason or "下載失敗：無法獲取檔案")
 
     def _get_minecraft_server_url(self, mc_version: str) -> str | None:
         """根據 Minecraft 版本獲取伺服器 JAR 下載 URL。"""

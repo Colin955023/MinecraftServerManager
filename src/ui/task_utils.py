@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import queue
-import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -138,12 +137,14 @@ class TaskUtils:
         """
         try:
             return run_in_background(target, *args, **kwargs)
-        except Exception:
-            threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True).start()
-            return None
+        except Exception as exc:
+            future: concurrent.futures.Future[Any] = concurrent.futures.Future()
+            future.set_exception(exc)
+            logger.exception(f"背景任務提交失敗: {exc}")
+            return future
 
     @staticmethod
-    def run_in_daemon_thread(
+    def run_background_task(
         task_func: Callable,
         *,
         ui_queue: queue.Queue | None = None,
@@ -152,7 +153,7 @@ class TaskUtils:
         error_log_prefix: str = "",
         component: str = "TaskUtils",
     ) -> None:
-        """在背景 daemon thread 執行任務，失敗時可選擇回派 UI callback。
+        """透過 Qt 背景工作池執行任務，失敗時可選擇回派 UI callback。
 
         Args:
             task_func: 要執行的任務函式。
@@ -192,7 +193,7 @@ class TaskUtils:
                 get_logger().bind(component=component).exception(f"{prefix}{exc}")
                 _dispatch(on_error)
 
-        threading.Thread(target=_wrapper, daemon=True).start()
+        TaskUtils.run_async(_wrapper)
 
 
 __all__ = ["TaskUtils"]

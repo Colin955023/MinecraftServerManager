@@ -30,55 +30,39 @@ class ServerPropertiesDialog:
     提供視覺化的 server.properties 編輯介面
     """
 
-    BOOLEAN_PROPS: tuple[str, ...] = (
-        "hardcore",
-        "pvp",
-        "online-mode",
-        "white-list",
-        "generate-structures",
-        "spawn-monsters",
-        "allow-flight",
-        "allow-nether",
-        "enable-command-block",
-        "use-native-transport",
-        "enable-jmx-monitoring",
-        "enable-rcon",
-        "prevent-proxy-connections",
-        "hide-online-players",
-        "force-gamemode",
-        "broadcast-console-to-ops",
-        "broadcast-rcon-to-ops",
-        "enable-query",
-        "enable-status",
-        "log-ips",
-        "require-resource-pack",
-        "enable-code-of-conduct",
-        "accepts-transfers",
-        "sync-chunk-writes",
-        "management-server-enabled",
-        "management-server-tls-enabled",
-    )
     CHOICE_PROPS: ClassVar[dict[str, tuple[str, ...]]] = {
         "gamemode": ("survival", "creative", "adventure", "spectator"),
         "difficulty": ("peaceful", "easy", "normal", "hard"),
-        "level-type": ("minecraft:normal", "minecraft:flat", "minecraft:large_biomes", "minecraft:amplified"),
+        "level-type": (
+            "minecraft:normal",
+            "minecraft:flat",
+            "minecraft:large_biomes",
+            "minecraft:amplified",
+            "minecraft:single_biome_surface",
+        ),
         "region-file-compression": ("deflate", "lz4", "none"),
     }
     RANGE_PROPS: ClassVar[dict[str, tuple[int, int]]] = {
         "server-port": (1, 65534),
-        "max-players": (1, 1000),
-        "spawn-protection": (0, 100),
+        "max-players": (0, 2147483647),
+        "max-world-size": (1, 29999984),
+        "spawn-protection": (0, 2147483647),
         "view-distance": (3, 32),
         "simulation-distance": (3, 32),
-        "op-permission-level": (1, 4),
+        "op-permission-level": (0, 4),
         "function-permission-level": (1, 4),
         "rcon.port": (1, 65534),
         "query.port": (1, 65534),
         "entity-broadcast-range-percentage": (10, 1000),
-        "network-compression-threshold": (-1, 10000),
-        "max-tick-time": (-1, 600000),
-        "rate-limit": (0, 1000),
-        "player-idle-timeout": (0, 1440),
+        "network-compression-threshold": (-1, 2147483647),
+        "max-tick-time": (-1, 2147483647),
+        "rate-limit": (0, 2147483647),
+        "player-idle-timeout": (0, 2147483647),
+        "pause-when-empty-seconds": (-2147483648, 2147483647),
+        "max-chained-neighbor-updates": (-2147483648, 2147483647),
+        "management-server-port": (0, 65535),
+        "status-heartbeat-interval": (0, 2147483647),
+        "text-filtering-version": (0, 1),
     }
 
     def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
@@ -86,6 +70,7 @@ class ServerPropertiesDialog:
         self.server_config = server_config
         self.server_manager = server_manager
         self.properties_helper = ServerPropertiesHelper()
+        self._default_properties: dict[str, str] = self._load_default_properties()
         self.result = None
         self.dialog = DialogUtils.create_toplevel_dialog(
             parent,
@@ -112,6 +97,19 @@ class ServerPropertiesDialog:
         self.create_widgets()
         self.load_properties()
         self.show_dialog()
+
+    def _load_default_properties(self) -> dict[str, str]:
+        """載入伺服器預設設定，供欄位型別與重設流程共用。"""
+        if not hasattr(self.server_manager, "get_default_server_properties"):
+            return {}
+        try:
+            defaults = self.server_manager.get_default_server_properties()
+        except Exception as e:
+            logger.exception(f"讀取預設 server.properties 失敗: {e}")
+            return {}
+        if not isinstance(defaults, dict):
+            return {}
+        return {str(key): "" if value is None else str(value) for key, value in defaults.items()}
 
     def setup_dialog(self) -> None:
         """設定對話框"""
@@ -303,21 +301,30 @@ class ServerPropertiesDialog:
         categorized_keys: set[str] = set()
         for props in categories.values():
             categorized_keys.update(props)
-        all_properties = dict(self.server_config.properties or {})
-        if hasattr(self.server_manager, "get_default_server_properties"):
-            try:
-                defaults = self.server_manager.get_default_server_properties()
-                all_properties = {**defaults, **all_properties}
-            except Exception as e:
-                logger.exception(f"讀取預設 server.properties 失敗: {e}")
+        all_properties = dict(self._default_properties)
+        all_properties.update(self.server_config.properties or {})
         all_keys = set(all_properties.keys())
-        uncategorized_keys = sorted(all_keys - categorized_keys)
         for category_name, properties in categories.items():
-            _add_scrollable_tab(category_name, properties)
+            visible_properties = [prop for prop in properties if prop in all_keys]
+            if visible_properties:
+                _add_scrollable_tab(category_name, visible_properties)
+        uncategorized_keys = sorted(all_keys - categorized_keys)
         if uncategorized_keys:
             _add_scrollable_tab("其他", uncategorized_keys)
         self.notebook.connect_event("tab_changed", self._on_tab_changed, append=True)
         self._on_tab_changed()
+
+    @staticmethod
+    def _is_boolean_string(value: Any) -> bool:
+        normalized = str(value).strip().lower() if value is not None else ""
+        return normalized in {"true", "false"}
+
+    def _should_use_checkbox(self, prop_name: str, value: Any) -> bool:
+        if ServerPropertiesValidator.is_boolean_property(prop_name):
+            return True
+        if self._is_boolean_string(value):
+            return True
+        return self._is_boolean_string(self._default_properties.get(prop_name))
 
     def _get_or_create_property_var(self, prop_name: str) -> Any:
         """取得或建立屬性對應的 TextState，並同步到 cache。"""
@@ -400,7 +407,7 @@ class ServerPropertiesDialog:
             建立完成的 widget。
         """
         widget: Any
-        if prop_name in self.BOOLEAN_PROPS:
+        if self._should_use_checkbox(prop_name, var.get()):
             bool_var = self._property_bool_vars.get(prop_name)
             if bool_var is None:
                 bool_var = qt.BoolState()

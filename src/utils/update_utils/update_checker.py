@@ -7,7 +7,6 @@ import re
 import shutil
 import sys
 import tempfile
-import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -16,7 +15,8 @@ from typing import Any, Protocol, TypeVar
 from packaging.version import Version
 
 from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UpdateParsing, get_logger
-from ..ui_support.qt_runtime import is_qobject_alive
+from ..runtime_utils.background_task import run_in_background
+from ..ui_support.qt_runtime import invoke_later, is_qobject_alive
 
 logger = get_logger().bind(component="UpdateChecker")
 _UpdateResultT = TypeVar("_UpdateResultT")
@@ -97,8 +97,7 @@ class _DirectUpdateCheckerInteraction:
     """沒有 UI adapter 時使用的安全後備互動實作。"""
 
     def run_async(self, work: Callable[[], None]) -> None:
-        thread = threading.Thread(target=work, daemon=True, name="UpdateChecker")
-        thread.start()
+        run_in_background(work)
 
     def call_on_ui(self, parent: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
         _ = parent
@@ -118,11 +117,9 @@ class _DirectUpdateCheckerInteraction:
                 if alive:
                     return widget.schedule(max(0, int(delay_ms)), callback)
             except Exception:
-                logger.debug("使用 widget.schedule 安排工作失敗，將回退到 threading.Timer", exc_info=True)
-        timer = threading.Timer(max(0, int(delay_ms)) / 1000, callback)
-        timer.daemon = True
-        timer.start()
-        return timer
+                logger.debug("使用 widget.schedule 安排工作失敗，將回退到 QTimer", exc_info=True)
+        parent = widget if is_qobject_alive(widget) else None
+        return invoke_later(max(0, int(delay_ms)), callback, parent=parent)
 
     def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
         _ = (message, kwargs)
@@ -557,7 +554,17 @@ class UpdateChecker:
                     temp_path = tmp.name
                 dest = Path(temp_path)
                 temp_files_to_cleanup.append(dest)
-                if HTTPUtils.download_file(download_url, str(dest)):
+                download_failure_reason = ""
+
+                def _capture_download_failure(message: str) -> None:
+                    nonlocal download_failure_reason
+                    download_failure_reason = message
+
+                if HTTPUtils.download_file(
+                    download_url,
+                    str(dest),
+                    failure_message_callback=_capture_download_failure,
+                ):
                     logger.info(f"[驗證階段] 正在計算並驗證下載檔案的 {alg.upper()}...")
                     logger.info(f"[驗證階段] 預期 {alg.upper()}: {expected_checksum}")
                     ok = _verify_file_checksum(dest, alg, expected_checksum)
@@ -596,15 +603,21 @@ class UpdateChecker:
                     )
                     time.sleep(2)
                     logger.info("準備關閉當前程式以完成更新")
-                    UpdateChecker._graceful_exit(parent, interaction=update_interaction)
                 else:
+                    failure_message = download_failure_reason or "無法下載安裝程式。"
+                    logger.warning(f"[下載失敗] {failure_message}")
                     TaskUtils.call_on_ui(
                         parent,
                         lambda: UIUtils.show_error(
-                            "下載失敗", "無法下載安裝檔，請稍後再試。", parent=parent, topmost=True
+                            "下載失敗",
+                            failure_message,
+                            parent=parent,
+                            topmost=True,
                         ),
                     )
                     _cleanup_temp_files(temp_files_to_cleanup)
+                    return
+                UpdateChecker._graceful_exit(parent, interaction=update_interaction)
             except Exception as e:
                 logger.exception(f"更新檢查失敗: {e}")
                 error_msg = str(e)

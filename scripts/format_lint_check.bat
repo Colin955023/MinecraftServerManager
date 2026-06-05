@@ -35,7 +35,7 @@ uv run pylint --disable=all --enable=cyclic-import src
 if errorlevel 1 exit /b 1
 echo.
 
-choice /c YN /m "Run secret scan? (Y/N)"
+choice /c YN /m "Run secret scan? (Y/N)" /t 5 /d N
 if errorlevel 2 (
     echo Skipping secret scan.
 ) else (

@@ -5,11 +5,9 @@ Server monitor window for real-time status, console output, and resource usage.
 
 import queue
 import re
-import threading
 import time
 import traceback
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from ..utils import Colors, FontSize, MemoryUtils, ServerOperations, Sizes, Spacing, UIUtils, WindowManager, get_logger
@@ -30,7 +28,6 @@ class ServerMonitorWindow:
         self.window: Any | None = None
         self._auto_refresh_id: str | None = None
         self.is_monitoring = False
-        self.monitor_thread = None
         self._last_player_count: int | None = None
         self._last_max_players: int | None = None
         self._last_player_names: tuple[str, ...] | None = None
@@ -43,8 +40,11 @@ class ServerMonitorWindow:
         self._refresh_log_max_lines = 2500
         self._refresh_log_max_bytes = 2 * 1024 * 1024
         self._command_history: list[str] = []
-        self._monitor_stop_event = threading.Event()
-        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ServerMonitor")
+        self._monitor_loop_job: str | None = None
+        self._delayed_player_list_job: str | None = None
+        self._last_monitor_status_update = 0.0
+        self._last_monitor_output_check = 0.0
+        self._last_log_mtime = 0.0
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
 
     def start_auto_refresh(self) -> None:
@@ -536,60 +536,66 @@ class ServerMonitorWindow:
     def start_monitoring(self) -> None:
         """開始監控，啟動時自動讀取現有日誌內容，避免橫幅遺漏"""
         if not self.is_monitoring:
-            self._monitor_stop_event.clear()
             self.is_monitoring = True
+            self._last_monitor_status_update = 0.0
+            self._last_monitor_output_check = 0.0
+            self._last_log_mtime = 0.0
             self._schedule_window_job("_monitor_start_refresh_job", 0, self.refresh_status)
             self.start_auto_refresh()
-            self.monitor_future = self.executor.submit(self.monitor_loop)
+            self._schedule_monitor_loop_tick(0)
 
     def stop_monitoring(self) -> None:
         """停止監控"""
         self.is_monitoring = False
-        self._monitor_stop_event.set()
         self.stop_auto_refresh()
         if self.window:
             UIUtils.cancel_scheduled_job(self.window, "_console_flush_job", owner=self)
+            UIUtils.cancel_scheduled_job(self.window, "_monitor_loop_job", owner=self)
+            UIUtils.cancel_scheduled_job(self.window, "_delayed_player_list_job", owner=self)
         self._cancel_window_jobs()
-        if hasattr(self, "executor"):
-            self.executor.shutdown(wait=False)
-        if hasattr(self, "monitor_future"):
-            try:
-                self.monitor_future.result(timeout=1)
-            except Exception as e:
-                logger.exception(f"等待監控 future 結束超時/失敗（忽略）: {e}", "ServerMonitorWindow", e)
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=1)
+
+    def _schedule_monitor_loop_tick(self, delay_ms: int = 100) -> None:
+        if not self.is_monitoring or not self.window or not self.window.is_alive():
+            self._monitor_loop_job = None
+            return
+        UIUtils.schedule_debounce(
+            self.window,
+            "_monitor_loop_job",
+            max(1, int(delay_ms)),
+            self.monitor_loop,
+            owner=self,
+        )
 
     def monitor_loop(self) -> None:
-        """改良的監控循環"""
-        last_output_check = 0.0
-        last_status_update = 0.0
-        last_log_mtime = 0
-        while self.is_monitoring and (not self._monitor_stop_event.is_set()):
-            try:
-                current_time = time.monotonic()
-                if current_time - last_status_update >= 1.5:
-                    if self.window and self.window.is_alive():
-                        self.ui_queue.put(self.update_status)
-                    last_status_update = current_time
-                if current_time - last_output_check >= 0.1:
-                    try:
-                        self.read_server_output()
-                    except Exception as e:
-                        logger.debug(f"從輸出隊列讀取失敗（忽略）: {e}", "ServerMonitorWindow")
-                    try:
-                        log_file = self.server_manager.get_server_log_file(self.server_name)
-                        if log_file and log_file.exists():
-                            current_mtime = log_file.stat().st_mtime
-                            if current_mtime > last_log_mtime:
-                                last_log_mtime = current_mtime
-                    except Exception as e:
-                        logger.debug(f"檢查日誌檔案變更時發生例外（忽略）: {e}", "ServerMonitorWindow")
-                    last_output_check = current_time
-                self._monitor_stop_event.wait(0.1)
-            except Exception as e:
-                logger.error(f"監控更新錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
-                self._monitor_stop_event.wait(0.5)
+        """使用 Qt timer 驅動監控輪詢。"""
+        self._monitor_loop_job = None
+        if not self.is_monitoring:
+            return
+        try:
+            current_time = time.monotonic()
+            if current_time - self._last_monitor_status_update >= 1.5:
+                if self.window and self.window.is_alive():
+                    self.ui_queue.put(self.update_status)
+                self._last_monitor_status_update = current_time
+            if current_time - self._last_monitor_output_check >= 0.1:
+                try:
+                    self.read_server_output()
+                except Exception as e:
+                    logger.debug(f"從輸出隊列讀取失敗（忽略）: {e}", "ServerMonitorWindow")
+                try:
+                    log_file = self.server_manager.get_server_log_file(self.server_name)
+                    if log_file and log_file.exists():
+                        current_mtime = log_file.stat().st_mtime
+                        if current_mtime > self._last_log_mtime:
+                            self._last_log_mtime = current_mtime
+                except Exception as e:
+                    logger.debug(f"檢查日誌檔案變更時發生例外（忽略）: {e}", "ServerMonitorWindow")
+                self._last_monitor_output_check = current_time
+        except Exception as e:
+            logger.error(f"監控更新錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
+            self._schedule_monitor_loop_tick(500)
+            return
+        self._schedule_monitor_loop_tick(100)
 
     def read_server_output(self) -> None:
         """讀取伺服器輸出並顯示在控制台，並即時解析玩家數量/名單與啟動完成通知"""
@@ -687,14 +693,16 @@ class ServerMonitorWindow:
         """更新玩家數量"""
         try:
             success = self.server_manager.send_command(self.server_name, "list")
-            if success:
-                self.executor.submit(self._delayed_read_player_list)
+            if success and self.window and self.window.is_alive():
+                UIUtils.schedule_debounce(
+                    self.window,
+                    "_delayed_player_list_job",
+                    800,
+                    self.read_player_list,
+                    owner=self,
+                )
         except Exception as e:
             logger.error(f"更新玩家數量錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
-
-    def _delayed_read_player_list(self):
-        self._monitor_stop_event.wait(0.8)
-        self.read_player_list()
 
     def read_player_list(self, line=None) -> None:
         """讀取玩家列表。

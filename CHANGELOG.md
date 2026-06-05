@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.7.2 - 2026-06-05
+
+### 新增
+- **UI 視覺升級 (Fluent Design)**：導入 `PySide6-Fluent-Widgets` 框架擴充，新增 `fluent.py` 封裝 Fluent 風格元件，全面翻新主視窗與子選單（如伺服器建立、模組管理、伺服器設定）的視覺語彙與互動體驗。
+
+### 調整
+- **更新與封裝機制最佳化**：全面優先改用「系統安裝程式」進行發佈，正式移除可攜式模式（Portable mode）及打包腳本 (`package-portable.ps1`) 支援，簡化後續的自動更新選擇流程。
+- **核心架構重構**：重構 `server_manager.py`、`server_instance.py` 等核心類別體系，並將耗時任務（如雜湊計算、線上資源驗證）進一步整合至共用的並行工作池（Worker Pool），降低資源佔用。
+- **設定與 I/O 強化**：調整 `settings_manager.py` 與 `subprocess_utils.py`，最佳化子處理程序生命週期管理，並套用更安全的序列化保護與重新啟動機制。
+- **政策與手冊更新**：更新官方資安通報政策與漏洞處理時程；並於《使用者手冊》與相關文檔中補充了 Quilt 與 NeoForge 的完整支援細節。
+
+### 修正
+- 修正 `update_parsing.py` 在遠端資源檢查與版本驗證時的錯誤攔截邏輯，避免網路異常導致主程式崩潰。
+- 新增與修正大量自動化測試覆蓋：包含更新檢查器互動模擬 (`test_update_checker_installer_smoke.py`)、UI 元件排版測試、模組清單整合測試等。
+
 ## v1.7.1 - 2026-05-06
 
 ### 新增

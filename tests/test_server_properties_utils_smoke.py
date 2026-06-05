@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from src.core import ServerManager
 from src.models import ServerConfig
-from src.utils import ServerPropertiesHelper
+from src.utils import ServerPropertiesHelper, ServerPropertiesValidator
 
 
 def test_load_properties_parses_escaped_delimiters(tmp_path) -> None:
@@ -60,6 +60,57 @@ def test_server_manager_update_server_properties_persists_empty_values_and_updat
     assert reloaded["server-ip"] == ""
     assert manager.servers["demo"].properties == {"motd": "", "server-ip": ""}
     assert manager.load_server_properties("demo") == {"motd": "", "server-ip": ""}
+
+
+def test_official_boolean_server_properties_are_classified_as_checkbox_candidates(tmp_path) -> None:
+    manager = ServerManager(str(tmp_path))
+    defaults = manager.get_default_server_properties()
+    boolean_keys = [key for key, value in defaults.items() if str(value).strip().lower() in {"true", "false"}]
+
+    missing = [key for key in boolean_keys if not ServerPropertiesValidator.is_boolean_property(key)]
+
+    assert missing == []
+    assert ServerPropertiesValidator.is_boolean_property("enforce-whitelist") is True
+    assert ServerPropertiesValidator.is_boolean_property("enforce-secure-profile") is True
+    assert ServerPropertiesValidator.is_boolean_property("motd") is False
+
+
+def test_current_java_server_defaults_and_validation_match_official_schema(tmp_path) -> None:
+    manager = ServerManager(str(tmp_path))
+    defaults = manager.get_default_server_properties()
+
+    expected_keys = {
+        "enable-code-of-conduct",
+        "management-server-allowed-origins",
+        "management-server-enabled",
+        "management-server-host",
+        "management-server-port",
+        "management-server-secret",
+        "management-server-tls-enabled",
+        "management-server-tls-keystore",
+        "management-server-tls-keystore-password",
+        "status-heartbeat-interval",
+    }
+    obsolete_keys = {"allow-nether", "enable-command-block", "pvp", "spawn-monsters"}
+
+    assert expected_keys.issubset(defaults.keys())
+    assert obsolete_keys.isdisjoint(defaults.keys())
+    assert defaults["management-server-port"] == "0"
+    assert defaults["management-server-secret"] == ""
+    assert defaults["management-server-tls-enabled"] == "true"
+
+    assert ServerPropertiesValidator.is_boolean_property("enable-code-of-conduct") is True
+    assert ServerPropertiesValidator.is_boolean_property("management-server-enabled") is True
+    assert ServerPropertiesValidator.validate_property("management-server-port", "0")[0] is True
+    assert ServerPropertiesValidator.validate_property("management-server-port", "65535")[0] is True
+    assert ServerPropertiesValidator.validate_property("management-server-port", "65536")[0] is False
+    assert ServerPropertiesValidator.validate_property("region-file-compression", "lz4")[0] is True
+    assert ServerPropertiesValidator.validate_property("level-type", "minecraft:single_biome_surface")[0] is True
+    assert ServerPropertiesValidator.validate_property("level-type", "single_biome_surface")[0] is True
+    assert ServerPropertiesValidator.validate_property("level-type", "buffet")[0] is False
+    assert ServerPropertiesValidator.validate_property("text-filtering-version", "1")[0] is True
+    assert ServerPropertiesValidator.validate_property("text-filtering-version", "2")[0] is False
+    assert ServerPropertiesValidator.validate_property("pause-when-empty-seconds", "-5")[0] is True
 
 
 def test_load_server_properties_skips_config_write_when_properties_unchanged(tmp_path, monkeypatch) -> None:
@@ -133,6 +184,90 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, mo
     assert manager.delete_server(delete_config.name) is False
     assert manager.servers[delete_config.name] == delete_config
     assert write_calls == []
+
+
+def test_server_manager_rolls_back_when_launch_script_write_fails(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+    server_dir = tmp_path / "demo"
+    config = ServerConfig(
+        name="demo",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path="",
+    )
+
+    monkeypatch.setattr(manager, "create_launch_script", lambda *_args, **_kwargs: False)
+
+    result = manager.create_server_result(config)
+
+    assert result.failed is True
+    assert config.name not in manager.servers
+    assert not server_dir.exists()
+
+
+def test_server_manager_rolls_back_when_servers_config_write_fails(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+    server_dir = tmp_path / "demo"
+    config = ServerConfig(
+        name="demo",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path="",
+    )
+
+    monkeypatch.setattr(manager, "create_launch_script", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(manager, "write_servers_config", lambda: False)
+
+    result = manager.create_server_result(config)
+
+    assert result.failed is True
+    assert config.name not in manager.servers
+    assert not server_dir.exists()
+
+
+def test_server_manager_rolls_back_when_add_server_write_fails(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+    server_dir = tmp_path / "imported"
+    server_dir.mkdir()
+    config = ServerConfig(
+        name="imported",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+    )
+
+    monkeypatch.setattr(manager, "_prepare_imported_startup_scripts", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(manager, "write_servers_config", lambda: False)
+
+    assert manager.add_server(config) is False
+    assert config.name not in manager.servers
+
+
+def test_server_manager_rolls_back_when_delete_server_write_fails(tmp_path, monkeypatch) -> None:
+    manager = ServerManager(str(tmp_path))
+    server_dir = tmp_path / "demo"
+    server_dir.mkdir()
+    config = ServerConfig(
+        name="demo",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+    )
+    manager.servers[config.name] = config
+
+    monkeypatch.setattr(manager, "write_servers_config", lambda: False)
+
+    assert manager.delete_server(config.name) is False
+    assert manager.servers[config.name] == config
+    assert server_dir.exists()
 
 
 def test_server_manager_rejects_outside_path_on_start(tmp_path, monkeypatch) -> None:

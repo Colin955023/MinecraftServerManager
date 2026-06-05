@@ -3,7 +3,6 @@
 """
 
 import os
-import threading
 import time
 import webbrowser
 from collections.abc import Callable
@@ -16,6 +15,11 @@ from . import qt_widgets as qt
 from .qt_runtime import QtCore, QtWidgets, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="UIUtils")
+
+
+def _is_ui_thread() -> bool:
+    app = QtWidgets.QApplication.instance()
+    return app is None or QtCore.QThread.currentThread() is app.thread()
 
 
 def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]:
@@ -392,7 +396,7 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        if threading.current_thread() is threading.main_thread():
+        if _is_ui_thread():
             DialogUtils.show_error(title, message, parent, topmost)
             return
         run_on_ui_thread(lambda: DialogUtils.show_error(title, message, parent, topmost), timeout=None)
@@ -407,7 +411,7 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        if threading.current_thread() is threading.main_thread():
+        if _is_ui_thread():
             DialogUtils.show_warning(title, message, parent, topmost)
             return
         run_on_ui_thread(lambda: DialogUtils.show_warning(title, message, parent, topmost), timeout=None)
@@ -422,7 +426,7 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        if threading.current_thread() is threading.main_thread():
+        if _is_ui_thread():
             DialogUtils.show_info(title, message, parent, topmost)
             return
         run_on_ui_thread(lambda: DialogUtils.show_info(title, message, parent, topmost), timeout=None)
@@ -520,7 +524,7 @@ class UIUtils:
         Returns:
             使用者選擇結果，或在無法判斷時回傳 None。
         """
-        if threading.current_thread() is threading.main_thread():
+        if _is_ui_thread():
             return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
         return run_on_ui_thread(
             lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None

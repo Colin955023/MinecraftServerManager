@@ -2024,6 +2024,82 @@ def test_build_local_update_review_key_falls_back_to_file_path_when_project_id_m
     assert key == "local::C:/servers/demo/mods/unknown-mod.jar"
 
 
+def test_prepare_local_update_review_entries_uses_fallback_root_key_when_project_id_missing(monkeypatch) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21.1", "fabric", ""))
+    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
+    monkeypatch.setattr(frame, "_dedupe_review_messages", list)
+    monkeypatch.setattr(frame, "_apply_review_advisory_enabled_overrides", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(frame, "_append_enabled_dependency_simulations", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(frame, "_append_simulated_installed_mod", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(frame, "_build_installed_mod_simulation_item", lambda *_args, **_kwargs: SimpleNamespace())
+
+    candidate = SimpleNamespace(
+        project_id="",
+        project_name="Unknown Mod",
+        filename="unknown-mod.jar",
+        local_mod=SimpleNamespace(file_path="C:/servers/demo/mods/unknown-mod.jar"),
+        actionable=True,
+        hard_errors=[],
+        current_issues=[],
+        dependency_issues=[],
+        notes=[],
+        update_available=False,
+    )
+
+    review_entries = frame._prepare_local_update_review_entries(
+        SimpleNamespace(candidates=[candidate]),
+        root_enabled_overrides={"local::C:/servers/demo/mods/unknown-mod.jar": False},
+    )
+
+    assert len(review_entries) == 1
+    assert review_entries[0].enabled is False
+
+
+def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path) -> None:
+    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    server_a = SimpleNamespace(name="server-a", path=str(tmp_path / "server-a"))
+    server_b = SimpleNamespace(name="server-b", path=str(tmp_path / "server-b"))
+    sentinel_mods = [SimpleNamespace(filename="sentinel.jar")]
+    enhancement_calls: list[str] = []
+    queued_items: list[Any] = []
+
+    frame.current_server = server_a
+    frame.mod_manager = SimpleNamespace()
+    frame.local_mods = sentinel_mods
+    frame.enhanced_mods_cache = {"keep": object()}
+    frame.update_status_safe = lambda _message: None
+    frame.update_progress_safe = lambda _value: None
+    frame.refresh_local_list = lambda: queued_items.append("refresh_local_list")
+    frame.ui_queue = SimpleNamespace(put=lambda item: queued_items.append(item))
+    frame.enhance_local_mods = lambda: enhancement_calls.append("called")
+
+    def _scan_mods() -> list[Any]:
+        frame.current_server = server_b
+        return [
+            SimpleNamespace(
+                filename="example.jar",
+                status=mod_management_module.ModStatus.ENABLED,
+                file_path=str(tmp_path / "server-a" / "mods" / "example.jar"),
+                name="Example Mod",
+                author="Example",
+                description="Example description",
+                version="1.0.0",
+                loader_type="fabric",
+            )
+        ]
+
+    frame.mod_manager.scan_mods = _scan_mods
+    monkeypatch.setattr(mod_management_module.TaskUtils, "run_async", lambda task, **_kwargs: task())
+
+    mod_management_module.LocalModListPresenter(frame).load_local_mods()
+
+    assert frame.local_mods is sentinel_mods
+    assert frame.enhanced_mods_cache == {"keep": frame.enhanced_mods_cache["keep"]}
+    assert enhancement_calls == []
+    assert queued_items == []
+
+
 def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() -> None:
     review_entry = mod_management_module.PendingInstallReviewEntry(
         pending=mod_management_module.PendingOnlineInstall(

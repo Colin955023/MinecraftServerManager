@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-import threading
 from typing import Any
 
 from ..utils import FontSize, Sizes, Spacing, get_logger
-from ..utils.ui_support.qt_runtime import QtCore, QtWidgets, invoke_later, is_qobject_alive
+from ..utils.ui_support import qt_widgets as qt
+from ..utils.ui_support.fluent import FluentPushButton
+from ..utils.ui_support.qt_runtime import QtCore, QtWidgets, is_qobject_alive
 from . import DialogUtils, FontManager
 from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ProgressDialog")
+
+
+class _ProgressDialogSignals(QtCore.QObject):
+    progress_requested = QtCore.Signal(float, str)
+    close_requested = QtCore.Signal()
 
 
 class ProgressDialog:
@@ -41,7 +47,7 @@ class ProgressDialog:
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.progress = QtWidgets.QProgressBar(self.dialog)
+        self.progress = qt.ProgressBar(self.dialog)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setMinimumHeight(38)
@@ -52,7 +58,11 @@ class ProgressDialog:
 
         self.cancel_button: QtWidgets.QPushButton | None = None
         if show_cancel:
-            self.cancel_button = QtWidgets.QPushButton("取消", self.dialog)
+            try:
+                self.cancel_button = FluentPushButton("取消", self.dialog)
+            except TypeError:
+                self.cancel_button = FluentPushButton(self.dialog)
+                self.cancel_button.setText("取消")
             self.cancel_button.setFont(FontManager.get_font(size=FontSize.NORMAL))
             self.cancel_button.setMinimumSize(Sizes.BUTTON_WIDTH_COMPACT, Sizes.BUTTON_HEIGHT_LARGE)
             self.cancel_button.setStyleSheet(NativeQtStyle.create_button(kind="secondary"))
@@ -63,6 +73,9 @@ class ProgressDialog:
         self._pending_update = False
         self._last_percent: float = -1.0
         self._last_status = ""
+        self._signals = _ProgressDialogSignals(self.dialog)
+        self._signals.progress_requested.connect(self._apply_progress_update)
+        self._signals.close_requested.connect(self._close_dialog)
 
     def update_progress(self, percent: float, status_text: str) -> bool:
         """更新進度百分比與狀態文字。
@@ -81,21 +94,19 @@ class ProgressDialog:
         self._last_percent = percent
         self._last_status = status_text
 
-        def _update() -> None:
-            if self.cancelled or not is_qobject_alive(self.dialog):
-                return
-            try:
-                clamped = max(0.0, min(100.0, float(percent)))
-                self.progress.setValue(round(clamped))
-                self.status_label.setText(status_text)
-            except Exception as exc:
-                logger.exception(f"更新進度 UI 失敗: {exc}")
-
-        if threading.current_thread() is threading.main_thread():
-            _update()
-        else:
-            invoke_later(0, _update, parent=self.dialog)
+        self._signals.progress_requested.emit(float(percent), str(status_text))
         return True
+
+    @QtCore.Slot(float, str)
+    def _apply_progress_update(self, percent: float, status_text: str) -> None:
+        if self.cancelled or not is_qobject_alive(self.dialog):
+            return
+        try:
+            clamped = max(0.0, min(100.0, float(percent)))
+            self.progress.setValue(round(clamped))
+            self.status_label.setText(status_text)
+        except Exception as exc:
+            logger.exception(f"更新進度 UI 失敗: {exc}")
 
     def cancel(self) -> None:
         """取消並關閉對話框。"""
@@ -104,19 +115,16 @@ class ProgressDialog:
 
     def close(self) -> None:
         """關閉對話框。"""
-
-        def _close() -> None:
-            if is_qobject_alive(self.dialog):
-                self.dialog.close()
-                self.dialog.deleteLater()
-
         try:
-            if threading.current_thread() is threading.main_thread():
-                _close()
-            else:
-                invoke_later(0, _close, parent=self.dialog)
+            self._signals.close_requested.emit()
         except Exception as exc:
             logger.exception(f"關閉進度對話框失敗: {exc}")
+
+    @QtCore.Slot()
+    def _close_dialog(self) -> None:
+        if is_qobject_alive(self.dialog):
+            self.dialog.close()
+            self.dialog.deleteLater()
 
 
 __all__ = ["ProgressDialog"]

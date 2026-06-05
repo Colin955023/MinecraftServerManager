@@ -2,7 +2,6 @@
 負責從官方 API 取得版本資訊，提供版本查詢、下載與快取管理功能。
 """
 
-import concurrent.futures
 import threading
 from contextlib import suppress
 from pathlib import Path
@@ -14,6 +13,7 @@ from ..utils import (
     Singleton,
     atomic_write_json,
     get_logger,
+    get_shared_manager,
     record_and_mark,
 )
 
@@ -51,10 +51,10 @@ class MinecraftVersionManager(Singleton):
             logger.exception(f"寫入版本快取失敗: {e}")
 
     def fetch_versions(self, max_workers: int = 10) -> list:
-        """從官方 API 取得所有 Minecraft 版本列表並多執行緒查詢詳細資訊。
+        """從官方 API 取得所有 Minecraft 版本列表並使用 Qt worker 查詢詳細資訊。
 
         Args:
-            max_workers: 同時查詢版本詳細資訊的執行緒數量上限。
+            max_workers: 同時查詢版本詳細資訊的工作數量上限。
 
         Returns:
             可用的 Minecraft 伺服器版本清單。
@@ -119,8 +119,13 @@ class MinecraftVersionManager(Singleton):
                                 )
                             logger.debug(f"查詢版本 {v_obj['id']} 失敗: {e}")
 
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        list(executor.map(fetch_server_url, versions_to_process))
+                    batch_size = max(1, int(max_workers or 1))
+                    manager = get_shared_manager()
+                    for start in range(0, len(versions_to_process), batch_size):
+                        batch = versions_to_process[start : start + batch_size]
+                        futures = [manager.run(fetch_server_url, version) for version in batch]
+                        for future in futures:
+                            future.result()
                 else:
                     logger.debug("版本清單比對完成: 所有版本資訊皆為最新。")
                 self._save_local_cache(final_list)

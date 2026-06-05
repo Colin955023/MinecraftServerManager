@@ -107,8 +107,9 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
     assert cache.get("1.21.1", [])[:3] == ["1.21.1-54.0.10", "1.21.1-54.0.9", "1.21.1-54.0.2"]
 
 
-def test_get_installer_download_url_supports_known_loaders() -> None:
+def test_get_installer_download_url_supports_known_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = LoaderManager.__new__(LoaderManager)
+    monkeypatch.setattr(LoaderManager, "_get_latest_quilt_installer_version", staticmethod(lambda: "0.12.1"))
 
     assert manager.get_installer_download_url("fabric", "1.21.1", "0.16.0") == (
         "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.1/fabric-installer-1.1.1.jar"
@@ -234,17 +235,13 @@ def test_download_and_run_installer_cleans_process_when_cancelled(monkeypatch: p
 
     monkeypatch.setattr(manager, "_download_file_with_progress", lambda *_args, **_kwargs: True)
 
-    class _Stdout:
-        def readline(self) -> str:
-            return "Downloading installer...\n"
-
     class _Process:
         pid = 4321
-        returncode = None
-        stdout = _Stdout()
+        returncode = -1
+        cancelled = True
 
         def poll(self):
-            return None
+            return self.returncode
 
     cleaned: list[tuple[str, object]] = []
 
@@ -257,7 +254,7 @@ def test_download_and_run_installer_cleans_process_when_cancelled(monkeypatch: p
         return True
 
     monkeypatch.setattr(
-        "src.core.loader_manager.SubprocessUtils.popen_checked",
+        "src.core.loader_manager.SubprocessUtils.run_qprocess_checked",
         lambda *_args, **_kwargs: _Process(),
     )
     monkeypatch.setattr(

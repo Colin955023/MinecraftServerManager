@@ -7,13 +7,37 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from PySide6 import QtCore
 
 from .. import PathUtils, get_logger
 
 logger = get_logger().bind(component="SubprocessUtils")
+
+
+@dataclass(slots=True)
+class QProcessResult:
+    """QProcess 執行結果封裝。"""
+
+    args: list[str]
+    returncode: int
+    stdout: str = ""
+    pid: int = 0
+    cancelled: bool = False
+    error_text: str = ""
+
+    def poll(self) -> int:
+        """模擬 subprocess.CompletedProcess 的 poll 方法。
+
+        Returns:
+            QProcess 結束代碼。
+        """
+        return self.returncode
 
 
 class SubprocessUtils:
@@ -73,7 +97,7 @@ class SubprocessUtils:
     def _normalize_subprocess_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
         normalized_kwargs = dict(kwargs)
         if normalized_kwargs.get("shell", False):
-            logger.debug("忽略 shell=True，強制使用 shell=False for safety")
+            logger.debug("忽略 shell=True，基於安全考量強制使用 shell=False")
         normalized_kwargs["shell"] = False
         if (normalized_kwargs.get("text") or normalized_kwargs.get("universal_newlines")) and normalized_kwargs.get(
             "errors"
@@ -114,6 +138,137 @@ class SubprocessUtils:
         cmd_list = SubprocessUtils._validate_cmd(cmd)
         # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
         return subprocess.Popen(cmd_list, **kwargs)  # nosec B603
+
+    @staticmethod
+    def create_qprocess_checked(
+        cmd: Iterable[str],
+        *,
+        cwd: str | None = None,
+        merged_channels: bool = True,
+        parent: QtCore.QObject | None = None,
+    ) -> QtCore.QProcess:
+        """建立已驗證 argv 的 QProcess。
+
+        Args:
+            cmd: 命令列參數序列。
+            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
+            merged_channels: 是否合併 stdout/stderr。
+            parent: QProcess 的 Qt parent。
+
+        Returns:
+            已設定 program、arguments 與 channel mode 的 QProcess。
+        """
+
+        cmd_list = SubprocessUtils._validate_cmd(cmd)
+        process = QtCore.QProcess(parent)
+        process.setProgram(cmd_list[0])
+        process.setArguments(cmd_list[1:])
+        if cwd:
+            process.setWorkingDirectory(str(cwd))
+        if merged_channels:
+            process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
+        return process
+
+    @staticmethod
+    def run_qprocess_checked(
+        cmd: Iterable[str],
+        *,
+        cwd: str | None = None,
+        encoding: str = "utf-8",
+        on_stdout: Callable[[str], Any] | None = None,
+        on_started: Callable[[int], Any] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+        cancel_poll_ms: int = 100,
+        timeout_ms: int | None = None,
+    ) -> QProcessResult:
+        """以 QProcess signal 同步執行命令並收集輸出。
+
+        Args:
+            cmd: 命令列參數序列。
+            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
+            encoding: stdout 解碼使用的文字編碼。
+            on_stdout: 每次收到 stdout 片段時呼叫的回呼。
+            on_started: QProcess 啟動後以 PID 呼叫的回呼。
+            cancel_check: 輪詢取消狀態的回呼。
+            cancel_poll_ms: 取消與 stdout 輪詢間隔毫秒數。
+            timeout_ms: 執行逾時毫秒數；未提供時不限制。
+
+        Returns:
+            QProcess 的結束代碼、輸出與取消狀態。
+        """
+
+        app = QtCore.QCoreApplication.instance()
+        if app is None:
+            app = QtCore.QCoreApplication([])
+        process = SubprocessUtils.create_qprocess_checked(cmd, cwd=cwd)
+        stdout_chunks: list[str] = []
+        state: dict[str, Any] = {
+            "returncode": -1,
+            "pid": 0,
+            "cancelled": False,
+            "error_text": "",
+            "finished": False,
+        }
+
+        def _decode(data: QtCore.QByteArray) -> str:
+            return bytes(cast(Any, data)).decode(encoding, errors="replace")
+
+        def _drain_stdout() -> None:
+            text = _decode(process.readAllStandardOutput())
+            if not text:
+                return
+            stdout_chunks.append(text)
+            if on_stdout is not None:
+                on_stdout(text)
+
+        def _finish(exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
+            _drain_stdout()
+            state["returncode"] = int(exit_code)
+            state["finished"] = True
+
+        def _error(_error: QtCore.QProcess.ProcessError) -> None:
+            state["error_text"] = process.errorString()
+
+        process.readyReadStandardOutput.connect(_drain_stdout)
+        process.finished.connect(_finish)
+        process.errorOccurred.connect(_error)
+        process.start()
+        if not process.waitForStarted(10000):
+            raise OSError(process.errorString() or "QProcess 啟動失敗")
+        state["pid"] = int(process.processId())
+        if on_started is not None:
+            on_started(int(state["pid"]))
+
+        deadline = None if timeout_ms is None else time.monotonic() + max(0, int(timeout_ms)) / 1000
+        poll_ms = max(25, int(cancel_poll_ms))
+        while process.state() != QtCore.QProcess.ProcessState.NotRunning:
+            if cancel_check is not None:
+                try:
+                    should_cancel = bool(cancel_check())
+                except Exception:
+                    should_cancel = False
+                if should_cancel:
+                    state["cancelled"] = True
+                    process.kill()
+            if deadline is not None and time.monotonic() >= deadline:
+                state["error_text"] = f"QProcess 執行逾時 ({timeout_ms} ms)"
+                process.kill()
+            if process.waitForReadyRead(poll_ms):
+                _drain_stdout()
+            else:
+                _drain_stdout()
+        process.waitForFinished(1000)
+        _drain_stdout()
+        if not state["finished"]:
+            state["returncode"] = int(process.exitCode())
+        return QProcessResult(
+            args=SubprocessUtils._validate_cmd(cmd),
+            returncode=int(state["returncode"]),
+            stdout="".join(stdout_chunks),
+            pid=int(state["pid"]),
+            cancelled=bool(state["cancelled"]),
+            error_text=str(state["error_text"] or ""),
+        )
 
     @staticmethod
     def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
