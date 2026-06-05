@@ -316,10 +316,9 @@ class ServerManager:
                     self.servers.pop(config.name, None)
             try:
                 if created_server_dir and server_path and server_path.exists():
-                    # 回滾時只移除本次建立的伺服器資料夾，避免殘留半成品。
                     PathUtils.delete_within(self.servers_root, server_path)
             except Exception:
-                pass
+                logger.warning(f"建立失敗後清理伺服器資料夾失敗: {server_path}")
             # 嘗試終止殘留 Java 進程
             try:
                 killed = False

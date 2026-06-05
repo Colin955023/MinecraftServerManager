@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from PySide6 import QtCore
+from PySide6 import QtCore, QtWidgets
 
 from .. import PathUtils, get_logger
 
@@ -197,8 +197,9 @@ class SubprocessUtils:
             QProcess 的結束代碼、輸出與取消狀態。
         """
 
-        if QtCore.QCoreApplication.instance() is None:
-            QtCore.QCoreApplication([])
+        if not isinstance(QtWidgets.QApplication.instance(), QtWidgets.QApplication):
+            _app = QtWidgets.QApplication([])  # 建立 QApplication 避免後續 UI 初始化失敗
+
         process = SubprocessUtils.create_qprocess_checked(cmd, cwd=cwd)
         stdout_chunks: list[str] = []
         state: dict[str, Any] = {

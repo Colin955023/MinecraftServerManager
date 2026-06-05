@@ -1475,7 +1475,8 @@ class ManageServerFrame:
                 if Path(bat_file_path).suffix.lower() in {".bat", ".cmd"}:
                     program = "cmd.exe"
                     arguments = ["/d", "/s", "/c", bat_file_path]
-                if not QtCore.QProcess.startDetached(program, arguments, backup_full_path):
+                success, _pid = QtCore.QProcess.startDetached(program, arguments, backup_full_path)
+                if not success:
                     raise RuntimeError("QProcess 無法啟動備份批次檔")
                 UIUtils.show_info(
                     "備份開始", f"備份已開始執行，請稍候...\n備份位置：{backup_full_path}", self.top_level_widget()
