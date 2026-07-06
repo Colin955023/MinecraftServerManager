@@ -140,7 +140,7 @@ class BackgroundTaskManager:
         if inspect.iscoroutinefunction(fn):
             task = loop.create_task(fn(*args, **kwargs))
         else:
-            future = self.run(fn, *args, cancel_token=cancel_token, **kwargs)
+            future = self.run(fn, *args, callback=callback, cancel_token=cancel_token, **kwargs)
 
             async def _await_future():
                 return await asyncio.wrap_future(future)
