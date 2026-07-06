@@ -271,7 +271,6 @@ def test_download_and_run_installer_cleans_process_when_cancelled(monkeypatch: p
         installer_url="https://example.invalid/installer.jar",
         installer_args=["java", "-jar", "{installer}", "--installServer"],
         minecraft_version="1.21.1",
-        _loader_version="0.16.0",
         download_path=str(test_root / "server.jar"),
         progress_callback=None,
         cancel_flag={"cancelled": True},

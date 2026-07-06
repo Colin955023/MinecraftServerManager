@@ -16,6 +16,38 @@ from .qt_runtime import QtCore, QtWidgets, cancel_timer, invoke_later, is_qobjec
 
 logger = get_logger().bind(component="UIUtils")
 
+# 按鈕樣式字典，取代原本的 if/elif 鏈
+_BUTTON_STYLES: dict[str, dict[str, Any]] = {
+    "primary": {
+        "fg_color": ("#1f4e79", "#0f2a44"),
+        "hover_color": ("#0f2a44", "#071925"),
+        "text_color": ("#ffffff", "#ffffff"),
+        "width": 135,
+        "height": 45,
+    },
+    "secondary": {
+        "fg_color": ("#2d3748", "#1a202c"),
+        "hover_color": ("#1a202c", "#0d1117"),
+        "text_color": ("#ffffff", "#ffffff"),
+        "width": 90,
+        "height": 32,
+    },
+    "small": {
+        "fg_color": ("#4a5568", "#2d3748"),
+        "hover_color": ("#2d3748", "#1a202c"),
+        "text_color": ("#ffffff", "#ffffff"),
+        "width": 60,
+        "height": 23,
+    },
+    "cancel": {
+        "fg_color": ("#dc2626", "#991b1b"),
+        "hover_color": ("#991b1b", "#7f1d1d"),
+        "text_color": ("#ffffff", "#ffffff"),
+        "width": 90,
+        "height": 36,
+    },
+}
+
 
 def _is_ui_thread() -> bool:
     app = QtWidgets.QApplication.instance()
@@ -387,6 +419,13 @@ class UIUtils:
             logger.exception(f"綁定 tooltip 事件失敗: {e}")
 
     @staticmethod
+    def _dispatch_dialog(fn: Callable, *args, **kwargs) -> Any:
+        """確保對話框在 UI 執行緒執行。"""
+        if _is_ui_thread():
+            return fn(*args, **kwargs)
+        return run_on_ui_thread(lambda: fn(*args, **kwargs), timeout=None)
+
+    @staticmethod
     def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
         """顯示錯誤訊息對話框。
 
@@ -396,10 +435,7 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        if _is_ui_thread():
-            DialogUtils.show_error(title, message, parent, topmost)
-            return
-        run_on_ui_thread(lambda: DialogUtils.show_error(title, message, parent, topmost), timeout=None)
+        UIUtils._dispatch_dialog(DialogUtils.show_error, title, message, parent, topmost)
 
     @staticmethod
     def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
@@ -411,10 +447,7 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
-        if _is_ui_thread():
-            DialogUtils.show_warning(title, message, parent, topmost)
-            return
-        run_on_ui_thread(lambda: DialogUtils.show_warning(title, message, parent, topmost), timeout=None)
+        UIUtils._dispatch_dialog(DialogUtils.show_warning, title, message, parent, topmost)
 
     @staticmethod
     def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
@@ -426,10 +459,29 @@ class UIUtils:
             parent: 父視窗。
             topmost: 是否置頂。
         """
+        UIUtils._dispatch_dialog(DialogUtils.show_info, title, message, parent, topmost)
+
+    @staticmethod
+    def ask_yes_no_cancel(
+        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True, topmost: bool = False
+    ) -> bool | None:
+        """
+        顯示確認對話框，支援是/否/取消選項。
+
+        Args:
+            title: 對話框標題。
+            message: 提示訊息。
+            parent: 父視窗。
+            show_cancel: 是否顯示取消按鈕。
+            topmost: 是否置頂。
+        Returns:
+            True 表示使用者選擇「是」，False 表示使用者選擇「否」，None 表示使用者選擇「取消」或關閉對話框
+        """
         if _is_ui_thread():
-            DialogUtils.show_info(title, message, parent, topmost)
-            return
-        run_on_ui_thread(lambda: DialogUtils.show_info(title, message, parent, topmost), timeout=None)
+            return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
+        return run_on_ui_thread(
+            lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None
+        )
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
@@ -509,28 +561,6 @@ class UIUtils:
             logger.exception(f"開啟外部資源失敗: {e}")
 
     @staticmethod
-    def ask_yes_no_cancel(
-        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True, topmost: bool = False
-    ) -> bool | None:
-        """顯示確認對話框，支援是/否/取消選項。
-
-        Args:
-            title: 對話框標題。
-            message: 提示訊息。
-            parent: 父視窗。
-            show_cancel: 是否顯示取消按鈕。
-            topmost: 是否置頂。
-
-        Returns:
-            使用者選擇結果，或在無法判斷時回傳 None。
-        """
-        if _is_ui_thread():
-            return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
-        return run_on_ui_thread(
-            lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None
-        )
-
-    @staticmethod
     def sync_bool_string_state(bool_var, string_var) -> None:
         """建立 BoolState 與 TextState 的雙向綁定（用於 server.properties 等場景）
 
@@ -541,7 +571,6 @@ class UIUtils:
         in_sync = False
 
         def update_string_var(*_args):
-            """當布林變數改變時，更新字串變數"""
             nonlocal in_sync
             if in_sync:
                 return
@@ -554,7 +583,6 @@ class UIUtils:
                 in_sync = False
 
         def update_bool_var(*_args):
-            """當字串變數改變時，更新布林變數"""
             nonlocal in_sync
             if in_sync:
                 return
@@ -585,49 +613,18 @@ class UIUtils:
             parent: 父容器。
             text: 按鈕文字。
             command: 按鈕點擊回呼。
-            button_type: 按鈕樣式類型。
-            **kwargs: 額外的 `QtButton` 參數。
+            button_type: 按鈕樣式類型（primary / secondary / small / cancel）。
+            **kwargs: 額外的 Button 參數，會覆蓋預設樣式。
 
         Returns:
-            建立完成的 `QtButton`。
+            建立完成的 Button。
         """
-        if button_type == "primary":
-            button_style = {
-                "fg_color": ("#1f4e79", "#0f2a44"),
-                "hover_color": ("#0f2a44", "#071925"),
-                "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=14, weight="bold"),
-                "width": 135,
-                "height": 45,
-            }
-        elif button_type == "secondary":
-            button_style = {
-                "fg_color": ("#2d3748", "#1a202c"),
-                "hover_color": ("#1a202c", "#0d1117"),
-                "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
-                "width": 90,
-                "height": 32,
-            }
-        elif button_type == "small":
-            button_style = {
-                "fg_color": ("#4a5568", "#2d3748"),
-                "hover_color": ("#2d3748", "#1a202c"),
-                "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
-                "width": 60,
-                "height": 23,
-            }
-        elif button_type == "cancel":
-            button_style = {
-                "fg_color": ("#dc2626", "#991b1b"),
-                "hover_color": ("#991b1b", "#7f1d1d"),
-                "text_color": ("#ffffff", "#ffffff"),
-                "font": FontManager.get_font(family="Microsoft JhengHei", size=14),
-                "width": 90,
-                "height": 36,
-            }
-        else:
-            button_style = {}
-        final_style = {**button_style, **kwargs}
+        base_style = dict(_BUTTON_STYLES.get(button_type, {}))
+        is_primary = button_type == "primary"
+        base_style["font"] = FontManager.get_font(
+            family="Microsoft JhengHei",
+            size=14,
+            weight="bold" if is_primary else "normal",
+        )
+        final_style = {**base_style, **kwargs}
         return qt.Button(parent, text=text, command=command, **final_style)

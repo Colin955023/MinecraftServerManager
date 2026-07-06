@@ -116,10 +116,5 @@ class FontManager:
         except Exception as exc:
             logger.exception(f"清理字體快取時發生錯誤: {exc}")
 
-    @staticmethod
-    def cleanup_fonts() -> None:
-        """清理字體快取。"""
-        FontManager.clear_cache()
-
 
 __all__ = ["FontManager"]

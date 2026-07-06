@@ -67,6 +67,7 @@ class ResolvedDependencyReference:
 
     @property
     def label(self) -> str:
+        """回傳此依賴引用的顯示標籤。"""
         if self.project_name:
             base = self.project_name
         elif self.project_id:

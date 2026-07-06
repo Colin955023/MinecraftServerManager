@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
+from ..app_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
@@ -45,7 +46,6 @@ from ..utils.ui_support.qt_runtime import (
     is_qobject_alive,
     show_window,
 )
-from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from . import (
     CreateServerFrame,
     DialogUtils,
@@ -167,7 +167,7 @@ class MinecraftServerManager:
             get_logger().bind(component="WindowState").debug("儲存視窗狀態...")
             WindowManager.save_main_window_state(self.root)
             logger.debug("清理字體快取...", "MainWindow")
-            FontManager.cleanup_fonts()
+            FontManager.clear_cache()
             if getattr(self, "server_manager", None) is not None:
                 self.server_manager.write_servers_config()
             app = QtWidgets.QApplication.instance()

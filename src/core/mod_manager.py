@@ -22,6 +22,7 @@ from .mod_models import (
     LocalModMutationResult,
     ModFileOperationResult,
     ModPlatform,
+    ModrinthIdentityCache,
     ModStatus,
 )
 from .mod_provider_resolver import (
@@ -43,7 +44,7 @@ class ModManager:
         self.mods_path = self.server_path / "mods"
         self.download_staging_root = self.server_path / ".download_staging"
         self.server_config = server_config
-        self._modrinth_identity_cache: dict[str, tuple[str, str]] = {}
+        self._modrinth_identity_cache = ModrinthIdentityCache()
         self.mods_path.mkdir(parents=True, exist_ok=True)
         self.download_staging_root.mkdir(parents=True, exist_ok=True)
         self.index_manager: ModIndexManager = ModIndexManager(server_path)
@@ -249,10 +250,6 @@ class ModManager:
         """
         return self._get_mod_file_installer().set_mod_state_result(mod_id, enable)
 
-    def set_mod_state(self, mod_id: str, enable: bool) -> bool:
-        """設定模組啟用或停用狀態。"""
-        return self.set_mod_state_result(mod_id, enable).completed
-
     def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
         """匯入本地模組檔案到目前伺服器的 mods 目錄。
 
@@ -265,19 +262,6 @@ class ModManager:
 
         return self._get_mod_file_installer().import_local_mod_file_result(source_path)
 
-    def import_local_mod_file(self, source_path: str | Path) -> Path | None:
-        """匯入本地模組檔案。
-
-        Args:
-            source_path: 要匯入的本地模組檔案路徑。
-
-        Returns:
-            匯入成功時回傳最終檔案路徑，失敗時回傳 None。
-        """
-
-        result = self.import_local_mod_file_result(source_path)
-        return result.final_path if result.completed else None
-
     def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
         """刪除一或多個本地模組檔案。
 
@@ -289,18 +273,6 @@ class ModManager:
         """
 
         return self._get_mod_file_installer().delete_local_mods_result(mod_ids)
-
-    def delete_local_mods(self, mod_ids: list[str] | tuple[str, ...]) -> bool:
-        """刪除一或多個本地模組檔案。
-
-        Args:
-            mod_ids: 要刪除的模組識別值列表。
-
-        Returns:
-            全部刪除成功時回傳 True，否則回傳 False。
-        """
-
-        return self.delete_local_mods_result(mod_ids).completed
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:
         """獲取模組列表"""

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from src.core import ModManager, ModPlatform
+from src.core.mod_models import ModrinthIdentityCache
 
 
 class _StubIndexManager:
@@ -19,7 +20,7 @@ class _StubIndexManager:
 def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()
-    manager._modrinth_identity_cache = {}
+    manager._modrinth_identity_cache = ModrinthIdentityCache()
 
     monkeypatch.setattr(
         manager,
@@ -52,7 +53,7 @@ def test_resolve_platform_info_uses_fallback_detection_when_no_cached_identifier
 ) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()
-    manager._modrinth_identity_cache = {}
+    manager._modrinth_identity_cache = ModrinthIdentityCache()
 
     monkeypatch.setattr(
         manager,
@@ -79,7 +80,7 @@ def test_resolve_platform_info_keeps_local_without_lookup_when_cached_local_mark
 ) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()
-    manager._modrinth_identity_cache = {}
+    manager._modrinth_identity_cache = ModrinthIdentityCache()
 
     def _unexpected_detect(*_args: Any, **_kwargs: Any):
         raise AssertionError("cached local marker should short-circuit provider detection")
@@ -103,7 +104,7 @@ def test_resolve_platform_info_keeps_local_without_lookup_when_cached_local_mark
 def test_resolve_platform_info_re_resolves_when_cached_provider_is_stale(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ModManager.__new__(ModManager)
     manager.index_manager = _StubIndexManager()
-    manager._modrinth_identity_cache = {}
+    manager._modrinth_identity_cache = ModrinthIdentityCache()
 
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     resolve_calls = {"count": 0}

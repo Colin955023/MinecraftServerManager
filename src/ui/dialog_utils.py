@@ -43,6 +43,7 @@ class _NativeDialog(QtWidgets.QDialog):
         self._close_callback = callback
 
     def closeEvent(self, event) -> None:
+        """處理 Qt 視窗關閉事件。"""
         if self._force_destroy:
             self._exists = False
             event.accept()
@@ -63,6 +64,7 @@ class _NativeDialog(QtWidgets.QDialog):
         event.accept()
 
     def destroy(self, *_args, **_kwargs) -> None:
+        """銷毀元件並清理底層 Qt 資源。"""
         self._force_destroy = True
         self._exists = False
         self.close()
@@ -72,6 +74,7 @@ class _NativeDialog(QtWidgets.QDialog):
         return bool(self._exists) and is_qobject_alive(self)
 
     def configure(self, **kwargs: Any) -> None:
+        """更新元件設定並套用到實際 Qt widget。"""
         bg = kwargs.get("bg") or kwargs.get("background") or kwargs.get("fg_color")
         if bg is not None:
             if isinstance(bg, tuple):
@@ -86,6 +89,7 @@ class _NativeDialog(QtWidgets.QDialog):
             previous = self._event_handlers[event_name]
 
             def chained(event) -> Any:
+                """串接事件處理器並保留原有事件流程。"""
                 previous(event)
                 return callback(event)
 
@@ -95,6 +99,7 @@ class _NativeDialog(QtWidgets.QDialog):
         return str(id(callback))
 
     def eventFilter(self, watched, event) -> bool:
+        """攔截 Qt 事件並依目前元件狀態處理。"""
         if watched is not self or event.type() != QtCore.QEvent.Type.KeyPress:
             return False
         event_name = ""

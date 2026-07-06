@@ -40,6 +40,7 @@ class ServerOperationResult:
 
     @property
     def failed(self) -> bool:
+        """回傳此操作是否已失敗。"""
         return not self.success
 
 

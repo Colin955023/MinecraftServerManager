@@ -184,3 +184,20 @@ def test_settings_manager_concurrent_window_pref_updates_preserve_snapshot_integ
         and snapshot["window_preferences"]["theme_mode"] == "dark"
         for snapshot in saved_snapshots
     )
+
+
+def test_settings_manager_get_returns_copy_for_mutable_payload(tmp_path, monkeypatch) -> None:
+    user_data_dir = tmp_path / "user_data"
+    monkeypatch.setattr(
+        settings_module.RuntimePaths,
+        "get_user_data_dir",
+        staticmethod(lambda: user_data_dir),
+    )
+
+    manager = settings_module.SettingsManager()
+    manager.set("custom", {"nested": {"enabled": True}})
+
+    returned = manager.get("custom")
+    returned["nested"]["enabled"] = False
+
+    assert manager.get("custom") == {"nested": {"enabled": True}}

@@ -66,6 +66,7 @@ class _IconRefreshFilter(QtCore.QObject):
         self._callback = callback
 
     def eventFilter(self, watched, event) -> bool:
+        """攔截 Qt 事件並依目前元件狀態處理。"""
         if event.type() in {QtCore.QEvent.Type.Show, QtCore.QEvent.Type.WindowActivate}:
             self._callback(event)
         return super().eventFilter(watched, event)

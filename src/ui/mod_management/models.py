@@ -34,10 +34,12 @@ class AbstractReviewEntry:
 
     @property
     def actionable(self) -> bool:
+        """回傳此項目是否可由使用者執行。"""
         return self.enabled and (not self.blocking_reasons)
 
     @property
     def runnable(self) -> bool:
+        """回傳此項目是否可直接執行。"""
         return not self.blocking_reasons
 
 

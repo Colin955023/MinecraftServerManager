@@ -44,13 +44,16 @@ except Exception:
             self.returnPressed.connect(self.search)
 
         def search(self) -> None:
+            """將搜尋文字更新到輸入框。"""
             self.searchSignal.emit(self.text())
 
         def clear(self) -> None:
+            """清除目前輸入內容。"""
             super().clear()
             self.clearSignal.emit()
 
         def setClearButtonEnabled(self, enable: bool) -> None:
+            """設定清除按鈕是否可用。"""
             super().setClearButtonEnabled(enable)
 
     _FluentSearchLineEdit = _FallbackSearchLineEdit

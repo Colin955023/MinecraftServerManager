@@ -31,6 +31,7 @@ _register_exports(
     "BackgroundTaskManager",
     "run_in_background",
     "run_async_in_background",
+    "submit_background_task",
     "CancellationToken",
     "get_shared_manager",
 )

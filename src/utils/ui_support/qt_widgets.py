@@ -239,6 +239,7 @@ class Variable(ValueState):
         self._callbacks: list[Callable[..., Any]] = []
 
     def set(self, value: Any) -> None:
+        """設定目前值或顯示狀態。"""
         if self._value == value:
             return
         super().set(value)
@@ -250,6 +251,7 @@ class Variable(ValueState):
         return str(id(callback))
 
     def trace(self, mode: str, callback: Callable[..., Any]) -> str:
+        """註冊變數變更監聽器。"""
         return self.trace_add(mode, callback)
 
 
@@ -275,6 +277,7 @@ class Font:
         self.font = _font(font)
 
     def measure(self, text: str) -> int:
+        """估算指定文字在目前字型下的寬度。"""
         if self.font is None:
             return len(str(text)) * 6
         return QtGui.QFontMetrics(self.font).horizontalAdvance(str(text))
@@ -350,6 +353,7 @@ class WidgetMixin:
                 layout.addWidget(cast(Any, self), stretch, alignment)
 
     def attach(self, **kwargs: Any) -> None:
+        """將元件加入父層布局並套用布局參數。"""
         self._add_to_parent(getattr(self, "_parent_ref", None), **kwargs)
         self._manager = "box"
 
@@ -409,6 +413,7 @@ class WidgetMixin:
 
     def configure(self, **kwargs: Any) -> None:
         # 偵測並警告已被 Qt 介面移除的舊 kwargs，避免靜默丟棄造成開發者困惑
+        """更新元件設定並套用到實際 Qt widget。"""
         legacy_keys = {
             "row",
             "column",
@@ -567,6 +572,7 @@ class WidgetMixin:
     config = configure
 
     def cget(self, key: str) -> Any:
+        """讀取指定設定選項的目前值。"""
         return self._options.get(key)
 
     def connect_event(self, event_name: str, callback: Callable[..., Any], *, append: bool = False) -> str:
@@ -651,6 +657,7 @@ class WidgetMixin:
         return result == "break"
 
     def eventFilter(self, watched: Any, event: Any) -> bool:
+        """攔截 Qt 事件並依目前元件狀態處理。"""
         watched_self = watched is self
         with context_suppress():
             watched_self = watched_self or watched is cast(Any, self).viewport() or watched is cast(Any, self).header()
@@ -703,6 +710,7 @@ class WidgetMixin:
                 self._dispatching_header_event = False
 
     def schedule(self, delay_ms: int, callback: Callable[..., Any] | None = None) -> str:
+        """建立延遲執行的 Qt 計時器工作。"""
         if callback is None:
             time.sleep(max(0, int(delay_ms)) / 1000)
             return ""
@@ -727,6 +735,7 @@ class WidgetMixin:
             timer.deleteLater()
 
     def destroy(self, *_args, **_kwargs) -> None:
+        """銷毀元件並清理底層 Qt 資源。"""
         self._exists = False
         widget = cast(Any, self)
         with context_suppress():
@@ -845,9 +854,11 @@ class Button(WidgetMixin, FluentPushButton):
             self._command()
 
     def invoke(self) -> None:
+        """觸發按鈕的點擊動作。"""
         self._invoke_command()
 
     def configure(self, **kwargs: Any) -> None:
+        """更新元件設定並套用到實際 Qt widget。"""
         command = kwargs.pop("command", None)
         if command is not None:
             with context_suppress():
@@ -868,9 +879,11 @@ class Entry(WidgetMixin, FluentLineEdit):
         self._init_native(parent, **kwargs)
 
     def get(self) -> str:
+        """取得元件目前值。"""
         return self.text()
 
     def insert(self, index: Any, text: str | None = None) -> None:
+        """插入項目或文字內容。"""
         insert_text = str(index if text is None else text)
         if index in (0, "0"):
             self.setText(insert_text + self.text())
@@ -878,6 +891,7 @@ class Entry(WidgetMixin, FluentLineEdit):
             self.setText(self.text() + insert_text)
 
     def delete(self, _start: Any, _end: Any = None) -> None:
+        """刪除指定項目或文字範圍。"""
         self.clear()
 
     def select_range(self, start: int, end: Any) -> None:
@@ -931,12 +945,14 @@ class SearchEntry(WidgetMixin, FluentSearchLineEdit):
         self._dispatch_event("clear")
 
     def get(self) -> str:
+        """取得元件目前值。"""
         return self.text()
 
     def filter_text(self) -> str:
         return self.filter_logic.normalize(self.text())
 
     def matches(self, candidate: Any) -> bool:
+        """檢查目前輸入是否符合搜尋條件。"""
         return self.filter_logic.matches(candidate, self.text())
 
 
@@ -946,17 +962,21 @@ class TextBox(WidgetMixin, QtWidgets.QTextEdit):
         self._init_native(parent, **kwargs)
 
     def insert(self, index: Any, text: str) -> None:
+        """插入項目或文字內容。"""
         if index in (END, "end"):
             self.moveCursor(QtGui.QTextCursor.MoveOperation.End)
         self.insertPlainText(str(text))
 
     def get(self, *_args: Any) -> str:
+        """取得元件目前值。"""
         return self.toPlainText()
 
     def delete(self, *_args: Any) -> None:
+        """刪除指定項目或文字範圍。"""
         self.clear()
 
     def see(self, *_args: Any) -> None:
+        """捲動到指定位置或項目。"""
         self.moveCursor(QtGui.QTextCursor.MoveOperation.End)
 
     def yview_scroll(self, number: int, _what: str = "units") -> None:
@@ -1057,9 +1077,11 @@ class Slider(WidgetMixin, QtWidgets.QSlider):
             self._command(scaled_value)
 
     def set(self, value: float) -> None:
+        """設定目前值或顯示狀態。"""
         self.setValue(int(float(value) * self._scale))
 
     def get(self) -> float:
+        """取得元件目前值。"""
         return self.value() / self._scale
 
 
@@ -1079,6 +1101,7 @@ class ProgressBar(WidgetMixin, FluentProgressBar):
         self._init_native(parent, **kwargs)
 
     def set(self, value: float) -> None:
+        """設定目前值或顯示狀態。"""
         self._progress_signal_proxy.value_requested.emit(float(value))
 
     @QtCore.Slot(float)
@@ -1086,6 +1109,7 @@ class ProgressBar(WidgetMixin, FluentProgressBar):
         self.setValue(int(float(value) * 100 if float(value) <= 1 else float(value)))
 
     def paintEvent(self, event: Any) -> None:
+        """執行 paintEvent 操作。"""
         super().paintEvent(event)
         if not self.isTextVisible():
             return
@@ -1119,7 +1143,8 @@ class ProgressBar(WidgetMixin, FluentProgressBar):
             painter.end()
 
     def stop(self) -> None:
-        return None
+        """停止目前進度動畫。"""
+        return
 
 
 class OptionMenu(WidgetMixin, QtWidgets.QComboBox):
@@ -1151,12 +1176,15 @@ class OptionMenu(WidgetMixin, QtWidgets.QComboBox):
             self._command(value)
 
     def get(self) -> str:
+        """取得元件目前值。"""
         return self.currentText()
 
     def set(self, value: str) -> None:
+        """設定目前值或顯示狀態。"""
         self.setCurrentText(str(value))
 
     def configure(self, **kwargs: Any) -> None:
+        """更新元件設定並套用到實際 Qt widget。"""
         if "values" in kwargs:
             self.clear()
             values = [str(v) for v in kwargs["values"]]
@@ -1184,14 +1212,17 @@ class _TreeRow:
         self.children: list[_TreeRow] = []
 
     def text(self, column: int) -> str:
+        """回傳指定欄位的顯示文字。"""
         return self.values[column] if 0 <= column < len(self.values) else ""
 
     def setText(self, column: int, value: Any) -> None:
+        """設定指定欄位的顯示文字。"""
         while len(self.values) <= column:
             self.values.append("")
         self.values[column] = str(value)
 
     def textAlignment(self, _column: int):
+        """回傳指定欄位的文字對齊方式。"""
         return QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
 
     def _style_color(self, name: str) -> str | None:
@@ -1201,10 +1232,12 @@ class _TreeRow:
         return color
 
     def background(self, _column: int) -> QtGui.QBrush:
+        """回傳指定欄位的背景色。"""
         color = self._style_color("background")
         return QtGui.QBrush(QtGui.QColor(color)) if color else QtGui.QBrush()
 
     def foreground(self, _column: int) -> QtGui.QBrush:
+        """回傳指定欄位的前景色。"""
         color = self._style_color("foreground")
         return QtGui.QBrush(QtGui.QColor(color)) if color else QtGui.QBrush()
 
@@ -1246,6 +1279,7 @@ class _TreeModel(_QAbstractItemModel):
         column: int,
         parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX,
     ) -> QtCore.QModelIndex:
+        """回傳或建立指定項目的索引。"""
         if not self.hasIndex(row, column, parent):
             return QtCore.QModelIndex()
         parent_row = self._row_from_index(parent)
@@ -1258,6 +1292,7 @@ class _TreeModel(_QAbstractItemModel):
         self,
         index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
     ) -> QtCore.QModelIndex:
+        """回傳指定項目的父項目。"""
         if not index.isValid():
             return QtCore.QModelIndex()
         row = self._row_from_index(index)
@@ -1267,11 +1302,13 @@ class _TreeModel(_QAbstractItemModel):
         return self._index_for_row(parent_row)
 
     def rowCount(self, parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX) -> int:
+        """回傳指定父節點底下的列數。"""
         if parent.isValid() and parent.column() > 0:
             return 0
         return len(self._row_from_index(parent).children)
 
     def columnCount(self, _parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX) -> int:
+        """回傳模型欄位數量。"""
         return self._column_count()
 
     def data(
@@ -1279,6 +1316,7 @@ class _TreeModel(_QAbstractItemModel):
         index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
         role: int = QtCore.Qt.ItemDataRole.DisplayRole,
     ) -> Any:
+        """依角色回傳模型資料。"""
         if not index.isValid():
             return None
         row = self._row_from_index(index)
@@ -1296,6 +1334,7 @@ class _TreeModel(_QAbstractItemModel):
         return None
 
     def flags(self, index: QtCore.QModelIndex | QtCore.QPersistentModelIndex) -> QtCore.Qt.ItemFlag:
+        """回傳指定索引支援的 Qt item flags。"""
         if not index.isValid():
             return QtCore.Qt.ItemFlag.NoItemFlags
         return QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
@@ -1306,6 +1345,7 @@ class _TreeModel(_QAbstractItemModel):
         orientation: QtCore.Qt.Orientation,
         role: int = QtCore.Qt.ItemDataRole.DisplayRole,
     ) -> Any:
+        """回傳指定欄位標題資料。"""
         if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.DisplayRole:
             return self.columns[section] if 0 <= section < len(self.columns) else ""
         if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
@@ -1319,6 +1359,7 @@ class _TreeModel(_QAbstractItemModel):
         value: Any,
         role: int = QtCore.Qt.ItemDataRole.EditRole,
     ) -> bool:
+        """設定指定欄位標題資料。"""
         if orientation != QtCore.Qt.Orientation.Horizontal or role not in {
             QtCore.Qt.ItemDataRole.EditRole,
             QtCore.Qt.ItemDataRole.DisplayRole,
@@ -1522,6 +1563,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
             self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
 
     def heading(self, column: str, text: str | None = None, command: Callable[..., Any] | None = None, **_kwargs):
+        """設定 Treeview 欄位標題。"""
         idx = self._column_index(column)
         if text == "text" and command is None:
             return self._model.headerData(idx, QtCore.Qt.Orientation.Horizontal)
@@ -1532,6 +1574,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return None
 
     def column(self, column: str | int, width: int | str | None = None, **_kwargs):
+        """設定或讀取 Treeview 欄位配置。"""
         idx = self._column_index(column)
         if isinstance(width, str):
             if width == "width":
@@ -1557,6 +1600,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return {"width": self.columnWidth(idx)}
 
     def configure(self, **kwargs: Any) -> None:
+        """更新元件設定並套用到實際 Qt widget。"""
         display_columns = kwargs.pop("displaycolumns", None)
         super().configure(**kwargs)
         if display_columns is not None:
@@ -1575,6 +1619,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         tags: Any = (),
         open: bool = False,
     ):
+        """插入項目或文字內容。"""
         item_id = str(iid or f"item-{len(self._items) + 1}")
         self._model.insert_item(parent, _index, item_id, text=text, values=values, tags=tags)
         self._tags[item_id] = tuple(tags or ())
@@ -1585,6 +1630,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return item_id
 
     def item(self, item: str, option: str | None = None, **kwargs: Any):
+        """設定或讀取 Treeview 項目資料。"""
         node = self._items.get(str(item))
         if node is None:
             return {} if option is None else None
@@ -1604,6 +1650,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return payload.get(option) if option is not None else payload
 
     def delete(self, *items: str) -> None:
+        """刪除指定項目或文字範圍。"""
         for item_id in items:
             self._model.remove_item(str(item_id))
             self._tags.pop(str(item_id), None)
@@ -1612,14 +1659,17 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return self._model.children_ids(item)
 
     def parent(self, item: str | None = None):
+        """回傳指定項目的父項目。"""
         if item is None:
             return QtWidgets.QTreeView.parent(self)
         return self._model.parent_id(str(item))
 
     def exists(self, item: str) -> bool:
+        """執行 exists 操作。"""
         return str(item) in self._items and self._model.index_for_id(str(item)).isValid()
 
     def selection(self) -> tuple[str, ...]:
+        """回傳目前選取的項目 ID。"""
         selection_model = self.selectionModel()
         if selection_model is None:
             return ()
@@ -1669,6 +1719,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return [str(item_id) for item_id in items]
 
     def focus(self, item: str | None = None):
+        """設定或取得目前焦點項目。"""
         if item is None:
             node = self.currentIndex().internalPointer() if self.currentIndex().isValid() else None
             return node.item_id if isinstance(node, _TreeRow) else ""
@@ -1678,6 +1729,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return item
 
     def set(self, item: str, column: str, value: Any = None):
+        """設定目前值或顯示狀態。"""
         node = self._items.get(str(item))
         if node is None:
             return None
@@ -1688,21 +1740,26 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return None
 
     def move(self, item: Any, _parent: Any = "", index: Any = 0) -> None:
+        """移動項目到新的父節點與位置。"""
         self._model.move_item(str(item), str(_parent or ""), int(index))
 
     def index(self, item: str) -> int:
+        """回傳或建立指定項目的索引。"""
         node = self._items.get(str(item))
         if node is None or node.parent is None:
             return -1
         return node.parent.children.index(node)
 
     def detach(self, item: str) -> None:
+        """從目前顯示樹中暫時分離項目。"""
         self._model.remove_item(str(item), detach=True)
 
     def reattach(self, item: str, parent: str, index: int | str = 0) -> None:
+        """重新掛回已分離的項目。"""
         self._model.reattach_item(str(item), str(parent or ""), index)
 
     def see(self, item: str) -> None:
+        """捲動到指定位置或項目。"""
         index = self._model.index_for_id(str(item))
         if index.isValid():
             self.scrollTo(index)
@@ -1722,6 +1779,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return "cell"
 
     def bbox(self, item: str, _column: str | None = None):
+        """回傳指定項目的顯示矩形。"""
         index = self._model.index_for_id(str(item), self._column_index(_column or 0))
         if not index.isValid():
             return ""
@@ -1747,6 +1805,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         self._model.emit_style_changed(tag)
 
     def yview(self, *_args: Any) -> tuple[float, float]:
+        """沿垂直方向捲動視圖。"""
         bar = self.verticalScrollBar()
         maximum = max(1, bar.maximum())
         start = bar.value() / maximum
@@ -1754,6 +1813,7 @@ class Treeview(WidgetMixin, QtWidgets.QTreeView):
         return (start, min(1.0, start + page))
 
     def xview(self, *_args: Any) -> tuple[float, float]:
+        """沿水平方向捲動視圖。"""
         bar = self.horizontalScrollBar()
         maximum = max(1, bar.maximum())
         start = bar.value() / maximum
@@ -1791,6 +1851,7 @@ class Scrollbar(WidgetMixin, QtWidgets.QScrollBar):
         self.hide()
 
     def set(self, first: float, _last: float | None = None) -> None:
+        """設定目前值或顯示狀態。"""
         maximum = max(1, self.maximum())
         self.setValue(int(float(first) * maximum))
 
@@ -1799,6 +1860,7 @@ class Scrollbar(WidgetMixin, QtWidgets.QScrollBar):
         self.hide()
 
     def attach(self, **kwargs: Any) -> None:
+        """將元件加入父層布局並套用布局參數。"""
         super().attach(**kwargs)
         self.hide()
 
@@ -1810,9 +1872,11 @@ class Notebook(WidgetMixin, QtWidgets.QTabWidget):
         self.currentChanged.connect(lambda _idx: self._dispatch_event("tab_changed"))
 
     def add(self, child: Any, text: str = "") -> None:
+        """新增分頁或子項目。"""
         self.addTab(child, str(text))
 
     def select(self, tab_id: Any = None):
+        """選取指定項目並回傳目前選取狀態。"""
         if tab_id is None:
             return self.currentWidget()
         if isinstance(tab_id, int):
@@ -1822,6 +1886,7 @@ class Notebook(WidgetMixin, QtWidgets.QTabWidget):
         return self.currentWidget()
 
     def tab(self, tab_id: Any, option: str | None = None, **kwargs: Any):
+        """設定或讀取分頁屬性。"""
         widget = _native_parent(tab_id)
         idx = self.indexOf(widget) if not isinstance(tab_id, int) else tab_id
         if idx < 0:
@@ -1833,6 +1898,7 @@ class Notebook(WidgetMixin, QtWidgets.QTabWidget):
         return {"text": self.tabText(idx)}
 
     def index(self, tab_id: Any) -> int:
+        """回傳或建立指定項目的索引。"""
         if tab_id in (None, "current"):
             return self.currentIndex()
         if isinstance(tab_id, int):
@@ -1856,6 +1922,7 @@ class Listbox(WidgetMixin, QtWidgets.QListWidget):
         self._init_native(parent, **kwargs)
 
     def insert(self, index: Any, *texts: str) -> None:
+        """插入項目或文字內容。"""
         insert_at_end = index in (END, "end")
         base_index = self.count() if insert_at_end else int(index)
         for offset, text in enumerate(texts):
@@ -1865,12 +1932,14 @@ class Listbox(WidgetMixin, QtWidgets.QListWidget):
                 self.insertItem(base_index + offset, str(text))
 
     def delete(self, start: Any, end: Any = None) -> None:
+        """刪除指定項目或文字範圍。"""
         if start in (0, "0") and end in (END, "end"):
             self.clear()
             return
         self.takeItem(int(start))
 
     def curselection(self) -> tuple[int, ...]:
+        """回傳目前選取索引。"""
         return tuple(self.row(item) for item in self.selectedItems())
 
     def selection_clear(self, _start: Any, _end: Any = None) -> None:
@@ -1883,23 +1952,28 @@ class Listbox(WidgetMixin, QtWidgets.QListWidget):
             self.setCurrentItem(item)
 
     def activate(self, index: int) -> None:
+        """啟用指定索引項目。"""
         item = self.item(int(index))
         if item is not None:
             self.setCurrentItem(item)
 
     def see(self, index: int) -> None:
+        """捲動到指定位置或項目。"""
         item = self.item(int(index))
         if item is not None:
             self.scrollToItem(item)
 
     def size(self) -> Any:
+        """回傳清單項目數量。"""
         return self.count()
 
     def get(self, index: int) -> str:
+        """取得元件目前值。"""
         item = self.item(int(index))
         return item.text() if item is not None else ""
 
     def itemconfig(self, index: int, **kwargs: Any) -> None:
+        """設定清單項目的顯示屬性。"""
         item = self.item(int(index))
         if item is None:
             return
@@ -1909,7 +1983,8 @@ class Listbox(WidgetMixin, QtWidgets.QListWidget):
             item.setForeground(QtGui.QBrush(QtGui.QColor(_color(kwargs["fg"]))))
 
     def yview(self, *_args: Any) -> None:
-        return None
+        """沿垂直方向捲動視圖。"""
+        return
 
 
 class PopupMenu:

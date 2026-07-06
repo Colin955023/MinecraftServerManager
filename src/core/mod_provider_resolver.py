@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..app_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..utils import (
     HTTPUtils,
     LocalProviderEnsureResult,
@@ -20,8 +21,7 @@ from ..utils import (
     record_and_mark,
     resolve_modrinth_provider_record,
 )
-from ..version_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
-from .mod_models import MODRINTH_SEARCH_URL, ModPlatform
+from .mod_models import MODRINTH_SEARCH_URL, ModPlatform, ModrinthIdentityCache
 
 logger = get_logger().bind(component="ModProviderResolver")
 
@@ -123,7 +123,7 @@ class ModProviderResolver:
         self,
         *,
         index_manager: Any,
-        modrinth_identity_cache: dict[str, tuple[str, str]],
+        modrinth_identity_cache: ModrinthIdentityCache,
         read_json_from_jar: Any,
         quarantine_file: Any,
     ) -> None:
@@ -263,7 +263,7 @@ class ModProviderResolver:
             search_fallback=self.build_provider_record_from_search,
         )
         resolved = (resolved_record.project_id, resolved_record.slug or clean_identifier)
-        self._modrinth_identity_cache[cache_key] = resolved
+        self._modrinth_identity_cache.set(cache_key, resolved)
         return resolved
 
     def build_provider_record_from_search(self, query: str) -> ProviderMetadataRecord | None:

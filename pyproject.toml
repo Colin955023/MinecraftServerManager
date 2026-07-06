@@ -93,7 +93,7 @@ unfixable = []
 "__init__.py" = ["F401"]
 
 [tool.setuptools.dynamic]
-version = {attr = "src.version_info.version_info.APP_VERSION"}
+version = {attr = "src.app_info.app_info.APP_VERSION"}
 
 [tool.uv]
 managed = true

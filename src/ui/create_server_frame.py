@@ -475,6 +475,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         self._update_combo_state(self.loader_version_combo, self.loader_version_var, "等待 MC 版本選擇...")
 
         def task():
+            """執行背景任務的工作內容。"""
             versions = self.version_manager.get_versions()
 
             def update_mc():
@@ -502,6 +503,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         self._update_combo_state(self.mc_version_combo)
 
         def task():
+            """執行背景任務的工作內容。"""
             versions = self.version_manager.fetch_versions()
             self.ui_queue.put(lambda: self.update_versions(versions))
             self.ui_queue.put(lambda: self.mc_version_combo.configure(state="readonly"))
@@ -519,6 +521,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         self._update_combo_state(self.loader_version_combo, self.loader_version_var)
 
         def task():
+            """執行背景任務的工作內容。"""
             self.loader_manager.clear_cache_file()
             self.loader_manager.preload_loader_versions()
             versions = []

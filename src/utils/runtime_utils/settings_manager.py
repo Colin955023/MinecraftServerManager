@@ -2,6 +2,7 @@
 提供統一的使用者設定管理功能，包含自動更新與視窗偏好等。
 """
 
+import copy
 import threading
 import time
 from pathlib import Path
@@ -50,11 +51,10 @@ DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
     "theme_mode": "system",
 }
 _BOOL_SETTINGS = {"auto_update_enabled": True, "first_run_completed": False}
-_WINDOW_PREF_KEYS = {
-    "remember_size_position": "remember_size_position",
-    "auto_center": "auto_center",
-    "adaptive_sizing": "adaptive_sizing",
-    "theme_mode": "theme_mode",
+_WINDOW_BOOL_PREFS: dict[str, bool] = {
+    "remember_size_position": True,
+    "auto_center": True,
+    "adaptive_sizing": True,
 }
 _THEME_MODES = {"system", "light", "dark"}
 
@@ -81,6 +81,15 @@ def _get_default_settings() -> dict[str, Any]:
         "auto_prune_markers_on_startup": False,
         "window_preferences": _copy_window_preferences(),
     }
+
+
+def _clone_settings_payload(value: Any) -> Any:
+    """複製設定 payload，避免呼叫端持有內部可變物件。"""
+    try:
+        return copy.deepcopy(value)
+    except Exception as exc:
+        logger.debug(f"複製設定 payload 失敗，改用原值: {exc}")
+        return value
 
 
 class SettingsManager:
@@ -137,13 +146,8 @@ class SettingsManager:
 
     def _normalize_window_preferences(self, window_preferences: dict[str, Any]) -> WindowPreferences:
         normalized_window = _copy_window_preferences()
-        normalized_window["remember_size_position"] = bool(
-            window_preferences.get("remember_size_position", normalized_window["remember_size_position"])
-        )
-        normalized_window["auto_center"] = bool(window_preferences.get("auto_center", normalized_window["auto_center"]))
-        normalized_window["adaptive_sizing"] = bool(
-            window_preferences.get("adaptive_sizing", normalized_window["adaptive_sizing"])
-        )
+        for key, default in _WINDOW_BOOL_PREFS.items():
+            normalized_window[key] = bool(window_preferences.get(key, default))  # type: ignore[literal-required]
         normalized_window["theme_mode"] = self._normalize_theme_mode(
             window_preferences.get("theme_mode", normalized_window["theme_mode"])
         )
@@ -179,19 +183,17 @@ class SettingsManager:
                 self._save_settings(default_settings)
                 return default_settings
             settings = PathUtils.load_json(self.settings_path)
-            if not settings:
-                return _get_default_settings()
-            if not isinstance(settings, dict):
+            if not settings or not isinstance(settings, dict):
                 return _get_default_settings()
             return self._normalize_settings(settings)
 
     def _save_settings(self, settings: dict[str, Any]) -> None:
-        # 若設定內容未變更則略過寫入以減少不必要的 I/O
         with self._lock:
+            settings_snapshot = cast(dict[str, Any], _clone_settings_payload(settings))
             try:
                 if self.settings_path.exists():
                     current = PathUtils.load_json(self.settings_path)
-                    if isinstance(current, dict) and current == settings:
+                    if isinstance(current, dict) and current == settings_snapshot:
                         self._no_change_skip_count += 1
                         now_monotonic = time.monotonic()
                         if (
@@ -205,8 +207,7 @@ class SettingsManager:
                         return
             except OSError as e:
                 logger.debug(f"比對 settings 檔案時發生 I/O 錯誤，改為直接寫入: {e}")
-
-            if not atomic_write_json(self.settings_path, settings):
+            if not atomic_write_json(self.settings_path, settings_snapshot):
                 logger.error("無法寫入 user_settings.json")
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -223,7 +224,7 @@ class SettingsManager:
             value = self._settings.get(key, default)
             if key == "window_preferences" and isinstance(value, dict):
                 return self._normalize_window_preferences(value)
-            return value
+            return _clone_settings_payload(value)
 
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
         """設定指定鍵值的資料。
@@ -234,7 +235,7 @@ class SettingsManager:
             immediate_save: 是否立即儲存到磁碟。
         """
         with self._lock:
-            self._settings[key] = value
+            self._settings[key] = _clone_settings_payload(value)
             if immediate_save:
                 self._save_settings(self._settings)
 
@@ -245,28 +246,17 @@ class SettingsManager:
             updates: 要合併寫入的設定更新項目。
         """
         with self._lock:
-            self._settings.update(updates)
+            self._settings.update(cast(dict[str, Any], _clone_settings_payload(updates)))
             self._save_settings(self._settings)
 
-    def _get_bool_setting(self, key: str) -> bool:
-        """通用的布林設定取得方法（內部使用）"""
-        default = _BOOL_SETTINGS.get(key, False)
-        return bool(self._settings.get(key, default))
-
-    def _set_bool_setting(self, key: str, value: bool) -> None:
-        """通用的布林設定設定方法（內部使用）"""
-        self.set(key, value)
-
     def _update_window_pref(self, key: str, value: Any) -> None:
-        """通用的視窗偏好設定更新方法（內部使用）"""
+        """更新視窗偏好中的單一鍵值。"""
         prefs: dict[str, Any] = dict(self.get_window_preferences())
         prefs[key] = value
         self.set("window_preferences", prefs)
 
-    @staticmethod
-    def _normalize_theme_mode(mode: Any) -> str:
-        normalized = str(mode or DEFAULT_WINDOW_PREFERENCES["theme_mode"]).strip().lower()
-        return normalized if normalized in _THEME_MODES else DEFAULT_WINDOW_PREFERENCES["theme_mode"]
+    def _get_window_bool(self, key: str, default: bool = True) -> bool:
+        return bool(self.get_window_preferences().get(key, default))
 
     def get_servers_root(self) -> str:
         """取得使用者設定的伺服器主資料夾路徑。
@@ -278,8 +268,7 @@ class SettingsManager:
             return str(self._settings.get("servers_root", "")).strip()
 
     def set_servers_root(self, path: str | Path) -> None:
-        normalized_path = self.normalize_servers_base_dir(path)
-        self.set("servers_root", normalized_path)
+        self.set("servers_root", self.normalize_servers_base_dir(path))
 
     def get_validated_servers_root_path(self, *, create: bool = False) -> Path:
         """回傳已驗證的 servers 根目錄。
@@ -310,17 +299,32 @@ class SettingsManager:
         return str(self.get_validated_servers_root_path(create=create))
 
     def is_auto_update_enabled(self) -> bool:
-        return self._get_bool_setting("auto_update_enabled")
+        """
+        檢查自動更新功能是否啟用。
+
+        Returns:
+            bool: 若啟用則回傳 True，否則回傳 False。
+        """
+        with self._lock:
+            return bool(self._settings.get("auto_update_enabled", _BOOL_SETTINGS["auto_update_enabled"]))
 
     def set_auto_update_enabled(self, enabled: bool) -> None:
-        self._set_bool_setting("auto_update_enabled", enabled)
+        """設定自動更新功能是否啟用。"""
+        self.set("auto_update_enabled", enabled)
 
     def is_first_run_completed(self) -> bool:
-        return self._get_bool_setting("first_run_completed")
+        """
+        檢查首次啟動流程是否已完成。
+
+        Returns:
+            bool: 若已完成則回傳 True，否則回傳 False。
+        """
+        with self._lock:
+            return bool(self._settings.get("first_run_completed", _BOOL_SETTINGS["first_run_completed"]))
 
     def mark_first_run_completed(self) -> None:
         """標記首次啟動流程已完成。"""
-        self._set_bool_setting("first_run_completed", True)
+        self.set("first_run_completed", True)
 
     def get_window_preferences(self) -> WindowPreferences:
         """取得視窗偏好設定。
@@ -335,11 +339,22 @@ class SettingsManager:
             return _copy_window_preferences()
 
     def is_remember_size_position_enabled(self) -> bool:
-        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["remember_size_position"], True))
+        return self._get_window_bool("remember_size_position", True)
 
     def set_remember_size_position(self, enabled: bool) -> None:
-        key = _WINDOW_PREF_KEYS["remember_size_position"]
-        self._update_window_pref(key, enabled)
+        self._update_window_pref("remember_size_position", enabled)
+
+    def is_auto_center_enabled(self) -> bool:
+        return self._get_window_bool("auto_center", True)
+
+    def set_auto_center(self, enabled: bool) -> None:
+        self._update_window_pref("auto_center", enabled)
+
+    def is_adaptive_sizing_enabled(self) -> bool:
+        return self._get_window_bool("adaptive_sizing", True)
+
+    def set_adaptive_sizing(self, enabled: bool) -> None:
+        self._update_window_pref("adaptive_sizing", enabled)
 
     def get_main_window_settings(self) -> MainWindowSettings:
         """取得主視窗的大小、位置和狀態設定。
@@ -375,34 +390,20 @@ class SettingsManager:
             prefs["main_window"] = {"width": width, "height": height, "x": x, "y": y, "maximized": maximized}
             self.set("window_preferences", prefs)
 
-    def is_auto_center_enabled(self) -> bool:
-        """檢查是否啟用自動置中新視窗的功能"""
-        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["auto_center"], True))
-
-    def set_auto_center(self, enabled: bool) -> None:
-        """設定是否自動置中新視窗的功能"""
-        key = _WINDOW_PREF_KEYS["auto_center"]
-        self._update_window_pref(key, enabled)
-
-    def is_adaptive_sizing_enabled(self) -> bool:
-        """檢查是否啟用根據螢幕大小自適應調整視窗的功能"""
-        return bool(self.get_window_preferences().get(_WINDOW_PREF_KEYS["adaptive_sizing"], True))
-
-    def set_adaptive_sizing(self, enabled: bool) -> None:
-        """設定是否啟用根據螢幕大小自適應調整視窗的功能"""
-        key = _WINDOW_PREF_KEYS["adaptive_sizing"]
-        self._update_window_pref(key, enabled)
+    @staticmethod
+    def _normalize_theme_mode(mode: Any) -> str:
+        normalized = str(mode or DEFAULT_WINDOW_PREFERENCES["theme_mode"]).strip().lower()
+        return normalized if normalized in _THEME_MODES else DEFAULT_WINDOW_PREFERENCES["theme_mode"]
 
     def get_theme_mode(self) -> str:
         """取得 UI 主題模式。"""
         return self._normalize_theme_mode(
-            self.get_window_preferences().get(_WINDOW_PREF_KEYS["theme_mode"], DEFAULT_WINDOW_PREFERENCES["theme_mode"])
+            self.get_window_preferences().get("theme_mode", DEFAULT_WINDOW_PREFERENCES["theme_mode"])
         )
 
     def set_theme_mode(self, mode: str) -> None:
         """設定 UI 主題模式。"""
-        key = _WINDOW_PREF_KEYS["theme_mode"]
-        self._update_window_pref(key, self._normalize_theme_mode(mode))
+        self._update_window_pref("theme_mode", self._normalize_theme_mode(mode))
 
 
 _settings_manager = None

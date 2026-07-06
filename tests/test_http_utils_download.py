@@ -74,6 +74,7 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
     )
     assert failure_messages and "磁碟空間不足" in failure_messages[0]
     assert not target.exists()
+    assert list(tmp_path.glob("*.part")) == []
 
 
 def test_download_file_reports_timeout_reason(tmp_path, monkeypatch) -> None:
@@ -91,6 +92,21 @@ def test_download_file_reports_timeout_reason(tmp_path, monkeypatch) -> None:
         is False
     )
     assert failure_messages and "逾時" in failure_messages[0]
+
+
+def test_download_file_reports_invalid_url_reason(tmp_path) -> None:
+    target = tmp_path / "server.jar"
+    failure_messages: list[str] = []
+
+    assert (
+        HTTPUtils.download_file(
+            "not-a-url",
+            str(target),
+            failure_message_callback=failure_messages.append,
+        )
+        is False
+    )
+    assert failure_messages == ["URL 參數無效"]
 
 
 def test_download_file_keeps_existing_target_when_replace_fails(tmp_path, monkeypatch) -> None:
