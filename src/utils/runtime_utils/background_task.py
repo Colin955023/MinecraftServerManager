@@ -27,6 +27,7 @@ __all__ = [
     "get_shared_manager",
     "run_async_in_background",
     "run_in_background",
+    "submit_background_task",
 ]
 
 
@@ -38,13 +39,43 @@ class CancellationToken:
 
     def cancel(self) -> None:
         """將取消標記設為已取消。"""
-
         self._cancelled = True
 
     def is_cancelled(self) -> bool:
         """回傳目前是否已請求取消。"""
-
         return self._cancelled
+
+
+def _make_done_callback(
+    callback: Callable[[Any], None],
+    task_label: str = "Background task",
+) -> Callable[[concurrent.futures.Future | asyncio.Future], None]:
+    """建立統一的任務完成回呼包裝器，消除 run() 與 run_async() 中的重複邏輯。
+
+    Args:
+        callback: 任務完成後要執行的使用者回呼。
+        task_label: 用於日誌的任務名稱。
+
+    Returns:
+        可直接傳入 future.add_done_callback 的包裝函式。
+    """
+
+    def _on_done(future) -> None:
+        try:
+            result = future.result()
+        except Exception as exc:
+            logger.exception(f"{task_label} failed: %s", exc)
+            try:
+                callback(None)
+            except Exception:
+                logger.exception(f"{task_label} callback failed while handling exception")
+            return
+        try:
+            callback(result)
+        except Exception:
+            logger.exception(f"{task_label} callback raised an exception")
+
+    return _on_done
 
 
 class BackgroundTaskManager:
@@ -62,12 +93,12 @@ class BackgroundTaskManager:
         cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> concurrent.futures.Future:
-        """提交背景任務，完成後若提供 callback 會在背景執行緒呼叫。
+        """提交背景任務到 QThreadPool 執行。
 
         Args:
             fn: 要執行的函式。
             *args: 傳入函式的位置參數。
-            callback: 任務完成後的回呼。
+            callback: 任務完成後的回呼，會在背景執行緒被呼叫。
             cancel_token: 協作式取消標記。
             **kwargs: 傳入函式的關鍵字參數。
 
@@ -80,23 +111,7 @@ class BackgroundTaskManager:
         runnable = _QtRunnable(future, functools.partial(fn, *args, **kwargs))
         self._pool.start(runnable)
         if callback:
-
-            def _on_done(f: concurrent.futures.Future):
-                try:
-                    res = f.result()
-                except Exception as e:
-                    logger.exception("Background task failed: %s", e)
-                    try:
-                        callback(None)
-                    except Exception:
-                        logger.exception("Background task callback failed while handling exception")
-                    return
-                try:
-                    callback(res)
-                except Exception:
-                    logger.exception("Background task callback raised an exception")
-
-            future.add_done_callback(_on_done)
+            future.add_done_callback(_make_done_callback(callback))
         return future
 
     async def run_async(
@@ -131,26 +146,10 @@ class BackgroundTaskManager:
                 return await asyncio.wrap_future(future)
 
             task = loop.create_task(_await_future())
-            callback = None
+            callback = None  # 已由 run() 的 future.add_done_callback 負責
 
         if callback:
-
-            def _on_done(task_fut: asyncio.Future):
-                try:
-                    res = task_fut.result()
-                except Exception as e:
-                    logger.exception("Background async task failed: %s", e)
-                    try:
-                        callback(None)
-                    except Exception:
-                        logger.exception("Background async task callback failed while handling exception")
-                    return
-                try:
-                    callback(res)
-                except Exception:
-                    logger.exception("Background async task callback raised an exception")
-
-            task.add_done_callback(_on_done)
+            task.add_done_callback(_make_done_callback(callback, task_label="Background async task"))
         return task
 
     def shutdown(self, wait: bool = True) -> None:
@@ -159,7 +158,6 @@ class BackgroundTaskManager:
         Args:
             wait: 是否等待既有任務完成。
         """
-
         if wait:
             self._pool.waitForDone()
         else:
@@ -176,6 +174,7 @@ class _QtRunnable(QtCore.QRunnable):
         self.setAutoDelete(True)
 
     def run(self) -> None:
+        """執行背景工作中保存的 callable。"""
         if not self.future.set_running_or_notify_cancel():
             return
         try:
@@ -207,8 +206,7 @@ def run_in_background(
 ) -> concurrent.futures.Future[Any] | None:
     """使用共享 BackgroundTaskManager 的便利函式。
 
-    若無法使用共享 manager（例：初始化失敗或其他稀有例外），
-    會同步完成一個 Future 以保持錯誤可觀測。
+    若無法使用共享 manager，會同步完成一個 Future 以保持錯誤可觀測。
     """
     try:
         return get_shared_manager().run(fn, *args, callback=callback, **kwargs)
@@ -229,17 +227,58 @@ def run_in_background(
         return future
 
 
+def submit_background_task(
+    fn: Callable[..., Any],
+    *args,
+    on_success: Callable[[Any], None] | None = None,
+    on_error: Callable[[Exception], None] | None = None,
+    task_label: str = "Background task",
+    **kwargs,
+) -> concurrent.futures.Future[Any] | None:
+    """提交背景任務並分流成功與失敗回呼。
+
+    Args:
+        fn: 要執行的函式。
+        *args: 傳入函式的位置參數。
+        on_success: 任務成功時收到結果的回呼（在背景執行緒被呼叫）。
+        on_error: 任務失敗時收到例外物件的回呼（在背景執行緒被呼叫）。
+        task_label: 用於日誌的任務名稱。
+        **kwargs: 傳入函式的關鍵字參數。
+
+    Returns:
+        提交後的 Future；若背景執行器完全不可用則回傳 None。
+    """
+    future = run_in_background(fn, *args, **kwargs)
+    if future is None:
+        return None
+
+    def _dispatch(result_future: concurrent.futures.Future[Any]) -> None:
+        try:
+            result = result_future.result()
+        except Exception as exc:
+            logger.exception(f"{task_label} failed: %s", exc)
+            if on_error:
+                try:
+                    on_error(exc)
+                except Exception:
+                    logger.exception(f"{task_label} error callback raised an exception")
+            return
+        if on_success:
+            try:
+                on_success(result)
+            except Exception:
+                logger.exception(f"{task_label} success callback raised an exception")
+
+    future.add_done_callback(_dispatch)
+    return future
+
+
 def run_async_in_background(
     fn: Callable[..., Any], *args, callback: Callable[[Any], None] | None = None, **kwargs
 ) -> concurrent.futures.Future[Any] | asyncio.Task[Any]:
-    """若在 asyncio loop 中，使用共享 manager 的 run_async；否則回傳 concurrent.futures.Future。
-
-    注意：呼叫者在 asyncio 環境中應直接呼叫 `await get_shared_manager().run_async(...)`。
-    此函式提供在不確定執行環境時的便利層級。
-    """
+    """若在 asyncio loop 中，使用共享 manager 的 run_async；否則回傳 concurrent.futures.Future。"""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
         return get_shared_manager().run(fn, *args, callback=callback, **kwargs)
-    # 已有 running loop，建立 task 並回傳 asyncio.Task
     return asyncio.ensure_future(get_shared_manager().run_async(fn, *args, callback=callback, **kwargs))

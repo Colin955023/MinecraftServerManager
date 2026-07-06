@@ -304,6 +304,7 @@ class _WindowStateTracker(QtCore.QObject):
         self._window = window
 
     def eventFilter(self, watched, event) -> bool:
+        """攔截 Qt 事件並依目前元件狀態處理。"""
         if event.type() in {
             QtCore.QEvent.Type.Resize,
             QtCore.QEvent.Type.Move,

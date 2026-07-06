@@ -130,9 +130,7 @@ class LocalModScanner:
                     0,
                     int(str(refreshed_provider.get("stale_revalidation_failures", "0") or "0").strip() or 0),
                 )
-            except TypeError:
-                stale_revalidation_failures = 0
-            except ValueError:
+            except TypeError, ValueError:
                 stale_revalidation_failures = 0
             return LocalModInfo(
                 id=base_name,

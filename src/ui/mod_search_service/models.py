@@ -52,6 +52,7 @@ class OnlineModCompatibilityReport:
 
     @property
     def compatible(self) -> bool:
+        """回傳相容性檢查是否通過。"""
         return not self.hard_errors
 
 
@@ -111,6 +112,7 @@ class LocalModUpdateCandidate:
 
     @property
     def actionable(self) -> bool:
+        """回傳此項目是否可由使用者執行。"""
         return self.update_available and (not self.hard_errors) and bool(self.download_url and self.target_filename)
 
     @property

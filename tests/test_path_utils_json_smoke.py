@@ -93,7 +93,9 @@ def test_safe_extract_zip_rejects_excessive_uncompressed_size(tmp_path) -> None:
     assert not (extract_dir / "mods" / "huge.jar").exists()
 
 
-@pytest.mark.parametrize("member_name", ["../evil.txt", "mods/../evil.txt", "/absolute/evil.txt", r"..\evil.txt"])
+@pytest.mark.parametrize(
+    "member_name", ["../evil.txt", "mods/../evil.txt", "/absolute/evil.txt", r"..\evil.txt", "C:/evil.txt"]
+)
 def test_safe_extract_zip_rejects_unsafe_member_names(tmp_path, member_name: str) -> None:
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
@@ -106,6 +108,59 @@ def test_safe_extract_zip_rejects_unsafe_member_names(tmp_path, member_name: str
         PathUtils.safe_extract_zip(zip_path, extract_dir)
 
     assert not (tmp_path / "evil.txt").exists()
+
+
+def test_safe_extract_zip_rejects_symlink_entry(tmp_path) -> None:
+    """宣告為 Unix symlink 的 entry 應被拒絕，避免指向 dest_dir 外部的符號連結。"""
+    zip_path = tmp_path / "server.zip"
+    extract_dir = tmp_path / "extracted"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        info = zipfile.ZipInfo("mods/evil_link.jar")
+        info.external_attr = 0o120777 << 16  # S_IFLNK：宣告為符號連結
+        zf.writestr(info, "../../../etc/passwd")
+
+    with pytest.raises(ValueError):
+        PathUtils.safe_extract_zip(zip_path, extract_dir)
+
+    assert not (extract_dir / "mods").exists()
+
+
+def test_safe_extract_zip_rejects_oversized_single_member(tmp_path) -> None:
+    """單一 entry 實際大小超過 `max_member_uncompressed_bytes` 時應被拒絕（與總大小上限為不同檢查路徑）。"""
+    zip_path = tmp_path / "server.zip"
+    extract_dir = tmp_path / "extracted"
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+        zf.writestr("mods/big.jar", b"x" * 1000)
+
+    with pytest.raises(ValueError, match="過大"):
+        PathUtils.safe_extract_zip(
+            zip_path,
+            extract_dir,
+            max_member_uncompressed_bytes=100,
+            max_compression_ratio=None,
+        )
+
+    assert not (extract_dir / "mods" / "big.jar").exists()
+
+
+def test_safe_extract_zip_rejects_excessive_compression_ratio(tmp_path) -> None:
+    """壓縮比例異常過高（典型 zip bomb 特徵）時應被拒絕。"""
+    zip_path = tmp_path / "server.zip"
+    extract_dir = tmp_path / "extracted"
+    # 高度可壓縮內容：2MB 全部相同 byte，DEFLATE 壓縮比會遠超過 200:1。
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("mods/bomb.jar", b"A" * (2 * 1024 * 1024))
+
+    with pytest.raises(ValueError, match="壓縮比例"):
+        PathUtils.safe_extract_zip(
+            zip_path,
+            extract_dir,
+            max_member_uncompressed_bytes=None,
+            max_total_uncompressed_bytes=None,
+            max_compression_ratio=200,
+        )
 
 
 def test_copy_dir_reports_progress(tmp_path) -> None:

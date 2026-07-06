@@ -27,6 +27,7 @@ from ..utils import (
     get_logger,
     record_and_mark,
 )
+from . import MinecraftVersionManager
 
 
 @dataclass
@@ -38,8 +39,6 @@ class OperationResult:
     error: Exception | None = None
     extra: dict = field(default_factory=dict)
 
-
-from . import MinecraftVersionManager
 
 logger = get_logger().bind(component="LoaderManager")
 
@@ -134,31 +133,6 @@ class LoaderManager(Singleton):
                 reason=reason,
                 details=details or {"installer": installer_path, "base_dir": str(base_dir)},
             )
-
-    def _download_installer_for_loader(
-        self,
-        *,
-        installer_url: str,
-        installer_args: list[str],
-        minecraft_version: str,
-        loader_version: str,
-        download_path: str,
-        progress_callback,
-        cancel_flag,
-        need_vanilla: bool,
-        loader_type: str = "",
-    ) -> bool | str:
-        return self._download_and_run_installer(
-            installer_url=installer_url,
-            installer_args=installer_args,
-            minecraft_version=minecraft_version,
-            _loader_version=loader_version,
-            download_path=download_path,
-            progress_callback=progress_callback,
-            cancel_flag=cancel_flag,
-            need_vanilla=need_vanilla,
-            loader_type=loader_type,
-        )
 
     @staticmethod
     def _extract_stable_version_strings(content: bytes) -> list[str]:
@@ -355,7 +329,7 @@ class LoaderManager(Singleton):
         if not installer_url:
             return self._fail(progress_callback, f"找不到 {loader_type} 安裝器下載網址")
         if lt == "fabric":
-            return self._download_installer_for_loader(
+            return self._download_and_run_installer(
                 installer_url=installer_url,
                 installer_args=[
                     java_path,
@@ -374,11 +348,10 @@ class LoaderManager(Singleton):
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=True,
-                loader_version=loader_version,
                 loader_type="fabric",
             )
         if lt in ("forge", "neoforge"):
-            return self._download_installer_for_loader(
+            return self._download_and_run_installer(
                 installer_url=installer_url,
                 installer_args=[java_path, "-jar", "{installer}", "--installServer"],
                 minecraft_version=minecraft_version,
@@ -386,11 +359,10 @@ class LoaderManager(Singleton):
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=False,
-                loader_version=loader_version,
                 loader_type=lt,
             )
         if lt == "quilt":
-            return self._download_installer_for_loader(
+            return self._download_and_run_installer(
                 installer_url=installer_url,
                 installer_args=[
                     java_path,
@@ -409,7 +381,6 @@ class LoaderManager(Singleton):
                 progress_callback=progress_callback,
                 cancel_flag=cancel_flag,
                 need_vanilla=True,
-                loader_version=loader_version,
                 loader_type="quilt",
             )
         return self._fail(
@@ -929,7 +900,6 @@ class LoaderManager(Singleton):
         installer_url: str,
         installer_args: list[str],
         minecraft_version: str,
-        _loader_version: str,
         download_path: str,
         progress_callback,
         cancel_flag,

@@ -602,6 +602,7 @@ class ManageServerFrame:
             return
 
         def task():
+            """執行背景任務的工作內容。"""
             try:
                 count = self._detect_servers_task(path)
                 self.ui_queue.put(lambda: self._detect_servers_callback(count, show_message))
@@ -1063,6 +1064,7 @@ class ManageServerFrame:
         """
 
         def task():
+            """執行背景任務的工作內容。"""
             try:
                 server_data = self._refresh_servers_task(reload_config)
                 self.ui_queue.put(lambda: self._refresh_servers_callback(server_data))

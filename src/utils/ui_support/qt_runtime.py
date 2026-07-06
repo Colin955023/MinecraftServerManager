@@ -118,6 +118,7 @@ class _OpenUrlClickFilter(QtCore.QObject):
         self._url = str(url)
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        """攔截 Qt 事件並依目前元件狀態處理。"""
         if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(self._url))
             return True

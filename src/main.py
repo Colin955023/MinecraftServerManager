@@ -125,6 +125,7 @@ class _ApplicationRoot(QtWidgets.QWidget):
     """主應用程式根視窗。"""
 
     def closeEvent(self, event) -> None:
+        """處理 Qt 視窗關閉事件。"""
         manager = getattr(self, "_msm_manager", None)
         if manager is None or getattr(self, "_msm_closing", False):
             event.accept()

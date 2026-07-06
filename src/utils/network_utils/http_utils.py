@@ -21,7 +21,7 @@ from requests import exceptions as requests_exceptions
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ...version_info import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+from ...app_info import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from .. import get_logger
 from ..runtime_utils.background_task import get_shared_manager
 from ..runtime_utils.worker_pool import run_blocking_io
@@ -56,7 +56,7 @@ class RateLimiter:
                 self.last_call_time[domain] = now
 
 
-_rate_limiter = RateLimiter(calls_per_second=10)  # 預設每秒 10 次
+_rate_limiter = RateLimiter(calls_per_second=10)
 
 
 class HTTPUtils:
@@ -94,16 +94,13 @@ class HTTPUtils:
 
     @staticmethod
     def _normalize_int_value(value: int, minimum: int) -> int:
-        """確保輸入為有效正整數，且不低於指定下限。"""
         try:
-            normalized = int(value)
-        except (TypeError, ValueError) as _:
-            normalized = minimum
-        return max(minimum, normalized)
+            return max(minimum, int(value))
+        except TypeError, ValueError:
+            return minimum
 
     @classmethod
     def _configure_session(cls, session: requests.Session) -> None:
-        """套用統一的 adapter/retry policy。"""
         adapter = HTTPAdapter(
             max_retries=Retry(
                 total=cls.RETRY_TOTAL,
@@ -123,7 +120,6 @@ class HTTPUtils:
 
     @classmethod
     def _get_session(cls) -> requests.Session:
-        """取得目前執行緒專屬的 Session，避免跨執行緒共用。"""
         session = getattr(cls._thread_local, "session", None)
         if session is None:
             session = requests.Session()
@@ -133,7 +129,6 @@ class HTTPUtils:
 
     @staticmethod
     def _is_valid_url(url: str) -> bool:
-        """僅接受具備主機名稱的 http/https URL。"""
         try:
             parsed = urlparse(url)
         except ValueError:
@@ -147,9 +142,7 @@ class HTTPUtils:
         value = float(size)
         for unit in units:
             if value < 1024 or unit == units[-1]:
-                if unit == "B":
-                    return f"{int(value)} {unit}"
-                return f"{value:.1f} {unit}"
+                return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
             value /= 1024
         return f"{size} B"
 
@@ -185,6 +178,73 @@ class HTTPUtils:
                 return "磁碟空間不足"
             return f"I/O 錯誤: {exc}"
         return str(exc) or exc.__class__.__name__
+
+    @staticmethod
+    def _cleanup_temp_file(temp_path: Path | None) -> None:
+        if temp_path is None:
+            return
+        with contextlib.suppress(OSError):
+            if temp_path.exists():
+                temp_path.unlink()
+
+    @classmethod
+    def _report_download_failure(
+        cls,
+        *,
+        url: str,
+        local_path: str,
+        message: str,
+        failure_message_callback: Callable[[str], None] | None = None,
+        exc: Exception | None = None,
+        log_message: str | None = None,
+    ) -> None:
+        if failure_message_callback:
+            try:
+                failure_message_callback(message)
+            except Exception:
+                logger.exception("下載失敗訊息 callback 執行失敗")
+        final_log_message = log_message or f"檔案下載失敗 ({url} -> {local_path}): {message}"
+        if exc is None:
+            logger.error(final_log_message)
+        else:
+            logger.exception(final_log_message)
+
+    @staticmethod
+    def _resolve_expected_hash_algorithm(expected_hash: str) -> str:
+        if not expected_hash:
+            return ""
+        if len(expected_hash) == 64:
+            return "sha256"
+        if len(expected_hash) == 128:
+            return "sha512"
+        return ""
+
+    @classmethod
+    def _existing_file_matches_hash(
+        cls,
+        local_path: Path,
+        *,
+        expected_hash: str,
+        expected_hash_algorithm: str,
+        progress_callback: Callable[[int, int], None] | None,
+    ) -> bool:
+        try:
+            hasher = hashlib.new(expected_hash_algorithm)
+            with local_path.open("rb") as file_obj:
+                for chunk in iter(lambda: file_obj.read(8192), b""):
+                    hasher.update(chunk)
+            if hasher.hexdigest().lower() != expected_hash:
+                return False
+            if progress_callback:
+                try:
+                    size = local_path.stat().st_size
+                    progress_callback(size, size)
+                except Exception as exc:
+                    logger.debug(f"progress_callback/stat failed: {exc}")
+            return True
+        except OSError as exc:
+            logger.debug(f"檢查本地檔案雜湊失敗，將進行下載: {exc}")
+            return False
 
     @staticmethod
     def get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
@@ -344,45 +404,47 @@ class HTTPUtils:
             下載成功時回傳 True，失敗時回傳 False。
         """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
-            logger.error("檔案下載失敗: URL 參數無效")
+            cls._report_download_failure(
+                url=str(url),
+                local_path=str(local_path),
+                message="URL 參數無效",
+                failure_message_callback=failure_message_callback,
+            )
             return False
         if not local_path or not isinstance(local_path, str):
-            logger.error("檔案下載失敗: 本地路徑參數無效")
+            cls._report_download_failure(
+                url=url,
+                local_path=str(local_path),
+                message="本地路徑參數無效",
+                failure_message_callback=failure_message_callback,
+            )
             return False
         timeout = cls._normalize_int_value(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
         chunk_size = cls._normalize_int_value(chunk_size, cls.MIN_CHUNK_SIZE)
         local_path_obj = Path(local_path)
         local_path_obj.parents[0].mkdir(parents=True, exist_ok=True)
         normalized_expected_hash = str(expected_hash or expected_sha256 or "").strip().lower()
-        expected_hash_algorithm = ""
-        if normalized_expected_hash:
-            if len(normalized_expected_hash) == 64:
-                expected_hash_algorithm = "sha256"
-            elif len(normalized_expected_hash) == 128:
-                expected_hash_algorithm = "sha512"
-            else:
-                logger.error(f"檔案下載失敗: 僅接受 SHA-256 / SHA-512 預期雜湊 (len={len(normalized_expected_hash)})")
-                return False
-        # 若提供預期雜湊，先檢查本地檔案是否已符合，以避免重複下載
-        if normalized_expected_hash and local_path_obj.exists():
-            try:
-                h = hashlib.new(expected_hash_algorithm)
-                with local_path_obj.open("rb") as f:
-                    for chunk in iter(lambda: f.read(8192), b""):
-                        h.update(chunk)
-                if h.hexdigest().lower() == normalized_expected_hash:
-                    # 直接回報完成（若有 progress callback，給予完成狀態）
-                    if progress_callback:
-                        try:
-                            size = local_path_obj.stat().st_size
-                            progress_callback(size, size)
-                        except OSError as e:
-                            logger.debug(f"progress_callback/stat failed: {e}")
-                        except Exception as e:
-                            logger.debug(f"progress_callback raised: {e}")
-                    return True
-            except OSError as e:
-                logger.debug(f"檢查本地檔案雜湊失敗，將進行下載: {e}")
+        expected_hash_algorithm = cls._resolve_expected_hash_algorithm(normalized_expected_hash)
+        if normalized_expected_hash and not expected_hash_algorithm:
+            cls._report_download_failure(
+                url=url,
+                local_path=local_path,
+                message=f"僅接受 SHA-256 / SHA-512 預期雜湊 (len={len(normalized_expected_hash)})",
+                failure_message_callback=failure_message_callback,
+            )
+            return False
+        if (
+            normalized_expected_hash
+            and local_path_obj.exists()
+            and cls._existing_file_matches_hash(
+                local_path_obj,
+                expected_hash=normalized_expected_hash,
+                expected_hash_algorithm=expected_hash_algorithm,
+                progress_callback=progress_callback,
+            )
+        ):
+            return True
+        temp_path_obj: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 delete=False, prefix=local_path_obj.name + ".", suffix=".part", dir=local_path_obj.parents[0]
@@ -407,18 +469,26 @@ class HTTPUtils:
                                 f"磁碟空間不足：目的地 {local_path_obj.parent} 需要至少 {cls._format_bytes(total_size)}，"
                                 f"目前剩餘 {cls._format_bytes(free_space)}。"
                             )
-                            if failure_message_callback:
-                                failure_message_callback(failure_message)
-                            logger.error(f"檔案下載失敗 ({url} -> {local_path}): {failure_message}")
+                            cls._report_download_failure(
+                                url=url,
+                                local_path=local_path,
+                                message=failure_message,
+                                failure_message_callback=failure_message_callback,
+                            )
+                            cls._cleanup_temp_file(temp_path_obj)
                             return False
                 downloaded = 0
                 hasher = hashlib.new(expected_hash_algorithm) if normalized_expected_hash else None
                 with open(temp_path_obj, "wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
-                            if temp_path_obj.exists():
-                                with contextlib.suppress(OSError):
-                                    temp_path_obj.unlink()
+                            cls._report_download_failure(
+                                url=url,
+                                local_path=local_path,
+                                message="下載已取消",
+                                failure_message_callback=failure_message_callback,
+                            )
+                            cls._cleanup_temp_file(temp_path_obj)
                             return False
                         if not chunk:
                             continue
@@ -432,14 +502,17 @@ class HTTPUtils:
                     computed = hasher.hexdigest().lower()
                     if computed != normalized_expected_hash:
                         failure_message = f"下載檔案雜湊驗證失敗：預期 {expected_hash_algorithm.upper()} 不符。"
-                        if failure_message_callback:
-                            failure_message_callback(failure_message)
-                        logger.error(
-                            f"下載檔案的雜湊不符: algorithm={expected_hash_algorithm} expected={normalized_expected_hash} computed={computed}"
+                        cls._report_download_failure(
+                            url=url,
+                            local_path=local_path,
+                            message=failure_message,
+                            failure_message_callback=failure_message_callback,
+                            log_message=(
+                                f"下載檔案的雜湊不符: algorithm={expected_hash_algorithm} "
+                                f"expected={normalized_expected_hash} computed={computed}"
+                            ),
                         )
-                        with contextlib.suppress(OSError):
-                            if temp_path_obj.exists():
-                                temp_path_obj.unlink()
+                        cls._cleanup_temp_file(temp_path_obj)
                         return False
             temp_path_obj.replace(local_path_obj)
             try:
@@ -453,12 +526,14 @@ class HTTPUtils:
             return True
         except (RequestException, OSError) as e:
             failure_message = cls._describe_request_failure(e)
-            if failure_message_callback:
-                failure_message_callback(failure_message)
-            logger.exception(f"檔案下載失敗 ({url} -> {local_path}): {failure_message}")
-            if temp_path_obj.exists():
-                with contextlib.suppress(OSError):
-                    temp_path_obj.unlink()
+            cls._report_download_failure(
+                url=url,
+                local_path=local_path,
+                message=failure_message,
+                failure_message_callback=failure_message_callback,
+                exc=e,
+            )
+            cls._cleanup_temp_file(temp_path_obj)
             return False
 
     @staticmethod
@@ -493,24 +568,20 @@ class HTTPUtils:
 
     @classmethod
     async def get_json_async(cls, *args, **kwargs):
-        """使用共用 requests 實作在線程中取得 JSON 回應。"""
-
+        """非同步版 get_json。"""
         return await run_blocking_io(cls.get_json, *args, **kwargs)
 
     @classmethod
     async def post_json_async(cls, *args, **kwargs):
-        """使用共用 requests 實作在線程中送出 JSON POST 請求。"""
-
+        """非同步版 post_json。"""
         return await run_blocking_io(cls.post_json, *args, **kwargs)
 
     @classmethod
     async def get_content_async(cls, *args, **kwargs):
-        """使用共用 requests 實作在線程中取得完整回應內容。"""
-
+        """非同步版 get_content。"""
         return await run_blocking_io(cls.get_content, *args, **kwargs)
 
     @classmethod
     async def download_file_async(cls, *args, **kwargs):
-        """使用共用 requests 實作在線程中下載檔案。"""
-
+        """非同步版 download_file。"""
         return await run_blocking_io(cls.download_file, *args, **kwargs)

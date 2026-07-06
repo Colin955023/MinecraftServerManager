@@ -27,14 +27,13 @@ def best_effort_fsync(file_obj) -> None:
     Args:
         file_obj: 已開啟且可取得 fileno 的檔案物件。
     """
-
     try:
         os.fsync(file_obj.fileno())
-    except (AttributeError, OSError, ValueError) as _:
+    except AttributeError, OSError, ValueError:
         return
 
 
-def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode: str) -> bool:
+def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode: str, **open_kwargs) -> bool:
     """以暫存檔與原子替換寫入 payload。"""
     p = Path(path)
     p.parents[0].mkdir(parents=True, exist_ok=True)
@@ -42,7 +41,7 @@ def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode:
         tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.{attempt}.tmp"
         tmp_path = p.with_name(tmp_name)
         try:
-            with open(tmp_path, mode) as file_obj:
+            with open(tmp_path, mode, **open_kwargs) as file_obj:
                 writer(file_obj)
                 file_obj.flush()
                 best_effort_fsync(file_obj)
@@ -78,11 +77,9 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
 
     if skip_if_unchanged and p.exists():
         try:
-            existing = p.read_text(encoding="utf-8")
-            if existing == payload:
+            if p.read_text(encoding="utf-8") == payload:
                 return True
-        except (OSError, UnicodeDecodeError) as _:
-            # 若無法讀取現有檔案，視為需覆寫；記錄 debug 以便除錯
+        except OSError, UnicodeDecodeError:
             logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p, exc_info=True)
 
     return atomic_write_text(p, payload, encoding="utf-8", newline="\n")
@@ -108,41 +105,14 @@ def atomic_write_text(
     Returns:
         寫入成功時回傳 True，失敗時回傳 False。
     """
-
-    return _atomic_write_text_custom(path, content, encoding=encoding, errors=errors, newline=newline)
-
-
-def _atomic_write_text_custom(
-    path: Path | str,
-    content: str,
-    *,
-    encoding: str,
-    errors: str | None,
-    newline: str | None,
-) -> bool:
-    """處理自訂文字編碼參數的原子寫入。"""
-    p = Path(path)
-    p.parents[0].mkdir(parents=True, exist_ok=True)
-    for attempt in range(_RETRY_COUNT):
-        tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.{attempt}.tmp"
-        tmp_path = p.with_name(tmp_name)
-        try:
-            with open(tmp_path, "w", encoding=encoding, errors=errors, newline=newline) as file_obj:
-                file_obj.write(content)
-                file_obj.flush()
-                best_effort_fsync(file_obj)
-            os.replace(tmp_path, p)
-            return True
-        except OSError:
-            try:
-                if tmp_path.exists():
-                    tmp_path.unlink()
-            except OSError:
-                logger.debug("嘗試移除臨時檔案 %s 時失敗；忽略錯誤。", tmp_path, exc_info=True)
-            if attempt + 1 >= _RETRY_COUNT:
-                return False
-            time.sleep(_RETRY_DELAY * (attempt + 1))
-    return False
+    return _atomic_write_payload(
+        path,
+        lambda file_obj: file_obj.write(content),
+        "w",
+        encoding=encoding,
+        errors=errors,
+        newline=newline,
+    )
 
 
 def atomic_write_bytes(path: Path | str, content: bytes) -> bool:
@@ -155,8 +125,4 @@ def atomic_write_bytes(path: Path | str, content: bytes) -> bool:
     Returns:
         寫入成功時回傳 True，失敗時回傳 False。
     """
-
-    def _write(file_obj: Any) -> None:
-        file_obj.write(content)
-
-    return _atomic_write_payload(path, _write, "wb")
+    return _atomic_write_payload(path, lambda f: f.write(content), "wb")
