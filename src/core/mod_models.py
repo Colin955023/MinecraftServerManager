@@ -125,6 +125,10 @@ class ModrinthIdentityCache:
     _store: OrderedDict[str, tuple[str, str]] = field(default_factory=OrderedDict, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
+    def __post_init__(self) -> None:
+        if self.max_size < 0:
+            raise ValueError("ModrinthIdentityCache.max_size must be >= 0")
+
     def get(self, key: str) -> tuple[str, str] | None:
         """
         讀取快取值；命中時會將該項目標記為最近使用。
@@ -159,4 +163,5 @@ class ModrinthIdentityCache:
             self._store.clear()
 
     def __len__(self) -> int:
-        return len(self._store)
+        with self._lock:
+            return len(self._store)

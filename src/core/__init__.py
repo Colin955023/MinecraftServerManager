@@ -10,9 +10,6 @@ from .. import lazy_exports
 _EXPORTS: dict[str, tuple[str, str]] = {
     "AppException": (".exceptions", "AppException"),
     "ConfigurationError": (".exceptions", "ConfigurationError"),
-    "NetworkOperationError": (".exceptions", "NetworkOperationError"),
-    "MetadataResolutionError": (".exceptions", "MetadataResolutionError"),
-    "ServerOperationError": (".exceptions", "ServerOperationError"),
     "LoaderManager": (".loader_manager", "LoaderManager"),
     "ModManager": (".mod_manager", "ModManager"),
     "ModPlatform": (".mod_manager", "ModPlatform"),
