@@ -263,6 +263,14 @@ _register_exports(
     "Spacing",
 )
 _register_exports(
+    ".ui_support.fluent",
+    "FluentLineEdit",
+    "FluentProgressBar",
+    "FluentPushButton",
+    "FluentSearchLineEdit",
+    "SearchFilter",
+)
+_register_exports(
     ".ui_support.ui_utils",
     "UIUtils",
     "compute_adaptive_pool_limit",
@@ -280,6 +288,9 @@ _register_exports(
 _register_exports(
     ".ui_support.window_manager",
     "WindowManager",
+)
+_register_exports(
+    ".runtime_utils.app_info", "APP_VERSION", "APP_NAME", "APP_DESCRIPTION", "GITHUB_OWNER", "GITHUB_REPO", "APP_ID"
 )
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)
