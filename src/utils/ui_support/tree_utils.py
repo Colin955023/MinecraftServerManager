@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ..utils import Colors, FontSize, get_logger
-from ..utils.ui_support import qt_widgets as qt
-from .font_manager import FontManager
+from .. import Colors, FontManager, FontSize, get_logger
+from ..ui_support import qt_widgets as qt
 
 logger = get_logger().bind(component="TreeUtils")
 
@@ -96,7 +95,7 @@ class TreeUtils:
             for column_id in candidate_columns:
                 try:
                     width = int(treeview.column(column_id, "width"))
-                except (Exception, TypeError, ValueError) as _:
+                except Exception, TypeError, ValueError:
                     continue
                 columns.append(column_id)
                 widths.append(width)
@@ -108,7 +107,7 @@ class TreeUtils:
                 xview = treeview.xview()
                 if xview and len(xview) >= 1:
                     xview_start = float(xview[0])
-            except (Exception, TypeError, ValueError) as _:
+            except Exception, TypeError, ValueError:
                 xview_start = 0.0
             logical_x = int(x + xview_start * total_width)
             threshold = 5
@@ -298,7 +297,6 @@ class TreeUtils:
                 )
             except (Exception, AttributeError, RuntimeError) as e:
                 logger.debug(f"設定 Listbox 交錯列暫時性失敗 index={index}: {e}", "TreeUtils")
-                break
 
     @staticmethod
     def make_tree_insert_batch(

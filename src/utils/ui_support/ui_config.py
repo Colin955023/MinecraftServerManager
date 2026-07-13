@@ -6,8 +6,8 @@
 
 from typing import Any, ClassVar
 
-from ..utils.ui_support.fluent import apply_fluent_theme
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ensure_application
+from ..ui_support.fluent import apply_fluent_theme
+from ..ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ensure_application
 
 
 def resolve_color(color: Any, *, dark: bool | None = None) -> str:
@@ -220,9 +220,19 @@ class NativeQtStyle:
     preferences_dialog = (
         _dialog_surface_stylesheet()
         + "QFrame, QScrollArea, QScrollArea QWidget { background: transparent; color: #0f172a; border: 0; }"
+        + "QSlider::groove:horizontal { background: #cbd5e1; height: 4px; border-radius: 2px; }"
+        + "QSlider::handle:horizontal { background: #2563eb; width: 12px; margin: -5px 0; border-radius: 6px; }"
         + dialog_controls
     )
-    server_properties_dialog = _dialog_surface_stylesheet() + dialog_controls
+    server_properties_dialog = (
+        _dialog_surface_stylesheet()
+        + "QFrame, QScrollArea, QScrollArea QWidget { background: #f8fafc; color: #0f172a; border: 0; }"
+        + "QLabel#ServerPropertiesTitle { color: #374151; }"
+        + "QTabWidget::pane { background: #ffffff; border: 1px solid #cbd5e1; }"
+        + "QTabBar::tab { background: #2563eb; color: white; border: 1px solid #d1d5db; padding: 5px 12px; }"
+        + "QTabBar::tab:selected { background: #1d4ed8; }"
+        + dialog_controls
+    )
 
     @staticmethod
     def nav_item_frame(key: str) -> str:
@@ -355,14 +365,17 @@ def _refresh_native_styles(dark: bool) -> None:
     NativeQtStyle.content_container = f"#ContentContainer {{ background: {bg}; border: 0; }}"
     NativeQtStyle.content_stack = "#ContentStack { background: transparent; border: 0; }"
     NativeQtStyle.create_page = (
-        f"#CreateServerFrame, #CreateServerFrame QWidget, #CreateServerScrollArea, #CreateServerScrollArea QWidget, "
+        f"#CreateServerFrame {{ background: {bg}; color: {text}; }}"
+        f"#CreateServerFrame QWidget {{ background: {bg}; color: {text}; }}"
+        f"#CreateServerScrollArea {{ background: {bg}; }}"
+        f"#CreateServerScrollArea QWidget {{ background: {bg}; color: {text}; }}"
         f"#CreateServerContent {{ background: {bg}; color: {text}; }}"
         f"#CreateServerScrollArea::viewport {{ background: {bg}; }}"
         f"#CreateServerFrame QLabel {{ color: {text}; background: transparent; }}"
-        "#CreateServerFrame QLineEdit, #CreateServerFrame QComboBox {"
+        f"#CreateServerFrame QLineEdit, #CreateServerFrame QComboBox {{"
         f"background: {input_bg}; border: 2px solid {input_border}; border-radius: 3px;"
         f"padding: 4px 7px; color: {text};"
-        "}"
+        f"}}"
         f"#CreateServerFrame QLineEdit:focus, #CreateServerFrame QComboBox:focus {{ border-color: {primary}; }}"
         f"#CreateServerFrame QComboBox::drop-down {{ width: 21px; border-left: 1px solid {input_border}; background: {panel_2}; }}"
         f"#CreateServerFrame QComboBox QAbstractItemView {{ background: {input_bg}; color: {text}; selection-background-color: {selection}; }}"
@@ -402,9 +415,9 @@ def _refresh_native_styles(dark: bool) -> None:
         f"#ServerMonitorWindow {{ background: {bg}; color: {text}; }}"
         f"#ServerMonitorWindow QLabel {{ color: {text}; }}"
         f"#ServerMonitorWindow QFrame {{ background: {bg}; border: 0; }}"
-        "#ServerMonitorWindow QListWidget {"
+        f"#ServerMonitorWindow QListWidget {{"
         f"background: {input_bg}; color: {text}; border: 1px solid {border}; border-radius: 3px;"
-        "}"
+        f"}}"
         + _dialog_control_stylesheet(
             text=text,
             input_bg=input_bg,
@@ -429,17 +442,18 @@ def _refresh_native_styles(dark: bool) -> None:
     NativeQtStyle.preferences_dialog = (
         _dialog_surface_stylesheet(panel_2=panel_2, text=text)
         + f"QFrame, QScrollArea, QScrollArea QWidget {{ background: transparent; color: {text}; border: 0; }}"
-        f"QSlider::groove:horizontal {{ background: {border}; height: 4px; border-radius: 2px; }}"
-        f"QSlider::handle:horizontal {{ background: {primary}; width: 12px; margin: -5px 0; border-radius: 6px; }}"
+        + f"QSlider::groove:horizontal {{ background: {border}; height: 4px; border-radius: 2px; }}"
+        + f"QSlider::handle:horizontal {{ background: {primary}; width: 12px; margin: -5px 0; border-radius: 6px; }}"
         + NativeQtStyle.dialog_controls
     )
     NativeQtStyle.server_properties_dialog = (
         _dialog_surface_stylesheet(panel_2=panel_2, text=text)
         + f"QFrame, QScrollArea, QScrollArea QWidget {{ background: {panel_2}; color: {text}; border: 0; }}"
-        f"QLabel#ServerPropertiesTitle {{ color: {heading}; }}"
-        f"QTabWidget::pane {{ background: {panel}; border: 1px solid {border}; }}"
-        f"QTabBar::tab {{ background: {primary}; color: white; border: 1px solid {border_soft}; padding: 5px 12px; }}"
-        f"QTabBar::tab:selected {{ background: {primary_hover}; }}" + NativeQtStyle.dialog_controls
+        + f"QLabel#ServerPropertiesTitle {{ color: {heading}; }}"
+        + f"QTabWidget::pane {{ background: {panel}; border: 1px solid {border}; }}"
+        + f"QTabBar::tab {{ background: {primary}; color: white; border: 1px solid {border_soft}; padding: 5px 12px; }}"
+        + f"QTabBar::tab:selected {{ background: {primary_hover}; }}"
+        + NativeQtStyle.dialog_controls
     )
 
 
@@ -525,9 +539,7 @@ def initialize_ui_theme(mode: str = "light") -> None:
         "padding: 0px; margin: 0px; }}"
         f"QTreeView::item {{ padding-left: 0px; margin-left: 0px; color: {colors['text']}; }}"
         f"QTreeView::item:selected {{ background: {colors['highlight']}; color: #ffffff; }}"
-        f"QHeaderView::section {{ background: {colors['tree_header']}; color: {colors['text']}; "
-        f"border: 1px solid {colors['tree_border']}; padding: 3px 4px 3px 0px; }}"
-        f"QPushButton {{ background: {colors['button']}; color: #ffffff; border: 0; border-radius: 4px; padding: 6px 10px; }}"
-        f"QPushButton:hover {{ background: {'#1e40af' if dark else '#1d4ed8'}; }}"
-        f"QPushButton:disabled {{ background: {colors['disabled_button']}; color: #f8fafc; }}"
     )
+
+
+__all__ = ["NativeQtStyle", "initialize_ui_theme", "resolve_color"]

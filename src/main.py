@@ -17,9 +17,18 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, str(project_root))
 
 from src.core import LoaderManager, MinecraftVersionManager
-from src.ui import MinecraftServerManager, ui_config
-from src.utils import PathUtils, UIUtils, get_logger, get_settings_manager, record_and_mark
-from src.utils.ui_support.qt_runtime import QtCore, QtWidgets, ensure_application
+from src.ui import MinecraftServerManager
+from src.utils import (
+    PathUtils,
+    QtCore,
+    QtWidgets,
+    UIUtils,
+    ensure_application,
+    get_logger,
+    get_settings_manager,
+    initialize_ui_theme,
+    record_and_mark,
+)
 
 logger = get_logger().bind(component="Main")
 
@@ -107,7 +116,7 @@ def _initialize_managers():
 def _setup_ui_environment():
     """設定 UI 環境和主題"""
     settings = get_settings_manager()
-    ui_config.initialize_ui_theme(settings.get_theme_mode())
+    initialize_ui_theme(settings.get_theme_mode())
 
 
 def _launch_main_window():

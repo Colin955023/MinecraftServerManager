@@ -14,14 +14,25 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from ..app_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    APP_VERSION,
+    GITHUB_OWNER,
+    GITHUB_REPO,
     Colors,
+    DialogUtils,
+    FluentPushButton,
+    FontManager,
     FontSize,
+    IconUtils,
     JavaUtils,
+    NativeQtStyle,
     PathUtils,
+    QtCore,
+    QtGui,
+    QtUpdateCheckerInteraction,
+    QtWidgets,
     RuntimePaths,
     ServerCommands,
     ServerDetectionUtils,
@@ -30,34 +41,25 @@ from ..utils import (
     Spacing,
     SubprocessUtils,
     SystemUtils,
+    TaskUtils,
     UIUtils,
     UpdateChecker,
     WindowManager,
     get_logger,
     get_settings_manager,
-)
-from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.fluent import FluentPushButton
-from ..utils.ui_support.qt_runtime import (
-    QtCore,
-    QtGui,
-    QtWidgets,
+    initialize_ui_theme,
     install_open_url_click,
     is_qobject_alive,
+    resolve_color,
     show_window,
 )
+from ..utils.ui_support import qt_widgets as qt
 from . import (
     CreateServerFrame,
-    DialogUtils,
-    FontManager,
-    IconUtils,
     ManageServerFrame,
     ModManagementFrame,
-    QtUpdateCheckerInteraction,
-    TaskUtils,
     WindowPreferencesDialog,
 )
-from .ui_config import NativeQtStyle, initialize_ui_theme, resolve_color
 
 logger = get_logger().bind(component="MainWindow")
 

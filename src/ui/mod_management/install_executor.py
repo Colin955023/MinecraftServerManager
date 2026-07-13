@@ -10,19 +10,19 @@ from types import SimpleNamespace
 from typing import Any
 
 from ...core import ModManager
+from ...models import LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
 from ...utils import (
     LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE,
     LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE,
     LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE,
     ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE,
     CancellationToken,
+    TaskUtils,
     UIUtils,
     extract_primary_file_hash,
 )
 from ...utils.ui_support import qt_widgets as qt
-from ..task_utils import TaskUtils
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
-from .models import LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
 from .online_mod_queue import ModManagementRuntimeBase
 
 

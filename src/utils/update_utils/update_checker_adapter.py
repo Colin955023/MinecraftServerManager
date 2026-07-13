@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from ..utils import UIUtils
-from ..utils.update_utils.update_checker import UpdateCheckerInteraction
-from .task_utils import TaskUtils
+from .. import TaskUtils, UIUtils, UpdateCheckerInteraction
 
 _ResultT = TypeVar("_ResultT")
 

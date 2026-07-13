@@ -7,7 +7,7 @@ from typing import ClassVar
 
 from PySide6 import QtGui
 
-from ..utils import get_logger
+from .. import get_logger
 
 logger = get_logger().bind(component="FontManager")
 

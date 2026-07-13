@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..utils import Sizes, Spacing, WindowManager, get_logger
-from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.qt_runtime import (
+from .. import (
+    NativeQtStyle,
     QtCore,
     QtWidgets,
+    Sizes,
+    Spacing,
+    WindowManager,
     ensure_application,
+    get_logger,
     invoke_later,
     is_qobject_alive,
     run_on_ui_thread,
@@ -18,8 +21,7 @@ from ..utils.ui_support.qt_runtime import (
     set_topmost,
     show_window,
 )
-from . import IconUtils
-from .ui_config import NativeQtStyle
+from ..ui_support import qt_widgets as qt
 
 logger = get_logger().bind(component="DialogUtils")
 
@@ -230,6 +232,8 @@ class DialogUtils:
             set_modal(window, parent if isinstance(parent, QtWidgets.QWidget) else None)
         set_topmost(window, options.topmost)
         if options.bind_icon:
+            from ..ui_support.icon_utils import IconUtils
+
             IconUtils.set_window_icon(window, options.delay_ms)
         if options.autosize_to_content:
             invoke_later(
@@ -419,6 +423,8 @@ class DialogUtils:
                 box.setStyleSheet(NativeQtStyle.message_box)
                 if topmost:
                     box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                from ..ui_support.icon_utils import IconUtils
+
                 IconUtils.set_window_icon(box, 25)
                 box.exec()
             except Exception as e:
@@ -508,6 +514,8 @@ class DialogUtils:
                 box.setStyleSheet(NativeQtStyle.message_box)
                 if topmost:
                     box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                from ..ui_support.icon_utils import IconUtils
+
                 IconUtils.set_window_icon(box, 25)
                 result = box.exec()
                 if result == QtWidgets.QMessageBox.StandardButton.Yes:

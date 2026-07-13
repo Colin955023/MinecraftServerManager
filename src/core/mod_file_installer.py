@@ -10,8 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
 from ..utils import HTTPUtils, PathUtils, build_non_official_source_warning, record_and_mark
-from .mod_models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
 
 
 class ModFileInstaller:

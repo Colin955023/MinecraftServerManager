@@ -19,7 +19,7 @@ from ..utils import SubprocessUtils, SystemUtils, get_logger
 
 if TYPE_CHECKING:
     # 僅在型別檢查時引入以避免執行時依賴循環
-    from ..models import ServerConfig
+    from . import ServerConfig
 else:
     ServerConfig = Any
 

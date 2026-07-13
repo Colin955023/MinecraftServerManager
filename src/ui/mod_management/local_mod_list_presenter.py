@@ -7,14 +7,21 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from ...core import ModStatus
-from ...utils import Colors, FontSize, Sizes, Spacing, UIUtils, get_shared_manager
+from ...models import ModStatus
+from ...utils import (
+    Colors,
+    CustomDropdown,
+    FontManager,
+    FontSize,
+    Sizes,
+    Spacing,
+    TaskUtils,
+    TreeUtils,
+    UIUtils,
+    get_shared_manager,
+)
 from ...utils.ui_support import qt_widgets as qt
-from ..custom_dropdown import CustomDropdown
-from ..font_manager import FontManager
 from ..mod_search_service.modrinth_service import enhance_local_mod
-from ..task_utils import TaskUtils
-from ..tree_utils import TreeUtils
 from .constants import MOD_TOOL_BUTTON_STYLE, logger
 from .presenter_delegate_mixin import PresenterDelegateMixin
 

@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 from ..utils import (
     ModIndexManager,
     PathUtils,
@@ -20,7 +21,6 @@ from ..utils import (
     get_shared_manager,
     record_and_mark,
 )
-from .mod_models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 
 TomlDecodeError = tomllib.TOMLDecodeError
 logger = get_logger().bind(component="LocalModScanner")

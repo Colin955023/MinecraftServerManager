@@ -6,7 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...models import ModrinthVersionLookupResult, OnlineModVersion, ResolvedDependencyReference
+from ...models import (
+    LocalModUpdateCandidate,
+    LocalModUpdatePlan,
+    ModrinthVersionLookupResult,
+    OnlineModCompatibilityReport,
+    OnlineModInfo,
+    OnlineModVersion,
+    ResolvedDependencyReference,
+)
 from ...utils import (
     LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED,
     LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED,
@@ -64,12 +72,6 @@ from .compatibility_analyzer import (
     resolve_dependency_reference_with_provider_context,
 )
 from .constants import logger
-from .models import (
-    LocalModUpdateCandidate,
-    LocalModUpdatePlan,
-    OnlineModCompatibilityReport,
-    OnlineModInfo,
-)
 from .modrinth_service import (
     build_provider_record_from_online_mod,
     fetch_modrinth_project_name,

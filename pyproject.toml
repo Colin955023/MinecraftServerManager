@@ -29,6 +29,7 @@ lint = [
   "eradicate>=3.0.1",
   "pylint>=4.0.5",
   "isort>=5.12.0",
+  "import-linter>=2.13",
 ]
 
 typecheck = [
@@ -49,6 +50,19 @@ tools = [
 
 [project.scripts]
 minecraft-server-manager = "src.main:main"
+
+[tool.importlinter]
+root_package = "src"
+
+[[tool.importlinter.contracts]]
+name = "分層依賴方向（右方為底層，禁止反向匯入）"
+type = "layers"
+layers = [
+    "src.ui",
+    "src.core",
+    "src.models",
+    "src.utils",
+]
 
 [tool.mypy]
 ignore_missing_imports = false

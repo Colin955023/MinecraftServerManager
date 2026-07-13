@@ -7,15 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...core import ModStatus
+from ...models import ModStatus
 from ...utils import (
     Colors,
+    TreeUtils,
     UIUtils,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
 )
 from ...utils.ui_support import qt_widgets as qt
-from ..tree_utils import TreeUtils
 from .constants import logger
 from .online_mod_queue import ModManagementRuntimeBase
 

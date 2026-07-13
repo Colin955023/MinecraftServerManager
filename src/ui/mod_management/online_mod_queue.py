@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# 直接內嵌原 runtime_typing 內容，避免循環依賴
 import contextlib
 import queue
 import re
@@ -10,26 +9,26 @@ import traceback
 from typing import Any
 
 from ...core import AppException
+from ...models import OnlineBrowseRequest, PendingOnlineInstall
 from ...utils import (
     Colors,
+    DialogUtils,
+    FontManager,
     FontSize,
     Sizes,
     Spacing,
+    TaskUtils,
+    TreeUtils,
     UIUtils,
 )
 from ...utils.ui_support import qt_widgets as qt
 from .. import (
-    DialogUtils,
-    FontManager,
-    TaskUtils,
-    TreeUtils,
     analyze_mod_version_compatibility,
     get_mod_versions,
     resolve_modrinth_project_names,
     search_mods_online,
 )
 from .constants import SUPPORTED_ONLINE_MOD_LOADERS, logger
-from .models import OnlineBrowseRequest, PendingOnlineInstall
 
 
 class ModManagementRuntimeBase:

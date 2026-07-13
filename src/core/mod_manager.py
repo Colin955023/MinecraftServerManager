@@ -6,6 +6,14 @@ from collections.abc import Callable
 from html import escape
 from pathlib import Path
 
+from ..models import (
+    LocalModInfo,
+    LocalModMutationResult,
+    ModFileOperationResult,
+    ModPlatform,
+    ModrinthIdentityCache,
+    ModStatus,
+)
 from ..utils import (
     LocalProviderEnsureResult,
     ModIndexManager,
@@ -17,14 +25,6 @@ from ..utils import (
 )
 from .local_mod_scanner import LocalModScanner
 from .mod_file_installer import ModFileInstaller
-from .mod_models import (
-    LocalModInfo,
-    LocalModMutationResult,
-    ModFileOperationResult,
-    ModPlatform,
-    ModrinthIdentityCache,
-    ModStatus,
-)
 from .mod_provider_resolver import (
     ModProviderResolver,
     resolve_platform_info_from_cache,

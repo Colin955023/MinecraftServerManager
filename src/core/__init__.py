@@ -13,9 +13,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "LoaderManager": (".loader_manager", "LoaderManager"),
     "ModManager": (".mod_manager", "ModManager"),
     "ModPlatform": (".mod_manager", "ModPlatform"),
-    "ModStatus": (".mod_manager", "ModStatus"),
-    "ServerInstance": (".server_instance", "ServerInstance"),
-    "ServerConfig": (".server_manager", "ServerConfig"),
     "ServerManager": (".server_manager", "ServerManager"),
     "MinecraftVersionManager": (".version_manager", "MinecraftVersionManager"),
 }

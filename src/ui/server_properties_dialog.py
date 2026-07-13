@@ -5,10 +5,15 @@
 import traceback
 from typing import Any, ClassVar
 
-from ..core import ServerConfig, ServerManager
+from ..core import ServerManager
+from ..models import ServerConfig
 from ..utils import (
     Colors,
+    CustomDropdown,
+    DialogUtils,
+    FontManager,
     FontSize,
+    NativeQtStyle,
     ServerPropertiesHelper,
     ServerPropertiesValidator,
     Sizes,
@@ -18,8 +23,6 @@ from ..utils import (
     get_logger,
 )
 from ..utils.ui_support import qt_widgets as qt
-from . import CustomDropdown, DialogUtils, FontManager
-from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ServerPropertiesDialog")
 

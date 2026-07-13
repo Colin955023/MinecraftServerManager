@@ -35,6 +35,13 @@ uv run pylint --disable=all --enable=cyclic-import src
 if errorlevel 1 exit /b 1
 echo.
 
+echo === Import Boundary Check ===
+uv run lint-imports
+if errorlevel 1 exit /b 1
+uv run scripts/check_import_boundaries.py
+if errorlevel 1 exit /b 1
+echo.
+
 choice /c YN /m "Run secret scan? (Y/N)" /t 5 /d N
 if errorlevel 2 (
     echo Skipping secret scan.

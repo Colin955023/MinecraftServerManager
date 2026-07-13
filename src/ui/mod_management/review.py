@@ -10,6 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ...models import (
+    LocalModUpdatePlan,
+    LocalUpdateReviewEntry,
+    PendingInstallReviewEntry,
+    ReviewTaskNode,
+)
 from ...utils import (
     LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
     LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE,
@@ -33,10 +39,14 @@ from ...utils import (
     RECOMMENDATION_SOURCE_SHORT_LABELS,
     RECOMMENDATION_SOURCE_STALE_METADATA,
     Colors,
+    DialogUtils,
+    FontManager,
     FontSize,
     ProviderMetadataRecord,
     Sizes,
     Spacing,
+    TaskUtils,
+    TreeUtils,
     UIUtils,
     apply_provider_metadata,
     build_non_official_source_warning_message,
@@ -51,21 +61,11 @@ from ...utils import (
 )
 from ...utils.ui_support import qt_widgets as qt
 from .. import (
-    DialogUtils,
-    FontManager,
-    LocalModUpdatePlan,
     ModManagementRuntimeBase,
-    TaskUtils,
-    TreeUtils,
     build_local_mod_update_plan,
 )
 from .constants import MODRINTH_PROJECT_PAGE_BASE_URL, logger
 from .install_review_dialog_builder import InstallReviewDialogBuilder
-from .models import (
-    LocalUpdateReviewEntry,
-    PendingInstallReviewEntry,
-    ReviewTaskNode,
-)
 
 
 class ModManagementReviewMixin(ModManagementRuntimeBase):

@@ -21,10 +21,7 @@ from requests import exceptions as requests_exceptions
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ...app_info import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO
-from .. import get_logger
-from ..runtime_utils.background_task import get_shared_manager
-from ..runtime_utils.worker_pool import run_blocking_io
+from .. import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO, get_logger, get_shared_manager, run_blocking_io
 
 logger = get_logger().bind(component="HTTPUtils")
 

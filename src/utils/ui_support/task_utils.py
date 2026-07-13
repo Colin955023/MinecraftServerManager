@@ -7,8 +7,8 @@ import queue
 from collections.abc import Callable
 from typing import Any
 
-from ..utils import get_logger, run_in_background
-from ..utils.ui_support.qt_runtime import QtCore, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
+from .. import get_logger, run_in_background
+from ..ui_support.qt_runtime import QtCore, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="TaskUtils")
 

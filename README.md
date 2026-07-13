@@ -82,9 +82,9 @@ uv run report\comprehensive_report.py
 ```
 src/
   core/      核心邏輯（版本管理、伺服器控制、模組服務）
-  ui/        主視窗、功能頁、對話框
-  utils/     共用基礎設施（設定、HTTP、日誌、視窗管理）
   models/    資料模型
+  ui/        主視窗、功能頁、對話框、模組管理、模組搜尋服務
+  utils/     共用基礎設施（設定、HTTP、日誌、視窗管理、Java 支援、更新檢查）
 docs/        文件
 tests/       自動化測試
 scripts/     建置與品質腳本

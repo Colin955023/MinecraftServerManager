@@ -69,5 +69,8 @@ report/*
 *.xml
 .vscode/tasks.json
 
-# uv cache
+# other
 *.egg-info
+.github/copilot-instructions.md
+PRIORITIZED_IMPROVEMENT_PLAN.md
+AGENTS.md

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ...models import ModrinthVersionLookupResult, OnlineModVersion
+from ...models import ModrinthVersionLookupResult, OnlineModInfo, OnlineModVersion
 from ...utils import (
     MODRINTH_PREFERRED_HASH_ALGORITHM,
     PROVIDER_LIFECYCLE_STALE,
@@ -58,7 +58,6 @@ from .constants import (
     SUPPORTED_SORT_OPTIONS,
     logger,
 )
-from .models import OnlineModInfo
 
 
 @dataclass(slots=True)

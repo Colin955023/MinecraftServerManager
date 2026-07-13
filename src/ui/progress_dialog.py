@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils import FontSize, Sizes, Spacing, get_logger
+from ..utils import (
+    DialogUtils,
+    FluentPushButton,
+    FontManager,
+    FontSize,
+    NativeQtStyle,
+    QtCore,
+    QtWidgets,
+    Sizes,
+    Spacing,
+    get_logger,
+    is_qobject_alive,
+)
 from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.fluent import FluentPushButton
-from ..utils.ui_support.qt_runtime import QtCore, QtWidgets, is_qobject_alive
-from . import DialogUtils, FontManager
-from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ProgressDialog")
 

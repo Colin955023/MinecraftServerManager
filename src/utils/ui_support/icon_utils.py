@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import contextlib
 
-from ..utils import PathUtils, get_logger
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, invoke_later, is_qobject_alive
+from .. import PathUtils, get_logger
+from ..ui_support.qt_runtime import QtCore, QtGui, QtWidgets, invoke_later, is_qobject_alive
 
 logger = get_logger().bind(component="IconUtils")
 

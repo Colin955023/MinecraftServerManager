@@ -10,10 +10,23 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from ..utils import Colors, FontSize, MemoryUtils, ServerOperations, Sizes, Spacing, UIUtils, WindowManager, get_logger
+from ..utils import (
+    Colors,
+    DialogUtils,
+    FontManager,
+    FontSize,
+    MemoryUtils,
+    NativeQtStyle,
+    ServerOperations,
+    Sizes,
+    Spacing,
+    TaskUtils,
+    TreeUtils,
+    UIUtils,
+    WindowManager,
+    get_logger,
+)
 from ..utils.ui_support import qt_widgets as qt
-from . import DialogUtils, FontManager, TaskUtils, TreeUtils
-from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ServerMonitorWindow")
 

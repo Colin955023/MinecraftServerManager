@@ -9,10 +9,21 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ...ui import DialogUtils, FontManager
-from .. import Colors, PathUtils, SubprocessUtils, get_logger
+from .. import (
+    Colors,
+    DialogUtils,
+    FontManager,
+    PathUtils,
+    QtCore,
+    QtWidgets,
+    SubprocessUtils,
+    cancel_timer,
+    get_logger,
+    invoke_later,
+    is_qobject_alive,
+    run_on_ui_thread,
+)
 from . import qt_widgets as qt
-from .qt_runtime import QtCore, QtWidgets, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="UIUtils")
 

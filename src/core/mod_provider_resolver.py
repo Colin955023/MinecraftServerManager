@@ -9,8 +9,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..app_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
+from ..models import MODRINTH_SEARCH_URL, ModPlatform, ModrinthIdentityCache
 from ..utils import (
+    APP_VERSION,
+    GITHUB_OWNER,
+    GITHUB_REPO,
     HTTPUtils,
     LocalProviderEnsureResult,
     ProviderMetadataRecord,
@@ -21,7 +24,6 @@ from ..utils import (
     record_and_mark,
     resolve_modrinth_provider_record,
 )
-from .mod_models import MODRINTH_SEARCH_URL, ModPlatform, ModrinthIdentityCache
 
 logger = get_logger().bind(component="ModProviderResolver")
 

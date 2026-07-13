@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ...core import LoaderManager
-from ...models import OnlineModVersion, ResolvedDependencyReference
+from ...models import OnlineModCompatibilityReport, OnlineModVersion, ResolvedDependencyReference
 from ...utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,
@@ -17,7 +17,6 @@ from ...utils import (
     resolve_dependency_reference,
 )
 from .constants import logger
-from .models import OnlineModCompatibilityReport
 from .modrinth_service import fetch_modrinth_project_name, get_mod_version_details
 
 

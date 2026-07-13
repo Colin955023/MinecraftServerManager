@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from PySide6 import QtCore
 
-from ..models import ServerConfig
+from ..models import ServerConfig, ServerInstance
 from ..utils import (
     PathUtils,
     ServerCommands,
@@ -24,7 +24,6 @@ from ..utils import (
     get_logger,
     record_and_mark,
 )
-from . import ServerInstance
 
 logger = get_logger().bind(component="ServerManager")
 

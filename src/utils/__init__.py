@@ -16,50 +16,11 @@ def _register_exports(module_path: str, *names: str) -> None:
 
 
 _register_exports(
-    ".runtime_utils.app_restart",
-    "AppRestart",
-)
-_register_exports(
     ".core_utils.atomic_writer",
     "atomic_write_bytes",
     "atomic_write_json",
     "atomic_write_text",
     "best_effort_fsync",
-)
-_register_exports(
-    ".runtime_utils.background_task",
-    "BackgroundTaskManager",
-    "run_in_background",
-    "run_async_in_background",
-    "submit_background_task",
-    "CancellationToken",
-    "get_shared_manager",
-)
-_register_exports(
-    ".runtime_utils.worker_pool",
-    "DEFAULT_WORKER_COUNT",
-    "get_shared_worker_pool",
-    "resolve_worker_count",
-    "run_blocking_io",
-    "shutdown_shared_worker_pool",
-    "submit_to_worker_pool",
-)
-_register_exports(
-    ".network_utils.request_retry_utils",
-    "chunk_sequence",
-    "execute_resilient_batch_requests",
-    "execute_resilient_single_request",
-    "sleep_if_needed",
-)
-_register_exports(
-    ".mod_utils.dependency_plan_serializer",
-    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
-    "OnlineDependencyInstallItem",
-    "OnlineDependencyInstallPlan",
-    "serialize_online_dependency_install_plan",
-    "validate_online_dependency_install_plan_payload",
-    "migrate_online_dependency_install_plan_payload",
-    "deserialize_online_dependency_install_plan",
 )
 _register_exports(
     ".core_utils.exception_utils",
@@ -70,8 +31,9 @@ _register_exports(
     "compute_file_hash",
 )
 _register_exports(
-    ".network_utils.http_utils",
-    "HTTPUtils",
+    ".core_utils.logger",
+    "get_logger",
+    "shutdown_logging",
 )
 _register_exports(
     ".core_utils.path_utils",
@@ -85,34 +47,16 @@ _register_exports(
     ".java_support.java_utils",
     "JavaUtils",
 )
+
 _register_exports(
-    ".core_utils.logger",
-    "get_logger",
-    "shutdown_logging",
-)
-_register_exports(".mod_utils.modrinth_query_utils", *MODRINTH_QUERY_EXPORT_NAMES)
-_register_exports(
-    ".mod_utils.mod_version_filtering",
-    "MODRINTH_PREFERRED_HASH_ALGORITHM",
-    "extract_primary_file_hash",
-    "is_allowed_version_type",
-    "normalize_hash_algorithm",
-    "select_best_mod_version",
-    "select_primary_file",
-    "version_type_priority",
-)
-_register_exports(
-    ".mod_utils.local_mod_metadata_utils",
-    "collect_installed_mod_identifiers",
-    "collect_installed_mod_versions",
-    "dependency_candidate_filenames",
-    "dependency_maybe_installed_by_filename",
-    "normalize_filename_stem",
-    "normalize_lax_filename",
-)
-_register_exports(
-    ".mod_utils.mod_dependency_reference_utils",
-    "resolve_dependency_reference",
+    ".mod_utils.dependency_plan_serializer",
+    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
+    "OnlineDependencyInstallItem",
+    "OnlineDependencyInstallPlan",
+    "serialize_online_dependency_install_plan",
+    "validate_online_dependency_install_plan_payload",
+    "migrate_online_dependency_install_plan_payload",
+    "deserialize_online_dependency_install_plan",
 )
 _register_exports(
     ".mod_utils.download_source_policy",
@@ -125,19 +69,22 @@ _register_exports(
     "normalize_download_provider",
 )
 _register_exports(
+    ".mod_utils.local_mod_metadata_utils",
+    "collect_installed_mod_identifiers",
+    "collect_installed_mod_versions",
+    "dependency_candidate_filenames",
+    "dependency_maybe_installed_by_filename",
+    "normalize_filename_stem",
+    "normalize_lax_filename",
+)
+_register_exports(
     ".mod_utils.mod_dependency_planner",
     "DependencyPlanHooks",
     "expand_required_dependency_install_plan",
 )
 _register_exports(
-    ".mod_utils.mod_revalidation_batch_utils",
-    "resolve_revalidation_batch_limits",
-    "recompute_adaptive_revalidation_batch_limit",
-)
-_register_exports(
-    ".mod_utils.modrinth_version_lookup",
-    "parse_modrinth_version",
-    "parse_modrinth_version_lookup_response",
+    ".mod_utils.mod_dependency_reference_utils",
+    "resolve_dependency_reference",
 )
 _register_exports(
     ".mod_utils.mod_index_manager",
@@ -166,6 +113,11 @@ _register_exports(
     "register_provider_revalidation_success",
     "resolve_modrinth_provider_record",
     "should_attempt_provider_revalidation",
+)
+_register_exports(
+    ".mod_utils.mod_revalidation_batch_utils",
+    "resolve_revalidation_batch_limits",
+    "recompute_adaptive_revalidation_batch_limit",
 )
 _register_exports(
     ".mod_utils.mod_semantics",
@@ -213,27 +165,56 @@ _register_exports(
     "RECOMMENDATION_SOURCE_STALE_METADATA",
 )
 _register_exports(
-    ".server_utils.server_detection_utils",
-    "ServerDetectionUtils",
+    ".mod_utils.mod_version_filtering",
+    "MODRINTH_PREFERRED_HASH_ALGORITHM",
+    "extract_primary_file_hash",
+    "is_allowed_version_type",
+    "normalize_hash_algorithm",
+    "select_best_mod_version",
+    "select_primary_file",
+    "version_type_priority",
 )
 _register_exports(
-    ".server_utils.server_detection_version_utils",
-    "ServerDetectionVersionUtils",
+    ".mod_utils.modrinth_query_utils",
+    *MODRINTH_QUERY_EXPORT_NAMES,
 )
 _register_exports(
-    ".server_utils.server_properties_utils",
-    "ServerPropertiesHelper",
-    "ServerPropertiesValidator",
+    ".mod_utils.modrinth_version_lookup",
+    "parse_modrinth_version",
+    "parse_modrinth_version_lookup_response",
 )
 _register_exports(
-    ".server_utils.server_memory_utils",
-    "MemoryUtils",
+    ".network_utils.http_utils",
+    "HTTPUtils",
 )
 _register_exports(
-    ".server_utils.server_runtime_utils",
-    "JvmOptionPolicy",
-    "ServerCommands",
-    "ServerOperations",
+    ".network_utils.request_retry_utils",
+    "chunk_sequence",
+    "execute_resilient_batch_requests",
+    "execute_resilient_single_request",
+    "sleep_if_needed",
+)
+_register_exports(
+    ".runtime_utils.app_info",
+    "APP_VERSION",
+    "APP_NAME",
+    "APP_DESCRIPTION",
+    "GITHUB_OWNER",
+    "GITHUB_REPO",
+    "APP_ID",
+)
+_register_exports(
+    ".runtime_utils.app_restart",
+    "AppRestart",
+)
+_register_exports(
+    ".runtime_utils.background_task",
+    "BackgroundTaskManager",
+    "run_in_background",
+    "run_async_in_background",
+    "submit_background_task",
+    "CancellationToken",
+    "get_shared_manager",
 )
 _register_exports(
     ".runtime_utils.runtime_paths",
@@ -256,11 +237,44 @@ _register_exports(
     "SystemUtils",
 )
 _register_exports(
-    ".ui_support.ui_tokens",
-    "Colors",
-    "FontSize",
-    "Sizes",
-    "Spacing",
+    ".runtime_utils.worker_pool",
+    "DEFAULT_WORKER_COUNT",
+    "get_shared_worker_pool",
+    "resolve_worker_count",
+    "run_blocking_io",
+    "shutdown_shared_worker_pool",
+    "submit_to_worker_pool",
+)
+_register_exports(
+    ".server_utils.server_detection_utils",
+    "ServerDetectionUtils",
+)
+_register_exports(
+    ".server_utils.server_detection_version_utils",
+    "ServerDetectionVersionUtils",
+)
+_register_exports(
+    ".server_utils.server_memory_utils",
+    "MemoryUtils",
+)
+_register_exports(
+    ".server_utils.server_properties_utils",
+    "ServerPropertiesHelper",
+    "ServerPropertiesValidator",
+)
+_register_exports(
+    ".server_utils.server_runtime_utils",
+    "JvmOptionPolicy",
+    "ServerCommands",
+    "ServerOperations",
+)
+_register_exports(
+    ".ui_support.custom_dropdown",
+    "CustomDropdown",
+)
+_register_exports(
+    ".ui_support.dialog_utils",
+    "DialogUtils",
 )
 _register_exports(
     ".ui_support.fluent",
@@ -271,11 +285,65 @@ _register_exports(
     "SearchFilter",
 )
 _register_exports(
+    ".ui_support.font_manager",
+    "FontManager",
+)
+_register_exports(
+    ".ui_support.icon_utils",
+    "IconUtils",
+)
+_register_exports(
+    ".ui_support.qt_runtime",
+    "QtCore",
+    "QtGui",
+    "QtWidgets",
+    "ValueState",
+    "cancel_timer",
+    "ensure_application",
+    "install_open_url_click",
+    "invoke_later",
+    "is_qobject_alive",
+    "run_on_ui_thread",
+    "set_modal",
+    "set_topmost",
+    "set_window_title",
+    "show_window",
+)
+_register_exports(
+    ".ui_support.qt_widgets",
+    "qt_widgets",
+)
+_register_exports(
+    ".ui_support.task_utils",
+    "TaskUtils",
+)
+_register_exports(
+    ".ui_support.tree_utils",
+    "TreeUtils",
+)
+_register_exports(
+    ".ui_support.ui_config",
+    "NativeQtStyle",
+    "initialize_ui_theme",
+    "resolve_color",
+)
+_register_exports(
+    ".ui_support.ui_tokens",
+    "Colors",
+    "FontSize",
+    "Sizes",
+    "Spacing",
+)
+_register_exports(
     ".ui_support.ui_utils",
     "UIUtils",
     "compute_adaptive_pool_limit",
     "compute_exponential_moving_average",
     "get_button_style",
+)
+_register_exports(
+    ".ui_support.window_manager",
+    "WindowManager",
 )
 _register_exports(
     ".update_utils.update_checker",
@@ -286,11 +354,333 @@ _register_exports(
     "UpdateParsing",
 )
 _register_exports(
+    ".core_utils.atomic_writer",
+    "atomic_write_bytes",
+    "atomic_write_json",
+    "atomic_write_text",
+    "best_effort_fsync",
+)
+_register_exports(
+    ".core_utils.exception_utils",
+    "record_and_mark",
+)
+_register_exports(
+    ".core_utils.hash_utils",
+    "compute_file_hash",
+)
+_register_exports(
+    ".core_utils.logger",
+    "get_logger",
+    "shutdown_logging",
+)
+_register_exports(
+    ".core_utils.path_utils",
+    "PathUtils",
+)
+_register_exports(
+    ".java_support.java_downloader",
+    "JavaDownloader",
+)
+_register_exports(
+    ".java_support.java_utils",
+    "JavaUtils",
+)
+_register_exports(
+    ".mod_utils.dependency_plan_serializer",
+    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
+    "OnlineDependencyInstallItem",
+    "OnlineDependencyInstallPlan",
+    "serialize_online_dependency_install_plan",
+    "validate_online_dependency_install_plan_payload",
+    "migrate_online_dependency_install_plan_payload",
+    "deserialize_online_dependency_install_plan",
+)
+_register_exports(
+    ".mod_utils.download_source_policy",
+    "OFFICIAL_DOWNLOAD_HOSTS",
+    "build_non_official_source_warning",
+    "build_non_official_source_warning_message",
+    "extract_download_host",
+    "get_non_official_download_host",
+    "get_official_download_hosts",
+    "normalize_download_provider",
+)
+_register_exports(
+    ".mod_utils.local_mod_metadata_utils",
+    "collect_installed_mod_identifiers",
+    "collect_installed_mod_versions",
+    "dependency_candidate_filenames",
+    "dependency_maybe_installed_by_filename",
+    "normalize_filename_stem",
+    "normalize_lax_filename",
+)
+_register_exports(
+    ".mod_utils.mod_dependency_planner",
+    "DependencyPlanHooks",
+    "expand_required_dependency_install_plan",
+)
+_register_exports(
+    ".mod_utils.mod_dependency_reference_utils",
+    "resolve_dependency_reference",
+)
+_register_exports(
+    ".mod_utils.mod_index_manager",
+    "ModIndexManager",
+)
+_register_exports(
+    ".mod_utils.mod_provider_metadata",
+    "LocalProviderEnsureResult",
+    "PROVIDER_LIFECYCLE_FRESH",
+    "PROVIDER_LIFECYCLE_INVALIDATED",
+    "PROVIDER_LIFECYCLE_MISSING",
+    "PROVIDER_LIFECYCLE_RETRYING",
+    "PROVIDER_LIFECYCLE_STALE",
+    "PROVIDER_METADATA_TTL_SECONDS",
+    "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN",
+    "ProviderMetadataRecord",
+    "apply_provider_metadata",
+    "cache_provider_metadata_record",
+    "compute_provider_revalidation_backoff_seconds",
+    "derive_provider_lifecycle_state",
+    "ensure_local_mod_provider_record",
+    "fetch_modrinth_project_detail",
+    "is_cached_provider_metadata_fresh",
+    "is_provider_revalidation_retry_due",
+    "register_provider_revalidation_failure",
+    "register_provider_revalidation_success",
+    "resolve_modrinth_provider_record",
+    "should_attempt_provider_revalidation",
+)
+_register_exports(
+    ".mod_utils.mod_revalidation_batch_utils",
+    "resolve_revalidation_batch_limits",
+    "recompute_adaptive_revalidation_batch_limit",
+)
+_register_exports(
+    ".mod_utils.mod_semantics",
+    "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED",
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED",
+    "LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED",
+    "LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE",
+    "LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED",
+    "LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED",
+    "LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE",
+    "LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED",
+    "LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY",
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED",
+    "LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING",
+    "LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO",
+    "LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE",
+    "LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE",
+    "LOCAL_UPDATE_REVIEW_PRECHECK_NOTE",
+    "LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE",
+    "LOCAL_UPDATE_SKIPPED_RETRYABLE_TEMPLATE",
+    "LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE",
+    "METADATA_SOURCE_CACHED_PROVIDER",
+    "METADATA_SOURCE_HASH",
+    "METADATA_SOURCE_LABELS",
+    "METADATA_SOURCE_LOOKUP",
+    "METADATA_SOURCE_SHORT_LABELS",
+    "METADATA_SOURCE_STALE_PROVIDER",
+    "METADATA_SOURCE_UNRESOLVED",
+    "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE",
+    "ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE",
+    "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE",
+    "ONLINE_REVIEW_PRECHECK_NOTE",
+    "RECOMMENDATION_CONFIDENCE_ADVISORY",
+    "RECOMMENDATION_CONFIDENCE_BLOCKED",
+    "RECOMMENDATION_CONFIDENCE_HIGH",
+    "RECOMMENDATION_CONFIDENCE_LABELS",
+    "RECOMMENDATION_CONFIDENCE_RETRYABLE",
+    "RECOMMENDATION_SOURCE_HASH_METADATA",
+    "RECOMMENDATION_SOURCE_LABELS",
+    "RECOMMENDATION_SOURCE_METADATA_UNRESOLVED",
+    "RECOMMENDATION_SOURCE_PROJECT_FALLBACK",
+    "RECOMMENDATION_SOURCE_SHORT_LABELS",
+    "RECOMMENDATION_SOURCE_STALE_METADATA",
+)
+_register_exports(
+    ".mod_utils.mod_version_filtering",
+    "MODRINTH_PREFERRED_HASH_ALGORITHM",
+    "extract_primary_file_hash",
+    "is_allowed_version_type",
+    "normalize_hash_algorithm",
+    "select_best_mod_version",
+    "select_primary_file",
+    "version_type_priority",
+)
+_register_exports(
+    ".mod_utils.modrinth_query_utils",
+    *MODRINTH_QUERY_EXPORT_NAMES,
+)
+_register_exports(
+    ".mod_utils.modrinth_version_lookup",
+    "parse_modrinth_version",
+    "parse_modrinth_version_lookup_response",
+)
+_register_exports(
+    ".network_utils.http_utils",
+    "HTTPUtils",
+)
+_register_exports(
+    ".network_utils.request_retry_utils",
+    "chunk_sequence",
+    "execute_resilient_batch_requests",
+    "execute_resilient_single_request",
+    "sleep_if_needed",
+)
+_register_exports(
+    ".runtime_utils.app_info",
+    "APP_VERSION",
+    "APP_NAME",
+    "APP_DESCRIPTION",
+    "GITHUB_OWNER",
+    "GITHUB_REPO",
+    "APP_ID",
+)
+_register_exports(
+    ".runtime_utils.app_restart",
+    "AppRestart",
+)
+_register_exports(
+    ".runtime_utils.background_task",
+    "BackgroundTaskManager",
+    "run_in_background",
+    "run_async_in_background",
+    "submit_background_task",
+    "CancellationToken",
+    "get_shared_manager",
+)
+_register_exports(
+    ".runtime_utils.runtime_paths",
+    "RuntimePaths",
+)
+_register_exports(
+    ".runtime_utils.settings_manager",
+    "get_settings_manager",
+)
+_register_exports(
+    ".runtime_utils.singleton",
+    "Singleton",
+)
+_register_exports(
+    ".runtime_utils.subprocess_utils",
+    "SubprocessUtils",
+)
+_register_exports(
+    ".runtime_utils.system_utils",
+    "SystemUtils",
+)
+_register_exports(
+    ".runtime_utils.worker_pool",
+    "DEFAULT_WORKER_COUNT",
+    "get_shared_worker_pool",
+    "resolve_worker_count",
+    "run_blocking_io",
+    "shutdown_shared_worker_pool",
+    "submit_to_worker_pool",
+)
+_register_exports(
+    ".server_utils.server_detection_utils",
+    "ServerDetectionUtils",
+)
+_register_exports(
+    ".server_utils.server_detection_version_utils",
+    "ServerDetectionVersionUtils",
+)
+_register_exports(
+    ".server_utils.server_memory_utils",
+    "MemoryUtils",
+)
+_register_exports(
+    ".server_utils.server_properties_utils",
+    "ServerPropertiesHelper",
+    "ServerPropertiesValidator",
+)
+_register_exports(
+    ".server_utils.server_runtime_utils",
+    "JvmOptionPolicy",
+    "ServerCommands",
+    "ServerOperations",
+)
+_register_exports(
+    ".ui_support.custom_dropdown",
+    "CustomDropdown",
+)
+_register_exports(
+    ".ui_support.dialog_utils",
+    "DialogUtils",
+)
+_register_exports(
+    ".ui_support.fluent",
+    "FluentLineEdit",
+    "FluentProgressBar",
+    "FluentPushButton",
+    "FluentSearchLineEdit",
+    "SearchFilter",
+)
+_register_exports(
+    ".ui_support.font_manager",
+    "FontManager",
+)
+_register_exports(
+    ".ui_support.icon_utils",
+    "IconUtils",
+)
+_register_exports(
+    ".ui_support.qt_runtime",
+    "QtCore",
+    "QtGui",
+    "QtWidgets",
+    "ValueState",
+    "install_open_url_click",
+    "is_qobject_alive",
+    "show_window",
+)
+_register_exports(
+    ".ui_support.qt_widgets",
+    "qt_widgets",
+)
+_register_exports(
+    ".ui_support.task_utils",
+    "TaskUtils",
+)
+_register_exports(
+    ".ui_support.tree_utils",
+    "TreeUtils",
+)
+_register_exports(
+    ".ui_support.ui_tokens",
+    "Colors",
+    "FontSize",
+    "Sizes",
+    "Spacing",
+)
+_register_exports(
+    ".ui_support.ui_utils",
+    "UIUtils",
+    "compute_adaptive_pool_limit",
+    "compute_exponential_moving_average",
+    "get_button_style",
+)
+_register_exports(
     ".ui_support.window_manager",
     "WindowManager",
 )
 _register_exports(
-    ".runtime_utils.app_info", "APP_VERSION", "APP_NAME", "APP_DESCRIPTION", "GITHUB_OWNER", "GITHUB_REPO", "APP_ID"
+    ".update_utils.update_checker",
+    "UpdateChecker",
+    "UpdateCheckerInteraction",
+)
+_register_exports(
+    ".update_utils.update_parsing",
+    "UpdateParsing",
+)
+_register_exports(
+    ".update_utils.update_checker_adapter",
+    "QtUpdateCheckerInteraction",
 )
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

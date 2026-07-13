@@ -8,7 +8,11 @@ from typing import ClassVar
 
 from ..utils import (
     Colors,
+    CustomDropdown,
+    DialogUtils,
+    FontManager,
     FontSize,
+    NativeQtStyle,
     Sizes,
     Spacing,
     UIUtils,
@@ -16,10 +20,9 @@ from ..utils import (
     get_button_style,
     get_logger,
     get_settings_manager,
+    initialize_ui_theme,
 )
 from ..utils.ui_support import qt_widgets as qt
-from . import CustomDropdown, DialogUtils, FontManager, ui_config
-from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="WindowPreferencesDialog")
 
@@ -244,7 +247,7 @@ class WindowPreferencesDialog:
             self.settings.set_auto_center(True)
             self.settings.set_adaptive_sizing(True)
             self.settings.set_theme_mode("system")
-            ui_config.initialize_ui_theme("system")
+            initialize_ui_theme("system")
             self.dialog.setStyleSheet(NativeQtStyle.preferences_dialog)
             self.theme_mode_dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
             defaults = self.settings.get_default_main_window_settings()
@@ -263,7 +266,7 @@ class WindowPreferencesDialog:
             self.settings.set_theme_mode(new_settings["theme"])
             theme_changed = changes["old"]["theme"] != new_settings["theme"]
             if theme_changed:
-                ui_config.initialize_ui_theme(new_settings["theme"])
+                initialize_ui_theme(new_settings["theme"])
                 self.dialog.setStyleSheet(NativeQtStyle.preferences_dialog)
                 self.theme_mode_dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
             if self.on_settings_changed:

@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
-from ..utils import FontSize, Sizes
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ValueState
-from . import FontManager
-from .ui_config import NativeQtStyle
+from .. import FontManager, FontSize, NativeQtStyle, QtCore, QtGui, QtWidgets, Sizes, ValueState
 
 
 class CustomDropdown(QtWidgets.QComboBox):
