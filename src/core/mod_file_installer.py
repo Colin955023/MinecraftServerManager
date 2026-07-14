@@ -39,7 +39,8 @@ class ModFileInstaller:
         final_path: Path | None = None,
         affected_count: int = 0,
     ) -> LocalModMutationResult:
-        """建立成功的本地模組異動結果。
+        """
+        建立成功的本地模組異動結果。
 
         Args:
             message: 結果訊息。
@@ -64,7 +65,8 @@ class ModFileInstaller:
         *,
         missing_ids: tuple[str, ...] = (),
     ) -> LocalModMutationResult:
-        """建立失敗的本地模組異動結果。
+        """
+        建立失敗的本地模組異動結果。
 
         Args:
             title: 失敗標題。
@@ -84,7 +86,8 @@ class ModFileInstaller:
 
     @staticmethod
     def normalize_expected_hash(expected_hash: str | None) -> tuple[str, str]:
-        """依雜湊長度推斷可接受的演算法。
+        """
+        依雜湊長度推斷可接受的演算法。
 
         Args:
             expected_hash: 原始預期雜湊字串。
@@ -109,7 +112,8 @@ class ModFileInstaller:
             self.on_mod_list_changed()
 
     def is_operation_cancelled(self, cancel_check: Callable[[], bool] | None) -> bool:
-        """安全地檢查目前作業是否被取消。
+        """
+        安全地檢查目前作業是否被取消。
 
         Args:
             cancel_check: 取消檢查回呼。
@@ -127,7 +131,8 @@ class ModFileInstaller:
             return False
 
     def restore_backup_to_path(self, original_path: Path | None, backup_path: Path | None) -> bool:
-        """將備份檔案還原回原始路徑。
+        """
+        將備份檔案還原回原始路徑。
 
         Args:
             original_path: 原始檔案路徑。
@@ -154,7 +159,8 @@ class ModFileInstaller:
         cancelled: bool,
         operation_name: str,
     ) -> ModFileOperationResult:
-        """回滾已寫入的新模組檔案與舊檔備份。
+        """
+        回滾已寫入的新模組檔案與舊檔備份。
 
         Args:
             old_path: 舊模組檔案路徑。
@@ -195,7 +201,8 @@ class ModFileInstaller:
         cancel_check: Callable[[], bool] | None = None,
         notify_change: bool = True,
     ) -> ModFileOperationResult:
-        """下載遠端模組並以原子方式安裝到 `mods` 目錄。
+        """
+        下載遠端模組並以原子方式安裝到 `mods` 目錄。
 
         Args:
             download_url: 遠端檔案下載網址。
@@ -324,7 +331,8 @@ class ModFileInstaller:
         provider: str | None = "modrinth",
         cancel_check: Callable[[], bool] | None = None,
     ) -> Path | None:
-        """以遠端版本覆蓋既有本地模組，必要時自動回滾。
+        """
+        以遠端版本覆蓋既有本地模組，必要時自動回滾。
 
         Args:
             local_mod: 既有本地模組資訊。
@@ -431,7 +439,8 @@ class ModFileInstaller:
             return None
 
     def set_mod_state_result(self, mod_id: str, enable: bool) -> LocalModMutationResult:
-        """切換本地模組的啟用或停用狀態。
+        """
+        切換本地模組的啟用或停用狀態。
 
         Args:
             mod_id: 模組識別值，不含副檔名。
@@ -518,7 +527,8 @@ class ModFileInstaller:
             return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {exc}")
 
     def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
-        """匯入本地模組檔案到目前伺服器的 `mods` 目錄。
+        """
+        匯入本地模組檔案到目前伺服器的 `mods` 目錄。
 
         Args:
             source_path: 要匯入的本地模組檔案路徑。
@@ -562,7 +572,8 @@ class ModFileInstaller:
             return self.failure_mutation_result("匯入失敗", f"匯入模組失敗: {exc}")
 
     def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
-        """刪除一或多個本地模組檔案。
+        """
+        刪除一或多個本地模組檔案。
 
         Args:
             mod_ids: 要刪除的模組識別值列表。

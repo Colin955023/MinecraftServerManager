@@ -1,4 +1,5 @@
-"""UI 應用程式配置
+"""
+UI 應用程式配置
 
 此模組負責 PySide6 全域配置與主題設定。
 所有 GUI 組件建立前應先導入此模組以套用主題。
@@ -11,7 +12,8 @@ from ..ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ensure_application
 
 
 def resolve_color(color: Any, *, dark: bool | None = None) -> str:
-    """解析專案色彩設定為 Qt stylesheet 可用色碼。
+    """
+    解析專案色彩設定為 Qt stylesheet 可用色碼。
 
     Args:
         color: 單一色碼或 `(light, dark)` 色碼 tuple。
@@ -236,7 +238,8 @@ class NativeQtStyle:
 
     @staticmethod
     def nav_item_frame(key: str) -> str:
-        """產生側欄項目容器樣式。
+        """
+        產生側欄項目容器樣式。
 
         Args:
             key: 導航項目識別鍵。
@@ -248,7 +251,8 @@ class NativeQtStyle:
 
     @staticmethod
     def nav_button(*, active: bool, mini: bool) -> str:
-        """產生側欄按鈕樣式。
+        """
+        產生側欄按鈕樣式。
 
         Args:
             active: 是否為目前作用中頁面。
@@ -273,7 +277,8 @@ class NativeQtStyle:
 
     @staticmethod
     def create_button(*, kind: str) -> str:
-        """產生建立伺服器頁按鈕樣式。
+        """
+        產生建立伺服器頁按鈕樣式。
 
         Args:
             kind: 按鈕種類，例如 primary 或 secondary。
@@ -302,7 +307,8 @@ class NativeQtStyle:
 
     @staticmethod
     def color_style(color: str) -> str:
-        """產生文字顏色樣式。
+        """
+        產生文字顏色樣式。
 
         Args:
             color: CSS/Qt 可接受的顏色字串。
@@ -458,7 +464,8 @@ def _refresh_native_styles(dark: bool) -> None:
 
 
 def initialize_ui_theme(mode: str = "light") -> None:
-    """初始化 UI 主題配置。
+    """
+    初始化 UI 主題配置。
 
     應在應用程式啟動時（組建主視窗前）呼叫一次。
     設定全域外觀模式與色彩主題。

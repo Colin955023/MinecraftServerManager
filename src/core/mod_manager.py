@@ -1,4 +1,6 @@
-"""模組管理器
+"""
+模組管理器
+
 負責管理 Minecraft 伺服器的模組，提供啟用/停用、移除等功能。
 """
 
@@ -117,7 +119,8 @@ class ModManager:
         )
 
     def scan_mods(self) -> list[LocalModInfo]:
-        """掃描 mods 目錄中的模組檔案並建立模組資訊列表。
+        """
+        掃描 mods 目錄中的模組檔案並建立模組資訊列表。
 
         Returns:
             掃描後的模組資訊清單。
@@ -125,7 +128,8 @@ class ModManager:
         return self._get_local_mod_scanner().scan_mods(self.create_mod_info_from_file)
 
     def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
-        """依 Prism Launcher 行為，從 jar metadata 取得版本，支援 fallback 與多格式。
+        """
+        從模組檔案建立 LocalModInfo。
 
         Args:
             file_path: 要解析的模組 JAR 檔案路徑。
@@ -170,7 +174,7 @@ class ModManager:
         )
 
     def _resolve_modrinth_provider_record_for_scan(self, identifier: str) -> ProviderMetadataRecord:
-        project_id, slug = self._resolve_modrinth_project_identity(identifier)
+        project_id, slug = self.resolve_modrinth_project_identity(identifier)
         return ProviderMetadataRecord.from_values(platform=ModPlatform.MODRINTH.value, project_id=project_id, slug=slug)
 
     def _detect_provider_record(
@@ -181,10 +185,6 @@ class ModManager:
             platform=platform.value, project_id=platform_id, slug=platform_slug, project_name=str(name or "").strip()
         )
 
-    def _resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
-        """將 slug 或 project id 轉為 canonical Modrinth project id 與 slug。"""
-        return self._get_provider_resolver().resolve_modrinth_project_identity(identifier)
-
     def _build_provider_record_from_search(self, query: str) -> ProviderMetadataRecord | None:
         platform, project_id, slug = self._search_on_modrinth(query, query, query)
         if platform != ModPlatform.MODRINTH or not project_id:
@@ -192,18 +192,20 @@ class ModManager:
         return ProviderMetadataRecord.from_values(platform=platform.value, project_id=project_id, slug=slug)
 
     def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
-        """公開封裝：將使用者輸入的 Modrinth project id / slug 正規化。
+        """
+        將使用者輸入的 Modrinth project id 或 slug 正規化。
 
         Args:
             identifier: 使用者輸入的 project id 或 slug。
 
         Returns:
-            解析後的 project id 與 slug。
+            tuple[str, str]: 解析後的規範（canonical）project id 與 slug。
         """
-        return self._resolve_modrinth_project_identity(identifier)
+        return self._get_provider_resolver().resolve_modrinth_project_identity(identifier)
 
     def _quarantine_file(self, file_path: Path, reason: str) -> None:
-        """標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動。
+        """
+        標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動。
 
         會在同一目錄下建立隱藏 marker 檔案 `.{filename}.issue.json`，包含原因與時間戳。
         """
@@ -251,7 +253,8 @@ class ModManager:
         return self._get_mod_file_installer().set_mod_state_result(mod_id, enable)
 
     def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
-        """匯入本地模組檔案到目前伺服器的 mods 目錄。
+        """
+        匯入本地模組檔案到目前伺服器的 mods 目錄。
 
         Args:
             source_path: 要匯入的本地模組檔案路徑。
@@ -263,7 +266,8 @@ class ModManager:
         return self._get_mod_file_installer().import_local_mod_file_result(source_path)
 
     def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
-        """刪除一或多個本地模組檔案。
+        """
+        刪除一或多個本地模組檔案。
 
         Args:
             mod_ids: 要刪除的模組識別值列表。
@@ -349,7 +353,8 @@ class ModManager:
         )
 
     def export_mod_list(self, format_type: str = "text") -> str:
-        """匯出模組列表，支援 text、json、html 格式。
+        """
+        匯出模組列表，支援 text、json、html 格式。
 
         Args:
             format_type: 輸出格式，預設為 text。

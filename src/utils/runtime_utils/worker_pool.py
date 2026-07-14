@@ -1,4 +1,5 @@
-"""受限背景工作池工具。
+"""
+受限背景工作池工具。
 
 集中管理檔案 I/O、壓縮與雜湊等高成本工作的共享 Qt 工作池，避免各模組自行建立執行緒。
 """
@@ -23,7 +24,8 @@ _shared_worker_pool: BackgroundTaskManager | None = None
 
 
 def resolve_worker_count(requested_workers: int | None = None) -> int:
-    """解析實際可用的 worker 數量。
+    """
+    解析實際可用的 worker 數量。
 
     Args:
         requested_workers: 呼叫端要求的 worker 數；未提供時使用預設值。
@@ -38,7 +40,8 @@ def resolve_worker_count(requested_workers: int | None = None) -> int:
 
 
 def get_shared_worker_pool() -> BackgroundTaskManager:
-    """取得全專案共享的受限工作池。
+    """
+    取得全專案共享的受限工作池。
 
     Returns:
         共用的 `BackgroundTaskManager` 實例。
@@ -53,7 +56,8 @@ def get_shared_worker_pool() -> BackgroundTaskManager:
 
 
 def submit_to_worker_pool[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> concurrent.futures.Future[T]:
-    """將同步函式提交至共享工作池。
+    """
+    將同步函式提交至共享工作池。
 
     Args:
         fn: 要執行的同步函式。
@@ -68,7 +72,8 @@ def submit_to_worker_pool[T](fn: Callable[..., T], *args: Any, **kwargs: Any) ->
 
 
 async def run_blocking_io[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """在共享工作池中執行阻塞 I/O 或高成本工作。
+    """
+    在共享工作池中執行阻塞 I/O 或高成本工作。
 
     Args:
         fn: 要執行的同步函式。
@@ -83,7 +88,8 @@ async def run_blocking_io[T](fn: Callable[..., T], *args: Any, **kwargs: Any) ->
 
 
 def shutdown_shared_worker_pool(*, wait: bool = True) -> None:
-    """關閉共享工作池，主要供測試或應用程式結束流程使用。
+    """
+    關閉共享工作池，主要供測試或應用程式結束流程使用。
 
     Args:
         wait: 是否等待既有任務完成。

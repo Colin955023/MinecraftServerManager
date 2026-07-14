@@ -1,4 +1,5 @@
-"""伺服器實例封裝。
+"""
+伺服器實例封裝。
 
 封裝單一伺服器的基礎屬性與基本 process 管理，供逐步遷移用。
 """
@@ -28,10 +29,7 @@ logger = get_logger().bind(component="ServerInstance")
 
 @dataclass
 class ServerInstance:
-    """代表單一伺服器的輕量實例封裝。
-
-    屬性皆為公開以利逐步遷移；方法提供最小的 process 管理介面。
-    """
+    """代表單一伺服器的輕量實例封裝。"""
 
     id: str
     name: str
@@ -45,7 +43,8 @@ class ServerInstance:
     _output_pending: str = field(default="", init=False, repr=False)
 
     def attach_process(self, process: Any) -> Any:
-        """綁定新的執行中的 process。
+        """
+        綁定新的執行中的 process。
 
         Args:
             process: 要綁定的執行中程序。
@@ -65,7 +64,8 @@ class ServerInstance:
             self.process = None
 
     def attach_output_buffer(self, max_size: int) -> None:
-        """建立或重設伺服器輸出緩衝。
+        """
+        建立或重設伺服器輸出緩衝。
 
         Args:
             max_size: 緩衝區最大行數。
@@ -83,7 +83,8 @@ class ServerInstance:
             self._output_pending = ""
 
     def append_output_line(self, line: str) -> None:
-        """將一行伺服器輸出寫入緩衝。
+        """
+        將一行伺服器輸出寫入緩衝。
 
         Args:
             line: 伺服器輸出內容。
@@ -97,7 +98,8 @@ class ServerInstance:
             output_buffer.append(line.rstrip("\r\n"))
 
     def append_output_text(self, text: str) -> None:
-        """將 QProcess stdout/stderr 文字片段拆成行並寫入緩衝。
+        """
+        將 QProcess stdout/stderr 文字片段拆成行並寫入緩衝。
 
         Args:
             text: 來自 QProcess signal 的輸出文字片段。
@@ -132,7 +134,8 @@ class ServerInstance:
                 self._output_pending = ""
 
     def consume_output_lines(self) -> list[str]:
-        """取出並清空目前的伺服器輸出緩衝。
+        """
+        取出並清空目前的伺服器輸出緩衝。
 
         Returns:
             目前累積的輸出行清單。
@@ -148,7 +151,8 @@ class ServerInstance:
         return lines
 
     def get_process(self) -> Any | None:
-        """取得目前的 process。
+        """
+        取得目前的 process。
 
         Returns:
             目前綁定的程序物件，若尚未啟動則回傳 None。
@@ -158,7 +162,8 @@ class ServerInstance:
 
     @staticmethod
     def is_qprocess(process: Any) -> bool:
-        """判斷物件是否為 Qt 的 QProcess。
+        """
+        判斷物件是否為 Qt 的 QProcess。
 
         Args:
             process: 要檢查的程序物件。
@@ -170,7 +175,8 @@ class ServerInstance:
 
     @staticmethod
     def process_pid(process: Any) -> int:
-        """取得 QProcess 或 subprocess 類物件的 PID。
+        """
+        取得 QProcess 或 subprocess 類物件的 PID。
 
         Args:
             process: 要讀取 PID 的程序物件。
@@ -187,7 +193,8 @@ class ServerInstance:
 
     @staticmethod
     def process_is_running(process: Any) -> bool:
-        """判斷 QProcess 或 subprocess 類物件是否仍在執行。
+        """
+        判斷 QProcess 或 subprocess 類物件是否仍在執行。
 
         Args:
             process: 要檢查狀態的程序物件。
@@ -201,7 +208,8 @@ class ServerInstance:
 
     @staticmethod
     def process_returncode(process: Any) -> int | None:
-        """取得 QProcess 或 subprocess 類物件的結束代碼。
+        """
+        取得 QProcess 或 subprocess 類物件的結束代碼。
 
         Args:
             process: 要讀取結束代碼的程序物件。
@@ -216,7 +224,8 @@ class ServerInstance:
         return process.poll()
 
     def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> Any:
-        """啟動伺服器，回傳 QProcess 物件。
+        """
+        啟動伺服器，回傳 QProcess 物件。
 
         注意：此方法只負責啟動與綁定；輸出處理應由呼叫端接 QProcess signal。
 
@@ -248,7 +257,8 @@ class ServerInstance:
             return self.attach_process(proc)
 
     def stop(self, timeout: float = 5.0) -> bool:
-        """嘗試優雅停止伺服器，若逾時則強制終止。
+        """
+        嘗試優雅停止伺服器，若逾時則強制終止。
 
         Args:
             timeout: 等待程序優雅結束的秒數。
@@ -311,7 +321,8 @@ class ServerInstance:
         return process is not None and self.process_is_running(process)
 
     def to_dict(self) -> dict[str, Any]:
-        """序列化不含 process 的 instance 資料，用於儲存或 UI 顯示。
+        """
+        序列化不含 process 的 instance 資料，用於儲存或 UI 顯示。
 
         Returns:
             可序列化的 instance 資料字典。

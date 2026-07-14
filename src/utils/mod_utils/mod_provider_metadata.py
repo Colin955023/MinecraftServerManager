@@ -1,4 +1,5 @@
-"""Provider metadata 契約工具。
+"""
+Provider metadata 契約工具。
 
 集中管理本地模組與索引之間的 provider metadata 結構，避免多處各自組裝
 `platform`、`project_id`、`slug`、`project_name` 的 payload。
@@ -35,7 +36,8 @@ class ProviderMetadataRecord:
 
     @classmethod
     def from_cached(cls, raw: dict[str, Any] | None) -> ProviderMetadataRecord:
-        """從快取 payload 還原 provider metadata。
+        """
+        從快取 payload 還原 provider metadata。
 
         Args:
             raw: 快取中的原始資料。
@@ -62,7 +64,8 @@ class ProviderMetadataRecord:
         slug: str | None = None,
         project_name: str | None = None,
     ) -> ProviderMetadataRecord:
-        """以原始欄位值建立正規化後的 provider metadata。
+        """
+        以原始欄位值建立正規化後的 provider metadata。
 
         Args:
             platform: provider 平台名稱。
@@ -89,7 +92,8 @@ class ProviderMetadataRecord:
         return self.platform == "modrinth"
 
     def as_cache_payload(self) -> dict[str, str]:
-        """轉成可寫入快取的精簡 payload。
+        """
+        轉成可寫入快取的精簡 payload。
 
         Returns:
             只包含已知欄位的字典。
@@ -131,7 +135,8 @@ def _parse_resolved_at_epoch_ms(raw: dict[str, Any] | None) -> int | None:
 def is_cached_provider_metadata_fresh(
     raw: dict[str, Any] | None, *, ttl_seconds: int = PROVIDER_METADATA_TTL_SECONDS
 ) -> bool:
-    """判斷快取 provider metadata 是否仍在 freshness 視窗內。
+    """
+    判斷快取 provider metadata 是否仍在 freshness 視窗內。
 
     Args:
         raw: 原始快取資料。
@@ -155,7 +160,8 @@ def is_cached_provider_metadata_fresh(
 def fetch_modrinth_project_detail(
     identifier: str, *, timeout: int = MODRINTH_PROJECT_DETAIL_TIMEOUT_SECONDS
 ) -> dict[str, Any] | None:
-    """依 project id 或 slug 取得 Modrinth 專案詳細資訊。
+    """
+    依 project id 或 slug 取得 Modrinth 專案詳細資訊。
 
     Args:
         identifier: Modrinth project id 或 slug。
@@ -189,7 +195,8 @@ def _remember_provider_record(*keys: str, record: ProviderMetadataRecord) -> Pro
 def resolve_modrinth_provider_record(
     identifier: str, *, search_fallback: Callable[[str], ProviderMetadataRecord | None] | None = None
 ) -> ProviderMetadataRecord:
-    """將 project id / slug 正規化為 canonical provider record。
+    """
+    將 project id / slug 正規化為 canonical provider record。
 
     Args:
         identifier: 待解析的 project id 或 slug。
@@ -243,7 +250,8 @@ def ensure_local_mod_provider_record(
     identifier_resolver: Callable[[str], ProviderMetadataRecord] | None = None,
     fallback_resolver: Callable[[], ProviderMetadataRecord | None] | None = None,
 ) -> LocalProviderEnsureResult:
-    """以固定順序確保本地模組 provider metadata。
+    """
+    以固定順序確保本地模組 provider metadata。
 
     Args:
         platform_id: 已知的 platform id。
@@ -321,7 +329,8 @@ def ensure_local_mod_provider_record(
 
 
 def apply_provider_metadata(target: Any, provider_metadata: ProviderMetadataRecord) -> bool:
-    """將 provider metadata 套用到本地模組物件。
+    """
+    將 provider metadata 套用到本地模組物件。
 
     Args:
         target: 目標物件。
@@ -363,7 +372,8 @@ def compute_provider_revalidation_backoff_seconds(
     base_seconds: int = PROVIDER_REVALIDATION_RETRY_BASE_SECONDS,
     max_seconds: int = PROVIDER_REVALIDATION_RETRY_MAX_SECONDS,
 ) -> int:
-    """依連續失敗次數計算 retry backoff 秒數。
+    """
+    依連續失敗次數計算 retry backoff 秒數。
 
     Args:
         failure_count: 連續失敗次數。
@@ -381,7 +391,8 @@ def compute_provider_revalidation_backoff_seconds(
 
 
 def is_provider_revalidation_retry_due(raw: dict[str, Any] | None, *, now_epoch_ms: int | None = None) -> bool:
-    """判斷 provider metadata 是否已到可重試時間。
+    """
+    判斷 provider metadata 是否已到可重試時間。
 
     Args:
         raw: 原始 provider metadata。
@@ -406,7 +417,8 @@ def should_attempt_provider_revalidation(
     max_attempts: int = PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN,
     now_epoch_ms: int | None = None,
 ) -> tuple[bool, str]:
-    """判斷本輪是否應嘗試 stale provider metadata 重查。
+    """
+    判斷本輪是否應嘗試 stale provider metadata 重查。
 
     Args:
         raw: 原始 provider metadata。
@@ -433,7 +445,8 @@ def should_attempt_provider_revalidation(
 def register_provider_revalidation_failure(
     raw: dict[str, Any] | None, *, now_epoch_ms: int | None = None
 ) -> dict[str, Any]:
-    """記錄 provider revalidation 失敗並產生退避欄位。
+    """
+    記錄 provider revalidation 失敗並產生退避欄位。
 
     Args:
         raw: 原始 provider metadata。
@@ -487,7 +500,8 @@ def register_provider_revalidation_success(
 def derive_provider_lifecycle_state(
     raw: dict[str, Any] | None, *, ttl_seconds: int = PROVIDER_METADATA_TTL_SECONDS
 ) -> str:
-    """依索引快取內容推導 provider metadata lifecycle state。
+    """
+    依索引快取內容推導 provider metadata lifecycle state。
 
     Args:
         raw: 原始 provider metadata。
@@ -525,7 +539,8 @@ def cache_provider_metadata_record(
     metadata_source: str | None = None,
     resolved_at_epoch_ms: int | None = None,
 ) -> None:
-    """使用統一 contract 將 provider metadata 寫回索引。
+    """
+    使用統一 contract 將 provider metadata 寫回索引。
 
     Args:
         index_manager: 索引管理器。

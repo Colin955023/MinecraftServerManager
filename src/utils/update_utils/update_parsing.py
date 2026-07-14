@@ -1,4 +1,5 @@
-"""更新資訊解析工具
+"""
+更新資訊解析工具
 集中處理版本字串、Release 資訊與更新資產選擇邏輯。
 """
 
@@ -21,7 +22,8 @@ class UpdateParsing:
     @staticmethod
     @lru_cache(maxsize=256)
     def parse_version(version_str: str | None) -> Version | None:
-        """解析版本字串為 PEP 440 Version 物件。
+        """
+        解析版本字串為 PEP 440 Version 物件。
 
         Args:
             version_str: 原始版本字串。
@@ -41,7 +43,8 @@ class UpdateParsing:
 
     @staticmethod
     def get_latest_release(owner: str, repo: str, include_prerelease: bool = False) -> dict[str, Any] | None:
-        """取得最新 release（預設忽略 prerelease），失敗時回傳 None。
+        """
+        取得最新 release（預設忽略 prerelease），失敗時回傳 None。
 
         Args:
             owner: GitHub repository owner。
@@ -66,7 +69,8 @@ class UpdateParsing:
 
     @staticmethod
     def choose_installer_asset(release: dict[str, Any]) -> dict[str, Any]:
-        """挑選 installer.exe 更新檔。
+        """
+        挑選 installer.exe 更新檔。
 
         Args:
             release: GitHub release 資料。
@@ -94,7 +98,8 @@ class UpdateParsing:
 
     @staticmethod
     def select_update_asset(release: dict[str, Any]) -> tuple[dict[str, Any], str]:
-        """挑選更新資產，並回傳選擇策略。
+        """
+        挑選更新資產，並回傳選擇策略。
 
         Args:
             release: GitHub release 資料。
@@ -119,7 +124,8 @@ class UpdateParsing:
 
     @staticmethod
     def parse_asset_digest(asset: dict[str, Any]) -> tuple[str, str] | None:
-        """從 GitHub release asset 的 digest 欄位解析 checksum。
+        """
+        從 GitHub release asset 的 digest 欄位解析 checksum。
 
         Args:
             asset: GitHub release asset 資料。

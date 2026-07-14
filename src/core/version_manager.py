@@ -1,4 +1,5 @@
-"""Minecraft 版本管理器模組
+"""
+Minecraft 版本管理器模組
 負責從官方 API 取得版本資訊，提供版本查詢、下載與快取管理功能。
 """
 
@@ -51,7 +52,8 @@ class MinecraftVersionManager(Singleton):
             logger.exception(f"寫入版本快取失敗: {e}")
 
     def fetch_versions(self, max_workers: int = 10) -> list:
-        """從官方 API 取得所有 Minecraft 版本列表並使用 Qt worker 查詢詳細資訊。
+        """
+        從官方 API 取得所有 Minecraft 版本列表並使用 Qt worker 查詢詳細資訊。
 
         Args:
             max_workers: 同時查詢版本詳細資訊的工作數量上限。
@@ -143,7 +145,8 @@ class MinecraftVersionManager(Singleton):
                 return self.get_versions(force_fetch=False)
 
     def get_server_download_url(self, version_id: str) -> str | None:
-        """獲取指定版本的伺服器下載 URL。
+        """
+        獲取指定版本的伺服器下載 URL。
 
         Args:
             version_id: Minecraft 版本 ID。
@@ -168,7 +171,8 @@ class MinecraftVersionManager(Singleton):
             return None
 
     def get_versions(self, force_fetch=False) -> list:
-        """取得 Minecraft 版本列表，優先從本地快取讀取，必要時從官方 API 獲取。
+        """
+        取得 Minecraft 版本列表，優先從本地快取讀取，必要時從官方 API 獲取。
 
         Args:
             force_fetch: 是否強制重新抓取官方版本資料。

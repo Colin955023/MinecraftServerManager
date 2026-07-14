@@ -15,7 +15,8 @@ class IconUtils:
 
     @staticmethod
     def set_window_icon(window, delay_ms=200) -> None:
-        """設定視窗 icon，並在不同生命週期時機補設，避免被 Qt/系統主題覆寫。
+        """
+        設定視窗 icon，並在不同生命週期時機補設，避免被 Qt/系統主題覆寫。
 
         Args:
             window: 要設定圖示的視窗。

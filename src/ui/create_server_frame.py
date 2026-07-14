@@ -1,4 +1,5 @@
-"""建立伺服器頁面
+"""
+建立伺服器頁面
 負責建立新 Minecraft 伺服器的使用者介面。
 """
 
@@ -70,7 +71,8 @@ class CreateServerFrame(QtWidgets.QWidget):
 
     @staticmethod
     def get_system_memory_mb() -> int:
-        """獲取系統記憶體容量。
+        """
+        獲取系統記憶體容量。
 
         Returns:
             系統總記憶體容量（MB），失敗時回傳 0。
@@ -162,7 +164,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         variable.changed.connect(_sync_from_var)
 
     def create_java_path_field(self, parent, row) -> None:
-        """建立 Java 路徑欄位（可手動輸入/瀏覽）。
+        """
+        建立 Java 路徑欄位（可手動輸入/瀏覽）。
 
         Args:
             parent: 父容器。
@@ -346,7 +349,8 @@ class CreateServerFrame(QtWidgets.QWidget):
             button.setStyleSheet(NativeQtStyle.create_button(kind=kind))
 
     def create_form(self, parent) -> None:
-        """建立表單。
+        """
+        建立表單。
 
         Args:
             parent: 父容器。
@@ -567,7 +571,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         )
 
     def create_field(self, parent, row, label_text, default_value, var_name) -> tuple:
-        """建立文字輸入欄位。
+        """
+        建立文字輸入欄位。
 
         Args:
             parent: 父容器。
@@ -591,7 +596,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         return (var, entry)
 
     def create_buttons(self, parent) -> None:
-        """建立按鈕。
+        """
+        建立按鈕。
 
         Args:
             parent: 父容器。
@@ -638,7 +644,8 @@ class CreateServerFrame(QtWidgets.QWidget):
             UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.window())
 
     def update_versions(self, versions: list) -> None:
-        """更新版本列表，並預設選擇最新版本。
+        """
+        更新版本列表，並預設選擇最新版本。
 
         Args:
             versions: 可用版本清單。
@@ -693,7 +700,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         return None
 
     def update_server_config_ui(self, _event=None) -> None:
-        """根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單。
+        """
+        根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單。
 
         Args:
             _event: 事件物件，供 trace callback 使用。
@@ -736,7 +744,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         TaskUtils.run_async(self.load_loader_versions, loader_type, mc_version)
 
     def load_loader_versions(self, loader_type: str, mc_version: str) -> None:
-        """載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）。
+        """
+        載入載入器版本，並預設選擇最新版本（使用預載入的快取資料）。
 
         Args:
             loader_type: 載入器類型。
@@ -807,7 +816,8 @@ class CreateServerFrame(QtWidgets.QWidget):
             self.ui_queue.put(handle_error)
 
     def validate_form(self) -> bool:
-        """驗證表單。
+        """
+        驗證表單。
 
         Returns:
             若表單內容通過驗證則回傳 True，否則回傳 False。
@@ -901,7 +911,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         TaskUtils.run_async(self.create_server_async, config)
 
     def create_server_async(self, config: ServerConfig) -> None:
-        """非同步建立伺服器。
+        """
+        非同步建立伺服器。
 
         Args:
             config: 伺服器建立設定。
@@ -991,7 +1002,8 @@ class CreateServerFrame(QtWidgets.QWidget):
                 self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
     def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> bool:
-        """下載伺服器檔案。
+        """
+        下載伺服器檔案。
 
         Args:
             config: 伺服器建立設定。
@@ -1105,7 +1117,8 @@ class CreateServerFrame(QtWidgets.QWidget):
         return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
 
     def destroy(self, destroyWindow: bool = True, destroySubWindows: bool = True) -> None:
-        """銷毀頁面前先清理待執行排程工作。
+        """
+        銷毀頁面前先清理待執行排程工作。
 
         Args:
             destroyWindow: 是否銷毀目前 Qt 視窗。

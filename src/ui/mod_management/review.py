@@ -2003,7 +2003,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return [*root_nodes, *dependency_nodes]
 
     def _build_local_update_task_nodes(self, review_entries: list[LocalUpdateReviewEntry]) -> list[ReviewTaskNode]:
-        """相容層：建立本地更新 review 的根級 task nodes。"""
+        """建立本地更新 review 的根級 task nodes。"""
         return self._build_flat_review_task_nodes(
             review_entries,
             get_entry_key=lambda entry: (
@@ -2051,7 +2051,8 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return "\n".join(lines)
 
     def _create_review_shared_ui(self, main_frame: qt.Frame, wraplength: int) -> tuple[qt.Label, qt.Frame]:
-        """建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
+        """
+        建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
 
         Args:
             main_frame: 父框架

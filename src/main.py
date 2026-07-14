@@ -1,7 +1,7 @@
-"""Minecraft 伺服器管理器主程式
+"""
+Minecraft 伺服器管理器主程式
+
 提供 Minecraft 伺服器的建立、管理和監控功能的主要入口點
-Minecraft Server Manager Main Application
-Main entry point for creating, managing and monitoring Minecraft servers
 """
 
 import ctypes

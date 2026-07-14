@@ -132,7 +132,8 @@ class TreeUtils:
     def auto_fit_treeview_column(
         treeview, column_id: str, *, heading_font=None, body_font=None, stretch_columns: set[str] | None = None
     ) -> None:
-        """依標題與內容寬度自動調整 Treeview 欄位大小。
+        """
+        依標題與內容寬度自動調整 Treeview 欄位大小。
 
         Args:
             treeview: 目標 Treeview。
@@ -199,7 +200,8 @@ class TreeUtils:
         body_font=None,
         stretch_columns: set[str] | None = None,
     ) -> None:
-        """綁定 Treeview 標題雙擊事件以自動調整欄位寬度。
+        """
+        綁定 Treeview 標題雙擊事件以自動調整欄位寬度。
 
         Args:
             treeview: 目標 Treeview。
@@ -246,7 +248,8 @@ class TreeUtils:
 
     @staticmethod
     def refresh_treeview_alternating_rows(treeview) -> None:
-        """重新套用 Treeview 交錯列背景，保留既有非 odd/even tag。
+        """
+        重新套用 Treeview 交錯列背景，保留既有非 odd/even tag。
 
         Args:
             treeview: 目標 Treeview。
@@ -273,7 +276,8 @@ class TreeUtils:
 
     @staticmethod
     def apply_listbox_alternating_rows(listbox, *, item_count: int | None = None) -> None:
-        """套用 Listbox 交錯列背景。
+        """
+        套用 Listbox 交錯列背景。
 
         Args:
             listbox: 目標 Listbox。
@@ -319,7 +323,8 @@ class TreeUtils:
         move_item: Callable[[str, int], None] | None = None,
         logger_name: str = "TreeUtils",
     ) -> Callable[[int, str | None], None]:
-        """建立一個可重用的 Treeview 批次插入函式。
+        """
+        建立一個可重用的 Treeview 批次插入函式。
 
         Args:
             tree: 目標 Treeview。

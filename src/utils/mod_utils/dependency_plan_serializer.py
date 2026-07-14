@@ -1,5 +1,5 @@
-"""依賴計畫序列化工具。
-
+"""
+依賴計畫序列化工具。
 集中處理 dependency plan 的資料模型、序列化、遷移與驗證邏輯，
 讓 UI 層只保留查詢與流程組裝責任。
 """
@@ -162,7 +162,8 @@ def _build_online_dependency_install_item(payload: Any) -> OnlineDependencyInsta
 
 
 def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
-    """將依賴安裝項目正規化為可持久化 payload。
+    """
+    將依賴安裝項目正規化為可持久化 payload。
 
     Args:
         item: 原始依賴安裝項目，可以是物件或映射。
@@ -209,7 +210,8 @@ def serialize_online_dependency_install_plan(
     root_enabled: bool | None = None,
     plan_source: str = "review",
 ) -> dict[str, Any]:
-    """將依賴安裝計畫轉為可持久化 payload。
+    """
+    將依賴安裝計畫轉為可持久化 payload。
 
     Args:
         plan: 原始依賴安裝計畫。
@@ -252,7 +254,8 @@ def serialize_online_dependency_install_plan(
 
 
 def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[bool, str]:
-    """驗證 dependency plan 快照是否符合 replay 契約。
+    """
+    驗證 dependency plan 快照是否符合 replay 契約。
 
     Args:
         raw: 待驗證的原始 payload。
@@ -309,7 +312,8 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
 
 
 def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
-    """嘗試遷移舊版 dependency plan payload 至可回放格式。
+    """
+    嘗試遷移舊版 dependency plan payload 至可回放格式。
 
     Args:
         raw: 待遷移的原始 payload。
@@ -383,7 +387,8 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
 
 
 def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
-    """從持久化 payload 還原 `OnlineDependencyInstallPlan`。
+    """
+    從持久化 payload 還原 `OnlineDependencyInstallPlan`。
 
     Args:
         raw: 已序列化的原始 payload。

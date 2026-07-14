@@ -1,5 +1,5 @@
-"""視窗偏好設定對話框
-Window preferences dialog for configuring window behavior and appearance.
+"""
+視窗偏好設定對話框
 """
 
 import traceback

@@ -8,7 +8,8 @@ from typing import Any
 
 
 def chunk_sequence(values: list[str], chunk_size: int) -> list[list[str]]:
-    """將序列切成固定大小的區塊。
+    """
+    將序列切成固定大小的區塊。
 
     Args:
         values: 要拆分的字串清單。
@@ -22,7 +23,8 @@ def chunk_sequence(values: list[str], chunk_size: int) -> list[list[str]]:
 
 
 def sleep_if_needed(delay_seconds: float) -> None:
-    """在需要時暫停執行。
+    """
+    在需要時暫停執行。
 
     Args:
         delay_seconds: 要暫停的秒數。
@@ -41,7 +43,8 @@ def execute_resilient_single_request(
     retry_backoff_base_seconds: float = 0.25,
     retry_backoff_max_seconds: float = 1.5,
 ) -> tuple[Any, bool, int]:
-    """以退避與節流重試單一請求。
+    """
+    以退避與節流重試單一請求。
 
     Args:
         request_once: 單次請求函式。
@@ -81,7 +84,8 @@ def execute_resilient_batch_requests(
     retry_backoff_base_seconds: float = 0.25,
     retry_backoff_max_seconds: float = 1.5,
 ) -> tuple[dict[str, Any], dict[str, int]]:
-    """以分塊、重試與必要時二分拆解的方式執行批次請求。
+    """
+    以分塊、重試與必要時二分拆解的方式執行批次請求。
 
     Args:
         items: 要處理的項目清單。

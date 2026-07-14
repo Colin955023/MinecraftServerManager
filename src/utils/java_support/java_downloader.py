@@ -1,4 +1,5 @@
-"""Java 下載工具模組
+"""
+Java 下載工具模組
 提供 Java 安裝包下載與管理功能，支援 Microsoft OpenJDK 的自動下載與安裝流程。
 """
 
@@ -74,7 +75,8 @@ class JavaDownloader:
 
     @staticmethod
     def install_java_with_winget(major: int):
-        """透過 winget 安裝指定主版本的 Java。
+        """
+        透過 winget 安裝指定主版本的 Java。
 
         Args:
             major: Java 主要版本號。

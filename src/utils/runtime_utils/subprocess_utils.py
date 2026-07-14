@@ -32,7 +32,8 @@ class QProcessResult:
     error_text: str = ""
 
     def poll(self) -> int:
-        """模擬 subprocess.CompletedProcess 的 poll 方法。
+        """
+        模擬 subprocess.CompletedProcess 的 poll 方法。
 
         Returns:
             QProcess 結束代碼。
@@ -109,7 +110,8 @@ class SubprocessUtils:
 
     @staticmethod
     def run_checked(cmd: Iterable[str], **kwargs) -> subprocess.CompletedProcess:
-        """像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`。
+        """
+        像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`。
 
         Args:
             cmd: 命令列參數序列。
@@ -125,7 +127,8 @@ class SubprocessUtils:
 
     @staticmethod
     def popen_checked(cmd: Iterable[str], **kwargs) -> subprocess.Popen:
-        """像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`。
+        """
+        像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`。
 
         Args:
             cmd: 命令列參數序列。
@@ -147,7 +150,8 @@ class SubprocessUtils:
         merged_channels: bool = True,
         parent: QtCore.QObject | None = None,
     ) -> QtCore.QProcess:
-        """建立已驗證 argv 的 QProcess。
+        """
+        建立已驗證 argv 的 QProcess。
 
         Args:
             cmd: 命令列參數序列。
@@ -181,7 +185,8 @@ class SubprocessUtils:
         cancel_poll_ms: int = 100,
         timeout_ms: int | None = None,
     ) -> QProcessResult:
-        """以 QProcess signal 同步執行命令並收集輸出。
+        """
+        以 QProcess signal 同步執行命令並收集輸出。
 
         Args:
             cmd: 命令列參數序列。

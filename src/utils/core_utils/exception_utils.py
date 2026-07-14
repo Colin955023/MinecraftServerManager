@@ -1,4 +1,5 @@
-"""例外處理輔助器
+"""
+例外處理輔助器
 
 提供集中化的例外記錄與非破壞性 marker 建立，以便 hotpath 能統一處理。
 
@@ -74,7 +75,8 @@ def record_and_mark(
     reason: str | None = None,
     details: Any | None = None,
 ) -> None:
-    """記錄例外並在指定路徑建立 issue marker（非破壞性）。
+    """
+    記錄例外並在指定路徑建立 issue marker（非破壞性）。
 
     Args:
         exc: 要記錄的例外。

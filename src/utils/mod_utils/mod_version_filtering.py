@@ -10,7 +10,8 @@ MODRINTH_PREFERRED_HASH_ALGORITHM = "sha512"
 
 
 def normalize_hash_algorithm(algorithm: str | None) -> str:
-    """正規化 Modrinth 使用的雜湊演算法名稱。
+    """
+    正規化 Modrinth 使用的雜湊演算法名稱。
 
     Args:
         algorithm: 原始演算法名稱。
@@ -26,7 +27,8 @@ def normalize_hash_algorithm(algorithm: str | None) -> str:
 
 
 def select_primary_file(files: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """從版本檔案列表中選出最適合下載的檔案。
+    """
+    從版本檔案列表中選出最適合下載的檔案。
 
     Args:
         files: 版本檔案列表。
@@ -55,7 +57,8 @@ def select_primary_file(files: list[dict[str, Any]] | None) -> dict[str, Any] | 
 
 
 def extract_primary_file_hash(version: Any | None, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM) -> str:
-    """擷取版本主要檔案的雜湊值。
+    """
+    擷取版本主要檔案的雜湊值。
 
     Args:
         version: 版本物件或空值。
@@ -73,7 +76,8 @@ def extract_primary_file_hash(version: Any | None, algorithm: str = MODRINTH_PRE
 
 
 def version_type_priority(version_type: str) -> int:
-    """回傳版本類型的排序優先權。
+    """
+    回傳版本類型的排序優先權。
 
     Args:
         version_type: Modrinth 版本類型。
@@ -93,7 +97,8 @@ def version_type_priority(version_type: str) -> int:
 
 
 def is_allowed_version_type(version_type: str) -> bool:
-    """判斷版本類型是否在允許範圍內。
+    """
+    判斷版本類型是否在允許範圍內。
 
     Args:
         version_type: Modrinth 版本類型。
@@ -114,7 +119,8 @@ def is_allowed_version_type(version_type: str) -> bool:
 
 
 def select_best_mod_version(versions: list[Any]) -> Any | None:
-    """從版本清單中挑選最適合的候選版本。
+    """
+    從版本清單中挑選最適合的候選版本。
 
     Args:
         versions: 候選版本清單。

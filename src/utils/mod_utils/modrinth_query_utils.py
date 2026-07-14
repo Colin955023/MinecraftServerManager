@@ -20,7 +20,8 @@ MODRINTH_QUERY_EXPORT_NAMES: tuple[str, ...] = (
 
 
 def normalize_identifier(value: str | None) -> str:
-    """將字串正規化為可比較的識別字。
+    """
+    將字串正規化為可比較的識別字。
 
     Args:
         value: 原始識別字或空值。
@@ -33,7 +34,8 @@ def normalize_identifier(value: str | None) -> str:
 
 
 def clean_api_identifier(value: str | None) -> str:
-    """清理 API 回傳的識別字。
+    """
+    清理 API 回傳的識別字。
 
     Args:
         value: 原始 API 識別字或空值。
@@ -46,7 +48,8 @@ def clean_api_identifier(value: str | None) -> str:
 
 
 def normalize_local_loader(loader: str | None) -> str:
-    """將本地載入器名稱正規化為內部比較格式。
+    """
+    將本地載入器名稱正規化為內部比較格式。
 
     Args:
         loader: 原始載入器名稱。
@@ -64,7 +67,8 @@ def normalize_local_loader(loader: str | None) -> str:
 
 
 def is_supported_modrinth_update_loader(loader: str | None) -> bool:
-    """判斷目前載入器是否支援 Modrinth 更新規劃。
+    """
+    判斷目前載入器是否支援 Modrinth 更新規劃。
 
     Args:
         loader: 原始載入器名稱。
@@ -80,7 +84,8 @@ def is_supported_modrinth_update_loader(loader: str | None) -> bool:
 
 
 def get_modrinth_loader_filters(loader: str | None) -> list[str]:
-    """回傳 Modrinth 查詢用 loader 過濾列表。
+    """
+    回傳 Modrinth 查詢用 loader 過濾列表。
 
     Args:
         loader: 原始載入器名稱。
@@ -96,7 +101,8 @@ def get_modrinth_loader_filters(loader: str | None) -> list[str]:
 
 
 def apply_loader_specific_dependency_override(project_id: str | None) -> str:
-    """回傳原始 project id，不再進行載入器特定的轉換。
+    """
+    回傳原始 project id，不再進行載入器特定的轉換。
 
     Args:
         project_id: 原始 project id。
@@ -116,7 +122,8 @@ def _split_camel_case_words(value: str | None) -> str:
 
 
 def normalize_mod_search_query(raw_query: str) -> str:
-    """將檔名或雜訊字串轉為較適合 Modrinth 搜尋的關鍵字。
+    """
+    將檔名或雜訊字串轉為較適合 Modrinth 搜尋的關鍵字。
 
     Args:
         raw_query: 原始檔名或搜尋字串。
@@ -137,7 +144,8 @@ def normalize_mod_search_query(raw_query: str) -> str:
 
 
 def canonical_lookup_key(value: str | None) -> str:
-    """產生用於比對與去重的標準化 key。
+    """
+    產生用於比對與去重的標準化 key。
 
     Args:
         value: 原始字串。
@@ -152,7 +160,8 @@ def canonical_lookup_key(value: str | None) -> str:
 def build_local_mod_lookup_candidates(
     filename: str, *, platform_id: str | None = None, platform_slug: str | None = None, local_name: str | None = None
 ) -> tuple[list[str], list[str], set[str]]:
-    """從本地模組資訊組合搜尋與比對候選字串。
+    """
+    從本地模組資訊組合搜尋與比對候選字串。
 
     Args:
         filename: 模組檔名。

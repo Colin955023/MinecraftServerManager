@@ -112,7 +112,8 @@ class DependencyPlanningService:
         dependency: dict[str, Any],
         dependency_names: dict[str, str],
     ) -> ResolvedDependencyReference:
-        """解析單一依賴節點所需的 provider 與命名資訊。
+        """
+        解析單一依賴節點所需的 provider 與命名資訊。
 
         Args:
             dependency: 原始依賴描述字典。
@@ -161,7 +162,8 @@ class DependencyPlanningService:
         dependency_label: str,
         dependency_names: dict[str, str],
     ) -> OnlineModCompatibilityReport:
-        """分析最佳依賴版本與目前伺服器環境的相容性。
+        """
+        分析最佳依賴版本與目前伺服器環境的相容性。
 
         Args:
             best_version: 選出的最佳依賴版本。
@@ -187,7 +189,8 @@ class DependencyPlanningService:
         )
 
     def extract_dependency_download_target(self, best_version: OnlineModVersion) -> tuple[str, str] | None:
-        """提取依賴版本的下載網址與檔名。
+        """
+        提取依賴版本的下載網址與檔名。
 
         Args:
             best_version: 目標依賴版本。
@@ -223,7 +226,8 @@ class DependencyPlanningService:
         edge_kind: str,
         edge_source: str,
     ) -> OnlineDependencyInstallItem:
-        """建立可直接交給安裝流程的依賴安裝項目。
+        """
+        建立可直接交給安裝流程的依賴安裝項目。
 
         Args:
             resolved_dependency: 已解析的依賴參考。
@@ -271,7 +275,8 @@ class DependencyPlanningService:
         )
 
     def build_hooks(self) -> DependencyPlanHooks:
-        """建立交給純展開邏輯使用的 hooks 集合。
+        """
+        建立交給純展開邏輯使用的 hooks 集合。
 
         Returns:
             依賴展開流程所需的 hook 組合。
@@ -299,7 +304,8 @@ def build_required_dependency_install_plan(
     root_project_name: str = "",
     max_depth: int = 20,
 ) -> OnlineDependencyInstallPlan:
-    """為必要依賴建立可自動安裝的連鎖安裝計畫。
+    """
+    為必要依賴建立可自動安裝的連鎖安裝計畫。
 
     Args:
         version: Modrinth 版本資訊。
@@ -357,7 +363,8 @@ def build_local_mod_update_plan(
     revalidation_failure_low_watermark: float = 0.25,
     revalidation_latency_threshold_ms: float = 800.0,
 ) -> LocalModUpdatePlan:
-    """為本地模組建立更新檢查計畫，優先採用 Prism 風格的 hash-first 批次檢查。
+    """
+    為本地模組建立更新檢查計畫，優先採用 Prism 風格的 hash-first 批次檢查。
 
     Args:
         local_mods: 本地模組清單。

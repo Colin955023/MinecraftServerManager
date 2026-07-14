@@ -86,7 +86,8 @@ class ProgressDialog:
         self._signals.close_requested.connect(self._close_dialog)
 
     def update_progress(self, percent: float, status_text: str) -> bool:
-        """更新進度百分比與狀態文字。
+        """
+        更新進度百分比與狀態文字。
 
         Args:
             percent: 進度百分比。

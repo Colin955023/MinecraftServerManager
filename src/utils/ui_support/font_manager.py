@@ -63,7 +63,8 @@ class FontManager:
         underline: bool = False,
         overstrike: bool = False,
     ) -> QtGui.QFont:
-        """取得字體物件並快取。
+        """
+        取得字體物件並快取。
 
         Args:
             family: 字體名稱；未提供時使用預設字體。

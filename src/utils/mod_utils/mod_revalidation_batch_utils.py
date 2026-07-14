@@ -10,7 +10,8 @@ def resolve_revalidation_batch_limits(
     batch_min_limit: int,
     batch_max_limit: int | None,
 ) -> tuple[int, int, int, int]:
-    """計算重查批次策略的基準/最小/最大/初始上限。
+    """
+    計算重查批次策略的基準/最小/最大/初始上限。
 
     Args:
         default_base_limit: 預設的基準批次上限。
@@ -57,7 +58,8 @@ def recompute_adaptive_revalidation_batch_limit(
     min_limit: int,
     max_limit: int,
 ) -> int:
-    """依重查結果動態調整下一輪批次上限。
+    """
+    依重查結果動態調整下一輪批次上限。
 
     Args:
         current_limit: 目前的批次上限。

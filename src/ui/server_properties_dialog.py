@@ -1,4 +1,5 @@
-"""server.properties 設定對話框
+"""
+server.properties 設定對話框
 提供視覺化的 server.properties 編輯介面
 """
 
@@ -238,7 +239,7 @@ class ServerPropertiesDialog:
             return
         batch_size = self._compute_property_render_batch_size(total_props)
         end_index = min(total_props, start_index + batch_size)
-        self.create_property_controls(content_frame, properties[start_index:end_index])
+        [self._create_property_control(content_frame, prop_name) for prop_name in properties[start_index:end_index]]
         self._tab_render_positions[tab_name] = end_index
         if end_index < total_props:
             self._schedule_tab_render_batch(tab_name)
@@ -388,18 +389,9 @@ class ServerPropertiesDialog:
         self.create_tooltip(widget, prop_name)
         return prop_frame
 
-    def create_property_controls(self, parent, properties: tuple[str, ...] | list[str]) -> None:
-        """批次建立屬性控制項（相容保留）。
-
-        Args:
-            parent: 父容器。
-            properties: 要建立控制項的屬性名稱列表。
-        """
-        for prop_name in properties:
-            self._create_property_control(parent, prop_name)
-
     def create_property_widget(self, parent, prop_name: str, var: Any) -> Any:
-        """根據屬性類型建立控制項。
+        """
+        根據屬性類型建立控制項。
 
         Args:
             parent: 父容器。
@@ -469,7 +461,8 @@ class ServerPropertiesDialog:
         return widget
 
     def create_tooltip(self, widget, prop_name: str) -> None:
-        """建立工具提示。
+        """
+        建立工具提示。
 
         Args:
             widget: 要綁定提示的元件。

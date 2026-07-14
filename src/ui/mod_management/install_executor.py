@@ -151,7 +151,8 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         )
 
     def _add_pending_online_install(self, pending: PendingOnlineInstall) -> bool:
-        """加入待安裝清單，若同版本已存在則覆蓋。
+        """
+        加入待安裝清單，若同版本已存在則覆蓋。
 
         Returns:
             若成功加入則回傳 True；若因伺服器端不支援而被阻擋則回傳 False。

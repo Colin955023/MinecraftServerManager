@@ -1,4 +1,5 @@
-"""設定管理器模組
+"""
+設定管理器模組
 提供統一的使用者設定管理功能，包含自動更新與視窗偏好等。
 """
 
@@ -105,7 +106,8 @@ class SettingsManager:
 
     @staticmethod
     def normalize_servers_base_dir(path_str: str | Path) -> str:
-        """正規化使用者設定的伺服器主資料夾路徑。
+        """
+        正規化使用者設定的伺服器主資料夾路徑。
 
         Args:
             path_str: 原始路徑字串或 Path。
@@ -126,7 +128,8 @@ class SettingsManager:
 
     @staticmethod
     def build_servers_root_path(base_dir: str | Path) -> Path:
-        """從基底資料夾組合出伺服器根目錄。
+        """
+        從基底資料夾組合出伺服器根目錄。
 
         Args:
             base_dir: 使用者指定的基底資料夾。
@@ -211,7 +214,8 @@ class SettingsManager:
                 logger.error("無法寫入 user_settings.json")
 
     def get(self, key: str, default: Any = None) -> Any:
-        """取得指定鍵值的設定資料。
+        """
+        取得指定鍵值的設定資料。
 
         Args:
             key: 設定鍵名。
@@ -227,7 +231,8 @@ class SettingsManager:
             return _clone_settings_payload(value)
 
     def set(self, key: str, value: Any, immediate_save: bool = True) -> None:
-        """設定指定鍵值的資料。
+        """
+        設定指定鍵值的資料。
 
         Args:
             key: 設定鍵名。
@@ -240,7 +245,8 @@ class SettingsManager:
                 self._save_settings(self._settings)
 
     def update_batch(self, updates: dict) -> None:
-        """批次更新多個設定值並一次性儲存。
+        """
+        批次更新多個設定值並一次性儲存。
 
         Args:
             updates: 要合併寫入的設定更新項目。
@@ -259,7 +265,8 @@ class SettingsManager:
         return bool(self.get_window_preferences().get(key, default))
 
     def get_servers_root(self) -> str:
-        """取得使用者設定的伺服器主資料夾路徑。
+        """
+        取得使用者設定的伺服器主資料夾路徑。
 
         Returns:
             目前設定的伺服器主資料夾根路徑字串；若尚未設定則回傳空字串。
@@ -271,7 +278,8 @@ class SettingsManager:
         self.set("servers_root", self.normalize_servers_base_dir(path))
 
     def get_validated_servers_root_path(self, *, create: bool = False) -> Path:
-        """回傳已驗證的 servers 根目錄。
+        """
+        回傳已驗證的 servers 根目錄。
 
         Args:
             create: 若目錄不存在時是否建立。
@@ -327,7 +335,8 @@ class SettingsManager:
         self.set("first_run_completed", True)
 
     def get_window_preferences(self) -> WindowPreferences:
-        """取得視窗偏好設定。
+        """
+        取得視窗偏好設定。
 
         Returns:
             已正規化且可安全讀取的視窗偏好設定。
@@ -357,7 +366,8 @@ class SettingsManager:
         self._update_window_pref("adaptive_sizing", enabled)
 
     def get_main_window_settings(self) -> MainWindowSettings:
-        """取得主視窗的大小、位置和狀態設定。
+        """
+        取得主視窗的大小、位置和狀態設定。
 
         Returns:
             主視窗尺寸、位置與最大化狀態設定。
@@ -376,7 +386,8 @@ class SettingsManager:
     def set_main_window_settings(
         self, width: int, height: int, x: int | None = None, y: int | None = None, maximized: bool = False
     ) -> None:
-        """設定主視窗的大小、位置和最大化狀態。
+        """
+        設定主視窗的大小、位置和最大化狀態。
 
         Args:
             width: 主視窗寬度。
@@ -410,7 +421,8 @@ _settings_manager = None
 
 
 def get_settings_manager() -> SettingsManager:
-    """取得全域設定管理器的單例實例。
+    """
+    取得全域設定管理器的單例實例。
 
     Returns:
         全域共用的 `SettingsManager` 實例。

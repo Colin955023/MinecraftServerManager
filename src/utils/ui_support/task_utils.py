@@ -14,11 +14,13 @@ logger = get_logger().bind(component="TaskUtils")
 
 
 class TaskUtils:
-    """集中處理 UI 執行緒切換、背景工作與 UI 佇列泵送。"""
+    """
+    集中處理 UI 執行緒切換、背景工作與 UI 佇列泵送。"""
 
     @staticmethod
     def call_on_ui(parent: Any, func: Callable[[], Any], timeout: float | None = None) -> Any:
-        """在 UI 執行緒執行函數，若目前不在主執行緒則排程並等待結果。
+        """
+        在 UI 執行緒執行函數，若目前不在主執行緒則排程並等待結果。
 
         Args:
             parent: 可用來排程 UI 工作的元件。
@@ -36,7 +38,8 @@ class TaskUtils:
 
     @staticmethod
     def safe_update_widget(widget, update_func: Callable, *args, **kwargs) -> None:
-        """安全地更新 widget，先確認 widget 仍然存在。
+        """
+        安全地更新 widget，先確認 widget 仍然存在。
 
         Args:
             widget: 要更新的元件。
@@ -64,7 +67,8 @@ class TaskUtils:
         max_tasks_per_tick: int = 100,
         job_attr: str = "_ui_queue_pump_job",
     ) -> None:
-        """啟動 UI queue pump，將背景執行緒送入的任務分批送到主執行緒。
+        """
+        啟動 UI queue pump，將背景執行緒送入的任務分批送到主執行緒。
 
         Args:
             widget: 原生 Qt QObject UI 元件。
@@ -125,7 +129,8 @@ class TaskUtils:
 
     @staticmethod
     def run_async(target: Callable[..., Any], *args: Any, **kwargs: Any) -> concurrent.futures.Future | None:
-        """簡單的非同步執行封裝。
+        """
+        簡單的非同步執行封裝。
 
         Args:
             target: 要執行的函式。
@@ -153,7 +158,8 @@ class TaskUtils:
         error_log_prefix: str = "",
         component: str = "TaskUtils",
     ) -> None:
-        """透過 Qt 背景工作池執行任務，失敗時可選擇回派 UI callback。
+        """
+        透過 Qt 背景工作池執行任務，失敗時可選擇回派 UI callback。
 
         Args:
             task_func: 要執行的任務函式。

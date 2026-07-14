@@ -1,4 +1,5 @@
-"""應用程式更新檢查器模組
+"""
+應用程式更新檢查器模組
 提供 GitHub Release 版本檢查與自動下載安裝功能
 """
 
@@ -29,7 +30,8 @@ class UpdateCheckerInteraction(Protocol):
         """在背景執行更新檢查工作。"""
 
     def call_on_ui(self, parent: Any, callback: Callable[[], _UpdateResultT]) -> _UpdateResultT:
-        """在 UI 執行緒執行 callback 並回傳結果。
+        """
+        在 UI 執行緒執行 callback 並回傳結果。
 
         Args:
             parent: 排程用 UI parent。
@@ -42,7 +44,8 @@ class UpdateCheckerInteraction(Protocol):
     def schedule_debounce(
         self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any:
-        """安排延遲 UI 工作。
+        """
+        安排延遲 UI 工作。
 
         Args:
             widget: 排程所在 widget。
@@ -56,7 +59,8 @@ class UpdateCheckerInteraction(Protocol):
         """
 
     def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
-        """詢問使用者是否同意更新流程。
+        """
+        詢問使用者是否同意更新流程。
 
         Args:
             title: 對話框標題。
@@ -68,7 +72,8 @@ class UpdateCheckerInteraction(Protocol):
         """
 
     def show_info(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示資訊訊息。
+        """
+        顯示資訊訊息。
 
         Args:
             title: 訊息標題。
@@ -77,7 +82,8 @@ class UpdateCheckerInteraction(Protocol):
         """
 
     def show_error(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示錯誤訊息。
+        """
+        顯示錯誤訊息。
 
         Args:
             title: 訊息標題。
@@ -86,7 +92,8 @@ class UpdateCheckerInteraction(Protocol):
         """
 
     def open_external(self, target: str) -> None:
-        """開啟外部連結或路徑。
+        """
+        開啟外部連結或路徑。
 
         Args:
             target: URL 或檔案路徑。
@@ -176,7 +183,8 @@ class UpdateChecker:
     def _launch_installer(
         installer_path: Path, parent=None, interaction: UpdateCheckerInteraction | None = None
     ) -> bool:
-        """啟動安裝程式
+        """
+        啟動安裝程式
 
         Args:
             installer_path: 安裝程式檔案路徑
@@ -231,7 +239,8 @@ class UpdateChecker:
 
     @staticmethod
     def _graceful_exit(parent, delay_ms: int = 100, interaction: UpdateCheckerInteraction | None = None) -> None:
-        """優雅地關閉應用程式
+        """
+        地關閉應用程式
 
         Args:
             parent: 父視窗物件
@@ -324,7 +333,8 @@ class UpdateChecker:
         parent=None,
         interaction: UpdateCheckerInteraction | None = None,
     ) -> None:
-        """檢查最新版本並在需要時提示使用者進行更新。
+        """
+        檢查最新版本並在需要時提示使用者進行更新。
 
         Args:
             current_version: 目前版本字串。

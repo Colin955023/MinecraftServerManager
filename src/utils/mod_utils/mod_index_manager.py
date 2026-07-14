@@ -124,7 +124,8 @@ class ModIndexManager:
                 logger.warning(f"無法保存索引檔案: {e}")
 
     def repair_index_entries(self) -> int:
-        """修復索引資料型別與欄位結構。
+        """
+        修復索引資料型別與欄位結構。
 
         Returns:
             已修復的索引項目數量。
@@ -159,7 +160,8 @@ class ModIndexManager:
         return repaired_count
 
     def get_index_consistency_report(self) -> dict[str, Any]:
-        """回傳索引一致性檢查結果，供觀測與診斷使用。
+        """
+        回傳索引一致性檢查結果，供觀測與診斷使用。
 
         Returns:
             索引一致性摘要資料。
@@ -218,6 +220,7 @@ class ModIndexManager:
     def should_reindex_file(self, file_path: Path) -> bool:
         """
         檢查檔案是否需要重新索引
+
         Args:
             file_path: JAR 檔案路徑
         Returns:
@@ -241,6 +244,7 @@ class ModIndexManager:
     def get_cached_metadata(self, file_path: Path) -> dict[str, Any] | None:
         """
         獲取快取的模組元資料
+
         Args:
             file_path: JAR 檔案路徑
         Returns:
@@ -288,6 +292,7 @@ class ModIndexManager:
     def cache_metadata(self, file_path: Path, metadata: dict[str, Any]) -> None:
         """
         快取模組元資料
+
         Args:
             file_path: JAR 檔案路徑
             metadata: 模組元資料
@@ -301,7 +306,8 @@ class ModIndexManager:
     def cache_provider_metadata(
         self, file_path: Path, provider_metadata: dict[str, Any], *, merge: bool = True
     ) -> None:
-        """快取 provider metadata，供後續更新與比對使用。
+        """
+        快取 provider metadata，供後續更新與比對使用。
 
         Args:
             file_path: 檔案路徑。
@@ -323,7 +329,8 @@ class ModIndexManager:
             logger.warning(f"無法快取 provider metadata: {e}")
 
     def cache_file_hash(self, file_path: Path, algorithm: str, file_hash: str) -> None:
-        """快取指定演算法的檔案哈希值。
+        """
+        快取指定演算法的檔案哈希值。
 
         Args:
             file_path: 檔案路徑。
@@ -346,7 +353,8 @@ class ModIndexManager:
             logger.warning(f"無法快取檔案哈希: {e}")
 
     def ensure_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
-        """確保指定演算法的檔案哈希已寫入索引，並回傳該值。
+        """
+        確保指定演算法的檔案哈希已寫入索引，並回傳該值。
 
         Args:
             file_path: 檔案路徑。
@@ -369,6 +377,7 @@ class ModIndexManager:
     def cleanup_stale_entries(self) -> int:
         """
         清理不存在的檔案對應的索引項
+
         Returns:
             清理的項目數
         """

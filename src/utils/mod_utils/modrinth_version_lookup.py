@@ -9,7 +9,8 @@ from .. import clean_api_identifier, normalize_hash_algorithm
 
 
 def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:
-    """將 Modrinth API 的版本資料轉為內部資料模型。
+    """
+    將 Modrinth API 的版本資料轉為內部資料模型。
 
     Args:
         item: Modrinth 版本原始回應。
@@ -40,7 +41,8 @@ def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:
 def parse_modrinth_version_lookup_response(
     response: dict[str, Any] | None, algorithm: str
 ) -> dict[str, ModrinthVersionLookupResult]:
-    """將 Modrinth 雜湊查詢回應轉為 lookup 結果。
+    """
+    將 Modrinth 雜湊查詢回應轉為 lookup 結果。
 
     Args:
         response: Modrinth API 雜湊查詢回應。

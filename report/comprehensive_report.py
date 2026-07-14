@@ -1,4 +1,5 @@
-"""綜合檢查報告產生器。
+"""
+綜合檢查報告產生器。
 
 功能：
 1. 程式碼品質（ruff + mypy + pylint + bandit + vulture + compileall）。

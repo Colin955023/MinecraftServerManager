@@ -18,7 +18,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
         TaskUtils.run_async(work)
 
     def call_on_ui(self, parent: Any, callback: Callable[[], _ResultT]) -> _ResultT:
-        """在 Qt UI 執行緒執行 callback。
+        """
+        在 Qt UI 執行緒執行 callback。
 
         Args:
             parent: 用於排程的 UI parent。
@@ -32,7 +33,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
     def schedule_debounce(
         self, widget: Any, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any:
-        """使用既有 Qt debounce helper 安排延遲工作。
+        """
+        使用既有 Qt debounce helper 安排延遲工作。
 
         Args:
             widget: 排程所在 widget。
@@ -47,7 +49,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
         return UIUtils.schedule_debounce(widget, job_attr, delay_ms, callback, owner=owner)
 
     def ask_yes_no_cancel(self, title: str, message: str, **kwargs: Any) -> bool | None:
-        """顯示確認對話框。
+        """
+        顯示確認對話框。
 
         Args:
             title: 對話框標題。
@@ -60,7 +63,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
         return UIUtils.ask_yes_no_cancel(title, message, **kwargs)
 
     def show_info(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示資訊對話框。
+        """
+        顯示資訊對話框。
 
         Args:
             title: 對話框標題。
@@ -70,7 +74,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
         UIUtils.show_info(title, message, **kwargs)
 
     def show_error(self, title: str, message: str, **kwargs: Any) -> None:
-        """顯示錯誤對話框。
+        """
+        顯示錯誤對話框。
 
         Args:
             title: 對話框標題。
@@ -80,7 +85,8 @@ class QtUpdateCheckerInteraction(UpdateCheckerInteraction):
         UIUtils.show_error(title, message, **kwargs)
 
     def open_external(self, target: str) -> None:
-        """透過既有 UI 工具開啟外部連結或路徑。
+        """
+        透過既有 UI 工具開啟外部連結或路徑。
 
         Args:
             target: 要開啟的 URL 或檔案路徑。

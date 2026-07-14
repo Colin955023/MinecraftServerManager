@@ -38,7 +38,8 @@ def expand_required_dependency_install_plan(
     log_debug: Callable[[str], None] | None = None,
     log_info: Callable[[str], None] | None = None,
 ) -> None:
-    """展開必要依賴安裝計畫，處理循環、版本檢查與 advisory 分流。
+    """
+    展開必要依賴安裝計畫，處理循環、版本檢查與 advisory 分流。
 
     Args:
         root_version: 起始模組版本。

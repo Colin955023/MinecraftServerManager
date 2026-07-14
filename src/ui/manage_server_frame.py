@@ -1,4 +1,5 @@
-"""管理伺服器頁面
+"""
+管理伺服器頁面
 負責管理現有 Minecraft 伺服器的使用者介面
 """
 
@@ -135,7 +136,8 @@ class ManageServerFrame:
             self._auto_refresh_job = self.schedule(self._auto_refresh_interval_ms, self._auto_refresh_loop)
 
     def set_auto_refresh_enabled(self, enabled: bool, *, refresh_now: bool = False) -> None:
-        """啟用或停用此管理頁面的背景自動重新整理。
+        """
+        啟用或停用此管理頁面的背景自動重新整理。
 
         此方法主要供外層 UI（例如分頁/頁籤容器）在切換顯示狀態時呼叫，用途如下：
         - 本頁不在前景時停用自動重新整理，降低 CPU 與 I/O 負擔。
@@ -190,7 +192,8 @@ class ManageServerFrame:
             logger.debug(f"套用管理伺服器頁面主題失敗: {e}")
 
     def create_controls(self, parent) -> None:
-        """建立控制區。
+        """
+        建立控制區。
 
         Args:
             parent: 控制區的父容器。
@@ -233,7 +236,8 @@ class ManageServerFrame:
         refresh_button.attach(side="left", padx=Spacing.TINY)
 
     def create_server_list(self, parent) -> None:
-        """建立伺服器列表。
+        """
+        建立伺服器列表。
 
         Args:
             parent: 父容器。
@@ -357,7 +361,8 @@ class ManageServerFrame:
         tree.column(column_id, width=computed_width, minwidth=safety_min_width, stretch=column_id == "路徑", anchor="w")
 
     def show_server_context_menu(self, event) -> None:
-        """顯示右鍵選單。
+        """
+        顯示右鍵選單。
 
         Args:
             event: 滑鼠右鍵事件。
@@ -482,7 +487,8 @@ class ManageServerFrame:
             UIUtils.show_error("錯誤", f"無法開啟備份資料夾: {e}", self.top_level_widget())
 
     def get_backup_status(self, server_name: str) -> str:
-        """獲取伺服器的備份狀態文字。
+        """
+        獲取伺服器的備份狀態文字。
 
         Args:
             server_name: 伺服器名稱。
@@ -521,7 +527,8 @@ class ManageServerFrame:
             return "❓ 檢查失敗"
 
     def create_actions(self, parent) -> None:
-        """建立操作區。
+        """
+        建立操作區。
 
         Args:
             parent: 父容器。
@@ -594,7 +601,8 @@ class ManageServerFrame:
             self.refresh_servers()
 
     def detect_servers(self, show_message: bool = True) -> None:
-        """偵測現有伺服器，無論新建或覆蓋都會呼叫 `detect_server_type`。
+        """
+        偵測現有伺服器，無論新建或覆蓋都會呼叫 `detect_server_type`。
 
         Args:
             show_message: 是否在完成後顯示提示訊息。
@@ -689,7 +697,8 @@ class ManageServerFrame:
         return "❌ 未就緒"
 
     def _check_server_jar_exists(self, server_path: str, loader_type: str = "vanilla") -> bool:
-        """檢查伺服器 JAR 檔案是否存在（使用 ServerDetectionUtils）
+        """
+        檢查伺服器 JAR 檔案是否存在（使用 ServerDetectionUtils）
 
         Args:
             server_path: 伺服器路徑
@@ -708,7 +717,8 @@ class ManageServerFrame:
             return (Path(server_path) / "server.jar").exists()
 
     def _cancel_server_refresh_job(self) -> None:
-        """取消尚未完成的列表插入工作（共用排程 helper）。
+        """
+        取消尚未完成的列表插入工作（共用排程 helper）。
 
         在新一輪重新整理開始前呼叫，立即終止舊輪次尚未執行的 after 批次工作。
         """
@@ -995,7 +1005,8 @@ class ManageServerFrame:
         refresh_token: int,
         previous_selection: str | None,
     ) -> None:
-        """以差異更新 Treeview，減少 delete/insert 造成的卡頓。
+        """
+        以差異更新 Treeview，減少 delete/insert 造成的卡頓。
 
         `refresh_token` 是本輪重新整理的輪次編號。這個方法可能透過 `after` 分批插入資料，
         因此它的執行生命週期可能跨越多次重新整理請求；每個批次都要先檢查 token。
@@ -1061,7 +1072,8 @@ class ManageServerFrame:
         )
 
     def refresh_servers(self, reload_config: bool = True) -> None:
-        """重新整理伺服器列表：只更新 UI，不自動偵測。
+        """
+        重新整理伺服器列表：只更新 UI，不自動偵測。
 
         Args:
             reload_config: 是否重新載入伺服器設定。
@@ -1133,7 +1145,8 @@ class ManageServerFrame:
                 self._set_server_tree_render_lock(False)
 
     def on_server_select(self, _event) -> None:
-        """伺服器選擇事件。
+        """
+        伺服器選擇事件。
 
         Args:
             _event: 事件物件。
@@ -1150,7 +1163,8 @@ class ManageServerFrame:
         self.update_selection()
 
     def on_server_tree_double_click(self, event) -> str | None:
-        """Treeview 雙擊事件：欄位分隔線自動調寬，列雙擊開啟設定。
+        """
+        Treeview 雙擊事件：欄位分隔線自動調寬，列雙擊開啟設定。
 
         Args:
             event: 滑鼠事件。
@@ -1177,7 +1191,8 @@ class ManageServerFrame:
         return None
 
     def on_server_double_click(self, event) -> None:
-        """伺服器雙擊事件。
+        """
+        伺服器雙擊事件。
 
         Args:
             event: 滑鼠事件。

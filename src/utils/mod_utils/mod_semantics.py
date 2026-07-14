@@ -1,4 +1,5 @@
-"""Mod metadata/recommendation 語意常數。
+"""
+Mod metadata/recommendation 語意常數。
 
 集中管理本地更新流程會用到的 metadata source 與 recommendation
 source/confidence 欄位值，避免不同路徑各自硬編碼造成語意漂移。

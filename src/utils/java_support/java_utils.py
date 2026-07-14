@@ -1,4 +1,5 @@
-"""在 Windows 上偵測與管理 Java 安裝的工具函式。
+"""
+在 Windows 上偵測與管理 Java 安裝的工具函式。
 本模組提供從 Windows 常見安裝路徑與環境變數中尋找 Java 安裝的功能。
 """
 
@@ -23,7 +24,8 @@ class JavaInstallInteraction(Protocol):
 
     @staticmethod
     def ask_yes_no_cancel(title: str, message: str, **kwargs) -> bool | None:
-        """詢問使用者是否同意動作。
+        """
+        詢問使用者是否同意動作。
 
         Args:
             title: 對話框標題。
@@ -36,7 +38,8 @@ class JavaInstallInteraction(Protocol):
 
     @staticmethod
     def show_info(title: str, message: str, **kwargs) -> None:
-        """顯示資訊訊息。
+        """
+        顯示資訊訊息。
 
         Args:
             title: 訊息標題。
@@ -46,7 +49,8 @@ class JavaInstallInteraction(Protocol):
 
     @staticmethod
     def show_error(title: str, message: str, **kwargs) -> None:
-        """顯示錯誤訊息。
+        """
+        顯示錯誤訊息。
 
         Args:
             title: 訊息標題。
@@ -70,7 +74,8 @@ class JavaUtils:
 
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
-        """取得指定 `javaw.exe` 的主要版本號。
+        """
+        取得指定 `javaw.exe` 的主要版本號。
 
         Args:
             java_path: `javaw.exe` 的完整路徑。
@@ -210,7 +215,8 @@ class JavaUtils:
 
     @staticmethod
     def refresh_java_candidates_cache() -> list[tuple[str, int]]:
-        """重新掃描本機 Java 並更新 JSON 快取。
+        """
+        重新掃描本機 Java 並更新 JSON 快取。
 
         Returns:
             最新掃描到的 Java 候選清單。
@@ -234,7 +240,8 @@ class JavaUtils:
 
     @staticmethod
     def get_required_java_major(mc_version: str) -> int:
-        """根據 Minecraft 版本決定所需 Java major 版本。
+        """
+        根據 Minecraft 版本決定所需 Java major 版本。
 
         Args:
             mc_version: Minecraft 版本字串。
@@ -271,7 +278,8 @@ class JavaUtils:
 
     @staticmethod
     def get_all_local_java_candidates() -> list:
-        """取得所有可用的 `javaw.exe` 路徑及其主要版本號列表。
+        """
+        取得所有可用的 `javaw.exe` 路徑及其主要版本號列表。
 
         Returns:
             `javaw.exe` 路徑與 major 版本的配對清單。
@@ -303,7 +311,8 @@ class JavaUtils:
         ask_download: bool = True,
         interaction: JavaInstallInteraction | None = None,
     ) -> str | None:
-        """為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑。
+        """
+        為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑。
 
         Args:
             mc_version: Minecraft 版本字串。

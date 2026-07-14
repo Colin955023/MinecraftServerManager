@@ -1,5 +1,5 @@
-"""檔案雜湊工具。
-
+"""
+檔案雜湊工具。
 提供同步與非同步的檔案雜湊計算，並使用背景工作池避免阻塞主執行緒。
 """
 
@@ -15,7 +15,8 @@ logger = get_logger().bind(component="HashUtils")
 
 
 def compute_file_hash_sync(file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024) -> str:
-    """同步計算檔案雜湊值。
+    """
+    同步計算檔案雜湊值。
 
     Args:
         file_path: 要計算雜湊的檔案路徑。
@@ -50,9 +51,7 @@ def compute_file_hash_sync(file_path: str | Path, algorithm: str = "sha256", chu
 def _compute_file_hash_cached_internal(
     file_path: str, algorithm: str, mtime_ns: int, file_size: int, chunk_size: int
 ) -> str:
-    """
-    透過快取避免重複計算，並發派任務到 Qt 工作池防止阻塞主執行緒。
-    """
+    """透過快取避免重複計算，並發派任務到 Qt 工作池防止阻塞主執行緒。"""
     del mtime_ns, file_size  # 用於快取鍵值
     future = submit_to_worker_pool(compute_file_hash_sync, file_path, algorithm, chunk_size)
     return future.result()
@@ -61,7 +60,8 @@ def _compute_file_hash_cached_internal(
 def compute_file_hash(
     file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024, use_cache: bool = True
 ) -> str:
-    """計算檔案雜湊值（適用於單次呼叫或大量小檔呼叫）。
+    """
+    計算檔案雜湊值（適用於單次呼叫或大量小檔呼叫）。
 
     Args:
         file_path: 要計算雜湊的檔案路徑。
@@ -94,7 +94,8 @@ def compute_file_hash(
 async def compute_file_hash_async(
     file_path: str | Path, algorithm: str = "sha256", chunk_size: int = 1024 * 1024, use_cache: bool = True
 ) -> str:
-    """非同步計算檔案雜湊值。
+    """
+    非同步計算檔案雜湊值。
 
     Args:
         file_path: 要計算雜湊的檔案路徑。

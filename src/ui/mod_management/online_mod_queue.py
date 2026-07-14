@@ -241,7 +241,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         TaskUtils.run_async(search_task)
 
     def on_online_browse_filters_changed(self, _value: str) -> None:
-        """線上瀏覽排序變更時立即刷新清單。
+        """
+        線上瀏覽排序變更時立即刷新清單。
 
         Args:
             _value: 下拉選單回傳的目前值。
@@ -251,7 +252,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         self._load_online_mods(force=True, show_warning=False)
 
     def search_online_mods(self, _event=None) -> None:
-        """載入 Modrinth 線上模組並觸發搜尋。
+        """
+        載入 Modrinth 線上模組並觸發搜尋。
 
         Args:
             _event: 事件繫結傳入的事件物件，未使用。
@@ -259,7 +261,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
         self._load_online_mods(force=True, show_warning=True)
 
     def show_browse_context_menu(self, event) -> None:
-        """顯示線上模組右鍵選單。
+        """
+        顯示線上模組右鍵選單。
 
         Args:
             event: 觸發選單的滑鼠事件。
@@ -278,7 +281,8 @@ class ModManagementQueueMixin(ModManagementRuntimeBase):
             menu.grab_release()
 
     def install_online_mod(self, _event=None) -> None:
-        """取得模組版本列表並讓使用者選擇要安裝的版本。
+        """
+        取得模組版本列表並讓使用者選擇要安裝的版本。
 
         Args:
             _event: 事件繫結傳入的事件物件，未使用。

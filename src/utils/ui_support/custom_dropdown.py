@@ -100,7 +100,8 @@ class CustomDropdown(QtWidgets.QComboBox):
             self.command(value)
 
     def get(self) -> str:
-        """取得目前選取值。
+        """
+        取得目前選取值。
 
         Returns:
             目前選取的文字。
@@ -108,7 +109,8 @@ class CustomDropdown(QtWidgets.QComboBox):
         return self.currentText()
 
     def set(self, value: str) -> None:
-        """設定目前選取值。
+        """
+        設定目前選取值。
 
         Args:
             value: 要選取或加入的文字。
@@ -125,7 +127,8 @@ class CustomDropdown(QtWidgets.QComboBox):
             self.variable.set(text)
 
     def configure(self, **kwargs: Any) -> None:
-        """更新選單設定。
+        """
+        更新選單設定。
 
         Args:
             **kwargs: 支援 values、command、font_size、font、width、height、state。
@@ -164,7 +167,8 @@ class CustomDropdown(QtWidgets.QComboBox):
     config = configure
 
     def attach(self, **kwargs: Any) -> None:
-        """加入父容器的線性 Qt 版面。
+        """
+        加入父容器的線性 Qt 版面。
 
         Args:
             **kwargs: 版面選項，例如 side、fill、expand、anchor。
@@ -189,7 +193,8 @@ class CustomDropdown(QtWidgets.QComboBox):
         cast(QtWidgets.QBoxLayout, layout).addWidget(self, 1 if kwargs.get("expand") else 0, alignment)
 
     def cget(self, key: str) -> Any:
-        """取得設定值。
+        """
+        取得設定值。
 
         Args:
             key: 要讀取的設定鍵。

@@ -99,7 +99,8 @@ def _score_local_mod_search_match(mod: OnlineModInfo, candidate_keys: set[str]) 
 def get_modrinth_current_versions_by_hashes(
     hashes: list[str] | set[str] | tuple[str, ...], algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM
 ) -> dict[str, ModrinthVersionLookupResult]:
-    """依雜湊值取得目前已知的 Modrinth 版本資訊。
+    """
+    依雜湊值取得目前已知的 Modrinth 版本資訊。
 
     Args:
         hashes: 要查詢的檔案雜湊清單。
@@ -164,7 +165,8 @@ def get_modrinth_latest_versions_by_hashes(
     minecraft_version: str | None = None,
     loader: str | None = None,
 ) -> dict[str, ModrinthVersionLookupResult]:
-    """依雜湊值取得最新的 Modrinth 版本資訊。
+    """
+    依雜湊值取得最新的 Modrinth 版本資訊。
 
     Args:
         hashes: 要查詢的檔案雜湊清單。
@@ -226,7 +228,8 @@ def _fetch_modrinth_project_detail(project_id: str) -> dict[str, Any] | None:
 
 
 def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
-    """盡量將本地模組對應到可用的 Modrinth 專案資訊。
+    """
+    盡量將本地模組對應到可用的 Modrinth 專案資訊。
 
     Args:
         local_mod: 本地模組物件。
@@ -246,7 +249,8 @@ def resolve_local_mod_project_info(local_mod: Any) -> OnlineModInfo | None:
 
 
 def build_provider_record_from_online_mod(mod_info: OnlineModInfo | None) -> ProviderMetadataRecord | None:
-    """將線上模組資訊轉成可快取的 provider metadata 紀錄。
+    """
+    將線上模組資訊轉成可快取的 provider metadata 紀錄。
 
     Args:
         mod_info: 線上模組資訊。
@@ -276,7 +280,8 @@ def normalize_cached_provider_identity(
     resolution_source: str | None = None,
     resolved_at_epoch_ms: Any | None = None,
 ) -> tuple[str, str, bool]:
-    """清理快取中的 provider identity，並回報是否需要重新驗證。
+    """
+    清理快取中的 provider identity，並回報是否需要重新驗證。
 
     Args:
         platform_id: 快取中的 provider project id。
@@ -410,7 +415,8 @@ def _ensure_local_mod_provider_identity(
 
 
 def get_modrinth_project_info(project_id: str) -> OnlineModInfo | None:
-    """依 project id 或 slug 取得單一 Modrinth 專案資訊。
+    """
+    依 project id 或 slug 取得單一 Modrinth 專案資訊。
 
     Args:
         project_id: Modrinth project id 或 slug。
@@ -470,7 +476,8 @@ def fetch_modrinth_project_name(project_id: str) -> str | None:
 
 
 def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
-    """依 Modrinth version id 取得精確版本資訊，並回傳其所屬 project id。
+    """
+    依 Modrinth version id 取得精確版本資訊，並回傳其所屬 project id。
 
     Args:
         version_id: Modrinth version id。
@@ -503,7 +510,8 @@ def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | No
 
 
 def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str, ...]) -> dict[str, str]:
-    """將 Modrinth project id 轉為較易讀的專案名稱。
+    """
+    將 Modrinth project id 轉為較易讀的專案名稱。
 
     Args:
         project_ids: 要解析的 project id 清單。
@@ -610,7 +618,8 @@ def search_mods_online(
     sort_by: str = "relevance",
     limit: int = 20,
 ) -> list[OnlineModInfo]:
-    """透過 Modrinth API 搜尋或瀏覽模組。
+    """
+    透過 Modrinth API 搜尋或瀏覽模組。
 
     Args:
         query: 搜尋關鍵字。
@@ -665,7 +674,8 @@ def search_mods_online(
 def get_mod_versions(
     project_id: str, minecraft_version: str | None = None, loader: str | None = None
 ) -> list[OnlineModVersion]:
-    """取得指定 Modrinth 模組的穩定版本。
+    """
+    取得指定 Modrinth 模組的穩定版本。
 
     Args:
         project_id: Modrinth project id。
@@ -737,7 +747,8 @@ def enhance_local_mod(
     resolution_source: str | None = None,
     resolved_at_epoch_ms: Any | None = None,
 ) -> OnlineModInfo | None:
-    """增強本地模組資訊，從線上查詢模組詳細資訊。
+    """
+    增強本地模組資訊，從線上查詢模組詳細資訊。
 
     Args:
         filename: 本地模組檔名。

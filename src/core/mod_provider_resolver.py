@@ -36,7 +36,8 @@ def resolve_platform_info_from_cache(
     cached_provider: dict[str, object] | None,
     ensure_platform_provider_record: Callable[[ProviderMetadataRecord], LocalProviderEnsureResult],
 ) -> tuple[ModPlatform, str, str]:
-    """依快取 provider metadata 解析平台資訊，必要時才重新偵測。
+    """
+    依快取 provider metadata 解析平台資訊，必要時才重新偵測。
 
     Args:
         index_manager: 用於快取 provider metadata 的索引管理器。
@@ -77,7 +78,8 @@ def resolve_platform_info_from_cache(
 
 
 def search_on_modrinth_candidates(name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
-    """依多組候選關鍵字搜尋 Modrinth 專案。
+    """
+    依多組候選關鍵字搜尋 Modrinth 專案。
 
     Args:
         name: 模組顯示名稱。
@@ -142,7 +144,8 @@ class ModProviderResolver:
         filename: str,
         cached_provider: dict[str, object] | None = None,
     ) -> tuple[ModPlatform, str, str]:
-        """優先使用快取 metadata，必要時再重新解析 provider 身分。
+        """
+        優先使用快取 metadata，必要時再重新解析 provider 身分。
 
         Args:
             file_path: 目前掃描中的模組檔案路徑。
@@ -178,7 +181,8 @@ class ModProviderResolver:
         filename: str,
         cached_record: ProviderMetadataRecord,
     ) -> LocalProviderEnsureResult:
-        """補齊或建立模組的 provider metadata record。
+        """
+        補齊或建立模組的 provider metadata record。
 
         Args:
             file_path: 模組檔案路徑。
@@ -200,7 +204,8 @@ class ModProviderResolver:
         )
 
     def resolve_modrinth_provider_record_for_scan(self, identifier: str) -> ProviderMetadataRecord:
-        """將掃描到的識別字轉成標準化的 Modrinth provider record。
+        """
+        將掃描到的識別字轉成標準化的 Modrinth provider record。
 
         Args:
             identifier: 可能是 slug 或 project id 的識別字。
@@ -223,7 +228,8 @@ class ModProviderResolver:
         base_name: str,
         filename: str,
     ) -> ProviderMetadataRecord:
-        """以 provider 偵測結果建立完整 record。
+        """
+        以 provider 偵測結果建立完整 record。
 
         Args:
             file_path: 模組檔案路徑。
@@ -244,7 +250,8 @@ class ModProviderResolver:
         )
 
     def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
-        """將 slug 或 project id 解析為 canonical project id 與 slug。
+        """
+        將 slug 或 project id 解析為 canonical project id 與 slug。
 
         Args:
             identifier: 可能是 Modrinth slug 或 project id。
@@ -269,7 +276,8 @@ class ModProviderResolver:
         return resolved
 
     def build_provider_record_from_search(self, query: str) -> ProviderMetadataRecord | None:
-        """透過搜尋結果建立 provider record。
+        """
+        透過搜尋結果建立 provider record。
 
         Args:
             query: 用於搜尋 Modrinth 的查詢字串。
@@ -286,7 +294,8 @@ class ModProviderResolver:
     def detect_platform_info(
         self, file_path: Path, name: str, base_name: str, filename: str
     ) -> tuple[ModPlatform, str, str]:
-        """從本地模組檔案與檔名線索偵測平台資訊。
+        """
+        從本地模組檔案與檔名線索偵測平台資訊。
 
         Args:
             file_path: 模組檔案路徑。
@@ -337,7 +346,8 @@ class ModProviderResolver:
         return (platform, platform_id, platform_slug)
 
     def extract_platform_id_from_fabric(self, jar: Any) -> str:
-        """從 `fabric.mod.json` 提取平台識別字。
+        """
+        從 `fabric.mod.json` 提取平台識別字。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -362,7 +372,8 @@ class ModProviderResolver:
         return ""
 
     def extract_platform_id_from_forge(self, jar: Any) -> str:
-        """從 `mods.toml` 提取平台識別字。
+        """
+        從 `mods.toml` 提取平台識別字。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -390,7 +401,8 @@ class ModProviderResolver:
         return ""
 
     def search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
-        """使用多組名稱候選在 Modrinth 搜尋對應專案。
+        """
+        使用多組名稱候選在 Modrinth 搜尋對應專案。
 
         Args:
             name: 模組顯示名稱。

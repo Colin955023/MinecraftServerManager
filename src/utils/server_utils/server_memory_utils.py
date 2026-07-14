@@ -8,7 +8,8 @@ class MemoryUtils:
 
     @staticmethod
     def parse_memory_setting(text: str, setting_type: str = "Xmx") -> int | None:
-        """解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數。
+        """
+        解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數。
 
         Args:
             text: 含有 Java 記憶體參數的文字。
@@ -36,7 +37,8 @@ class MemoryUtils:
 
     @staticmethod
     def format_memory_mb(memory_mb: int, compact: bool = True) -> str:
-        """格式化記憶體大小（MB），自動選擇單位顯示。
+        """
+        格式化記憶體大小（MB），自動選擇單位顯示。
 
         Args:
             memory_mb: 以 MB 表示的記憶體數值。

@@ -110,7 +110,8 @@ class LocalModMutationResult:
 
 @dataclass(slots=True)
 class ModrinthIdentityCache:
-    """執行緒安全、具容量上限的 Modrinth project identity 快取。
+    """
+    執行緒安全、具容量上限的 Modrinth project identity 快取。
 
     取代先前 `ModManager` 把私有的 `_modrinth_identity_cache` dict 以參照方式
     直接交給 `ModProviderResolver` 讀寫的作法：
