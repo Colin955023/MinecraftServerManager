@@ -4,15 +4,20 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import src.utils.ui_support.qt_widgets as qt
 from PySide6 import QtGui
-from src.ui import DialogUtils
-from src.ui.task_utils import TaskUtils
-from src.ui.ui_config import NativeQtStyle, initialize_ui_theme
-from src.utils import UIUtils
-from src.utils.ui_support import qt_widgets as qt
-from src.utils.ui_support.qt_runtime import QtCore, QtWidgets
-from src.utils.ui_support.ui_tokens import Colors, Sizes
-from src.utils.ui_support.ui_utils import get_button_style
+from src.utils import (
+    Colors,
+    DialogUtils,
+    NativeQtStyle,
+    QtCore,
+    QtWidgets,
+    Sizes,
+    TaskUtils,
+    UIUtils,
+    get_button_style,
+    initialize_ui_theme,
+)
 
 
 def test_qt_wrapper_attach_creates_layout_for_native_parent() -> None:

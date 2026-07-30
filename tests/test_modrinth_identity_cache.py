@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
-from src.core.mod_models import ModrinthIdentityCache
+from src.models import ModrinthIdentityCache
 
 
 class _SpyLock:

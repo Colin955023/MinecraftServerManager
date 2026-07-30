@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from src.core import ModManager
-from src.core.mod_models import LocalModInfo, ModStatus
+from src.models import LocalModInfo, ModStatus
 from src.utils import (
     build_non_official_source_warning,
     build_non_official_source_warning_message,

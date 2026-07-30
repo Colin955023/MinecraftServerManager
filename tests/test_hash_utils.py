@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from src.utils.core_utils.hash_utils import compute_file_hash_sync
+from src.utils import compute_file_hash_sync
 
 
 def test_matches_known_sha256(tmp_path: Path) -> None:

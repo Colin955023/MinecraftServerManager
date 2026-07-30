@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 def test_server_instance_init(tmp_path):
-    from src.core.server_instance import ServerInstance
+    from src.models import ServerInstance
 
     inst = ServerInstance(id="s1", name="myserver", path=tmp_path)
 
@@ -17,7 +17,7 @@ def test_server_instance_init(tmp_path):
 
 
 def test_server_instance_process_helpers(tmp_path):
-    from src.core.server_instance import ServerInstance
+    from src.models import ServerInstance
 
     class DummyProcess:
         def poll(self):
@@ -36,7 +36,7 @@ def test_server_instance_process_helpers(tmp_path):
 
 
 def test_to_dict(tmp_path):
-    from src.core.server_instance import ServerInstance
+    from src.models import ServerInstance
 
     inst = ServerInstance(id="s2", name="srv", path=tmp_path)
     d = inst.to_dict()
@@ -45,8 +45,8 @@ def test_to_dict(tmp_path):
 
 
 def test_server_manager_reads_buffer_before_stopped_process_cleanup(tmp_path):
-    from src.core.server_instance import ServerInstance
     from src.core.server_manager import ServerManager
+    from src.models import ServerInstance
 
     class StoppedProcess:
         pid = 0

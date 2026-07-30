@@ -289,6 +289,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "UpdateCheckerInteraction": (".update_utils.update_checker", "UpdateCheckerInteraction"),
     "UpdateParsing": (".update_utils.update_parsing", "UpdateParsing"),
     "QtUpdateCheckerInteraction": (".update_utils.update_checker_adapter", "QtUpdateCheckerInteraction"),
+    "compute_file_hash_sync": (".core_utils.hash_utils", "compute_file_hash_sync"),
 }
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

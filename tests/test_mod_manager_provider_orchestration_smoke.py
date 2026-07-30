@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from src.core import ModManager, ModPlatform
-from src.core.mod_models import ModrinthIdentityCache
+from src.models import ModrinthIdentityCache
 
 
 class _StubIndexManager:
@@ -24,7 +24,7 @@ def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypat
 
     monkeypatch.setattr(
         manager,
-        "_resolve_modrinth_project_identity",
+        "resolve_modrinth_project_identity",
         lambda _identifier: ("YL57xq9U", "inventory-profiles-next"),
     )
 
@@ -114,7 +114,7 @@ def test_resolve_platform_info_re_resolves_when_cached_provider_is_stale(monkeyp
         resolve_calls["count"] += 1
         return "YL57xq9U", "inventory-profiles-next"
 
-    monkeypatch.setattr(manager, "_resolve_modrinth_project_identity", _track_resolve)
+    monkeypatch.setattr(manager, "resolve_modrinth_project_identity", _track_resolve)
 
     def _track_detect(*_args: Any, **_kwargs: Any) -> tuple[ModPlatform, str, str]:
         detect_calls["count"] += 1

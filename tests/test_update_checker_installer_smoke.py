@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Any
 
-from src.utils.update_utils import update_checker as update_checker_module
-from src.utils.update_utils.update_checker import UpdateChecker
+import src.utils.update_utils.update_checker as update_checker_module
+from src.utils import UpdateChecker
 
 
 class ImmediateUpdateInteraction:

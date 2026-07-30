@@ -53,7 +53,7 @@ class _StubWindowSettings:
     def is_remember_size_position_enabled(self) -> bool:
         return True
 
-    def get_main_window_settings(self) -> dict[str, int | None | bool]:
+    def get_main_window_settings(self) -> dict[str, int | bool | None]:
         return {"width": 600, "height": 400, "x": None, "y": None, "maximized": False}
 
     def set_main_window_settings(self, width: int, height: int, x: int | None, y: int | None, maximized: bool) -> None:

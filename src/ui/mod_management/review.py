@@ -56,6 +56,7 @@ from ...utils import (
     get_non_official_download_host,
     migrate_online_dependency_install_plan_payload,
     register_provider_revalidation_success,
+    resolve_modrinth_provider_record,
     serialize_online_dependency_install_plan,
     validate_online_dependency_install_plan_payload,
 )
@@ -63,6 +64,7 @@ from ...utils.ui_support import qt_widgets as qt
 from .. import (
     ModManagementRuntimeBase,
     build_local_mod_update_plan,
+    enhance_local_mod,
 )
 from .constants import MODRINTH_PROJECT_PAGE_BASE_URL, logger
 from .install_review_dialog_builder import InstallReviewDialogBuilder
@@ -2284,8 +2286,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
 
     def _ensure_local_mod_project_ids(self, local_mods: list[Any]) -> None:
         """盡量補齊本地模組的 Modrinth project id / slug，供更新檢查使用。"""
-        from .. import enhance_local_mod, resolve_modrinth_provider_record
-
         for local_mod in local_mods:
             current_project_id = str(getattr(local_mod, "platform_id", "") or "").strip()
             current_slug = str(getattr(local_mod, "platform_slug", "") or "").strip()
