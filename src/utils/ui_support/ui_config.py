@@ -5,29 +5,11 @@ UI 應用程式配置
 所有 GUI 組件建立前應先導入此模組以套用主題。
 """
 
+import contextlib
 from typing import Any, ClassVar
 
-from ..ui_support.fluent import apply_fluent_theme
 from ..ui_support.qt_runtime import QtCore, QtGui, QtWidgets, ensure_application
-
-
-def resolve_color(color: Any, *, dark: bool | None = None) -> str:
-    """
-    解析專案色彩設定為 Qt stylesheet 可用色碼。
-
-    Args:
-        color: 單一色碼或 `(light, dark)` 色碼 tuple。
-        dark: 是否使用深色主題；未指定時由目前 QApplication 判斷。
-
-    Returns:
-        Qt stylesheet 可接受的色彩字串。
-    """
-    if dark is None:
-        app = QtWidgets.QApplication.instance()
-        dark = _is_dark_scheme(app) if isinstance(app, QtWidgets.QApplication) else False
-    if isinstance(color, tuple):
-        return str(color[1 if dark and len(color) > 1 else 0])
-    return str(color)
+from ..ui_support.qt_widgets import apply_fluent_theme
 
 
 def _requested_scheme(mode: str) -> QtCore.Qt.ColorScheme:
@@ -96,7 +78,7 @@ def _dialog_control_stylesheet(
         scope,
     )
     return (
-        f"{button} {{ background: {primary}; color: white; border: 0; border-radius: 4px; padding: 6px 10px; }}"
+        f"{button} {{ background: {primary}; color: white; border: 0; border-radius: 4px; padding: 7px 12px; min-height: 34px; }}"
         f"{button}:hover {{ background: {primary_hover}; }}"
         f"{button}:pressed {{ background: {secondary_hover}; }}"
         f"{button}:disabled {{ background: {disabled_button}; color: #f8fafc; }}"
@@ -288,18 +270,22 @@ class NativeQtStyle:
         """
         theme = getattr(NativeQtStyle, "_theme", {})
         bg = (
-            theme.get("button_primary_dark", "#1f4e79")
+            theme.get("button_danger", "#b91c1c")
+            if kind == "danger"
+            else theme.get("button_primary_dark", "#1f4e79")
             if kind == "primary"
             else theme.get("button_secondary", "#2f3b52")
         )
         hover = (
-            theme.get("button_primary_hover", "#163d61")
+            theme.get("button_danger_hover", "#991b1b")
+            if kind == "danger"
+            else theme.get("button_primary_hover", "#163d61")
             if kind == "primary"
             else theme.get("button_secondary_hover", "#1f2937")
         )
         return (
             "QPushButton {"
-            f"background: {bg}; color: white; border: 0; border-radius: 4px; padding: 4px 8px;"
+            f"background: {bg}; color: white; border: 0; border-radius: 4px; padding: 7px 12px; min-height: 34px;"
             "}"
             f"QPushButton:hover {{ background: {hover}; }}"
             "QPushButton:disabled { background: #9ca3af; color: #f8fafc; }"
@@ -465,13 +451,13 @@ def _refresh_native_styles(dark: bool) -> None:
 
 def initialize_ui_theme(mode: str = "light") -> None:
     """
-    初始化 UI 主題配置。
+    初始化或動態切換 UI 主題配置。
 
-    應在應用程式啟動時（組建主視窗前）呼叫一次。
+    可在應用程式啟動時或執行期呼叫以動態切換主題。
     設定全域外觀模式與色彩主題。
 
     Args:
-        mode: 主題模式，可為 `light` 或 `dark`。
+        mode: 主題模式，可為 `light`、`dark` 或 `system`。
 
     Returns:
         None
@@ -517,19 +503,19 @@ def initialize_ui_theme(mode: str = "light") -> None:
     QtWidgets.QApplication.setFont(ui_font)
     font_family = ui_font.family().replace("'", "\\'")
     app.setStyleSheet(
-        f"QWidget {{ font-family: '{font_family}'; color: {colors['text']}; }}"
-        f"QLabel, QRadioButton, QGroupBox, QTabWidget, QTreeView {{ color: {colors['text']}; }}"
-        "QToolTip { background: #000000; color: #ffffff; border: 1px solid #ffffff; padding: 5px; }"
-        "QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {"
-        f"background: {colors['base']}; color: {colors['text']}; border: 2px solid {colors['input_border']}; "
-        "border-radius: 3px; padding: 4px 7px;"
-        "}"
+        f"QWidget {{ font-family: '{font_family}'; color: {colors['text']}; }}\n"
+        f"QLabel, QRadioButton, QGroupBox, QTabWidget, QTreeView {{ color: {colors['text']}; }}\n"
+        "QToolTip { background: #000000; color: #ffffff; border: 1px solid #ffffff; padding: 5px; }\n"
+        "QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {\n"
+        f"background: {colors['base']}; color: {colors['text']}; border: 2px solid {colors['input_border']}; \n"
+        "border-radius: 3px; padding: 4px 7px;\n"
+        "}\n"
         f"QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus "
-        f"{{ border-color: {colors['button']}; }}"
+        f"{{ border-color: {colors['button']}; }}\n"
         f"QComboBox::drop-down {{ width: 21px; border-left: 1px solid {colors['input_border']}; "
-        f"background: {colors['alternate_base']}; }}"
+        f"background: {colors['alternate_base']}; }}\n"
         f"QComboBox QAbstractItemView {{ background: {colors['base']}; color: {colors['text']}; "
-        f"selection-background-color: {colors['highlight']}; selection-color: #ffffff; }}"
+        f"selection-background-color: {colors['highlight']}; selection-color: #ffffff; }}\n"
         + _checkbox_stylesheet(
             text=colors["text"],
             unchecked_fill=colors["alternate_base"] if dark else colors["base"],
@@ -541,12 +527,38 @@ def initialize_ui_theme(mode: str = "light") -> None:
             disabled_fill=colors["alternate_base"],
             disabled_border=colors["disabled_button"],
         )
-        + f"QTreeView {{ background: {colors['base']}; color: {colors['text']}; "
-        f"alternate-background-color: {colors['tree_alt']}; border: 1px solid {colors['tree_border']}; "
-        "padding: 0px; margin: 0px; }}"
-        f"QTreeView::item {{ padding-left: 0px; margin-left: 0px; color: {colors['text']}; }}"
-        f"QTreeView::item:selected {{ background: {colors['highlight']}; color: #ffffff; }}"
+        + f"QTreeView {{ background-color: {colors['base']}; color: {colors['text']}; "
+        f"alternate-background-color: {colors['tree_alt']}; border: 1px solid {colors['tree_border']}; }}\n"
+        f"QTreeView::item {{ color: {colors['text']}; height: 32px; }}\n"
+        f"QTreeView::item:hover {{ background-color: {colors['alternate_base']}; }}\n"
+        f"QTreeView::item:selected {{ background-color: {colors['highlight']}; color: #ffffff; }}\n"
+        f"QHeaderView::section {{ background-color: {colors['tree_header']}; color: {colors['text']}; "
+        f"padding: 6px; border: 1px solid {colors['tree_border']}; font-weight: bold; }}\n"
     )
 
+    # 通知所有頂層視窗重新套用主題樣式
+    _notify_windows_theme_changed(dark)
 
-__all__ = ["NativeQtStyle", "initialize_ui_theme", "resolve_color"]
+
+def _notify_windows_theme_changed(dark: bool) -> None:
+    """通知所有頂層 FluentWindow 重新套用主題相關樣式。"""
+    app = QtWidgets.QApplication.instance()
+    if app is None or not isinstance(app, QtWidgets.QApplication):
+        return
+    for widget in app.topLevelWidgets():
+        if hasattr(widget, "apply_theme_styles"):
+            with contextlib.suppress(Exception):
+                widget.apply_theme_styles()
+        # 遞迴通知子介面
+        _notify_child_interfaces_theme_changed(widget, dark)
+
+
+def _notify_child_interfaces_theme_changed(parent: Any, dark: bool) -> None:
+    """遞迴通知子介面重新套用主題樣式。"""
+    if not hasattr(parent, "children"):
+        return
+    for child in parent.children():
+        if hasattr(child, "apply_theme_styles"):
+            with contextlib.suppress(Exception):
+                child.apply_theme_styles()
+        _notify_child_interfaces_theme_changed(child, dark)

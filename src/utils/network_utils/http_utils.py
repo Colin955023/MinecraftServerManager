@@ -22,7 +22,7 @@ from requests import exceptions as requests_exceptions
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .. import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO, get_logger, get_shared_manager, run_blocking_io
+from .. import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO, get_logger
 
 logger = get_logger().bind(component="HTTPUtils")
 
@@ -74,22 +74,6 @@ class HTTPUtils:
     RETRY_ALLOWED_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
     CONNECTION_POOL_SIZE = 16
     _thread_local = threading.local()
-
-    @classmethod
-    def get_timeout_retry_policy(cls) -> dict[str, Any]:
-        """回傳目前 HTTP timeout/retry policy（供文件與診斷使用）。"""
-        return {
-            "json_timeout_min_seconds": cls.JSON_TIMEOUT_MIN_SECONDS,
-            "content_timeout_min_seconds": cls.CONTENT_TIMEOUT_MIN_SECONDS,
-            "download_timeout_min_seconds": cls.DOWNLOAD_TIMEOUT_MIN_SECONDS,
-            "retry_total": cls.RETRY_TOTAL,
-            "retry_connect": cls.RETRY_CONNECT,
-            "retry_read": cls.RETRY_READ,
-            "retry_status": cls.RETRY_STATUS,
-            "retry_backoff_factor": cls.RETRY_BACKOFF_FACTOR,
-            "retry_status_forcelist": list(cls.RETRY_STATUS_FORCELIST),
-            "retry_allowed_methods": sorted(cls.RETRY_ALLOWED_METHODS),
-        }
 
     @staticmethod
     def _normalize_int_value(value: int, minimum: int) -> int:
@@ -212,6 +196,8 @@ class HTTPUtils:
     def _resolve_expected_hash_algorithm(expected_hash: str) -> str:
         if not expected_hash:
             return ""
+        if len(expected_hash) == 40:
+            return "sha1"
         if len(expected_hash) == 64:
             return "sha256"
         if len(expected_hash) == 128:
@@ -432,7 +418,7 @@ class HTTPUtils:
             cls._report_download_failure(
                 url=url,
                 local_path=local_path,
-                message=f"僅接受 SHA-256 / SHA-512 預期雜湊 (len={len(normalized_expected_hash)})",
+                message=f"無法辨識的雜湊演算法 (len={len(normalized_expected_hash)})",
                 failure_message_callback=failure_message_callback,
             )
             return False
@@ -538,54 +524,3 @@ class HTTPUtils:
             )
             cls._cleanup_temp_file(temp_path_obj)
             return False
-
-    @staticmethod
-    def get_json_batch(
-        urls: list[str], timeout: int = 10, headers: dict[str, str] | None = None, max_workers: int = 5
-    ) -> list[dict[str, Any] | None]:
-        """
-        批次發送 HTTP GET 請求並解析回傳的 JSON 資料。
-
-        Args:
-            urls: 要請求的 URL 清單。
-            timeout: 請求逾時秒數。
-            headers: 額外 HTTP headers。
-            max_workers: 同時執行的工作數量。
-
-        Returns:
-            對應每個 URL 的 JSON 結果清單。
-        """
-        if not urls:
-            return []
-        try:
-            batch_size = max(1, min(int(max_workers or 1), len(urls)))
-            manager = get_shared_manager()
-            results: list[dict[str, Any] | None] = []
-            for start in range(0, len(urls), batch_size):
-                batch = urls[start : start + batch_size]
-                futures = [manager.run(HTTPUtils.get_json, url, timeout, headers) for url in batch]
-                results.extend(future.result() for future in futures)
-            return results
-        except Exception as e:
-            logger.exception(f"批次 HTTP 請求失敗: {e}")
-            return [None] * len(urls)
-
-    @classmethod
-    async def get_json_async(cls, *args, **kwargs):
-        """非同步版 get_json。"""
-        return await run_blocking_io(cls.get_json, *args, **kwargs)
-
-    @classmethod
-    async def post_json_async(cls, *args, **kwargs):
-        """非同步版 post_json。"""
-        return await run_blocking_io(cls.post_json, *args, **kwargs)
-
-    @classmethod
-    async def get_content_async(cls, *args, **kwargs):
-        """非同步版 get_content。"""
-        return await run_blocking_io(cls.get_content, *args, **kwargs)
-
-    @classmethod
-    async def download_file_async(cls, *args, **kwargs):
-        """非同步版 download_file。"""
-        return await run_blocking_io(cls.download_file, *args, **kwargs)

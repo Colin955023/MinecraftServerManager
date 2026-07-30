@@ -144,8 +144,3 @@ _logger = LoggerConfig.get_logger()
 def get_logger():
     """獲取全局 logger 實例"""
     return _logger
-
-
-def shutdown_logging() -> None:
-    """關閉 logging 系統，確保所有 handler 已刷新並關閉。"""
-    logging.shutdown()

@@ -7,7 +7,7 @@ import re
 SUPPORTED_MODRINTH_UPDATE_LOADERS: set[str] = {"fabric", "forge", "quilt", "neoforge"}
 MODRINTH_QUERY_EXPORT_NAMES: tuple[str, ...] = (
     "SUPPORTED_MODRINTH_UPDATE_LOADERS",
-    "apply_loader_specific_dependency_override",
+    "clean_api_identifier",
     "build_local_mod_lookup_candidates",
     "canonical_lookup_key",
     "clean_api_identifier",
@@ -98,20 +98,6 @@ def get_modrinth_loader_filters(loader: str | None) -> list[str]:
     if not normalized_loader:
         return []
     return [normalized_loader]
-
-
-def apply_loader_specific_dependency_override(project_id: str | None) -> str:
-    """
-    回傳原始 project id，不再進行載入器特定的轉換。
-
-    Args:
-        project_id: 原始 project id。
-
-    Returns:
-        原始 project id。
-    """
-
-    return clean_api_identifier(project_id)
 
 
 def _split_camel_case_words(value: str | None) -> str:

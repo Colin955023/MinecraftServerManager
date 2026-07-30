@@ -15,7 +15,6 @@ DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
 INDEX_SCHEMA_VERSION = 1
 
 
-# hash 工作池（共享）：預設 4 個工作執行緒。
 class ModIndexManager:
     """
     管理模組 JAR 檔案的增量索引
@@ -158,29 +157,6 @@ class ModIndexManager:
                 self._index = sanitized
                 self._dirty = True
         return repaired_count
-
-    def get_index_consistency_report(self) -> dict[str, Any]:
-        """
-        回傳索引一致性檢查結果，供觀測與診斷使用。
-
-        Returns:
-            索引一致性摘要資料。
-        """
-        with self._index_lock:
-            invalid_entries = 0
-            missing_stats = 0
-            for entry in self._index.values():
-                if not isinstance(entry, dict):
-                    invalid_entries += 1
-                    continue
-                if "size" not in entry or "mtime" not in entry:
-                    missing_stats += 1
-            return {
-                "schema_version": INDEX_SCHEMA_VERSION,
-                "total_entries": len(self._index),
-                "invalid_entries": invalid_entries,
-                "entries_missing_file_stats": missing_stats,
-            }
 
     def _save_index_if_due(self, *, force: bool = False) -> None:
         """依時間節流保存索引，避免每個檔案都立即落盤。"""
@@ -394,28 +370,6 @@ class ModIndexManager:
                 self._dirty = True
                 self._save_index_if_due(force=True)
             return len(files_to_remove)
-
-    def get_statistics(self) -> dict[str, Any]:
-        """獲取索引統計資訊。
-
-        Returns:
-            索引統計摘要。
-        """
-        with self._index_lock:
-            return {
-                "total_cached": len(self._index),
-                "index_file": str(self.index_file),
-                "last_updated": self.index_file.stat().st_mtime if self.index_file.exists() else 0,
-            }
-
-    def clear_cache(self) -> None:
-        """清空整個索引快取"""
-        with self._index_lock:
-            self._index.clear()
-            self._dirty = False
-            if self.index_file.exists():
-                self.index_file.unlink()
-            logger.info("已清空模組索引快取")
 
     def flush(self) -> None:
         """立即保存尚未落盤的索引內容。"""

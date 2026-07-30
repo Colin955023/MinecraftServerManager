@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import traceback
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,25 @@ from .path_utils import PathUtils
 
 logger = get_logger().bind(component="ExceptionUtils")
 _RUNTIME_ISSUE_MARKER_NAME = ".runtime_issues"
+
+# 預期內的例外類型 → 使用 WARNING 級別而非 ERROR
+_EXPECTED_EXCEPTION_TYPES = (
+    FileExistsError,
+    FileNotFoundError,
+    PermissionError,
+    ValueError,
+    TypeError,
+    KeyError,
+    IndexError,
+)
+
+
+def _log_level_for_exception(exc: BaseException) -> int:
+    """根據例外類型回傳適當的日誌級別。預期錯誤用 WARNING，其餘用 ERROR。"""
+    if isinstance(exc, _EXPECTED_EXCEPTION_TYPES):
+        return logging.WARNING
+    return logging.ERROR
+
 
 _SENSITIVE_NAME_MARKERS = (
     "password",
@@ -99,7 +119,10 @@ def record_and_mark(
             local_vars = {}
 
     try:
-        logger.bind(exception_type=exc_type).exception(f"已處理例外: {exc}\nTraceback:\n{tb_str}\nLocals: {local_vars}")
+        log_level = _log_level_for_exception(exc)
+        logger.bind(exception_type=exc_type).log(
+            log_level, f"已處理例外: {exc}\nTraceback:\n{tb_str}\nLocals: {local_vars}"
+        )
     except Exception:
         with contextlib.suppress(Exception):
             logger.error(f"記錄例外時發生錯誤: {exc}")

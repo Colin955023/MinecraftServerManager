@@ -1,61 +1,16 @@
 """
 依賴計畫序列化工具。
-集中處理 dependency plan 的資料模型、序列化、遷移與驗證邏輯，
+集中處理 dependency plan 的序列化、遷移與驗證邏輯，
 讓 UI 層只保留查詢與流程組裝責任。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 
+from src.models import OnlineDependencyInstallItem, OnlineDependencyInstallPlan
+
 DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 1
-
-
-@dataclass(slots=True)
-class OnlineDependencyInstallItem:
-    """必要依賴的自動安裝項目。"""
-
-    project_id: str
-    project_name: str
-    version_id: str
-    version_name: str
-    filename: str
-    download_url: str
-    parent_name: str = ""
-    maybe_installed: bool = False
-    status_note: str = ""
-    resolution_source: str = "project_id"
-    resolution_confidence: str = "direct"
-    enabled: bool = True
-    is_optional: bool = False
-    provider: str = "modrinth"
-    expected_hash: str = ""
-    required_by: list[str] = field(default_factory=list)
-    decision_source: str = "required:auto"
-    graph_depth: int = 1
-    edge_kind: str = "required"
-    edge_source: str = "required:modrinth_dependency"
-
-
-@dataclass(slots=True)
-class OnlineDependencyInstallPlan:
-    """必要依賴的連鎖安裝計畫。"""
-
-    items: list[OnlineDependencyInstallItem] = field(default_factory=list)
-    advisory_items: list[OnlineDependencyInstallItem] = field(default_factory=list)
-    unresolved_required: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-
-    @property
-    def auto_install_count(self) -> int:
-        """取得可自動安裝的項目數量。"""
-        return len(self.items)
-
-    @property
-    def has_unresolved_required(self) -> bool:
-        """判斷是否存在無法解析的必要依賴。"""
-        return bool(self.unresolved_required)
 
 
 def _get_source_value(source: Any, key: str, default: Any = None) -> Any:

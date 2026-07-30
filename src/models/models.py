@@ -4,8 +4,35 @@
 定義應用程式中使用的核心資料結構與配置類別
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Any
+
+from ..utils import (
+    MODRINTH_PREFERRED_HASH_ALGORITHM,
+    RECOMMENDATION_CONFIDENCE_HIGH,
+    RECOMMENDATION_SOURCE_HASH_METADATA,
+)
+
+MODRINTH_HASH_ALGORITHM = "sha512"
+MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
+
+
+class ModStatus(Enum):
+    """模組狀態。"""
+
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
+class ModPlatform(Enum):
+    """模組來源平台。"""
+
+    MODRINTH = "modrinth"
+    LOCAL = "local"
 
 
 @dataclass
@@ -92,9 +119,7 @@ class LoaderVersion:
     """模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器"""
 
     version: str
-    build: str | None = None
     url: str | None = None
-    stable: bool | None = None
     mc_version: str | None = None
     game_versions: list[str] = field(default_factory=list)
 
@@ -125,3 +150,364 @@ class ServerConfig:
     def memory_mb(self, value: int):
         """設定伺服器最大記憶體配置，提供向後相容性"""
         self.memory_max_mb = value
+
+
+@dataclass(slots=True)
+class ServerOperationResult:
+    """描述伺服器操作結果，供 UI 層決定如何呈現。"""
+
+    success: bool
+    title: str = ""
+    message: str = ""
+    server_name: str = ""
+
+    @property
+    def failed(self) -> bool:
+        """回傳此操作是否已失敗。"""
+        return not self.success
+
+
+@dataclass
+class LocalModInfo:
+    """本地模組資訊。"""
+
+    id: str
+    name: str
+    filename: str
+    version: str
+    minecraft_version: str
+    loader_type: str
+    description: str = ""
+    author: str = ""
+    platform: ModPlatform = ModPlatform.LOCAL
+    platform_id: str = ""
+    platform_slug: str = ""
+    status: ModStatus = ModStatus.ENABLED
+    file_path: str = ""
+    download_url: str = ""
+    homepage_url: str = ""
+    dependencies: list[str] | None = None
+    file_size: int = 0
+    current_hash: str = ""
+    hash_algorithm: str = ""
+    resolution_source: str = ""
+    resolved_at_epoch_ms: str = ""
+    provider_lifecycle_state: str = ""
+    stale_revalidation_failures: int = 0
+    next_retry_not_before_epoch_ms: str = ""
+
+    def __post_init__(self) -> None:
+        if self.dependencies is None:
+            self.dependencies = []
+
+
+@dataclass(slots=True)
+class ModFileOperationResult:
+    """描述遠端下載/覆蓋流程的最終狀態。"""
+
+    status: str
+    final_path: Path | None = None
+    rollback_performed: bool = False
+    message: str = ""
+
+    @property
+    def completed(self) -> bool:
+        """回傳此操作是否已完成。"""
+        return self.status == "completed"
+
+    @property
+    def cancelled(self) -> bool:
+        """回傳此操作是否已取消。"""
+        return self.status == "cancelled"
+
+
+@dataclass(slots=True)
+class LocalModMutationResult:
+    """描述本地模組檔案異動結果，供 UI 層決定呈現方式。"""
+
+    status: str
+    title: str = ""
+    message: str = ""
+    final_path: Path | None = None
+    affected_count: int = 0
+    missing_ids: tuple[str, ...] = ()
+
+    @property
+    def completed(self) -> bool:
+        """回傳此操作是否已完成。"""
+        return self.status == "completed"
+
+    @property
+    def partial(self) -> bool:
+        """回傳此操作是否為部分完成。"""
+        return self.status == "partial"
+
+    @property
+    def failed(self) -> bool:
+        """回傳此操作是否已失敗。"""
+        return self.status == "failed"
+
+
+@dataclass(slots=True)
+class OnlineDependencyInstallItem:
+    """必要依賴的自動安裝項目。"""
+
+    project_id: str
+    project_name: str
+    version_id: str
+    version_name: str
+    filename: str
+    download_url: str
+    parent_name: str = ""
+    maybe_installed: bool = False
+    status_note: str = ""
+    resolution_source: str = "project_id"
+    resolution_confidence: str = "direct"
+    enabled: bool = True
+    is_optional: bool = False
+    provider: str = "modrinth"
+    expected_hash: str = ""
+    required_by: list[str] = field(default_factory=list)
+    decision_source: str = "required:auto"
+    graph_depth: int = 1
+    edge_kind: str = "required"
+    edge_source: str = "required:modrinth_dependency"
+
+
+@dataclass(slots=True)
+class OnlineDependencyInstallPlan:
+    """必要依賴的連鎖安裝計畫。"""
+
+    items: list[OnlineDependencyInstallItem] = field(default_factory=list)
+    advisory_items: list[OnlineDependencyInstallItem] = field(default_factory=list)
+    unresolved_required: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def auto_install_count(self) -> int:
+        """取得可自動安裝的項目數量。"""
+        return len(self.items)
+
+    @property
+    def has_unresolved_required(self) -> bool:
+        """判斷是否存在無法解析的必要依賴。"""
+        return bool(self.unresolved_required)
+
+
+@dataclass(slots=True)
+class PendingOnlineInstall:
+    """待安裝的線上模組項目。"""
+
+    project_id: str
+    project_name: str
+    version: Any
+    report: Any | None = None
+    homepage_url: str = ""
+    source_url: str = ""
+    server_side: str = ""
+    client_side: str = ""
+
+
+@dataclass(slots=True, kw_only=True)
+class AbstractReviewEntry:
+    """Review 項目共用屬性與狀態判斷。"""
+
+    blocking_reasons: list[str] = field(default_factory=list)
+    warning_messages: list[str] = field(default_factory=list)
+    enabled: bool = True
+    provider: str = "modrinth"
+    version_type: str = ""
+    date_published: str = ""
+    changelog: str = ""
+
+    @property
+    def actionable(self) -> bool:
+        """回傳此項目是否可由使用者執行。"""
+        return self.enabled and (not self.blocking_reasons)
+
+    @property
+    def runnable(self) -> bool:
+        """回傳此項目是否可直接執行。"""
+        return not self.blocking_reasons
+
+
+@dataclass(slots=True, kw_only=True)
+class PendingInstallReviewEntry(AbstractReviewEntry):
+    """待安裝項目的最終驗證結果。"""
+
+    pending: PendingOnlineInstall
+    report: Any | None
+    dependency_plan: Any
+
+
+@dataclass(slots=True, kw_only=True)
+class LocalUpdateReviewEntry(AbstractReviewEntry):
+    """本地模組更新 review 項目。"""
+
+    candidate: Any
+    dependency_plan: Any
+
+    @property
+    def candidate_actionable(self) -> bool:
+        return bool(getattr(self.candidate, "actionable", False))
+
+
+@dataclass(slots=True)
+class ReviewTaskNode:
+    """Review 對話框中的共用 task 節點。"""
+
+    node_id: str
+    root_key: str
+    group_key: str
+    title: str
+    values: tuple[str, ...]
+    node_kind: str
+    parent_id: str | None = None
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class OnlineBrowseRequest:
+    """線上模組瀏覽/搜尋請求。"""
+
+    query: str
+    minecraft_version: str | None
+    loader_type: str
+    sort_by: str
+
+
+@dataclass(slots=True)
+class OnlineModInfo:
+    """線上模組資訊。"""
+
+    project_id: str
+    slug: str
+    name: str
+    author: str
+    description: str = ""
+    latest_version: str = ""
+    download_count: int = 0
+    icon_url: str = ""
+    homepage_url: str = ""
+    url: str = ""
+    categories: list[str] = field(default_factory=list)
+    versions: list[str] = field(default_factory=list)
+    server_side: str = ""
+    client_side: str = ""
+    source: str = "modrinth"
+    available: bool = True
+
+
+@dataclass(slots=True)
+class OnlineModCompatibilityReport:
+    """安裝前版本相容性與依賴分析結果。"""
+
+    hard_errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    missing_required_dependencies: list[str] = field(default_factory=list)
+    optional_dependencies: list[str] = field(default_factory=list)
+    incompatible_installed: list[str] = field(default_factory=list)
+    installed_version_mismatches: list[str] = field(default_factory=list)
+    embedded_dependencies: list[str] = field(default_factory=list)
+    already_installed: list[str] = field(default_factory=list)
+
+    @property
+    def compatible(self) -> bool:
+        """回傳相容性檢查是否通過。"""
+        return not self.hard_errors
+
+
+@dataclass(slots=True)
+class LocalMetadataEnsureSummary:
+    """本地模組 metadata ensure / 專案識別摘要。"""
+
+    total_scanned: int = 0
+    resolved_by_hash: int = 0
+    resolved_by_cached_project: int = 0
+    resolved_by_lookup: int = 0
+    unresolved: int = 0
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def resolved_count(self) -> int:
+        return self.resolved_by_hash + self.resolved_by_cached_project + self.resolved_by_lookup
+
+
+@dataclass(slots=True)
+class LocalModUpdateCandidate:
+    """本地模組更新檢查結果。"""
+
+    project_id: str
+    project_name: str
+    filename: str
+    current_version: str
+    target_version_id: str = ""
+    target_version_name: str = ""
+    target_version: OnlineModVersion | None = None
+    target_filename: str = ""
+    download_url: str = ""
+    current_hash: str = ""
+    hash_algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM
+    target_file_hash: str = ""
+    recommendation_source: str = RECOMMENDATION_SOURCE_HASH_METADATA
+    recommendation_confidence: str = RECOMMENDATION_CONFIDENCE_HIGH
+    current_issues: list[str] = field(default_factory=list)
+    dependency_issues: list[str] = field(default_factory=list)
+    hard_errors: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    metadata_source: str = ""
+    metadata_note: str = ""
+    metadata_resolved: bool = True
+    server_side: str = ""
+    client_side: str = ""
+    report: OnlineModCompatibilityReport | None = None
+    local_mod: Any = None
+
+    @property
+    def update_available(self) -> bool:
+        """回傳是否有可用更新（以 hash 或版本字串比較判定）。"""
+        if not self.target_version_id:
+            return False
+        if self.current_hash and self.target_file_hash:
+            return self.current_hash != self.target_file_hash
+        return self.current_version.strip().lower() != self.target_version_name.strip().lower()
+
+    @property
+    def actionable(self) -> bool:
+        """回傳此項目是否可由使用者執行。"""
+        return self.update_available and (not self.hard_errors) and bool(self.download_url and self.target_filename)
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.current_issues or self.dependency_issues or self.hard_errors)
+
+
+@dataclass(slots=True)
+class LocalModUpdatePlan:
+    """本地模組更新檢查彙總。"""
+
+    candidates: list[LocalModUpdateCandidate] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    metadata_summary: LocalMetadataEnsureSummary = field(default_factory=LocalMetadataEnsureSummary)
+    _has_candidates: bool = field(default=False, init=False, repr=False)
+    _actionable_count: int = field(default=0, init=False, repr=False)
+
+    @property
+    def has_candidates(self) -> bool:
+        return self._has_candidates
+
+    @property
+    def actionable_count(self) -> int:
+        return self._actionable_count
+
+    def finalize_summary(self) -> None:
+        """計算並快取候選摘要，避免後續重複掃描 candidates。"""
+        actionable_count = 0
+        has_candidates = False
+        for candidate in self.candidates:
+            has_candidates = True
+            if candidate.actionable:
+                actionable_count += 1
+        self._has_candidates = has_candidates
+        self._actionable_count = actionable_count

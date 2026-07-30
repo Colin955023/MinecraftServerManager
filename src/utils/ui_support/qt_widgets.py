@@ -1,23 +1,125 @@
-"""原生 PySide6 元件."""
+"""原生 PySide6 元件與 qfluentwidgets 整合。"""
 
 from __future__ import annotations
 
+import contextlib
+import re
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from qfluentwidgets import (
+    BodyLabel,
+    TabWidget,
+    Theme,
+    isDarkTheme,
+    setCustomStyleSheet,
+    setFontFamilies,
+    setTheme,
+    setThemeColor,
+)
+from qfluentwidgets import (
+    CheckBox as FluentCheckBox,
+)
+from qfluentwidgets import (
+    ComboBox as FluentComboBox,
+)
+from qfluentwidgets import (
+    Dialog as FluentDialog,
+)
+from qfluentwidgets import (
+    HyperlinkLabel as FluentHyperlinkLabel,
+)
+from qfluentwidgets import (
+    LineEdit as FluentLineEdit,
+)
+from qfluentwidgets import (
+    MessageBox as FluentMessageBox,
+)
+from qfluentwidgets import (
+    ProgressBar as FluentProgressBarWidget,
+)
+from qfluentwidgets import (
+    PushButton as FluentPushButton,
+)
+from qfluentwidgets import (
+    RadioButton as FluentRadioButton,
+)
+from qfluentwidgets import (
+    ScrollArea as FluentScrollArea,
+)
+from qfluentwidgets import (
+    SearchLineEdit as FluentSearchLineEdit,
+)
+from qfluentwidgets import (
+    Slider as FluentSlider,
+)
+from qfluentwidgets import (
+    SpinBox as FluentSpinBox,
+)
+from qfluentwidgets import (
+    SubtitleLabel as FluentSubtitleLabel,
+)
+from qfluentwidgets import (
+    TextEdit as FluentTextEdit,
+)
 
 from .. import get_logger
-from .fluent import FluentLineEdit, FluentProgressBar, FluentPushButton, FluentSearchLineEdit, SearchFilter
 from .qt_runtime import ValueState, is_qobject_alive
+from .ui_tokens import Colors, FluentTokens
 
 logger = get_logger().bind(component="QtWidgets")
 
+__all__ = [
+    "BOTH",
+    "BOTTOM",
+    "DISABLED",
+    "END",
+    "HORIZONTAL",
+    "INVALID_MODEL_INDEX",
+    "LEFT",
+    "NORMAL",
+    "RIGHT",
+    "TOP",
+    "VERTICAL",
+    "Button",
+    "CheckBox",
+    "ComboBox",
+    "Dialog",
+    "Entry",
+    "Frame",
+    "Label",
+    "LineEdit",
+    "MessageBox",
+    "Notebook",
+    "PlainWindow",
+    "ProgressBar",
+    "PushButton",
+    "RadioButton",
+    "ScrollableFrame",
+    "Scrollbar",
+    "SearchFilter",
+    "SearchLineEdit",
+    "Slider",
+    "Spinbox",
+    "TextBox",
+    "Theme",
+    "Treeview",
+    "X",
+    "Y",
+    "apply_fluent_theme",
+    "ensure_app",
+    "get_existing_directory",
+    "get_open_file_name",
+    "get_save_file_name",
+    "setTheme",
+    "setThemeColor",
+]
 
+# Tkinter 相容常數
 END = "end"
 NORMAL = "normal"
 DISABLED = "disabled"
@@ -34,6 +136,90 @@ INVALID_MODEL_INDEX = QtCore.QModelIndex()
 _QAbstractItemModel: Any = QtCore.QAbstractItemModel
 
 
+@dataclass(slots=True)
+class SearchFilter:
+    """搜尋元件共用的文字篩選器。"""
+
+    case_sensitive: bool = False
+    normalize_whitespace: bool = True
+    require_all_terms: bool = True
+
+    def normalize(self, value: Any) -> str:
+        """
+        正規化搜尋文字。
+
+        Args:
+            value: 要轉成搜尋字串的任意值。
+
+        Returns:
+            正規化後的搜尋字串。
+        """
+        text = str(value or "").strip()
+        if self.normalize_whitespace:
+            text = re.sub(r"\s+", " ", text)
+        return text if self.case_sensitive else text.lower()
+
+    def matches(self, candidate: Any, query: Any) -> bool:
+        """
+        判斷候選文字是否符合查詢字串。
+
+        Args:
+            candidate: 被比對的候選值；可為字串、序列或 dict。
+            query: 使用者輸入的查詢值。
+
+        Returns:
+            候選值符合查詢時回傳 True。
+        """
+        normalized_query = self.normalize(query)
+        if not normalized_query:
+            return True
+        candidate_text = " ".join(self.normalize(value) for value in self._candidate_values(candidate))
+        if not candidate_text:
+            return False
+        if not self.require_all_terms:
+            return normalized_query in candidate_text
+        return all(term in candidate_text for term in normalized_query.split())
+
+    def matches_any(self, candidates: Any, query: Any) -> bool:
+        """
+        判斷多個候選欄位是否符合查詢。
+
+        Args:
+            candidates: 字串、序列或 dict 候選欄位。
+            query: 使用者輸入的搜尋字串。
+
+        Returns:
+            任一候選欄位符合查詢時回傳 True。
+        """
+        return self.matches(candidates, query)
+
+    def _candidate_values(self, candidate: Any) -> list[Any]:
+        if isinstance(candidate, Mapping):
+            return list(candidate.values())
+        if isinstance(candidate, (list, tuple, set, frozenset)):
+            return list(candidate)
+        return [candidate]
+
+
+def apply_fluent_theme(*, dark: bool, accent_color: str | None = None) -> None:
+    """
+    在 qfluentwidgets 可用時套用 Fluent 主題。
+
+    Args:
+        dark: 是否套用深色主題。
+        accent_color: Fluent accent 色碼；未提供時使用專案主要按鈕色。
+    """
+    try:
+        setTheme(Theme.DARK if dark else Theme.LIGHT)
+        if setThemeColor is not None:
+            setThemeColor(accent_color or Colors.BUTTON_PRIMARY[0])
+        # 設定 qfluentwidgets 使用與專案一致的字型家族，避免 fallback 時出現 -1 point size 警告
+        if setFontFamilies is not None:
+            setFontFamilies(["Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", "Segoe UI"])
+    except Exception:
+        return
+
+
 def ensure_app():
     app = QtWidgets.QApplication.instance()
     if app is None:
@@ -42,11 +228,11 @@ def ensure_app():
 
 
 def is_dark_color_scheme() -> bool:
-    """Return whether the active Qt palette/color scheme is dark."""
+    """是否使用深色主題。"""
     app = cast(Any, QtWidgets.QApplication.instance())
     if app is None:
         return False
-    with context_suppress():
+    with contextlib.suppress(Exception):
         scheme = app.styleHints().colorScheme()
         if scheme == QtCore.Qt.ColorScheme.Dark:
             return True
@@ -56,34 +242,36 @@ def is_dark_color_scheme() -> bool:
     return window_color.lightness() < 128
 
 
-def set_color_scheme(mode: str) -> None:
-    """Set Qt color scheme hint: Light, Dark, or System/Auto."""
-    app = ensure_app()
-    normalized = str(mode or "System").strip().lower()
-    scheme = QtCore.Qt.ColorScheme.Unknown
-    if normalized == "dark":
-        scheme = QtCore.Qt.ColorScheme.Dark
-    elif normalized == "light":
-        scheme = QtCore.Qt.ColorScheme.Light
-    with context_suppress():
-        app.styleHints().setColorScheme(scheme)
+def native_parent(parent: Any) -> Any:
+    """對話框/訊息框專用：parent 為 None 時備援尋找 activeWindow，確保彈出視窗可置中與遮罩定位。"""
+    raw_parent = getattr(parent, "_qt_widget", parent)
+    if raw_parent is not None and isinstance(raw_parent, QtCore.QObject) and not is_qobject_alive(raw_parent):
+        raw_parent = None
+
+    if raw_parent is None:
+        app = cast(Any, QtWidgets.QApplication.instance())
+        if app is not None:
+            active = app.activeWindow()
+            if active is not None and is_qobject_alive(active):
+                raw_parent = active
+            else:
+                for widget in app.topLevelWidgets():
+                    if (
+                        widget.isVisible()
+                        and is_qobject_alive(widget)
+                        and not widget.windowFlags() & (QtCore.Qt.WindowType.ToolTip | QtCore.Qt.WindowType.Popup)
+                    ):
+                        raw_parent = widget
+                        break
+    return raw_parent
 
 
-def is_alive(widget: Any) -> bool:
-    """Return whether a wrapper or native Qt object is still usable."""
-    if widget is None:
-        return False
-    checker = getattr(widget, "is_alive", None)
-    if callable(checker):
-        with context_suppress():
-            return bool(checker())
-    if isinstance(widget, QtCore.QObject):
-        return is_qobject_alive(widget)
-    return True
-
-
-def _native_parent(parent: Any) -> Any:
-    return getattr(parent, "_qt_widget", parent)
+def _native_parent_simple(parent: Any) -> Any:
+    """普通靜態元件專用：僅取原生 QWidget，不進行 activeWindow 備援綁定，避免生命週期過度連結與 Qt parent 變更警告。"""
+    raw_parent = getattr(parent, "_qt_widget", parent)
+    if raw_parent is not None and isinstance(raw_parent, QtCore.QObject) and not is_qobject_alive(raw_parent):
+        return None
+    return raw_parent
 
 
 def _qt_class(name: str) -> Any:
@@ -92,14 +280,6 @@ def _qt_class(name: str) -> Any:
 
 def _is_qt_instance(widget: Any, *class_names: str) -> bool:
     return any(isinstance(widget, _qt_class(class_name)) for class_name in class_names)
-
-
-def _style_selector(widget: Any) -> str:
-    object_name = widget.objectName() if hasattr(widget, "objectName") else ""
-    if not object_name and hasattr(widget, "setObjectName"):
-        object_name = f"msm_{id(widget)}"
-        widget.setObjectName(object_name)
-    return f"#{object_name}" if object_name else widget.__class__.__name__
 
 
 def _event_position(event: Any) -> tuple[int, int, int, int]:
@@ -121,39 +301,49 @@ def _event_position(event: Any) -> tuple[int, int, int, int]:
 
 
 def _color(value: Any) -> str:
+    if isinstance(value, str) and hasattr(FluentTokens, value.upper()):
+        return FluentTokens.qss_value(getattr(FluentTokens, value.upper()))
     if isinstance(value, tuple):
         index = 1 if is_dark_color_scheme() and len(value) > 1 else 0
-        return str(value[index])
+        return _color(value[index])
     if value in (None, "transparent"):
         return "transparent"
     return str(value)
 
 
-def _font(value: Any = None):
+def _font(value: Any = None, *, size_token: str | None = None, weight_token: str | None = None):
     if hasattr(value, "font"):
         value = value.font
     if isinstance(value, QtGui.QFont):
-        return value
-    family = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.GeneralFont).family()
-    size = 12
-    weight = QtGui.QFont.Weight.Normal
-    underline = False
-    if isinstance(value, tuple):
-        if len(value) >= 1 and value[0]:
-            family = str(value[0])
-        if len(value) >= 2 and value[1]:
-            size = int(value[1])
-        if len(value) >= 3 and str(value[2]).lower() == "bold":
-            weight = QtGui.QFont.Weight.Bold
-    elif isinstance(value, dict):
-        family = str(value.get("family", family))
-        size = int(value.get("size", size))
-        if str(value.get("weight", "")).lower() == "bold":
-            weight = QtGui.QFont.Weight.Bold
-        underline = bool(value.get("underline", False))
-    font = QtGui.QFont(family, size)
-    font.setWeight(weight)
-    font.setUnderline(underline)
+        font = value
+    else:
+        family = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.GeneralFont).family()
+        size = 12
+        weight = QtGui.QFont.Weight.Normal
+        underline = False
+        if isinstance(value, tuple):
+            if len(value) >= 1 and value[0]:
+                family = str(value[0])
+            if len(value) >= 2 and value[1]:
+                size = int(value[1])
+            if len(value) >= 3 and str(value[2]).lower() == "bold":
+                weight = QtGui.QFont.Weight.Bold
+        elif isinstance(value, dict):
+            family = str(value.get("family", family))
+            size = int(value.get("size", size))
+            if str(value.get("weight", "")).lower() == "bold":
+                weight = QtGui.QFont.Weight.Bold
+            underline = bool(value.get("underline", False))
+        font = QtGui.QFont(family, size)
+        font.setWeight(weight)
+        font.setUnderline(underline)
+
+    if size_token and hasattr(FluentTokens, size_token.upper()):
+        font.setPointSize(getattr(FluentTokens, size_token.upper()))
+    if weight_token and hasattr(FluentTokens, weight_token.upper()):
+        weight_val = getattr(FluentTokens, weight_token.upper())
+        font.setWeight(weight_val)
+
     return font
 
 
@@ -202,35 +392,104 @@ def _padding_pair(value: Any) -> tuple[int, int]:
     return amount, amount
 
 
+def _apply_fluent_style(
+    widget: QtWidgets.QWidget, light_qss: str = "", dark_qss: str = "", *, preserve_native: bool = True
+) -> None:
+    """
+    在保留 Fluent 原生樣式的前提下疊加自訂樣式
+
+    Args:
+        preserve_native: True 時使用 setCustomStyleSheet（疊加），
+                         False 時使用 setStyleSheet（完全覆寫）
+    """
+    if preserve_native:
+        setCustomStyleSheet(widget, light_qss, dark_qss)
+    else:
+        widget.setStyleSheet(light_qss if not isDarkTheme() else dark_qss)
+
+
+def _build_qss(
+    *,
+    bg: Any = None,
+    fg: Any = None,
+    border: Any = None,
+    radius: Any = None,
+    padding: tuple[int, int] = (0, 0),
+    hover_bg: Any = None,
+    pressed_bg: Any = None,
+    focus_border: Any = None,
+) -> tuple[str, str]:
+    """
+    建構亮/暗雙主題 QSS，自動解析 Token
+    回傳: (light_qss, dark_qss)
+    """
+
+    def resolve(v):
+        return _color(v) if v is not None else None
+
+    light_parts = []
+    dark_parts = []
+
+    # 基礎屬性
+    for prop, light_val, dark_val in [
+        ("background-color", resolve(bg), resolve(bg)),
+        ("color", resolve(fg), resolve(fg)),
+        (
+            "border",
+            f"1px solid {resolve(border)}" if border else "none",
+            f"1px solid {resolve(border)}" if border else "none",
+        ),
+        ("border-radius", f"{int(radius)}px" if radius else "0", f"{int(radius)}px" if radius else "0"),
+        ("padding", f"{padding[1]}px {padding[0]}px", f"{padding[1]}px {padding[0]}px"),
+    ]:
+        if light_val:
+            light_parts.append(f"{prop}: {light_val};")
+        if dark_val:
+            dark_parts.append(f"{prop}: {dark_val};")
+
+    # 狀態樣式
+    states = []
+    if hover_bg:
+        states.append(f":hover {{ background-color: {resolve(hover_bg)}; }}")
+    if pressed_bg:
+        states.append(f":pressed {{ background-color: {resolve(pressed_bg)}; }}")
+    if focus_border:
+        states.append(f":focus {{ border: 1px solid {resolve(focus_border)}; }}")
+
+    light_qss = " ".join(light_parts + states)
+    dark_qss = " ".join(dark_parts + states)
+
+    return light_qss, dark_qss
+
+
 def _apply_size_policy(widget: Any, kwargs: dict[str, Any]) -> None:
     if not hasattr(widget, "setSizePolicy"):
         return
     fill = str(kwargs.get("fill", "") or "").lower()
     expand = bool(kwargs.get("expand", False))
+    sticky = str(kwargs.get("sticky", "") or "").lower()
+    has_n_s = "n" in sticky and "s" in sticky
+    has_e_w = "e" in sticky and "w" in sticky
+
     horizontal = (
         QtWidgets.QSizePolicy.Policy.Expanding
-        if expand or fill in (X, BOTH)
+        if expand or fill in (X, BOTH) or has_e_w
         else QtWidgets.QSizePolicy.Policy.Preferred
     )
     vertical = (
         QtWidgets.QSizePolicy.Policy.Expanding
-        if expand or fill in (Y, BOTH)
+        if expand or fill in (Y, BOTH) or has_n_s
         else QtWidgets.QSizePolicy.Policy.Preferred
     )
     widget.setSizePolicy(horizontal, vertical)
 
 
-@dataclass(slots=True)
-class Event:
-    widget: Any
-    x: int = 0
-    y: int = 0
-    x_root: int = 0
-    y_root: int = 0
-    width: int = 0
-    height: int = 0
-    delta: int = 0
-    keysym: str = ""
+class context_suppress:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc: Any) -> bool:
+        return True
 
 
 class Variable(ValueState):
@@ -245,14 +504,6 @@ class Variable(ValueState):
         super().set(value)
         for callback in list(self._callbacks):
             callback()
-
-    def trace_add(self, _mode: str, callback: Callable[..., Any]) -> str:
-        self._callbacks.append(callback)
-        return str(id(callback))
-
-    def trace(self, mode: str, callback: Callable[..., Any]) -> str:
-        """註冊變數變更監聽器。"""
-        return self.trace_add(mode, callback)
 
 
 class TextState(Variable):
@@ -304,14 +555,29 @@ class WidgetMixin:
     def _ensure_layout(self, mode: str = "vbox"):
         existing = self.layout() if hasattr(self, "layout") else None
         if existing is not None:
+            if mode == "grid" and not isinstance(existing, QtWidgets.QGridLayout) and existing.count() == 0:
+                margins = existing.contentsMargins()
+                spacing = existing.spacing()
+                QtWidgets.QWidget().setLayout(existing)
+                grid: Any = QtWidgets.QGridLayout()
+                grid.setContentsMargins(margins)
+                grid.setSpacing(spacing)
+                cast(Any, self).setLayout(grid)
+                self._layout_mode = mode
+                return grid
             return existing
+        padding = getattr(self, "_padding", None)
+        layout: Any
         if mode == "grid":
-            layout: Any = QtWidgets.QGridLayout()
+            layout = QtWidgets.QGridLayout()
         elif mode == "hbox":
             layout = QtWidgets.QHBoxLayout()
         else:
             layout = QtWidgets.QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
+        if padding is not None:
+            layout.setContentsMargins(padding, padding + 10, padding, padding)
+        else:
+            layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
         cast(Any, self).setLayout(layout)
         self._layout_mode = mode
@@ -324,8 +590,25 @@ class WidgetMixin:
         if hasattr(parent, "_ensure_layout"):
             layout = parent._ensure_layout(mode)
         else:
-            layout = parent.layout() if hasattr(parent, "layout") else None
-            if layout is None and hasattr(parent, "setLayout"):
+            existing_layout: Any = None
+            with contextlib.suppress(AttributeError, RuntimeError):
+                existing_layout = parent.layout()
+            if existing_layout is not None:
+                if (
+                    mode == "grid"
+                    and not isinstance(existing_layout, QtWidgets.QGridLayout)
+                    and existing_layout.count() == 0
+                ):
+                    margins = existing_layout.contentsMargins()
+                    spacing = existing_layout.spacing()
+                    QtWidgets.QWidget().setLayout(existing_layout)
+                    layout = QtWidgets.QGridLayout()
+                    layout.setContentsMargins(margins)
+                    layout.setSpacing(spacing)
+                    parent.setLayout(layout)
+                else:
+                    layout = existing_layout
+            elif hasattr(parent, "setLayout"):
                 if mode == "grid":
                     layout = QtWidgets.QGridLayout()
                 elif mode == "hbox":
@@ -334,7 +617,13 @@ class WidgetMixin:
                     layout = QtWidgets.QVBoxLayout()
                 layout.setContentsMargins(0, 0, 0, 0)
                 layout.setSpacing(6)
-                parent.setLayout(layout)
+                try:
+                    if parent.layout() is None:
+                        parent.setLayout(layout)
+                    else:
+                        layout = parent.layout()
+                except AttributeError, RuntimeError:
+                    parent.setLayout(layout)
         if layout is None:
             return
         _apply_size_policy(self, kwargs)
@@ -373,27 +662,67 @@ class WidgetMixin:
                 min_size, max_size = previous_limits
                 self_widget.setMinimumSize(min_size)
                 self_widget.setMaximumSize(max_size)
-                delattr(self, "_layout_resize_previous_limits")
+                with contextlib.suppress(AttributeError):
+                    delattr(self, "_layout_resize_previous_limits")
+            if hasattr(self_widget, "setUpdatesEnabled"):
+                self_widget.setUpdatesEnabled(True)
             return
 
         if getattr(self, "_layout_resize_previous_limits", None) is None:
             self._layout_resize_previous_limits = (self_widget.minimumSize(), self_widget.maximumSize())
 
-        requested_width = self._options.get("width")
-        requested_height = self._options.get("height")
-        if requested_width is not None and requested_height is not None:
-            self_widget.setFixedSize(int(requested_width), int(requested_height))
-            return
-        if requested_width is not None:
-            self_widget.setFixedWidth(int(requested_width))
-            return
-        if requested_height is not None:
-            self_widget.setFixedHeight(int(requested_height))
-            return
+        if hasattr(self_widget, "setUpdatesEnabled"):
+            self_widget.setUpdatesEnabled(False)
 
-        width = max(1, int(self_widget.width() or self_widget.sizeHint().width()))
-        height = max(1, int(self_widget.height() or self_widget.sizeHint().height()))
-        self_widget.setFixedSize(width, height)
+    def _apply_fluent_style_config(self, kwargs: dict[str, Any]) -> None:
+        """使用疊加模式套用樣式，保留 Fluent 原生外觀"""
+        widget = cast(Any, self)
+
+        # 解析參數
+        bg = kwargs.get("fg_color", kwargs.get("bg", kwargs.get("background")))
+        fg = kwargs.get("text_color", kwargs.get("fg", kwargs.get("foreground")))
+        border = kwargs.get("border_color")
+        radius = kwargs.get("corner_radius", kwargs.get("border_radius"))
+        hover = kwargs.get("hover_color", kwargs.get("button_hover_color"))
+        pressed = kwargs.get("pressed_color")
+        focus = kwargs.get("focus_color")
+
+        # Padding 處理
+        padx = _padding_pair(kwargs.get("padx", kwargs.get("padding", (0, 0))))[0]
+        pady = _padding_pair(kwargs.get("pady", kwargs.get("padding", (0, 0))))[1]
+
+        # 決定是否保留原生樣式
+        preserve_native = not kwargs.get("_override_native_style", False)
+
+        # 特定元件的預設樣式增強
+        extra_qss = ""
+        if _is_qt_instance(self, "QPushButton"):
+            # 按鈕預設保留 Fluent 圓角、動畫等
+            if radius is None:
+                radius = FluentTokens.BORDER_RADIUS_MD
+            if border is None:
+                extra_qss = "border: none;"
+        elif _is_qt_instance(self, "QLineEdit") or _is_qt_instance(self, "QComboBox"):
+            if radius is None:
+                radius = FluentTokens.BORDER_RADIUS_SM
+
+        light_qss, dark_qss = _build_qss(
+            bg=bg,
+            fg=fg,
+            border=border,
+            radius=radius,
+            padding=(padx, pady),
+            hover_bg=hover,
+            pressed_bg=pressed,
+            focus_border=focus,
+        )
+
+        # 合併額外 QSS
+        if extra_qss:
+            light_qss = extra_qss + " " + light_qss
+            dark_qss = extra_qss + " " + dark_qss
+
+        _apply_fluent_style(widget, light_qss, dark_qss, preserve_native=preserve_native)
 
     def set_box_layout_propagation(self, flag: bool) -> None:
         self._set_layout_resize_enabled(bool(flag))
@@ -440,41 +769,29 @@ class WidgetMixin:
             self_widget.setText(str(kwargs["text"]))
         if "font" in kwargs and hasattr(self, "setFont"):
             self_widget.setFont(_font(kwargs["font"]))
-        if "width" in kwargs and hasattr(self, "setFixedWidth"):
-            with context_suppress():
-                width = int(kwargs["width"])
-                if _is_qt_instance(
-                    self,
-                    "QPushButton",
-                    "QLineEdit",
-                    "QComboBox",
-                    "QTextEdit",
-                    "QTreeView",
-                    "QListWidget",
+
+        # 尺寸處理 - 支援 Token
+        size_props = {
+            "width": "setFixedWidth",
+            "height": "setFixedHeight",
+            "min_width": "setMinimumWidth",
+            "min_height": "setMinimumHeight",
+        }
+        for prop, setter in size_props.items():
+            if prop in kwargs and hasattr(self_widget, setter):
+                val = kwargs[prop]
+                if (
+                    prop == "height"
+                    and _is_qt_instance(self_widget, "QAbstractItemView")
+                    and isinstance(val, (int, float))
+                    and val <= 100
                 ):
-                    self_widget.setMinimumWidth(width)
-                else:
-                    self_widget.setFixedWidth(width)
-        if "height" in kwargs and hasattr(self, "setFixedHeight"):
-            with context_suppress():
-                height = int(kwargs["height"])
-                if _is_qt_instance(self, "QPushButton", "QLineEdit", "QComboBox"):
-                    self_widget.setMinimumHeight(max(height, self_widget.sizeHint().height()))
-                elif _is_qt_instance(self, "QTreeView") and height <= 80:
-                    row_height = max(14, self_widget.fontMetrics().height() + 5)
-                    header_height = max(16, self_widget.header().height())
-                    self_widget.setMinimumHeight(header_height + row_height * max(1, height))
-                elif _is_qt_instance(self, "QListWidget") and height <= 80:
-                    row_height = max(13, self_widget.fontMetrics().height() + 4)
-                    self_widget.setMinimumHeight(row_height * max(1, height) + 4)
-                else:
-                    self_widget.setFixedHeight(height)
-        if "min_width" in kwargs and hasattr(self, "setMinimumWidth"):
-            with context_suppress():
-                self_widget.setMinimumWidth(int(kwargs["min_width"]))
-        if "min_height" in kwargs and hasattr(self, "setMinimumHeight"):
-            with context_suppress():
-                self_widget.setMinimumHeight(int(kwargs["min_height"]))
+                    continue
+                if isinstance(val, str) and hasattr(FluentTokens, val.upper()):
+                    val = getattr(FluentTokens, val.upper())
+                with context_suppress():
+                    getattr(self_widget, setter)(int(val))
+
         if "placeholder_text" in kwargs and hasattr(self, "setPlaceholderText"):
             self_widget.setPlaceholderText(str(kwargs["placeholder_text"]))
         if "cursor" in kwargs and hasattr(self, "setCursor"):
@@ -499,81 +816,32 @@ class WidgetMixin:
                 self_widget.setAlignment(_align(alignment_value))
         if "state" in kwargs and hasattr(self, "setEnabled"):
             self_widget.setEnabled(str(kwargs["state"]) != DISABLED)
-        style_parts: list[str] = []
-        bg = kwargs.get("fg_color", kwargs.get("bg", kwargs.get("background")))
-        fg = kwargs.get("text_color", kwargs.get("fg", kwargs.get("foreground")))
-        border = kwargs.get("border_color")
-        radius = kwargs.get("corner_radius", kwargs.get("border_radius"))
-        hover = kwargs.get("hover_color", kwargs.get("button_hover_color"))
-        style_requested = any(
-            key in kwargs
-            for key in (
-                "fg_color",
-                "bg",
-                "background",
-                "text_color",
-                "fg",
-                "foreground",
-                "border_color",
-                "corner_radius",
-                "border_radius",
-                "hover_color",
-                "button_hover_color",
-                "border_spacing",
-                "padx",
-                "pady",
-                "width",
-                "height",
-            )
-        )
-        if bg is not None:
-            style_parts.append(f"background-color: {_color(bg)};")
-        if fg is not None:
-            style_parts.append(f"color: {_color(fg)};")
-        if border is not None:
-            style_parts.append(f"border: 1px solid {_color(border)};")
-        if radius is not None:
-            style_parts.append(f"border-radius: {int(radius)}px;")
-        if _is_qt_instance(self, "QPushButton") and style_requested:
-            if border is None:
-                style_parts.append("border: 0;")
-            requested_width = int(kwargs.get("width", 0) or 0)
-            requested_height = int(kwargs.get("height", 0) or 0)
-            if requested_width <= 24 or requested_height <= 16:
-                style_parts.append("padding: 2px 5px;")
-            elif requested_width <= 45 or requested_height <= 18:
-                style_parts.append("padding: 3px 6px;")
-            else:
-                style_parts.append("padding: 6px 10px;")
-            if "border_spacing" in kwargs:
-                spacing = int(kwargs["border_spacing"])
-                style_parts.append(f"padding-left: {spacing}px; padding-right: {spacing}px;")
-            elif "padx" in kwargs or "pady" in kwargs:
-                padx = _padding_pair(kwargs.get("padx", 7))[0]
-                pady = _padding_pair(kwargs.get("pady", 4))[0]
-                style_parts.append(f"padding: {pady}px {padx}px;")
-            if kwargs.get("anchor") in ("w", "left"):
-                style_parts.append("text-align: left;")
-        if _is_qt_instance(self, "QComboBox"):
-            button_color = kwargs.get("button_color")
-            if button_color is not None:
-                style_parts.append(f"selection-background-color: {_color(button_color)};")
-        if _is_qt_instance(self, "QFrame") and border is None and style_requested:
-            style_parts.append("border: none;")
-        if _is_qt_instance(self, "QLabel") and style_requested:
-            style_parts.append("border: none; background: transparent;")
-        if style_parts and hasattr(self, "setStyleSheet"):
-            selector = _style_selector(self)
-            stylesheet = f"{selector} {{ {' '.join(style_parts)} }}"
-            if hover is not None and _is_qt_instance(self, "QPushButton"):
-                stylesheet += f" {selector}:hover {{ background-color: {_color(hover)}; }}"
-            self_widget.setStyleSheet(stylesheet)
+
+        # 樣式處理 - 使用新疊加模式
+        style_keys = {
+            "fg_color",
+            "bg",
+            "background",
+            "text_color",
+            "fg",
+            "foreground",
+            "border_color",
+            "corner_radius",
+            "border_radius",
+            "hover_color",
+            "button_hover_color",
+            "pressed_color",
+            "focus_color",
+            "padding",
+            "padx",
+            "pady",
+            "progress_color",
+        }
+        if any(k in kwargs for k in style_keys):
+            self._apply_fluent_style_config(kwargs)
+            self._last_style_kwargs = kwargs
 
     config = configure
-
-    def cget(self, key: str) -> Any:
-        """讀取指定設定選項的目前值。"""
-        return self._options.get(key)
 
     def connect_event(self, event_name: str, callback: Callable[..., Any], *, append: bool = False) -> str:
         if append and event_name in self._event_handlers:
@@ -616,7 +884,7 @@ class WidgetMixin:
                     selection_model.selectionChanged.connect(lambda *_args: self._dispatch_event(event_name))
                     self._connected_event_names.add(event_name)
 
-    def _event_from_qt(self, qt_event: Any = None) -> Event:
+    def _event_from_qt(self, qt_event: Any = None) -> Any:
         x, y, x_root, y_root = _event_position(qt_event)
         delta = 0
         keysym = ""
@@ -637,22 +905,31 @@ class WidgetMixin:
                 QtCore.Qt.Key.Key_Down: "Down",
             }
             keysym = key_map.get(qt_event.key(), "")
-        return Event(
-            widget=self,
-            x=x,
-            y=y,
-            x_root=x_root,
-            y_root=y_root,
-            width=width,
-            height=height,
-            delta=delta,
-            keysym=keysym,
-        )
+        return type(
+            "Event",
+            (),
+            {
+                "widget": self,
+                "x": x,
+                "y": y,
+                "x_root": x_root,
+                "y_root": y_root,
+                "width": width,
+                "height": height,
+                "delta": delta,
+                "keysym": keysym,
+            },
+        )()
 
     def _dispatch_event(self, event_name: str, qt_event: Any = None) -> bool:
         callback = self._event_handlers.get(event_name)
         if callback is None:
+            logger.debug(
+                f"_dispatch_event: no handler for '{event_name}', available={list(self._event_handlers.keys())}",
+                "WidgetMixin",
+            )
             return False
+        logger.debug(f"_dispatch_event: calling handler for '{event_name}'", "WidgetMixin")
         result = callback(self._event_from_qt(qt_event))
         return result == "break"
 
@@ -660,7 +937,9 @@ class WidgetMixin:
         """攔截 Qt 事件並依目前元件狀態處理。"""
         watched_self = watched is self
         with context_suppress():
-            watched_self = watched_self or watched is cast(Any, self).viewport() or watched is cast(Any, self).header()
+            is_header = watched is cast(Any, self).header()
+            self._dispatching_header_event = is_header
+            watched_self = watched_self or watched is cast(Any, self).viewport() or is_header
         if not watched_self:
             return False
         event_type = event.type()
@@ -669,14 +948,15 @@ class WidgetMixin:
             button = event.button()
             if button == QtCore.Qt.MouseButton.LeftButton:
                 event_names.append("mouse_left_press")
-            elif button == QtCore.Qt.MouseButton.RightButton:
-                event_names.append("mouse_right_press")
         elif event_type == QtCore.QEvent.Type.MouseButtonRelease:
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 event_names.append("mouse_left_release")
         elif event_type == QtCore.QEvent.Type.MouseButtonDblClick:
+            logger.debug(f"eventFilter MouseButtonDblClick: button={event.button()}", "WidgetMixin")
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 event_names.append("mouse_double_click")
+        elif event_type == QtCore.QEvent.Type.ContextMenu:
+            event_names.append("mouse_right_press")
         elif event_type == QtCore.QEvent.Type.KeyPress:
             key = event.key()
             key_event_names = {
@@ -747,13 +1027,6 @@ class WidgetMixin:
         if hasattr(widget, "deleteLater"):
             widget.deleteLater()
 
-    def is_alive(self) -> bool:
-        if not bool(getattr(self, "_exists", True)):
-            return False
-        if isinstance(self, QtCore.QObject):
-            return is_qobject_alive(self)
-        return True
-
     def top_level_widget(self):
         widget = self
         while getattr(widget, "_parent_ref", None) is not None:
@@ -775,6 +1048,11 @@ class WidgetMixin:
     def is_viewable(self) -> bool:
         return bool(self.isVisible()) if hasattr(self, "isVisible") else True
 
+    def _on_theme_changed(self) -> None:
+        """主題切換時自動重新套用樣式"""
+        if hasattr(self, "_last_style_kwargs") and self._last_style_kwargs:
+            self.configure(**self._last_style_kwargs)
+
     def clipboard_clear(self) -> None:
         app = ensure_app()
         app.clipboard().clear()
@@ -784,23 +1062,62 @@ class WidgetMixin:
         app.clipboard().setText(str(text))
 
 
-class context_suppress:
-    def __enter__(self):
-        return self
+# =============================================================================
+# Fluent 原生元件包裝器
+# =============================================================================
 
-    def __exit__(self, *_exc: Any) -> bool:
-        return True
+
+class PlainWindow(WidgetMixin, QtWidgets.QWidget):
+    """無側邊欄的純內容視窗，用於對話框與彈出視窗。"""
+
+    def __init__(self, parent: Any = None, title: str = "", resizable: bool = True, **kwargs: Any) -> None:
+        flags = (
+            QtCore.Qt.WindowType.Window
+            | QtCore.Qt.WindowType.WindowCloseButtonHint
+            | QtCore.Qt.WindowType.WindowTitleHint
+        )
+        if resizable:
+            flags |= QtCore.Qt.WindowType.WindowMinMaxButtonsHint
+        QtWidgets.QWidget.__init__(self, _native_parent_simple(parent), flags)
+        self.setWindowTitle(title)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._close_event_handler: Callable[..., Any] | None = None
+        self._init_native(parent, **kwargs)
+
+    def set_close_event_handler(self, handler: Callable[..., Any]) -> None:
+        """設定關閉事件處理器，於視窗關閉時呼叫。"""
+        self._close_event_handler = handler
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self._close_event_handler is not None:
+            self._close_event_handler(event)
+        super().closeEvent(event)
+
+    def accept(self) -> None:
+        self._modal_result = True
+        self.close()
+
+    def reject(self) -> None:
+        self._modal_result = False
+        self.close()
+
+    def destroy(self, *_args, **_kwargs) -> None:
+        self._exists = False
+        with context_suppress():
+            self.close()
+        with context_suppress():
+            self.deleteLater()
 
 
 class Frame(WidgetMixin, QtWidgets.QFrame):
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QFrame.__init__(self, _native_parent(parent))
+        QtWidgets.QFrame.__init__(self, _native_parent_simple(parent))
         self._init_native(parent, **kwargs)
 
 
-class ScrollableFrame(WidgetMixin, QtWidgets.QScrollArea):
+class ScrollableFrame(WidgetMixin, FluentScrollArea):
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QScrollArea.__init__(self, _native_parent(parent))
+        FluentScrollArea.__init__(self, _native_parent_simple(parent))
         self.setWidgetResizable(True)
         self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -828,59 +1145,101 @@ class ScrollableFrame(WidgetMixin, QtWidgets.QScrollArea):
         return layout
 
 
-class Label(WidgetMixin, QtWidgets.QLabel):
+class Label(WidgetMixin, BodyLabel):
     def __init__(self, parent: Any = None, text: str = "", **kwargs: Any) -> None:
-        QtWidgets.QLabel.__init__(self, str(text), _native_parent(parent))
-        self._init_native(parent, text=text, **kwargs)
+        BodyLabel.__init__(self, _native_parent_simple(parent))
+        self.setText(str(text))
+        self._init_native(parent, text=str(text), **kwargs)
         if "wraplength" in kwargs:
             self.setWordWrap(True)
         self.setAlignment(_align(kwargs.get("anchor")))
 
 
+class SubtitleLabel(WidgetMixin, FluentSubtitleLabel):
+    def __init__(self, parent: Any = None, text: str = "", **kwargs: Any) -> None:
+        FluentSubtitleLabel.__init__(self, _native_parent_simple(parent))
+        self.setText(str(text))
+        self._init_native(parent, text=str(text), **kwargs)
+
+
+class HyperlinkLabel(WidgetMixin, FluentHyperlinkLabel):
+    def __init__(self, parent: Any = None, text: str = "", url: str = "", **kwargs: Any) -> None:
+        FluentHyperlinkLabel.__init__(self, _native_parent_simple(parent))
+        self.setUrl(url)
+        self.setText(str(text))
+        self._init_native(parent, text=str(text), **kwargs)
+
+
+def _apply_button_command(button: Any, kwargs: dict[str, Any]) -> None:
+    """共用邏輯：從 configure kwargs 中提取 command 並重新綁定。"""
+    command = kwargs.pop("command", None)
+    if command is not None:
+        with context_suppress():
+            button.clicked.disconnect()
+        button._command = command
+        button.clicked.connect(button._invoke_command)
+
+
+def _invoke_button_command(button: Any) -> None:
+    """共用邏輯：執行按鈕綁定的 command。"""
+    cmd = getattr(button, "_command", None)
+    if cmd:
+        cmd()
+
+
 class Button(WidgetMixin, FluentPushButton):
-    def __init__(self, parent: Any = None, text: str = "", command: Callable[..., Any] | None = None, **kwargs: Any):
-        try:
-            FluentPushButton.__init__(self, str(text), _native_parent(parent))
-        except TypeError:
-            FluentPushButton.__init__(self, _native_parent(parent))
-            self.setText(str(text))
+    def __init__(
+        self,
+        parent: Any = None,
+        text: str = "",
+        command: Callable[..., Any] | None = None,
+        **kwargs: Any,
+    ):
+        FluentPushButton.__init__(self, _native_parent_simple(parent))
+        self.setText(str(text))
         self._command = command
         if command is not None:
             self.clicked.connect(self._invoke_command)
         self._init_native(parent, text=text, **kwargs)
 
     def _invoke_command(self, *_args: Any) -> None:
-        if self._command:
-            self._command()
-
-    def invoke(self) -> None:
-        """觸發按鈕的點擊動作。"""
-        self._invoke_command()
+        _invoke_button_command(self)
 
     def configure(self, **kwargs: Any) -> None:
         """更新元件設定並套用到實際 Qt widget。"""
-        command = kwargs.pop("command", None)
-        if command is not None:
-            with context_suppress():
-                self.clicked.disconnect()
-            self._command = command
-            self.clicked.connect(self._invoke_command)
+        _apply_button_command(self, kwargs)
+        if "width" in kwargs:
+            kwargs["min_width"] = kwargs.pop("width")
         super().configure(**kwargs)
+
+    def set_accent(self, accent: bool = True) -> None:
+        """一鍵切換強調色樣式"""
+        if accent:
+            self.configure(
+                fg_color=FluentTokens.PRIMARY,
+                text_color="#ffffff",
+                hover_color=FluentTokens.HOVER,
+                pressed_color=FluentTokens.PRESSED,
+                corner_radius=FluentTokens.BORDER_RADIUS_MD,
+            )
+        else:
+            self.configure(
+                fg_color=FluentTokens.SURFACE,
+                text_color=FluentTokens.TEXT_PRIMARY,
+                border_color=FluentTokens.BORDER,
+                hover_color=FluentTokens.HOVER,
+                corner_radius=FluentTokens.BORDER_RADIUS_MD,
+            )
 
 
 class Entry(WidgetMixin, FluentLineEdit):
-    def __init__(self, parent: Any = None, textvariable: Variable | None = None, **kwargs: Any) -> None:
-        FluentLineEdit.__init__(self, _native_parent(parent))
-        self._variable = textvariable
-        if textvariable is not None:
-            self.setText(str(textvariable.get()))
-            self.textChanged.connect(textvariable.set)
-            textvariable.trace_add("write", lambda *_: self.setText(str(textvariable.get())))
+    def __init__(
+        self,
+        parent: Any = None,
+        **kwargs: Any,
+    ):
+        FluentLineEdit.__init__(self, _native_parent_simple(parent))
         self._init_native(parent, **kwargs)
-
-    def get(self) -> str:
-        """取得元件目前值。"""
-        return self.text()
 
     def insert(self, index: Any, text: str | None = None) -> None:
         """插入項目或文字內容。"""
@@ -890,17 +1249,26 @@ class Entry(WidgetMixin, FluentLineEdit):
         else:
             self.setText(self.text() + insert_text)
 
-    def delete(self, _start: Any, _end: Any = None) -> None:
-        """刪除指定項目或文字範圍。"""
-        self.clear()
-
     def select_range(self, start: int, end: Any) -> None:
         length = len(self.text()) if end == END else int(end) - int(start)
         self.setSelection(int(start), max(0, length))
 
+    def set_error_state(self, is_error: bool) -> None:
+        """輸入框錯誤狀態"""
+        if is_error:
+            self.configure(
+                border_color="#dc2626",  # 紅色
+                focus_color="#dc2626",
+            )
+        else:
+            self.configure(
+                border_color=FluentTokens.BORDER,
+                focus_color=FluentTokens.PRIMARY,
+            )
+
 
 class SearchEntry(WidgetMixin, FluentSearchLineEdit):
-    """SearchLineEdit wrapper with project state binding and filter logic."""
+    """SearchLineEdit 包裝器，支援專案狀態綁定與過濾邏輯。"""
 
     def __init__(
         self,
@@ -909,8 +1277,8 @@ class SearchEntry(WidgetMixin, FluentSearchLineEdit):
         search_command: Callable[..., Any] | None = None,
         filter_logic: SearchFilter | None = None,
         **kwargs: Any,
-    ) -> None:
-        FluentSearchLineEdit.__init__(self, _native_parent(parent))
+    ):
+        FluentSearchLineEdit.__init__(self, _native_parent_simple(parent))
         self._variable = textvariable
         self._search_command = search_command
         self.filter_logic = filter_logic or SearchFilter()
@@ -925,6 +1293,8 @@ class SearchEntry(WidgetMixin, FluentSearchLineEdit):
             self.searchSignal.connect(self._on_search_signal)
         with context_suppress():
             self.clearSignal.connect(self._on_clear_signal)
+        if hasattr(self, "returnPressed"):
+            self.returnPressed.connect(self._on_search_signal)
         self._init_native(parent, **kwargs)
 
     def _sync_from_variable(self) -> None:
@@ -944,10 +1314,6 @@ class SearchEntry(WidgetMixin, FluentSearchLineEdit):
             self._variable.set("")
         self._dispatch_event("clear")
 
-    def get(self) -> str:
-        """取得元件目前值。"""
-        return self.text()
-
     def filter_text(self) -> str:
         return self.filter_logic.normalize(self.text())
 
@@ -956,9 +1322,9 @@ class SearchEntry(WidgetMixin, FluentSearchLineEdit):
         return self.filter_logic.matches(candidate, self.text())
 
 
-class TextBox(WidgetMixin, QtWidgets.QTextEdit):
+class TextBox(WidgetMixin, FluentTextEdit):
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QTextEdit.__init__(self, _native_parent(parent))
+        FluentTextEdit.__init__(self, _native_parent_simple(parent))
         self._init_native(parent, **kwargs)
 
     def insert(self, index: Any, text: str) -> None:
@@ -966,14 +1332,6 @@ class TextBox(WidgetMixin, QtWidgets.QTextEdit):
         if index in (END, "end"):
             self.moveCursor(QtGui.QTextCursor.MoveOperation.End)
         self.insertPlainText(str(text))
-
-    def get(self, *_args: Any) -> str:
-        """取得元件目前值。"""
-        return self.toPlainText()
-
-    def delete(self, *_args: Any) -> None:
-        """刪除指定項目或文字範圍。"""
-        self.clear()
 
     def see(self, *_args: Any) -> None:
         """捲動到指定位置或項目。"""
@@ -988,9 +1346,17 @@ class TextBox(WidgetMixin, QtWidgets.QTextEdit):
         bar.setValue(int(float(fraction) * bar.maximum()))
 
 
-class CheckBox(WidgetMixin, QtWidgets.QCheckBox):
-    def __init__(self, parent: Any = None, text: str = "", variable: Variable | None = None, command=None, **kwargs):
-        QtWidgets.QCheckBox.__init__(self, str(text), _native_parent(parent))
+class CheckBox(WidgetMixin, FluentCheckBox):
+    def __init__(
+        self,
+        parent: Any = None,
+        text: str = "",
+        variable: Variable | None = None,
+        command=None,
+        **kwargs,
+    ):
+        FluentCheckBox.__init__(self, _native_parent_simple(parent))
+        self.setText(str(text))
         self._variable = variable
         self._command = command
         if variable is not None:
@@ -1014,7 +1380,7 @@ class CheckBox(WidgetMixin, QtWidgets.QCheckBox):
             self.blockSignals(was_blocked)
 
 
-class RadioButton(WidgetMixin, QtWidgets.QRadioButton):
+class RadioButton(WidgetMixin, FluentRadioButton):
     def __init__(
         self,
         parent: Any = None,
@@ -1023,8 +1389,9 @@ class RadioButton(WidgetMixin, QtWidgets.QRadioButton):
         value: Any = None,
         command: Callable[..., Any] | None = None,
         **kwargs: Any,
-    ) -> None:
-        QtWidgets.QRadioButton.__init__(self, str(text), _native_parent(parent))
+    ):
+        FluentRadioButton.__init__(self, _native_parent_simple(parent))
+        self.setText(str(text))
         self._variable = variable
         self._value = value
         self._command = command
@@ -1036,7 +1403,7 @@ class RadioButton(WidgetMixin, QtWidgets.QRadioButton):
         self._init_native(parent, text=text, **kwargs)
 
 
-class Slider(WidgetMixin, QtWidgets.QSlider):
+class Slider(WidgetMixin, FluentSlider):
     def __init__(
         self,
         parent: Any = None,
@@ -1046,1001 +1413,963 @@ class Slider(WidgetMixin, QtWidgets.QSlider):
         variable: Variable | None = None,
         **kwargs,
     ):
-        QtWidgets.QSlider.__init__(self, QtCore.Qt.Orientation.Horizontal, _native_parent(parent))
+        FluentSlider.__init__(self, _native_parent_simple(parent))
         self._scale = 100
+        self.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.setRange(int(from_ * self._scale), int(to * self._scale))
         self._command = command
         self._variable = variable
         if variable is not None:
             self.setValue(int(float(variable.get()) * self._scale))
+            self.valueChanged.connect(lambda v: variable.set(v / self._scale))
             variable.trace_add("write", lambda *_: self._sync_from_variable())
-        self.valueChanged.connect(self._on_value_changed)
+        if command is not None:
+            self.valueChanged.connect(lambda _v: command())
         self._init_native(parent, **kwargs)
 
     def _sync_from_variable(self) -> None:
         if self._variable is None:
             return
-        raw_value = int(float(self._variable.get()) * self._scale)
-        if self.value() == raw_value:
+        value = int(float(self._variable.get()) * self._scale)
+        if self.value() == value:
             return
         was_blocked = self.blockSignals(True)
         try:
-            self.setValue(raw_value)
+            self.setValue(value)
         finally:
             self.blockSignals(was_blocked)
 
-    def _on_value_changed(self, value: int) -> None:
-        scaled_value = value / self._scale
-        if self._variable is not None:
-            self._variable.set(scaled_value)
-        if self._command is not None:
-            self._command(scaled_value)
-
     def set(self, value: float) -> None:
-        """設定目前值或顯示狀態。"""
-        self.setValue(int(float(value) * self._scale))
-
-    def get(self) -> float:
-        """取得元件目前值。"""
-        return self.value() / self._scale
+        """設定滑桿值。"""
+        self.setValue(int(value * self._scale))
 
 
-class _ProgressSignalProxy(QtCore.QObject):
-    value_requested = QtCore.Signal(float)
-
-
-class ProgressBar(WidgetMixin, FluentProgressBar):
+class ProgressBar(WidgetMixin, FluentProgressBarWidget):
     def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        FluentProgressBar.__init__(self, _native_parent(parent))
-        self.setRange(0, 100)
+        FluentProgressBarWidget.__init__(self, _native_parent_simple(parent))
+        self._init_native(parent, **kwargs)
         self.setTextVisible(True)
         self.setFormat("%p%")
-        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self._progress_signal_proxy = _ProgressSignalProxy(self)
-        self._progress_signal_proxy.value_requested.connect(self._apply_progress_value)
-        self._init_native(parent, **kwargs)
+        self.setVal(0)
+
+    def value(self) -> int:
+        """回傳目前進度值（取自 _val 並轉為 int，避免 float 顯示為 25.0%）。"""
+        val = getattr(self, "_val", None)
+        if val is not None:
+            return int(val)
+        return super().value()
+
+    def text(self) -> str:
+        """回傳進度文字，確保值為 0 時仍顯示 0%。"""
+        return f"{self.value()}%"
 
     def set(self, value: float) -> None:
-        """設定目前值或顯示狀態。"""
-        self._progress_signal_proxy.value_requested.emit(float(value))
+        """設定進度值 (0.0 - 1.0)，同步 Qt 原生進度狀態以維持 valueChanged 訊號。"""
+        val_int = int(value * 100)
+        self.setVal(val_int)
+        super().setValue(val_int)
 
-    @QtCore.Slot(float)
-    def _apply_progress_value(self, value: float) -> None:
-        self.setValue(int(float(value) * 100 if float(value) <= 1 else float(value)))
+    def setRange(self, min_val: int, max_val: int) -> None:
+        self.setMinimum(min_val)
+        self.setMaximum(max_val)
 
-    def paintEvent(self, event: Any) -> None:
-        """執行 paintEvent 操作。"""
-        super().paintEvent(event)
-        if not self.isTextVisible():
-            return
-        text = self.text()
-        if not text:
-            return
+    def setValue(self, value: int) -> None:
+        self.setVal(value)
+        super().setValue(value)
 
-        painter = QtGui.QPainter(self)
-        try:
-            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-            painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing, True)
-
-            font = QtGui.QFont(self.font())
-            font_size = max(8, min(12, max(8, int(self.height() * 0.58))))
-            if font.pointSize() > 0:
-                font.setPointSize(font_size)
-            else:
-                font.setPixelSize(font_size)
-            painter.setFont(font)
-
-            rect = self.rect().adjusted(4, 0, -4, 0)
-            alignment = QtCore.Qt.AlignmentFlag.AlignCenter
-            shadow = QtGui.QColor(0, 0, 0, 180)
-            text_color = QtGui.QColor("#f8fafc") if is_dark_color_scheme() else QtGui.QColor("#0f172a")
-            painter.setPen(shadow)
-            painter.drawText(rect.translated(1, 1), alignment, text)
-            painter.drawText(rect.translated(-1, 0), alignment, text)
-            painter.setPen(text_color)
-            painter.drawText(rect, alignment, text)
-        finally:
-            painter.end()
+    def start(self) -> None:
+        """啟動不定進度模式"""
+        self.setRange(0, 0)
 
     def stop(self) -> None:
-        """停止目前進度動畫。"""
-        return
+        """停止不定進度模式"""
+        self.setRange(0, 100)
 
 
-class OptionMenu(WidgetMixin, QtWidgets.QComboBox):
+class ComboBox(WidgetMixin, FluentComboBox):
     def __init__(
         self,
         parent: Any = None,
         values: list[str] | None = None,
         variable: Variable | None = None,
-        command=None,
-        **kwargs,
+        command: Callable[..., Any] | None = None,
+        **kwargs: Any,
     ):
-        QtWidgets.QComboBox.__init__(self, _native_parent(parent))
+        FluentComboBox.__init__(self, _native_parent_simple(parent))
         self._variable = variable
         self._command = command
-        self.setEditable(False)
-        self.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
-        self.setSizeAdjustPolicy(QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.setMinimumContentsLength(4)
-        self.addItems([str(v) for v in values or []])
-        if variable is not None and variable.get():
+        if values:
+            self.addItems(values)
+        if variable is not None:
             self.setCurrentText(str(variable.get()))
-        self.currentTextChanged.connect(self._on_changed)
-        self._init_native(parent, values=values or [], **kwargs)
+            self.currentTextChanged.connect(variable.set)
+            variable.trace_add("write", lambda *_: self._sync_from_variable())
+        if command is not None:
+            self.currentTextChanged.connect(lambda _: command())
+        self._init_native(parent, **kwargs)
 
-    def _on_changed(self, value: str) -> None:
-        if self._variable is not None:
-            self._variable.set(value)
-        if self._command is not None:
-            self._command(value)
-
-    def get(self) -> str:
-        """取得元件目前值。"""
-        return self.currentText()
-
-    def set(self, value: str) -> None:
-        """設定目前值或顯示狀態。"""
-        self.setCurrentText(str(value))
+    def _sync_from_variable(self) -> None:
+        if self._variable is None:
+            return
+        value = str(self._variable.get())
+        if self.currentText() == value:
+            return
+        was_blocked = self.blockSignals(True)
+        try:
+            index = self.findText(value)
+            if index >= 0:
+                self.setCurrentIndex(index)
+        finally:
+            self.blockSignals(was_blocked)
 
     def configure(self, **kwargs: Any) -> None:
-        """更新元件設定並套用到實際 Qt widget。"""
-        if "values" in kwargs:
+        values = kwargs.pop("values", None)
+        if values is not None:
             self.clear()
-            values = [str(v) for v in kwargs["values"]]
             self.addItems(values)
-            longest = max((len(v) for v in values), default=4)
-            self.setMinimumContentsLength(min(max(longest, 4), 24))
+        state = kwargs.pop("state", None)
+        if state is not None:
+            self.setEnabled(str(state) != DISABLED)
         super().configure(**kwargs)
 
-
-class _TreeRow:
-    __slots__ = ("children", "item_id", "parent", "tag_styles", "tags", "values")
-
-    def __init__(
-        self,
-        item_id: str,
-        values: list[str] | tuple[str, ...] = (),
-        tags: tuple[str, ...] = (),
-        tag_styles: dict[str, dict[str, str]] | None = None,
-    ) -> None:
-        self.item_id = item_id
-        self.values = [str(value) for value in values]
-        self.tags = tuple(tags)
-        self.tag_styles = tag_styles if tag_styles is not None else {}
-        self.parent: _TreeRow | None = None
-        self.children: list[_TreeRow] = []
-
-    def text(self, column: int) -> str:
-        """回傳指定欄位的顯示文字。"""
-        return self.values[column] if 0 <= column < len(self.values) else ""
-
-    def setText(self, column: int, value: Any) -> None:
-        """設定指定欄位的顯示文字。"""
-        while len(self.values) <= column:
-            self.values.append("")
-        self.values[column] = str(value)
-
-    def textAlignment(self, _column: int):
-        """回傳指定欄位的文字對齊方式。"""
-        return QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-
-    def _style_color(self, name: str) -> str | None:
-        color: str | None = None
-        for tag in self.tags:
-            color = self.tag_styles.get(str(tag), {}).get(name, color)
-        return color
-
-    def background(self, _column: int) -> QtGui.QBrush:
-        """回傳指定欄位的背景色。"""
-        color = self._style_color("background")
-        return QtGui.QBrush(QtGui.QColor(color)) if color else QtGui.QBrush()
-
-    def foreground(self, _column: int) -> QtGui.QBrush:
-        """回傳指定欄位的前景色。"""
-        color = self._style_color("foreground")
-        return QtGui.QBrush(QtGui.QColor(color)) if color else QtGui.QBrush()
-
-
-class _TreeModel(_QAbstractItemModel):
-    def __init__(self, columns: list[str], tag_styles: dict[str, dict[str, str]], parent: Any = None) -> None:
-        super().__init__(parent)
-        self.columns = list(columns)
-        self.tag_styles = tag_styles
-        self.root = _TreeRow("", tag_styles=tag_styles)
-        self.rows: dict[str, _TreeRow] = {}
-
-    def _column_count(self) -> int:
-        return max(1, len(self.columns))
-
-    def _row_from_index(self, index: QtCore.QModelIndex | QtCore.QPersistentModelIndex) -> _TreeRow:
-        if index.isValid():
-            row = index.internalPointer()
-            if isinstance(row, _TreeRow):
-                return row
-        return self.root
-
-    def _parent_index_for_row(self, row: _TreeRow) -> QtCore.QModelIndex:
-        parent = row.parent
-        if parent is None or parent is self.root:
-            return QtCore.QModelIndex()
-        grandparent = parent.parent or self.root
-        return self.createIndex(grandparent.children.index(parent), 0, parent)
-
-    def _index_for_row(self, row: _TreeRow, column: int = 0) -> QtCore.QModelIndex:
-        parent = row.parent
-        if parent is None:
-            return QtCore.QModelIndex()
-        return self.createIndex(parent.children.index(row), max(0, int(column)), row)
-
-    def index(
-        self,
-        row: int,
-        column: int,
-        parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX,
-    ) -> QtCore.QModelIndex:
-        """回傳或建立指定項目的索引。"""
-        if not self.hasIndex(row, column, parent):
-            return QtCore.QModelIndex()
-        parent_row = self._row_from_index(parent)
-        try:
-            return self.createIndex(row, column, parent_row.children[row])
-        except IndexError:
-            return QtCore.QModelIndex()
-
-    def parent(
-        self,
-        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
-    ) -> QtCore.QModelIndex:
-        """回傳指定項目的父項目。"""
-        if not index.isValid():
-            return QtCore.QModelIndex()
-        row = self._row_from_index(index)
-        parent_row = row.parent
-        if parent_row is None or parent_row is self.root:
-            return QtCore.QModelIndex()
-        return self._index_for_row(parent_row)
-
-    def rowCount(self, parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX) -> int:
-        """回傳指定父節點底下的列數。"""
-        if parent.isValid() and parent.column() > 0:
-            return 0
-        return len(self._row_from_index(parent).children)
-
-    def columnCount(self, _parent: QtCore.QModelIndex | QtCore.QPersistentModelIndex = INVALID_MODEL_INDEX) -> int:
-        """回傳模型欄位數量。"""
-        return self._column_count()
-
-    def data(
-        self,
-        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
-        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
-    ) -> Any:
-        """依角色回傳模型資料。"""
-        if not index.isValid():
-            return None
-        row = self._row_from_index(index)
-        column = index.column()
-        if role == QtCore.Qt.ItemDataRole.DisplayRole:
-            return row.text(column)
-        if role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
-            return row.textAlignment(column)
-        if role == QtCore.Qt.ItemDataRole.BackgroundRole:
-            color = row._style_color("background")
-            return QtGui.QBrush(QtGui.QColor(color)) if color else None
-        if role == QtCore.Qt.ItemDataRole.ForegroundRole:
-            color = row._style_color("foreground")
-            return QtGui.QBrush(QtGui.QColor(color)) if color else None
-        return None
-
-    def flags(self, index: QtCore.QModelIndex | QtCore.QPersistentModelIndex) -> QtCore.Qt.ItemFlag:
-        """回傳指定索引支援的 Qt item flags。"""
-        if not index.isValid():
-            return QtCore.Qt.ItemFlag.NoItemFlags
-        return QtCore.Qt.ItemFlag.ItemIsEnabled | QtCore.Qt.ItemFlag.ItemIsSelectable
-
-    def headerData(
-        self,
-        section: int,
-        orientation: QtCore.Qt.Orientation,
-        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
-    ) -> Any:
-        """回傳指定欄位標題資料。"""
-        if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.DisplayRole:
-            return self.columns[section] if 0 <= section < len(self.columns) else ""
-        if orientation == QtCore.Qt.Orientation.Horizontal and role == QtCore.Qt.ItemDataRole.TextAlignmentRole:
-            return QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-        return None
-
-    def setHeaderData(
-        self,
-        section: int,
-        orientation: QtCore.Qt.Orientation,
-        value: Any,
-        role: int = QtCore.Qt.ItemDataRole.EditRole,
-    ) -> bool:
-        """設定指定欄位標題資料。"""
-        if orientation != QtCore.Qt.Orientation.Horizontal or role not in {
-            QtCore.Qt.ItemDataRole.EditRole,
-            QtCore.Qt.ItemDataRole.DisplayRole,
-        }:
-            return False
-        while len(self.columns) <= section:
-            self.columns.append("")
-        self.columns[section] = str(value)
-        self.headerDataChanged.emit(orientation, section, section)
-        return True
-
-    def index_for_id(self, item_id: str, column: int = 0) -> QtCore.QModelIndex:
-        row = self.rows.get(str(item_id))
-        if row is None or row.parent is None:
-            return QtCore.QModelIndex()
-        return self._index_for_row(row, column)
-
-    def _normalized_values(self, values: Any, text: str = "") -> list[str]:
-        normalized = [str(value) for value in (values or ())]
-        while len(normalized) < self._column_count():
-            normalized.append("")
-        if text:
-            normalized[0] = str(text)
-        return normalized[: self._column_count()]
-
-    def insert_item(
-        self,
-        parent_id: str,
-        index: Any,
-        item_id: str,
-        text: str = "",
-        values: Any = (),
-        tags: Any = (),
-    ) -> str:
-        if item_id in self.rows:
-            self.remove_item(item_id)
-        parent_row = self.rows.get(str(parent_id), self.root) if parent_id else self.root
-        row_index = len(parent_row.children) if index in (END, "end") else max(0, int(index))
-        row_index = min(row_index, len(parent_row.children))
-        parent_index = QtCore.QModelIndex() if parent_row is self.root else self._index_for_row(parent_row)
-        self.beginInsertRows(parent_index, row_index, row_index)
-        row = _TreeRow(item_id, self._normalized_values(values, text), tuple(tags or ()), self.tag_styles)
-        row.parent = parent_row
-        parent_row.children.insert(row_index, row)
-        self.rows[item_id] = row
-        self.endInsertRows()
-        return item_id
-
-    def _remove_row_mapping(self, row: _TreeRow) -> None:
-        for child in list(row.children):
-            self._remove_row_mapping(child)
-        self.rows.pop(row.item_id, None)
-
-    def remove_item(self, item_id: str, *, detach: bool = False) -> None:
-        row = self.rows.get(str(item_id))
-        if row is None or row.parent is None:
-            return
-        parent_row = row.parent
-        row_index = parent_row.children.index(row)
-        parent_index = QtCore.QModelIndex() if parent_row is self.root else self._index_for_row(parent_row)
-        self.beginRemoveRows(parent_index, row_index, row_index)
-        parent_row.children.pop(row_index)
-        row.parent = None
-        self.endRemoveRows()
-        if not detach:
-            self._remove_row_mapping(row)
-
-    def reattach_item(self, item_id: str, parent_id: str, index: int | str = 0) -> None:
-        row = self.rows.get(str(item_id))
-        if row is None:
-            return
-        if row.parent is not None:
-            self.remove_item(item_id, detach=True)
-        parent_row = self.rows.get(str(parent_id), self.root) if parent_id else self.root
-        row_index = len(parent_row.children) if index == END else max(0, int(index))
-        row_index = min(row_index, len(parent_row.children))
-        parent_index = QtCore.QModelIndex() if parent_row is self.root else self._index_for_row(parent_row)
-        self.beginInsertRows(parent_index, row_index, row_index)
-        row.parent = parent_row
-        parent_row.children.insert(row_index, row)
-        self.endInsertRows()
-
-    def move_item(self, item_id: str, parent_id: str = "", index: int = 0) -> None:
-        if str(item_id) not in self.rows:
-            return
-        self.remove_item(str(item_id), detach=True)
-        self.reattach_item(str(item_id), parent_id, index)
-
-    def children_ids(self, parent_id: str | None = None) -> tuple[str, ...]:
-        parent_row = self.rows.get(str(parent_id), self.root) if parent_id else self.root
-        return tuple(row.item_id for row in parent_row.children)
-
-    def parent_id(self, item_id: str) -> str:
-        row = self.rows.get(str(item_id))
-        if row is None or row.parent is None or row.parent is self.root:
-            return ""
-        return row.parent.item_id
-
-    def set_values(self, item_id: str, values: Any) -> None:
-        row = self.rows.get(str(item_id))
-        if row is None:
-            return
-        row.values = self._normalized_values(values)
-        index_left = self.index_for_id(item_id, 0)
-        index_right = self.index_for_id(item_id, self._column_count() - 1)
-        if index_left.isValid() and index_right.isValid():
-            self.dataChanged.emit(index_left, index_right, [QtCore.Qt.ItemDataRole.DisplayRole])
-
-    def set_cell(self, item_id: str, column: int, value: Any) -> None:
-        row = self.rows.get(str(item_id))
-        if row is None:
-            return
-        row.setText(column, value)
-        index = self.index_for_id(item_id, column)
-        if index.isValid():
-            self.dataChanged.emit(index, index, [QtCore.Qt.ItemDataRole.DisplayRole])
-
-    def set_tags(self, item_id: str, tags: Any) -> None:
-        row = self.rows.get(str(item_id))
-        if row is None:
-            return
-        row.tags = tuple(tags or ())
-        self._emit_row_style_changed(item_id)
-
-    def _emit_row_style_changed(self, item_id: str) -> None:
-        index_left = self.index_for_id(item_id, 0)
-        index_right = self.index_for_id(item_id, self._column_count() - 1)
-        if index_left.isValid() and index_right.isValid():
-            self.dataChanged.emit(
-                index_left,
-                index_right,
-                [QtCore.Qt.ItemDataRole.BackgroundRole, QtCore.Qt.ItemDataRole.ForegroundRole],
-            )
-
-    def emit_style_changed(self, tag: str) -> None:
-        for item_id, row in self.rows.items():
-            if tag not in row.tags:
-                continue
-            self._emit_row_style_changed(item_id)
+    def set(self, value: str) -> None:
+        index = self.findText(value)
+        if index >= 0:
+            self.setCurrentIndex(index)
 
 
 class Treeview(WidgetMixin, QtWidgets.QTreeView):
-    def __init__(self, parent: Any = None, columns: list[str] | tuple[str, ...] = (), show: str = "", **kwargs):
-        QtWidgets.QTreeView.__init__(self, _native_parent(parent))
-        self._columns = list(columns)
-        self._tags: dict[str, tuple[str, ...]] = {}
+    def __init__(
+        self,
+        parent: Any = None,
+        columns: list[str] | tuple[str, ...] | None = None,
+        show: str = "headings",
+        selectmode: str = "browse",
+        **kwargs: Any,
+    ):
+        QtWidgets.QTreeView.__init__(self, _native_parent_simple(parent))
+        self._columns: list[str] = list(columns) if columns else []
+        self._show = show
+        self._model = QtGui.QStandardItemModel()
+        self._items: dict[str, QtGui.QStandardItem] = {}
+        self._item_rows: dict[str, list[QtGui.QStandardItem]] = {}
+        self._item_tags: dict[str, tuple] = {}
         self._tag_styles: dict[str, dict[str, str]] = {}
-        self._model = _TreeModel([str(c) for c in self._columns] or [""], self._tag_styles, self)
-        self._items = self._model.rows
+        self._detached: dict[str, list[QtGui.QStandardItem]] = {}
+        self._detached_tags: dict[str, tuple] = {}
         self.setModel(self._model)
+        if columns:
+            self._model.setHorizontalHeaderLabels(columns)
+        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self._apply_selectmode(selectmode)
+        self.setAlternatingRowColors(True)
         self.setRootIsDecorated(False)
         self.setIndentation(0)
-        self.setUniformRowHeights(True)
-        self.setAllColumnsShowFocus(True)
-        self.setAlternatingRowColors(True)
-        self.setItemsExpandable(True)
-        self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
-        self.setViewportMargins(0, 0, 0, 0)
-        self.header().setMinimumSectionSize(0)
-        self.header().setStretchLastSection(False)
-        self.setHeaderHidden("headings" not in str(show).split())
-        default_alignment = QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter
-        self.header().setDefaultAlignment(default_alignment)
-        self._apply_selectmode(str(kwargs.get("selectmode", "browse")))
-        self._init_native(parent, columns=columns, show=show, **kwargs)
-        self.apply_theme_style()
+        self.header().setStretchLastSection(True)
+        self.header().setSectionsClickable(True)
+        self._init_native(parent, **kwargs)
 
-    def apply_theme_style(self) -> None:
-        """Apply the current Qt theme colors directly to this native tree."""
-        dark = is_dark_color_scheme()
-        base = "#000000" if dark else "#ffffff"
-        alternate = "#111827" if dark else "#f8fafc"
-        text = "#ffffff" if dark else "#0f172a"
-        border = "#4b5563" if dark else "#cbd5e1"
-        header_bg = "#171717" if dark else "#f1f5f9"
-        header_text = "#f8fafc" if dark else "#0f172a"
-        selected = "#2563eb"
-        self.setStyleSheet(
-            "QTreeView {"
-            f"background: {base}; color: {text}; alternate-background-color: {alternate};"
-            f"border: 1px solid {border}; padding: 0px; margin: 0px;"
-            "}"
-            "QTreeView::item {"
-            f"color: {text}; padding: 0px 2px 0px 0px; margin: 0px;"
-            "}"
-            f"QTreeView::item:selected {{ background: {selected}; color: #ffffff; }}"
-            f"QTreeView::item:selected:!active {{ background: {selected}; color: #ffffff; }}"
-            "QHeaderView::section {"
-            f"background: {header_bg}; color: {header_text}; border: 1px solid {border};"
-            "padding: 3px 4px 3px 0px; margin: 0px;"
-            "}"
-        )
+    # ── 內部輔助 ──────────────────────────────────────────────
 
-    def _apply_selectmode(self, selectmode: str) -> None:
-        mode = selectmode.lower()
-        if mode in {"extended", "multiple"}:
-            self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
-        elif mode in {"none", "disabled"}:
-            self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.NoSelection)
-        else:
-            self.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+    def _apply_selectmode(self, mode: str) -> None:
+        mode_map = {
+            "browse": QtWidgets.QAbstractItemView.SelectionMode.SingleSelection,
+            "extended": QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection,
+            "single": QtWidgets.QAbstractItemView.SelectionMode.SingleSelection,
+            "multiple": QtWidgets.QAbstractItemView.SelectionMode.MultiSelection,
+            "none": QtWidgets.QAbstractItemView.SelectionMode.NoSelection,
+        }
+        self.setSelectionMode(mode_map.get(mode, QtWidgets.QAbstractItemView.SelectionMode.SingleSelection))
 
-    def heading(self, column: str, text: str | None = None, command: Callable[..., Any] | None = None, **_kwargs):
-        """設定 Treeview 欄位標題。"""
-        idx = self._column_index(column)
-        if text == "text" and command is None:
-            return self._model.headerData(idx, QtCore.Qt.Orientation.Horizontal)
-        if text is not None:
-            self._model.setHeaderData(idx, QtCore.Qt.Orientation.Horizontal, str(text))
-        if command is not None:
-            self.header().sectionClicked.connect(lambda clicked: command() if clicked == idx else None)
+    def _row_of(self, item_id: str) -> int:
+        """回傳 item_id 對應的 model row，若已 detach 則回傳 -1。"""
+        if item_id in self._items:
+            return self._items[item_id].row()
+        return -1
+
+    def _find_iid_by_row(self, row: int) -> str | None:
+        for iid, item in self._items.items():
+            if item.row() == row:
+                return iid
         return None
 
-    def column(self, column: str | int, width: int | str | None = None, **_kwargs):
-        """設定或讀取 Treeview 欄位配置。"""
-        idx = self._column_index(column)
-        if isinstance(width, str):
-            if width == "width":
-                return self.columnWidth(idx)
-            if width == "minwidth":
-                return self.header().minimumSectionSize()
-            if width == "stretch":
-                return self.header().sectionResizeMode(idx) == QtWidgets.QHeaderView.ResizeMode.Stretch
-            width = None
-        if width is not None:
-            self.setColumnWidth(idx, int(width))
-        if "minwidth" in _kwargs and _kwargs["minwidth"] is not None:
-            self.header().setMinimumSectionSize(
-                min(self.header().minimumSectionSize(), max(0, int(_kwargs["minwidth"])))
-            )
-        if "stretch" in _kwargs:
-            mode = (
-                QtWidgets.QHeaderView.ResizeMode.Stretch
-                if bool(_kwargs["stretch"])
-                else QtWidgets.QHeaderView.ResizeMode.Interactive
-            )
-            self.header().setSectionResizeMode(idx, mode)
-        return {"width": self.columnWidth(idx)}
+    # ── 欄位與標題 ────────────────────────────────────────────
 
-    def configure(self, **kwargs: Any) -> None:
-        """更新元件設定並套用到實際 Qt widget。"""
-        display_columns = kwargs.pop("displaycolumns", None)
-        super().configure(**kwargs)
-        if display_columns is not None:
-            display_set = {str(column) for column in display_columns}
-            for column_name in self._columns:
-                idx = self._column_index(column_name)
-                self.setColumnHidden(idx, column_name not in display_set)
+    def heading(self, column: str, option: str | None = None, **kwargs: Any) -> Any:
+        """讀取或設定欄位標題。heading(col, 'text') 回傳標題文字；heading(col, text=...) 設定標題。"""
+        col_index = self._columns.index(column) if column in self._columns else 0
+        if option == "text":
+            data = self._model.headerData(col_index, QtCore.Qt.Orientation.Horizontal)
+            return str(data) if data else ""
+        if "text" in kwargs:
+            self._model.setHeaderData(col_index, QtCore.Qt.Orientation.Horizontal, kwargs["text"])
+        return None
+
+    def column(self, column: str, option: str | None = None, **kwargs: Any) -> Any:
+        """讀取或設定欄位屬性。column(col, 'width') 回傳寬度；column(col, width=...) 設定寬度。"""
+        col_index = self._columns.index(column) if column in self._columns else 0
+        if option == "width":
+            return self.columnWidth(col_index)
+        if option == "minwidth":
+            return self.header().minimumSectionSize()
+        if option == "stretch":
+            return self.header().sectionResizeMode(col_index) == QtWidgets.QHeaderView.ResizeMode.Stretch
+        if "width" in kwargs:
+            self.setColumnWidth(col_index, int(kwargs["width"]))
+        if "minwidth" in kwargs:
+            self.header().setMinimumSectionSize(int(kwargs["minwidth"]))
+        if "stretch" in kwargs:
+            self.header().setSectionResizeMode(
+                col_index,
+                QtWidgets.QHeaderView.ResizeMode.Stretch
+                if kwargs["stretch"]
+                else QtWidgets.QHeaderView.ResizeMode.Interactive,
+            )
+        return None
+
+    def identify_column(self, x: int) -> str:
+        """依 x 座標回傳欄位識別字串（如 '#0' 或欄位名稱）。"""
+        col = self.columnAt(x)
+        if col < 0:
+            return "#0"
+        if col < len(self._columns):
+            return self._columns[col]
+        return f"#{col}"
+
+    def identify_row(self, y: int, x: int | None = None) -> str:
+        """依 y (以及選擇性的 x) 座標回傳該列的 item ID。"""
+        px = 10 if x is None else x
+        index = self.indexAt(QtCore.QPoint(px, y))
+        if not index.isValid():
+            # 嘗試向右偏移一些避免滾動條/Margin干擾
+            index = self.indexAt(QtCore.QPoint(50, y))
+            if not index.isValid():
+                return ""
+        row = index.row()
+        iid = self._find_iid_by_row(row)
+        return iid if iid else str(row)
+
+    def identify_region(self, x: int, y: int) -> str:
+        """依座標回傳區域類型（'heading'/'cell'/'nothing'等）。"""
+        if getattr(self, "_dispatching_header_event", False):
+            return "heading"
+        index = self.indexAt(QtCore.QPoint(x, y))
+        if not index.isValid():
+            return "nothing"
+        return "cell"
+
+    # ── 標籤樣式 ──────────────────────────────────────────────
+
+    def tag_configure(self, tag: str, **kwargs: Any) -> None:
+        """設定標籤樣式（背景、前景色等）。"""
+        self._tag_styles[tag] = kwargs
+
+    def _apply_tag_styles(self, items: list, tags: tuple) -> None:
+        for tag in tags:
+            style = self._tag_styles.get(tag, {})
+            if "background" in style:
+                bg = QtGui.QColor(style["background"])
+                for item in items:
+                    item.setBackground(bg)
+            if "foreground" in style:
+                fg = QtGui.QColor(style["foreground"])
+                for item in items:
+                    item.setForeground(fg)
+
+    # ── 插入與刪除 ────────────────────────────────────────────
 
     def insert(
         self,
-        parent: str,
-        _index: Any,
         iid: str | None = None,
-        text: str = "",
-        values: Any = (),
-        tags: Any = (),
-        open: bool = False,
-    ):
-        """插入項目或文字內容。"""
-        item_id = str(iid or f"item-{len(self._items) + 1}")
-        self._model.insert_item(parent, _index, item_id, text=text, values=values, tags=tags)
-        self._tags[item_id] = tuple(tags or ())
-        if open:
-            index = self._model.index_for_id(item_id)
-            if index.isValid():
-                self.expand(index)
+        values: tuple = (),
+        tags: tuple = (),
+    ) -> str:
+        row = self._model.rowCount()
+        items = [QtGui.QStandardItem(str(v)) for v in values]
+        for item in items:
+            item.setEditable(False)
+            item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+        if tags:
+            self._apply_tag_styles(items, tags)
+        self._model.appendRow(items)
+        item_id = iid if iid else str(row)
+        self._items[item_id] = items[0]
+        self._item_rows[item_id] = items
+        if tags:
+            self._item_tags[item_id] = tags
         return item_id
 
-    def item(self, item: str, option: str | None = None, **kwargs: Any):
-        """設定或讀取 Treeview 項目資料。"""
-        node = self._items.get(str(item))
-        if node is None:
-            return {} if option is None else None
-        if "values" in kwargs:
-            self._model.set_values(str(item), kwargs["values"])
-        if "tags" in kwargs:
-            self._tags[str(item)] = tuple(kwargs["tags"])
-            self._model.set_tags(str(item), kwargs["tags"])
-        if "open" in kwargs:
-            index = self._model.index_for_id(str(item))
-            if index.isValid():
-                self.expand(index) if kwargs["open"] else self.collapse(index)
-        if "text" in kwargs:
-            self._model.set_cell(str(item), 0, kwargs["text"])
-        item_values = tuple(node.text(idx) for idx in range(self._model.columnCount()))
-        payload: dict[str, Any] = {"text": node.text(0), "values": item_values, "tags": self._tags.get(str(item), ())}
-        return payload.get(option) if option is not None else payload
+    def exists(self, item_id: str) -> bool:
+        """檢查 item 是否存在。"""
+        return item_id in self._items or item_id in self._detached
 
-    def delete(self, *items: str) -> None:
-        """刪除指定項目或文字範圍。"""
-        for item_id in items:
-            self._model.remove_item(str(item_id))
-            self._tags.pop(str(item_id), None)
+    def detach(self, *item_ids: str) -> None:
+        """暫時從樹中隱藏 item。"""
+        rows_to_remove: list[int] = []
+        for item_id in item_ids:
+            if item_id in self._items:
+                row = self._items[item_id].row()
+                if row >= 0:
+                    rows_to_remove.append(row)
+                self._detached[item_id] = self._item_rows.pop(item_id, [])
+                self._detached_tags[item_id] = self._item_tags.pop(item_id, ())
+                del self._items[item_id]
+        for row in sorted(rows_to_remove, reverse=True):
+            self._model.takeRow(row)
 
-    def get_children(self, item: str | None = None) -> tuple[str, ...]:
-        return self._model.children_ids(item)
+    def reattach(self, item_id: str) -> None:
+        """重新顯示之前 detach 的 item。"""
+        if item_id not in self._detached:
+            return
+        items = self._detached.pop(item_id)
+        tags = self._detached_tags.pop(item_id, ())
+        self._model.appendRow(items)
+        self._items[item_id] = items[0]
+        self._item_rows[item_id] = items
+        if tags:
+            self._item_tags[item_id] = tags
 
-    def parent(self, item: str | None = None):
-        """回傳指定項目的父項目。"""
-        if item is None:
-            return QtWidgets.QTreeView.parent(self)
-        return self._model.parent_id(str(item))
+    def move_item(self, item_id: str, index: int) -> None:
+        """移動 item 到指定位置。"""
+        if item_id not in self._items:
+            return
+        row = self._items[item_id].row()
+        if row < 0:
+            return
+        items = self._model.takeRow(row)
+        if items:
+            target = min(index, self._model.rowCount())
+            self._model.insertRow(target, items)
 
-    def exists(self, item: str) -> bool:
-        """執行 exists 操作。"""
-        return str(item) in self._items and self._model.index_for_id(str(item)).isValid()
+    def index(self, item_id: str) -> int:
+        """回傳 item 的列索引。"""
+        if item_id in self._items:
+            return self._items[item_id].row()
+        return -1
 
-    def selection(self) -> tuple[str, ...]:
-        """回傳目前選取的項目 ID。"""
-        selection_model = self.selectionModel()
-        if selection_model is None:
-            return ()
+    # ── 取值與設值 ────────────────────────────────────────────
+
+    def item(
+        self,
+        item_id: str,
+        option: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        讀取或更新 item 屬性。
+
+        讀取模式：item(id, "values") → tuple / item(id, "tags") → tuple / item(id, "text") → str
+        寫入模式：item(id, values=..., tags=..., open=...)
+        無參數：item(id) → {"values": tuple(...), "tags": tuple(...), "text": str}
+        """
+        if item_id not in self._items:
+            return "" if option else {}
+
+        row = self._items[item_id].row()
+        if row < 0:
+            return "" if option else {}
+
+        # 寫入模式
+        if kwargs:
+            if "values" in kwargs:
+                new_vals = kwargs["values"]
+                for col, val in enumerate(new_vals):
+                    if col < self._model.columnCount():
+                        self._model.setData(self._model.index(row, col), str(val))
+            if "tags" in kwargs:
+                new_tags = kwargs["tags"]
+                if new_tags:
+                    row_items = self._item_rows.get(item_id, [])
+                    if row_items:
+                        self._apply_tag_styles(row_items, new_tags)
+            return None
+
+        # 讀取模式 — 指定 option
+        if option == "values":
+            vals = []
+            for col in range(self._model.columnCount()):
+                vals.append(self._model.data(self._model.index(row, col)))
+            return tuple(vals)
+        if option == "tags":
+            return self._item_tags.get(item_id, ())
+        if option == "text":
+            return str(self._model.data(self._model.index(row, 0)) or "")
+
+        # 讀取模式 — 無 option，回傳完整 dict
+        vals = []
+        for col in range(self._model.columnCount()):
+            vals.append(self._model.data(self._model.index(row, col)))
+        return {"values": tuple(vals), "tags": (), "text": str(vals[0]) if vals else ""}
+
+    def get_children(self, parent: str = "") -> list[str]:
+        if parent:
+            return []
+        return [str(i) for i in range(self._model.rowCount())]
+
+    def parent_item(self, _item_id: str = "") -> str:
+        """回傳父項目 ID（扁平模型永遠回傳空字串）。"""
+        return ""
+
+    # ── 選取 ──────────────────────────────────────────────────
+
+    def selection(self) -> list[str]:
+        """回傳目前選取的項目 ID 清單（有序）。"""
         selected: list[str] = []
-        for index in selection_model.selectedRows(0):
-            node = index.internalPointer()
-            if isinstance(node, _TreeRow):
-                selected.append(node.item_id)
-        return tuple(selected)
+        for index in self.selectionModel().selectedRows():
+            row = index.row()
+            iid = self._find_iid_by_row(row)
+            if iid:
+                selected.append(iid)
+        return selected
 
-    def selection_set(self, *items: str | list[str] | tuple[str, ...]) -> None:
-        ids = self._flatten_item_ids(items)
-        self.clearSelection()
-        selection_model = self.selectionModel()
-        if selection_model is None:
-            return
-        first_index = QtCore.QModelIndex()
-        for item_id in ids:
-            index = self._model.index_for_id(str(item_id))
-            if index.isValid():
-                selection_model.select(
-                    index,
-                    QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows,
-                )
-                if not first_index.isValid():
-                    first_index = index
-        if first_index.isValid():
-            selection_model.setCurrentIndex(first_index, QtCore.QItemSelectionModel.SelectionFlag.NoUpdate)
+    def selection_set(self, *item_ids: str) -> None:
+        self.selectionModel().clearSelection()
+        for item_id in item_ids:
+            if item_id in self._items:
+                row = self._items[item_id].row()
+                if row >= 0:
+                    index = self._model.index(row, 0)
+                    self.selectionModel().select(
+                        index,
+                        QtCore.QItemSelectionModel.SelectionFlag.Select | QtCore.QItemSelectionModel.SelectionFlag.Rows,
+                    )
 
-    def selection_remove(self, *items: str | list[str] | tuple[str, ...]) -> None:
-        ids = self._flatten_item_ids(items)
-        selection_model = self.selectionModel()
-        if selection_model is None:
-            return
-        for item_id in ids:
-            index = self._model.index_for_id(str(item_id))
-            if index.isValid():
-                selection_model.select(
-                    index,
-                    QtCore.QItemSelectionModel.SelectionFlag.Deselect | QtCore.QItemSelectionModel.SelectionFlag.Rows,
-                )
+    def selection_remove(self, *item_ids: str) -> None:
+        """取消選取指定 item。"""
+        for item_id in item_ids:
+            if item_id in self._items:
+                row = self._items[item_id].row()
+                if row >= 0:
+                    index = self._model.index(row, 0)
+                    self.selectionModel().select(
+                        index,
+                        QtCore.QItemSelectionModel.SelectionFlag.Deselect
+                        | QtCore.QItemSelectionModel.SelectionFlag.Rows,
+                    )
+
+    def see(self, item_id: str) -> None:
+        if item_id in self._items:
+            row = self._items[item_id].row()
+            if row >= 0:
+                self.scrollTo(self._model.index(row, 0))
+
+    # ── 捲動 ──────────────────────────────────────────────────
+
+    def yview(self, *args: Any) -> Any:
+        """垂直捲動（供 Scrollbar command 使用）。"""
+        if args:
+            self.verticalScrollBar().setValue(int(args[0]))
+            return None
+        return self.verticalScrollBar().value()
+
+    def xview(self, *args: Any) -> Any:
+        """水平捲動（供 Scrollbar command 使用）。"""
+        if args:
+            self.horizontalScrollBar().setValue(int(args[0]))
+            return None
+        return self.horizontalScrollBar().value()
+
+    def yview_scroll(self, number: int, what: str) -> None:
+        """滑鼠滾輪捲動。"""
+        bar = self.verticalScrollBar()
+        if what == "units":
+            bar.setValue(bar.value() - number * bar.singleStep())
+        elif what == "pages":
+            bar.setValue(bar.value() - number * bar.pageStep())
+
+    def connect_event(self, event_name: str, callback: Callable[..., Any], *, append: bool = False) -> str:
+        if event_name == "selection_changed":
+            self.selectionModel().selectionChanged.connect(lambda *_args: callback(None))
+            return "selection_changed"
+        return super().connect_event(event_name, callback, append=append)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        """覆寫雙擊事件，確保自訂事件系統能正確攔截。"""
+        logger.debug(f"Treeview mouseDoubleClickEvent called, handlers={list(self._event_handlers.keys())}", "Treeview")
+        pos = event.pos()
+        adjusted_event = type(
+            "AdjustedEvent",
+            (),
+            {
+                "x": pos.x(),
+                "y": pos.y(),
+                "x_root": event.globalPosition().x() if hasattr(event, "globalPosition") else event.globalPos().x(),
+                "y_root": event.globalPosition().y() if hasattr(event, "globalPosition") else event.globalPos().y(),
+                "widget": self,
+                "width": self.width(),
+                "height": self.height(),
+                "delta": 0,
+                "keysym": "",
+            },
+        )()
+        callback = self._event_handlers.get("mouse_double_click")
+        if callback is not None:
+            logger.debug(
+                f"Treeview mouseDoubleClickEvent: callback={callback.__name__ if hasattr(callback, '__name__') else callback}",
+                "Treeview",
+            )
+            result = callback(adjusted_event)
+            if result == "break":
+                return
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
+        """覆寫右鍵事件，轉換為自訂 mouse_right_press 事件。"""
+        pos = event.pos()
+        simulated = type(
+            "Event",
+            (),
+            {
+                "widget": self,
+                "x": pos.x(),
+                "y": pos.y(),
+                "x_root": event.globalPos().x() if hasattr(event, "globalPos") else pos.x(),
+                "y_root": event.globalPos().y() if hasattr(event, "globalPos") else pos.y(),
+                "width": self.width(),
+                "height": self.height(),
+                "delta": 0,
+                "keysym": "",
+            },
+        )()
+        callback = self._event_handlers.get("mouse_right_press")
+        if callback is not None:
+            result = callback(simulated)
+            if result == "break":
+                return
+        super().contextMenuEvent(event)
+
+    def configure(self, **kwargs: Any) -> None:
+        """更新元件設定，支援 Treeview 特有的 yscrollcommand/xscrollcommand/displaycolumns。"""
+        if "height" in kwargs:
+            val = kwargs.pop("height")
+            if isinstance(val, (int, float)) and val > 100:
+                self.setMinimumHeight(int(val))
+        if "yscrollcommand" in kwargs:
+            cmd = kwargs.pop("yscrollcommand")
+            if cmd:
+                self._link_scroll_bar(self.verticalScrollBar(), cmd, self.yview)
+        if "xscrollcommand" in kwargs:
+            cmd = kwargs.pop("xscrollcommand")
+            if cmd:
+                self._link_scroll_bar(self.horizontalScrollBar(), cmd, self.xview)
+        if "displaycolumns" in kwargs:
+            columns = kwargs.pop("displaycolumns")
+            for col in range(self._model.columnCount()):
+                col_name = self._columns[col] if col < len(self._columns) else ""
+                is_visible = False
+                if (isinstance(columns, str) and columns == "all") or col in columns or col_name in columns:
+                    is_visible = True
+                self.setColumnHidden(col, not is_visible)
+        super().configure(**kwargs)
 
     @staticmethod
-    def _flatten_item_ids(items: tuple[str | list[str] | tuple[str, ...], ...]) -> list[str]:
-        if len(items) == 1 and not isinstance(items[0], str):
-            return [str(item_id) for item_id in items[0]]
-        return [str(item_id) for item_id in items]
+    def _link_scroll_bar(
+        source_bar: QtWidgets.QScrollBar,
+        cmd: Callable[..., Any],
+        view_method: Callable[..., Any],
+    ) -> None:
+        """雙向同步 Qt 捲軸與 Tkinter 風格 Scrollbar。"""
+        maximum = source_bar.maximum()
+        source_bar.valueChanged.connect(
+            lambda value: cmd(value / maximum, (value + source_bar.pageStep()) / maximum) if maximum > 0 else None
+        )
+        if hasattr(cmd, "__self__") and isinstance(cmd.__self__, QtWidgets.QScrollBar):
+            cmd.__self__.valueChanged.connect(lambda value: view_method(value))
 
-    def focus(self, item: str | None = None):
-        """設定或取得目前焦點項目。"""
-        if item is None:
-            node = self.currentIndex().internalPointer() if self.currentIndex().isValid() else None
-            return node.item_id if isinstance(node, _TreeRow) else ""
-        index = self._model.index_for_id(str(item))
-        if index.isValid():
-            self.setCurrentIndex(index)
-        return item
+    def apply_theme_style(self) -> None:
+        """套用主題樣式"""
 
-    def set(self, item: str, column: str, value: Any = None):
-        """設定目前值或顯示狀態。"""
-        node = self._items.get(str(item))
-        if node is None:
-            return None
-        idx = self._column_index(column)
-        if value is None:
-            return node.text(idx)
-        self._model.set_cell(str(item), idx, value)
+    def delete(self, *items: str) -> None:
+        """刪除項目"""
+        for item_id in items:
+            if hasattr(self, "_model") and hasattr(self._model, "remove_item"):
+                self._model.remove_item(str(item_id))
+            if hasattr(self, "_tags"):
+                self._tags.pop(str(item_id), None)
+
+
+class Notebook(WidgetMixin, TabWidget):
+    def __init__(self, parent: Any = None, **kwargs: Any) -> None:
+        TabWidget.__init__(self, _native_parent_simple(parent))
+        self._init_native(parent, **kwargs)
+
+    def add(self, child: Any, **kwargs: Any) -> None:
+        text = kwargs.get("text", "")
+        self.addTab(child, text)
+
+    def select(self, tab_id: Any = None) -> Any:
+        """選取或查詢目前 tab。無參數時回傳目前 tab 的文字標籤。"""
+        if tab_id is None:
+            idx = self.currentIndex()
+            return self.tabText(idx) if idx >= 0 else ""
+        if isinstance(tab_id, int):
+            self.setCurrentIndex(tab_id)
+        elif isinstance(tab_id, str):
+            for i in range(self.count()):
+                if self.tabText(i) == tab_id:
+                    self.setCurrentIndex(i)
+                    break
         return None
 
-    def move(self, item: Any, _parent: Any = "", index: Any = 0) -> None:
-        """移動項目到新的父節點與位置。"""
-        self._model.move_item(str(item), str(_parent or ""), int(index))
-
-    def index(self, item: str) -> int:
-        """回傳或建立指定項目的索引。"""
-        node = self._items.get(str(item))
-        if node is None or node.parent is None:
-            return -1
-        return node.parent.children.index(node)
-
-    def detach(self, item: str) -> None:
-        """從目前顯示樹中暫時分離項目。"""
-        self._model.remove_item(str(item), detach=True)
-
-    def reattach(self, item: str, parent: str, index: int | str = 0) -> None:
-        """重新掛回已分離的項目。"""
-        self._model.reattach_item(str(item), str(parent or ""), index)
-
-    def see(self, item: str) -> None:
-        """捲動到指定位置或項目。"""
-        index = self._model.index_for_id(str(item))
-        if index.isValid():
-            self.scrollTo(index)
-
-    def identify_row(self, y: int) -> str:
-        index = self.indexAt(QtCore.QPoint(0, int(y)))
-        node = index.internalPointer() if index.isValid() else None
-        return node.item_id if isinstance(node, _TreeRow) else ""
-
-    def identify_column(self, x: int) -> str:
-        idx = self.columnAt(int(x))
-        return f"#{idx + 1}" if idx >= 0 else ""
-
-    def identify_region(self, _x: int, _y: int) -> str:
-        if getattr(self, "_dispatching_header_event", False):
-            return "heading"
-        return "cell"
-
-    def bbox(self, item: str, _column: str | None = None):
-        """回傳指定項目的顯示矩形。"""
-        index = self._model.index_for_id(str(item), self._column_index(_column or 0))
-        if not index.isValid():
-            return ""
-        rect = self.visualRect(index)
-        return (rect.x(), rect.y(), rect.width(), rect.height())
-
-    def tag_configure(self, *args: Any, **kwargs: Any) -> None:
-        if not args:
-            return
-        tag = str(args[0])
-        style = self._tag_styles.setdefault(tag, {})
-        for source, target in (
-            ("background", "background"),
-            ("bg", "background"),
-            ("foreground", "foreground"),
-            ("fg", "foreground"),
-        ):
-            if source in kwargs and kwargs[source] is not None:
-                style[target] = _color(kwargs[source])
-        for item_id, node in self._items.items():
-            if tag in self._tags.get(item_id, ()):
-                self._model.set_tags(item_id, node.tags)
-        self._model.emit_style_changed(tag)
-
-    def yview(self, *_args: Any) -> tuple[float, float]:
-        """沿垂直方向捲動視圖。"""
-        bar = self.verticalScrollBar()
-        maximum = max(1, bar.maximum())
-        start = bar.value() / maximum
-        page = bar.pageStep() / maximum
-        return (start, min(1.0, start + page))
-
-    def xview(self, *_args: Any) -> tuple[float, float]:
-        """沿水平方向捲動視圖。"""
-        bar = self.horizontalScrollBar()
-        maximum = max(1, bar.maximum())
-        start = bar.value() / maximum
-        page = bar.pageStep() / maximum
-        return (start, min(1.0, start + page))
-
-    def yview_scroll(self, number: int, _what: str = "units") -> None:
-        bar = self.verticalScrollBar()
-        bar.setValue(bar.value() + int(number) * bar.singleStep())
-
-    def yview_moveto(self, fraction: float) -> None:
-        bar = self.verticalScrollBar()
-        bar.setValue(int(float(fraction) * bar.maximum()))
-
-    def _column_index(self, column: str | int) -> int:
-        if isinstance(column, int):
-            return max(0, column)
-        if isinstance(column, str) and column.startswith("#"):
-            return max(0, int(column[1:]) - 1)
-        if column in self._columns:
-            return self._columns.index(column)
+    def index(self, tab_id: str) -> int:
+        for i in range(self.count()):
+            if self.tabText(i) == tab_id:
+                return i
         return 0
 
-    def _apply_item_tag_styles(self, item_id: str, node: _TreeRow) -> None:
-        self._model.set_tags(item_id, node.tags)
+    def tab(self, tab_id: str, option: str) -> Any:
+        if option == "text":
+            for i in range(self.count()):
+                if self.tabText(i) == tab_id:
+                    return self.tabText(i)
+        return ""
+
+    def connect_event(self, event_name: str, callback: Callable[..., Any], *, append: bool = False) -> str:
+        if event_name == "tab_changed":
+            self.currentChanged.connect(lambda _: callback())
+            return "tab_changed"
+        return super().connect_event(event_name, callback, append=append)
 
 
 class Scrollbar(WidgetMixin, QtWidgets.QScrollBar):
-    def __init__(self, parent: Any = None, orient: str = VERTICAL, command: Any = None, **kwargs: Any) -> None:
-        orientation = QtCore.Qt.Orientation.Horizontal if orient == HORIZONTAL else QtCore.Qt.Orientation.Vertical
-        QtWidgets.QScrollBar.__init__(self, orientation, _native_parent(parent))
+    def __init__(
+        self, parent: Any = None, orient: str = VERTICAL, command: Callable[..., Any] | None = None, **kwargs: Any
+    ):
+        orientation = QtCore.Qt.Orientation.Vertical if orient == VERTICAL else QtCore.Qt.Orientation.Horizontal
+        QtWidgets.QScrollBar.__init__(self, orientation, _native_parent_simple(parent))
         self._command = command
-        self._init_native(parent, orient=orient, **kwargs)
-        self.setFixedSize(0, 0)
-        self.hide()
-
-    def set(self, first: float, _last: float | None = None) -> None:
-        """設定目前值或顯示狀態。"""
-        maximum = max(1, self.maximum())
-        self.setValue(int(float(first) * maximum))
-
-    def attach_matrix(self, **kwargs: Any) -> None:
-        super().attach_matrix(**kwargs)
-        self.hide()
-
-    def attach(self, **kwargs: Any) -> None:
-        """將元件加入父層布局並套用布局參數。"""
-        super().attach(**kwargs)
-        self.hide()
-
-
-class Notebook(WidgetMixin, QtWidgets.QTabWidget):
-    def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QTabWidget.__init__(self, _native_parent(parent))
-        self._init_native(parent, **kwargs)
-        self.currentChanged.connect(lambda _idx: self._dispatch_event("tab_changed"))
-
-    def add(self, child: Any, text: str = "") -> None:
-        """新增分頁或子項目。"""
-        self.addTab(child, str(text))
-
-    def select(self, tab_id: Any = None):
-        """選取指定項目並回傳目前選取狀態。"""
-        if tab_id is None:
-            return self.currentWidget()
-        if isinstance(tab_id, int):
-            self.setCurrentIndex(tab_id)
-        else:
-            self.setCurrentWidget(_native_parent(tab_id))
-        return self.currentWidget()
-
-    def tab(self, tab_id: Any, option: str | None = None, **kwargs: Any):
-        """設定或讀取分頁屬性。"""
-        widget = _native_parent(tab_id)
-        idx = self.indexOf(widget) if not isinstance(tab_id, int) else tab_id
-        if idx < 0:
-            return None
-        if "text" in kwargs:
-            self.setTabText(idx, str(kwargs["text"]))
-        if option == "text":
-            return self.tabText(idx)
-        return {"text": self.tabText(idx)}
-
-    def index(self, tab_id: Any) -> int:
-        """回傳或建立指定項目的索引。"""
-        if tab_id in (None, "current"):
-            return self.currentIndex()
-        if isinstance(tab_id, int):
-            return tab_id
-        return self.indexOf(_native_parent(tab_id))
-
-
-class LabelFrame(WidgetMixin, QtWidgets.QGroupBox):
-    def __init__(self, parent: Any = None, text: str = "", **kwargs: Any) -> None:
-        QtWidgets.QGroupBox.__init__(self, str(text), _native_parent(parent))
-        self._init_native(parent, text=text, **kwargs)
-
-
-class Spinbox(Entry):
-    pass
-
-
-class Listbox(WidgetMixin, QtWidgets.QListWidget):
-    def __init__(self, parent: Any = None, **kwargs: Any) -> None:
-        QtWidgets.QListWidget.__init__(self, _native_parent(parent))
-        self._init_native(parent, **kwargs)
-
-    def insert(self, index: Any, *texts: str) -> None:
-        """插入項目或文字內容。"""
-        insert_at_end = index in (END, "end")
-        base_index = self.count() if insert_at_end else int(index)
-        for offset, text in enumerate(texts):
-            if insert_at_end:
-                self.addItem(str(text))
-            else:
-                self.insertItem(base_index + offset, str(text))
-
-    def delete(self, start: Any, end: Any = None) -> None:
-        """刪除指定項目或文字範圍。"""
-        if start in (0, "0") and end in (END, "end"):
-            self.clear()
-            return
-        self.takeItem(int(start))
-
-    def curselection(self) -> tuple[int, ...]:
-        """回傳目前選取索引。"""
-        return tuple(self.row(item) for item in self.selectedItems())
-
-    def selection_clear(self, _start: Any, _end: Any = None) -> None:
-        self.clearSelection()
-
-    def selection_set(self, index: int) -> None:
-        item = self.item(int(index))
-        if item is not None:
-            item.setSelected(True)
-            self.setCurrentItem(item)
-
-    def activate(self, index: int) -> None:
-        """啟用指定索引項目。"""
-        item = self.item(int(index))
-        if item is not None:
-            self.setCurrentItem(item)
-
-    def see(self, index: int) -> None:
-        """捲動到指定位置或項目。"""
-        item = self.item(int(index))
-        if item is not None:
-            self.scrollToItem(item)
-
-    def size(self) -> Any:
-        """回傳清單項目數量。"""
-        return self.count()
-
-    def get(self, index: int) -> str:
-        """取得元件目前值。"""
-        item = self.item(int(index))
-        return item.text() if item is not None else ""
-
-    def itemconfig(self, index: int, **kwargs: Any) -> None:
-        """設定清單項目的顯示屬性。"""
-        item = self.item(int(index))
-        if item is None:
-            return
-        if "bg" in kwargs:
-            item.setBackground(QtGui.QBrush(QtGui.QColor(_color(kwargs["bg"]))))
-        if "fg" in kwargs:
-            item.setForeground(QtGui.QBrush(QtGui.QColor(_color(kwargs["fg"]))))
-
-    def yview(self, *_args: Any) -> None:
-        """沿垂直方向捲動視圖。"""
-        return
-
-
-class PopupMenu:
-    def __init__(self, parent: Any = None, **_kwargs: Any) -> None:
-        self._menu = QtWidgets.QMenu(_native_parent(parent))
-
-    def grab_release(self) -> None:
-        pass
-
-    def add_command(self, label: str, command: Callable[..., Any] | None = None, **_kwargs: Any) -> None:
-        action = self._menu.addAction(str(label))
         if command is not None:
-            action.triggered.connect(command)
+            self.valueChanged.connect(command)
+        self._init_native(parent, **kwargs)
 
-    def add_separator(self) -> None:
-        self._menu.addSeparator()
-
-    def popup_at(self, x: int, y: int) -> None:
-        self._menu.popup(QtCore.QPoint(int(x), int(y)))
-
-
-Widget = QtWidgets.QWidget
-
-
-def _file_dialog_filters(filetypes: Any = None) -> str:
-    return ";;".join(f"{label} ({pattern})" for label, pattern in filetypes or [])
+    def set(self, first: float, _last: float) -> None:
+        """Tkinter 相容的 set 方法：由可捲動元件呼叫以更新捲軸位置。"""
+        # first, last 為 0.0~1.0 的比例
+        maximum = self.maximum()
+        if maximum <= 0:
+            return
+        value = int(first * maximum)
+        self.setValue(value)
 
 
-def get_existing_directory(parent: Any = None, title: str = "", initialdir: str | None = None) -> str:
-    """Open a native Qt directory picker and return the selected path."""
-    return QtWidgets.QFileDialog.getExistingDirectory(_native_parent(parent), title, initialdir or "")
+class Spinbox(WidgetMixin, FluentSpinBox):
+    def __init__(
+        self,
+        parent: Any = None,
+        from_: int = 0,
+        to: int = 100,
+        textvariable: Variable | None = None,
+        **kwargs: Any,
+    ):
+        FluentSpinBox.__init__(self, _native_parent_simple(parent))
+        self.setRange(from_, to)
+        self._variable = textvariable
+        if textvariable is not None:
+            self.setValue(int(textvariable.get()))
+            self.valueChanged.connect(lambda v: textvariable.set(v))
+            textvariable.trace_add("write", lambda *_: self._sync_from_variable())
+        self._init_native(parent, **kwargs)
+
+    def _sync_from_variable(self) -> None:
+        if self._variable is None:
+            return
+        value = int(self._variable.get())
+        if self.value() == value:
+            return
+        was_blocked = self.blockSignals(True)
+        try:
+            self.setValue(value)
+        finally:
+            self.blockSignals(was_blocked)
+
+
+# =============================================================================
+# 對話框與訊息框
+# =============================================================================
+
+
+class Dialog:
+    """對話框基類"""
+
+    def __init__(self, parent: Any = None, title: str = "", content: Any = None):
+        self._dummy_parent: QtWidgets.QWidget | None = None
+        p = native_parent(parent)
+        if p is None:
+            self._dummy_parent = QtWidgets.QWidget()
+            screen = QtWidgets.QApplication.primaryScreen()
+            if screen:
+                self._dummy_parent.setGeometry(screen.geometry())
+            else:
+                self._dummy_parent.setGeometry(0, 0, 800, 600)
+            p = self._dummy_parent
+        else:
+            self._dummy_parent = None
+        self._dialog = FluentDialog(title, str(content) if content is not None else "", p)
+        self._dialog.setWindowTitle(title)
+        self._dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._parent = parent
+
+    def destroy(self) -> None:
+        self._dialog.deleteLater()
+        if self._dummy_parent is not None:
+            self._dummy_parent.deleteLater()
+            self._dummy_parent = None
+
+    def configure(self, **kwargs: Any) -> None:
+        if "fg_color" in kwargs:
+            self._dialog.setStyleSheet(f"background-color: {_color(kwargs['fg_color'])};")
+
+
+class MessageBox:
+    """訊息框包裝器"""
+
+    @staticmethod
+    def show_info(title: str, content: str, parent: Any = None) -> None:
+        p = native_parent(parent)
+        if p is None:
+            QtWidgets.QMessageBox.information(None, title, content)
+        else:
+            dialog = FluentMessageBox(title, content, p)
+            dialog.yesButton.setText("確定")
+            dialog.cancelButton.setText("取消")
+            dialog.cancelButton.hide()
+            dialog.exec()
+
+    @staticmethod
+    def show_warning(title: str, content: str, parent: Any = None) -> None:
+        p = native_parent(parent)
+        if p is None:
+            QtWidgets.QMessageBox.warning(None, title, content)
+        else:
+            dialog = FluentMessageBox(title, content, p)
+            dialog.yesButton.setText("確定")
+            dialog.cancelButton.setText("取消")
+            dialog.cancelButton.hide()
+            dialog.exec()
+
+    @staticmethod
+    def show_error(title: str, content: str, parent: Any = None) -> None:
+        p = native_parent(parent)
+        if p is None:
+            QtWidgets.QMessageBox.critical(None, title, content)
+        else:
+            dialog = FluentMessageBox(title, content, p)
+            dialog.yesButton.setText("確定")
+            dialog.cancelButton.setText("取消")
+            dialog.cancelButton.hide()
+            dialog.exec()
+
+    @staticmethod
+    def ask_yes_no(title: str, content: str, parent: Any = None) -> bool:
+        p = native_parent(parent)
+        if p is None:
+            return (
+                QtWidgets.QMessageBox.question(
+                    None,
+                    title,
+                    content,
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                )
+                == QtWidgets.QMessageBox.StandardButton.Yes
+            )
+        dialog = FluentMessageBox(title, content, p)
+        dialog.yesButton.setText("是")
+        dialog.cancelButton.setText("否")
+        return dialog.exec() == 1
+
+    @staticmethod
+    def ask_yes_no_cancel(title: str, content: str, parent: Any = None, show_cancel: bool = True) -> bool | None:
+        p = native_parent(parent)
+        if p is None or show_cancel:
+            buttons = QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+            if show_cancel:
+                buttons |= QtWidgets.QMessageBox.StandardButton.Cancel
+
+            msg_box = QtWidgets.QMessageBox(p)
+            msg_box.setWindowTitle(title)
+            msg_box.setText(content)
+            msg_box.setStandardButtons(buttons)
+            msg_box.button(QtWidgets.QMessageBox.StandardButton.Yes).setText("是")
+            msg_box.button(QtWidgets.QMessageBox.StandardButton.No).setText("否")
+            if show_cancel:
+                msg_box.button(QtWidgets.QMessageBox.StandardButton.Cancel).setText("取消")
+
+            result = msg_box.exec()
+            if result == QtWidgets.QMessageBox.StandardButton.Yes:
+                return True
+            if result == QtWidgets.QMessageBox.StandardButton.No:
+                return False
+            return None
+
+        dialog = FluentMessageBox(title, content, p)
+        dialog.yesButton.setText("是")
+        dialog.cancelButton.setText("否")
+        result = dialog.exec()
+        if result == 1:
+            return True
+        if result == 0:
+            return False
+        return None
+
+
+# =============================================================================
+# 檔案對話框
+# =============================================================================
 
 
 def get_open_file_name(
-    parent: Any = None, title: str = "", filetypes: Any = None, initialdir: str | None = None
-) -> str:
-    """Open a native Qt file picker and return the selected path."""
-    path, _selected = QtWidgets.QFileDialog.getOpenFileName(
-        _native_parent(parent), title, initialdir or "", _file_dialog_filters(filetypes)
-    )
-    return path
+    parent: Any = None,
+    title: str = "開啟檔案",
+    filetypes: list[tuple[str, str]] | str | None = None,
+    initialdir: str | None = None,
+) -> str | None:
+    """開啟檔案選擇對話框"""
+    if isinstance(filetypes, str):
+        filter_str = filetypes
+    else:
+        filter_str = ";;".join([f"{desc} ({pattern})" for desc, pattern in (filetypes or [("所有檔案", "*")])])
+    file_path, _ = QtWidgets.QFileDialog.getOpenFileName(native_parent(parent), title, initialdir or "", filter_str)
+    return file_path if file_path else None
 
 
 def get_save_file_name(
     parent: Any = None,
-    title: str = "",
-    filetypes: Any = None,
-    *,
-    initialfile: str | None = None,
-    defaultextension: str | None = None,
-) -> str:
-    """Open a native Qt save dialog and return the selected path."""
-    initial = initialfile or ""
-    path, _selected = QtWidgets.QFileDialog.getSaveFileName(
-        _native_parent(parent), title, initial, _file_dialog_filters(filetypes)
+    title: str = "儲存檔案",
+    defaultextension: str = "",
+    filetypes: list[tuple[str, str]] | None = None,
+    initialdir: str | None = None,
+) -> str | None:
+    """儲存檔案對話框"""
+    filter_str = ";;".join([f"{desc} ({pattern})" for desc, pattern in (filetypes or [("所有檔案", "*")])])
+    file_path, _ = QtWidgets.QFileDialog.getSaveFileName(native_parent(parent), title, initialdir or "", filter_str)
+    if file_path and defaultextension and not file_path.endswith(defaultextension):
+        file_path += defaultextension
+    return file_path if file_path else None
+
+
+def get_existing_directory(
+    parent: Any = None,
+    title: str = "選擇資料夾",
+    initialdir: str | None = None,
+) -> str | None:
+    """選擇資料夾對話框"""
+    dir_path = QtWidgets.QFileDialog.getExistingDirectory(
+        native_parent(parent), title, initialdir or "", QtWidgets.QFileDialog.Option.ShowDirsOnly
     )
-    if path and defaultextension and "." not in Path(path).name:
-        path += str(defaultextension)
-    return path
+    return dir_path if dir_path else None
+
+
+LineEdit = Entry
+PushButton = Button
+SearchLineEdit = SearchEntry
+SearchFilter = SearchFilter
+Theme = Theme
+apply_fluent_theme = apply_fluent_theme
+setTheme = setTheme
+setThemeColor = setThemeColor
+
+
+# =============================================================================
+# LabelFrame — 帶標題的群組框
+# =============================================================================
+
+
+class LabelFrame(WidgetMixin, QtWidgets.QGroupBox):
+    def __init__(self, parent: Any = None, text: str = "", padding: int = 5, **kwargs: Any):
+        QtWidgets.QGroupBox.__init__(self, _native_parent_simple(parent))
+        self.setTitle(text)
+        self._padding = padding
+        self._init_native(parent, **kwargs)
+
+    def configure(self, **kwargs: Any) -> None:
+        if "text" in kwargs:
+            self.setTitle(str(kwargs.pop("text")))
+        if "padding" in kwargs:
+            padding = int(kwargs.pop("padding"))
+            self._padding = padding
+            lay = self.layout()
+            if lay is not None:
+                lay.setContentsMargins(padding, padding + 10, padding, padding)
+        super().configure(**kwargs)
+
+
+# =============================================================================
+# PopupMenu — 右鍵彈出選單
+# =============================================================================
+
+
+class PopupMenu(QtWidgets.QMenu):
+    def __init__(self, parent: Any = None, _tearoff: int = 0, font: Any = None):
+        QtWidgets.QMenu.__init__(self, _native_parent_simple(parent))
+        if font is not None:
+            self.setFont(font)
+
+        # 調整 QMenu 樣式以解決文字被裁切的問題並設定內距
+        self.setStyleSheet("""
+            QMenu {
+                padding: 4px;
+                border: 1px solid rgba(128, 128, 128, 0.2);
+                border-radius: 6px;
+                background-color: palette(window);
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                border-radius: 4px;
+                margin: 2px;
+            }
+            QMenu::item:selected {
+                background-color: rgba(128, 128, 128, 0.1);
+            }
+        """)
+        self._commands: dict[str, Callable[..., Any]] = {}
+
+    def add_command(self, *, label: str, command: Callable[..., Any]) -> None:
+        action = self.addAction(label)
+        action.triggered.connect(lambda _checked=False: command())
+        self._commands[label] = command
+
+    def popup_at(self, x: int, y: int) -> None:
+        parent = self.parent()
+        pos = parent.mapToGlobal(QtCore.QPoint(x, y)) if isinstance(parent, QtWidgets.QWidget) else QtCore.QPoint(x, y)
+        self.exec(pos)
+
+
+# =============================================================================
+# Listbox — 清單元件
+# =============================================================================
+
+
+class Listbox(WidgetMixin, QtWidgets.QListWidget):
+    def __init__(self, parent: Any = None, selectmode: str = "browse", **kwargs: Any):
+        QtWidgets.QListWidget.__init__(self, _native_parent_simple(parent))
+        self._apply_selectmode(selectmode)
+        self._init_native(parent, **kwargs)
+
+    def _apply_selectmode(self, mode: str) -> None:
+        mode_map = {
+            "browse": QtWidgets.QAbstractItemView.SelectionMode.SingleSelection,
+            "extended": QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection,
+            "single": QtWidgets.QAbstractItemView.SelectionMode.SingleSelection,
+            "multiple": QtWidgets.QAbstractItemView.SelectionMode.MultiSelection,
+        }
+        self.setSelectionMode(mode_map.get(mode, QtWidgets.QAbstractItemView.SelectionMode.SingleSelection))
+
+    def insert(self, _index: str | int = "end", *values: str) -> None:
+        for value in values:
+            self.addItem(value)
+
+    def selection(self) -> list[int]:
+        """回傳選取項目的索引清單。"""
+        return [index.row() for index in self.selectedIndexes()]
+
+    def see(self, index: int) -> None:
+        item = self.item(index)
+        if item:
+            self.scrollToItem(item)
+
+    def yview_scroll(self, number: int, what: str) -> None:
+        bar = self.verticalScrollBar()
+        if what == "units":
+            bar.setValue(bar.value() - number * bar.singleStep())
+        elif what == "pages":
+            bar.setValue(bar.value() - number * bar.pageStep())

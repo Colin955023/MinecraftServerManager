@@ -1,20 +1,21 @@
-"""專案統一使用的原生 Qt 下拉選單。"""
+"""專案統一使用的 Fluent 下拉選單。"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, cast
 
-from .. import FontManager, FontSize, NativeQtStyle, QtCore, QtGui, QtWidgets, Sizes, ValueState
+from .. import FontManager, FontSize, QtCore, QtWidgets, Sizes
+from .qt_widgets import ComboBox as FluentComboBoxBase
 
 
-class CustomDropdown(QtWidgets.QComboBox):
-    """淺色原生 Qt QComboBox。"""
+class CustomDropdown(FluentComboBoxBase):
+    """Fluent ComboBox 包裝器，提供專案統一 API。"""
 
     def __init__(
         self,
         parent,
-        variable: ValueState | None = None,
+        variable: Any | None = None,
         values: list[str] | None = None,
         command: Callable[[str], Any] | None = None,
         width: int = Sizes.DROPDOWN_WIDTH,
@@ -25,68 +26,57 @@ class CustomDropdown(QtWidgets.QComboBox):
         **kwargs: Any,
     ) -> None:
         super().__init__(parent)
-        self.variable = variable or ValueState("")
+        self.variable = variable
         self.values = [str(value) for value in values or []]
         self.command = command
         self.font_size = int(font_size)
         self.max_contents_length = max(4, int(max_contents_length))
-        self.setEditable(False)
-        self.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
         self.setFont(FontManager.get_font(size=self.font_size))
         self.setMinimumHeight(int(height))
         if width:
             self.setMinimumWidth(int(width))
-        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-        self.setStyleSheet(NativeQtStyle.custom_dropdown)
-        self._set_minimum_contents_length(self.values)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
         self.addItems(self.values)
-        initial_value = str(self.variable.get() or "")
+        initial_value = str(self.variable.get() if self.variable and hasattr(self.variable, "get") else "")
         if initial_value:
             self.set(initial_value)
         elif self.values:
-            self.variable.set(self.values[0])
+            if self.variable and hasattr(self.variable, "set"):
+                self.variable.set(self.values[0])
             self.setCurrentIndex(0)
         self.currentTextChanged.connect(self._handle_changed)
-        self.variable.changed.connect(self._sync_from_state)
+        if self.variable and hasattr(self.variable, "changed"):
+            self.variable.changed.connect(self._sync_from_state)
         self.configure(state=state, **kwargs)
+        # 安裝滾輪事件攔截，使下拉選單展開時可用滾輪切換選項
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.installEventFilter(self)
 
-    def paintEvent(self, event) -> None:
+    def eventFilter(self, watched: Any, event: Any) -> bool:
         """
-        自訂繪製下拉箭頭以確保在不同平台和樣式下都能保持一致的外觀。
+        攔截滾輪事件，在下拉清單展開時切換選項而非捲動頁面。
 
         Args:
-            event: Qt 的繪製事件。
-        """
-        super().paintEvent(event)
-        if self.width() <= 0 or self.height() <= 0:
-            return
-        painter = QtGui.QPainter(self)
-        try:
-            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
-            painter.setPen(QtCore.Qt.PenStyle.NoPen)
-            if self.isEnabled():
-                arrow_color = self.palette().color(QtGui.QPalette.ColorRole.Text)
-            else:
-                arrow_color = self.palette().color(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Text)
-            painter.setBrush(arrow_color)
-            arrow_width = max(8, int(self.height() * 0.36))
-            arrow_height = max(5, int(self.height() * 0.2))
-            center_x = self.width() - max(11, int(self.height() * 0.5))
-            center_y = self.height() // 2 + 1
-            arrow = QtGui.QPolygon(
-                [
-                    QtCore.QPoint(center_x - arrow_width // 2, center_y - arrow_height // 2),
-                    QtCore.QPoint(center_x + arrow_width // 2, center_y - arrow_height // 2),
-                    QtCore.QPoint(center_x, center_y + arrow_height // 2),
-                ]
-            )
-            painter.drawPolygon(arrow)
-        finally:
-            painter.end()
+            watched: 事件來源物件。
+            event: Qt 事件物件。
 
-    def _set_minimum_contents_length(self, values: list[Any]) -> None:
-        longest = max((len(str(value)) for value in values), default=4)
-        self.setMinimumContentsLength(max(4, min(longest, self.max_contents_length)))
+        Returns:
+            True 表示事件已被處理，False 表示事件未被處理。
+        """
+        if watched is self and event.type() == QtCore.QEvent.Type.Wheel:
+            popup_view = getattr(self, "view", None)
+            if popup_view is not None and callable(popup_view):
+                popup_view = popup_view()
+            if popup_view is not None and popup_view.isVisible():
+                delta = event.angleDelta().y()
+                current = self.currentIndex()
+                count = self.count()
+                if delta > 0 and current > 0:
+                    self.setCurrentIndex(current - 1)
+                elif delta < 0 and current < count - 1:
+                    self.setCurrentIndex(current + 1)
+            return True
+        return super().eventFilter(watched, event)
 
     def _sync_from_state(self, value: object) -> None:
         text = str(value or "")
@@ -94,7 +84,12 @@ class CustomDropdown(QtWidgets.QComboBox):
             self.set(text)
 
     def _handle_changed(self, value: str) -> None:
-        if self.variable.get() != value:
+        if (
+            self.variable
+            and hasattr(self.variable, "get")
+            and self.variable.get() != value
+            and hasattr(self.variable, "set")
+        ):
             self.variable.set(value)
         if self.command is not None:
             self.command(value)
@@ -120,10 +115,14 @@ class CustomDropdown(QtWidgets.QComboBox):
         if index < 0:
             self.addItem(text)
             self.values.append(text)
-            self._set_minimum_contents_length(self.values)
             index = self.findText(text)
         self.setCurrentIndex(index)
-        if self.variable.get() != text:
+        if (
+            self.variable
+            and hasattr(self.variable, "get")
+            and self.variable.get() != text
+            and hasattr(self.variable, "set")
+        ):
             self.variable.set(text)
 
     def configure(self, **kwargs: Any) -> None:
@@ -139,9 +138,8 @@ class CustomDropdown(QtWidgets.QComboBox):
             self.clear()
             self.addItems(self.values)
             self.blockSignals(False)
-            self._set_minimum_contents_length(self.values)
             if self.values:
-                target = str(self.variable.get() or self.values[0])
+                target = str(self.variable.get() if self.variable and hasattr(self.variable, "get") else self.values[0])
                 self.set(target if target in self.values else self.values[0])
         if "command" in kwargs:
             self.command = kwargs.pop("command")
@@ -156,7 +154,6 @@ class CustomDropdown(QtWidgets.QComboBox):
             self.setMinimumHeight(int(kwargs.pop("height")))
         if "max_contents_length" in kwargs:
             self.max_contents_length = max(4, int(kwargs.pop("max_contents_length")))
-            self._set_minimum_contents_length(self.values)
         if "state" in kwargs:
             state = str(kwargs.pop("state"))
             self.setEnabled(state not in {"disabled", "readonly_disabled"})

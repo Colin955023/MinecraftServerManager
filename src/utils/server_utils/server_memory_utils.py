@@ -1,6 +1,9 @@
 """伺服器記憶體工具模組。"""
 
+from __future__ import annotations
+
 import re
+from dataclasses import dataclass
 
 
 class MemoryUtils:
@@ -54,3 +57,62 @@ class MemoryUtils:
         if memory_mb >= 1024:
             return f"{memory_mb / 1024:.1f} GB"
         return f"{memory_mb:.1f} MB"
+
+    @staticmethod
+    def check_memory_limits(
+        min_mb: int,
+        max_mb: int,
+        total_system_mb: int,
+    ) -> MemoryCheckResult:
+        """
+        驗證記憶體配置是否合法，回傳警告文字與顏色代碼。
+
+        Args:
+            min_mb: 最小記憶體 (MB)
+            max_mb: 最大記憶體 (MB)
+            total_system_mb: 系統總實體記憶體 (MB)
+
+        Returns:
+            MemoryCheckResult: 包含警告文字、顏色類別、是否有效
+        """
+        half_system_mb = total_system_mb // 2
+
+        # 最小記憶體不能大於最大記憶體
+        if min_mb > max_mb:
+            return MemoryCheckResult(
+                warning_text="⚠️ 警告：最小記憶體不能大於最大記憶體",
+                color="error",
+                is_valid=False,
+            )
+
+        # 最大記憶體超過系統總記憶體
+        if max_mb > total_system_mb:
+            return MemoryCheckResult(
+                warning_text=f"⚠️ 警告：設定記憶體超過系統總記憶體 ({total_system_mb}MB)",
+                color="error",
+                is_valid=False,
+            )
+
+        # 最大記憶體超過系統記憶體一半
+        if max_mb > half_system_mb:
+            return MemoryCheckResult(
+                warning_text=f"⚠️ 提示：設定記憶體超過系統記憶體的一半 ({half_system_mb}MB)",
+                color="warning",
+                is_valid=True,
+            )
+
+        # 通過所有檢查
+        return MemoryCheckResult(
+            warning_text="",
+            color="none",
+            is_valid=True,
+        )
+
+
+@dataclass(slots=True)
+class MemoryCheckResult:
+    """記憶體檢查結果。"""
+
+    warning_text: str
+    color: str  # "error" | "warning" | "none"
+    is_valid: bool

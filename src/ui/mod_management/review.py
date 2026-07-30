@@ -10,6 +10,18 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ...core import (
+    PROVIDER_LIFECYCLE_STALE,
+    ProviderMetadataRecord,
+    apply_provider_metadata,
+    build_local_mod_update_plan,
+    build_required_dependency_install_plan,
+    cache_provider_metadata_record,
+    enhance_local_mod,
+    ensure_local_mod_provider_record,
+    register_provider_revalidation_success,
+    resolve_modrinth_provider_record,
+)
 from ...models import (
     LocalModUpdatePlan,
     LocalUpdateReviewEntry,
@@ -23,49 +35,36 @@ from ...utils import (
     LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE,
     LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE,
     LOCAL_UPDATE_REVIEW_PRECHECK_NOTE,
-    METADATA_SOURCE_LABELS,
-    METADATA_SOURCE_SHORT_LABELS,
     METADATA_SOURCE_STALE_PROVIDER,
     METADATA_SOURCE_UNRESOLVED,
     ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE,
     ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE,
     ONLINE_REVIEW_PRECHECK_NOTE,
-    PROVIDER_LIFECYCLE_STALE,
     RECOMMENDATION_CONFIDENCE_ADVISORY,
-    RECOMMENDATION_CONFIDENCE_LABELS,
     RECOMMENDATION_CONFIDENCE_RETRYABLE,
-    RECOMMENDATION_SOURCE_LABELS,
     RECOMMENDATION_SOURCE_METADATA_UNRESOLVED,
-    RECOMMENDATION_SOURCE_SHORT_LABELS,
     RECOMMENDATION_SOURCE_STALE_METADATA,
     Colors,
-    DialogUtils,
     FontManager,
     FontSize,
-    ProviderMetadataRecord,
     Sizes,
     Spacing,
     TaskUtils,
     TreeUtils,
     UIUtils,
-    apply_provider_metadata,
     build_non_official_source_warning_message,
-    cache_provider_metadata_record,
     deserialize_online_dependency_install_plan,
-    ensure_local_mod_provider_record,
     get_non_official_download_host,
     migrate_online_dependency_install_plan_payload,
-    register_provider_revalidation_success,
+    schedule_toplevel_layout_refresh,
     serialize_online_dependency_install_plan,
     validate_online_dependency_install_plan_payload,
 )
 from ...utils.ui_support import qt_widgets as qt
-from .. import (
-    ModManagementRuntimeBase,
-    build_local_mod_update_plan,
-)
-from .constants import MODRINTH_PROJECT_PAGE_BASE_URL, logger
+from . import review_formatting as _rfmt
+from .constants import MOD_MANAGEMENT_UI_SCALE, logger
 from .install_review_dialog_builder import InstallReviewDialogBuilder
+from .online_mod_queue import ModManagementRuntimeBase
 
 
 class ModManagementReviewMixin(ModManagementRuntimeBase):
@@ -79,107 +78,21 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             self.install_review_dialog_builder = builder
         return builder
 
-    @staticmethod
-    def _get_online_version_status_text(report: Any | None) -> str:
-        """將版本分析結果轉成簡短狀態，供列表快速判讀。"""
-        if report is None:
-            return "未分析"
-        if not getattr(report, "compatible", True):
-            return "不相容"
-        if list(getattr(report, "missing_required_dependencies", []) or []):
-            return "可安裝，含依賴"
-        if list(getattr(report, "incompatible_installed", []) or []) or list(
-            getattr(report, "installed_version_mismatches", []) or []
-        ):
-            return "可安裝，需注意"
-        if list(getattr(report, "warnings", []) or []):
-            return "可安裝，需注意"
-        return "可安裝"
-
-    @staticmethod
-    def _normalize_online_version_type(value: Any) -> str:
-        """正規化版本類型，避免不同 provider 字串差異造成排序飄移。"""
-        return str(value or "").strip().lower()
-
-    @classmethod
-    def _get_online_version_type_rank(cls, version_type: Any) -> int:
-        """回傳版本穩定度排名（數字越小越優先）。"""
-        normalized = cls._normalize_online_version_type(version_type)
-        if normalized in {"release", "stable"}:
-            return 0
-        if normalized in {"beta", "pre", "preview", "rc"}:
-            return 1
-        if normalized in {"alpha", "snapshot"}:
-            return 2
-        return 3
-
-    @staticmethod
-    def _get_online_version_compatibility_rank(report: Any | None) -> int:
-        """相容性排名（數字越小越優先）。"""
-        if report is None:
-            return 1
-        return 0 if bool(getattr(report, "compatible", True)) else 2
-
-    @classmethod
-    def _sort_online_versions_for_server(
-        cls, versions: list[Any], version_reports: list[Any] | None
-    ) -> tuple[list[Any], list[Any] | None]:
-        """伺服器安裝場景排序：相容性 > 穩定度 > 發布時間。"""
-        if not versions:
-            return (versions, version_reports)
-        indexed_reports: list[Any | None]
-        if version_reports is None:
-            indexed_reports = [None] * len(versions)
-        else:
-            indexed_reports = [
-                version_reports[index] if index < len(version_reports) else None for index in range(len(versions))
-            ]
-        merged = list(zip(versions, indexed_reports, strict=False))
-
-        def _published_sort_value(version: Any) -> tuple[int, str]:
-            published = str(getattr(version, "date_published", "") or "")
-            return (0 if published else 1, published)
-
-        merged.sort(
-            key=lambda item: (
-                cls._get_online_version_compatibility_rank(item[1]),
-                cls._get_online_version_type_rank(getattr(item[0], "version_type", "")),
-                _published_sort_value(item[0]),
-            )
-        )
-        grouped: dict[tuple[int, int], list[tuple[Any, Any | None]]] = {}
-        for row in merged:
-            group_key = (
-                cls._get_online_version_compatibility_rank(row[1]),
-                cls._get_online_version_type_rank(getattr(row[0], "version_type", "")),
-            )
-            grouped.setdefault(group_key, []).append(row)
-        merged = []
-        for group_key in sorted(grouped):
-            group_rows = grouped[group_key]
-            group_rows.sort(key=lambda row: str(getattr(row[0], "date_published", "") or ""), reverse=True)
-            merged.extend(group_rows)
-        sorted_versions = [item[0] for item in merged]
-        if version_reports is None:
-            return (sorted_versions, None)
-        sorted_reports = [item[1] for item in merged]
-        return (sorted_versions, sorted_reports)
-
     def _format_online_version_report(self, version: Any, report: Any | None) -> str:
         """格式化版本相容性與依賴分析結果。"""
         lines = [
             f"版本：{getattr(version, 'display_name', '未知版本')}",
-            f"來源：{self._format_review_provider_label(getattr(version, 'provider', 'modrinth'))}",
+            f"來源：{_rfmt.format_review_provider_label(getattr(version, 'provider', 'modrinth'))}",
             f"Minecraft：{', '.join(getattr(version, 'game_versions', []) or []) or '-'}",
             f"Loader：{', '.join(getattr(version, 'loaders', []) or []) or '-'}",
         ]
         version_type = str(getattr(version, "version_type", "") or "").strip()
         if version_type:
             lines.append(f"版本類型：{version_type}")
-        published_text = self._format_review_published_at(getattr(version, "date_published", ""))
+        published_text = _rfmt.format_review_published_at(getattr(version, "date_published", ""))
         if published_text:
             lines.append(f"發布時間：{published_text}")
-        changelog_text = self._summarize_review_changelog(getattr(version, "changelog", ""))
+        changelog_text = _rfmt.summarize_review_changelog(getattr(version, "changelog", ""))
         if changelog_text:
             lines.append("")
             lines.append("更新內容：")
@@ -247,13 +160,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             )
         return "\n\n".join(sections)
 
-    @staticmethod
-    def _format_review_provider_label(provider: str | None) -> str:
-        normalized = str(provider or "").strip().lower()
-        if normalized == "modrinth":
-            return "Modrinth"
-        return str(provider or "未知來源").strip() or "未知來源"
-
     @classmethod
     def _iter_review_download_source_records(
         cls,
@@ -312,7 +218,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 item_label,
                 download_url,
                 provider,
-                provider_label=cls._format_review_provider_label(provider),
+                provider_label=_rfmt.format_review_provider_label(provider),
             )
             if warning_message:
                 warnings.append(warning_message)
@@ -334,7 +240,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 host = get_non_official_download_host(download_url, provider)
                 if not host:
                     continue
-                provider_label = cls._format_review_provider_label(provider)
+                provider_label = _rfmt.format_review_provider_label(provider)
                 lines.append(f"- {item_label}：{host}（非 {provider_label} 官方網域）")
         deduped_lines = cls._dedupe_review_messages(lines)
         if not deduped_lines:
@@ -345,38 +251,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             + "\n\n這些檔案不會從官方 provider 網域下載，請確認你信任這些來源。\n\n是否仍要繼續？"
         )
 
-    @staticmethod
-    def _format_metadata_source_label(source: str | None) -> str:
-        normalized = str(source or "").strip().lower()
-        return METADATA_SOURCE_LABELS.get(normalized, "未知")
-
-    @staticmethod
-    def _format_metadata_source_short_label(source: str | None) -> str:
-        normalized = str(source or "").strip().lower()
-        return METADATA_SOURCE_SHORT_LABELS.get(normalized, "未知")
-
-    @staticmethod
-    def _format_recommendation_source_label(source: str | None) -> str:
-        normalized = str(source or "").strip().lower()
-        return RECOMMENDATION_SOURCE_LABELS.get(normalized, "未知")
-
-    @staticmethod
-    def _format_recommendation_source_short_label(source: str | None) -> str:
-        normalized = str(source or "").strip().lower()
-        return RECOMMENDATION_SOURCE_SHORT_LABELS.get(normalized, "未知")
-
-    @staticmethod
-    def _format_recommendation_confidence_label(confidence: str | None) -> str:
-        normalized = str(confidence or "").strip().lower()
-        return RECOMMENDATION_CONFIDENCE_LABELS.get(normalized, "未知")
-
-    @staticmethod
-    def _build_modrinth_project_page_url(identifier: str | None) -> str:
-        normalized = str(identifier or "").strip().strip("/")
-        if not normalized:
-            return ""
-        return f"{MODRINTH_PROJECT_PAGE_BASE_URL}/{normalized}"
-
     @classmethod
     def _resolve_project_page_url_from_candidates(
         cls, *, url_candidates: Iterable[Any] = (), identifier_candidates: Iterable[Any] = ()
@@ -386,7 +260,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             if clean_url:
                 return clean_url
         for raw_identifier in identifier_candidates:
-            project_page_url = cls._build_modrinth_project_page_url(str(raw_identifier or "").strip())
+            project_page_url = _rfmt.build_modrinth_project_page_url(str(raw_identifier or "").strip())
             if project_page_url:
                 return project_page_url
         return ""
@@ -408,17 +282,16 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return _callback
 
     @classmethod
-    def _resolve_pending_install_review_project_page_url(cls, review_entry: PendingInstallReviewEntry) -> str:
-        pending = getattr(review_entry, "pending", None)
-        if pending is None:
-            return ""
-        return cls._resolve_project_page_url_from_candidates(
-            url_candidates=(getattr(pending, "homepage_url", ""), getattr(pending, "source_url", "")),
-            identifier_candidates=(getattr(pending, "project_id", ""),),
-        )
-
-    @classmethod
-    def _resolve_local_update_review_project_page_url(cls, review_entry: LocalUpdateReviewEntry) -> str:
+    def _resolve_review_project_page_url(cls, review_entry: Any, *, mode: str) -> str:
+        """依 mode 解析 review entry 的專案頁面 URL。"""
+        if mode == "online":
+            pending = getattr(review_entry, "pending", None)
+            if pending is None:
+                return ""
+            return cls._resolve_project_page_url_from_candidates(
+                url_candidates=(getattr(pending, "homepage_url", ""), getattr(pending, "source_url", "")),
+                identifier_candidates=(getattr(pending, "project_id", ""),),
+            )
         candidate = getattr(review_entry, "candidate", None)
         if candidate is None:
             return ""
@@ -430,13 +303,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 getattr(local_mod, "platform_id", ""),
             )
         )
-
-    @staticmethod
-    def _format_review_published_at(value: str | None) -> str:
-        raw_value = str(value or "").strip()
-        if not raw_value:
-            return ""
-        return raw_value.replace("T", " ").replace("Z", "")[:16]
 
     def _open_project_page(self, url: str, parent: Any, *, title: str = "沒有可開啟的專案頁面") -> None:
         clean_url = str(url or "").strip()
@@ -476,7 +342,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         selection = set(tree.selection())
         if row_id not in selection:
             tree.selection_set(row_id)
-        tree.focus(row_id)
         tree.see(row_id)
         return row_id
 
@@ -501,31 +366,29 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return "｜".join(segments)
 
     @staticmethod
-    def _build_online_install_review_subtitle(
-        actionable_count: int, blocked_count: int, *, advisory_count: int = 0, migrated_snapshot_count: int = 0
-    ) -> str:
-        return ModManagementReviewMixin._build_review_subtitle(
-            prefix_segments=["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"],
-            count_segments=((advisory_count, "建議確認"),),
-            blocked_count=blocked_count,
-            blocked_label="待處理",
-            migrated_snapshot_count=migrated_snapshot_count,
-            migrated_snapshot_label="快照自動遷移",
-        )
-
-    @staticmethod
-    def _build_local_update_review_subtitle(
-        scope_text: str,
-        enabled_count: int,
-        blocked_count: int,
+    def _build_mode_review_subtitle(
         *,
+        mode: str,
+        actionable_count: int = 0,
+        blocked_count: int = 0,
+        scope_text: str = "",
         advisory_count: int = 0,
         retryable_count: int = 0,
         unknown_count: int = 0,
         migrated_snapshot_count: int = 0,
     ) -> str:
+        """依 mode 建立 review 副標題。"""
+        if mode == "online":
+            return ModManagementReviewMixin._build_review_subtitle(
+                prefix_segments=["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"],
+                count_segments=((advisory_count, "建議確認"),),
+                blocked_count=blocked_count,
+                blocked_label="待處理",
+                migrated_snapshot_count=migrated_snapshot_count,
+                migrated_snapshot_label="快照自動遷移",
+            )
         return ModManagementReviewMixin._build_review_subtitle(
-            prefix_segments=[f"範圍：{scope_text}", f"可執行更新 {enabled_count} 項"],
+            prefix_segments=[f"範圍：{scope_text}", f"可執行更新 {actionable_count} 項"],
             count_segments=(
                 (advisory_count, "建議確認"),
                 (retryable_count, "可重試"),
@@ -537,45 +400,31 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         )
 
     def _format_local_update_source_text(self, review_entry: LocalUpdateReviewEntry) -> str:
-        provider_label = self._format_review_provider_label(review_entry.provider)
+        provider_label = _rfmt.format_review_provider_label(review_entry.provider)
         metadata_source = str(getattr(review_entry.candidate, "metadata_source", "") or "").strip()
         recommendation_source = str(getattr(review_entry.candidate, "recommendation_source", "") or "").strip()
         segments = [provider_label]
         if metadata_source:
-            segments.append(self._format_metadata_source_short_label(metadata_source))
+            segments.append(_rfmt.format_metadata_source_short_label(metadata_source))
         if recommendation_source:
-            segments.append(self._format_recommendation_source_short_label(recommendation_source))
+            segments.append(_rfmt.format_recommendation_source_short_label(recommendation_source))
         if not segments:
             return provider_label
         return "｜".join(segments)
 
     def _build_local_update_metadata_detail(self, review_entry: LocalUpdateReviewEntry) -> str:
         candidate = review_entry.candidate
-        lines = [f"Metadata 來源：{self._format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}"]
+        lines = [f"Metadata 來源：{_rfmt.format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}"]
         recommendation_source = str(getattr(candidate, "recommendation_source", "") or "").strip()
         recommendation_confidence = str(getattr(candidate, "recommendation_confidence", "") or "").strip()
         if recommendation_source:
-            lines.append(f"更新建議來源：{self._format_recommendation_source_label(recommendation_source)}")
+            lines.append(f"更新建議來源：{_rfmt.format_recommendation_source_label(recommendation_source)}")
         if recommendation_confidence:
-            lines.append(f"更新建議可信度：{self._format_recommendation_confidence_label(recommendation_confidence)}")
+            lines.append(f"更新建議可信度：{_rfmt.format_recommendation_confidence_label(recommendation_confidence)}")
         metadata_note = str(getattr(candidate, "metadata_note", "") or "").strip()
         if metadata_note:
             lines.append(f"Metadata 狀態：{metadata_note}")
         return "\n".join(lines)
-
-    @staticmethod
-    def _summarize_review_changelog(value: str | None, max_length: int = 420) -> str:
-        raw_value = str(value or "").strip()
-        if not raw_value:
-            return ""
-        normalized = re.sub("\\s+", " ", raw_value).strip()
-        if len(normalized) <= max_length:
-            return normalized
-        return normalized[: max(0, max_length - 3)].rstrip() + "..."
-
-    @staticmethod
-    def _collect_selected_root_keys(tree: qt.Treeview) -> set[str]:
-        return ModManagementReviewMixin._collect_selected_root_keys_from(tree, None)
 
     @staticmethod
     def _collect_selected_root_keys_from(tree: qt.Treeview, valid_keys: set[str] | None) -> set[str]:
@@ -587,7 +436,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 if valid_keys is not None and current_item in valid_keys:
                     matched_valid_key = True
                     break
-                parent_id = tree.parent(current_item)
+                parent_id = tree.parent_item(current_item)
                 if not parent_id:
                     break
                 current_item = parent_id
@@ -716,18 +565,24 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             segments.extend(extra_segment_getter(review_entry))
         return "｜".join(segments)
 
-    def _build_online_review_root_status_text(self, review_entry: PendingInstallReviewEntry) -> str:
-        """建立線上安裝 review 根節點摘要，供 task tree 快速判讀。"""
-        return self._build_review_root_status_text(
+    def _build_review_root_status_text_by_mode(self, review_entry: Any, *, mode: str) -> str:
+        """依 mode 建立 review 根節點狀態摘要。"""
+        if mode == "online":
+            return self._build_review_root_status_text(
+                review_entry,
+                group_key_getter=self._get_online_install_review_group_key,
+                group_status_getter=lambda gk: self._get_group_status_label(gk, mode="online"),
+                extra_segment_getter=self._build_online_review_root_extra_segments,
+            )
+        return ModManagementReviewMixin._build_review_root_status_text(
             review_entry,
-            group_key_getter=self._get_online_install_review_group_key,
-            group_status_getter=self._get_online_install_group_status_label,
-            extra_segment_getter=self._build_online_review_root_extra_segments,
+            group_key_getter=ModManagementReviewMixin._get_local_update_review_group_key,
+            group_status_getter=lambda gk: ModManagementReviewMixin._get_group_status_label(gk, mode="local"),
         )
 
     def _build_pending_install_summary_lines(self, review_entry: PendingInstallReviewEntry) -> list[str]:
         """建立待安裝 review 詳細文字頂部摘要。"""
-        lines = [f"摘要：{self._build_online_review_root_status_text(review_entry)}"]
+        lines = [f"摘要：{self._build_review_root_status_text_by_mode(review_entry, mode='online')}"]
         dependency_plan = getattr(review_entry, "dependency_plan", None)
         auto_dependency_count, optional_dependency_count = self._count_dependency_plan_items(dependency_plan)
         if auto_dependency_count:
@@ -1117,20 +972,19 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             )
 
     @staticmethod
-    def _collect_online_dependency_required_by(
-        review_entries: list[PendingInstallReviewEntry],
+    def _collect_dependency_required_by_mode(
+        review_entries: list[Any],
+        *,
+        mode: str,
     ) -> dict[tuple[str, str], list[str]]:
-        return ModManagementReviewMixin._collect_dependency_required_by(
-            review_entries,
-            parent_name_getter=lambda entry: str(
-                getattr(getattr(entry, "pending", None), "project_name", "") or ""
-            ).strip(),
-        )
-
-    @staticmethod
-    def _collect_local_dependency_required_by(
-        review_entries: list[LocalUpdateReviewEntry],
-    ) -> dict[tuple[str, str], list[str]]:
+        """依 mode 收集依賴的 required_by 對應。"""
+        if mode == "online":
+            return ModManagementReviewMixin._collect_dependency_required_by(
+                review_entries,
+                parent_name_getter=lambda entry: str(
+                    getattr(getattr(entry, "pending", None), "project_name", "") or ""
+                ).strip(),
+            )
         return ModManagementReviewMixin._collect_dependency_required_by(
             review_entries,
             parent_name_getter=lambda entry: str(
@@ -1334,7 +1188,14 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return counts
 
     @staticmethod
-    def _count_local_update_review_groups(entries: list[LocalUpdateReviewEntry]) -> dict[str, int]:
+    def _count_review_groups_by_mode(entries: list[Any], *, mode: str) -> dict[str, int]:
+        """依 mode 統計 review group 數量。"""
+        if mode == "online":
+            return ModManagementReviewMixin._count_review_groups(
+                entries,
+                supported_group_keys=("enabled", "advisory", "disabled", "blocked"),
+                group_key_getter=ModManagementReviewMixin._get_online_install_review_group_key,
+            )
         return ModManagementReviewMixin._count_review_groups(
             entries,
             supported_group_keys=("enabled", "advisory", "disabled", "retryable", "unknown", "blocked"),
@@ -1342,19 +1203,17 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         )
 
     @staticmethod
-    def _build_local_update_root_status_text(review_entry: LocalUpdateReviewEntry) -> str:
-        return ModManagementReviewMixin._build_review_root_status_text(
-            review_entry,
-            group_key_getter=ModManagementReviewMixin._get_local_update_review_group_key,
-            group_status_getter=ModManagementReviewMixin._get_local_update_group_status_label,
-        )
-
-    @staticmethod
     def _get_review_group_label(group_key: str, label_map: dict[str, str], *, default_label: str = "需先處理") -> str:
         return label_map.get(group_key, default_label)
 
     @staticmethod
-    def _get_local_update_group_status_label(group_key: str) -> str:
+    def _get_group_status_label(group_key: str, *, mode: str = "online") -> str:
+        """依 mode 取得 group 狀態標籤。"""
+        if mode == "online":
+            return ModManagementReviewMixin._get_review_group_label(
+                group_key,
+                {"enabled": "可安裝", "advisory": "建議確認", "disabled": "已停用", "blocked": "需先處理"},
+            )
         return ModManagementReviewMixin._get_review_group_label(
             group_key,
             {
@@ -1365,22 +1224,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 "unknown": "需先識別",
                 "blocked": "需先處理",
             },
-        )
-
-    @staticmethod
-    def _get_online_install_group_status_label(group_key: str) -> str:
-        """線上安裝用 group 標籤；與本地更新共用 group key，但 enabled 標籤不同。"""
-        return ModManagementReviewMixin._get_review_group_label(
-            group_key,
-            {"enabled": "可安裝", "advisory": "建議確認", "disabled": "已停用", "blocked": "需先處理"},
-        )
-
-    @staticmethod
-    def _count_online_install_review_groups(entries: list[PendingInstallReviewEntry]) -> dict[str, int]:
-        return ModManagementReviewMixin._count_review_groups(
-            entries,
-            supported_group_keys=("enabled", "advisory", "disabled", "blocked"),
-            group_key_getter=ModManagementReviewMixin._get_online_install_review_group_key,
         )
 
     @staticmethod
@@ -1412,18 +1255,32 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         )
 
     @staticmethod
-    def _build_online_install_execution_prompt(review_entries: list[PendingInstallReviewEntry]) -> str | None:
-        """與 _build_local_update_execution_prompt 共用語意，建立線上安裝前確認提示。"""
-        counts = ModManagementReviewMixin._count_online_install_review_groups(review_entries)
+    def _build_execution_prompt(review_entries: list[Any], *, mode: str) -> str | None:
+        """依 mode 建立執行前確認提示。"""
+        counts = ModManagementReviewMixin._count_review_groups_by_mode(review_entries, mode=mode)
+        if mode == "online":
+            return ModManagementReviewMixin._build_review_execution_prompt(
+                review_entries,
+                counts=counts,
+                summary_title="本次安裝摘要",
+                continue_action_template="安裝其餘 {count} 個可安裝項目",
+                required_group_keys=("blocked",),
+                summary_templates=(
+                    ("advisory", ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE),
+                    ("blocked", ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE),
+                ),
+            )
         return ModManagementReviewMixin._build_review_execution_prompt(
             review_entries,
             counts=counts,
-            summary_title="本次安裝摘要",
-            continue_action_template="安裝其餘 {count} 個可安裝項目",
-            required_group_keys=("blocked",),
+            summary_title="本次更新摘要",
+            continue_action_template="更新其餘 {count} 個可更新項目",
+            required_group_keys=("retryable", "unknown", "blocked"),
             summary_templates=(
-                ("advisory", ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE),
-                ("blocked", ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE),
+                ("advisory", LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE),
+                ("retryable", LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE),
+                ("unknown", LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE),
+                ("blocked", LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE),
             ),
         )
 
@@ -1440,23 +1297,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 "blocked": "處理等級：需先處理，仍有相容性或依賴阻擋",
             },
             default_label="處理等級：需先處理",
-        )
-
-    @staticmethod
-    def _build_local_update_execution_prompt(review_entries: list[LocalUpdateReviewEntry]) -> str | None:
-        counts = ModManagementReviewMixin._count_local_update_review_groups(review_entries)
-        return ModManagementReviewMixin._build_review_execution_prompt(
-            review_entries,
-            counts=counts,
-            summary_title="本次更新摘要",
-            continue_action_template="更新其餘 {count} 個可更新項目",
-            required_group_keys=("retryable", "unknown", "blocked"),
-            summary_templates=(
-                ("advisory", LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE),
-                ("retryable", LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE),
-                ("unknown", LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE),
-                ("blocked", LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE),
-            ),
         )
 
     def _confirm_non_official_download_sources(
@@ -1610,76 +1450,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             detail=detail_text,
         )
 
-    def _build_online_dependency_task_node(
-        self,
-        *,
-        root_key: str,
-        group_key: str,
-        parent_values: tuple[str, ...],
-        index: int,
-        dependency_item: Any,
-        dependency_status: str,
-        is_advisory: bool,
-        is_enabled: bool,
-        parent_id: str,
-    ) -> ReviewTaskNode:
-        return self._build_dependency_task_node(
-            root_key=root_key,
-            group_key=group_key,
-            parent_values=parent_values,
-            index=index,
-            dependency_item=dependency_item,
-            dependency_status=dependency_status,
-            is_advisory=is_advisory,
-            is_enabled=is_enabled,
-            parent_id=parent_id,
-            title_getter=lambda _item: "依賴",
-            values_getter=lambda item, advisory, enabled, status: (
-                "自動" if enabled else "略過" if advisory else "自動",
-                "Modrinth",
-                item.project_name,
-                item.version_name,
-                "optional" if self._is_optional_dependency_item(item) else "required",
-                status,
-            ),
-        )
-
-    def _build_local_dependency_task_node(
-        self,
-        *,
-        root_key: str,
-        group_key: str,
-        parent_values: tuple[str, ...],
-        index: int,
-        dependency_item: Any,
-        dependency_status: str,
-        is_advisory: bool,
-        is_enabled: bool,
-        parent_id: str,
-    ) -> ReviewTaskNode:
-        return self._build_dependency_task_node(
-            root_key=root_key,
-            group_key=group_key,
-            parent_values=parent_values,
-            index=index,
-            dependency_item=dependency_item,
-            dependency_status=dependency_status,
-            is_advisory=is_advisory,
-            is_enabled=is_enabled,
-            parent_id=parent_id,
-            title_getter=lambda item: f"依賴：{item.project_name}",
-            values_getter=lambda item, advisory, enabled, status: (
-                "自動" if enabled else "略過" if advisory else "自動",
-                "-",
-                item.version_name,
-                "可選依賴" if self._is_optional_dependency_item(item) else "Modrinth",
-                status,
-            ),
-            detail_getter=lambda current_group_key, status: (
-                f"{self._build_local_update_group_detail_text(current_group_key)}\n{status}"
-            ),
-        )
-
     def _build_issue_task_node(
         self,
         *,
@@ -1815,16 +1585,17 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         side: str = "left",
         bold: bool = False,
     ) -> qt.Button:
+        s = MOD_MANAGEMENT_UI_SCALE
         button = qt.Button(
             parent,
             text=text,
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold" if bold else "normal"),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s), weight="bold" if bold else "normal"),
             fg_color=fg_color,
             hover_color=hover_color,
             text_color=Colors.TEXT_ON_DARK,
             command=command,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
         pack_kwargs: dict[str, Any] = {"side": side}
         if padx is not None:
@@ -1840,21 +1611,17 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             tree.delete(item_id)
         blank_values = tuple("" for _ in range(column_count))
         group_parent_ids: dict[str, str] = {}
-        for group_key, label in self._get_review_group_specs():
+        for group_key, _label in self._get_review_group_specs():
             if not any(node.node_kind == "root" and node.group_key == group_key for node in nodes):
                 continue
             group_id = self._build_group_node_id(group_key)
             group_parent_ids[group_key] = group_id
-            tree.insert("", "end", iid=group_id, text=label, values=blank_values, open=True, tags=("group", group_key))
+            tree.insert(iid=group_id, values=blank_values, tags=("group", group_key))
         for node in nodes:
-            parent_id = group_parent_ids.get(node.group_key, "") if node.parent_id is None else node.parent_id
+            group_parent_ids.get(node.group_key, "") if node.parent_id is None else node.parent_id
             tree.insert(
-                parent_id,
-                "end",
                 iid=node.node_id,
-                text=node.title,
                 values=node.values,
-                open=node.node_kind in {"root", "dependency-group"},
                 tags=(node.node_kind, node.root_key, node.group_key),
             )
 
@@ -1933,10 +1700,10 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             ),
             get_group_key=self._get_online_install_review_group_key,
             get_title=lambda entry: str(getattr(getattr(entry, "pending", None), "project_name", "") or "模組"),
-            get_status_text=self._build_online_review_root_status_text,
+            get_status_text=lambda entry: self._build_review_root_status_text_by_mode(entry, mode="online"),
             get_root_values=lambda entry, status_text: (
                 "是" if entry.enabled else "否",
-                self._format_review_provider_label(entry.provider),
+                _rfmt.format_review_provider_label(entry.provider),
                 str(getattr(getattr(entry, "pending", None), "project_name", "") or "未知模組"),
                 str(
                     getattr(getattr(getattr(entry, "pending", None), "version", None), "display_name", "") or "未知版本"
@@ -1977,7 +1744,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                 _group_key: str = root_group_key,
                 _parent_values: tuple[str, ...] = root_values,
             ) -> ReviewTaskNode:
-                return self._build_online_dependency_task_node(
+                return self._build_dependency_task_node(
                     root_key=_root_key,
                     group_key=_group_key,
                     parent_values=_parent_values,
@@ -1987,6 +1754,15 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
                     is_advisory=is_optional,
                     is_enabled=is_enabled,
                     parent_id=parent_id,
+                    title_getter=lambda _item: "依賴",
+                    values_getter=lambda item, advisory, enabled, status: (
+                        "自動" if enabled else "略過" if advisory else "自動",
+                        "Modrinth",
+                        item.project_name,
+                        item.version_name,
+                        "optional" if self._is_optional_dependency_item(item) else "required",
+                        status,
+                    ),
                 )
 
             dependency_nodes.extend(
@@ -2015,7 +1791,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             get_root_key=lambda entry: self._build_local_update_review_key(entry.candidate),
             get_group_key=self._get_local_update_review_group_key,
             get_title=lambda entry: str(getattr(getattr(entry, "candidate", None), "project_name", "") or "模組"),
-            get_status_text=self._build_local_update_root_status_text,
+            get_status_text=lambda entry: self._build_review_root_status_text_by_mode(entry, mode="local"),
             get_root_values=lambda entry, status_text: (
                 "是" if entry.enabled else "否",
                 str(getattr(getattr(entry, "candidate", None), "current_version", "") or "未知"),
@@ -2039,7 +1815,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         lines.append(f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}")
         lines.append(
             "處理等級："
-            + self._get_online_install_group_status_label(self._get_online_install_review_group_key(review_entry))
+            + self._get_group_status_label(self._get_online_install_review_group_key(review_entry), mode="online")
         )
         dependency_plan = getattr(review_entry, "dependency_plan", None)
         self._append_dependency_review_sections(lines, dependency_plan, "將自動安裝的必要依賴：")
@@ -2081,10 +1857,11 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         shell = self._get_install_review_dialog_builder().create_review_dialog_shell(
             dialog_title="安裝清單 Review",
             heading="待安裝模組與依賴檢查",
-            subtitle_text=self._build_online_install_review_subtitle(
-                sum(1 for entry in review_entries if entry.actionable),
-                self._count_blocked_entries(review_entries),
-                advisory_count=self._count_online_install_review_groups(review_entries).get("advisory", 0),
+            subtitle_text=self._build_mode_review_subtitle(
+                mode="online",
+                actionable_count=sum(1 for entry in review_entries if entry.actionable),
+                blocked_count=self._count_blocked_entries(review_entries),
+                advisory_count=self._count_review_groups_by_mode(review_entries, mode="online").get("advisory", 0),
                 migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
             ),
             subtitle_wraplength=645,
@@ -2139,20 +1916,19 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             )
 
         self._bind_vertical_mousewheel(queue_tree, scroll_callback=queue_tree.yview_scroll)
-        summary_text_widget = getattr(summary_box, "_textbox", summary_box)
-        self._bind_vertical_mousewheel(summary_box, scroll_callback=summary_text_widget.yview_scroll)
-        self._bind_vertical_mousewheel(summary_text_widget, scroll_callback=summary_text_widget.yview_scroll)
+        self._bind_vertical_mousewheel(summary_box, scroll_callback=summary_box.yview_scroll)
 
         def refresh_queue_status_banner() -> None:
             review_nodes = self._build_online_review_task_nodes(review_entries)
-            counts = self._count_online_install_review_groups(review_entries)
+            counts = self._count_review_groups_by_mode(review_entries, mode="online")
             actionable_count = sum(1 for entry in review_entries if entry.actionable)
             blocked_count = counts.get("blocked", 0)
             advisory_count = counts.get("advisory", 0)
             subtitle.configure(
-                text=self._build_online_install_review_subtitle(
-                    actionable_count,
-                    blocked_count,
+                text=self._build_mode_review_subtitle(
+                    mode="online",
+                    actionable_count=actionable_count,
+                    blocked_count=blocked_count,
                     advisory_count=advisory_count,
                     migrated_snapshot_count=self._dependency_snapshot_migration_totals.get("migrated", 0),
                 )
@@ -2173,7 +1949,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             if not review_entry:
                 return
             summary_box.setReadOnly(False)
-            summary_box.delete("1.0", "end")
+            summary_box.clear()
             summary_box.insert("1.0", self._format_pending_install_review_text(review_entry))
             with contextlib.suppress(Exception):
                 summary_box.yview_moveto(0.0)
@@ -2183,7 +1959,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             selected_root_key = self._get_selected_review_key(queue_tree, review_root_keys)
             review_entry = review_entry_map.get(selected_root_key)
             project_page_url = (
-                self._resolve_pending_install_review_project_page_url(review_entry) if review_entry else ""
+                self._resolve_review_project_page_url(review_entry, mode="online") if review_entry else ""
             )
             self._open_project_page(project_page_url, dialog)
 
@@ -2204,7 +1980,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         try:
             if not queue_tree.get_children():
                 summary_box.setReadOnly(False)
-                summary_box.delete("1.0", "end")
+                summary_box.clear()
                 summary_box.insert("1.0", "目前無法直接在列表中顯示安裝項目；以下為回退顯示：\n\n")
                 for entry in review_entries:
                     pending = getattr(entry, "pending", None)
@@ -2234,7 +2010,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             review_entry = review_entry_map.get(selected_root_key)
             project_page_button.configure(
                 state="normal"
-                if review_entry and self._resolve_pending_install_review_project_page_url(review_entry)
+                if review_entry and self._resolve_review_project_page_url(review_entry, mode="online")
                 else "disabled"
             )
 
@@ -2274,17 +2050,16 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         refresh_queue_action_button()
         refresh_queue_project_page_button()
         queue_tree.connect_event("selection_changed", refresh_queue_project_page_button, append=True)
-        DialogUtils.schedule_toplevel_layout_refresh(
+        schedule_toplevel_layout_refresh(
             dialog,
             min_width=750,
             min_height=615,
-            parent=self.parent,
             preserve_current_size=False,
         )
+        dialog.show()
 
     def _ensure_local_mod_project_ids(self, local_mods: list[Any]) -> None:
         """盡量補齊本地模組的 Modrinth project id / slug，供更新檢查使用。"""
-        from .. import enhance_local_mod, resolve_modrinth_provider_record
 
         for local_mod in local_mods:
             current_project_id = str(getattr(local_mod, "platform_id", "") or "").strip()
@@ -2354,8 +2129,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         advisory_enabled_overrides: dict[tuple[str, tuple[str, str]], bool] | None = None,
     ) -> list[LocalUpdateReviewEntry]:
         """建立本地模組更新 review 項目，並依序模擬更新後狀態避免重複依賴。"""
-        from .. import build_required_dependency_install_plan
-
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         simulated_installed_mods = list(self._get_current_installed_mods())
         review_entries: list[LocalUpdateReviewEntry] = []
@@ -2438,17 +2211,17 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         candidate = review_entry.candidate
         lines = [
             f"模組：{candidate.project_name}",
-            f"來源：{self._format_review_provider_label(review_entry.provider)}",
-            f"Metadata 來源：{self._format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}",
-            f"更新建議來源：{self._format_recommendation_source_label(getattr(candidate, 'recommendation_source', ''))}",
-            f"更新建議可信度：{self._format_recommendation_confidence_label(getattr(candidate, 'recommendation_confidence', ''))}",
+            f"來源：{_rfmt.format_review_provider_label(review_entry.provider)}",
+            f"Metadata 來源：{_rfmt.format_metadata_source_label(getattr(candidate, 'metadata_source', ''))}",
+            f"更新建議來源：{_rfmt.format_recommendation_source_label(getattr(candidate, 'recommendation_source', ''))}",
+            f"更新建議可信度：{_rfmt.format_recommendation_confidence_label(getattr(candidate, 'recommendation_confidence', ''))}",
             f"目前版本：{candidate.current_version or '未知'}",
             f"推薦版本：{candidate.target_version_name or '查無可用版本'}",
         ]
         metadata_note = str(getattr(candidate, "metadata_note", "") or "").strip()
         if metadata_note:
             lines.append(f"Metadata 狀態：{metadata_note}")
-        published_text = self._format_review_published_at(review_entry.date_published)
+        published_text = _rfmt.format_review_published_at(review_entry.date_published)
         if published_text:
             lines.append(f"發布時間：{published_text}")
         client_install_reminder = self._build_client_install_reminder_line(
@@ -2457,7 +2230,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         if client_install_reminder:
             lines.append(client_install_reminder)
         lines.append(f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}")
-        lines.append(f"處理等級：{self._build_local_update_root_status_text(review_entry)}")
+        lines.append(f"處理等級：{self._build_review_root_status_text_by_mode(review_entry, mode='local')}")
         if review_entry.blocking_reasons:
             self._append_review_section(lines, "需先處理：", review_entry.blocking_reasons, max_items=3)
         self._append_dependency_review_sections(lines, review_entry.dependency_plan, "更新時將一併安裝的必要依賴：")
@@ -2469,7 +2242,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             self._append_review_section(lines, "提醒：", warnings, max_items=3)
         if notes:
             self._append_review_section(lines, "補充說明：", notes, max_items=2)
-        changelog_text = self._summarize_review_changelog(review_entry.changelog)
+        changelog_text = _rfmt.summarize_review_changelog(review_entry.changelog)
         if changelog_text:
             lines.append("")
             lines.append("更新內容：")
@@ -2502,14 +2275,15 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             entry_map = {self._build_local_update_review_key(entry.candidate): entry for entry in review_entries}
             review_root_keys = set(entry_map)
 
-        local_group_counts = self._count_local_update_review_groups(review_entries)
+        local_group_counts = self._count_review_groups_by_mode(review_entries, mode="local")
         shell = self._get_install_review_dialog_builder().create_review_dialog_shell(
             dialog_title="本地模組更新檢查",
             heading="本地模組更新與相容性 Review",
-            subtitle_text=self._build_local_update_review_subtitle(
-                scope_text,
-                self._count_enabled_runnable_entries(review_entries),
-                local_group_counts["blocked"],
+            subtitle_text=self._build_mode_review_subtitle(
+                mode="local",
+                actionable_count=self._count_enabled_runnable_entries(review_entries),
+                blocked_count=local_group_counts["blocked"],
+                scope_text=scope_text,
                 advisory_count=local_group_counts["advisory"],
                 retryable_count=local_group_counts["retryable"],
                 unknown_count=local_group_counts["unknown"],
@@ -2553,12 +2327,13 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         def refresh_update_status_banner() -> None:
             review_nodes = self._build_local_update_task_nodes(review_entries)
             enabled_count = self._count_enabled_runnable_entries(review_entries)
-            local_group_counts = self._count_local_update_review_groups(review_entries)
+            local_group_counts = self._count_review_groups_by_mode(review_entries, mode="local")
             subtitle.configure(
-                text=self._build_local_update_review_subtitle(
-                    scope_text,
-                    enabled_count,
-                    local_group_counts["blocked"],
+                text=self._build_mode_review_subtitle(
+                    mode="local",
+                    actionable_count=enabled_count,
+                    blocked_count=local_group_counts["blocked"],
+                    scope_text=scope_text,
                     advisory_count=local_group_counts["advisory"],
                     retryable_count=local_group_counts["retryable"],
                     unknown_count=local_group_counts["unknown"],
@@ -2577,7 +2352,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             if not review_entry:
                 return
             summary_box.setReadOnly(False)
-            summary_box.delete("1.0", "end")
+            summary_box.clear()
             summary_box.insert("1.0", self._format_local_update_review_text(review_entry))
             summary_box.setReadOnly(True)
 
@@ -2597,7 +2372,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         def open_selected_update_project_page() -> None:
             selected_key = self._get_selected_review_key(update_tree, review_root_keys)
             review_entry = entry_map.get(selected_key)
-            project_page_url = self._resolve_local_update_review_project_page_url(review_entry) if review_entry else ""
+            project_page_url = self._resolve_review_project_page_url(review_entry, mode="local") if review_entry else ""
             self._open_project_page(project_page_url, dialog)
 
         update_tree.connect_event("selection_changed", refresh_update_summary)
@@ -2644,7 +2419,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
             review_entry = entry_map.get(selected_key)
             project_page_button.configure(
                 state="normal"
-                if review_entry and self._resolve_local_update_review_project_page_url(review_entry)
+                if review_entry and self._resolve_review_project_page_url(review_entry, mode="local")
                 else "disabled"
             )
 
@@ -2660,13 +2435,13 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         refresh_update_status_banner()
         refresh_update_action_button()
         refresh_update_project_page_button()
-        DialogUtils.schedule_toplevel_layout_refresh(
+        schedule_toplevel_layout_refresh(
             dialog,
             min_width=795,
             min_height=645,
-            parent=self.parent,
             preserve_current_size=False,
         )
+        dialog.show()
 
     def check_local_mod_updates(self) -> None:
         """檢查本地模組是否有可用更新與相容性問題。"""

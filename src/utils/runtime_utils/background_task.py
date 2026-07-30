@@ -26,9 +26,7 @@ __all__ = [
     "BackgroundTaskManager",
     "CancellationToken",
     "get_shared_manager",
-    "run_async_in_background",
     "run_in_background",
-    "submit_background_task",
 ]
 
 
@@ -84,8 +82,22 @@ class BackgroundTaskManager:
     """簡單的背景任務執行器，支援取消 token 與回呼"""
 
     def __init__(self, max_workers: int = 4):
-        self._pool = QtCore.QThreadPool()
-        self._pool.setMaxThreadCount(max(1, int(max_workers)))
+        self._max_workers = max(1, int(max_workers))
+        self._pool = self._create_pool()
+
+    def _create_pool(self) -> QtCore.QThreadPool:
+        """建立新的 QThreadPool 實例。"""
+        pool = QtCore.QThreadPool()
+        pool.setMaxThreadCount(self._max_workers)
+        return pool
+
+    def _ensure_pool_alive(self) -> QtCore.QThreadPool:
+        """確保 QThreadPool 仍然有效；若 C++ 物件已被銷毀則重新建立。"""
+        try:
+            _ = self._pool.maxThreadCount()
+        except RuntimeError:
+            self._pool = self._create_pool()
+        return self._pool
 
     def run(
         self,
@@ -112,7 +124,7 @@ class BackgroundTaskManager:
             kwargs["cancel_token"] = cancel_token
         future: concurrent.futures.Future[Any] = concurrent.futures.Future()
         runnable = _QtRunnable(future, functools.partial(fn, *args, **kwargs))
-        self._pool.start(runnable)
+        self._ensure_pool_alive().start(runnable)
         if callback:
             future.add_done_callback(_make_done_callback(callback))
         return future
@@ -232,61 +244,3 @@ def run_in_background(
             if callback:
                 callback(result)
         return future
-
-
-def submit_background_task(
-    fn: Callable[..., Any],
-    *args,
-    on_success: Callable[[Any], None] | None = None,
-    on_error: Callable[[Exception], None] | None = None,
-    task_label: str = "Background task",
-    **kwargs,
-) -> concurrent.futures.Future[Any] | None:
-    """
-    提交背景任務並分流成功與失敗回呼。
-
-    Args:
-        fn: 要執行的函式。
-        *args: 傳入函式的位置參數。
-        on_success: 任務成功時收到結果的回呼（在背景執行緒被呼叫）。
-        on_error: 任務失敗時收到例外物件的回呼（在背景執行緒被呼叫）。
-        task_label: 用於日誌的任務名稱。
-        **kwargs: 傳入函式的關鍵字參數。
-
-    Returns:
-        提交後的 Future；若背景執行器完全不可用則回傳 None。
-    """
-    future = run_in_background(fn, *args, **kwargs)
-    if future is None:
-        return None
-
-    def _dispatch(result_future: concurrent.futures.Future[Any]) -> None:
-        try:
-            result = result_future.result()
-        except Exception as exc:
-            logger.exception(f"{task_label} failed: %s", exc)
-            if on_error:
-                try:
-                    on_error(exc)
-                except Exception:
-                    logger.exception(f"{task_label} error callback raised an exception")
-            return
-        if on_success:
-            try:
-                on_success(result)
-            except Exception:
-                logger.exception(f"{task_label} success callback raised an exception")
-
-    future.add_done_callback(_dispatch)
-    return future
-
-
-def run_async_in_background(
-    fn: Callable[..., Any], *args, callback: Callable[[Any], None] | None = None, **kwargs
-) -> concurrent.futures.Future[Any] | asyncio.Task[Any]:
-    """若在 asyncio loop 中，使用共享 manager 的 run_async；否則回傳 concurrent.futures.Future。"""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return get_shared_manager().run(fn, *args, callback=callback, **kwargs)
-    return asyncio.ensure_future(get_shared_manager().run_async(fn, *args, callback=callback, **kwargs))

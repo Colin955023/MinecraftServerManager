@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from .. import (
-    Colors,
-    DialogUtils,
     FontManager,
     PathUtils,
     QtCore,
@@ -25,6 +23,7 @@ from .. import (
     run_on_ui_thread,
 )
 from . import qt_widgets as qt
+from .qt_widgets import MessageBox
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -64,25 +63,6 @@ _BUTTON_STYLES: dict[str, dict[str, Any]] = {
 def _is_ui_thread() -> bool:
     app = QtWidgets.QApplication.instance()
     return app is None or QtCore.QThread.currentThread() is app.thread()
-
-
-def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]:
-    """
-    取得按鈕樣式配置
-
-    Args:
-        button_type: 按鈕類型 ("primary", "secondary", "warning", "danger")
-
-    Returns:
-        包含 fg_color 和 hover_color 的字典
-    """
-    styles = {
-        "primary": {"fg_color": Colors.BUTTON_PRIMARY, "hover_color": Colors.BUTTON_PRIMARY_HOVER},
-        "secondary": {"fg_color": Colors.BUTTON_SECONDARY, "hover_color": Colors.BUTTON_SECONDARY_HOVER},
-        "warning": {"fg_color": Colors.BUTTON_WARNING, "hover_color": Colors.BUTTON_WARNING_HOVER},
-        "danger": {"fg_color": Colors.BUTTON_DANGER, "hover_color": Colors.BUTTON_DANGER_HOVER},
-    }
-    return styles.get(button_type, styles["primary"])
 
 
 def compute_adaptive_pool_limit(
@@ -448,7 +428,7 @@ class UIUtils:
         return run_on_ui_thread(lambda: fn(*args, **kwargs), timeout=None)
 
     @staticmethod
-    def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
+    def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None) -> None:
         """
         顯示錯誤訊息對話框。
 
@@ -456,12 +436,11 @@ class UIUtils:
             title: 對話框標題。
             message: 錯誤訊息。
             parent: 父視窗。
-            topmost: 是否置頂。
         """
-        UIUtils._dispatch_dialog(DialogUtils.show_error, title, message, parent, topmost)
+        UIUtils._dispatch_dialog(MessageBox.show_error, title, message, parent)
 
     @staticmethod
-    def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
+    def show_warning(title: str = "警告", message: str = "警告訊息", parent=None) -> None:
         """
         顯示警告訊息對話框。
 
@@ -469,12 +448,11 @@ class UIUtils:
             title: 對話框標題。
             message: 警告訊息。
             parent: 父視窗。
-            topmost: 是否置頂。
         """
-        UIUtils._dispatch_dialog(DialogUtils.show_warning, title, message, parent, topmost)
+        UIUtils._dispatch_dialog(MessageBox.show_warning, title, message, parent)
 
     @staticmethod
-    def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
+    def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None) -> None:
         """
         顯示資訊對話框。
 
@@ -482,13 +460,40 @@ class UIUtils:
             title: 對話框標題。
             message: 資訊訊息。
             parent: 父視窗。
-            topmost: 是否置頂。
         """
-        UIUtils._dispatch_dialog(DialogUtils.show_info, title, message, parent, topmost)
+        UIUtils._dispatch_dialog(MessageBox.show_info, title, message, parent)
+
+    @staticmethod
+    def ask_yes_no(title: str = "確認", message: str = "請選擇操作", parent=None) -> bool:
+        """
+        顯示確認對話框，只支援是/否選項。
+
+        Args:
+            title: 對話框標題。
+            message: 提示訊息。
+            parent: 父視窗。
+        Returns:
+            True 表示使用者選擇「是」，False 表示使用者選擇「否」
+        """
+        res = UIUtils.ask_yes_no_cancel(title, message, parent, show_cancel=False)
+        return bool(res)
+
+    @staticmethod
+    def open_url(url: str) -> None:
+        """
+        在系統預設瀏覽器中開啟 URL。
+
+        Args:
+            url: 要開啟的網址。
+        """
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            logger.error(f"無法開啟 URL: {url}, {e}")
 
     @staticmethod
     def ask_yes_no_cancel(
-        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True, topmost: bool = False
+        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True
     ) -> bool | None:
         """
         顯示確認對話框，支援是/否/取消選項。
@@ -498,15 +503,12 @@ class UIUtils:
             message: 提示訊息。
             parent: 父視窗。
             show_cancel: 是否顯示取消按鈕。
-            topmost: 是否置頂。
         Returns:
             True 表示使用者選擇「是」，False 表示使用者選擇「否」，None 表示使用者選擇「取消」或關閉對話框
         """
         if _is_ui_thread():
-            return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
-        return run_on_ui_thread(
-            lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None
-        )
+            return MessageBox.ask_yes_no_cancel(title, message, parent, show_cancel)
+        return run_on_ui_thread(lambda: MessageBox.ask_yes_no_cancel(title, message, parent, show_cancel), timeout=None)
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
@@ -657,3 +659,50 @@ class UIUtils:
         )
         final_style = {**base_style, **kwargs}
         return qt.Button(parent, text=text, command=command, **final_style)
+
+
+def schedule_toplevel_layout_refresh(
+    dialog: Any,
+    *,
+    min_width: int = 0,
+    min_height: int = 0,
+    preserve_current_size: bool = True,
+) -> None:
+    """
+    排程頂層對話框的佈局重整與尺寸約束套用。
+
+    使用 invoke_later 延遲執行，確保對話框內容已完全渲染後再調整尺寸。
+
+    Args:
+        dialog: 目標對話框（QWidget 或 FluentWindow）。
+        min_width: 最小寬度（像素），0 表示不設定。
+        min_height: 最小高度（像素），0 表示不設定。
+        preserve_current_size: 是否保留目前視窗尺寸；False 時會觸發 resize 以套用最小尺寸。
+    """
+    if not is_qobject_alive(dialog):
+        return
+
+    def _apply() -> None:
+        if not is_qobject_alive(dialog):
+            return
+        try:
+            if min_width > 0:
+                current_min = dialog.minimumWidth()
+                if current_min < min_width:
+                    dialog.setMinimumWidth(min_width)
+            if min_height > 0:
+                current_min = dialog.minimumHeight()
+                if current_min < min_height:
+                    dialog.setMinimumHeight(min_height)
+            if not preserve_current_size:
+                current_size = dialog.size()
+                new_w = max(current_size.width(), min_width) if min_width > 0 else current_size.width()
+                new_h = max(current_size.height(), min_height) if min_height > 0 else current_size.height()
+                if new_w != current_size.width() or new_h != current_size.height():
+                    dialog.resize(new_w, new_h)
+            # 觸發佈局更新
+            dialog.updateGeometry()
+        except Exception:
+            logger.exception("schedule_toplevel_layout_refresh 執行失敗")
+
+    invoke_later(10, _apply, parent=dialog)

@@ -26,36 +26,6 @@ def normalize_hash_algorithm(algorithm: str | None) -> str:
     return MODRINTH_PREFERRED_HASH_ALGORITHM
 
 
-def select_primary_file(files: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """
-    從版本檔案列表中選出最適合下載的檔案。
-
-    Args:
-        files: 版本檔案列表。
-
-    Returns:
-        選中的檔案資訊，找不到時回傳 None。
-    """
-
-    if not files:
-        return None
-    for file_info in files:
-        if not isinstance(file_info, dict):
-            continue
-        if file_info.get("primary"):
-            return file_info
-    for file_info in files:
-        if not isinstance(file_info, dict):
-            continue
-        filename = str(file_info.get("filename", "") or "")
-        if filename.lower().endswith(".jar"):
-            return file_info
-    for file_info in files:
-        if isinstance(file_info, dict):
-            return file_info
-    return None
-
-
 def extract_primary_file_hash(version: Any | None, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM) -> str:
     """
     擷取版本主要檔案的雜湊值。
@@ -148,6 +118,5 @@ __all__ = [
     "is_allowed_version_type",
     "normalize_hash_algorithm",
     "select_best_mod_version",
-    "select_primary_file",
     "version_type_priority",
 ]

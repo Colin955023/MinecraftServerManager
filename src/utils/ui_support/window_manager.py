@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from .. import get_logger, get_settings_manager
 from .qt_runtime import QtCore, QtGui, QtWidgets, ensure_application, is_qobject_alive
+from .ui_utils import UIUtils
 
 logger = get_logger().bind(component="WindowManager")
 
@@ -191,8 +192,6 @@ class WindowManager:
             window.resize(width, height)
             window.move(x, y)
             if window_settings.get("maximized", False) and settings.is_remember_size_position_enabled():
-                from .ui_utils import UIUtils
-
                 UIUtils.schedule_debounce(window, "_window_zoom_job", 100, window.showMaximized, owner=window)
             get_logger().bind(component="WindowState").debug(f"主視窗設定: {width}x{height}+{x}+{y}")
         except Exception as e:
@@ -318,8 +317,6 @@ class _WindowStateTracker(QtCore.QObject):
             QtCore.QEvent.Type.WindowStateChange,
             QtCore.QEvent.Type.Show,
         }:
-            from .ui_utils import UIUtils
-
             UIUtils.schedule_debounce(
                 self._window,
                 "_save_timer",

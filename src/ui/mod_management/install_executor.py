@@ -9,7 +9,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from ...core import ModManager
+from ...core import (
+    ModManager,
+    analyze_mod_version_compatibility,
+    build_required_dependency_install_plan,
+    resolve_modrinth_project_names,
+)
 from ...models import LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
 from ...utils import (
     LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE,
@@ -69,7 +74,11 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
 
     @staticmethod
     def _resolve_expected_download_hash(version: Any | None) -> str:
-        return extract_primary_file_hash(version) or extract_primary_file_hash(version, "sha256")
+        return (
+            extract_primary_file_hash(version)
+            or extract_primary_file_hash(version, "sha256")
+            or extract_primary_file_hash(version, "sha1")
+        )
 
     @staticmethod
     def _build_download_kwargs(
@@ -199,12 +208,6 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
 
     def _prepare_online_install_review_entries(self) -> list[PendingInstallReviewEntry]:
         """以目前本地模組狀態重新驗證待安裝清單。"""
-        from .. import (
-            analyze_mod_version_compatibility,
-            build_required_dependency_install_plan,
-            resolve_modrinth_project_names,
-        )
-
         minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
         simulated_installed_mods = list(self._get_current_installed_mods())
         review_entries: list[PendingInstallReviewEntry] = []
@@ -391,7 +394,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
         if not actionable_entries:
             UIUtils.show_warning("無法安裝", ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE, dialog)
             return
-        execution_prompt = self._build_online_install_execution_prompt(effective_review_entries)
+        execution_prompt = self._build_execution_prompt(effective_review_entries, mode="online")
         if execution_prompt:
             proceed = UIUtils.ask_yes_no_cancel("確認本次安裝內容", execution_prompt, parent=dialog, show_cancel=False)
             if proceed is not True:
@@ -406,7 +409,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
             return
         self.update_status_safe("正在啟動安裝清單執行...")
         dialog.destroy()
-        online_group_counts = self._count_online_install_review_groups(effective_review_entries)
+        online_group_counts = self._count_review_groups_by_mode(effective_review_entries, mode="online")
         online_skipped_parts: list[str] = []
         if online_group_counts.get("disabled", 0):
             online_skipped_parts.append(f"已停用 {online_group_counts['disabled']} 項")
@@ -579,7 +582,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
                 message = "目前沒有已啟用的可更新項目，請先啟用要執行的更新項目。"
             UIUtils.show_warning("沒有可更新項目", message, dialog)
             return
-        execution_prompt = self._build_local_update_execution_prompt(review_entries)
+        execution_prompt = self._build_execution_prompt(review_entries, mode="local")
         if execution_prompt:
             proceed = UIUtils.ask_yes_no_cancel("確認本次更新內容", execution_prompt, parent=dialog, show_cancel=False)
             if proceed is not True:
@@ -593,7 +596,7 @@ class ModManagementInstallExecutorMixin(ModManagementRuntimeBase):
             self.update_status_safe("已取消非官方來源更新")
             return
         dialog.destroy()
-        skipped_counts = self._count_local_update_review_groups(review_entries)
+        skipped_counts = self._count_review_groups_by_mode(review_entries, mode="local")
         skipped_group_parts: list[str] = []
         if skipped_counts["retryable"]:
             skipped_group_parts.append(

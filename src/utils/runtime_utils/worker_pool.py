@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import os
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -55,22 +54,6 @@ def get_shared_worker_pool() -> BackgroundTaskManager:
     return _shared_worker_pool
 
 
-def submit_to_worker_pool[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> concurrent.futures.Future[T]:
-    """
-    將同步函式提交至共享工作池。
-
-    Args:
-        fn: 要執行的同步函式。
-        *args: 位置參數。
-        **kwargs: 關鍵字參數。
-
-    Returns:
-        已提交的 Future。
-    """
-
-    return get_shared_worker_pool().run(fn, *args, **kwargs)
-
-
 async def run_blocking_io[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """
     在共享工作池中執行阻塞 I/O 或高成本工作。
@@ -84,23 +67,7 @@ async def run_blocking_io[T](fn: Callable[..., T], *args: Any, **kwargs: Any) ->
         函式執行結果。
     """
 
-    return await asyncio.wrap_future(submit_to_worker_pool(fn, *args, **kwargs))
-
-
-def shutdown_shared_worker_pool(*, wait: bool = True) -> None:
-    """
-    關閉共享工作池，主要供測試或應用程式結束流程使用。
-
-    Args:
-        wait: 是否等待既有任務完成。
-    """
-
-    global _shared_worker_pool
-    with QtCore.QMutexLocker(_worker_pool_lock):
-        pool = _shared_worker_pool
-        _shared_worker_pool = None
-    if pool is not None:
-        pool.shutdown(wait=wait)
+    return await asyncio.wrap_future(get_shared_worker_pool().run(fn, *args, **kwargs))
 
 
 __all__ = [
@@ -108,6 +75,4 @@ __all__ = [
     "get_shared_worker_pool",
     "resolve_worker_count",
     "run_blocking_io",
-    "shutdown_shared_worker_pool",
-    "submit_to_worker_pool",
 ]

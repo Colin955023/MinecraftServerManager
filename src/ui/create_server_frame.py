@@ -8,160 +8,123 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import queue
+import re
 import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..core import LoaderManager, MinecraftVersionManager, ServerManager
+from PySide6 import QtCore
+
+from ..core import (
+    JavaManager,
+    LoaderManager,
+    MinecraftVersionManager,
+    ServerCommands,
+    ServerCRUD,
+    ServerDetectionUtils,
+    ServerRepository,
+)
 from ..models import ServerConfig
 from ..utils import (
     CancellationToken,
     Colors,
     CustomDropdown,
-    FluentLineEdit,
-    FluentPushButton,
     FontManager,
     FontSize,
-    JavaUtils,
-    NativeQtStyle,
-    QtCore,
-    QtGui,
-    QtWidgets,
+    PathUtils,
     Sizes,
+    Spacing,
+    SubprocessUtils,
     SystemUtils,
     TaskUtils,
     UIUtils,
-    ValueState,
     get_logger,
     get_shared_manager,
     install_open_url_click,
     is_qobject_alive,
     record_and_mark,
-    resolve_color,
 )
-from . import ProgressDialog
+from ..utils.ui_support import qt_widgets as qt
+from . import CreateServerService, ProgressDialog, ServerConfigInputs
 
 logger = get_logger().bind(component="CreateServerFrame")
 
 
-def _qt_font(font: Any) -> QtGui.QFont:
-    return getattr(font, "font", font)
-
-
-def _qt_color(color: Any) -> str:
-    if getattr(NativeQtStyle, "_dark", False) and color in {
-        Colors.TEXT_PRIMARY,
-        Colors.TEXT_PRIMARY_CONTRAST,
-        Colors.TEXT_HEADING,
-        Colors.TEXT_SECONDARY,
-        Colors.TEXT_MUTED,
-        Colors.TEXT_TERTIARY,
-    }:
-        return Colors.TEXT_ON_DARK
-    return resolve_color(color)
-
-
-def _set_layout_margins(layout: QtWidgets.QLayout, *margins: int) -> None:
-    layout.setContentsMargins(*(int(value) for value in margins))
-
-
-class CreateServerFrame(QtWidgets.QWidget):
+class CreateServerFrame(qt.Frame):
     """建立伺服器頁面"""
-
-    @staticmethod
-    def get_system_memory_mb() -> int:
-        """
-        獲取系統記憶體容量。
-
-        Returns:
-            系統總記憶體容量（MB），失敗時回傳 0。
-        """
-        try:
-            return SystemUtils.get_total_memory_mb()
-        except Exception as e:
-            with __import__("contextlib").suppress(Exception):
-                record_and_mark(e, marker_path=Path(__file__), reason="get_system_memory_failed")
-            logger.bind(component="").error(
-                f"無法獲取系統記憶體資訊: {e}\n{traceback.format_exc()}", "CreateServerFrame"
-            )
-            UIUtils.show_error("錯誤", f"無法獲取系統記憶體資訊: {e}", topmost=True)
-            return 0
 
     def update_memory_warning(self) -> None:
         """更新記憶體使用警告標籤"""
         try:
-            max_memory_str = self.max_memory_var.get().strip()
-            min_memory_str = self.min_memory_var.get().strip()
-            if not max_memory_str:
-                self._set_warning_text("")
-                return
-            max_memory = int(max_memory_str)
-            min_memory = int(min_memory_str)
-            system_memory = self.get_system_memory_mb()
-            half_system_memory = system_memory // 2
-            if (max_memory > system_memory or min_memory > system_memory) and min_memory >= 1024:
-                warning_text = f"⚠️ 警告：設定記憶體超過系統總記憶體 ({system_memory}MB)"
-                self._set_warning_text(warning_text, Colors.TEXT_ERROR)
-            elif (max_memory > half_system_memory or min_memory > half_system_memory) and min_memory >= 1024:
-                warning_text = f"⚠️ 警告：設定記憶體超過系統記憶體的一半 ({half_system_memory}MB)"
-                self._set_warning_text(warning_text, Colors.TEXT_WARNING)
-            elif min_memory > max_memory:
-                warning_text = "⚠️ 警告：最小記憶體必須小於最大記憶體"
-                self._set_warning_text(warning_text, Colors.TEXT_ERROR)
+            inputs = ServerConfigInputs(
+                server_name=self.server_name_entry.text().strip() if hasattr(self, "server_name_entry") else "",
+                mc_version=self.mc_version_combo.currentText().strip() if hasattr(self, "mc_version_combo") else "",
+                loader_type=self.loader_type_combo.currentText().strip()
+                if hasattr(self, "loader_type_combo")
+                else "Vanilla",
+                loader_version=self.loader_version_combo.currentText().strip()
+                if hasattr(self, "loader_version_combo")
+                else "",
+                min_memory=self.min_memory_entry.text().strip() if hasattr(self, "min_memory_entry") else "",
+                max_memory=self.max_memory_entry.text().strip() if hasattr(self, "max_memory_entry") else "",
+                system_memory=SystemUtils.get_total_memory_mb(),
+                servers_root=self.repository.servers_root,
+            )
+            val_result = CreateServerService.validate_server_config_inputs(inputs)
+
+            if val_result.memory_warning:
+                color = Colors.TEXT_ERROR if val_result.memory_color == "error" else Colors.TEXT_WARNING
+                self._set_warning_text(val_result.memory_warning, color)
+            elif "記憶體設定必須為有效整數" in val_result.errors:
+                if not inputs.min_memory and not inputs.max_memory:
+                    self._set_warning_text("")
+                else:
+                    self._set_warning_text("⚠️ 警告：記憶體設定必須為有效的整數", Colors.TEXT_ERROR)
             else:
                 self._set_warning_text("")
-        except ValueError:
-            if not min_memory_str:
-                self._set_warning_text("")
-            else:
-                self._set_warning_text("⚠️ 警告：記憶體設定必須為有效的整數", Colors.TEXT_ERROR)
         except Exception as e:
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 record_and_mark(e, marker_path=Path(__file__), reason="update_memory_warning_failed")
             logger.bind(component="").error(f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame")
             UIUtils.show_error("錯誤", f"更新記憶體警告失敗: {e}", self.window())
 
     def _set_warning_text(self, text: str, color: Any = Colors.TEXT_ERROR) -> None:
-        self.memory_warning_label.setText(text)
-        self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(color)))
+        self.memory_warning_label.configure(text=text, text_color=color)
 
-    def _make_label(self, text: str, *, muted: bool = False, bold: bool = True) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(text)
-        label.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold" if bold else "normal"))
-        label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED if muted else Colors.TEXT_PRIMARY)))
-        label.setMinimumWidth(143)
-        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
+    def _make_label(self, text: str, *, muted: bool = False, bold: bool = True) -> qt.Label:
+        label = qt.Label(self.form_panel, text=text)
+        label.configure(
+            font=FontManager.get_font(size=FontSize.MEDIUM, weight="bold" if bold else "normal"),
+            text_color=Colors.TEXT_MUTED if muted else Colors.TEXT_PRIMARY,
+            width=Sizes.FORM_LABEL_WIDTH,
+            anchor="w",
+        )
         return label
 
-    def _style_control(self, widget, *, height: int = 20) -> None:
-        widget.setMinimumHeight(height)
-        widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
-
-    def _make_button(self, text: str, command: Callable[[], Any], *, kind: str = "secondary") -> QtWidgets.QPushButton:
-        try:
-            button = FluentPushButton(text, self)
-        except TypeError:
-            button = FluentPushButton(self)
-            button.setText(text)
-        button.setProperty("msm_button_kind", kind)
-        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
-        button.setMinimumHeight(30)
-        button.clicked.connect(lambda _checked=False: command())
-        button.setStyleSheet(NativeQtStyle.create_button(kind=kind))
+    def _make_button(self, parent: Any, text: str, command: Callable[[], Any], *, kind: str = "secondary") -> qt.Button:
+        """建立按鈕並掛載至實際使用它的容器。"""
+        button = qt.Button(parent, text=text, command=command)
+        button.configure(
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            height=Sizes.BUTTON_HEIGHT_LARGE,
+            cursor="hand2",
+        )
+        if kind == "primary":
+            button.configure(
+                fg_color=Colors.BUTTON_PRIMARY, hover_color=Colors.BUTTON_PRIMARY_HOVER, text_color=Colors.TEXT_ON_DARK
+            )
+        elif kind == "danger":
+            button.configure(
+                fg_color=Colors.BUTTON_DANGER, hover_color=Colors.BUTTON_DANGER_HOVER, text_color=Colors.TEXT_ON_DARK
+            )
+        else:
+            button.configure(
+                fg_color=Colors.BUTTON_SECONDARY,
+                hover_color=Colors.BUTTON_SECONDARY_HOVER,
+                text_color=Colors.TEXT_PRIMARY,
+            )
         return button
-
-    def _bind_entry(self, entry: QtWidgets.QLineEdit, variable: ValueState) -> None:
-        entry.setText(str(variable.get()))
-        entry.textChanged.connect(variable.set)
-
-        def _sync_from_var(value: object) -> None:
-            text = str(value or "")
-            if entry.text() != text:
-                entry.setText(text)
-
-        variable.changed.connect(_sync_from_var)
 
     def create_java_path_field(self, parent, row) -> None:
         """
@@ -171,38 +134,36 @@ class CreateServerFrame(QtWidgets.QWidget):
             parent: 父容器。
             row: 要放置的表單列號。
         """
-        parent.addWidget(self._make_label("Java 執行檔路徑 (可選):"), row, 0)
-        self.java_path_var = ValueState("")
-        java_path_entry = FluentLineEdit(self.form_panel)
-        java_path_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        self._bind_entry(java_path_entry, self.java_path_var)
-        self._style_control(java_path_entry)
-        parent.addWidget(java_path_entry, row, 1)
+        self._make_label("Java 路徑 (可選):").attach_matrix(
+            row=row, column=0, sticky="w", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
+        self.java_path_entry = qt.Entry(self.form_panel)
+        self.java_path_entry.configure(font=FontManager.get_font(size=FontSize.MEDIUM))
+        self.java_path_entry.attach_matrix(row=row, column=1, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL)
 
         def browse_java():
-            path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
-                self.window(), "選擇 javaw.exe", "", "Java 執行檔 (javaw.exe);;所有檔案 (*)"
-            )
+            path = qt.get_open_file_name(self.window(), "選擇 javaw.exe", "", "Java 執行檔 (javaw.exe);;所有檔案 (*)")
             if path:
-                self.java_path_var.set(path)
+                self.java_path_entry.setText(path)
 
-        browse_btn = self._make_button("瀏覽...", browse_java)
-        browse_btn.setFixedWidth(72)
-        parent.addWidget(browse_btn, row, 2)
+        browse_btn = self._make_button(parent, "瀏覽...", command=browse_java)
+        browse_btn.configure(width=Sizes.BUTTON_WIDTH_PRIMARY)
+        browse_btn.attach_matrix(row=row, column=2, padx=Spacing.SMALL, pady=Spacing.SMALL)
 
         def auto_detect():
-            mc_version = self.mc_version_var.get() if hasattr(self, "mc_version_var") else None
-            if not mc_version:
-                UIUtils.show_warning("Java 偵測", "請先選擇 Minecraft 版本！", self.window())
+            mc_version = self.mc_version_combo.currentText() if hasattr(self, "mc_version_combo") else None
+            if not mc_version or mc_version in ["載入中...", "無可用版本", "載入失敗"]:
+                UIUtils.show_warning("Java 偵測", "請先選擇有效的 Minecraft 版本！", self.window())
                 return
-            java_path = JavaUtils.get_best_java_path(mc_version, interaction=UIUtils)
+            java_path = JavaManager.get_best_java_path(mc_version, interaction=UIUtils)
             if java_path:
                 java_path_win = str(Path(java_path))
-                self.java_path_var.set(java_path_win)
+                self.java_path_entry.setText(java_path_win)
 
-        auto_btn = self._make_button("自動偵測", auto_detect)
-        auto_btn.setFixedWidth(75)
-        parent.addWidget(auto_btn, row, 3)
+        auto_btn = self._make_button(parent, "自動偵測", command=auto_detect)
+        auto_btn.configure(width=Sizes.BUTTON_WIDTH_PRIMARY)
+        auto_btn.attach_matrix(row=row, column=3, padx=Spacing.SMALL, pady=Spacing.SMALL)
+        parent.set_grid_column_stretch(1, weight=1)
 
     def __init__(
         self,
@@ -210,20 +171,27 @@ class CreateServerFrame(QtWidgets.QWidget):
         version_manager: MinecraftVersionManager,
         loader_manager: LoaderManager,
         callback: Callable,
-        server_manager: ServerManager,
+        repository: ServerRepository,
+        server_crud: ServerCRUD,
     ):
         super().__init__(parent)
         self.version_manager = version_manager
         self.loader_manager = loader_manager
         self.callback = callback
-        self.server_manager = server_manager
+        self.repository = repository
+        self.server_crud = server_crud
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
         self._create_server_progress_job = None
         self._create_server_success_job = None
         self._create_server_error_job = None
-        self.server_name_var = ValueState("")
+        self.server_name_entry: qt.Entry
+        self.min_memory_entry: qt.Entry
+        self.max_memory_entry: qt.Entry
+        self.loader_type_combo: qt.ComboBox
+        self.loader_version_combo: qt.ComboBox
+        self.mc_version_combo: qt.ComboBox
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
         self.bg_tasks = get_shared_manager()
         TaskUtils.start_ui_queue_pump(self, self.ui_queue)
@@ -248,105 +216,62 @@ class CreateServerFrame(QtWidgets.QWidget):
     def create_widgets(self) -> None:
         """建立介面元件"""
         self.setObjectName("CreateServerFrame")
-        self.setStyleSheet(NativeQtStyle.create_page)
-        main_layout = QtWidgets.QVBoxLayout(self)
-        _set_layout_margins(main_layout, 0, 0, 0, 0)
-        main_layout.setSpacing(11)
+        main_frame = qt.Frame(self, fg_color="transparent")
+        main_frame.attach(fill="both", expand=True)
 
-        self.scroll_area = QtWidgets.QScrollArea(self)
+        self.scroll_area = qt.ScrollableFrame(main_frame)
         self.scroll_area.setObjectName("CreateServerScrollArea")
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setStyleSheet(NativeQtStyle.create_page)
-        self.content_widget = QtWidgets.QWidget()
+        self.scroll_area.attach(fill="both", expand=True)
+
+        self.content_widget = self.scroll_area._content_widget
         self.content_widget.setObjectName("CreateServerContent")
-        self.content_widget.setStyleSheet(NativeQtStyle.create_page)
-        content_layout = QtWidgets.QVBoxLayout(self.content_widget)
-        _set_layout_margins(content_layout, 0, 0, 0, 0)
-        content_layout.setSpacing(11)
-        self.scroll_area.setWidget(self.content_widget)
-        main_layout.addWidget(self.scroll_area, 1)
 
-        title_label = QtWidgets.QLabel("建立新伺服器", self.content_widget)
+        title_label = qt.Label(self.content_widget, text="建立新伺服器")
         self.title_label = title_label
-        title_label.setFont(_qt_font(FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")))
-        title_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_HEADING)))
-        content_layout.addWidget(title_label)
+        title_label.configure(
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
+            text_color=Colors.TEXT_HEADING,
+        )
+        title_label.attach(pady=(0, Spacing.LARGE))
 
-        eula_frame = QtWidgets.QFrame(self.content_widget)
+        eula_frame = qt.Frame(self.content_widget)
         self.eula_frame = eula_frame
         eula_frame.setObjectName("EulaNotice")
-        eula_frame.setStyleSheet(NativeQtStyle.eula_notice)
-        eula_layout = QtWidgets.QHBoxLayout(eula_frame)
-        _set_layout_margins(eula_layout, 6, 5, 6, 5)
-        eula_layout.setSpacing(8)
-        eula_icon = QtWidgets.QLabel("⚠️", eula_frame)
+        eula_frame.configure(fg_color=Colors.BG_WARNING, height=Sizes.WARNING_AREA_HEIGHT)
+        eula_frame.attach(fill="x", pady=(0, Spacing.SMALL))
+
+        eula_icon = qt.Label(eula_frame, text="⚠️")
         self.eula_icon = eula_icon
-        eula_icon.setFont(_qt_font(FontManager.get_font(size=FontSize.LARGE, weight="bold")))
-        eula_icon.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.BUTTON_WARNING_HOVER)))
-        eula_layout.addWidget(eula_icon, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        eula_link = QtWidgets.QLabel(
-            "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n"
-            "點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
+        eula_icon.configure(
+            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            text_color=Colors.BUTTON_WARNING_HOVER,
+        )
+        eula_icon.attach(side="left", padx=Spacing.MEDIUM, pady=Spacing.SMALL, anchor="v")
+
+        eula_link = qt.Label(
             eula_frame,
+            text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
         )
         self.eula_link = eula_link
-        eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True)))
-        eula_link.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_WARNING)))
-        eula_link.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        eula_link.configure(
+            font=FontManager.get_font(size=FontSize.SMALL, weight="bold", underline=True),
+            text_color=Colors.TEXT_WARNING,
+            cursor="hand2",
+        )
         install_open_url_click(eula_link, "https://aka.ms/MinecraftEULA")
-        eula_layout.addWidget(eula_link, 1)
-        content_layout.addWidget(eula_frame)
+        eula_link.attach(side="left", fill="x", expand=True, padx=(Spacing.SMALL, Spacing.MEDIUM), pady=Spacing.SMALL)
 
-        self.form_panel = QtWidgets.QFrame(self.content_widget)
+        self.form_panel = qt.Frame(self.content_widget)
         self.form_panel.setObjectName("CreateFormPanel")
-        self.form_panel.setStyleSheet(NativeQtStyle.create_form_panel)
-        form_layout = QtWidgets.QGridLayout(self.form_panel)
-        _set_layout_margins(form_layout, 0, 3, 0, 0)
-        form_layout.setHorizontalSpacing(8)
-        form_layout.setVerticalSpacing(8)
-        form_layout.setColumnStretch(1, 1)
-        self.create_form(form_layout)
-        content_layout.addWidget(self.form_panel)
-        content_layout.addStretch(1)
-        self.create_buttons(main_layout)
+        self.form_panel.configure(fg_color=Colors.BG_SECONDARY)
+        self.form_panel.attach(fill="x", pady=(0, Spacing.LARGE))
+        # 防止 Y 軸自動填滿，將所有表單內容推至頂部
+        layout = self.content_widget.layout()
+        if layout and hasattr(layout, "addStretch"):
+            layout.addStretch(1)  # type: ignore[attr-defined]
+        self.create_form(self.form_panel)
 
-    def apply_theme_styles(self) -> None:
-        """重新套用目前主題到建立伺服器頁。"""
-        self.setStyleSheet(NativeQtStyle.create_page)
-        if hasattr(self, "scroll_area"):
-            self.scroll_area.setStyleSheet(NativeQtStyle.create_page)
-        if hasattr(self, "content_widget"):
-            self.content_widget.setStyleSheet(NativeQtStyle.create_page)
-        if hasattr(self, "title_label"):
-            self.title_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_HEADING)))
-        if hasattr(self, "eula_frame"):
-            self.eula_frame.setStyleSheet(NativeQtStyle.eula_notice)
-        if hasattr(self, "eula_icon"):
-            self.eula_icon.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.BUTTON_WARNING_HOVER)))
-        if hasattr(self, "eula_link"):
-            self.eula_link.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_WARNING)))
-        if hasattr(self, "form_panel"):
-            self.form_panel.setStyleSheet(NativeQtStyle.create_form_panel)
-        if hasattr(self, "actions_frame"):
-            self.actions_frame.setStyleSheet(NativeQtStyle.create_actions)
-        if hasattr(self, "memory_warning_label"):
-            self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_ERROR)))
-        special_labels = {
-            getattr(self, "eula_icon", None),
-            getattr(self, "eula_link", None),
-            getattr(self, "memory_warning_label", None),
-        }
-        for label in self.findChildren(QtWidgets.QLabel):
-            if label in special_labels:
-                continue
-            label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_PRIMARY)))
-        for dropdown in self.findChildren(CustomDropdown):
-            dropdown.setStyleSheet(NativeQtStyle.custom_dropdown)
-        for button in self.findChildren(QtWidgets.QPushButton):
-            kind = str(button.property("msm_button_kind") or "secondary")
-            button.setStyleSheet(NativeQtStyle.create_button(kind=kind))
+        self.create_buttons(main_frame)
 
     def create_form(self, parent) -> None:
         """
@@ -355,121 +280,123 @@ class CreateServerFrame(QtWidgets.QWidget):
         Args:
             parent: 父容器。
         """
-        content_frame = parent
-        self.create_field(content_frame, 0, "伺服器名稱:", "我的伺服器", "server_name")
-        self.create_java_path_field(content_frame, 1)
-        content_frame.addWidget(self._make_label("模組載入器:"), 2, 0)
-        self.loader_type_var = ValueState("Vanilla")
+        parent.set_grid_column_stretch(1, weight=1)
+
+        self.create_field(parent, 0, "伺服器名稱:", "我的伺服器", "server_name")
+        self.create_java_path_field(parent, 1)
+
+        self._make_label("模組載入器:").attach_matrix(
+            row=2, column=0, sticky="w", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
         self.loader_type_combo = CustomDropdown(
-            self.form_panel,
-            variable=self.loader_type_var,
+            parent,
             values=["Vanilla", "Fabric", "Forge", "Quilt", "NeoForge"],
             width=Sizes.DROPDOWN_WIDTH,
             font_size=FontSize.MEDIUM,
-            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self._style_control(self.loader_type_combo)
-        content_frame.addWidget(self.loader_type_combo, 2, 1)
-        self.loader_type_var.trace_add("write", lambda *_args: self.update_server_config_ui())
+        self.loader_type_combo.set("Vanilla")
+        self.loader_type_combo.attach_matrix(row=2, column=1, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL)
+        self.loader_type_combo.currentTextChanged.connect(lambda *_: self.update_server_config_ui())
+
         loader_version_row = 3
-        content_frame.addWidget(self._make_label("載入器版本:"), loader_version_row, 0)
-        self.loader_version_var = ValueState("無")
+        self._make_label("載入器版本:").attach_matrix(
+            row=loader_version_row, column=0, sticky="w", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
         self.loader_version_combo = CustomDropdown(
-            self.form_panel,
-            variable=self.loader_version_var,
+            parent,
             values=["無"],
             width=Sizes.DROPDOWN_WIDTH,
             font_size=FontSize.MEDIUM,
-            dropdown_font_size=FontSize.MEDIUM,
             state="disabled",
         )
-        self._style_control(self.loader_version_combo)
-        content_frame.addWidget(self.loader_version_combo, loader_version_row, 1)
-        loader_reload_btn = self._make_button("⟳", self.reload_loader_versions)
-        loader_reload_btn.setFixedWidth(72)
-        content_frame.addWidget(loader_reload_btn, loader_version_row, 2)
-        content_frame.addWidget(self._make_label("Minecraft 版本:"), 4, 0)
-        self.mc_version_var = ValueState("")
+        self.loader_version_combo.set("無")
+        self.loader_version_combo.attach_matrix(
+            row=loader_version_row, column=1, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
+        loader_reload_btn = self._make_button(parent, "⟳", self.reload_loader_versions)
+        loader_reload_btn.configure(width=Sizes.BUTTON_WIDTH_SMALL)
+        loader_reload_btn.attach_matrix(row=loader_version_row, column=2, padx=Spacing.SMALL, pady=Spacing.SMALL)
+
+        self._make_label("Minecraft 版本:").attach_matrix(
+            row=4, column=0, sticky="w", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
         self.mc_version_combo = CustomDropdown(
-            self.form_panel,
-            variable=self.mc_version_var,
+            parent,
             values=["載入中..."],
             command=self.update_server_config_ui,
             width=Sizes.DROPDOWN_COMPACT_WIDTH,
             font_size=FontSize.MEDIUM,
-            dropdown_font_size=FontSize.MEDIUM,
             state="readonly",
         )
-        self._style_control(self.mc_version_combo)
-        content_frame.addWidget(self.mc_version_combo, 4, 1)
-        mc_reload_btn = self._make_button("⟳", self.reload_mc_versions)
-        mc_reload_btn.setFixedWidth(72)
-        content_frame.addWidget(mc_reload_btn, 4, 2)
+        self.mc_version_combo.set("載入中...")
+        self.mc_version_combo.attach_matrix(row=4, column=1, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL)
+        mc_reload_btn = self._make_button(parent, "⟳", self.reload_mc_versions)
+        mc_reload_btn.configure(width=Sizes.BUTTON_WIDTH_SMALL)
+        mc_reload_btn.attach_matrix(row=4, column=2, padx=Spacing.SMALL, pady=Spacing.SMALL)
 
         memory_title = self._make_label("記憶體設定 (MB):")
-        content_frame.addWidget(memory_title, 5, 0)
-        memory_container = QtWidgets.QWidget(self.form_panel)
-        memory_layout = QtWidgets.QVBoxLayout(memory_container)
-        _set_layout_margins(memory_layout, 0, 0, 0, 0)
-        memory_layout.setSpacing(5)
-        memory_input_layout = QtWidgets.QHBoxLayout()
-        memory_input_layout.setSpacing(8)
-        self.min_memory_var = ValueState("1024")
-        min_memory_frame = QtWidgets.QWidget(memory_container)
-        min_layout = QtWidgets.QVBoxLayout(min_memory_frame)
-        _set_layout_margins(min_layout, 0, 0, 0, 0)
-        min_layout.setSpacing(3)
-        min_label = QtWidgets.QLabel("最小記憶體:", min_memory_frame)
-        min_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
-        min_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
-        min_layout.addWidget(min_label)
-        self.min_memory_entry = FluentLineEdit(min_memory_frame)
-        self.min_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        self._bind_entry(self.min_memory_entry, self.min_memory_var)
-        self._style_control(self.min_memory_entry)
-        min_layout.addWidget(self.min_memory_entry)
-        memory_input_layout.addWidget(min_memory_frame, 1)
+        memory_title.attach_matrix(row=5, column=0, sticky="nw", padx=Spacing.MEDIUM, pady=Spacing.SMALL)
 
-        self.max_memory_var = ValueState("2048")
-        max_memory_frame = QtWidgets.QWidget(memory_container)
-        max_layout = QtWidgets.QVBoxLayout(max_memory_frame)
-        _set_layout_margins(max_layout, 0, 0, 0, 0)
-        max_layout.setSpacing(3)
-        max_label = QtWidgets.QLabel("最大記憶體:", max_memory_frame)
-        max_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
-        max_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
-        max_layout.addWidget(max_label)
-        self.max_memory_entry = FluentLineEdit(max_memory_frame)
-        self.max_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        self._bind_entry(self.max_memory_entry, self.max_memory_var)
-        self._style_control(self.max_memory_entry)
-        max_layout.addWidget(self.max_memory_entry)
-        memory_input_layout.addWidget(max_memory_frame, 1)
-        memory_layout.addLayout(memory_input_layout)
-        self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-        self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-        memory_tip = QtWidgets.QLabel(
-            "最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
-            memory_container,
+        memory_container = qt.Frame(parent)
+        memory_container.attach_matrix(
+            row=5, column=1, columnspan=2, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL
         )
-        memory_tip.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        memory_tip.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_MUTED)))
-        memory_tip.setWordWrap(True)
-        memory_layout.addWidget(memory_tip)
-        self.memory_warning_label = QtWidgets.QLabel("", memory_container)
-        self.memory_warning_label.setFont(FontManager.get_font(size=FontSize.SMALL_PLUS))
-        self.memory_warning_label.setStyleSheet(NativeQtStyle.color_style(_qt_color(Colors.TEXT_ERROR)))
-        self.memory_warning_label.setWordWrap(True)
-        memory_layout.addWidget(self.memory_warning_label)
-        content_frame.addWidget(memory_container, 5, 1, 1, 2)
 
-    def _update_combo_state(self, combo, var=None, message="載入中...", state="disabled") -> None:
+        memory_fields_row = qt.Frame(memory_container, fg_color="transparent")
+        memory_fields_row.attach(fill="x", pady=(0, Spacing.SMALL))
+
+        min_memory_frame = qt.Frame(memory_fields_row, fg_color="transparent")
+        min_memory_frame.attach(side="left", fill="x", expand=True, padx=(0, Spacing.LARGE))
+        min_label = qt.Label(min_memory_frame, text="最小記憶體:")
+        min_label.configure(
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            text_color=Colors.TEXT_MUTED,
+        )
+        min_label.attach(fill="x")
+        self.min_memory_entry = qt.Entry(min_memory_frame)
+        self.min_memory_entry.setText("1024")
+        self.min_memory_entry.configure(font=FontManager.get_font(size=FontSize.MEDIUM))
+        self.min_memory_entry.attach(fill="x", pady=(Spacing.XS, 0))
+        self.min_memory_entry.textChanged.connect(self.update_memory_warning)
+
+        max_memory_frame = qt.Frame(memory_fields_row, fg_color="transparent")
+        max_memory_frame.attach(side="left", fill="x", expand=True, padx=(Spacing.SMALL, 0))
+        max_label = qt.Label(max_memory_frame, text="最大記憶體:")
+        max_label.configure(
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            text_color=Colors.TEXT_MUTED,
+        )
+        max_label.attach(fill="x")
+        self.max_memory_entry = qt.Entry(max_memory_frame)
+        self.max_memory_entry.setText("2048")
+        self.max_memory_entry.configure(font=FontManager.get_font(size=FontSize.MEDIUM))
+        self.max_memory_entry.attach(fill="x", pady=(Spacing.XS, Spacing.LARGE))
+        self.max_memory_entry.textChanged.connect(self.update_memory_warning)
+
+        memory_tip = qt.Label(
+            memory_container,
+            text="最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
+        )
+        memory_tip.configure(
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            text_color=Colors.TEXT_MUTED,
+        )
+        memory_tip.setWordWrap(True)
+        memory_tip.attach(anchor="nw", fill="x", pady=(Spacing.SMALL, 0))
+
+        self.memory_warning_label = qt.Label(memory_container, text="")
+        self.memory_warning_label.configure(
+            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            text_color=Colors.TEXT_ERROR,
+        )
+        self.memory_warning_label.setWordWrap(True)
+        self.memory_warning_label.attach(anchor="nw", fill="x", pady=(Spacing.XS, 0))
+
+    def _update_combo_state(self, combo, message="載入中...", state="disabled") -> None:
         """統一更新下拉選單狀態"""
         combo.configure(values=[message])
         combo.set(message)
-        if var:
-            var.set(message)
         combo.configure(state=state)
 
     def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:
@@ -485,8 +412,8 @@ class CreateServerFrame(QtWidgets.QWidget):
 
     def preload_version_data(self) -> None:
         """預載入版本資訊並管理載入狀態"""
-        self._update_combo_state(self.mc_version_combo, self.mc_version_var, "正在載入 MC 版本...")
-        self._update_combo_state(self.loader_version_combo, self.loader_version_var, "等待 MC 版本選擇...")
+        self._update_combo_state(self.mc_version_combo, "正在載入 MC 版本...")
+        self._update_combo_state(self.loader_version_combo, "等待 MC 版本選擇...")
 
         def task():
             """執行背景任務的工作內容。"""
@@ -494,21 +421,21 @@ class CreateServerFrame(QtWidgets.QWidget):
 
             def update_mc():
                 self.update_versions(versions)
-                self._update_combo_state(self.loader_version_combo, self.loader_version_var, "請先選擇載入器類型...")
+                self._update_combo_state(self.loader_version_combo, "請先選擇載入器類型...")
 
             self.ui_queue.put(update_mc)
             try:
                 self.loader_manager.preload_loader_versions()
             except Exception as e:
-                with __import__("contextlib").suppress(Exception):
+                with contextlib.suppress(Exception):
                     record_and_mark(e, marker_path=Path(__file__), reason="preload_loader_versions_failed")
                 logger.bind(component="").error(
                     f"預載入載入器版本失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
                 )
 
         def on_error():
-            self._update_combo_state(self.mc_version_combo, self.mc_version_var, "載入失敗")
-            self._update_combo_state(self.loader_version_combo, self.loader_version_var, "載入失敗")
+            self._update_combo_state(self.mc_version_combo, "載入失敗")
+            self._update_combo_state(self.loader_version_combo, "載入失敗")
 
         self._run_background_task(task, "預載入版本資訊失敗", on_error)
 
@@ -528,47 +455,46 @@ class CreateServerFrame(QtWidgets.QWidget):
 
     def reload_loader_versions(self) -> None:
         """重新載入載入器版本"""
-        loader_type = self.loader_type_var.get()
-        mc_version = self.mc_version_var.get()
+        loader_type = self.loader_type_combo.currentText()
+        mc_version = self.mc_version_combo.currentText()
         if not loader_type or not mc_version or loader_type == "Vanilla":
             return
-        self._update_combo_state(self.loader_version_combo, self.loader_version_var)
+        self._update_combo_state(self.loader_version_combo)
 
         def task():
             """執行背景任務的工作內容。"""
             self.loader_manager.clear_cache_file()
             self.loader_manager.preload_loader_versions()
-            versions = []
+            versions: list = []
             if loader_type.lower():
                 versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
-
-            def update_ui():
-                if not is_qobject_alive(self.loader_version_combo):
-                    return
-                if versions:
-                    v_names = []
-                    for v in versions:
-                        if hasattr(v, "version"):
-                            v_names.append(v.version)
-                        elif isinstance(v, str):
-                            v_names.append(v)
-                        else:
-                            v_names.append(str(v))
-                    self.loader_version_combo.configure(values=v_names)
-                    if v_names:
-                        self.loader_version_combo.set(v_names[0])
-                        self.loader_version_var.set(v_names[0])
-                    self.loader_version_combo.configure(state="readonly")
-                else:
-                    self._update_combo_state(self.loader_version_combo, self.loader_version_var, "無可用版本")
-
-            self.ui_queue.put(update_ui)
+            self.ui_queue.put(lambda: self._apply_loader_version_ui(versions, loader_type, mc_version))
 
         self._run_background_task(
             task,
             "載入載入器版本失敗",
-            lambda: self._update_combo_state(self.loader_version_combo, self.loader_version_var, "載入失敗"),
+            lambda: self._update_combo_state(self.loader_version_combo, "載入失敗"),
         )
+
+    def _apply_loader_version_ui(self, versions: list, loader_type: str, mc_version: str) -> None:
+        """將載入器版本清單套用至下拉選單 UI。"""
+        try:
+            if not is_qobject_alive(self.loader_version_combo):
+                return
+            current_type = self.loader_type_combo.currentText()
+            current_version = self.mc_version_combo.currentText()
+            if loader_type != current_type or mc_version != current_version:
+                return
+            if versions:
+                v_names = [v.version if hasattr(v, "version") else str(v) for v in versions]
+                self.loader_version_combo.configure(values=v_names)
+                self.loader_version_combo.configure(state="readonly")
+                if v_names:
+                    self.loader_version_combo.set(v_names[0])
+            else:
+                self._update_combo_state(self.loader_version_combo, "無可用版本")
+        except Exception as e:
+            logger.exception(f"更新載入器版本 UI 失敗: {e}")
 
     def create_field(self, parent, row, label_text, default_value, var_name) -> tuple:
         """
@@ -582,63 +508,72 @@ class CreateServerFrame(QtWidgets.QWidget):
             var_name: 要建立的變數名稱前綴。
 
         Returns:
-            `(ValueState, QLineEdit)` 元組。
+            `(Entry, str)` 元組。
         """
-        parent.addWidget(self._make_label(label_text), row, 0)
-        var = ValueState(default_value)
-        setattr(self, f"{var_name}_var", var)
-        entry = FluentLineEdit(self.form_panel)
-        entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        self._bind_entry(entry, var)
-        self._style_control(entry)
-        parent.addWidget(entry, row, 1, 1, 3)
+        self._make_label(label_text).attach_matrix(
+            row=row, column=0, sticky="w", padx=Spacing.MEDIUM, pady=Spacing.SMALL
+        )
+        entry = qt.Entry(parent)
+        entry.setText(default_value)
+        entry.configure(font=FontManager.get_font(size=FontSize.MEDIUM))
+        entry.attach_matrix(row=row, column=1, sticky="ew", padx=Spacing.MEDIUM, pady=Spacing.SMALL)
         setattr(self, f"{var_name}_entry", entry)
-        return (var, entry)
+        return (entry, default_value)
 
     def create_buttons(self, parent) -> None:
         """
-        建立按鈕。
+        建立操作按鈕，置於頁面底部右側。
 
         Args:
-            parent: 父容器。
+            parent: 父容器（main_frame）。
         """
-        self.actions_frame = QtWidgets.QFrame(self)
-        self.actions_frame.setObjectName("CreateServerActions")
-        self.actions_frame.setStyleSheet(NativeQtStyle.create_actions)
-        button_layout = QtWidgets.QHBoxLayout(self.actions_frame)
-        _set_layout_margins(button_layout, 0, 4, 0, 0)
-        button_layout.addStretch(1)
-        self.create_button = self._make_button("建立伺服器", self.create_server, kind="primary")
-        self.create_button.setFixedWidth(Sizes.BUTTON_WIDTH_PRIMARY)
-        reset_button = self._make_button("重設表單", self.reset_form)
-        reset_button.setFixedWidth(Sizes.BUTTON_WIDTH_SECONDARY)
-        button_layout.addWidget(self.create_button)
-        button_layout.addSpacing(8)
-        button_layout.addWidget(reset_button)
-        parent.addWidget(self.actions_frame, 0)
+        self.actions_frame = qt.Frame(parent, fg_color=Colors.BG_SECONDARY)
+        self.actions_frame.attach(pady=(Spacing.LARGE, 0), anchor="e")
+
+        self.create_button = self._make_button(
+            self.actions_frame, "建立伺服器", command=self.create_server, kind="primary"
+        )
+        self.create_button.configure(width=Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
+        self.create_button.attach(side="right", padx=(Spacing.SMALL, 0))
+
+        reset_button = self._make_button(
+            self.actions_frame, "重設表單", command=self._confirm_reset_form, kind="danger"
+        )
+        reset_button.configure(width=Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
+        reset_button.attach(side="right", padx=(Spacing.SMALL, 0))
+
+    def _confirm_reset_form(self) -> None:
+        """重設表單前進行二次確認，避免誤觸。"""
+        if UIUtils.ask_yes_no_cancel(
+            "確認重設",
+            "確定要重設表單嗎？\n所有已輸入的資料將恢復為預設值。",
+            parent=self.window(),
+            show_cancel=False,
+        ):
+            self.reset_form()
 
     def reset_form(self):
         """重設表單到預設值"""
         try:
             if hasattr(self, "release_versions") and self.release_versions:
                 latest_version = self.release_versions[0].get("id", "未知版本")
-                self.server_name_var.set(latest_version)
+                self.server_name_entry.setText(latest_version)
             else:
-                self.server_name_var.set("我的伺服器")
-            self.java_path_var.set("")
-            self.loader_type_var.set("Vanilla")
-            self.loader_version_var.set("無")
+                self.server_name_entry.setText("我的伺服器")
+            self.java_path_entry.setText("")
+            self.loader_type_combo.set("Vanilla")
+            self.loader_version_combo.set("無")
             self.loader_version_combo.configure(values=["無"])
             if hasattr(self, "mc_version_combo") and self.mc_version_combo.cget("values"):
                 version_list = list(self.mc_version_combo.cget("values"))
                 if version_list:
-                    self.mc_version_var.set(version_list[0])
+                    self.mc_version_combo.set(version_list[0])
             self.update_version_list()
-            self.min_memory_var.set("1024")
-            self.max_memory_var.set("2048")
+            self.min_memory_entry.setText("1024")
+            self.max_memory_entry.setText("2048")
             UIUtils.show_info("重設完成", "表單已重設為預設值", self.window())
         except Exception as e:
-            with __import__("contextlib").suppress(Exception):
+            with contextlib.suppress(Exception):
                 record_and_mark(e, marker_path=Path(__file__), reason="reset_form_failed")
             logger.error(f"重設表單失敗: {e}\n{traceback.format_exc()}")
             UIUtils.show_error("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.window())
@@ -655,49 +590,26 @@ class CreateServerFrame(QtWidgets.QWidget):
         self.update_version_list()
         if self.release_versions:
             latest_version = self.release_versions[0].get("id")
-            if self.server_name_var.get() in ["我的伺服器", ""]:
-                self.server_name_var.set(latest_version)
+            if self.server_name_entry.text() in ["我的伺服器", ""]:
+                self.server_name_entry.setText(latest_version)
 
     def update_version_list(self) -> None:
         """更新版本列表顯示，並預設選擇最新版本"""
         if not hasattr(self, "versions") or not self.versions:
             self.mc_version_combo.configure(values=["載入中..."])
-            self.mc_version_var.set("載入中...")
+            self.mc_version_combo.set("載入中...")
             return
         display_versions = [v for v in self.release_versions if v.get("server_url")]
         if not display_versions:
             self.mc_version_combo.configure(values=["無可用版本"], state="disabled")
-            self.mc_version_var.set("無可用版本")
+            self.mc_version_combo.set("無可用版本")
             return
         version_names = [v.get("id") for v in display_versions]
         self.mc_version_combo.configure(values=version_names, state="readonly")
         if display_versions:
             first_version = display_versions[0].get("id")
-            self.mc_version_var.set(first_version)
+            self.mc_version_combo.set(first_version)
         self.update_server_config_ui()
-
-    @staticmethod
-    def _compose_server_name(loader_type: str, mc_version: str, suffix: str = "") -> str:
-        """依載入器類型與版本組合標準伺服器名稱。"""
-        base_name = f"{mc_version}{suffix}"
-        if loader_type in ("Fabric", "Forge", "Quilt", "NeoForge"):
-            return f"{loader_type} {base_name}"
-        return base_name
-
-    @staticmethod
-    def _extract_server_name_suffix(name: str, version_candidates: tuple[str, ...]) -> str | None:
-        """解析「[載入器前綴] + 版本 + 自訂尾字」中的尾字。"""
-        normalized = name.strip()
-        if not normalized:
-            return None
-        for prefix in ("Fabric ", "Forge ", "Quilt ", "NeoForge "):
-            if normalized.startswith(prefix):
-                normalized = normalized[len(prefix) :]
-                break
-        for version in version_candidates:
-            if version and normalized.startswith(version):
-                return normalized[len(version) :]
-        return None
 
     def update_server_config_ui(self, _event=None) -> None:
         """
@@ -706,33 +618,32 @@ class CreateServerFrame(QtWidgets.QWidget):
         Args:
             _event: 事件物件，供 trace callback 使用。
         """
-        mc_version = self.mc_version_var.get()
-        loader_type = self.loader_type_var.get()
-        name = self.server_name_var.get()
+        mc_version = self.mc_version_combo.currentText()
+        loader_type = self.loader_type_combo.currentText()
+        name = self.server_name_entry.text()
         auto_names = [
             "我的伺服器",
             "",
-            self._compose_server_name("Fabric", mc_version),
-            self._compose_server_name("Forge", mc_version),
-            self._compose_server_name("Vanilla", mc_version),
-            self._compose_server_name("Quilt", mc_version),
-            self._compose_server_name("NeoForge", mc_version),
+            CreateServerService.compose_server_name("Fabric", mc_version),
+            CreateServerService.compose_server_name("Forge", mc_version),
+            CreateServerService.compose_server_name("Vanilla", mc_version),
+            CreateServerService.compose_server_name("Quilt", mc_version),
+            CreateServerService.compose_server_name("NeoForge", mc_version),
         ]
         old_version = getattr(self, "old_mc_version", None)
         self.old_mc_version = mc_version
         if name in auto_names:
-            self.server_name_var.set(self._compose_server_name(loader_type, mc_version))
+            self.server_name_entry.setText(CreateServerService.compose_server_name(loader_type, mc_version))
         else:
             version_candidates = tuple(v for v in (old_version, mc_version) if v)
-            suffix = self._extract_server_name_suffix(name, version_candidates)
+            suffix = CreateServerService.extract_server_name_suffix(name, version_candidates)
             if suffix is not None:
-                self.server_name_var.set(self._compose_server_name(loader_type, mc_version, suffix))
-        if old_version and old_version in name and (name == self.server_name_var.get()):
-            self.server_name_var.set(name.replace(old_version, mc_version))
+                self.server_name_entry.setText(CreateServerService.compose_server_name(loader_type, mc_version, suffix))
+        if old_version and old_version in name and (name == self.server_name_entry.text()):
+            self.server_name_entry.setText(name.replace(old_version, mc_version))
         if loader_type == "Vanilla":
             self.loader_version_combo.configure(values=["無"], state="disabled")
             self.loader_version_combo.set("無")
-            self.loader_version_var.set("無")
             return
         self.loader_version_combo.configure(state="readonly")
         if not mc_version:
@@ -757,169 +668,40 @@ class CreateServerFrame(QtWidgets.QWidget):
                 if is_qobject_alive(self.loader_version_combo):
                     self._update_combo_state(
                         self.loader_version_combo,
-                        self.loader_version_var,
                         f"正在載入 {loader_type} 版本...",
                         "disabled",
                     )
 
             self.ui_queue.put(set_loading)
-            versions = []
             versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
-
-            def update_ui():
-                try:
-                    if not is_qobject_alive(self.loader_version_combo):
-                        return
-                    current_type = self.loader_type_var.get()
-                    current_version = self.mc_version_var.get()
-                    if loader_type != current_type or mc_version != current_version:
-                        return
-                    if versions:
-                        version_names = [v.version for v in versions]
-                        self.loader_version_combo.configure(values=version_names)
-                        self.loader_version_combo.configure(state="readonly")
-                        if version_names:
-                            self.loader_version_combo.set(version_names[0])
-                            self.loader_version_var.set(version_names[0])
-                    else:
-                        self._update_combo_state(
-                            self.loader_version_combo, self.loader_version_var, "無可用版本", "disabled"
-                        )
-                    if hasattr(self, "_loading_key"):
-                        delattr(self, "_loading_key")
-                except Exception as e:
-                    with __import__("contextlib").suppress(Exception):
-                        record_and_mark(e, marker_path=Path(__file__), reason="update_loader_versions_ui_failed")
-                    logger.bind(component="").error(
-                        f"更新載入器版本 UI 失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
-                    )
-                    if hasattr(self, "_loading_key"):
-                        delattr(self, "_loading_key")
-
-            self.ui_queue.put(update_ui)
+            self.ui_queue.put(lambda: self._apply_loader_version_ui(versions, loader_type, mc_version))
         except Exception as e:
-            with __import__("contextlib").suppress(Exception):
-                record_and_mark(e, marker_path=Path(__file__), reason="load_loader_versions_failed")
-            logger.bind(component="").error(f"載入載入器版本失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame")
+            logger.exception(f"載入載入器版本失敗: {e}")
+            self.ui_queue.put(lambda: self._update_combo_state(self.loader_version_combo, "載入失敗"))
 
-            def handle_error():
-                try:
-                    if is_qobject_alive(self.loader_version_combo):
-                        self._update_combo_state(
-                            self.loader_version_combo, self.loader_version_var, "載入失敗", "disabled"
-                        )
-                except Exception as e2:
-                    logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e2}")
-                if hasattr(self, "_loading_key"):
-                    delattr(self, "_loading_key")
-
-            self.ui_queue.put(handle_error)
-
-    def validate_form(self) -> bool:
-        """
-        驗證表單。
-
-        Returns:
-            若表單內容通過驗證則回傳 True，否則回傳 False。
-        """
-        server_name = self.server_name_var.get().strip()
-        if not server_name:
-            UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.window())
-            return False
-        servers_root = self.server_manager.servers_root
-        if (servers_root / server_name).exists():
-            UIUtils.show_error(
-                "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.window()
-            )
-            return False
-        if self.server_manager.server_exists(server_name) and (
-            not UIUtils.ask_yes_no_cancel(
-                "名稱衝突",
-                f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
-                self.window(),
-                show_cancel=False,
-            )
-        ):
-            return False
-        if not self.mc_version_var.get():
-            UIUtils.show_error("錯誤", "請選擇 Minecraft 版本", self.window())
-            return False
-        max_memory = self.max_memory_var.get().strip()
-        if not max_memory:
-            UIUtils.show_error("錯誤", "請輸入最大記憶體", self.window())
-            return False
-        try:
-            max_mem_int = int(max_memory)
-            if max_mem_int < 1024:
-                UIUtils.show_error("錯誤", "最大記憶體不能少於 1024MB", self.window())
-                return False
-            system_memory = self.get_system_memory_mb()
-            if max_mem_int >= system_memory:
-                UIUtils.show_error(
-                    "記憶體超出限制",
-                    f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n已自動調整為 {system_memory - 1}MB",
-                    self.window(),
-                )
-                self.max_memory_var.set(str(system_memory - 1))
-                return False
-        except ValueError:
-            UIUtils.show_error("錯誤", "最大記憶體必須是數字", self.window())
-            return False
-        min_memory = self.min_memory_var.get().strip()
-        if min_memory:
-            try:
-                min_mem_int = int(min_memory)
-                if min_mem_int >= max_mem_int:
-                    UIUtils.show_error("錯誤", "最小記憶體必須小於最大記憶體", self.window())
-                    return False
-            except ValueError:
-                UIUtils.show_error("錯誤", "最小記憶體必須是數字", self.window())
-                return False
-        return True
-
-    def create_server(self):
-        """建立伺服器"""
-        if not self.validate_form():
-            return
-        min_memory = self.min_memory_var.get().strip()
-        max_memory = self.max_memory_var.get().strip()
-        name = self.server_name_var.get().strip()
-        loader_type = self.loader_type_var.get()
-        mc_version = self.mc_version_var.get()
-        if name in ["", "我的伺服器"]:
-            if loader_type == "Vanilla":
-                name = f"{mc_version}"
-            elif loader_type == "Fabric":
-                name = f"Fabric {mc_version}"
-            elif loader_type == "Forge":
-                name = f"Forge {mc_version}"
-            elif loader_type == "Quilt":
-                name = f"Quilt {mc_version}"
-            elif loader_type == "NeoForge":
-                name = f"NeoForge {mc_version}"
-            self.server_name_var.set(name)
-        config = ServerConfig(
-            name=name,
-            minecraft_version=mc_version,
-            loader_type=loader_type,
-            loader_version=self.loader_version_var.get() if loader_type != "Vanilla" else "",
-            memory_max_mb=int(max_memory),
-            memory_min_mb=int(min_memory) if min_memory else None,
-            path="",
-            eula_accepted=True,
-        )
-        TaskUtils.run_async(self.create_server_async, config)
-
-    def create_server_async(self, config: ServerConfig) -> None:
-        """
-        非同步建立伺服器。
-
-        Args:
-            config: 伺服器建立設定。
-        """
+    def create_server(self) -> None:
+        """建立伺服器按鈕點擊處理"""
         parent_window = self.window()
         progress_dialog = None
         try:
+            inputs = ServerConfigInputs(
+                server_name=self.server_name_entry.text().strip(),
+                mc_version=self.mc_version_combo.currentText().strip(),
+                loader_type=self.loader_type_combo.currentText().strip(),
+                loader_version=self.loader_version_combo.currentText().strip(),
+                min_memory=self.min_memory_entry.text().strip(),
+                max_memory=self.max_memory_entry.text().strip(),
+                system_memory=SystemUtils.get_total_memory_mb(),
+                servers_root=self.repository.servers_root,
+            )
+
+            val_result = CreateServerService.validate_server_config_inputs(inputs)
+            if not val_result.is_valid:
+                UIUtils.show_error("錯誤", val_result.errors[0], self.window())
+                return
+
+            config = CreateServerService.build_server_config(inputs)
+
             progress_dialog = TaskUtils.call_on_ui(
                 parent_window,
                 lambda: ProgressDialog(parent_window, "正在建立伺服器"),
@@ -927,67 +709,51 @@ class CreateServerFrame(QtWidgets.QWidget):
             )
             if progress_dialog is None:
                 raise Exception("建立進度對話框失敗")
-            if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):
-                return
-            create_result = self.server_manager.create_server_result(config)
-            if create_result.failed:
-                logger.error(f"建立伺服器基礎結構失敗 config: {config} | {create_result.message}")
-                progress_dialog.close()
-                raise Exception(create_result.message or "建立伺服器基礎結構失敗")
-            if not config.loader_type or config.loader_type == "unknown":
-                progress_dialog.close()
-                raise Exception(f"偵測失敗：loader_type 無法判斷，config={config}")
-            if not config.minecraft_version or config.minecraft_version == "unknown":
-                progress_dialog.close()
-                raise Exception(f"偵測失敗：minecraft_version 無法判斷，config={config}")
-            if config.loader_type.lower() in ["forge", "fabric", "quilt", "neoforge"] and (
-                not config.loader_version or config.loader_version == "unknown"
-            ):
-                progress_dialog.close()
-                raise Exception(f"偵測失敗：loader_version 無法判斷，config={config}")
-            server_path = Path(config.path)
-            if not progress_dialog.update_progress(15, "下載伺服器核心檔案..."):
-                return
-            try:
-                if not self.download_server_files(config, progress_dialog, server_path):
-                    progress_dialog.close()
-                    return
-                self.server_manager.create_launch_script(config)
-            except Exception as e:
-                with __import__("contextlib").suppress(Exception):
-                    record_and_mark(
-                        e,
-                        marker_path=Path(__file__),
-                        reason="download_server_files_failed",
-                        details={"config": repr(config)},
-                    )
-                logger.bind(component="").error(
-                    f"下載伺服器檔案失敗: {e}\n{traceback.format_exc()}", "CreateServerFrame"
+
+            def progress_callback(percent, status):
+                return progress_dialog.update_progress(percent, status)
+
+            shared_cancel_token = CancellationToken()
+
+            def ask_proceed(title, msg):
+                return UIUtils.ask_yes_no_cancel(title, msg, parent=self.window(), show_cancel=False)
+
+            def do_download(cancel_token: CancellationToken | None = None):
+                token = cancel_token or shared_cancel_token
+                user_java_path = self.java_path_entry.text().strip() or None
+                CreateServerService.execute_server_creation(
+                    config=config,
+                    server_crud=self.server_crud,
+                    loader_manager=self.loader_manager,
+                    progress_callback=progress_callback,
+                    cancel_token=token,
+                    user_java_path=user_java_path,
+                    ask_proceed_callback=ask_proceed,
                 )
-                error_message = str(e)
 
-                def _show_download_error() -> None:
-                    UIUtils.show_error("下載失敗", f"下載伺服器檔案失敗: {error_message}", self.window())
-
-                self.ui_queue.put(_show_download_error)
-                raise Exception(error_message) from None
-            if not progress_dialog.update_progress(100, "伺服器建立完成！"):
-                return
+            future = self.bg_tasks.run(do_download, cancel_token=shared_cancel_token)
+            while not future.done():
+                QtCore.QCoreApplication.processEvents()
+                if progress_dialog.cancelled:
+                    with contextlib.suppress(Exception):
+                        shared_cancel_token.cancel()
+                try:
+                    future.result(timeout=0.1)
+                except concurrent.futures.TimeoutError:
+                    continue
 
             def on_success():
                 progress_dialog.close()
-                self.callback(config)
+                init_dialog = ServerInitializationDialog(
+                    parent=self.window(),
+                    server_config=config,
+                    completion_callback=self._on_init_complete,
+                )
+                init_dialog.start_initialization()
 
             self._schedule_ui_job("_create_server_success_job", 1000, on_success)
         except Exception as error:
-            with __import__("contextlib").suppress(Exception):
-                record_and_mark(
-                    error, marker_path=Path(__file__), reason="create_server_failed", details={"config": repr(config)}
-                )
-            logger.bind(component="").error(
-                f"建立伺服器時發生錯誤: {error}\n{traceback.format_exc()}", "CreateServerFrame"
-            )
-
+            logger.warning(f"建立伺服器時發生錯誤: {error}", "CreateServerFrame")
             error_str = str(error)
             if "下載" in error_str or "下載失敗" in error_str:
                 if progress_dialog:
@@ -1001,120 +767,11 @@ class CreateServerFrame(QtWidgets.QWidget):
 
                 self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
-    def download_server_files(self, config: ServerConfig, progress_dialog: ProgressDialog, server_path: Path) -> bool:
-        """
-        下載伺服器檔案。
-
-        Args:
-            config: 伺服器建立設定。
-            progress_dialog: 進度對話框。
-            server_path: 伺服器資料夾路徑。
-
-        Returns:
-            下載與建立流程是否成功。
-        """
-        loader_type = config.loader_type.lower()
-        download_path = str(server_path / "server.jar")
-
-        installer_url = self.loader_manager.get_installer_download_url(
-            loader_type,
-            config.minecraft_version,
-            config.loader_version,
-        )
-        if installer_url:
-            checksum = self.loader_manager._fetch_secure_checksum(installer_url)
-            if checksum is None:
-                proceed = UIUtils.ask_yes_no_cancel(
-                    "缺少驗證資訊",
-                    (f"{config.loader_type} 安裝器目前找不到 SHA-256 / SHA-512 驗證資訊。\n仍要繼續建立伺服器嗎？"),
-                    parent=self.window(),
-                    show_cancel=False,
-                )
-                if proceed is not True:
-                    return False
-
-        # [1] 建立 server_path 後 sleep 0.3 秒，確保目錄完全建立
-        with contextlib.suppress(Exception):
-            server_path.mkdir(parents=True, exist_ok=True)
-        import time
-
-        time.sleep(0.3)
-
-        def progress_callback(percent, status):
-            progress_dialog.update_progress(percent, status)
-
-        result: list[bool | None] = [None]
-        shared_cancel_token = CancellationToken()
-
-        def do_download(cancel_token: CancellationToken | None = None):
-            token = cancel_token or shared_cancel_token
-            user_java_path = self.java_path_var.get().strip() or None
-            if not self._validate_download_parameters(loader_type, config):
-                self.ui_queue.put(
-                    lambda: UIUtils.show_error(
-                        "下載流程參數異常",
-                        f"loader_type={loader_type}\nmc={config.minecraft_version}\nloader_ver={config.loader_version}",
-                        topmost=True,
-                    )
-                )
-                result[0] = False
-                return
-            ok = self.loader_manager.download_server_jar_with_progress(
-                loader_type,
-                config.minecraft_version,
-                config.loader_version,
-                download_path,
-                progress_callback,
-                token,
-                user_java_path,
-            )
-            result[0] = ok
-
-        future = self.bg_tasks.run(do_download, cancel_token=shared_cancel_token)
-        while not future.done():
-            if progress_dialog.cancelled:
-                with __import__("contextlib").suppress(Exception):
-                    shared_cancel_token.cancel()
-            try:
-                future.result(timeout=0.1)
-            except concurrent.futures.TimeoutError:
-                continue
-        if result[0] is False:
-            # [2] 失敗時補充 cmd 與 installer.log 內容
-            log_details = []
-            log_details.append(f"loader_type: {loader_type}")
-            log_details.append(f"minecraft_version: {config.minecraft_version}")
-            log_details.append(f"loader_version: {config.loader_version}")
-            log_details.append(f"download_path: {download_path}")
-            log_details.append(f"user_java_path: {getattr(self, 'java_path_var', None) and self.java_path_var.get()}")
-            # 嘗試補充 cmd
-            try:
-                installer_dir = server_path
-                possible_logs = [installer_dir / "installer.log"]
-                for log_path in possible_logs:
-                    if log_path.exists():
-                        log_details.append(
-                            f"\n--- {log_path.name} ---\n"
-                            + log_path.read_text(encoding="utf-8", errors="ignore")[-2048:]
-                        )
-            except Exception as e:
-                log_details.append(f"[installer.log 讀取失敗: {e}]")
-            msg = "伺服器下載失敗，參數如下：\n" + "\n".join(log_details)
-
-            logger.bind(component="").error(
-                f"server_path: {server_path}\nconfig: {config}\n{msg}\n{traceback.format_exc()}", "CreateServerFrame"
-            )
-            raise Exception(msg)
-        return True
-
-    def _validate_download_parameters(self, loader_type: str, config) -> bool:
-        """驗證下載參數"""
-        if not loader_type or loader_type == "unknown":
-            return False
-        if not config.minecraft_version or config.minecraft_version == "unknown":
-            return False
-        requires_loader_version = loader_type in ["forge", "fabric", "quilt", "neoforge"]
-        return not (requires_loader_version and (not config.loader_version or config.loader_version == "unknown"))
+    def _on_init_complete(self, server_config: ServerConfig, init_dialog: Any) -> None:
+        """初始化對話框完成後的回調，關閉對話框並通知主視窗。"""
+        if init_dialog and init_dialog.is_alive():
+            init_dialog.destroy()
+        self.callback(server_config)
 
     def destroy(self, destroyWindow: bool = True, destroySubWindows: bool = True) -> None:
         """
@@ -1126,3 +783,451 @@ class CreateServerFrame(QtWidgets.QWidget):
         """
         self._cancel_create_server_jobs()
         super().destroy(destroyWindow, destroySubWindows)
+
+
+class ServerInitializationDialog:
+    """伺服器初始化對話框 — 首次啟動伺服器以產生世界檔案與設定。"""
+
+    def __init__(
+        self,
+        parent: Any,
+        server_config: ServerConfig,
+        completion_callback: Callable[[ServerConfig, Any], None] | None = None,
+    ) -> None:
+        self._parent = parent
+        self.server_config = server_config
+        self.server_path = Path(server_config.path)
+        self.completion_callback = completion_callback
+        self.server_process: Any | None = None
+        self.server_process_pid: int = 0
+        self.done_detected = False
+        self.init_dialog: Any | None = None
+        self.console_text: qt.TextBox | None = None
+        self.progress_label: qt.Label | None = None
+        self.close_button: qt.Button | None = None
+        self._console_queue: queue.Queue[str] = queue.Queue()
+        self._console_pump_job: Any = None
+        self._process_output_buffer = ""
+        self._stop_sent = False
+
+    # ── console 輸出佇列 ──────────────────────────────────────────
+
+    def _enqueue_console(self, text: str) -> None:
+        """將文字加入 console 輸出佇列，稍後由 UI 排程處理。"""
+        with contextlib.suppress(Exception):
+            self._console_queue.put_nowait(text)
+
+    def _start_console_pump(self) -> None:
+        """啟動 console 輸出排程，將佇列中的文字定期更新到 UI。"""
+        if self._console_pump_job is not None:
+            return
+
+        def _schedule_next(delay_ms: int) -> None:
+            if not self.init_dialog or not self.init_dialog.is_alive():
+                self._console_pump_job = None
+                return
+            UIUtils.schedule_debounce(self.init_dialog, "_console_pump_job", delay_ms, _tick, owner=self)
+
+        def _tick() -> None:
+            self._console_pump_job = None
+            try:
+                if not self.init_dialog or not self.init_dialog.is_alive():
+                    return
+            except Exception:
+                return
+            chunks: list[str] = []
+            remaining_chars = 20000
+            for _ in range(200):
+                try:
+                    part = self._console_queue.get_nowait()
+                except queue.Empty:
+                    break
+                chunks.append(part)
+                remaining_chars -= len(part)
+                if remaining_chars <= 0:
+                    break
+            if chunks:
+                self._update_console("".join(chunks))
+            delay = 25 if not self._console_queue.empty() else 100
+            _schedule_next(delay)
+
+        _schedule_next(50)
+
+    def _update_console(self, text: str) -> None:
+        with contextlib.suppress(Exception):
+            if self.init_dialog and self.init_dialog.is_alive() and self.console_text:
+                self.console_text.insert("end", text)
+                self.console_text.see("end")
+
+    # ── 排程管理 ──────────────────────────────────────────────────
+
+    def _schedule_dialog_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
+        dialog = self.init_dialog
+        if not dialog or not dialog.is_alive():
+            return
+        UIUtils.schedule_debounce(dialog, job_attr, delay_ms, callback, owner=self)
+
+    def _cancel_dialog_jobs(self) -> None:
+        dialog = self.init_dialog
+        if not dialog or not dialog.is_alive():
+            return
+        for job_attr in (
+            "_console_pump_job",
+            "_init_timeout_job",
+            "_init_progress_job",
+            "_init_world_prep_job",
+            "_init_world_load_job",
+            "_init_closing_job",
+            "_init_complete_job",
+            "_init_error_job",
+            "_init_transition_job",
+            "_init_close_button_job",
+        ):
+            UIUtils.cancel_scheduled_job(dialog, job_attr, owner=self)
+
+    # ── 公開 API ──────────────────────────────────────────────────
+
+    def start_initialization(self) -> None:
+        """啟動初始化對話框流程：建立視窗、設定 UI、啟動伺服器程序。"""
+        self._create_dialog()
+        self._setup_ui()
+        self._run_server()
+
+    # ── 對話框建立 ────────────────────────────────────────────────
+
+    def _create_dialog(self) -> None:
+        self.init_dialog = qt.PlainWindow(
+            title=f"初始化伺服器 - {self.server_config.name}",
+        )
+        self.init_dialog.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
+        self.init_dialog.configure(fg_color=Colors.BG_CONSOLE)
+        self.init_dialog.show()
+
+    def _setup_ui(self) -> None:
+        self._create_title_and_info()
+        self._create_console()
+        self._create_progress_label()
+        self._create_buttons()
+        self._setup_timeout()
+
+    def _create_title_and_info(self) -> None:
+        title_label = qt.Label(
+            self.init_dialog,
+            text=f"正在初始化伺服器: {self.server_config.name}",
+            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
+            text_color=Colors.CONSOLE_TEXT,
+            fg_color=Colors.BG_CONSOLE,
+        )
+        title_label.attach(anchor="center", pady=Spacing.SMALL_PLUS)
+        info_label = qt.Label(
+            self.init_dialog,
+            text="伺服器正在首次啟動，請等待初始化完成...\n系統會自動在完成後關閉伺服器",
+            font=FontManager.get_font(size=FontSize.LARGE),
+            text_color=Colors.CONSOLE_TEXT,
+            fg_color=Colors.BG_CONSOLE,
+        )
+        info_label.attach(anchor="center", justify="center", pady=Spacing.TINY)
+
+    def _create_console(self) -> None:
+        console_frame = qt.Frame(self.init_dialog)
+        console_frame.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
+        self.console_text = qt.TextBox(
+            console_frame,
+            font=FontManager.get_font(family="Consolas", size=FontSize.TINY),
+            wrap="none",
+            fg_color=(Colors.BG_CONSOLE, Colors.BG_CONSOLE),
+            text_color=(Colors.CONSOLE_TEXT, Colors.CONSOLE_TEXT),
+        )
+        self.console_text.attach(fill="both", expand=True, padx=Spacing.TINY, pady=Spacing.TINY)
+        self._start_console_pump()
+
+    def _create_progress_label(self) -> None:
+        if not self.init_dialog:
+            return
+        self.progress_label = qt.Label(
+            self.init_dialog,
+            text="狀態: 準備啟動...",
+            font=FontManager.get_font(size=FontSize.INPUT, weight="bold"),
+            text_color=Colors.CONSOLE_TEXT,
+            fg_color=Colors.BG_CONSOLE,
+        )
+        self.progress_label.attach(anchor="center", pady=Spacing.TINY)
+
+    def _create_buttons(self) -> None:
+        if not self.init_dialog:
+            return
+        button_frame = qt.Frame(self.init_dialog, fg_color="transparent")
+        button_frame.attach(fill="x", pady=Spacing.SMALL_PLUS)
+        self.close_button = qt.Button(
+            button_frame,
+            text="取消初始化",
+            command=self._close_init_server,
+            font=FontManager.get_font(size=FontSize.MEDIUM),
+            width=Sizes.BUTTON_WIDTH_SECONDARY,
+            height=Sizes.BUTTON_HEIGHT_MEDIUM,
+            fg_color=Colors.BUTTON_DANGER,
+            hover_color=Colors.BUTTON_DANGER_HOVER,
+            text_color=Colors.TEXT_ON_DARK,
+            border_width=0,
+            corner_radius=Spacing.TINY,
+        )
+        self.close_button.attach(anchor="center")
+
+    def _setup_timeout(self) -> None:
+        if self.init_dialog:
+            self._schedule_dialog_job("_init_timeout_job", 120000, self._timeout_force_close)
+
+    # ── 關閉邏輯 ──────────────────────────────────────────────────
+
+    def _close_init_server(self) -> None:
+        if self.done_detected:
+            if self.init_dialog and self.init_dialog.is_alive():
+                self._cancel_dialog_jobs()
+                UIUtils.show_info("初始化完成", "伺服器已成功初始化並安全關閉。", parent=self._parent)
+                if self.completion_callback:
+                    self.completion_callback(self.server_config, self.init_dialog)
+                else:
+                    self.init_dialog.destroy()
+        else:
+            self._terminate_server_process()
+            if self.init_dialog and self.init_dialog.is_alive():
+                self._cancel_dialog_jobs()
+                UIUtils.show_warning("強制關閉", "伺服器初始化未完成，已強制關閉。請檢查伺服器日誌。", self._parent)
+                self.init_dialog.destroy()
+
+    def _terminate_server_process(self) -> None:
+        with contextlib.suppress(Exception):
+            if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
+                self.server_process.terminate()
+                if not self.server_process.waitForFinished(5000):
+                    self.server_process.kill()
+            if self.server_process is not None:
+                with contextlib.suppress(Exception):
+                    SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
+
+    def _timeout_force_close(self) -> None:
+        if self.init_dialog and self.init_dialog.is_alive() and not self.done_detected:
+            self._close_init_server()
+
+    # ── 伺服器啟動 ────────────────────────────────────────────────
+
+    def _run_server(self) -> None:
+        try:
+            if self.init_dialog:
+                self._schedule_dialog_job(
+                    "_init_progress_job",
+                    0,
+                    lambda: (
+                        self.progress_label.configure(text="狀態: 正在啟動伺服器...")
+                        if self.progress_label and self.progress_label.is_alive()
+                        else None
+                    ),
+                )
+            self._enqueue_console("正在啟動 Minecraft 伺服器...\n")
+            java_cmd = self._build_java_command()
+            process = SubprocessUtils.create_qprocess_checked(java_cmd, cwd=str(self.server_path))
+            self.server_process = process
+            process.started.connect(self._on_server_process_started)
+            process.readyReadStandardOutput.connect(self._on_server_process_output)
+            process.finished.connect(self._on_server_process_finished)
+            process.errorOccurred.connect(self._on_server_process_error)
+            process.start()
+        except Exception as e:
+            logger.exception(f"伺服器啟動失敗: {e}")
+            self._handle_server_error(str(e))
+
+    def _build_java_command(self) -> list[str]:
+        loader_type = str(self.server_config.loader_type or "").lower()
+        if loader_type == "forge":
+            return self._build_forge_command()
+        java_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
+        if isinstance(java_cmd, str):
+            java_cmd = [java_cmd]
+        self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
+        return java_cmd
+
+    def _build_forge_command(self) -> list[str]:
+        user_args = self.server_path / "user_jvm_args.txt"
+        if user_args.exists():
+            ServerDetectionUtils.update_forge_user_jvm_args(self.server_path, self.server_config)
+        start_bat = self.server_path / "start_server.bat"
+        java_cmd: list[str] | None = None
+        if user_args.exists() and start_bat.exists():
+            java_cmd = self._extract_java_command_from_bat(start_bat)
+        if java_cmd is None:
+            raw_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
+            java_cmd = [raw_cmd] if isinstance(raw_cmd, str) else raw_cmd
+            self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
+        return java_cmd
+
+    def _extract_java_command_from_bat(self, start_bat: Path) -> list[str] | None:
+        with contextlib.suppress(Exception):
+            content = PathUtils.read_text_file(start_bat, errors="ignore")
+            if content:
+                for line in content.splitlines():
+                    if re.search(r"\bjavaw?(?:\.exe)?\b.*@user_jvm_args\.txt\b", line, re.IGNORECASE):
+                        cleaned = re.sub(r"\s*[%$]\*?$", "", line.strip())
+                        if cleaned.lower().startswith("call "):
+                            cleaned = cleaned[5:].lstrip()
+                        return ServerCommands.split_windows_command_line(cleaned)
+        return None
+
+    # ── QProcess signal handlers ───────────────────────────────────
+
+    @QtCore.Slot()
+    def _on_server_process_started(self) -> None:
+        if self.server_process is None:
+            return
+        self.server_process_pid = int(self.server_process.processId())
+        SystemUtils.register_managed_process(self.server_path, self.server_process_pid)
+
+    @QtCore.Slot()
+    def _on_server_process_output(self) -> None:
+        if self.server_process is None:
+            return
+        try:
+            chunk = bytes(self.server_process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        except Exception:
+            return
+        if not chunk:
+            return
+        self._enqueue_console(chunk)
+        self._process_output_buffer += chunk
+        lines = self._process_output_buffer.splitlines()
+        if self._process_output_buffer and not self._process_output_buffer.endswith(("\n", "\r")):
+            self._process_output_buffer = lines.pop() if lines else self._process_output_buffer
+        else:
+            self._process_output_buffer = ""
+        for line in lines:
+            self._process_server_output(line)
+            if self.done_detected and not self._stop_sent:
+                self._handle_server_ready(line)
+
+    @QtCore.Slot(int, QtCore.QProcess.ExitStatus)
+    def _on_server_process_finished(self, _exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
+        if self._process_output_buffer:
+            line = self._process_output_buffer
+            self._process_output_buffer = ""
+            self._process_server_output(line)
+            if self.done_detected and not self._stop_sent:
+                self._handle_server_ready(line)
+        with contextlib.suppress(Exception):
+            SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
+        self._handle_server_completion()
+
+    @QtCore.Slot(QtCore.QProcess.ProcessError)
+    def _on_server_process_error(self, _error: QtCore.QProcess.ProcessError) -> None:
+        if self.server_process is None:
+            return
+        self._handle_server_error(self.server_process.errorString())
+
+    # ── 輸出解析 ──────────────────────────────────────────────────
+
+    def _process_server_output(self, output: str) -> None:
+        if self.init_dialog is None or not self.init_dialog.is_alive():
+            return
+        if "Loading dimension" in output or "Preparing spawn area" in output:
+            with contextlib.suppress(Exception):
+                self._schedule_dialog_job(
+                    "_init_world_prep_job",
+                    0,
+                    lambda: (
+                        self.progress_label.configure(text="狀態: 準備世界...")
+                        if self.progress_label and self.progress_label.is_alive()
+                        else None
+                    ),
+                )
+        elif "Preparing level" in output:
+            with contextlib.suppress(Exception):
+                self._schedule_dialog_job(
+                    "_init_world_load_job",
+                    0,
+                    lambda: (
+                        self.progress_label.configure(text="狀態: 載入世界...")
+                        if self.progress_label and self.progress_label.is_alive()
+                        else None
+                    ),
+                )
+        elif "Done (" in output and 'For help, type "help"' in output and (not self.done_detected):
+            self.done_detected = True
+
+            def update_close_button() -> None:
+                if self.close_button and self.close_button.is_alive():
+                    self.close_button.configure(
+                        text="完成初始化",
+                        command=self._close_init_server,
+                        fg_color=Colors.BUTTON_SUCCESS,
+                        hover_color=Colors.BUTTON_SUCCESS_HOVER
+                        if hasattr(Colors, "BUTTON_SUCCESS_HOVER")
+                        else Colors.BUTTON_SUCCESS,
+                        text_color=Colors.TEXT_ON_DARK,
+                    )
+
+            self._schedule_dialog_job("_init_close_button_job", 0, update_close_button)
+
+    def _handle_server_ready(self, output: str) -> None:
+        if "ERROR" in output.upper() or "WARN" in output.upper():
+            self._enqueue_console(f"[注意] {output}")
+
+        def update_closing_status() -> None:
+            if (
+                self.init_dialog
+                and self.init_dialog.is_alive()
+                and self.progress_label
+                and self.progress_label.is_alive()
+            ):
+                self.progress_label.configure(text="狀態: 伺服器完全啟動，正在關閉...")
+                self._enqueue_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
+
+        if self.init_dialog:
+            self._schedule_dialog_job("_init_closing_job", 0, update_closing_status)
+        if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
+            self._stop_sent = True
+            self.server_process.write(b"stop\n")
+
+    def _handle_server_completion(self) -> None:
+        if self.init_dialog is None:
+            return
+
+        if self.done_detected:
+
+            def complete_init() -> None:
+                if self.init_dialog and self.init_dialog.is_alive():
+                    self._update_console("[系統] 伺服器初始化完成！\n")
+                    if self.progress_label and self.progress_label.is_alive():
+                        self.progress_label.configure(text="狀態: 初始化完成")
+
+            self._schedule_dialog_job("_init_complete_job", 0, complete_init)
+            if self.completion_callback:
+                _cb = self.completion_callback
+                _cfg = self.server_config
+                _dlg = self.init_dialog
+                self._schedule_dialog_job(
+                    "_init_transition_job",
+                    2000,
+                    lambda: _cb(_cfg, _dlg),
+                )
+        else:
+
+            def show_error() -> None:
+                if self.init_dialog and self.init_dialog.is_alive():
+                    self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
+                    if self.progress_label and self.progress_label.is_alive():
+                        self.progress_label.configure(text="狀態: 啟動異常")
+
+            self._schedule_dialog_job("_init_error_job", 0, show_error)
+
+    def _handle_server_error(self, err_msg: str) -> None:
+        if self.init_dialog is None:
+            return
+
+        def show_error() -> None:
+            if self.init_dialog and self.init_dialog.is_alive():
+                self._update_console(f"[錯誤] 啟動失敗: {err_msg}\n")
+                if self.progress_label and self.progress_label.is_alive():
+                    self.progress_label.configure(text="狀態: 啟動失敗")
+
+        self._schedule_dialog_job("_init_error_job", 0, show_error)
+
+
+__all__ = ["CreateServerFrame", "ServerInitializationDialog"]

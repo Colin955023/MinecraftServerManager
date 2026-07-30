@@ -19,27 +19,3 @@ class AppException(Exception):
 
 class ConfigurationError(AppException):
     """設定無效、缺失或無法使用。"""
-
-
-class NetworkError(AppException):
-    """對外部服務（如 Modrinth API）的網路請求失敗。"""
-
-
-class DownloadVerificationError(AppException):
-    """下載檔案的雜湊或大小驗證失敗，內容不可信任。"""
-
-
-class ModInstallError(AppException):
-    """模組安裝、匯入或移除流程失敗。"""
-
-
-class DependencyResolutionError(AppException):
-    """模組依賴解析或版本相容性檢查失敗。"""
-
-
-class ServerProcessError(AppException):
-    """啟動、停止或監控 Minecraft 伺服器行程時失敗。"""
-
-
-class ArchiveSecurityError(AppException):
-    """壓縮檔內容未通過安全檢查（例如路徑穿越、symlink、大小超限）。"""

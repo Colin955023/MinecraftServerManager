@@ -6,21 +6,16 @@ server.properties 設定對話框
 import traceback
 from typing import Any, ClassVar
 
-from ..core import ServerManager
+from ..core import ServerPropertiesHelper, ServerPropertiesValidator, ServerRepository
 from ..models import ServerConfig
 from ..utils import (
     Colors,
     CustomDropdown,
-    DialogUtils,
     FontManager,
     FontSize,
-    NativeQtStyle,
-    ServerPropertiesHelper,
-    ServerPropertiesValidator,
     Sizes,
     Spacing,
     UIUtils,
-    get_button_style,
     get_logger,
 )
 from ..utils.ui_support import qt_widgets as qt
@@ -69,22 +64,15 @@ class ServerPropertiesDialog:
         "text-filtering-version": (0, 1),
     }
 
-    def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
+    def __init__(self, parent, server_config: ServerConfig, repository: ServerRepository):
         self.parent = parent
         self.server_config = server_config
-        self.server_manager = server_manager
+        self.repository = repository
         self.properties_helper = ServerPropertiesHelper()
         self._default_properties: dict[str, str] = self._load_default_properties()
         self.result = None
-        self.dialog = DialogUtils.create_toplevel_dialog(
-            parent,
-            f"伺服器設定 - {server_config.name}",
-            width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH,
-            height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT,
-            center_on_parent=True,
-            make_modal=True,
-            delay_ms=250,
-        )
+        self.dialog = qt.PlainWindow(title=f"伺服器設定 - {server_config.name}")
+        self.dialog.resize(Sizes.SERVER_PROPERTIES_DIALOG_WIDTH, Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT)
         self.setup_dialog()
         self.property_vars: dict[str, Any] = {}
         self.property_widgets: dict[str, Any] = {}
@@ -104,10 +92,10 @@ class ServerPropertiesDialog:
 
     def _load_default_properties(self) -> dict[str, str]:
         """載入伺服器預設設定，供欄位型別與重設流程共用。"""
-        if not hasattr(self.server_manager, "get_default_server_properties"):
+        if not hasattr(self.repository, "get_default_server_properties"):
             return {}
         try:
-            defaults = self.server_manager.get_default_server_properties()
+            defaults = self.repository.get_default_server_properties()
         except Exception as e:
             logger.exception(f"讀取預設 server.properties 失敗: {e}")
             return {}
@@ -122,7 +110,7 @@ class ServerPropertiesDialog:
         min_height = Sizes.SERVER_PROPERTIES_DIALOG_MIN_HEIGHT
         self.dialog.setMinimumSize(min_width, min_height)
         try:
-            self.dialog.setStyleSheet(NativeQtStyle.server_properties_dialog)
+            self.dialog.configure(fg_color=Colors.BG_PRIMARY)
         except Exception as e:
             logger.error(f"應用對話框主題失敗: {e}\n{traceback.format_exc()}")
 
@@ -146,8 +134,8 @@ class ServerPropertiesDialog:
         info_frame.attach(side="left")
         button_frame = qt.Frame(footer_frame, fg_color="transparent")
         button_frame.attach(side="right")
-        button_width = Sizes.BUTTON_WIDTH_SMALL
-        button_height = 24
+        button_width = Sizes.BUTTON_WIDTH_COMPACT
+        button_height = Sizes.BUTTON_HEIGHT_MEDIUM
         button_font_size = FontSize.LARGE
         help_label = qt.Label(
             info_frame,
@@ -169,13 +157,33 @@ class ServerPropertiesDialog:
         )
 
         button_specs = [
-            ("❌ 取消", self.dialog.destroy, get_button_style("danger")),
-            ("🔄 重設", self.reset_properties, get_button_style("warning")),
-            ("💾 儲存", self.save_properties, get_button_style("primary")),
+            ("❌ 取消", self.dialog.destroy, "danger"),
+            ("🔄 重設", self.reset_properties, "warning"),
+            ("💾 儲存", self.save_properties, "primary"),
         ]
         button_gap = max(1, Spacing.XS - 1)
-        for index, (text, command, style_config) in enumerate(button_specs):
+        for index, (text, command, style_type) in enumerate(button_specs):
             padding = (0, 0) if index == len(button_specs) - 1 else (0, button_gap)
+            if style_type == "primary":
+                fg_color = Colors.BUTTON_PRIMARY
+                hover_color = Colors.BUTTON_PRIMARY_HOVER
+                text_color = Colors.TEXT_ON_DARK
+            elif style_type == "secondary":
+                fg_color = Colors.BUTTON_SECONDARY
+                hover_color = Colors.BUTTON_SECONDARY_HOVER
+                text_color = Colors.TEXT_PRIMARY
+            elif style_type == "warning":
+                fg_color = Colors.BUTTON_WARNING
+                hover_color = Colors.BUTTON_WARNING_HOVER
+                text_color = Colors.TEXT_ON_DARK
+            elif style_type == "danger":
+                fg_color = Colors.BUTTON_DANGER
+                hover_color = Colors.BUTTON_DANGER_HOVER
+                text_color = Colors.TEXT_ON_DARK
+            else:
+                fg_color = Colors.BUTTON_PRIMARY
+                hover_color = Colors.BUTTON_PRIMARY_HOVER
+                text_color = Colors.TEXT_ON_DARK
             qt.Button(
                 button_frame,
                 text=text,
@@ -183,7 +191,9 @@ class ServerPropertiesDialog:
                 width=button_width,
                 height=button_height,
                 font=FontManager.get_font(family="Microsoft JhengHei", size=button_font_size, weight="bold"),
-                **style_config,
+                fg_color=fg_color,
+                hover_color=hover_color,
+                text_color=text_color,
             ).attach(side="left", padx=padding)
 
     def _compute_property_render_batch_size(self, total_props: int) -> int:
@@ -435,24 +445,30 @@ class ServerPropertiesDialog:
             widget.attach(anchor="w", pady=Spacing.TINY)
         elif prop_name in self.RANGE_PROPS:
             min_val, max_val = self.RANGE_PROPS[prop_name]
+            font = FontManager.get_font("Microsoft JhengHei", FontSize.INPUT)
+            fm = qt.QtGui.QFontMetrics(font)
+            input_width = fm.horizontalAdvance("中" * 30)
             widget = qt.Spinbox(
                 parent,
                 textvariable=var,
                 from_=min_val,
                 to=max_val,
-                width=Sizes.SPINBOX_WIDTH_CHARS,
-                font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
+                min_width=input_width,
+                font=font,
                 fg_color=Colors.BG_PRIMARY,
                 border_color=Colors.BORDER_LIGHT,
                 corner_radius=Sizes.INPUT_CORNER_RADIUS,
             )
             widget.attach(anchor="w")
         else:
+            font = FontManager.get_font("Microsoft JhengHei", FontSize.INPUT)
+            fm = qt.QtGui.QFontMetrics(font)
+            input_width = fm.horizontalAdvance("中" * 30)
             widget = qt.Entry(
                 parent,
                 textvariable=var,
-                font=FontManager.get_font("Microsoft JhengHei", FontSize.INPUT),
-                width=Sizes.SERVER_PROPERTY_TEXT_INPUT_WIDTH,
+                font=font,
+                min_width=input_width,
                 fg_color=Colors.BG_PRIMARY,
                 border_color=Colors.BORDER_LIGHT,
                 corner_radius=Sizes.INPUT_CORNER_RADIUS,
@@ -489,10 +505,10 @@ class ServerPropertiesDialog:
 
     def load_properties(self) -> None:
         """載入屬性值"""
-        current_properties = self.server_manager.load_server_properties(self.server_config.name)
+        current_properties = self.repository.load_server_properties(self.server_config.name)
         if not current_properties:
             current_properties = dict(self.server_config.properties or {})
-        default_properties = self.server_manager.get_default_server_properties()
+        default_properties = self.repository.get_default_server_properties()
         all_properties = {**default_properties, **current_properties}
         self._property_value_cache = {prop: str(value) for prop, value in all_properties.items()}
         for prop_name, value in self._property_value_cache.items():
@@ -523,7 +539,7 @@ class ServerPropertiesDialog:
                 UIUtils.show_error("驗證失敗", error_message, self.dialog)
                 return
             logger.info(f"開始儲存 server.properties 對話框內容: server={self.server_config.name}")
-            success = self.server_manager.update_server_properties(self.server_config.name, properties)
+            success = self.repository.update_server_properties(self.server_config.name, properties)
             if success:
                 UIUtils.show_info(
                     "成功", "伺服器屬性已儲存\n若伺服器正在運行建議執行指令：/reload或是重新運行伺服器", self.dialog
@@ -539,12 +555,12 @@ class ServerPropertiesDialog:
         """顯示對話框"""
         self.dialog.setFocus()
         self.dialog.activateWindow()
-        self.dialog.exec()
+        self.dialog.show()
 
     def reset_properties(self) -> None:
         """重設所有屬性為預設值"""
         if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self.dialog, show_cancel=False):
-            default_properties = self.server_manager.get_default_server_properties()
+            default_properties = self.repository.get_default_server_properties()
             for prop_name, value in default_properties.items():
                 value_str = str(value)
                 self._property_value_cache[prop_name] = value_str

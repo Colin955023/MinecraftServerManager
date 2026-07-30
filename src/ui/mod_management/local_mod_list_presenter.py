@@ -7,12 +7,15 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from ...core import enhance_local_mod
 from ...models import ModStatus
 from ...utils import (
     Colors,
     CustomDropdown,
     FontManager,
     FontSize,
+    QtCore,
+    QtGui,
     Sizes,
     Spacing,
     TaskUtils,
@@ -21,8 +24,7 @@ from ...utils import (
     get_shared_manager,
 )
 from ...utils.ui_support import qt_widgets as qt
-from ..mod_search_service.modrinth_service import enhance_local_mod
-from .constants import MOD_TOOL_BUTTON_STYLE, logger
+from .constants import MOD_MANAGEMENT_UI_SCALE, logger
 from .presenter_delegate_mixin import PresenterDelegateMixin
 
 
@@ -86,74 +88,87 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列。"""
+        s = MOD_MANAGEMENT_UI_SCALE
         toolbar_frame = qt.Frame(self.local_tab)
-        toolbar_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
+        toolbar_frame.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=int(Spacing.MEDIUM * s))
         left_frame = qt.Frame(toolbar_frame, fg_color="transparent")
-        left_frame.attach(side="left", padx=Spacing.SMALL)
+        left_frame.attach(side="left", padx=int(Spacing.SMALL * s))
         import_btn = qt.Button(
             left_frame,
             text="📁 匯入模組",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.import_mod_file,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_TOOLBAR * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        import_btn.attach(side="left", padx=(0, 12))
+        import_btn.attach(side="left", padx=(0, int(12 * s)))
         refresh_mod_list_btn = qt.Button(
             left_frame,
             text="🔄 重新整理",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.refresh_mod_list_force,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_SECONDARY * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        refresh_mod_list_btn.attach(side="left", padx=(0, 12))
+        refresh_mod_list_btn.attach(side="left", padx=(0, int(12 * s)))
         update_btn = qt.Button(
             left_frame,
             text="🔄 檢查更新",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.check_local_mod_updates,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_TOOLBAR * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        update_btn.attach(side="left", padx=(0, 12))
+        update_btn.attach(side="left", padx=(0, int(12 * s)))
         self.select_all_btn = qt.Button(
             left_frame,
             text="☑️ 全選",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.toggle_select_all,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_TOOLBAR * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        self.select_all_btn.attach(side="left", padx=(0, 12))
+        self.select_all_btn.attach(side="left", padx=(0, int(12 * s)))
         self.batch_toggle_btn = qt.Button(
             left_frame,
             text="🔄 批量切換",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.batch_toggle_selected,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_TOOLBAR * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        self.batch_toggle_btn.attach(side="left", padx=(0, 12))
+        self.batch_toggle_btn.attach(side="left", padx=(0, int(12 * s)))
         folder_btn = qt.Button(
             left_frame,
             text="📂 開啟資料夾",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.open_mods_folder,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            width=int(Sizes.BUTTON_WIDTH_TOOLBAR * s),
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
         folder_btn.attach(side="left")
         right_frame = qt.Frame(toolbar_frame, fg_color="transparent")
-        right_frame.attach(side="right", padx=Spacing.LARGE_MINUS)
+        right_frame.attach(side="right", padx=int(Spacing.LARGE_MINUS * s))
         search_frame = qt.Frame(right_frame, fg_color="transparent")
-        search_frame.attach(side="left", padx=(0, Spacing.LARGE_MINUS))
+        search_frame.attach(side="left", padx=(0, int(Spacing.LARGE_MINUS * s)))
         self.local_search_var = qt.TextState()
         self.local_search_filter = qt.SearchFilter()
         search_entry = qt.SearchEntry(
@@ -161,20 +176,21 @@ class LocalModListPresenter(PresenterDelegateMixin):
             textvariable=self.local_search_var,
             filter_logic=self.local_search_filter,
             placeholder_text="搜尋本地模組",
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=Sizes.DROPDOWN_COMPACT_WIDTH,
-            height=Sizes.INPUT_HEIGHT,
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s)),
+            width=int(Sizes.DROPDOWN_COMPACT_WIDTH * s),
+            height=int(Sizes.INPUT_HEIGHT * s),
         )
         search_entry.attach(side="left")
-        self.local_search_var.trace("w", self.filter_local_mods)
+        self.local_search_var.trace_add("w", self.filter_local_mods)
         self.local_filter_var = qt.TextState(value="所有")
         filter_combo = CustomDropdown(
             right_frame,
             variable=self.local_filter_var,
             values=["所有", "啟用", "停用"],
             command=self.on_filter_changed,
-            width=Sizes.DROPDOWN_FILTER_WIDTH,
-            height=Sizes.INPUT_HEIGHT,
+            width=int(Sizes.DROPDOWN_FILTER_WIDTH * s),
+            height=int(Sizes.DROPDOWN_HEIGHT * s),
+            font_size=max(8, int(FontSize.MEDIUM * s)),
         )
         filter_combo.attach(side="left")
 
@@ -185,6 +201,8 @@ class LocalModListPresenter(PresenterDelegateMixin):
         Args:
             _value: 下拉選單回傳的目前值。
         """
+        if hasattr(self, "local_filter_var") and self.local_filter_var:
+            self.local_filter_var.set(_value)
         self.filter_local_mods()
 
     def refresh_mod_list_force(self) -> None:
@@ -195,7 +213,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
             def load_thread():
                 try:
                     self.update_status_safe("正在強制重新掃描本地模組...")
-                    mods = manager.scan_mods()
+                    mods = manager.get_mod_list()
                     self.local_mods = mods
                     self.enhanced_mods_cache = {}
                     self.enhance_local_mods()
@@ -210,20 +228,32 @@ class LocalModListPresenter(PresenterDelegateMixin):
 
     def create_local_mod_list(self) -> None:
         """建立本地模組列表。"""
+        s = MOD_MANAGEMENT_UI_SCALE
         list_frame = qt.Frame(self.local_tab)
-        list_frame.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
+        list_frame.attach(
+            fill="both", expand=True, padx=int(Spacing.SMALL_PLUS * s), pady=(0, int(Spacing.SMALL_PLUS * s))
+        )
         export_btn = qt.Button(
             list_frame,
             text="匯出模組列表",
-            font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
-            **MOD_TOOL_BUTTON_STYLE,
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold"),
             command=self.export_mod_list_dialog,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT_EXPORT,
+            width=int(Sizes.BUTTON_WIDTH_EXPORT * s),
+            height=int(Sizes.BUTTON_HEIGHT_EXPORT * s),
         )
-        export_btn.attach(anchor="ne", pady=(Spacing.SMALL_PLUS, Spacing.TINY), padx=Spacing.SMALL_PLUS)
+        export_btn.configure(
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            border_color=Colors.BORDER_LIGHT,
+        )
+        export_btn.attach(
+            anchor="ne", pady=(int(Spacing.SMALL_PLUS * s), int(Spacing.TINY * s)), padx=int(Spacing.SMALL_PLUS * s)
+        )
         tree_container = qt.Frame(list_frame)
-        tree_container.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
+        tree_container.attach(
+            fill="both", expand=True, padx=int(Spacing.SMALL_PLUS * s), pady=(0, int(Spacing.SMALL_PLUS * s))
+        )
         columns = ("status", "name", "version", "author", "loader", "size", "mtime", "description")
         self.local_tree = qt.Treeview(
             tree_container,
@@ -233,34 +263,35 @@ class LocalModListPresenter(PresenterDelegateMixin):
             selectmode="extended",
         )
         column_config = {
-            "status": ("狀態", 40),
+            "status": ("狀態", 90),
             "name": ("模組名稱", 100),
             "version": ("版本", 50),
             "author": ("作者", 60),
-            "loader": ("載入器", 40),
-            "size": ("檔案大小", 50),
-            "mtime": ("修改時間", 60),
+            "loader": ("載入器", 50),
+            "size": ("檔案大小", 55),
+            "mtime": ("修改時間", 65),
             "description": ("描述", 230),
         }
+        # 計算每個欄位的最小寬度：以標題文字寬度為基準
+        header_font = FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold")
+        header_fm = QtGui.QFontMetrics(header_font) if header_font else None
         for col, (text, width) in column_config.items():
             self.local_tree.heading(col, text=text, anchor="w")
             is_stretch = col == "description"
-            self.local_tree.column(col, width=width, minwidth=width if is_stretch else 25, stretch=is_stretch)
-        v_scrollbar = qt.Scrollbar(tree_container, orient="vertical", command=self.local_tree.yview)
-        h_scrollbar = qt.Scrollbar(tree_container, orient="horizontal", command=self.local_tree.xview)
-        self.local_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-        self.local_v_scrollbar = v_scrollbar
-        self.local_h_scrollbar = h_scrollbar
-        self.local_tree.attach_matrix(row=0, column=0, sticky="nsew")
-        v_scrollbar.attach_matrix(row=0, column=1, sticky="ns")
-        h_scrollbar.attach_matrix(row=1, column=0, sticky="ew")
+            # 最小寬度 = 標題文字寬度 + padding（約 20px）
+            min_width = (
+                width if is_stretch else max(25, (header_fm.horizontalAdvance(text) + 20) if header_fm else width)
+            )
+            self.local_tree.column(col, width=width, minwidth=min_width, stretch=is_stretch)
+        self.local_tree.attach(fill="both", expand=True)
+        # 使用內建捲軸，僅在內容超出時顯示
+        self.local_tree.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.local_tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         is_dark = qt.is_dark_color_scheme()
         bg_odd, bg_even = self._get_local_row_palette(is_dark)
         fg = Colors.TEXT_ON_DARK if is_dark else Colors.TEXT_HEADING[0]
         self.local_tree.tag_configure("odd", background=bg_odd, foreground=fg)
         self.local_tree.tag_configure("even", background=bg_even, foreground=fg)
-        tree_container.set_grid_row_stretch(0, weight=1)
-        tree_container.set_grid_column_stretch(0, weight=1)
         TreeUtils.bind_treeview_header_auto_fit(
             self.local_tree,
             on_row_double_click=self.toggle_local_mod,
@@ -312,7 +343,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
         def load_thread():
             try:
                 self.update_status_safe("正在掃描本地模組...")
-                mods = list(manager.scan_mods())
+                mods = list(manager.get_mod_list())
                 dedup: dict[str, Any] = {}
                 for mod in mods:
                     base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
@@ -446,7 +477,10 @@ class LocalModListPresenter(PresenterDelegateMixin):
         if not self.local_tree:
             return
         if _event is not None and hasattr(_event, "y"):
-            clicked_item = self.local_tree.identify_row(int(_event.y))
+            try:
+                clicked_item = self.local_tree.identify_row(int(_event.y), x=getattr(_event, "x", None))
+            except TypeError:
+                clicked_item = self.local_tree.identify_row(int(_event.y))
             if clicked_item:
                 self.local_tree.selection_set(clicked_item)
         selection = self.local_tree.selection()
@@ -554,7 +588,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
             if not items:
                 return
             if self.all_selected:
-                self.local_tree.selection_remove(items)
+                self.local_tree.selection_remove(*items)
                 self.selected_mods.clear()
                 self.all_selected = False
                 try:
@@ -563,7 +597,7 @@ class LocalModListPresenter(PresenterDelegateMixin):
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
             else:
-                self.local_tree.selection_set(items)
+                self.local_tree.selection_set(*items)
                 self.selected_mods.clear()
                 for item in items:
                     mod_name = self._get_tree_item_mod_name(self.local_tree, item)
@@ -690,6 +724,11 @@ class LocalModListPresenter(PresenterDelegateMixin):
                 status_text = f"找到 {total_count} 個模組"
             if hasattr(self, "status_label"):
                 self.status_label.configure(text=status_text)
+            # 動態更新全選與批量切換按鈕的啟用狀態
+            if hasattr(self, "select_all_btn") and self.select_all_btn:
+                self.select_all_btn.configure(state="normal" if total_count > 0 else "disabled")
+            if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
+                self.batch_toggle_btn.configure(state="normal" if selected_count > 0 else "disabled")
         except Exception as e:
             logger.error(f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}")
 

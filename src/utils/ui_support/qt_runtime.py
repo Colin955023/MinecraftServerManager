@@ -240,46 +240,6 @@ class ValueState(QtCore.QObject):
         return str(id(callback))
 
 
-def set_window_title(window: QtWidgets.QWidget, title: str) -> None:
-    """設定 QWidget / QMainWindow 標題。"""
-    if is_qobject_alive(window):
-        window.setWindowTitle(title)
-
-
-def show_window(window: QtWidgets.QWidget, *, raise_window: bool = True) -> None:
-    """
-    顯示視窗並選擇性帶到前景。
-
-    Args:
-        window: 要顯示的視窗。
-        raise_window: 是否將視窗帶到前景。
-    """
-    if not is_qobject_alive(window):
-        return
-    window.show()
-    if raise_window:
-        window.raise_()
-        window.activateWindow()
-
-
-def set_modal(dialog: QtWidgets.QDialog, parent: QtWidgets.QWidget | None = None) -> None:
-    """套用 Qt dialog modality。"""
-    if parent is not None and is_qobject_alive(parent):
-        dialog.setParent(parent, dialog.windowFlags())
-    dialog.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
-    dialog.setModal(True)
-
-
-def set_topmost(window: QtWidgets.QWidget, enabled: bool) -> None:
-    """設定視窗置頂旗標。"""
-    if not is_qobject_alive(window):
-        return
-    was_visible = window.isVisible()
-    window.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, bool(enabled))
-    if was_visible:
-        window.show()
-
-
 __all__ = [
     "QtCore",
     "QtGui",
@@ -291,8 +251,4 @@ __all__ = [
     "invoke_later",
     "is_qobject_alive",
     "run_on_ui_thread",
-    "set_modal",
-    "set_topmost",
-    "set_window_title",
-    "show_window",
 ]

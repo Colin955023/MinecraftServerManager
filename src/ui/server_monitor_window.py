@@ -1,7 +1,6 @@
 """
 伺服器監控視窗
 提供即時的伺服器狀態監控、控制台輸出和資源使用情況
-Server monitor window for real-time status, console output, and resource usage.
 """
 
 import queue
@@ -11,14 +10,12 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
+from ..core import ServerOperations, ServerStartup
 from ..utils import (
     Colors,
-    DialogUtils,
     FontManager,
     FontSize,
     MemoryUtils,
-    NativeQtStyle,
-    ServerOperations,
     Sizes,
     Spacing,
     TaskUtils,
@@ -35,9 +32,9 @@ logger = get_logger().bind(component="ServerMonitorWindow")
 class ServerMonitorWindow:
     """伺服器監控視窗"""
 
-    def __init__(self, parent, server_manager, server_name: str):
+    def __init__(self, parent, server_startup: ServerStartup, server_name: str):
         self.parent = parent
-        self.server_manager = server_manager
+        self.server_startup = server_startup
         self.server_name = server_name
         self.window: Any | None = None
         self._auto_refresh_id: str | None = None
@@ -141,23 +138,15 @@ class ServerMonitorWindow:
 
     def create_window(self) -> None:
         """創建監控視窗"""
-        self.window = DialogUtils.create_toplevel_dialog(
-            self.parent,
-            f"伺服器監控 - {self.server_name}",
-            width=Sizes.DIALOG_LARGE_WIDTH,
-            height=Sizes.DIALOG_LARGE_HEIGHT,
-            center_on_parent=False,
-            make_modal=False,
-            topmost=False,
-            delay_ms=250,
-        )
+        self.window = qt.PlainWindow(title=f"伺服器監控 - {self.server_name}")
+        self.window.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
         self.window.setObjectName("ServerMonitorWindow")
-        self.window.setStyleSheet(NativeQtStyle.monitor_window)
+        self.window.setStyleSheet(f"background:{Colors.BG_PRIMARY};")
         self.window.showNormal()
         physical_min_width = 1350
         physical_min_height = 900
         self.window.setMinimumSize(physical_min_width, physical_min_height)
-        self.window.set_close_callback(self.on_closing)
+        self.window.set_close_event_handler(self._handle_window_close_event)
         main_frame = qt.Frame(self.window, fg_color=Colors.BG_SECONDARY)
         UIUtils.pack_main_frame(main_frame)
         self.create_control_panel(main_frame)
@@ -222,18 +211,18 @@ class ServerMonitorWindow:
         title_label = qt.Label(
             control_frame,
             text="🎮 伺服器控制",
-            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.HEADING_MEDIUM * 0.8), weight="bold"),
             text_color=Colors.TEXT_PRIMARY,
         )
-        title_label.attach(pady=(Spacing.LARGE, Spacing.SMALL))
+        title_label.attach(pady=(int(Spacing.LARGE * 0.8), int(Spacing.SMALL * 0.8)))
         status_text, status_color = ServerOperations.get_status_text(False)
         self.status_label = qt.Label(
             control_frame,
             text=status_text,
-            font=FontManager.get_font(size=FontSize.HEADING_SMALL, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.HEADING_SMALL * 0.8), weight="bold"),
             text_color=status_color if status_color != "red" else Colors.TEXT_ERROR,
         )
-        self.status_label.attach(side="left", padx=Spacing.LARGE)
+        self.status_label.attach(side="left", padx=int(Spacing.LARGE * 0.8))
         button_frame = qt.Frame(control_frame, fg_color="transparent")
         button_frame.attach(side="right", padx=Spacing.SMALL_PLUS)
         self.start_button = qt.Button(
@@ -241,27 +230,27 @@ class ServerMonitorWindow:
             text="🚀 啟動",
             command=self.start_server,
             state="disabled",
-            font=FontManager.get_font(size=FontSize.LARGE),
-            width=Sizes.BUTTON_WIDTH_COMPACT,
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * 0.8),
         )
-        self.start_button.attach(side="left", padx=(0, Spacing.TINY))
+        self.start_button.attach(side="left", padx=(0, int(Spacing.TINY * 0.8)))
         self.stop_button = qt.Button(
             button_frame,
             text="⏹️ 停止",
             command=self.stop_server,
             state="disabled",
-            font=FontManager.get_font(size=FontSize.LARGE),
-            width=Sizes.BUTTON_WIDTH_COMPACT,
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * 0.8),
             fg_color=Colors.BUTTON_DANGER,
             hover_color=Colors.BUTTON_DANGER_HOVER,
         )
-        self.stop_button.attach(side="left", padx=(0, Spacing.TINY))
+        self.stop_button.attach(side="left", padx=(0, int(Spacing.TINY * 0.8)))
         self.refresh_button = qt.Button(
             button_frame,
             text="🔄 刷新",
             command=self.refresh_status,
-            font=FontManager.get_font(size=FontSize.LARGE),
-            width=Sizes.BUTTON_WIDTH_COMPACT,
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * 0.8),
         )
         self.refresh_button.attach(side="left")
         status_frame = qt.Frame(
@@ -274,10 +263,10 @@ class ServerMonitorWindow:
         status_title_label = qt.Label(
             status_frame,
             text="📈 系統資源",
-            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.HEADING_MEDIUM * 0.8), weight="bold"),
             text_color=Colors.TEXT_PRIMARY,
         )
-        status_title_label.attach(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
+        status_title_label.attach(pady=(int(Spacing.SMALL_PLUS * 0.8), int(Spacing.TINY * 0.8)))
         status_content_frame = qt.Frame(status_frame, fg_color="transparent")
         status_content_frame.attach(fill="x", padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
         left_frame = qt.Frame(status_content_frame, fg_color="transparent")
@@ -289,44 +278,44 @@ class ServerMonitorWindow:
         self.pid_label = qt.Label(
             left_frame,
             text="🆔 PID: N/A",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
             anchor="w",
             text_color=Colors.TEXT_PRIMARY,
         )
-        self.pid_label.attach(anchor="w", pady=Spacing.XS)
+        self.pid_label.attach(anchor="w", pady=int(Spacing.XS * 0.8))
         self.memory_label = qt.Label(
             left_frame,
             text="🧠 記憶體使用: 0 MB",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
             anchor="w",
             text_color=Colors.TEXT_PRIMARY,
         )
-        self.memory_label.attach(anchor="w", pady=Spacing.XS)
+        self.memory_label.attach(anchor="w", pady=int(Spacing.XS * 0.8))
         self.uptime_label = qt.Label(
             middle_frame,
             text="⏱️ 運行時間: 00:00:00",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
             anchor="w",
             text_color=Colors.TEXT_PRIMARY,
         )
-        self.uptime_label.attach(anchor="w", pady=Spacing.XS)
+        self.uptime_label.attach(anchor="w", pady=int(Spacing.XS * 0.8))
         self.players_label = qt.Label(
             middle_frame,
             text="👥 玩家數量: 0/20",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
             anchor="w",
             text_color=Colors.TEXT_PRIMARY,
         )
-        self.players_label.attach(anchor="w", pady=Spacing.XS)
+        self.players_label.attach(anchor="w", pady=int(Spacing.XS * 0.8))
         self.version_label = qt.Label(
             right_frame,
             text="📦 版本: N/A",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * 0.8)),
             anchor="w",
             text_color=Colors.TEXT_PRIMARY,
         )
         logger.debug("初始化 ServerMonitorWindow，預設版本顯示 N/A")
-        self.version_label.attach(anchor="w", pady=Spacing.XS)
+        self.version_label.attach(anchor="w", pady=int(Spacing.XS * 0.8))
         players_frame = qt.Frame(
             parent,
             fg_color=Colors.BG_PRIMARY,
@@ -337,14 +326,14 @@ class ServerMonitorWindow:
         players_title_label = qt.Label(
             players_frame,
             text="👥 線上玩家",
-            font=FontManager.get_font(size=FontSize.HEADING_MEDIUM, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.HEADING_MEDIUM * 0.8), weight="bold"),
             text_color=Colors.TEXT_PRIMARY,
         )
-        players_title_label.attach(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
+        players_title_label.attach(pady=(int(Spacing.SMALL_PLUS * 0.8), int(Spacing.TINY * 0.8)))
         self.players_listbox = qt.Listbox(
             players_frame,
-            height=Sizes.PLAYER_LIST_VISIBLE_ROWS,
-            font=FontManager.get_font("Microsoft JhengHei", FontSize.LARGE),
+            height=int(Sizes.PLAYER_LIST_VISIBLE_ROWS * 0.8) or 1,
+            font=FontManager.get_font("Microsoft JhengHei", int(FontSize.LARGE * 0.8)),
             bg=Colors.BG_LISTBOX_LIGHT,
             fg=Colors.TEXT_ON_LIGHT,
             selectbackground=Colors.SELECT_BG,
@@ -352,7 +341,9 @@ class ServerMonitorWindow:
             borderwidth=0,
             highlightthickness=0,
         )
-        self.players_listbox.attach(fill="x", padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
+        self.players_listbox.attach(
+            fill="x", padx=int(Spacing.SMALL_PLUS * 0.8), pady=(0, int(Spacing.SMALL_PLUS * 0.8))
+        )
         self.players_listbox.insert(qt.END, "無玩家在線")
         TreeUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=1)
         self.players_listbox.connect_event("mouse_left_release", self._on_player_click)
@@ -360,11 +351,11 @@ class ServerMonitorWindow:
     def _on_player_click(self, _event) -> None:
         """點擊玩家列表時複製名稱"""
         try:
-            selection = self.players_listbox.curselection()
+            selection = self.players_listbox.selection()
             if not selection:
                 return
             index = selection[0]
-            name = self.players_listbox.get(index)
+            name = self.players_listbox.item(index).text()
             if not name or "無玩家在線" in name:
                 return
             app = qt.ensure_app()
@@ -472,7 +463,7 @@ class ServerMonitorWindow:
         console_title_label.attach(pady=(Spacing.SMALL_PLUS, Spacing.TINY))
         self.console_text = qt.TextBox(
             console_frame,
-            height=Sizes.CONSOLE_OUTPUT_HEIGHT,
+            min_height=200,
             font=FontManager.get_font(family="Consolas", size=FontSize.NORMAL_PLUS),
             wrap="word",
             fg_color=Colors.BG_CONSOLE,
@@ -601,7 +592,7 @@ class ServerMonitorWindow:
                 except Exception as e:
                     logger.debug(f"從輸出隊列讀取失敗（忽略）: {e}", "ServerMonitorWindow")
                 try:
-                    log_file = self.server_manager.get_server_log_file(self.server_name)
+                    log_file = self.server_startup.get_server_log_file(self.server_name)
                     if log_file and log_file.exists():
                         current_mtime = log_file.stat().st_mtime
                         if current_mtime > self._last_log_mtime:
@@ -618,7 +609,7 @@ class ServerMonitorWindow:
     def read_server_output(self) -> None:
         """讀取伺服器輸出並顯示在控制台，並即時解析玩家數量/名單與啟動完成通知"""
         try:
-            output_lines = self.server_manager.read_server_output(self.server_name)
+            output_lines = self.server_startup.read_server_output(self.server_name)
             for line in output_lines:
                 if line.strip():
 
@@ -677,7 +668,7 @@ class ServerMonitorWindow:
                     self.safe_update_widget(
                         "players_listbox",
                         lambda w: [
-                            w.delete(0, qt.END),
+                            w.clear(),
                             w.insert(qt.END, "無玩家在線"),
                             TreeUtils.apply_listbox_alternating_rows(w, item_count=1),
                         ],
@@ -710,7 +701,7 @@ class ServerMonitorWindow:
     def update_player_count(self) -> None:
         """更新玩家數量"""
         try:
-            success = self.server_manager.send_command(self.server_name, "list")
+            success = self.server_startup.send_command(self.server_name, "list")
             if success and self.window and self.window.is_alive():
                 UIUtils.schedule_debounce(
                     self.window,
@@ -730,7 +721,7 @@ class ServerMonitorWindow:
             line: 可選的單行玩家統計字串。
         """
         try:
-            lines = [line] if line is not None else self.server_manager.read_server_output(self.server_name)
+            lines = [line] if line is not None else self.server_startup.read_server_output(self.server_name)
             found = False
             for line in lines:
                 snapshot = self._parse_player_list_line(line)
@@ -755,14 +746,14 @@ class ServerMonitorWindow:
             if self._last_player_names == players_tuple:
                 return
             self._last_player_names = players_tuple
-            self.players_listbox.delete(0, qt.END)
+            self.players_listbox.clear()
             if players:
                 for player in players:
                     if player:
                         self.players_listbox.insert(qt.END, player)
             else:
                 self.players_listbox.insert(qt.END, "無玩家在線")
-            TreeUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=self.players_listbox.size())
+            TreeUtils.apply_listbox_alternating_rows(self.players_listbox, item_count=self.players_listbox.count())
         except Exception as e:
             logger.error(f"更新玩家列表錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 
@@ -771,7 +762,7 @@ class ServerMonitorWindow:
         try:
             if not self.window or not self.window.is_alive():
                 return
-            info = self.server_manager.get_server_info(self.server_name)
+            info = self.server_startup.get_server_info(self.server_name)
             if not info:
                 return
             self._update_ui(info)
@@ -780,8 +771,8 @@ class ServerMonitorWindow:
 
     def start_server(self) -> None:
         """啟動伺服器"""
-        self.console_text.delete("0.0", "end")
-        start_result = self.server_manager.start_server_result(self.server_name)
+        self.console_text.clear()
+        start_result = self.server_startup.start_server_result(self.server_name)
         if start_result.success:
             self.add_console_message(f"✅ 伺服器 {self.server_name} 啟動中...")
             self._schedule_window_job("_start_status_job", 500, self.update_status)
@@ -797,7 +788,7 @@ class ServerMonitorWindow:
 
     def stop_server(self) -> None:
         """停止伺服器"""
-        success = ServerOperations.graceful_stop_server(self.server_manager, self.server_name)
+        success = ServerOperations.graceful_stop_server(self.server_startup, self.server_name)
         if success:
             self.add_console_message(f"⏹️ 伺服器 {self.server_name} 停止命令已發送")
             self._schedule_window_job("_stop_refresh_after_job", 2000, self.refresh_after_stop)
@@ -807,7 +798,7 @@ class ServerMonitorWindow:
 
     def refresh_after_stop(self) -> None:
         """停止後刷新狀態，直到伺服器完全結束才停止輪詢"""
-        if self.server_manager.is_server_running(self.server_name):
+        if self.server_startup.is_server_running(self.server_name):
             self._schedule_window_job("_stop_refresh_after_job", 500, self.refresh_after_stop)
         else:
             self.refresh_status()
@@ -856,10 +847,10 @@ class ServerMonitorWindow:
 
     def refresh_status(self) -> None:
         """手動刷新狀態和控制台輸出"""
-        self.console_text.delete("0.0", "end")
+        self.console_text.clear()
         last_player_line = None
         try:
-            log_file = self.server_manager.get_server_log_file(self.server_name)
+            log_file = self.server_startup.get_server_log_file(self.server_name)
             if log_file and log_file.exists():
                 out_lines, truncated = self._read_recent_log_lines(log_file)
                 last_player_line = self._find_latest_player_line(out_lines)
@@ -874,7 +865,7 @@ class ServerMonitorWindow:
                 if last_player_line:
                     self.read_player_list(line=last_player_line)
                 else:
-                    if self.server_manager.is_server_running(self.server_name):
+                    if self.server_startup.is_server_running(self.server_name):
                         self.update_player_count()
                     else:
                         self.update_player_list([])
@@ -904,7 +895,7 @@ class ServerMonitorWindow:
         if self._history_index >= len(self._command_history):
             self._history_index = None
             if hasattr(self, "command_entry") and self.command_entry:
-                self.command_entry.delete(0, "end")
+                self.command_entry.clear()
         else:
             self._update_command_entry_from_history()
 
@@ -912,7 +903,7 @@ class ServerMonitorWindow:
         """根據目前 history_index 更新輸入框"""
         if self._history_index is not None and 0 <= self._history_index < len(self._command_history):
             cmd = self._command_history[self._history_index]
-            self.command_entry.delete(0, "end")
+            self.command_entry.clear()
             self.command_entry.insert(0, cmd)
 
     def send_command(self, _event=None) -> None:
@@ -922,15 +913,15 @@ class ServerMonitorWindow:
         Args:
             _event: 事件物件，供按鍵綁定使用。
         """
-        command = self.command_entry.get().strip()
+        command = self.command_entry.text().strip()
         if not command:
             return
         if not self._command_history or self._command_history[-1] != command:
             self._command_history.append(command)
         self._history_index = None
-        self.command_entry.delete(0, "end")
+        self.command_entry.clear()
         self.add_console_message(f"> {command}")
-        success = self.server_manager.send_command(self.server_name, command)
+        success = self.server_startup.send_command(self.server_name, command)
         if success:
             self.add_console_message(f"✅ 命令已發送: {command}")
             if command.lower() in ["stop", "end", "exit"]:
@@ -955,6 +946,11 @@ class ServerMonitorWindow:
             self.window.destroy()
         self.window = None
 
+    def _handle_window_close_event(self, event) -> None:
+        """內部使用的 closeEvent 處理函式，確保回傳 None 以符合型別檢查。"""
+        self.on_closing()
+        event.accept()
+
     def show(self) -> None:
         """顯示視窗"""
         if not self.window:
@@ -972,8 +968,8 @@ class ServerMonitorWindow:
                 return
             self._server_ready_notified = True
             properties = (
-                self.server_manager.load_server_properties(self.server_name)
-                if hasattr(self.server_manager, "load_server_properties")
+                self.server_startup.repository.load_server_properties(self.server_name)
+                if hasattr(self.server_startup.repository, "load_server_properties")
                 else {}
             )
             server_ip = properties.get("server-ip", "").strip()

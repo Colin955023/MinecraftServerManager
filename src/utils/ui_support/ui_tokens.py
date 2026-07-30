@@ -6,25 +6,93 @@ UI Token 定義
 
 from typing import Final
 
+from PySide6.QtGui import QColor
+from qfluentwidgets import ThemeColor, themeColor
+
 
 class FontSize:
     """字型大小定義，單位為 pt (points)"""
 
-    TINY: Final[int] = 9
-    SMALL: Final[int] = 10
-    NORMAL: Final[int] = 12
-    SMALL_PLUS: Final[int] = 11
-    MEDIUM: Final[int] = 12
-    NORMAL_PLUS: Final[int] = 13
-    INPUT: Final[int] = 12
-    LARGE: Final[int] = 14
-    HEADING_SMALL: Final[int] = 15
-    HEADING_MEDIUM: Final[int] = 17
-    HEADING_SMALL_PLUS: Final[int] = 17
-    HEADING_LARGE: Final[int] = 18
-    HEADING_XLARGE: Final[int] = 21
-    CONSOLE: Final[int] = 9
-    ICON: Final[int] = 17
+    TINY: Final[int] = 12
+    SMALL: Final[int] = 15
+    NORMAL: Final[int] = 16
+    SMALL_PLUS: Final[int] = 17
+    MEDIUM: Final[int] = 18
+    NORMAL_PLUS: Final[int] = 20
+    INPUT: Final[int] = 18
+    LARGE: Final[int] = 21
+    HEADING_SMALL: Final[int] = 23
+    HEADING_MEDIUM: Final[int] = 26
+    HEADING_SMALL_PLUS: Final[int] = 26
+    HEADING_LARGE: Final[int] = 27
+    HEADING_XLARGE: Final[int] = 32
+    CONSOLE: Final[int] = 14
+    ICON: Final[int] = 26
+
+
+class FluentTokens:
+    """統一管理所有可自訂的設計 Token，自動追蹤主題變更"""
+
+    # 語義化色彩（映射到 Fluent ThemeColor）
+    PRIMARY = "ThemeColor.PRIMARY"
+    SECONDARY = "ThemeColor.SECONDARY"
+    BACKGROUND = "ThemeColor.BACKGROUND"
+    SURFACE = "ThemeColor.SURFACE"
+    TEXT_PRIMARY = "ThemeColor.TEXT_PRIMARY"
+    TEXT_SECONDARY = "ThemeColor.TEXT_SECONDARY"
+    BORDER = "ThemeColor.BORDER"
+    HOVER = "ThemeColor.HOVER"
+    PRESSED = "ThemeColor.PRESSED"
+    DISABLED = "ThemeColor.DISABLED"
+
+    # 尺寸 Token
+    SPACING_XS = 4
+    SPACING_SM = 8
+    SPACING_MD = 12
+    SPACING_LG = 16
+    SPACING_XL = 24
+
+    BORDER_RADIUS_SM = 4
+    BORDER_RADIUS_MD = 6
+    BORDER_RADIUS_LG = 8
+    BORDER_RADIUS_FULL = 999
+
+    FONT_SIZE_SM = 27
+    FONT_SIZE_MD = 32
+    FONT_SIZE_LG = 36
+    FONT_SIZE_XL = 45
+
+    @classmethod
+    def resolve_color(cls, token: str) -> QColor:
+        """
+        解析 Token 為實際 QColor（支援主題切換）
+
+        Args:
+            token (str): 顏色 Token，支援 ThemeColor 前綴。
+
+        Returns:
+            QColor: 對應的 QColor 物件。
+        """
+        if token.startswith("ThemeColor."):
+            color_attr = token.split(".")[1]
+            return themeColor(getattr(ThemeColor, color_attr))
+        return QColor(token)
+
+    @classmethod
+    def qss_value(cls, token: str) -> str:
+        """
+        產生 QSS 可用的色彩值（含主題變數）
+
+        Args:
+            token (str): 顏色 Token，支援 ThemeColor 前綴。
+
+        Returns:
+            str: 對應的 QSS 色彩值，若為 ThemeColor 則回傳 CSS 變數格式。
+        """
+        if token.startswith("ThemeColor."):
+            return f"var({token})"  # qfluentwidgets 支援 CSS 變數
+        color = cls.resolve_color(token)
+        return color.name()
 
 
 class Colors:
@@ -81,6 +149,7 @@ class Colors:
     BG_PRIMARY: Final[tuple[str, str]] = ("#ffffff", "#1e1e1e")
     BG_SECONDARY: Final[tuple[str, str]] = ("#f3f4f6", "#2b2b2b")
     BG_ALERT: Final[tuple[str, str]] = ("#fffbe6", "#2d2a1f")
+    BG_WARNING: Final[tuple[str, str]] = ("#fff7ed", "#2d1f1a")
     BG_CONSOLE: Final[str] = "#000000"
     BG_LISTBOX_LIGHT: Final[str] = "#f8fafc"
     BG_LISTBOX_DARK: Final[str] = "#2b2b2b"
@@ -122,74 +191,83 @@ class Sizes:
     """尺寸定義，單位為 px (pixels)"""
 
     # === 按鈕 ===
-    BUTTON_HEIGHT: Final[int] = 27
-    BUTTON_HEIGHT_MEDIUM: Final[int] = 27
-    BUTTON_HEIGHT_LARGE: Final[int] = 30
-    BUTTON_HEIGHT_SMALL: Final[int] = 21
-    BUTTON_WIDTH_PRIMARY: Final[int] = 105
-    BUTTON_WIDTH_SECONDARY: Final[int] = 90
-    BUTTON_WIDTH_COMPACT: Final[int] = 60
-    BUTTON_WIDTH_SMALL: Final[int] = 75
-    BUTTON_HEIGHT_EXPORT: Final[int] = 20
-    ICON_BUTTON: Final[int] = 15
+    BUTTON_HEIGHT: Final[int] = 42
+    BUTTON_HEIGHT_MEDIUM: Final[int] = 42
+    BUTTON_HEIGHT_LARGE: Final[int] = 46
+    BUTTON_HEIGHT_SMALL: Final[int] = 48
+    BUTTON_WIDTH_PRIMARY: Final[int] = 158
+    BUTTON_WIDTH_SECONDARY: Final[int] = 180
+    BUTTON_WIDTH_COMPACT: Final[int] = 90
+    BUTTON_WIDTH_TOOLBAR: Final[int] = 160
+    BUTTON_WIDTH_SMALL: Final[int] = 113
+    BUTTON_WIDTH_EXPORT: Final[int] = 150
+    BUTTON_HEIGHT_EXPORT: Final[int] = 40
+    ICON_BUTTON: Final[int] = 23
+    DETECT_BUTTON_WIDTH: Final[int] = 220
 
     # === 輸入與選單 ===
-    INPUT_HEIGHT: Final[int] = 24
-    INPUT_WIDTH: Final[int] = 225
+    INPUT_HEIGHT: Final[int] = 36
+    INPUT_WIDTH: Final[int] = 338
     INPUT_FIELD_WIDTH_CHARS: Final[int] = 24
     SPINBOX_WIDTH_CHARS: Final[int] = 11
-    WRAP_LENGTH_MEDIUM: Final[int] = 300
-    WRAP_LENGTH_WIDE: Final[int] = 675
-    DROPDOWN_HEIGHT: Final[int] = 23
-    DROPDOWN_WIDTH: Final[int] = 210
-    SERVER_PROPERTY_TEXT_INPUT_WIDTH: Final[int] = 315
-    DROPDOWN_COMPACT_WIDTH: Final[int] = 150
-    DROPDOWN_FILTER_WIDTH: Final[int] = 75
-    DROPDOWN_MAX_HEIGHT: Final[int] = 150
-    DROPDOWN_ITEM_HEIGHT: Final[int] = 23
+    WRAP_LENGTH_MEDIUM: Final[int] = 450
+    WRAP_LENGTH_WIDE: Final[int] = 1013
+    DROPDOWN_HEIGHT: Final[int] = 35
+    DROPDOWN_WIDTH: Final[int] = 315
+    SERVER_PROPERTY_TEXT_INPUT_WIDTH: Final[int] = 473
+    DROPDOWN_COMPACT_WIDTH: Final[int] = 225
+    DROPDOWN_FILTER_WIDTH: Final[int] = 113
+    DROPDOWN_MAX_HEIGHT: Final[int] = 225
+    DROPDOWN_ITEM_HEIGHT: Final[int] = 35
 
     # === TreeView 欄寬 ===
-    SERVER_TREE_COL_NAME: Final[int] = 225
-    SERVER_TREE_COL_VERSION: Final[int] = 57
-    SERVER_TREE_COL_LOADER: Final[int] = 113
-    SERVER_TREE_COL_STATUS: Final[int] = 83
-    SERVER_TREE_COL_BACKUP: Final[int] = 83
-    SERVER_TREE_COL_PATH: Final[int] = 150
+    SERVER_TREE_COL_NAME: Final[int] = 338
+    SERVER_TREE_COL_VERSION: Final[int] = 86
+    SERVER_TREE_COL_LOADER: Final[int] = 170
+    SERVER_TREE_COL_STATUS: Final[int] = 125
+    SERVER_TREE_COL_BACKUP: Final[int] = 125
+    SERVER_TREE_COL_PATH: Final[int] = 225
 
     # === 視窗對話框版面 ===
-    DIALOG_SMALL_WIDTH: Final[int] = 300
-    DIALOG_SMALL_HEIGHT: Final[int] = 150
-    DIALOG_MEDIUM_WIDTH: Final[int] = 450
-    DIALOG_MEDIUM_HEIGHT: Final[int] = 300
-    DIALOG_PROGRESS_WIDTH: Final[int] = 600
-    DIALOG_PROGRESS_HEIGHT: Final[int] = 270
-    DIALOG_LARGE_WIDTH: Final[int] = 600
-    DIALOG_LARGE_HEIGHT: Final[int] = 450
-    DIALOG_PREFERENCES_WIDTH: Final[int] = 480
-    DIALOG_PREFERENCES_HEIGHT: Final[int] = 540
-    DIALOG_FIRST_RUN_WIDTH: Final[int] = 360
-    DIALOG_FIRST_RUN_HEIGHT: Final[int] = 188
-    DIALOG_IMPORT_WIDTH: Final[int] = 338
-    DIALOG_IMPORT_HEIGHT: Final[int] = 210
-    DIALOG_ABOUT_WIDTH: Final[int] = 450
-    DIALOG_ABOUT_HEIGHT: Final[int] = 488
-    SERVER_PROPERTIES_DIALOG_WIDTH: Final[int] = 900
-    SERVER_PROPERTIES_DIALOG_HEIGHT: Final[int] = 600
-    SERVER_PROPERTIES_DIALOG_MIN_WIDTH: Final[int] = 900
-    SERVER_PROPERTIES_DIALOG_MIN_HEIGHT: Final[int] = 600
-    CONSOLE_PANEL_HEIGHT: Final[int] = 180
-    CONSOLE_OUTPUT_HEIGHT: Final[int] = 240
-    PREVIEW_TEXTBOX_HEIGHT: Final[int] = 225
+    DIALOG_SMALL_WIDTH: Final[int] = 450
+    DIALOG_SMALL_HEIGHT: Final[int] = 225
+    DIALOG_MEDIUM_WIDTH: Final[int] = 675
+    DIALOG_MEDIUM_HEIGHT: Final[int] = 450
+    DIALOG_PROGRESS_WIDTH: Final[int] = 750
+    DIALOG_PROGRESS_HEIGHT: Final[int] = 360
+    DIALOG_LARGE_WIDTH: Final[int] = 900
+    DIALOG_LARGE_HEIGHT: Final[int] = 675
+    DIALOG_PREFERENCES_WIDTH: Final[int] = 720
+    DIALOG_PREFERENCES_HEIGHT: Final[int] = 810
+    DIALOG_FIRST_RUN_WIDTH: Final[int] = 540
+    DIALOG_FIRST_RUN_HEIGHT: Final[int] = 282
+    DIALOG_IMPORT_WIDTH: Final[int] = 507
+    DIALOG_IMPORT_HEIGHT: Final[int] = 315
+    DIALOG_ABOUT_WIDTH: Final[int] = 675
+    DIALOG_ABOUT_HEIGHT: Final[int] = 732
+    SERVER_PROPERTIES_DIALOG_WIDTH: Final[int] = 1200
+    SERVER_PROPERTIES_DIALOG_HEIGHT: Final[int] = 800
+    SERVER_PROPERTIES_DIALOG_MIN_WIDTH: Final[int] = 1200
+    SERVER_PROPERTIES_DIALOG_MIN_HEIGHT: Final[int] = 800
+    CONSOLE_PANEL_HEIGHT: Final[int] = 270
+    CONSOLE_OUTPUT_HEIGHT: Final[int] = 360
+    PREVIEW_TEXTBOX_HEIGHT: Final[int] = 338
     TREEVIEW_VISIBLE_ROWS: Final[int] = 12
     PLAYER_LIST_VISIBLE_ROWS: Final[int] = 5
-    MOD_EXPORT_SAVE_BUTTON_WIDTH: Final[int] = 135
-    MOD_EXPORT_CLOSE_BUTTON_WIDTH: Final[int] = 113
-    MOD_PROGRESS_HEIGHT: Final[int] = 15
-    ONLINE_HINT_WRAP_LENGTH: Final[int] = 735
-    ONLINE_VERSION_HINT_WRAP_LENGTH: Final[int] = 570
-    SERVER_PROPERTY_BOOL_WIDTH: Final[int] = 270
-    SERVER_PROPERTY_BOOL_HEIGHT: Final[int] = 54
-    PREFERENCES_RESET_BUTTON_HEIGHT: Final[int] = 16
+    MOD_EXPORT_SAVE_BUTTON_WIDTH: Final[int] = 203
+    MOD_EXPORT_CLOSE_BUTTON_WIDTH: Final[int] = 170
+    MOD_PROGRESS_HEIGHT: Final[int] = 23
+    ONLINE_HINT_WRAP_LENGTH: Final[int] = 1103
+    ONLINE_VERSION_HINT_WRAP_LENGTH: Final[int] = 855
+    SERVER_PROPERTY_BOOL_WIDTH: Final[int] = 405
+    SERVER_PROPERTY_BOOL_HEIGHT: Final[int] = 81
+    PREFERENCES_RESET_BUTTON_HEIGHT: Final[int] = 48
     CARD_CORNER_RADIUS: Final[int] = 6
     INPUT_CORNER_RADIUS: Final[int] = 3
-    APP_HEADER_HEIGHT: Final[int] = 45
+    APP_HEADER_HEIGHT: Final[int] = 68
+    FLUENT_BUTTON_HEIGHT: Final[int] = 59
+    RELOAD_BUTTON_WIDTH: Final[int] = 108
+    FORM_LABEL_WIDTH: Final[int] = 215
+    SIDEBAR_SPACER_WIDTH: Final[int] = 54
+    PROGRESS_BUTTON_HEIGHT: Final[int] = 57
+    WARNING_AREA_HEIGHT: Final[int] = 63

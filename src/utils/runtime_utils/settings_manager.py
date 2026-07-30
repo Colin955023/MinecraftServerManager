@@ -35,15 +35,6 @@ class WindowPreferences(TypedDict):
     theme_mode: str
 
 
-class UserSettings(TypedDict):
-    """使用者設定的完整資料結構。"""
-
-    servers_root: str
-    auto_update_enabled: bool
-    first_run_completed: bool
-    window_preferences: WindowPreferences
-
-
 DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
     "remember_size_position": True,
     "main_window": {"width": 1350, "height": 820, "x": None, "y": None, "maximized": False},
@@ -244,17 +235,6 @@ class SettingsManager:
             if immediate_save:
                 self._save_settings(self._settings)
 
-    def update_batch(self, updates: dict) -> None:
-        """
-        批次更新多個設定值並一次性儲存。
-
-        Args:
-            updates: 要合併寫入的設定更新項目。
-        """
-        with self._lock:
-            self._settings.update(cast(dict[str, Any], _clone_settings_payload(updates)))
-            self._save_settings(self._settings)
-
     def _update_window_pref(self, key: str, value: Any) -> None:
         """更新視窗偏好中的單一鍵值。"""
         prefs: dict[str, Any] = dict(self.get_window_preferences())
@@ -302,9 +282,6 @@ class SettingsManager:
         except OSError as exc:
             raise ConfigurationError(f"無法建立伺服器資料夾： {servers_root}") from exc
         return servers_root
-
-    def get_validated_servers_root(self, *, create: bool = False) -> str:
-        return str(self.get_validated_servers_root_path(create=create))
 
     def is_auto_update_enabled(self) -> bool:
         """

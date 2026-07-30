@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...utils import Colors, CustomDropdown, FontManager, FontSize, Sizes, Spacing, TreeUtils
+from ...utils import Colors, CustomDropdown, FontManager, FontSize, QtCore, QtGui, Sizes, Spacing, TreeUtils
 from ...utils.ui_support import qt_widgets as qt
-from .constants import MOD_TOOL_BUTTON_STYLE
+from .constants import MOD_MANAGEMENT_UI_SCALE
 from .presenter_delegate_mixin import PresenterDelegateMixin
 
 
@@ -31,12 +31,13 @@ class OnlineBrowsePresenter(PresenterDelegateMixin):
 
     def create_browse_search(self) -> None:
         """建立線上搜尋區域。"""
+        s = MOD_MANAGEMENT_UI_SCALE
         if not self.browse_tab:
             return
         search_frame = qt.Frame(self.browse_tab)
-        search_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=Spacing.MEDIUM)
-        self.search_var = qt.TextState()
-        self.browse_sort_var = qt.TextState(value="相關性")
+        search_frame.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=int(Spacing.MEDIUM * s))
+        self.search_var = None if not hasattr(qt, "TextState") else qt.TextState()
+        self.browse_sort_var = "相關性" if not hasattr(qt, "TextState") else qt.TextState(value="相關性")
         self.browse_sort_options = {
             "相關性": "relevance",
             "下載量": "downloads",
@@ -51,82 +52,107 @@ class OnlineBrowsePresenter(PresenterDelegateMixin):
             search_command=self.search_online_mods,
             filter_logic=self.online_search_filter,
             placeholder_text="請輸入關鍵字後搜尋，例如 sodium / lithium / worldedit",
-            font=FontManager.get_font(size=FontSize.MEDIUM),
-            width=Sizes.DIALOG_PROGRESS_WIDTH,
-            height=Sizes.INPUT_HEIGHT,
+            font=FontManager.get_font(size=int(FontSize.MEDIUM * s)),
+            width=int(Sizes.DIALOG_PROGRESS_WIDTH * s),
+            height=int(Sizes.INPUT_HEIGHT * s),
         )
-        search_entry.attach(side="left", padx=(Spacing.MEDIUM, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
+        search_entry.attach(
+            side="left", padx=(int(Spacing.MEDIUM * s), int(Spacing.SMALL_PLUS * s)), pady=int(Spacing.MEDIUM * s)
+        )
         sort_dropdown = CustomDropdown(
             search_frame,
             variable=self.browse_sort_var,
             values=list(self.browse_sort_options.keys()),
             command=self.on_online_browse_filters_changed,
-            width=Sizes.DROPDOWN_FILTER_WIDTH,
-            height=Sizes.INPUT_HEIGHT,
+            width=int(90 * s),
+            height=int(Sizes.DROPDOWN_HEIGHT * s),
+            font_size=max(8, int(FontSize.MEDIUM * s)),
         )
-        sort_dropdown.attach(side="left", padx=(0, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
+        sort_dropdown.attach(side="left", padx=(0, int(Spacing.SMALL_PLUS * s)), pady=int(Spacing.MEDIUM * s))
         search_button = qt.Button(
             search_frame,
             text="🔍 搜尋 Modrinth",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s), weight="bold"),
             command=self.search_online_mods,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            width=Sizes.DETECT_BUTTON_WIDTH,
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        search_button.attach(side="left", padx=(0, Spacing.SMALL_PLUS), pady=Spacing.MEDIUM)
+        search_button.configure(
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            border_color=Colors.BORDER_LIGHT,
+        )
+        search_button.attach(side="left", padx=(0, int(Spacing.SMALL_PLUS * s)), pady=int(Spacing.MEDIUM * s))
         install_button = qt.Button(
             search_frame,
             text="➕ 加入安裝清單",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s), weight="bold"),
             command=self.install_online_mod,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            width=Sizes.DETECT_BUTTON_WIDTH,
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        install_button.attach(side="left", pady=Spacing.MEDIUM)
+        install_button.configure(
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            border_color=Colors.BORDER_LIGHT,
+        )
+        install_button.attach(side="left", pady=int(Spacing.MEDIUM * s))
         self.online_queue_button = qt.Button(
             search_frame,
             text="🧺 安裝清單 (0)",
-            font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s), weight="bold"),
             command=self.show_online_install_queue,
-            **MOD_TOOL_BUTTON_STYLE,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
-            height=Sizes.BUTTON_HEIGHT,
+            width=Sizes.DETECT_BUTTON_WIDTH,
+            height=int(Sizes.BUTTON_HEIGHT * s),
         )
-        self.online_queue_button.attach(side="left", padx=(Spacing.SMALL_PLUS, 0), pady=Spacing.MEDIUM)
+        self.online_queue_button.configure(
+            fg_color=Colors.BUTTON_LIGHT,
+            hover_color=Colors.BUTTON_LIGHT_HOVER,
+            text_color=Colors.TEXT_ON_LIGHT,
+            border_color=Colors.BORDER_LIGHT,
+        )
+        self.online_queue_button.attach(
+            side="left", padx=(int(Spacing.SMALL_PLUS * s), 0), pady=int(Spacing.MEDIUM * s)
+        )
         self.browse_filter_label = qt.Label(
             self.browse_tab,
             text="",
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            font=FontManager.get_font(size=int(FontSize.SMALL_PLUS * s)),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=Sizes.ONLINE_HINT_WRAP_LENGTH,
+            wraplength=int(Sizes.ONLINE_HINT_WRAP_LENGTH * s),
         )
-        self.browse_filter_label.attach(fill="x", padx=Spacing.LARGE, pady=(0, Spacing.XS))
+        self.browse_filter_label.attach(fill="x", padx=int(Spacing.LARGE * s), pady=(0, int(Spacing.XS * s)))
         self.browse_results_label = qt.Label(
             self.browse_tab,
             text="",
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            font=FontManager.get_font(size=int(FontSize.SMALL_PLUS * s)),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=Sizes.ONLINE_HINT_WRAP_LENGTH,
+            wraplength=int(Sizes.ONLINE_HINT_WRAP_LENGTH * s),
         )
-        self.browse_results_label.attach(fill="x", padx=Spacing.LARGE, pady=(0, Spacing.TINY))
+        self.browse_results_label.attach(fill="x", padx=int(Spacing.LARGE * s), pady=(0, int(Spacing.TINY * s)))
         self._refresh_online_filter_hint()
         self._refresh_online_results_summary()
 
     def create_browse_mod_list(self) -> None:
         """建立線上模組列表。"""
+        s = MOD_MANAGEMENT_UI_SCALE
         if not self.browse_tab:
             return
         list_frame = qt.Frame(self.browse_tab)
-        list_frame.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=(0, Spacing.SMALL_PLUS))
+        list_frame.attach(
+            fill="both", expand=True, padx=int(Spacing.SMALL_PLUS * s), pady=(0, int(Spacing.SMALL_PLUS * s))
+        )
         tree_container = qt.Frame(list_frame)
-        tree_container.attach(fill="both", expand=True, padx=Spacing.SMALL_PLUS, pady=Spacing.SMALL_PLUS)
-        columns = ("name", "author", "downloads", "description", "platform", "environments")
+        tree_container.attach(
+            fill="both", expand=True, padx=int(Spacing.SMALL_PLUS * s), pady=int(Spacing.SMALL_PLUS * s)
+        )
+        columns = ("name", "author", "downloads", "platform", "environments", "description")
         self.browse_tree = qt.Treeview(
             tree_container,
             columns=columns,
@@ -136,25 +162,24 @@ class OnlineBrowsePresenter(PresenterDelegateMixin):
         column_config = {
             "name": ("模組名稱", 110),
             "author": ("作者", 60),
-            "downloads": ("下載數", 50),
+            "downloads": ("下載數", 55),
+            "platform": ("平台", 50),
+            "environments": ("支援環境", 80),
             "description": ("描述", 230),
-            "platform": ("平台", 45),
-            "environments": ("支援環境", 75),
         }
+        header_font = FontManager.get_font(size=int(FontSize.NORMAL * s), weight="bold")
+        header_fm = QtGui.QFontMetrics(header_font) if header_font else None
         for col, (text, width) in column_config.items():
             self.browse_tree.heading(col, text=text, anchor="w")
             is_stretch = col == "description"
-            self.browse_tree.column(
-                col, width=width, minwidth=width if is_stretch else 30, anchor="w", stretch=is_stretch
+            min_width = (
+                width if is_stretch else max(30, (header_fm.horizontalAdvance(text) + 20) if header_fm else width)
             )
-        v_scrollbar = qt.Scrollbar(tree_container, orient="vertical", command=self.browse_tree.yview)
-        h_scrollbar = qt.Scrollbar(tree_container, orient="horizontal", command=self.browse_tree.xview)
-        self.browse_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-        self.browse_tree.attach_matrix(row=0, column=0, sticky="nsew")
-        v_scrollbar.attach_matrix(row=0, column=1, sticky="ns")
-        h_scrollbar.attach_matrix(row=1, column=0, sticky="ew")
-        tree_container.set_grid_row_stretch(0, weight=1)
-        tree_container.set_grid_column_stretch(0, weight=1)
+            self.browse_tree.column(col, width=width, minwidth=min_width, anchor="w", stretch=is_stretch)
+        # 使用內建捲軸，僅在內容超出時顯示
+        self.browse_tree.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.browse_tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.browse_tree.attach(fill="both", expand=True)
         TreeUtils.bind_treeview_header_auto_fit(
             self.browse_tree,
             on_row_double_click=self.install_online_mod,

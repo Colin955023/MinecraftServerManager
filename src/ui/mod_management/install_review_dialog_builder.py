@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...models import LocalUpdateReviewEntry, PendingInstallReviewEntry
-from ...utils import Colors, DialogUtils, FontManager, FontSize, Sizes, Spacing, TreeUtils
+from ...utils import Colors, FontManager, FontSize, Sizes, Spacing, TreeUtils
 from ...utils.ui_support import qt_widgets as qt
+from .constants import MOD_MANAGEMENT_UI_SCALE
 from .presenter_delegate_mixin import PresenterDelegateMixin
 
 
@@ -40,8 +41,9 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             設定完成的 qt.Frame 實例。
         """
+        s = MOD_MANAGEMENT_UI_SCALE
         main_frame = qt.Frame(dialog)
-        main_frame.attach(fill="both", expand=True, padx=Spacing.LARGE, pady=Spacing.LARGE)
+        main_frame.attach(fill="both", expand=True, padx=int(Spacing.LARGE * s), pady=int(Spacing.LARGE * s))
         return main_frame
 
     @staticmethod
@@ -55,13 +57,14 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             建立完成的 qt.TextBox 實例，已設定為唯讀模式。
         """
+        s = MOD_MANAGEMENT_UI_SCALE
         summary_box = qt.TextBox(
             parent,
-            height=height,
-            font=FontManager.get_font(size=FontSize.NORMAL_PLUS),
+            height=int(height * s),
+            font=FontManager.get_font(size=int(FontSize.NORMAL_PLUS * s)),
             wrap="word",
         )
-        summary_box.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        summary_box.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.MEDIUM * s)))
         summary_box.setReadOnly(True)
         return summary_box
 
@@ -75,28 +78,32 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             包含概覽標籤與樹狀視圖容器的元組。
         """
+        s = MOD_MANAGEMENT_UI_SCALE
         overview_label = qt.Label(
             main_frame,
             text="",
-            font=FontManager.get_font(size=FontSize.NORMAL),
+            font=FontManager.get_font(size=int(FontSize.NORMAL * s)),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=wraplength,
+            wraplength=int(wraplength * s),
         )
-        overview_label.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        overview_label.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.TINY * s)))
         tree_container = qt.Frame(main_frame)
-        tree_container.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        tree_container.attach(fill="both", expand=True, padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.MEDIUM * s)))
         return overview_label, tree_container
 
     @staticmethod
     def _create_dialog_title(parent: Any, heading: str) -> qt.Label:
+        s = MOD_MANAGEMENT_UI_SCALE
         title_label = qt.Label(
             parent,
             text=heading,
-            font=FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"),
+            font=FontManager.get_font(size=int(FontSize.HEADING_LARGE * s), weight="bold"),
         )
-        title_label.attach(anchor="w", padx=Spacing.MEDIUM, pady=(Spacing.MEDIUM, Spacing.SMALL))
+        title_label.attach(
+            anchor="w", padx=int(Spacing.MEDIUM * s), pady=(int(Spacing.MEDIUM * s), int(Spacing.SMALL * s))
+        )
         return title_label
 
     def create_review_dialog_shell(
@@ -130,34 +137,26 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             包含對話框及其共用 UI 元件的 ReviewDialogShell 實例。
         """
-        dialog = DialogUtils.create_toplevel_dialog(
-            self.parent,
-            dialog_title,
-            width=width,
-            height=height,
-            make_modal=True,
-            bind_icon=True,
-            center_on_parent=True,
-            delay_ms=250,
-            min_width=min_width,
-            min_height=min_height,
-        )
+        s = MOD_MANAGEMENT_UI_SCALE
+        dialog = qt.PlainWindow(title=dialog_title)
+        dialog.resize(int(width * s), int(height * s))
+        dialog.setMinimumSize(int(min_width * s), int(min_height * s))
         main_frame = self._create_dialog_main_frame(dialog)
         self._create_dialog_title(main_frame, heading)
         subtitle = qt.Label(
             main_frame,
             text=subtitle_text,
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            font=FontManager.get_font(size=int(FontSize.SMALL_PLUS * s)),
             text_color=Colors.TEXT_SECONDARY,
             justify="left",
             anchor="w",
-            wraplength=subtitle_wraplength,
+            wraplength=int(subtitle_wraplength * s),
         )
-        subtitle.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.TINY))
+        subtitle.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.TINY * s)))
         overview_label, tree_container = self.create_review_shared_ui(main_frame, overview_wraplength)
         summary_box = self.create_review_summary_box(main_frame, height=summary_height)
         button_frame = qt.Frame(main_frame, fg_color="transparent")
-        button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        button_frame.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.SMALL * s)))
         return ReviewDialogShell(
             dialog=dialog,
             main_frame=main_frame,
@@ -199,30 +198,31 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         Returns:
             建立完成的 qt.Treeview 實例，已配置好自動欄寬調整與垂直捲軸。
         """
+        s = MOD_MANAGEMENT_UI_SCALE
         tree = qt.Treeview(
             tree_container,
             columns=columns,
             show="tree headings",
-            height=Spacing.MEDIUM,
+            height=int(Spacing.MEDIUM * s),
         )
         tree.setRootIsDecorated(True)
         tree.setItemsExpandable(True)
         tree.heading("#0", text=tree_heading)
         tree.column(
             "#0",
-            width=tree_column_width,
-            minwidth=tree_column_minwidth,
+            width=int(tree_column_width * s),
+            minwidth=int(tree_column_minwidth * s),
             anchor="w",
             stretch=tree_column_stretch,
         )
         for column_name, text, width, minwidth, stretch, anchor in column_specs:
             tree.heading(column_name, text=text, anchor="w")
-            tree.column(column_name, width=width, minwidth=minwidth, anchor=anchor, stretch=stretch)
+            tree.column(column_name, width=int(width * s), minwidth=int(minwidth * s), anchor=anchor, stretch=stretch)
         TreeUtils.bind_treeview_header_auto_fit(
             tree,
             include_tree_column=include_tree_column,
-            heading_font=FontManager.get_font(size=FontSize.LARGE, weight="bold"),
-            body_font=FontManager.get_font(size=FontSize.INPUT),
+            heading_font=FontManager.get_font(size=int(FontSize.LARGE * s), weight="bold"),
+            body_font=FontManager.get_font(size=int(FontSize.INPUT * s)),
             stretch_columns=stretch_columns,
         )
         scrollbar = qt.Scrollbar(tree_container, orient="vertical", command=tree.yview)
@@ -244,50 +244,45 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
          Raises:
             TypeError: 當 review_entry 的類型不受支援時引發。
         """
+        s = MOD_MANAGEMENT_UI_SCALE
         if isinstance(review_entry, PendingInstallReviewEntry):
             title = "安裝項目 Review"
             heading = "待安裝模組詳細資訊"
             body = self._format_pending_install_review_text(review_entry)
-            project_page_url = self._resolve_pending_install_review_project_page_url(review_entry)
+            project_page_url = self._resolve_review_project_page_url(review_entry, mode="online")
         elif isinstance(review_entry, LocalUpdateReviewEntry):
             title = "本地模組更新 Review"
             heading = "本地模組更新詳細資訊"
             body = self._format_local_update_review_text(review_entry)
-            project_page_url = self._resolve_local_update_review_project_page_url(review_entry)
+            project_page_url = self._resolve_review_project_page_url(review_entry, mode="local")
         else:
             raise TypeError(f"不支援的 review entry 類型: {type(review_entry).__name__}")
-        dialog = DialogUtils.create_toplevel_dialog(
-            self.parent,
-            title,
-            width=Sizes.DIALOG_MEDIUM_WIDTH,
-            height=Sizes.DIALOG_MEDIUM_HEIGHT,
-            make_modal=True,
-            bind_icon=True,
-            center_on_parent=True,
-            delay_ms=150,
-            min_width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH + Sizes.CONSOLE_PANEL_HEIGHT,
-            min_height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT + Sizes.CONSOLE_PANEL_HEIGHT + Sizes.BUTTON_WIDTH_COMPACT,
+        dialog = qt.PlainWindow(title=title)
+        dialog.resize(int(Sizes.DIALOG_MEDIUM_WIDTH * s), int(Sizes.DIALOG_MEDIUM_HEIGHT * s))
+        dialog.setMinimumSize(
+            int((Sizes.SERVER_PROPERTIES_DIALOG_WIDTH + Sizes.CONSOLE_PANEL_HEIGHT) * s),
+            int((Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT + Sizes.CONSOLE_PANEL_HEIGHT + Sizes.BUTTON_WIDTH_COMPACT) * s),
         )
         main_frame = self._create_dialog_main_frame(dialog)
         self._create_dialog_title(main_frame, heading)
         summary_box = qt.TextBox(
             main_frame,
-            font=FontManager.get_font(size=FontSize.SMALL_PLUS),
+            font=FontManager.get_font(size=int(FontSize.SMALL_PLUS * s)),
             wrap="word",
         )
-        summary_box.attach(fill="both", expand=True, padx=Spacing.MEDIUM, pady=(0, Spacing.MEDIUM))
+        summary_box.attach(fill="both", expand=True, padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.MEDIUM * s)))
         summary_box.insert("1.0", body)
         summary_box.setReadOnly(True)
         button_frame = qt.Frame(main_frame, fg_color="transparent")
-        button_frame.attach(fill="x", padx=Spacing.MEDIUM, pady=(0, Spacing.SMALL))
+        button_frame.attach(fill="x", padx=int(Spacing.MEDIUM * s), pady=(0, int(Spacing.SMALL * s)))
         project_button = qt.Button(
             button_frame,
             text="開啟專案頁面",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s)),
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             text_color=Colors.TEXT_ON_DARK,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * s),
             command=lambda: self._open_project_page(project_page_url, dialog),
             state="normal" if project_page_url else "disabled",
         )
@@ -295,21 +290,14 @@ class InstallReviewDialogBuilder(PresenterDelegateMixin):
         close_button = qt.Button(
             button_frame,
             text="關閉",
-            font=FontManager.get_font(size=FontSize.LARGE),
+            font=FontManager.get_font(size=int(FontSize.LARGE * s)),
             fg_color=Colors.BUTTON_INFO,
             hover_color=Colors.BUTTON_INFO_HOVER,
             text_color=Colors.TEXT_ON_DARK,
-            width=Sizes.BUTTON_WIDTH_COMPACT,
+            width=int(Sizes.BUTTON_WIDTH_COMPACT * s),
             command=dialog.destroy,
         )
         close_button.attach(side="right")
-        DialogUtils.schedule_toplevel_layout_refresh(
-            dialog,
-            min_width=Sizes.SERVER_PROPERTIES_DIALOG_WIDTH + Sizes.CONSOLE_PANEL_HEIGHT,
-            min_height=Sizes.SERVER_PROPERTIES_DIALOG_HEIGHT + Sizes.CONSOLE_PANEL_HEIGHT + Sizes.BUTTON_WIDTH_COMPACT,
-            parent=self.parent,
-            preserve_current_size=False,
-        )
         return dialog
 
 

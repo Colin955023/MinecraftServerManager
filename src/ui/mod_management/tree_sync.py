@@ -14,6 +14,7 @@ from ...utils import (
     UIUtils,
     compute_adaptive_pool_limit,
     compute_exponential_moving_average,
+    is_qobject_alive,
 )
 from ...utils.ui_support import qt_widgets as qt
 from .constants import logger
@@ -99,9 +100,9 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             str(getattr(mod, "name", "未知模組") or "未知模組"),
             str(getattr(mod, "author", "?") or "?"),
             f"{downloads:,}" if downloads > 0 else "N/A",
-            self._format_online_result_description(mod),
             str(getattr(mod, "source", "modrinth") or "modrinth").title(),
             self._format_online_environment_text(mod),
+            self._format_online_result_description(mod),
         )
 
     def _clear_online_mods(self) -> None:
@@ -164,7 +165,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     def _purge_orphan_online_tree_items(self, expected_item_ids: set[str]) -> None:
         """刪除線上瀏覽 Treeview 中不屬於目前資料的孤兒列。"""
         tree = self.browse_tree
-        if not tree or not tree.is_alive():
+        if not tree or not is_qobject_alive(tree):
             return
         for item_id in list(tree.get_children("")):
             if item_id in expected_item_ids:
@@ -191,7 +192,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         """重新整理線上模組列表（差異更新，避免整棵重建）。"""
         self._refresh_online_results_summary()
         tree = self.browse_tree
-        if not tree or not tree.is_alive():
+        if not tree or not is_qobject_alive(tree):
             return
         self._cancel_online_refresh_job()
         self._online_refresh_token += 1
@@ -240,7 +241,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
                 except Exception as e:
                     logger.debug(f"更新線上列失敗 row_key={row_key}: {e}", "ModManagement")
                     with contextlib.suppress(Exception):
-                        tree.delete(row_key)
+                        tree.delete(item_id)
             pending_insert.append((row_key, values, tags))
 
         expected_item_ids = set(mod_order)
@@ -249,10 +250,10 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
 
         def _finalize_online() -> None:
             try:
-                if tree and tree.is_alive():
+                if tree and is_qobject_alive(tree):
                     for order_index, row_key in enumerate(mod_order):
                         if tree.exists(row_key):
-                            tree.move(row_key, "", order_index)
+                            tree.move_item(row_key, order_index)
                     TreeUtils.refresh_treeview_alternating_rows(tree)
             except Exception as e:
                 logger.debug(f"重排線上 mods 失敗: {e}", "ModManagement")
@@ -269,7 +270,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             is_refresh_token_valid=lambda: refresh_token == self._online_refresh_token,
             acquire_recycled=lambda _entry: None,
             update_recycled=lambda _item_id, _entry: None,
-            insert_new=lambda _idx, entry: tree.insert("", "end", iid=entry[0], values=entry[1], tags=entry[2]),
+            insert_new=lambda _idx, entry: tree.insert(iid=entry[0], values=entry[1], tags=entry[2]),
             set_mapping=lambda _key, _item_id: None,
             mapping_get=lambda key: key if tree.exists(key) else None,
             get_key=lambda entry: entry[0],
@@ -278,7 +279,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             _get_rows=lambda key: mod_rows.get(key),
             finalize_cb=_finalize_online,
             set_refresh_job=lambda v: setattr(self, "_online_refresh_job", v),
-            move_item=lambda item_id, idx: tree.move(item_id, "", idx),
+            move_item=lambda item_id, idx: tree.move_item(item_id, idx),
             logger_name="ModManagement",
         )
         if pending_insert:
@@ -312,7 +313,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         return local_name or enhanced_name
 
     def _sync_local_tree_state(self) -> None:
-        """把 legacy frame 屬性同步回 LocalTreeVirtualizationState。"""
+        """把 legacy frame 屬性同步回 TreeVirtualizationState。"""
         state = getattr(self, "local_tree_state", None)
         if state is not None:
             state.capture_from_frame(self)
@@ -341,7 +342,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
                 self._local_recycle_drops += 1
                 with contextlib.suppress(Exception):
                     if self.local_tree.exists(stale_id):
-                        self.local_tree.delete(stale_id)
+                        self.local_tree.delete(item_id)
                 self._maybe_log_local_recycle_stats()
             self._sync_local_tree_state()
         except Exception as e:
@@ -462,7 +463,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
         ]
         if selected_items:
             with contextlib.suppress(Exception):
-                self.local_tree.selection_set(selected_items)
+                self.local_tree.selection_set(*selected_items)
                 self.local_tree.see(selected_items[0])
 
     def _finalize_local_refresh(
@@ -486,7 +487,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     def _purge_orphan_local_tree_items(self, expected_item_ids: set[str]) -> None:
         """刪除 Treeview 中不屬於目前映射表的孤兒列，避免重複顯示。"""
         tree = self.local_tree
-        if not tree or not tree.is_alive():
+        if not tree or not is_qobject_alive(tree):
             return
         recycled_pool = set(self._local_recycled_item_ids)
         active_children = list(tree.get_children(""))
@@ -511,7 +512,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
     ) -> None:
         """以差異更新本地模組 Treeview，避免整棵重建。"""
         tree = self.local_tree
-        if not tree or not tree.is_alive():
+        if not tree or not is_qobject_alive(tree):
             self._set_local_tree_render_lock(False)
             return
         for mod_id, stale_item_id in list(self._local_item_by_mod_id.items()):
@@ -544,7 +545,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
 
         def _update_recycled(item_id: str, entry: tuple) -> None:
             tree.item(item_id, values=entry[1], tags=entry[2])
-            tree.reattach(item_id, "", "end")
+            tree.reattach(item_id)
 
         def _finalize_local() -> None:
             self._purge_orphan_local_tree_items(
@@ -561,7 +562,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             is_refresh_token_valid=lambda: refresh_token == self._local_refresh_token,
             acquire_recycled=lambda _entry: self._acquire_recycled_local_item(),
             update_recycled=_update_recycled,
-            insert_new=lambda _idx, entry: tree.insert("", "end", values=entry[1], tags=entry[2]),
+            insert_new=lambda _idx, entry: tree.insert(values=entry[1], tags=entry[2]),
             set_mapping=lambda key, item_id: self._local_item_by_mod_id.__setitem__(key, item_id),
             mapping_get=lambda key: self._local_item_by_mod_id.get(key),
             get_key=lambda entry: entry[0],
@@ -570,7 +571,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             _get_rows=lambda key: mod_rows.get(key),
             finalize_cb=_finalize_local,
             set_refresh_job=lambda v: setattr(self, "_local_refresh_job", v),
-            move_item=lambda item_id, idx: tree.move(item_id, "", idx),
+            move_item=lambda item_id, idx: tree.move_item(item_id, idx),
             logger_name="ModManagement",
         )
         if pending_insert:
@@ -580,7 +581,7 @@ class ModManagementTreeSyncMixin(ModManagementRuntimeBase):
             for order_index, mod_id in enumerate(mod_order):
                 item_id = self._local_item_by_mod_id.get(mod_id)
                 if item_id:
-                    tree.move(item_id, "", order_index)
+                    tree.move_item(item_id, order_index)
                     rows_snapshot[mod_id] = mod_rows[mod_id]
             expected_item_ids = {
                 item_id for mod_id in mod_order for item_id in [self._local_item_by_mod_id.get(mod_id)] if item_id
