@@ -14,7 +14,6 @@ import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibil
 import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
 import src.ui.mod_search_service.modrinth_service as mod_search_provider_module
 import src.utils as utils_module
-from src.models import OnlineModVersion
 
 
 def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
@@ -64,7 +63,7 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
 def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
-        version=OnlineModVersion(
+        version=models_module.OnlineModVersion(
             version_id="ver123",
             version_number="1.0.0",
             display_name="1.0.0",
