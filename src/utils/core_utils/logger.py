@@ -1,4 +1,5 @@
-"""日誌工具模組
+"""
+日誌工具模組
 提供統一的日誌記錄功能 (使用標準 logging 庫替代 loguru 以減少依賴與體積)
 """
 
@@ -19,7 +20,8 @@ class LoguruShim:
         self.extra = extra or {"component": "Global"}
 
     def bind(self, **kwargs):
-        """回傳綁定額外上下文的 logger 包裝。
+        """
+        回傳綁定額外上下文的 logger 包裝。
 
         Args:
             **kwargs: 要合併的額外上下文。
@@ -63,7 +65,8 @@ class LoguruShim:
     critical = partialmethod(_log, logging.CRITICAL)
 
     def exception(self, msg, *args, **kwargs):
-        """以 error 等級記錄例外並自動帶入 exc_info。
+        """
+        以 error 等級記錄例外並自動帶入 exc_info。
 
         Args:
             msg: 日誌訊息。

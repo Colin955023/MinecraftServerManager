@@ -17,7 +17,8 @@ def resolve_dependency_reference(
     get_mod_version_details: Callable[[str], tuple[str, OnlineModVersion | None]],
     fetch_project_name: Callable[[str], str | None],
 ) -> ResolvedDependencyReference:
-    """解析單一依賴項目，統一 project id / version id 回填流程。
+    """
+    解析單一依賴項目，統一 project id / version id 回填流程。
 
     Args:
         dependency: 原始依賴資料。

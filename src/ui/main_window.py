@@ -1,4 +1,5 @@
-"""主視窗
+"""
+主視窗
 Minecraft 伺服器管理器的主要使用者介面
 本模組定義 Minecraft 伺服器管理器的主視窗。
 """
@@ -14,14 +15,25 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from ..app_info import APP_VERSION, GITHUB_OWNER, GITHUB_REPO
 from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
 from ..models import ServerConfig
 from ..utils import (
+    APP_VERSION,
+    GITHUB_OWNER,
+    GITHUB_REPO,
     Colors,
+    DialogUtils,
+    FluentPushButton,
+    FontManager,
     FontSize,
+    IconUtils,
     JavaUtils,
+    NativeQtStyle,
     PathUtils,
+    QtCore,
+    QtGui,
+    QtUpdateCheckerInteraction,
+    QtWidgets,
     RuntimePaths,
     ServerCommands,
     ServerDetectionUtils,
@@ -30,34 +42,25 @@ from ..utils import (
     Spacing,
     SubprocessUtils,
     SystemUtils,
+    TaskUtils,
     UIUtils,
     UpdateChecker,
     WindowManager,
     get_logger,
     get_settings_manager,
-)
-from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.fluent import FluentPushButton
-from ..utils.ui_support.qt_runtime import (
-    QtCore,
-    QtGui,
-    QtWidgets,
+    initialize_ui_theme,
     install_open_url_click,
     is_qobject_alive,
+    resolve_color,
     show_window,
 )
+from ..utils.ui_support import qt_widgets as qt
 from . import (
     CreateServerFrame,
-    DialogUtils,
-    FontManager,
-    IconUtils,
     ManageServerFrame,
     ModManagementFrame,
-    QtUpdateCheckerInteraction,
-    TaskUtils,
     WindowPreferencesDialog,
 )
-from .ui_config import NativeQtStyle, initialize_ui_theme, resolve_color
 
 logger = get_logger().bind(component="MainWindow")
 
@@ -96,7 +99,8 @@ class MinecraftServerManager:
     """Minecraft 伺服器管理器主視窗類別"""
 
     def set_servers_root(self, new_root: str | None = None) -> str:
-        """取得或設定伺服器根目錄。
+        """
+        取得或設定伺服器根目錄。
 
         Args:
             new_root: 要設定的新根目錄；未提供時會提示使用者選擇。
@@ -521,7 +525,8 @@ class MinecraftServerManager:
         self.mod_frame = None
 
     def create_sidebar(self, parent) -> None:
-        """建立單一原生 Qt 側欄，完整/迷你模式共用。
+        """
+        建立單一原生 Qt 側欄，完整/迷你模式共用。
 
         Args:
             parent: 承載側欄的 Qt 容器。
@@ -564,7 +569,8 @@ class MinecraftServerManager:
             logger.exception(f"建立側邊欄底部資訊失敗: {e}")
 
     def create_nav_button(self, parent, icon, title, description, command, key) -> QtWidgets.QFrame:
-        """建立導航按鈕。
+        """
+        建立導航按鈕。
 
         Args:
             parent: 父容器。
@@ -619,7 +625,8 @@ class MinecraftServerManager:
         return NativeQtStyle.nav_button(active=active, mini=mini)
 
     def set_active_nav_button(self, key: str) -> None:
-        """設定活動導航按鈕。
+        """
+        設定活動導航按鈕。
 
         Args:
             key: 要設為活動狀態的導航鍵。
@@ -692,7 +699,8 @@ class MinecraftServerManager:
         self._apply_sidebar_visibility()
 
     def create_tooltip(self, widget, text) -> None:
-        """為元件建立工具提示。
+        """
+        為元件建立工具提示。
 
         Args:
             widget: 要綁定提示的元件。
@@ -772,7 +780,8 @@ class MinecraftServerManager:
         self.set_active_nav_button("create")
 
     def show_manage_server(self, auto_select=None) -> None:
-        """顯示管理伺服器頁面並強制刷新伺服器列表。
+        """
+        顯示管理伺服器頁面並強制刷新伺服器列表。
 
         Args:
             auto_select: 可選的伺服器名稱，用於刷新後自動選取。
@@ -1123,10 +1132,6 @@ class MinecraftServerManager:
 
         TaskUtils.run_async(_import_task)
 
-    def hide_all_frames(self) -> None:
-        """相容舊流程：頁面切換已改用堆疊版面，不再逐一隱藏 frame。"""
-        return
-
     def open_servers_folder(self) -> None:
         """開啟伺服器資料夾"""
         folder = self.servers_root
@@ -1267,7 +1272,8 @@ class MinecraftServerManager:
         WindowPreferencesDialog(self.root, on_settings_changed)
 
     def on_server_created(self, server_config: ServerConfig) -> None:
-        """伺服器建立完成的回調。
+        """
+        伺服器建立完成的回調。
 
         Args:
             server_config: 新建立的伺服器設定。
@@ -1275,7 +1281,8 @@ class MinecraftServerManager:
         self.initialize_server(server_config)
 
     def initialize_server(self, server_config: ServerConfig) -> None:
-        """啟動伺服器初始化流程。
+        """
+        啟動伺服器初始化流程。
 
         Args:
             server_config: 要初始化的伺服器設定。
@@ -1284,7 +1291,8 @@ class MinecraftServerManager:
         dialog.start_initialization()
 
     def on_server_selected(self, server_name: str) -> None:
-        """伺服器被選中的回調。
+        """
+        伺服器被選中的回調。
 
         Args:
             server_name: 被選取的伺服器名稱。
@@ -1295,7 +1303,8 @@ class MinecraftServerManager:
         logger.info(f"選中伺服器: {server_name}")
 
     def complete_initialization(self, server_config: ServerConfig, init_dialog) -> None:
-        """完成伺服器初始化後的 UI 收尾。
+        """
+        完成伺服器初始化後的 UI 收尾。
 
         Args:
             server_config: 已初始化的伺服器設定。

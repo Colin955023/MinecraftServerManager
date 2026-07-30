@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ..utils import Colors, FontSize, get_logger
-from ..utils.ui_support import qt_widgets as qt
-from .font_manager import FontManager
+from .. import Colors, FontManager, FontSize, get_logger
+from ..ui_support import qt_widgets as qt
 
 logger = get_logger().bind(component="TreeUtils")
 
@@ -96,7 +95,7 @@ class TreeUtils:
             for column_id in candidate_columns:
                 try:
                     width = int(treeview.column(column_id, "width"))
-                except (Exception, TypeError, ValueError) as _:
+                except Exception, TypeError, ValueError:
                     continue
                 columns.append(column_id)
                 widths.append(width)
@@ -108,7 +107,7 @@ class TreeUtils:
                 xview = treeview.xview()
                 if xview and len(xview) >= 1:
                     xview_start = float(xview[0])
-            except (Exception, TypeError, ValueError) as _:
+            except Exception, TypeError, ValueError:
                 xview_start = 0.0
             logical_x = int(x + xview_start * total_width)
             threshold = 5
@@ -133,7 +132,8 @@ class TreeUtils:
     def auto_fit_treeview_column(
         treeview, column_id: str, *, heading_font=None, body_font=None, stretch_columns: set[str] | None = None
     ) -> None:
-        """依標題與內容寬度自動調整 Treeview 欄位大小。
+        """
+        依標題與內容寬度自動調整 Treeview 欄位大小。
 
         Args:
             treeview: 目標 Treeview。
@@ -200,7 +200,8 @@ class TreeUtils:
         body_font=None,
         stretch_columns: set[str] | None = None,
     ) -> None:
-        """綁定 Treeview 標題雙擊事件以自動調整欄位寬度。
+        """
+        綁定 Treeview 標題雙擊事件以自動調整欄位寬度。
 
         Args:
             treeview: 目標 Treeview。
@@ -247,7 +248,8 @@ class TreeUtils:
 
     @staticmethod
     def refresh_treeview_alternating_rows(treeview) -> None:
-        """重新套用 Treeview 交錯列背景，保留既有非 odd/even tag。
+        """
+        重新套用 Treeview 交錯列背景，保留既有非 odd/even tag。
 
         Args:
             treeview: 目標 Treeview。
@@ -274,7 +276,8 @@ class TreeUtils:
 
     @staticmethod
     def apply_listbox_alternating_rows(listbox, *, item_count: int | None = None) -> None:
-        """套用 Listbox 交錯列背景。
+        """
+        套用 Listbox 交錯列背景。
 
         Args:
             listbox: 目標 Listbox。
@@ -298,7 +301,6 @@ class TreeUtils:
                 )
             except (Exception, AttributeError, RuntimeError) as e:
                 logger.debug(f"設定 Listbox 交錯列暫時性失敗 index={index}: {e}", "TreeUtils")
-                break
 
     @staticmethod
     def make_tree_insert_batch(
@@ -321,7 +323,8 @@ class TreeUtils:
         move_item: Callable[[str, int], None] | None = None,
         logger_name: str = "TreeUtils",
     ) -> Callable[[int, str | None], None]:
-        """建立一個可重用的 Treeview 批次插入函式。
+        """
+        建立一個可重用的 Treeview 批次插入函式。
 
         Args:
             tree: 目標 Treeview。

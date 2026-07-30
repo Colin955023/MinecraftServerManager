@@ -46,7 +46,7 @@ def main():
     logging.info("Step 0: 讀取版本資訊...")
     try:
         sys.path.insert(0, str(project_root))
-        from src.app_info import APP_ID, APP_NAME, APP_VERSION
+        from src.utils import APP_ID, APP_NAME, APP_VERSION
     except Exception as e:
         print_error_and_exit(f"無法讀取版本資訊: {e}")
 

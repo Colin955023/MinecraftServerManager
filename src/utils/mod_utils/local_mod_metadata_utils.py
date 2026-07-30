@@ -9,7 +9,8 @@ from .. import normalize_identifier
 
 
 def normalize_filename_stem(value: str | None) -> str:
-    """將檔名正規化為可比對的 stem。
+    """
+    將檔名正規化為可比對的 stem。
 
     Args:
         value: 原始檔名或空值。
@@ -27,7 +28,8 @@ def normalize_filename_stem(value: str | None) -> str:
 
 
 def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -> str:
-    """將檔名正規化為較寬鬆的比對格式。
+    """
+    將檔名正規化為較寬鬆的比對格式。
 
     Args:
         value: 原始檔名或空值。
@@ -46,7 +48,8 @@ def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -
 
 
 def dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
-    """從依賴資訊組出可能的檔名候選。
+    """
+    從依賴資訊組出可能的檔名候選。
 
     Args:
         resolved_dependency: 已解析的依賴資訊。
@@ -64,7 +67,8 @@ def dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
 
 
 def dependency_maybe_installed_by_filename(resolved_dependency: Any, installed_mods: list[Any] | None) -> bool:
-    """以寬鬆檔名規則判斷依賴是否可能已安裝。
+    """
+    以寬鬆檔名規則判斷依賴是否可能已安裝。
 
     Args:
         resolved_dependency: 已解析的依賴資訊。
@@ -89,7 +93,8 @@ def dependency_maybe_installed_by_filename(resolved_dependency: Any, installed_m
 
 
 def collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tuple[set[str], set[str]]:
-    """蒐集已安裝模組的識別字與候選字串。
+    """
+    蒐集已安裝模組的識別字與候選字串。
 
     Args:
         installed_mods: 已安裝模組清單。
@@ -116,7 +121,8 @@ def collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tuple
 
 
 def collect_installed_mod_versions(installed_mods: list[Any] | None) -> dict[str, set[str]]:
-    """依 project id 彙整已安裝版本。
+    """
+    依 project id 彙整已安裝版本。
 
     Args:
         installed_mods: 已安裝模組清單。

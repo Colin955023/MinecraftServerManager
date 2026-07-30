@@ -4,11 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...utils import Colors, FontSize, Sizes, Spacing
+from ...utils import Colors, CustomDropdown, FontManager, FontSize, Sizes, Spacing, TreeUtils
 from ...utils.ui_support import qt_widgets as qt
-from ..custom_dropdown import CustomDropdown
-from ..font_manager import FontManager
-from ..tree_utils import TreeUtils
 from .constants import MOD_TOOL_BUTTON_STYLE
 from .presenter_delegate_mixin import PresenterDelegateMixin
 

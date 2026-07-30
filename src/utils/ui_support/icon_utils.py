@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import contextlib
 
-from ..utils import PathUtils, get_logger
-from ..utils.ui_support.qt_runtime import QtCore, QtGui, QtWidgets, invoke_later, is_qobject_alive
+from .. import PathUtils, get_logger
+from ..ui_support.qt_runtime import QtCore, QtGui, QtWidgets, invoke_later, is_qobject_alive
 
 logger = get_logger().bind(component="IconUtils")
 
@@ -15,7 +15,8 @@ class IconUtils:
 
     @staticmethod
     def set_window_icon(window, delay_ms=200) -> None:
-        """設定視窗 icon，並在不同生命週期時機補設，避免被 Qt/系統主題覆寫。
+        """
+        設定視窗 icon，並在不同生命週期時機補設，避免被 Qt/系統主題覆寫。
 
         Args:
             window: 要設定圖示的視窗。

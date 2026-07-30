@@ -77,7 +77,8 @@ class SearchFilter:
     require_all_terms: bool = True
 
     def normalize(self, value: Any) -> str:
-        """正規化搜尋文字。
+        """
+        正規化搜尋文字。
 
         Args:
             value: 要轉成搜尋字串的任意值。
@@ -91,7 +92,8 @@ class SearchFilter:
         return text if self.case_sensitive else text.lower()
 
     def matches(self, candidate: Any, query: Any) -> bool:
-        """判斷候選文字是否符合查詢字串。
+        """
+        判斷候選文字是否符合查詢字串。
 
         Args:
             candidate: 被比對的候選值；可為字串、序列或 dict。
@@ -111,7 +113,8 @@ class SearchFilter:
         return all(term in candidate_text for term in normalized_query.split())
 
     def matches_any(self, candidates: Any, query: Any) -> bool:
-        """判斷多個候選欄位是否符合查詢。
+        """
+        判斷多個候選欄位是否符合查詢。
 
         Args:
             candidates: 字串、序列或 dict 候選欄位。
@@ -131,7 +134,8 @@ class SearchFilter:
 
 
 def apply_fluent_theme(*, dark: bool, accent_color: str | None = None) -> None:
-    """在 qfluentwidgets 可用時套用 Fluent 主題。
+    """
+    在 qfluentwidgets 可用時套用 Fluent 主題。
 
     Args:
         dark: 是否套用深色主題。

@@ -1,4 +1,5 @@
-"""UI 工具函數
+"""
+UI 工具函數
 提供常用的界面元件和工具函數，避免重複程式碼。
 """
 
@@ -9,10 +10,21 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ...ui import DialogUtils, FontManager
-from .. import Colors, PathUtils, SubprocessUtils, get_logger
+from .. import (
+    Colors,
+    DialogUtils,
+    FontManager,
+    PathUtils,
+    QtCore,
+    QtWidgets,
+    SubprocessUtils,
+    cancel_timer,
+    get_logger,
+    invoke_later,
+    is_qobject_alive,
+    run_on_ui_thread,
+)
 from . import qt_widgets as qt
-from .qt_runtime import QtCore, QtWidgets, cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -55,7 +67,8 @@ def _is_ui_thread() -> bool:
 
 
 def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]:
-    """取得按鈕樣式配置
+    """
+    取得按鈕樣式配置
 
     Args:
         button_type: 按鈕類型 ("primary", "secondary", "warning", "danger")
@@ -84,7 +97,8 @@ def compute_adaptive_pool_limit(
     high_hit_threshold: float = 90.0,
     idle_divisor: int = 4,
 ) -> int:
-    """依命中率與池使用狀態，回傳建議的 recycle pool 上限。
+    """
+    依命中率與池使用狀態，回傳建議的 recycle pool 上限。
 
     Args:
         current: 目前池大小。
@@ -115,7 +129,8 @@ def compute_adaptive_pool_limit(
 
 
 def compute_exponential_moving_average(*, previous: float | None, current: float, alpha: float = 0.35) -> float:
-    """計算 EMA（Exponential Moving Average）並限制 alpha 於 [0, 1]。
+    """
+    計算 EMA（Exponential Moving Average）並限制 alpha 於 [0, 1]。
 
     Args:
         previous: 前一筆 EMA 值。
@@ -137,7 +152,8 @@ class UIUtils:
 
     @staticmethod
     def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
-        """統一的主框架布局方法。
+        """
+        統一的主框架布局方法。
 
         Args:
             frame: 要配置的主框架。
@@ -158,7 +174,8 @@ class UIUtils:
 
     @staticmethod
     def get_mousewheel_units(delta: int) -> int:
-        """將原生 MouseWheel 的 delta 轉為視窗滾動單位。
+        """
+        將原生 MouseWheel 的 delta 轉為視窗滾動單位。
 
         回傳值符合清單滾動介面的單位格式。
         """
@@ -171,7 +188,8 @@ class UIUtils:
 
     @staticmethod
     def cancel_scheduled_job(widget, job_attr: str, *, owner: Any | None = None) -> None:
-        """取消指定的排程工作。
+        """
+        取消指定的排程工作。
 
         Args:
             widget: 排程所在的 widget。
@@ -212,7 +230,8 @@ class UIUtils:
     def schedule_debounce(
         widget, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any | None:
-        """以 debounce 方式排程：新的呼叫會覆蓋尚未執行的舊工作。
+        """
+        以 debounce 方式排程：新的呼叫會覆蓋尚未執行的舊工作。
 
         Args:
             widget: 排程所在的 widget。
@@ -254,7 +273,8 @@ class UIUtils:
     def schedule_coalesced_idle(
         widget, job_attr: str, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any | None:
-        """合併多次請求為單次 `schedule_idle` 執行。
+        """
+        合併多次請求為單次 `schedule_idle` 執行。
 
         Args:
             widget: 排程所在的 widget。
@@ -305,7 +325,8 @@ class UIUtils:
         trailing: bool = True,
         last_run_attr: str | None = None,
     ) -> bool:
-        """節流排程：限制 callback 執行頻率，必要時保留尾端一次執行。
+        """
+        節流排程：限制 callback 執行頻率，必要時保留尾端一次執行。
 
         Args:
             widget: 排程所在的 widget。
@@ -386,7 +407,8 @@ class UIUtils:
         show_delay_ms: int = 0,
         auto_hide_ms: int | None = None,
     ) -> None:
-        """替 widget 綁定原生 Qt tooltip。
+        """
+        替 widget 綁定原生 Qt tooltip。
 
         Args:
             widget: 要綁定提示的 widget。
@@ -427,7 +449,8 @@ class UIUtils:
 
     @staticmethod
     def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
-        """顯示錯誤訊息對話框。
+        """
+        顯示錯誤訊息對話框。
 
         Args:
             title: 對話框標題。
@@ -439,7 +462,8 @@ class UIUtils:
 
     @staticmethod
     def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
-        """顯示警告訊息對話框。
+        """
+        顯示警告訊息對話框。
 
         Args:
             title: 對話框標題。
@@ -451,7 +475,8 @@ class UIUtils:
 
     @staticmethod
     def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
-        """顯示資訊對話框。
+        """
+        顯示資訊對話框。
 
         Args:
             title: 對話框標題。
@@ -485,7 +510,8 @@ class UIUtils:
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
-        """在檔案總管中顯示。
+        """
+        在檔案總管中顯示。
 
         Args:
             target: 要顯示的檔案或資料夾路徑。
@@ -520,7 +546,8 @@ class UIUtils:
 
     @staticmethod
     def open_external(target) -> None:
-        """使用系統預設程式開啟。
+        """
+        使用系統預設程式開啟。
 
         Args:
             target: 要開啟的檔案、資料夾或 URL。
@@ -562,7 +589,8 @@ class UIUtils:
 
     @staticmethod
     def sync_bool_string_state(bool_var, string_var) -> None:
-        """建立 BoolState 與 TextState 的雙向綁定（用於 server.properties 等場景）
+        """
+        建立 BoolState 與 TextState 的雙向綁定（用於 server.properties 等場景）
 
         Args:
             bool_var: qt.BoolState 布林變數
@@ -607,7 +635,8 @@ class UIUtils:
 
     @staticmethod
     def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> qt.Button:
-        """建立統一樣式的按鈕。
+        """
+        建立統一樣式的按鈕。
 
         Args:
             parent: 父容器。

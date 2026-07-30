@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 import src.core.mod_manager as mod_manager_module
+import src.models as models_module
 import src.ui as mod_search_service_module
 import src.ui.mod_management.review as mod_management_review_module
 import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
 import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
 import src.ui.mod_search_service.modrinth_service as mod_search_provider_module
-from src.models import OnlineModVersion
-from src.utils import HTTPUtils, extract_download_host
+import src.utils as utils_module
 
 
 def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
@@ -45,7 +45,7 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
             ]
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online("sodium", minecraft_version="1.21", loader="fabric")
 
@@ -63,7 +63,7 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
 def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
-        version=OnlineModVersion(
+        version=models_module.OnlineModVersion(
             version_id="ver123",
             version_number="1.0.0",
             display_name="1.0.0",
@@ -90,7 +90,7 @@ def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
 def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
-        version=OnlineModVersion(
+        version=models_module.OnlineModVersion(
             version_id="ver123",
             version_number="1.0.0",
             display_name="1.0.0",
@@ -116,7 +116,7 @@ def test_search_mods_online_passes_category_facets(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     mod_search_service_module.search_mods_online(
         "sodium",
@@ -152,7 +152,7 @@ def test_search_mods_online_supports_browse_mode_without_query(monkeypatch) -> N
             ]
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online(
         "",
@@ -191,7 +191,7 @@ def test_search_mods_online_filters_out_pure_client_hits(monkeypatch) -> None:
             ]
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online("", minecraft_version="1.21", loader="fabric")
 
@@ -224,7 +224,7 @@ def test_get_mod_versions_filters_and_selects_primary_file(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
@@ -255,7 +255,7 @@ def test_get_mod_versions_requires_exact_quilt_loader(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="quilt")
 
@@ -283,7 +283,7 @@ def test_get_mod_versions_requires_exact_neoforge_loader(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions(
         "proj123",
@@ -323,7 +323,7 @@ def test_get_mod_versions_skips_prerelease_entries(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
@@ -349,7 +349,7 @@ def test_get_mod_versions_preserves_project_id_case_for_api(monkeypatch) -> None
         captured_url["value"] = kwargs.get("url", "")
         return []
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     mod_search_service_module.get_mod_versions("P7dR8mSH")
 
@@ -374,7 +374,7 @@ def test_get_mod_versions_retries_single_request_after_transient_failure(monkeyp
             }
         ]
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
@@ -401,7 +401,7 @@ def test_get_mod_version_details_retries_single_request_after_transient_failure(
             "files": [{"filename": "example.jar", "url": "https://example.invalid/example.jar", "primary": True}],
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
     _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
@@ -437,7 +437,7 @@ def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkey
             }
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
 
     results = mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -463,7 +463,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_quilt_loader(monkeypa
         captured_request.update(kwargs)
         return {}
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
 
     mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -486,7 +486,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_neoforge_loader(monke
         captured_request.update(kwargs)
         return {}
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
 
     mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -520,7 +520,7 @@ def test_get_modrinth_current_versions_by_hashes_splits_failed_batch_into_single
             }
         }
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
 
     results = mod_search_service_module.get_modrinth_current_versions_by_hashes(["hash-a", "hash-b"])
 
@@ -544,7 +544,7 @@ def test_resolve_modrinth_project_names_splits_failed_batch_and_recovers(monkeyp
             return [{"id": "AANobbMI", "title": "Sodium"}]
         return []
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     names = mod_search_service_module.resolve_modrinth_project_names(["P7dR8mSH", "AANobbMI"])
 
@@ -560,7 +560,7 @@ def test_search_mods_online_uses_exact_quilt_loader_facet(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     mod_search_service_module.search_mods_online("sodium", minecraft_version="1.21", loader="quilt")
 
@@ -587,7 +587,7 @@ def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monk
     def fail_search(*_args, **_kwargs):
         raise AssertionError("fuzzy search should not run when platform_id is available")
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
     _patch_mod_search_attr(monkeypatch, "search_mods_online", fail_search)
 
     enhanced = mod_search_service_module.enhance_local_mod(
@@ -613,7 +613,7 @@ def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> No
         monkeypatch,
         "search_mods_online",
         lambda *_args, **_kwargs: [
-            mod_search_service_module.OnlineModInfo(
+            models_module.OnlineModInfo(
                 project_id="proj-unrelated",
                 slug="totally-different-mod",
                 name="Totally Different Mod",
@@ -634,9 +634,9 @@ def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> No
 def test_enhance_local_mod_prefers_cached_slug_identifier_resolver_before_fuzzy_search(monkeypatch) -> None:
     resolver_calls: list[str] = []
 
-    def fake_resolver(identifier: str) -> mod_search_service_module.ProviderMetadataRecord:
+    def fake_resolver(identifier: str) -> utils_module.ProviderMetadataRecord:
         resolver_calls.append(identifier)
-        return mod_search_service_module.ProviderMetadataRecord.from_values(
+        return utils_module.ProviderMetadataRecord.from_values(
             platform="modrinth",
             project_id="YL57xq9U",
             slug="inventory-profiles-next",
@@ -667,7 +667,7 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     searched_terms: list[str] = []
     attempted_identifiers: list[str] = []
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
@@ -692,7 +692,7 @@ def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch
     def fake_search(term: str, *_args, **_kwargs):
         searched_terms.append(term)
         return [
-            mod_search_service_module.OnlineModInfo(
+            models_module.OnlineModInfo(
                 project_id="YL57xq9U",
                 slug="inventory-profiles-next",
                 name="Inventory Profiles Next",
@@ -771,12 +771,12 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
 
     assert len(plan.candidates) == 1
     candidate = plan.candidates[0]
-    assert candidate.recommendation_confidence == mod_search_service_module.RECOMMENDATION_CONFIDENCE_BLOCKED
+    assert candidate.recommendation_confidence == utils_module.RECOMMENDATION_CONFIDENCE_BLOCKED
     assert any("invalidated" in item for item in candidate.hard_errors)
 
 
 def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -802,7 +802,7 @@ def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
 
 
 def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_server() -> None:
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -823,7 +823,7 @@ def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_serv
 
 
 def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -874,7 +874,7 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
 
 
 def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatch(monkeypatch) -> None:
-    dependency_version = mod_search_service_module.OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -882,7 +882,7 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
         loaders=["forge"],
         files=[{"filename": "dep.jar", "url": "https://example.invalid/dep.jar", "primary": True}],
     )
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -930,7 +930,7 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
 
 
 def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_installed(monkeypatch) -> None:
-    dependency_version = mod_search_service_module.OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -940,7 +940,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
             {"filename": "cloth-config-2.0.0.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}
         ],
     )
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -978,7 +978,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
 
 
 def test_build_required_dependency_install_plan_resolves_version_id_dependency(monkeypatch) -> None:
-    dependency_version = mod_search_service_module.OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -986,7 +986,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
         loaders=["forge"],
         files=[{"filename": "cloth-config.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}],
     )
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -1028,7 +1028,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
 
 
 def test_build_required_dependency_install_plan_marks_maybe_installed_dependency_as_unresolved(monkeypatch) -> None:
-    dependency_version = mod_search_service_module.OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -1038,7 +1038,7 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
             {"filename": "cloth-config-2.0.0.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}
         ],
     )
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -1091,7 +1091,7 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
         loader_type="Fabric",
         minecraft_version="1.21.11",
     )
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
@@ -1136,7 +1136,7 @@ def test_resolve_local_mod_project_info_normalizes_camel_case_local_names(monkey
         filename="InventoryProfilesNext-fabric-1.21.11-2.2.2.jar",
     )
     attempted_identifiers: list[str] = []
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
@@ -1166,7 +1166,7 @@ def test_resolve_local_mod_project_info_uses_platform_slug_when_project_id_missi
         filename="InventoryProfilesNext.jar",
     )
     attempted_identifiers: list[str] = []
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
@@ -1209,7 +1209,7 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
         monkeypatch,
         "search_mods_online",
         lambda *_args, **_kwargs: [
-            mod_search_service_module.OnlineModInfo(
+            models_module.OnlineModInfo(
                 project_id="proj-unrelated",
                 slug="totally-different-mod",
                 name="Totally Different Mod",
@@ -1243,13 +1243,13 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
         loader_type="Fabric",
     )
     captured_project_ids: list[str] = []
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
         author="Libz",
     )
-    recommended_version = mod_search_service_module.OnlineModVersion(
+    recommended_version = models_module.OnlineModVersion(
         version_id="ver-new",
         version_number="2.2.2",
         display_name="2.2.2",
@@ -1286,7 +1286,7 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
     update_plan = mod_search_service_module.build_local_mod_update_plan(
@@ -1309,7 +1309,7 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(mod_search_service_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
 
     mod_search_service_module.search_mods_online("letsdo-API-forge-1.2.15-forge", loader="forge")
 
@@ -1317,7 +1317,7 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
 
 
 def test_build_required_dependency_install_plan_collects_recursive_dependencies(monkeypatch) -> None:
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1330,7 +1330,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         if project_id == "cloth-config":
             return [
-                mod_search_service_module.OnlineModVersion(
+                models_module.OnlineModVersion(
                     version_id="cloth-v1",
                     version_number="15.0.0",
                     display_name="15.0.0",
@@ -1348,7 +1348,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
             ]
         if project_id == "fabric-api":
             return [
-                mod_search_service_module.OnlineModVersion(
+                models_module.OnlineModVersion(
                     version_id="fabric-api-v1",
                     version_number="0.100.0",
                     display_name="0.100.0",
@@ -1388,7 +1388,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
 def test_build_required_dependency_install_plan_allows_prism_like_recursion_depth(monkeypatch) -> None:
     chain_length = 10
     dependency_ids = [f"dep-{index}" for index in range(chain_length)]
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1409,7 +1409,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
             dependencies.append({"project_id": dependency_ids[index + 1], "dependency_type": "required"})
 
         return [
-            mod_search_service_module.OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id=f"{project_id}-v1",
                 version_number="1.0.0",
                 display_name="1.0.0",
@@ -1447,7 +1447,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
 
 
 def test_build_required_dependency_install_plan_preserves_dependency_project_id_case_for_api(monkeypatch) -> None:
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1484,7 +1484,7 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
 def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fabric_loader(
     monkeypatch,
 ) -> None:
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1498,7 +1498,7 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         captured_project_ids.append(project_id)
         return [
-            mod_search_service_module.OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id="fabric-api-v1",
                 version_number="0.100.0",
                 display_name="0.100.0",
@@ -1544,7 +1544,7 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
 def test_build_required_dependency_install_plan_does_not_apply_quilt_override_for_forge_loader(
     monkeypatch,
 ) -> None:
-    root_version = mod_search_service_module.OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1558,7 +1558,7 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         captured_project_ids.append(project_id)
         return [
-            mod_search_service_module.OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id="dep-v1",
                 version_number="1.0.0",
                 display_name="1.0.0",
@@ -1610,7 +1610,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
         minecraft_version="1.21",
         loader_type="Fabric",
     )
-    recommended_version = mod_search_service_module.OnlineModVersion(
+    recommended_version = models_module.OnlineModVersion(
         version_id="ver2",
         version_number="1.1.0",
         display_name="1.1.0",
@@ -1621,7 +1621,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
         ],
         dependencies=[{"project_id": "cloth-config", "dependency_type": "required"}],
     )
-    resolved_info = mod_search_service_module.OnlineModInfo(
+    resolved_info = models_module.OnlineModInfo(
         project_id="proj123",
         slug="example-mod",
         name="Example Mod",
@@ -1638,7 +1638,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
         }
 
     def fake_analyze_mod_version_compatibility(*_args, **_kwargs):
-        return mod_search_service_module.OnlineModCompatibilityReport(
+        return models_module.OnlineModCompatibilityReport(
             missing_required_dependencies=["Cloth Config"],
             notes=["已找到相容更新"],
         )
@@ -1668,9 +1668,9 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     file_path = tmp_path / "mods" / "example-mod.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"old-mod")
-    current_hash = mod_search_service_module.compute_file_hash(str(file_path), "sha512")
+    current_hash = utils_module.compute_file_hash(str(file_path), "sha512")
 
-    current_version = mod_search_service_module.OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1685,7 +1685,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
             }
         ],
     )
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1714,7 +1714,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
-            current_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            current_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=current_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
@@ -1728,7 +1728,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     ):
         del minecraft_version, loader
         return {
-            current_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            current_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=current_hash,
                 algorithm="sha512",
                 project_id="proj123",
@@ -1755,7 +1755,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
     update_plan = mod_search_service_module.build_local_mod_update_plan(
@@ -1775,7 +1775,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
 
 def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> None:
     cached_hash = "abc123cached"
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -1819,7 +1819,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
     ):
         del minecraft_version, loader
         return {
-            cached_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            cached_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=cached_hash,
                 algorithm="sha512",
                 project_id="proj123",
@@ -1841,7 +1841,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
     update_plan = mod_search_service_module.build_local_mod_update_plan(
@@ -1861,7 +1861,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
 
 def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_fallback(monkeypatch) -> None:
     cached_hash = "hash-current-only"
-    current_version = mod_search_service_module.OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1892,7 +1892,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
-            cached_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            cached_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=cached_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
@@ -1904,7 +1904,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -1928,7 +1928,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
 
 def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_missing(monkeypatch) -> None:
     cached_hash = "hash-without-mapping"
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -1963,7 +1963,7 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -1971,7 +1971,7 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
@@ -2013,13 +2013,13 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
         loader_type="Fabric",
     )
 
-    resolved_cached = mod_search_service_module.OnlineModInfo(
+    resolved_cached = models_module.OnlineModInfo(
         project_id="YL57xq9U",
         slug="inventory-profiles-next",
         name="Inventory Profiles Next",
         author="Libz",
     )
-    resolved_lookup = mod_search_service_module.OnlineModInfo(
+    resolved_lookup = models_module.OnlineModInfo(
         project_id="AANobbMI",
         slug="sodium",
         name="Sodium",
@@ -2084,7 +2084,7 @@ def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(m
     def fake_get_modrinth_project_info(identifier: str, *_args, **_kwargs):
         attempted_identifiers.append(identifier)
         if identifier == "inventory-profiles-next":
-            return mod_search_service_module.OnlineModInfo(
+            return models_module.OnlineModInfo(
                 project_id="YL57xq9U",
                 slug="inventory-profiles-next",
                 name="Inventory Profiles Next",
@@ -2244,7 +2244,7 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
 
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_reached(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-    original_limit = mod_search_service_module.PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN
+    original_limit = utils_module.PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN
     _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", 1)
 
     mod1 = SimpleNamespace(
@@ -2358,7 +2358,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
             progress_callback(10, 10)
         return True
 
-    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2381,7 +2381,7 @@ def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, m
     def fake_download_file(*_args, **_kwargs):
         raise AssertionError("verified target should skip download")
 
-    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2399,7 +2399,7 @@ def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, mo
     def fake_download_file(*_args, **_kwargs):
         raise AssertionError("remote mod install should reject insecure verification before download")
 
-    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
 
     assert (
         manager.install_remote_mod_file(
@@ -2434,7 +2434,7 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
         version="1.0.0",
         minecraft_version="1.21",
         loader_type="Fabric",
-        status=mod_manager_module.ModStatus.ENABLED,
+        status=models_module.ModStatus.ENABLED,
         file_path=str(old_path),
     )
 
@@ -2487,7 +2487,7 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
         version="1.0.0",
         minecraft_version="1.21",
         loader_type="Fabric",
-        status=mod_manager_module.ModStatus.ENABLED,
+        status=models_module.ModStatus.ENABLED,
         file_path=str(old_path),
     )
 
@@ -2534,7 +2534,7 @@ def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Pa
         Path(local_path).write_bytes(b"partial")
         return False
 
-    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2561,7 +2561,7 @@ def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_pa
         version="1.0.0",
         minecraft_version="1.21",
         loader_type="Fabric",
-        status=mod_manager_module.ModStatus.ENABLED,
+        status=models_module.ModStatus.ENABLED,
         file_path=str(old_path),
     )
 
@@ -2604,7 +2604,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
         version="1.0.0",
         minecraft_version="1.21",
         loader_type="Fabric",
-        status=mod_manager_module.ModStatus.ENABLED,
+        status=models_module.ModStatus.ENABLED,
         file_path=str(old_path),
     )
 
@@ -2618,7 +2618,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
         cancel_calls["count"] += 1
         return cancel_calls["count"] >= 3
 
-    monkeypatch.setattr(HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
 
     replaced_path = manager.replace_local_mod_file(
         local_mod,
@@ -2633,16 +2633,16 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
 
 
 def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads() -> None:
-    version = mod_search_service_module.OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver-1",
         version_number="1.0.0",
         display_name="1.0.0",
         provider="modrinth",
         files=[{"filename": "example.jar", "url": "https://mirror.example.com/example.jar", "primary": True}],
     )
-    dependency_plan = mod_search_service_module.OnlineDependencyInstallPlan(
+    dependency_plan = utils_module.OnlineDependencyInstallPlan(
         items=[
-            mod_search_service_module.OnlineDependencyInstallItem(
+            utils_module.OnlineDependencyInstallItem(
                 project_id="dep-1",
                 project_name="Fabric API",
                 version_id="dep-ver",
@@ -2653,7 +2653,7 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
             )
         ],
         advisory_items=[
-            mod_search_service_module.OnlineDependencyInstallItem(
+            utils_module.OnlineDependencyInstallItem(
                 project_id="dep-2",
                 project_name="Mirror Dep",
                 version_id="dep-ver-2",
@@ -2666,8 +2666,8 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
             )
         ],
     )
-    review_entry = mod_search_service_module.PendingInstallReviewEntry(
-        pending=mod_search_service_module.PendingOnlineInstall(
+    review_entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="proj-1",
             project_name="Example Mod",
             version=version,
@@ -2691,8 +2691,8 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
         prompt_hosts[label] = host
 
     expected_hosts = {
-        "Example Mod (1.0.0)": extract_download_host((version.primary_file or {}).get("url", "")),
-        "Mirror Dep（依賴）": extract_download_host(dependency_plan.advisory_items[0].download_url),
+        "Example Mod (1.0.0)": utils_module.extract_download_host((version.primary_file or {}).get("url", "")),
+        "Mirror Dep（依賴）": utils_module.extract_download_host(dependency_plan.advisory_items[0].download_url),
     }
     assert prompt_hosts == expected_hosts
 
@@ -2820,7 +2820,7 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -2864,7 +2864,7 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -2899,7 +2899,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
         current_hash="hash-old-001",
         hash_algorithm="sha512",
     )
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -2920,7 +2920,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -2931,7 +2931,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: ["提示 A"])
 
@@ -2949,7 +2949,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
 
 def test_build_local_mod_update_plan_prefers_provider_current_version_over_local_version(monkeypatch) -> None:
     local_hash = "hash-001"
-    current_version = mod_search_service_module.OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0-provider",
@@ -2964,7 +2964,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
             }
         ],
     )
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -2996,7 +2996,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda *_args, **_kwargs: {
-            local_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            local_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=local_hash, algorithm="sha512", project_id="proj123", version=current_version
             )
         },
@@ -3005,7 +3005,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
         monkeypatch,
         "get_modrinth_latest_versions_by_hashes",
         lambda *_args, **_kwargs: {
-            local_hash: mod_search_service_module.ModrinthVersionLookupResult(
+            local_hash: models_module.ModrinthVersionLookupResult(
                 file_hash=local_hash, algorithm="sha512", project_id="proj123", version=latest_version
             )
         },
@@ -3016,7 +3016,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
@@ -3045,7 +3045,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
         current_hash="hash-without-map",
         hash_algorithm="sha512",
     )
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -3069,7 +3069,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_local_mod_project_info",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModInfo(
+        lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
@@ -3077,7 +3077,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
@@ -3124,7 +3124,7 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         enabled=True,
     )
 
-    latest_version = mod_search_service_module.OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="sodium-v2",
         version_number="0.7.0",
         display_name="0.7.0",
@@ -3140,11 +3140,9 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         monkeypatch,
         "resolve_modrinth_provider_record",
         lambda identifier: (
-            mod_search_service_module.ProviderMetadataRecord.from_values(
-                project_id="sodium", slug="sodium", project_name="Sodium"
-            )
+            utils_module.ProviderMetadataRecord.from_values(project_id="sodium", slug="sodium", project_name="Sodium")
             if "sodium" in str(identifier).lower()
-            else mod_search_service_module.ProviderMetadataRecord()
+            else utils_module.ProviderMetadataRecord()
         ),
     )
     _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
@@ -3153,7 +3151,7 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(
         monkeypatch,
@@ -3216,7 +3214,7 @@ def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolve
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_modrinth_provider_record",
-        lambda _identifier: mod_search_service_module.ProviderMetadataRecord(),
+        lambda _identifier: utils_module.ProviderMetadataRecord(),
     )
     _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
     _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
@@ -3224,7 +3222,7 @@ def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolve
     _patch_mod_search_attr(
         monkeypatch,
         "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: mod_search_service_module.OnlineModCompatibilityReport(),
+        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
     _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
@@ -3246,9 +3244,9 @@ def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolve
 
 
 def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields() -> None:
-    plan = mod_search_service_module.OnlineDependencyInstallPlan(
+    plan = utils_module.OnlineDependencyInstallPlan(
         items=[
-            mod_search_service_module.OnlineDependencyInstallItem(
+            utils_module.OnlineDependencyInstallItem(
                 project_id="AANobbMI",
                 project_name="Sodium",
                 version_id="ver-1",
@@ -3268,7 +3266,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
             )
         ],
         advisory_items=[
-            mod_search_service_module.OnlineDependencyInstallItem(
+            utils_module.OnlineDependencyInstallItem(
                 project_id="P7dR8mSH",
                 project_name="Fabric API",
                 version_id="ver-2",
@@ -3291,7 +3289,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
         notes=["note"],
     )
 
-    payload = mod_search_service_module.serialize_online_dependency_install_plan(
+    payload = utils_module.serialize_online_dependency_install_plan(
         plan,
         root_project_id="root-proj",
         root_project_name="Root Mod",
@@ -3299,9 +3297,9 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
         root_target_version_name="1.2.3",
         plan_source="local_update_review",
     )
-    restored = mod_search_service_module.deserialize_online_dependency_install_plan(payload)
+    restored = utils_module.deserialize_online_dependency_install_plan(payload)
 
-    assert payload["schema_version"] == mod_search_service_module.DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION
+    assert payload["schema_version"] == utils_module.DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION
     assert payload["plan_source"] == "local_update_review"
     assert payload["root_project_id"] == "root-proj"
     assert payload["root_target_version_id"] == "root-ver-1"
@@ -3319,7 +3317,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     assert payload["graph_edges"][0]["depth"] == 1
     assert payload["graph_edges"][0]["edge"] == "required"
     assert payload["graph_edges"][1]["edge"] == "optional"
-    assert mod_search_service_module.validate_online_dependency_install_plan_payload(payload) == (True, "ok")
+    assert utils_module.validate_online_dependency_install_plan_payload(payload) == (True, "ok")
     assert restored.items[0].project_id == "AANobbMI"
     assert restored.items[0].required_by == ["Root Mod"]
     assert restored.items[0].expected_hash == "a" * 64
@@ -3354,13 +3352,13 @@ def test_migrate_online_dependency_install_plan_payload_recovers_missing_graph_e
         "notes": [],
     }
 
-    migrated, state = mod_search_service_module.migrate_online_dependency_install_plan_payload(legacy_payload)
+    migrated, state = utils_module.migrate_online_dependency_install_plan_payload(legacy_payload)
 
     assert migrated is not None
     assert state == "migrated"
     assert isinstance(migrated.get("graph_edges"), list)
     assert migrated["graph_edges"][0]["edge"] == "required"
     assert migrated["graph_edges"][0]["depth"] == 1
-    valid, reason = mod_search_service_module.validate_online_dependency_install_plan_payload(migrated)
+    valid, reason = utils_module.validate_online_dependency_install_plan_payload(migrated)
     assert valid is True
     assert reason == "ok"

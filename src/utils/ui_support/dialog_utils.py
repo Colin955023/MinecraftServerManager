@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..utils import Sizes, Spacing, WindowManager, get_logger
-from ..utils.ui_support import qt_widgets as qt
-from ..utils.ui_support.qt_runtime import (
+from .. import (
+    NativeQtStyle,
     QtCore,
     QtWidgets,
+    Sizes,
+    Spacing,
+    WindowManager,
     ensure_application,
+    get_logger,
     invoke_later,
     is_qobject_alive,
     run_on_ui_thread,
@@ -18,8 +21,7 @@ from ..utils.ui_support.qt_runtime import (
     set_topmost,
     show_window,
 )
-from . import IconUtils
-from .ui_config import NativeQtStyle
+from ..ui_support import qt_widgets as qt
 
 logger = get_logger().bind(component="DialogUtils")
 
@@ -140,7 +142,8 @@ class DialogUtils:
 
     @staticmethod
     def apply_standard_dialog_style(window: QtWidgets.QWidget) -> None:
-        """套用新視窗共用控制項樣式。
+        """
+        套用新視窗共用控制項樣式。
 
         Args:
             window: 要套用對話框共用樣式的 Qt 視窗。
@@ -181,7 +184,8 @@ class DialogUtils:
         start_maximized: bool = False,
         reveal_after_setup: bool = True,
     ) -> None:
-        """統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能。
+        """
+        統一的視窗屬性設定函數，整合圖示綁定、視窗置中、模態設定三個功能。
 
         Args:
             window: 要設定的視窗。
@@ -230,6 +234,8 @@ class DialogUtils:
             set_modal(window, parent if isinstance(parent, QtWidgets.QWidget) else None)
         set_topmost(window, options.topmost)
         if options.bind_icon:
+            from ..ui_support.icon_utils import IconUtils
+
             IconUtils.set_window_icon(window, options.delay_ms)
         if options.autosize_to_content:
             invoke_later(
@@ -249,7 +255,8 @@ class DialogUtils:
 
     @staticmethod
     def maximize_window(window) -> None:
-        """將對話框最大化，並兼容不同視窗管理器的行為。
+        """
+        將對話框最大化，並兼容不同視窗管理器的行為。
 
         Args:
             window: 要最大化的視窗。
@@ -279,7 +286,8 @@ class DialogUtils:
         reveal_after_setup: bool = True,
         start_maximized: bool = False,
     ) -> Any:
-        """建立並套用專案一致的 dialog 視窗屬性。
+        """
+        建立並套用專案一致的 dialog 視窗屬性。
 
         Args:
             parent: 父視窗。
@@ -330,7 +338,8 @@ class DialogUtils:
         delays_ms: tuple[int, ...] = (0, 120),
         preserve_current_size: bool = True,
     ) -> None:
-        """在內容建構完成後重新整理對話框尺寸，降低初次開啟時被裁切的機率。
+        """
+        在內容建構完成後重新整理對話框尺寸，降低初次開啟時被裁切的機率。
 
         Args:
             dialog: 要重新整理的對話框。
@@ -364,7 +373,8 @@ class DialogUtils:
         parent=None,
         preserve_current_size: bool = True,
     ) -> None:
-        """依內容實際需求調整對話框大小，避免初次開啟時過小。
+        """
+        依內容實際需求調整對話框大小，避免初次開啟時過小。
 
         Args:
             dialog: 要調整大小的對話框。
@@ -419,6 +429,8 @@ class DialogUtils:
                 box.setStyleSheet(NativeQtStyle.message_box)
                 if topmost:
                     box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                from ..ui_support.icon_utils import IconUtils
+
                 IconUtils.set_window_icon(box, 25)
                 box.exec()
             except Exception as e:
@@ -442,7 +454,8 @@ class DialogUtils:
 
     @staticmethod
     def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
-        """顯示錯誤訊息對話框。
+        """
+        顯示錯誤訊息對話框。
 
         Args:
             title: 對話框標題。
@@ -454,7 +467,8 @@ class DialogUtils:
 
     @staticmethod
     def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
-        """顯示警告訊息對話框。
+        """
+        顯示警告訊息對話框。
 
         Args:
             title: 對話框標題。
@@ -466,7 +480,8 @@ class DialogUtils:
 
     @staticmethod
     def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
-        """顯示資訊對話框。
+        """
+        顯示資訊對話框。
 
         Args:
             title: 對話框標題。
@@ -480,7 +495,8 @@ class DialogUtils:
     def ask_yes_no_cancel(
         title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True, topmost: bool = False
     ) -> bool | None:
-        """顯示確認對話框，支援是/否/取消選項。
+        """
+        顯示確認對話框，支援是/否/取消選項。
 
         Args:
             title: 對話框標題。
@@ -508,6 +524,8 @@ class DialogUtils:
                 box.setStyleSheet(NativeQtStyle.message_box)
                 if topmost:
                     box.setWindowFlag(QtCore.Qt.WindowType.WindowStaysOnTopHint, True)
+                from ..ui_support.icon_utils import IconUtils
+
                 IconUtils.set_window_icon(box, 25)
                 result = box.exec()
                 if result == QtWidgets.QMessageBox.StandardButton.Yes:
@@ -532,7 +550,8 @@ class DialogUtils:
 
     @staticmethod
     def show_manual_restart_dialog(parent, details: str | None) -> None:
-        """顯示需要手動重啟的對話框，並提供複製診斷按鈕。
+        """
+        顯示需要手動重啟的對話框，並提供複製診斷按鈕。
 
         Args:
             parent: 父視窗。

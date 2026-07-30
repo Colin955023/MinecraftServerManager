@@ -68,3 +68,13 @@ report/*
 !report/comprehensive_report.py
 *.xml
 .vscode/tasks.json
+
+# other
+*.egg-info
+
+#文件
+docs/*
+!docs/USER_GUIDE.md
+!docs/PORTABLE_INSTALLER_MATRIX.md
+!docs/TECHNICAL_OVERVIEW.md
+.github/skills

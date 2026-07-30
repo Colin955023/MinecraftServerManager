@@ -12,7 +12,7 @@
 | XML 解析 | defusedxml（防止 XXE 攻擊） |
 | Release Notes 清理 | 內建正規表示式與 HTML entity 解碼，轉為純文字後顯示 |
 | 測試 | pytest（smoke、integration） |
-| 靜態檢查 | ruff、mypy、bandit |
+| 靜態檢查 | ruff、mypy、bandit、import-linter |
 
 ---
 
@@ -33,13 +33,43 @@ src/main.py
      └── utils/update_utils/*     更新檢查、資產選擇、下載與套用流程
 ```
 
+> 上圖為典型呼叫關係示意，非嚴格依賴方向規則。`models/` 為 core 與 ui 共用的資料結構層，未在上圖逐一標出所有引用點；完整的分層依賴方向與匯入邊界規則見第 3 節。
+
 ---
 
-## 3. 模組職責
+## 3. 模組邊界與依賴方向
+
+為避免跨層誤用（例如 UI 直接繞過 core 存取底層工具、或子模組彼此耦合），專案採單向分層依賴，並以工具強制檢查，不僅靠文件約束。
+
+### 分層方向
+
+```
+ui → core → models → utils
+```
+
+左方可依賴右方，右方不可反向匯入左方。此規則以 `import-linter` 定義於 `pyproject.toml` 的 `[tool.importlinter]`，執行 `uv run lint-imports` 檢查。
+
+### 匯入邊界規則
+
+- 跨資料夾一律經由該資料夾 `__init__.py` 的匯出匯入，禁止深入子模組（例如禁止 `from src.core.mod_manager import X`，應寫 `from src.core import X`）。
+- `__init__.py` 只允許出現在 `src/` 與 `src/<子資料夾>/`；二層子資料夾（如 `src/ui/mod_management/`）禁止建立 `__init__.py`。
+- 每個 `__init__.py` 只匯出自己資料夾內的內容；`src/ui/__init__.py` 例外，可跨子資料夾匯出同一頂層套件內的模組。
+
+以上規則由 `scripts/check_import_boundaries.py`（AST 掃描）自動檢查，與 `lint-imports` 一併整合進 `scripts/format_lint_check.bat`，作為強制關卡而非人工稽核。
+
+---
+
+## 4. 模組簡介
+
+### `src/models/`
+
+| 檔案 | 簡介 |
+|------|------|
+| `models.py` | 核心資料結構：`ServerConfig`、`ModrinthVersionLookupResult`、`LoaderVersion`、`OnlineModVersion`、`ResolvedDependencyReference` |
 
 ### `src/core/`
 
-| 檔案 | 職責 |
+| 檔案 | 簡介 |
 |------|------|
 | `server_manager.py` | 伺服器 CRUD、啟動／停止、備份 |
 | `mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
@@ -51,30 +81,34 @@ src/main.py
 
 ### `src/ui/`
 
-| 檔案 | 職責 |
+| 檔案 | 簡介 |
 |------|------|
 | `main_window.py` | 主視窗框架、頁面切換 |
 | `create_server_frame.py` | 建立伺服器精靈 |
 | `manage_server_frame.py` | 伺服器清單與操作面板 |
+| `progress_dialog.py` | 進度對話框 |
+| `server_properties_dialog.py` | 伺服器屬性對話框 |
+| `window_preferences_dialog.py` | 視窗偏好設定對話框 |
+| `server_monitor_window.py` | 即時監控視窗 |
 | `mod_management/` | 模組管理頁面、Review、樹狀列表同步與安裝執行 |
 | `mod_search_service/` | Modrinth 搜尋、相容性分析、依賴規劃與 provider 轉接 |
-| `server_monitor_window.py` | 即時監控視窗 |
 
 ### `src/utils/`
 
-| 檔案 | 職責 |
-|------|------|
-| `runtime_utils/settings_manager.py` | 設定讀寫與共享設定管理器存取 |
-| `network_utils/http_utils.py` | requests session，集中 timeout／retry |
-| `ui_support/window_manager.py` | Qt 視窗定位與狀態持久化 |
-| `core_utils/logger.py` | 集中日誌初始化 |
-| `java_support/java_utils.py` / `java_support/java_downloader.py` | Java 自動偵測；必要時透過 winget 安裝 Oracle JRE 8 或 Microsoft OpenJDK 並帶入授權接受參數 |
-| `core_utils/path_utils.py` / `runtime_utils/runtime_paths.py` | 安全路徑操作與執行模式資料路徑解析 |
-| `update_utils/update_checker.py` / `update_utils/update_parsing.py` | GitHub Releases 更新檢查、資產選擇與 digest 驗證 |
+| 子目錄 | 簡介 |
+|--------|------|
+| `core_utils/` | `logger`、`path_utils`、`atomic_writer`、`exception_utils`、`hash_utils` |
+| `network_utils/` | `http_utils` (集中 timeout/retry)、`request_retry_utils` |
+| `java_support/` | Java 自動偵測、winget 安裝支援 |
+| `ui_support/` | Fluent theme、window manager、DPI handling、dialog_utils、font_manager、icon_utils、qt_runtime、qt_widgets、task_utils、tree_utils、ui_config、ui_tokens、ui_utils、custom_dropdown |
+| `runtime_utils/` | 延遲匯出、版本資訊、環境檢查、OS 判斷、Python 版本檢查、app_info、app_restart、background_task、runtime_paths、settings_manager、singleton、subprocess_utils、worker_pool |
+| `mod_utils/` | 依賴規劃序列化、下載來源策略、本地模組 metadata 工具、Modrinth 查詢工具、Modrinth 版本查詢、模組依賴規劃、模組依賴參考工具、模組索引管理、模組 provider metadata、模組重新驗證批次工具、模組語意、模組版本過濾 |
+| `server_utils/` | 伺服器常數、伺服器偵測工具、伺服器偵測版本工具、伺服器記憶體工具、伺服器屬性工具、伺服器執行期工具 |
+| `update_utils/` | 更新檢查、更新解析、更新檢查適配器 |
 
 ---
 
-## 4. 視窗生命週期
+## 5. 視窗生命週期
 
 主視窗與大多數對話框採 Qt 視窗生命週期，避免在元件尚未完成佈局時顯示：
 
@@ -89,7 +123,7 @@ src/main.py
 
 ---
 
-## 5. 效能設計
+## 6. 效能設計
 
 - **減少啟動網路請求**：loader 版本快取採 TTL（預設 12 小時），快取有效期間略過預抓。
 - **為何是 12 小時**：在「資料新鮮度」與「API 請求量」間折衷；Minecraft 伺服器管理情境通常是長時間運行、重啟頻率低，12 小時可避免每次啟動都重新查詢，同時仍能在每日維運節奏內更新版本資訊。
@@ -97,7 +131,7 @@ src/main.py
 - **列表差異更新**：Treeview 只更新變動列，不整批重繪。
 - **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
 
-## 6. 支援的伺服器類型與載入器
+## 7. 支援的伺服器類型與載入器
 
 本專案支援原版伺服器與四種模組載入器：
 
@@ -114,7 +148,7 @@ src/main.py
 - **Fabric / Quilt**：從官方 Fabric / Quilt Meta API 取得穩定版本清單，支援依 Minecraft 版本過濾
 - **Forge / NeoForge**：從 Maven metadata 解析版本，每個 Minecraft 版本保留最新 10 個版本
 
-## 7. 資料與設定路徑
+## 8. 資料與設定路徑
 
 | 模式 | 設定 | 日誌 | 快取 |
 |------|------|------|------|
@@ -123,7 +157,7 @@ src/main.py
 
 設定由 `runtime_utils/settings_manager.py` 統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
 
-## 8. 開發指令
+## 9. 開發指令
 
 ```bash
 # 安裝依賴
@@ -135,20 +169,25 @@ uv run python -m src.main
 # 快速 test
 uv run quick_test.py
 
-# 完整格式／型別／測試門禁
+# 匯入邊界檢查（分層方向 + 深層匯入 + __init__.py 規則）
+uv run lint-imports
+uv run scripts/check_import_boundaries.py
+
+# 完整格式／型別／測試門禁（已包含上述所有檢查）
 scripts/format_lint_check.bat
 
 # 產生綜合報告
 uv run report\comprehensive_report.py
 ```
 
-## 9. 建議閱讀順序
+## 10. 建議閱讀順序
 
 想快速理解整體架構，建議依此順序閱讀：
 
 1. `src/main.py` — 進入點，環境初始化
-2. `src/ui/main_window.py` — 整體 UI 框架與頁面切換
-3. `src/core/server_manager.py` — 伺服器核心邏輯
-4. `src/core/mod_manager.py` — 模組服務
-5. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
-6. `src/utils/ui_support/window_manager.py` — 視窗管理慣例
+2. `src/models/models.py` — 核心資料結構，貫穿全專案
+3. `src/ui/main_window.py` — 整體 UI 框架與頁面切換
+4. `src/core/server_manager.py` — 伺服器核心邏輯
+5. `src/core/mod_manager.py` — 模組服務
+6. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
+7. `src/utils/ui_support/window_manager.py` — 視窗管理慣例

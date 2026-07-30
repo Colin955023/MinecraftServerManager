@@ -1,4 +1,5 @@
-"""伺服器版本/載入器文字解析工具。
+"""
+伺服器版本/載入器文字解析工具。
 
 這個模組只負責「字串與版本資訊」相關的判斷，
 避免與檔案掃描、啟動參數偵測邏輯混在同一檔案。
@@ -43,7 +44,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def parse_mc_version(version_str: str) -> list[int]:
-        """解析 Minecraft 版本字串為數字列表。
+        """
+        解析 Minecraft 版本字串為數字列表。
 
         Args:
             version_str: 原始版本字串。
@@ -66,7 +68,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def is_fabric_compatible_version(mc_version: str) -> bool:
-        """檢查 MC 版本是否與 Fabric 相容（1.14+）。
+        """
+        檢查 MC 版本是否與 Fabric 相容（1.14+）。
 
         Args:
             mc_version: Minecraft 版本字串。
@@ -90,7 +93,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def standardize_loader_type(loader_type: str, loader_version: str = "") -> str:
-        """標準化載入器類型：將輸入轉為小寫並進行基本推斷。
+        """
+        標準化載入器類型：將輸入轉為小寫並進行基本推斷。
 
         Args:
             loader_type: 原始載入器類型。
@@ -120,7 +124,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def normalize_mc_version(mc_version) -> str:
-        """標準化 Minecraft 版本字串。
+        """
+        標準化 Minecraft 版本字串。
 
         Args:
             mc_version: 原始 Minecraft 版本值。
@@ -138,7 +143,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def clean_version(version: str) -> str:
-        """清理版本字串中的常見後綴。
+        """
+        清理版本字串中的常見後綴。
 
         Args:
             version: 原始版本字串。
@@ -158,7 +164,8 @@ class ServerDetectionVersionUtils:
 
     @staticmethod
     def extract_mc_version_from_text(text: str) -> str | None:
-        """從文字中提取 Minecraft 版本。
+        """
+        從文字中提取 Minecraft 版本。
 
         Args:
             text: 待分析的文字內容。
@@ -190,7 +197,8 @@ class ServerDetectionVersionUtils:
     @staticmethod
     @lru_cache(maxsize=128)
     def detect_loader_from_text(text: str) -> str:
-        """從文字中偵測載入器類型。
+        """
+        從文字中偵測載入器類型。
 
         Args:
             text: 待分析的文字內容。
@@ -216,7 +224,8 @@ class ServerDetectionVersionUtils:
     @staticmethod
     @lru_cache(maxsize=128)
     def extract_version_from_forge_path(path_str: str) -> tuple[str | None, str | None]:
-        """從 Forge 路徑字串提取 `(minecraft_version, forge_version)`。
+        """
+        從 Forge 路徑字串提取 `(minecraft_version, forge_version)`。
 
         Args:
             path_str: Forge 路徑或檔名字串。

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ...core import LoaderManager
-from ...models import OnlineModVersion, ResolvedDependencyReference
+from ...models import OnlineModCompatibilityReport, OnlineModVersion, ResolvedDependencyReference
 from ...utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,
@@ -17,7 +17,6 @@ from ...utils import (
     resolve_dependency_reference,
 )
 from .constants import logger
-from .models import OnlineModCompatibilityReport
 from .modrinth_service import fetch_modrinth_project_name, get_mod_version_details
 
 
@@ -29,7 +28,8 @@ def resolve_dependency_reference_with_provider_context(
     get_mod_version_details_fn: Callable[[str], tuple[str, OnlineModVersion | None]] | None = None,
     fetch_project_name_fn: Callable[[str], str | None] | None = None,
 ) -> ResolvedDependencyReference:
-    """補上 provider 查詢能力後解析單筆依賴參照。
+    """
+    補上 provider 查詢能力後解析單筆依賴參照。
 
     Args:
         dependency: 原始依賴描述資料。
@@ -96,7 +96,8 @@ def analyze_mod_version_compatibility(
     get_mod_version_details_fn: Callable[[str], tuple[str, OnlineModVersion | None]] | None = None,
     fetch_project_name_fn: Callable[[str], str | None] | None = None,
 ) -> OnlineModCompatibilityReport:
-    """根據目前伺服器與已安裝模組分析可用版本的相容性。
+    """
+    根據目前伺服器與已安裝模組分析可用版本的相容性。
 
     Args:
         version: Modrinth 版本資訊。
@@ -204,7 +205,8 @@ def analyze_mod_version_compatibility(
 
 
 def analyze_local_mod_file_compatibility(local_mod: Any, loader: str | None = None) -> list[str]:
-    """以本地模組已知 metadata 產生輔助提示。
+    """
+    以本地模組已知 metadata 產生輔助提示。
 
     Args:
         local_mod: 本地模組物件。

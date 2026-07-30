@@ -10,6 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from ...models import (
+    LocalModUpdatePlan,
+    LocalUpdateReviewEntry,
+    PendingInstallReviewEntry,
+    ReviewTaskNode,
+)
 from ...utils import (
     LOCAL_UPDATE_GROUP_DETAIL_RETRYABLE,
     LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE,
@@ -33,10 +39,14 @@ from ...utils import (
     RECOMMENDATION_SOURCE_SHORT_LABELS,
     RECOMMENDATION_SOURCE_STALE_METADATA,
     Colors,
+    DialogUtils,
+    FontManager,
     FontSize,
     ProviderMetadataRecord,
     Sizes,
     Spacing,
+    TaskUtils,
+    TreeUtils,
     UIUtils,
     apply_provider_metadata,
     build_non_official_source_warning_message,
@@ -46,26 +56,18 @@ from ...utils import (
     get_non_official_download_host,
     migrate_online_dependency_install_plan_payload,
     register_provider_revalidation_success,
+    resolve_modrinth_provider_record,
     serialize_online_dependency_install_plan,
     validate_online_dependency_install_plan_payload,
 )
 from ...utils.ui_support import qt_widgets as qt
 from .. import (
-    DialogUtils,
-    FontManager,
-    LocalModUpdatePlan,
     ModManagementRuntimeBase,
-    TaskUtils,
-    TreeUtils,
     build_local_mod_update_plan,
+    enhance_local_mod,
 )
 from .constants import MODRINTH_PROJECT_PAGE_BASE_URL, logger
 from .install_review_dialog_builder import InstallReviewDialogBuilder
-from .models import (
-    LocalUpdateReviewEntry,
-    PendingInstallReviewEntry,
-    ReviewTaskNode,
-)
 
 
 class ModManagementReviewMixin(ModManagementRuntimeBase):
@@ -2003,7 +2005,7 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return [*root_nodes, *dependency_nodes]
 
     def _build_local_update_task_nodes(self, review_entries: list[LocalUpdateReviewEntry]) -> list[ReviewTaskNode]:
-        """相容層：建立本地更新 review 的根級 task nodes。"""
+        """建立本地更新 review 的根級 task nodes。"""
         return self._build_flat_review_task_nodes(
             review_entries,
             get_entry_key=lambda entry: (
@@ -2051,7 +2053,8 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
         return "\n".join(lines)
 
     def _create_review_shared_ui(self, main_frame: qt.Frame, wraplength: int) -> tuple[qt.Label, qt.Frame]:
-        """建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
+        """
+        建立 Review 對話框中重複使用的概覽標籤與樹狀視圖容器。
 
         Args:
             main_frame: 父框架
@@ -2283,8 +2286,6 @@ class ModManagementReviewMixin(ModManagementRuntimeBase):
 
     def _ensure_local_mod_project_ids(self, local_mods: list[Any]) -> None:
         """盡量補齊本地模組的 Modrinth project id / slug，供更新檢查使用。"""
-        from .. import enhance_local_mod, resolve_modrinth_provider_record
-
         for local_mod in local_mods:
             current_project_id = str(getattr(local_mod, "platform_id", "") or "").strip()
             current_slug = str(getattr(local_mod, "platform_slug", "") or "").strip()

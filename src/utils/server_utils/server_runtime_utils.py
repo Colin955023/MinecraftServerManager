@@ -1,4 +1,5 @@
-"""伺服器執行時工具
+"""
+伺服器執行時工具
 集中啟停操作與 Java 命令建構。
 """
 
@@ -45,7 +46,8 @@ class ServerOperations:
 
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
-        """優雅停止伺服器（先嘗試 stop 命令，失敗則強制停止）。
+        """
+        停止伺服器（先嘗試 stop 命令，失敗則強制停止）。
 
         Args:
             server_manager: 伺服器管理器實例。
@@ -70,7 +72,8 @@ class JvmOptionPolicy:
 
     @staticmethod
     def normalize_jvm_args(raw_args: Any) -> list[str]:
-        """將使用者自訂 JVM 參數正規化為清單。
+        """
+        將使用者自訂 JVM 參數正規化為清單。
 
         Args:
             raw_args: 字串、序列或其他可忽略值。
@@ -104,7 +107,8 @@ class JvmOptionPolicy:
         performance_profile: str = "",
         existing_args: list[str] | None = None,
     ) -> list[str]:
-        """依記憶體與 Java 版本產生 GC 建議。
+        """
+        依記憶體與 Java 版本產生 GC 建議。
 
         Args:
             memory_max_mb: 最大記憶體，單位 MB。
@@ -160,7 +164,8 @@ class ServerCommands:
 
     @staticmethod
     def to_console_java_executable(java_path: str | None) -> str | None:
-        """將 `javaw.exe` 路徑轉為適合伺服器 console 使用的 `java.exe`。
+        """
+        將 `javaw.exe` 路徑轉為適合伺服器 console 使用的 `java.exe`。
 
         Args:
             java_path: 偵測到的 Java 執行檔路徑。
@@ -177,7 +182,8 @@ class ServerCommands:
 
     @staticmethod
     def resolve_java_executable(server_config, fallback: str = "java") -> str:
-        """依伺服器 Minecraft 版本解析應使用的 Java console 執行檔。
+        """
+        依伺服器 Minecraft 版本解析應使用的 Java console 執行檔。
 
         Args:
             server_config: 伺服器設定物件。
@@ -206,7 +212,8 @@ class ServerCommands:
 
     @staticmethod
     def split_windows_command_line(command_line: str) -> list[str]:
-        """將 Windows bat 中的一行命令切成 `subprocess` 可用參數。
+        """
+        將 Windows bat 中的一行命令切成 `subprocess` 可用參數。
 
         Args:
             command_line: bat 檔中的單行命令。
@@ -256,7 +263,8 @@ class ServerCommands:
 
     @staticmethod
     def extract_startup_script_command(script_path: Path) -> StartupScriptCommand:
-        """讀取既有啟動腳本中的 Java 啟動命令。
+        """
+        讀取既有啟動腳本中的 Java 啟動命令。
 
         Args:
             script_path: 要讀取的啟動腳本路徑。
@@ -289,7 +297,8 @@ class ServerCommands:
 
     @staticmethod
     def replace_java_command_line(line: str, java_exe: str) -> tuple[str, bool]:
-        """替換單行 bat 命令開頭的 Java 執行檔。
+        """
+        替換單行 bat 命令開頭的 Java 執行檔。
 
         Args:
             line: 原始 bat 單行內容。
@@ -318,21 +327,9 @@ class ServerCommands:
         return (replacement, replacement != line)
 
     @staticmethod
-    def replace_bare_java_command_line(line: str, java_exe: str) -> tuple[str, bool]:
-        """向後相容舊呼叫；目前也會替換完整 Java 路徑。
-
-        Args:
-            line: 原始 bat 單行內容。
-            java_exe: 要替換成的 Java 執行檔路徑。
-
-        Returns:
-            `(新行內容, 是否修改)`。
-        """
-        return ServerCommands.replace_java_command_line(line, java_exe)
-
-    @staticmethod
     def replace_startup_command_java_path(command_line: str, server_config) -> str:
-        """將匯入啟動命令的 Java 執行檔替換為版本相符路徑。
+        """
+        將匯入啟動命令的 Java 執行檔替換為版本相符路徑。
 
         Args:
             command_line: 原始 Java 啟動命令。
@@ -372,7 +369,7 @@ class ServerCommands:
             content = content.removeprefix("\ufeff")
         new_lines = []
         for line in content.splitlines(keepends=True):
-            new_line, line_changed = ServerCommands.replace_bare_java_command_line(line, java_exe)
+            new_line, line_changed = ServerCommands.replace_java_command_line(line, java_exe)
             changed = changed or line_changed
             new_lines.append(new_line)
         if not changed:
@@ -385,7 +382,8 @@ class ServerCommands:
 
     @staticmethod
     def repair_startup_scripts_java_commands(server_path: Path, server_config) -> list[Path]:
-        """檢查並修補伺服器資料夾中的已知 bat 啟動腳本。
+        """
+        檢查並修補伺服器資料夾中的已知 bat 啟動腳本。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -403,7 +401,8 @@ class ServerCommands:
 
     @staticmethod
     def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
-        """構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。
+        """
+        構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。
 
         Args:
             server_config: 伺服器設定物件。

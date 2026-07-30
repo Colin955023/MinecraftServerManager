@@ -5,8 +5,7 @@ import zipfile
 import pytest
 from packaging.version import Version
 from src.models import ServerConfig
-from src.utils import ServerDetectionVersionUtils, UpdateParsing
-from src.utils.server_utils.server_detection_utils import ServerDetectionUtils
+from src.utils import ServerDetectionUtils, ServerDetectionVersionUtils, UpdateParsing
 
 
 @pytest.mark.parametrize(
@@ -46,8 +45,8 @@ def test_standardize_loader_type_supports_vanilla_fabric_and_forge(
 
 
 def test_server_detection_utils_loader_text_alias_matches_version_utils() -> None:
-    assert ServerDetectionUtils.detect_loader_from_text("Fabric server") == "fabric"
-    assert ServerDetectionUtils.detect_loader_from_text("NeoForge server") == "neoforge"
+    assert ServerDetectionVersionUtils.detect_loader_from_text("Fabric server") == "fabric"
+    assert ServerDetectionVersionUtils.detect_loader_from_text("NeoForge server") == "neoforge"
 
 
 def test_detect_loader_from_text_supports_vanilla_and_rejects_unsupported_loader_text() -> None:

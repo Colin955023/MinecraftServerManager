@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from src.core import ModManager, ModPlatform
-from src.utils import ModIndexManager, compute_file_hash
+from src.utils import HTTPUtils, ModIndexManager, compute_file_hash
 
 
 def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
@@ -115,8 +115,6 @@ def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tm
             ]
         }
 
-    from src.utils import HTTPUtils
-
     monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
 
     platform, project_id, slug = manager._search_on_modrinth("Fabric API", "fabric-api", "fabric-api.jar")
@@ -139,8 +137,6 @@ def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_look
         assert url == "https://api.modrinth.com/v2/search"
         assert params == {"query": "ferritecore"}
         return {"hits": [{"project_id": "uXXizFIs", "slug": "ferrite-core"}]}
-
-    from src.utils import HTTPUtils
 
     monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
 

@@ -5,12 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ...utils import Colors, FontSize, Sizes, Spacing
+from ...models import LocalUpdateReviewEntry, PendingInstallReviewEntry
+from ...utils import Colors, DialogUtils, FontManager, FontSize, Sizes, Spacing, TreeUtils
 from ...utils.ui_support import qt_widgets as qt
-from ..dialog_utils import DialogUtils
-from ..font_manager import FontManager
-from ..tree_utils import TreeUtils
-from .models import LocalUpdateReviewEntry, PendingInstallReviewEntry
 from .presenter_delegate_mixin import PresenterDelegateMixin
 
 

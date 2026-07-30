@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from ...models import OnlineModInfo
 from ...utils import (
     PROVIDER_LIFECYCLE_STALE,
     LocalProviderEnsureResult,
@@ -15,7 +16,6 @@ from ...utils import (
     resolve_revalidation_batch_limits,
     should_attempt_provider_revalidation,
 )
-from .models import OnlineModInfo
 
 
 @dataclass(slots=True)

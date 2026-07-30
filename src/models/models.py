@@ -1,7 +1,7 @@
-"""資料模型定義
+"""
+資料模型定義
+
 定義應用程式中使用的核心資料結構與配置類別
-Data Model Definitions
-Defines core data structures and configuration classes used in the application
 """
 
 from dataclasses import dataclass, field

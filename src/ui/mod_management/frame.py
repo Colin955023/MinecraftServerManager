@@ -10,27 +10,26 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ...core import AppException, MinecraftVersionManager, ModManager, ModStatus
+from ...core import AppException, MinecraftVersionManager, ModManager
+from ...models import LocalModUpdatePlan, ModStatus, OnlineBrowseRequest, PendingOnlineInstall
 from ...utils import (
     Colors,
+    CustomDropdown,
+    DialogUtils,
+    FontManager,
     FontSize,
     PathUtils,
     Sizes,
     Spacing,
+    TaskUtils,
     UIUtils,
+    resolve_color,
 )
 from ...utils.ui_support import qt_widgets as qt
-from ..custom_dropdown import CustomDropdown
-from ..dialog_utils import DialogUtils
-from ..font_manager import FontManager
-from ..mod_search_service.models import LocalModUpdatePlan
-from ..task_utils import TaskUtils
-from ..ui_config import resolve_color
 from .constants import logger
 from .install_executor import ModManagementInstallExecutorMixin
 from .local_mod_list_presenter import LocalModListPresenter
 from .local_tree_virtualization_state import LocalTreeVirtualizationState
-from .models import OnlineBrowseRequest, PendingOnlineInstall
 from .online_browse_presenter import OnlineBrowsePresenter
 from .online_mod_queue import ModManagementQueueMixin
 from .review import ModManagementReviewMixin
@@ -130,7 +129,8 @@ class ModManagementFrame(
         return presenter
 
     def update_status(self, message: str) -> None:
-        """安全地更新狀態標籤，並合併連續的 idle 更新。
+        """
+        安全地更新狀態標籤，並合併連續的 idle 更新。
 
         Args:
             message: 要顯示的狀態文字。
@@ -159,7 +159,8 @@ class ModManagementFrame(
             self.status_label.configure(text=self._pending_status_message)
 
     def update_status_safe(self, message: str) -> None:
-        """將狀態更新排入 UI 佇列執行。
+        """
+        將狀態更新排入 UI 佇列執行。
 
         Args:
             message: 要顯示的狀態文字。
@@ -167,7 +168,8 @@ class ModManagementFrame(
         self.ui_queue.put(lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
-        """將進度更新交給 Qt signal 執行。
+        """
+        將進度更新交給 Qt signal 執行。
 
         Args:
             value: 介於 0 到 1 的進度值。
@@ -372,7 +374,8 @@ class ModManagementFrame(
         )
 
     def on_tab_changed(self, _event=None) -> None:
-        """頁籤切換時同步目前頁面的資料狀態。
+        """
+        頁籤切換時同步目前頁面的資料狀態。
 
         Args:
             _event: 事件繫結傳入的事件物件，未使用。
@@ -597,7 +600,8 @@ class ModManagementFrame(
             UIUtils.show_error("錯誤", f"載入伺服器列表失敗: {e}", self.parent)
 
     def on_server_changed(self, _event=None) -> None:
-        """切換目前伺服器時重新載入相關模組資料。
+        """
+        切換目前伺服器時重新載入相關模組資料。
 
         Args:
             _event: 事件繫結傳入的事件物件，未使用。
@@ -636,7 +640,8 @@ class ModManagementFrame(
         self._get_local_mod_list_presenter().enhance_local_mods()
 
     def _set_bulk_controls_enabled(self, enabled: bool) -> None:
-        """設定批量操作控制元件的啟用/停用狀態
+        """
+        設定批量操作控制元件的啟用/停用狀態
 
         Args:
             enabled: True 表示啟用，False 表示停用
@@ -644,7 +649,8 @@ class ModManagementFrame(
         self._get_local_mod_list_presenter()._set_bulk_controls_enabled(enabled)
 
     def toggle_local_mod(self, _event=None) -> None:
-        """切換目前選取本地模組的啟用/停用狀態。
+        """
+        切換目前選取本地模組的啟用/停用狀態。
 
         Args:
             _event: 事件繫結傳入的事件物件，未使用。
@@ -652,7 +658,8 @@ class ModManagementFrame(
         self._get_local_mod_list_presenter().toggle_local_mod(_event)
 
     def filter_local_mods(self, *_args) -> None:
-        """篩選本地模組（debounce，避免連續重建 Treeview）。
+        """
+        篩選本地模組（debounce，避免連續重建 Treeview）。
 
         Args:
             *_args: 來自事件或 trace callback 的額外參數。
@@ -663,7 +670,8 @@ class ModManagementFrame(
         self._get_local_mod_list_presenter()._run_debounced_local_filter_refresh()
 
     def show_local_context_menu(self, event) -> None:
-        """顯示本地模組右鍵選單。
+        """
+        顯示本地模組右鍵選單。
 
         Args:
             event: 滑鼠右鍵事件。
@@ -861,7 +869,8 @@ class ModManagementFrame(
         self._get_local_mod_list_presenter().on_tree_selection_changed(_event)
 
     def attach(self, **kwargs) -> None:
-        """將主框架加入父容器的線性版面。
+        """
+        將主框架加入父容器的線性版面。
 
         Args:
             kwargs: 版面配置參數。
@@ -872,7 +881,8 @@ class ModManagementFrame(
             logger.debug("主框架未初始化，無法打包", "ModManagementFrame")
 
     def attach_matrix(self, **kwargs) -> None:
-        """將主框架加入父容器的矩陣版面。
+        """
+        將主框架加入父容器的矩陣版面。
 
         Args:
             kwargs: 版面配置參數。

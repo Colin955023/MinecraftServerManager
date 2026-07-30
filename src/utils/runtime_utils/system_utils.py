@@ -1,4 +1,5 @@
-"""系統工具模組
+"""
+系統工具模組
 提供系統資訊查詢與進程管理功能，使用原生 Windows API 與受管理 PID 清理。
 """
 
@@ -86,7 +87,8 @@ class SystemUtils:
 
     @classmethod
     def register_managed_process(cls, path, pid: int) -> None:
-        """記錄由本程式啟動、可安全用 taskkill /T 清理的 process。
+        """
+        記錄由本程式啟動、可安全用 taskkill /T 清理的 process。
 
         Args:
             path: process 所屬的伺服器或安裝工作目錄。
@@ -102,7 +104,8 @@ class SystemUtils:
 
     @classmethod
     def unregister_managed_process(cls, path, pid: int) -> None:
-        """移除已結束或已清理的受管理 process。
+        """
+        移除已結束或已清理的受管理 process。
 
         Args:
             path: process 所屬的伺服器或安裝工作目錄。
@@ -118,7 +121,8 @@ class SystemUtils:
 
     @staticmethod
     def kill_java_processes_in_path(path) -> bool:
-        """終止本程式在指定路徑啟動過的 Java/啟動腳本 process tree。
+        """
+        終止本程式在指定路徑啟動過的 Java/啟動腳本 process tree。
 
         Args:
             path: 目標資料夾。
@@ -140,8 +144,6 @@ class SystemUtils:
         except Exception as e:
             logger.error(f"kill_java_processes_in_path 失敗: {e}")
         return killed
-
-    """系統工具類別"""
 
     @staticmethod
     def _iterate_process_snapshot() -> list[PROCESSENTRY32]:
@@ -173,7 +175,8 @@ class SystemUtils:
 
     @staticmethod
     def get_total_memory_mb() -> int:
-        """獲取系統總實體記憶體。
+        """
+        獲取系統總實體記憶體。
 
         Returns:
             系統總實體記憶體（MB）。
@@ -190,7 +193,8 @@ class SystemUtils:
 
     @staticmethod
     def get_process_name(pid: int) -> str:
-        """獲取指定 PID 的進程名稱。
+        """
+        獲取指定 PID 的進程名稱。
 
         Args:
             pid: 進程 ID。
@@ -208,7 +212,8 @@ class SystemUtils:
 
     @staticmethod
     def get_process_children(pid_root: int) -> list[tuple[int, str]]:
-        """獲取子進程列表 [(pid, name), ...]。
+        """
+        獲取子進程列表 [(pid, name), ...]。
 
         Args:
             pid_root: 父進程 ID。
@@ -237,7 +242,8 @@ class SystemUtils:
 
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
-        """獲取進程記憶體使用量（bytes）。
+        """
+        獲取進程記憶體使用量（bytes）。
 
         Args:
             pid: 進程 ID。
@@ -264,7 +270,8 @@ class SystemUtils:
 
     @staticmethod
     def find_java_process(parent_pid: int) -> int | None:
-        """從父進程查找 Java 子進程 PID。
+        """
+        從父進程查找 Java 子進程 PID。
 
         Args:
             parent_pid: 父進程 ID。
@@ -286,7 +293,8 @@ class SystemUtils:
 
     @staticmethod
     def kill_process_tree(pid: int) -> bool:
-        """強制結束進程樹。
+        """
+        強制結束進程樹。
 
         Args:
             pid: 要結束的進程 ID。
@@ -304,7 +312,8 @@ class SystemUtils:
 
     @staticmethod
     def is_process_running(pid: int) -> bool:
-        """檢查進程是否運行中。
+        """
+        檢查進程是否運行中。
 
         Args:
             pid: 進程 ID。

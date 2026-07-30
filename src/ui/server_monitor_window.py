@@ -1,4 +1,5 @@
-"""伺服器監控視窗
+"""
+伺服器監控視窗
 提供即時的伺服器狀態監控、控制台輸出和資源使用情況
 Server monitor window for real-time status, console output, and resource usage.
 """
@@ -10,10 +11,23 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from ..utils import Colors, FontSize, MemoryUtils, ServerOperations, Sizes, Spacing, UIUtils, WindowManager, get_logger
+from ..utils import (
+    Colors,
+    DialogUtils,
+    FontManager,
+    FontSize,
+    MemoryUtils,
+    NativeQtStyle,
+    ServerOperations,
+    Sizes,
+    Spacing,
+    TaskUtils,
+    TreeUtils,
+    UIUtils,
+    WindowManager,
+    get_logger,
+)
 from ..utils.ui_support import qt_widgets as qt
-from . import DialogUtils, FontManager, TaskUtils, TreeUtils
-from .ui_config import NativeQtStyle
 
 logger = get_logger().bind(component="ServerMonitorWindow")
 
@@ -99,7 +113,8 @@ class ServerMonitorWindow:
             UIUtils.cancel_scheduled_job(self.window, job_attr, owner=self)
 
     def safe_update_widget(self, widget_name: str, update_func: Callable, *args, **kwargs) -> None:
-        """安全地更新 widget，檢查 widget 是否存在。
+        """
+        安全地更新 widget，檢查 widget 是否存在。
 
         Args:
             widget_name: 目標 widget 的屬性名稱。
@@ -115,7 +130,8 @@ class ServerMonitorWindow:
             logger.error(f"更新 {widget_name} 失敗: {e}\n{traceback.format_exc()}")
 
     def safe_config_widget(self, widget_name: str, **config) -> None:
-        """安全地配置 widget。
+        """
+        安全地配置 widget。
 
         Args:
             widget_name: 目標 widget 的屬性名稱。
@@ -190,7 +206,8 @@ class ServerMonitorWindow:
                 logger.debug(f"顯示監控視窗失敗: {e}", "ServerMonitorWindow")
 
     def create_control_panel(self, parent) -> None:
-        """創建控制面板。
+        """
+        創建控制面板。
 
         Args:
             parent: 父容器。
@@ -433,7 +450,8 @@ class ServerMonitorWindow:
         self.ui_queue.put(_apply)
 
     def create_console_panel(self, parent) -> None:
-        """創建控制台面板。
+        """
+        創建控制台面板。
 
         Args:
             parent: 父容器。
@@ -600,7 +618,7 @@ class ServerMonitorWindow:
     def read_server_output(self) -> None:
         """讀取伺服器輸出並顯示在控制台，並即時解析玩家數量/名單與啟動完成通知"""
         try:
-            output_lines = self.server_manager.read_server_output(self.server_name, _timeout=0.1)
+            output_lines = self.server_manager.read_server_output(self.server_name)
             for line in output_lines:
                 if line.strip():
 
@@ -705,16 +723,14 @@ class ServerMonitorWindow:
             logger.error(f"更新玩家數量錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 
     def read_player_list(self, line=None) -> None:
-        """讀取玩家列表。
+        """
+        讀取玩家列表。
 
         Args:
             line: 可選的單行玩家統計字串。
         """
         try:
-            if line is not None:
-                lines = [line]
-            else:
-                lines = self.server_manager.read_server_output(self.server_name, _timeout=1.2)
+            lines = [line] if line is not None else self.server_manager.read_server_output(self.server_name)
             found = False
             for line in lines:
                 snapshot = self._parse_player_list_line(line)
@@ -728,7 +744,8 @@ class ServerMonitorWindow:
             logger.error(f"讀取玩家列表時發生錯誤: {e}\n{traceback.format_exc()}", "ServerMonitorWindow")
 
     def update_player_list(self, players: list) -> None:
-        """更新玩家列表顯示（支援條紋交替顏色）。
+        """
+        更新玩家列表顯示（支援條紋交替顏色）。
 
         Args:
             players: 玩家名稱清單。
@@ -899,7 +916,8 @@ class ServerMonitorWindow:
             self.command_entry.insert(0, cmd)
 
     def send_command(self, _event=None) -> None:
-        """發送命令到伺服器。
+        """
+        發送命令到伺服器。
 
         Args:
             _event: 事件物件，供按鍵綁定使用。
@@ -921,7 +939,8 @@ class ServerMonitorWindow:
             self.add_console_message(f"❌ 命令發送失敗: {command}")
 
     def add_console_message(self, message: str) -> None:
-        """添加控制台訊息（緩衝處理）。
+        """
+        添加控制台訊息（緩衝處理）。
 
         Args:
             message: 要加入控制台的訊息。

@@ -49,7 +49,8 @@ class WindowManager:
 
     @staticmethod
     def get_screen_info(window: QtWidgets.QWidget | None = None) -> dict[str, Any]:
-        """取得螢幕資訊，優先使用 Qt screen。
+        """
+        取得螢幕資訊，優先使用 Qt screen。
 
         Args:
             window: 用來解析所在螢幕的視窗。
@@ -100,7 +101,8 @@ class WindowManager:
     def calculate_optimal_size(
         screen_info: dict[str, Any], min_width: int = 900, min_height: int = 600
     ) -> tuple[int, int]:
-        """根據螢幕大小計算最佳視窗尺寸。
+        """
+        根據螢幕大小計算最佳視窗尺寸。
 
         Args:
             screen_info: `get_screen_info` 回傳的螢幕資訊。
@@ -130,7 +132,8 @@ class WindowManager:
 
     @staticmethod
     def calculate_center_position(screen_info: dict[str, Any], width: int, height: int) -> tuple[int, int]:
-        """計算視窗置中位置。
+        """
+        計算視窗置中位置。
 
         Args:
             screen_info: `get_screen_info` 回傳的螢幕資訊。
@@ -150,7 +153,8 @@ class WindowManager:
 
     @staticmethod
     def setup_main_window(window: QtWidgets.QWidget, force_defaults: bool = False) -> None:
-        """設定主視窗大小、位置與最小尺寸。
+        """
+        設定主視窗大小、位置與最小尺寸。
 
         Args:
             window: 主視窗。
@@ -198,7 +202,8 @@ class WindowManager:
 
     @staticmethod
     def save_main_window_state(window: QtWidgets.QWidget) -> None:
-        """儲存主視窗狀態。
+        """
+        儲存主視窗狀態。
 
         Args:
             window: 要保存狀態的主視窗。
@@ -250,7 +255,8 @@ class WindowManager:
         height: int | None = None,
         center_on_parent: bool = True,
     ) -> None:
-        """設定 dialog 大小與位置。
+        """
+        設定 dialog 大小與位置。
 
         Args:
             window: 要設定的對話框視窗。
@@ -282,7 +288,8 @@ class WindowManager:
 
     @staticmethod
     def bind_window_state_tracking(window: QtWidgets.QWidget) -> None:
-        """綁定 Qt 視窗狀態追蹤事件。
+        """
+        綁定 Qt 視窗狀態追蹤事件。
 
         Args:
             window: 要追蹤移動、縮放與顯示事件的視窗。

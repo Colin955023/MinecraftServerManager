@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 from types import SimpleNamespace
 
-from src.core.local_mod_scanner import LocalModScanner
+from src.core import LocalModScanner
 from src.utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,

@@ -98,7 +98,9 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
 </metadata>
 """
 
-    monkeypatch.setattr("src.core.loader_manager.HTTPUtils.get_content", lambda *_args, **_kwargs: xml_content)
+    monkeypatch.setattr(
+        "src.utils.network_utils.http_utils.HTTPUtils.get_content", lambda *_args, **_kwargs: xml_content
+    )
 
     manager._preload_forge_versions()
 

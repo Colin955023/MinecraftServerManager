@@ -1,4 +1,5 @@
-"""路徑工具模組。
+"""
+路徑工具模組。
 提供專案中的路徑處理與檔案操作輔助函式。
 """
 
@@ -71,7 +72,8 @@ class PathUtils:
 
     @staticmethod
     def _save_json_internal(path: Path | str, data: Any, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
-        """JSON 寫入核心：使用路徑專屬鎖後呼叫統一的 atomic_write_json。
+        """
+        JSON 寫入核心：使用路徑專屬鎖後呼叫統一的 atomic_write_json。
 
         行為保留原本的 `skip_if_unchanged` 檢查，但實際寫入委由
         `atomic_write_json` 處理，以統一原子替換策略與 fsync 行為。
@@ -97,7 +99,8 @@ class PathUtils:
 
     @staticmethod
     def is_path_within(base_dir: Path, target_path: Path, *, strict: bool = True) -> bool:
-        """檢查 `target_path` 是否位於 `base_dir` 之下。
+        """
+        檢查 `target_path` 是否位於 `base_dir` 之下。
 
         Args:
             base_dir: 基準目錄。
@@ -122,7 +125,8 @@ class PathUtils:
 
     @staticmethod
     def _sanitize_archive_member_name(member_name: str) -> Path | None:
-        """清理 zip/zip-like 內部檔案名稱，移除絕對路徑與父目錄參考。
+        """
+        清理 zip/zip-like 內部檔案名稱，移除絕對路徑與父目錄參考。
 
         Args:
             member_name: zip 內部檔案名稱。
@@ -200,7 +204,8 @@ class PathUtils:
         max_member_uncompressed_bytes: int | None = SAFE_ZIP_MAX_MEMBER_BYTES,
         max_compression_ratio: int | None = SAFE_ZIP_MAX_COMPRESSION_RATIO,
     ) -> None:
-        """安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞。
+        """
+        安全地解壓縮 Zip 檔案，防止 Zip Slip 漏洞。
 
         Args:
             zip_path: Zip 檔案路徑。
@@ -266,7 +271,8 @@ class PathUtils:
 
     @staticmethod
     def get_project_root() -> Path:
-        """獲取專案根目錄的絕對路徑。
+        """
+        獲取專案根目錄的絕對路徑。
 
         優先沿著目前模組位置向上尋找 `pyproject.toml`，這樣即使本檔案
         被搬到不同子目錄，仍可正確定位專案根目錄。若為 frozen 執行，
@@ -292,7 +298,8 @@ class PathUtils:
 
     @staticmethod
     def load_json(path: Path | str, default: Any = None) -> Any:
-        """安全讀取 JSON 檔案。
+        """
+        安全讀取 JSON 檔案。
 
         Args:
             path: JSON 檔案路徑。
@@ -312,7 +319,8 @@ class PathUtils:
 
     @staticmethod
     def save_json(path: Path | str, data: Any, indent: int = 2) -> bool:
-        """安全寫入 JSON 檔案。
+        """
+        安全寫入 JSON 檔案。
 
         Args:
             path: JSON 檔案路徑。
@@ -326,7 +334,8 @@ class PathUtils:
 
     @staticmethod
     def save_json_if_changed(path: Path | str, data: Any, indent: int = 2) -> bool:
-        """僅在內容異動時才寫入 JSON。
+        """
+        僅在內容異動時才寫入 JSON。
 
         Args:
             path: JSON 檔案路徑。
@@ -340,7 +349,8 @@ class PathUtils:
 
     @staticmethod
     def read_json_from_zip(zip_path: Path | str, internal_path: str) -> Any | None:
-        """從 Zip 檔案中讀取 JSON。
+        """
+        從 Zip 檔案中讀取 JSON。
 
         Args:
             zip_path: Zip 檔案路徑。
@@ -372,7 +382,8 @@ class PathUtils:
 
     @staticmethod
     def to_json_str(data: Any, indent: int | None = None) -> str:
-        """將資料轉換為 JSON 字串。
+        """
+        將資料轉換為 JSON 字串。
 
         Args:
             data: 要轉換的資料。
@@ -388,7 +399,8 @@ class PathUtils:
 
     @staticmethod
     def from_json_str(json_str: str) -> Any:
-        """從 JSON 字串解析資料。
+        """
+        從 JSON 字串解析資料。
 
         Args:
             json_str: JSON 文字。
@@ -432,7 +444,8 @@ class PathUtils:
 
     @staticmethod
     def read_text_file(path: Path, encoding: str = "utf-8", errors: str = "replace") -> str | None:
-        """讀取文字檔案，統一處理編碼和錯誤。
+        """
+        讀取文字檔案，統一處理編碼和錯誤。
 
         Args:
             path: 文字檔案路徑。
@@ -446,7 +459,8 @@ class PathUtils:
 
     @staticmethod
     def write_text_file(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
-        """寫入文字檔案，統一處理編碼和錯誤。
+        """
+        寫入文字檔案，統一處理編碼和錯誤。
 
         Args:
             path: 文字檔案路徑。
@@ -464,7 +478,8 @@ class PathUtils:
 
     @staticmethod
     def ensure_dir_exists(path: Path) -> bool:
-        """確保目錄存在，不存在則建立。
+        """
+        確保目錄存在，不存在則建立。
 
         Args:
             path: 目錄路徑。
@@ -480,7 +495,8 @@ class PathUtils:
 
     @staticmethod
     def read_bytes_file(path: Path) -> bytes | None:
-        """讀取二進位檔案。
+        """
+        讀取二進位檔案。
 
         Args:
             path: 檔案路徑。
@@ -492,7 +508,8 @@ class PathUtils:
 
     @staticmethod
     def calculate_checksum(path: Path, algorithm: str = "sha256") -> str | None:
-        """計算檔案雜湊值（檢查碼）。
+        """
+        計算檔案雜湊值（檢查碼）。
 
         Args:
             path: 檔案路徑。
@@ -514,7 +531,8 @@ class PathUtils:
 
     @staticmethod
     def delete_path(path: Path | str) -> bool:
-        """刪除檔案或目錄。
+        """
+        刪除檔案或目錄。
 
         Args:
             path: 要刪除的路徑。
@@ -539,7 +557,8 @@ class PathUtils:
 
     @staticmethod
     def delete_within(base_dir: Path | str, path: Path | str) -> bool:
-        """僅在 `path` 位於 `base_dir` 之下時才刪除。
+        """
+        僅在 `path` 位於 `base_dir` 之下時才刪除。
 
         Args:
             base_dir: 允許刪除的根目錄。
@@ -559,7 +578,8 @@ class PathUtils:
 
     @staticmethod
     def move_path(src: Path, dst: Path) -> bool:
-        """移動檔案或目錄。
+        """
+        移動檔案或目錄。
 
         Args:
             src: 來源路徑。
@@ -579,7 +599,8 @@ class PathUtils:
 
     @staticmethod
     def move_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
-        """僅在來源與目的地都位於 `base_dir` 之下時才搬移。
+        """
+        僅在來源與目的地都位於 `base_dir` 之下時才搬移。
 
         Args:
             base_dir: 允許搬移的根目錄。
@@ -656,7 +677,8 @@ class PathUtils:
         ignore_patterns: list[str] | None = None,
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> bool:
-        """複製目錄。
+        """
+        複製目錄。
 
         Args:
             src: 來源目錄。
@@ -710,7 +732,8 @@ class PathUtils:
 
     @staticmethod
     def find_executable(name: str) -> str | None:
-        """尋找執行檔路徑。
+        """
+        尋找執行檔路徑。
 
         Args:
             name: 執行檔名稱。
@@ -722,7 +745,8 @@ class PathUtils:
 
     @staticmethod
     def get_long_path(path: Path | str) -> Path:
-        """將 Windows 的短路徑（8.3 格式）展開為完整長路徑。
+        """
+        將 Windows 的短路徑（8.3 格式）展開為完整長路徑。
 
         Args:
             path: 原始路徑。
@@ -753,7 +777,8 @@ class PathUtils:
 
     @staticmethod
     def mark_issue(path: Path | str, reason: str, details: Any | None = None) -> bool:
-        """在專案根目錄下的 `.issues/` 中建立或更新聚合的 issue marker。
+        """
+        在專案根目錄下的 `.issues/` 中建立或更新聚合的 issue marker。
 
                 Args:
                         path: 原始檔案路徑。
@@ -839,7 +864,8 @@ class PathUtils:
 
     @staticmethod
     def list_issue_markers(root: Path | str | None = None) -> list[dict]:
-        """列出集中儲存的聚合 issue marker。
+        """
+        列出集中儲存的聚合 issue marker。
 
         Args:
             root: 掃描根目錄；未提供時預設為專案根目錄。
@@ -869,7 +895,8 @@ class PathUtils:
 
     @staticmethod
     def recover_issue_marker(marker_path: Path | str, remove_marker: bool = True) -> bool:
-        """嘗試從標記檔回復/清理。
+        """
+        嘗試從標記檔回復/清理。
 
         Args:
             marker_path: 標記檔或原始檔路徑。
@@ -911,7 +938,8 @@ class PathUtils:
 
     @staticmethod
     def auto_prune_markers(root: Path | str | None = None, max_age_days: int = 365) -> list[str]:
-        """針對集中式聚合 markers 執行過期清理與條目修剪。
+        """
+        針對集中式聚合 markers 執行過期清理與條目修剪。
 
         Args:
             root: 掃描根目錄；未提供時預設為專案根目錄。

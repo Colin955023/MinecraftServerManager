@@ -6,13 +6,12 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import src.models as models_module
 import src.ui as mod_management_module
 import src.ui.mod_management.online_mod_queue as online_mod_queue_module
 import src.utils as meta_module
+import src.utils as utils_module
 import src.utils.ui_support.ui_utils as ui_utils_module
-
-Colors = ui_utils_module.Colors
-UIUtils = ui_utils_module.UIUtils
 
 
 class _StubTree:
@@ -200,8 +199,8 @@ class _BrowseRefreshTree:
         return "schedule-id"
 
 
-def _pending_install(project_id: str, project_name: str, version_id: str) -> mod_management_module.PendingOnlineInstall:
-    return mod_management_module.PendingOnlineInstall(
+def _pending_install(project_id: str, project_name: str, version_id: str) -> models_module.PendingOnlineInstall:
+    return models_module.PendingOnlineInstall(
         project_id=project_id,
         project_name=project_name,
         version=cast(Any, SimpleNamespace(version_id=version_id)),
@@ -212,10 +211,10 @@ def test_local_row_palette_uses_distinct_tokens() -> None:
     light_odd, light_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=False)
     dark_odd, dark_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=True)
 
-    assert light_odd == Colors.BG_LISTBOX_LIGHT
-    assert light_even == Colors.BG_LISTBOX_ALT_LIGHT
-    assert dark_odd == Colors.BG_LISTBOX_DARK
-    assert dark_even == Colors.BG_LISTBOX_ALT_DARK
+    assert light_odd == utils_module.Colors.BG_LISTBOX_LIGHT
+    assert light_even == utils_module.Colors.BG_LISTBOX_ALT_LIGHT
+    assert dark_odd == utils_module.Colors.BG_LISTBOX_DARK
+    assert dark_even == utils_module.Colors.BG_LISTBOX_ALT_DARK
     assert light_odd != light_even
     assert dark_odd != dark_even
 
@@ -455,7 +454,7 @@ def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.Monk
     errors: list[tuple[str, str]] = []
     monkeypatch.setattr(online_mod_queue_module.qt, "ensure_app", lambda: _BrokenApp())
     monkeypatch.setattr(
-        mod_management_module.UIUtils,
+        utils_module.UIUtils,
         "show_error",
         lambda title, message, _parent=None: errors.append((title, message)),
     )
@@ -473,7 +472,7 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
     frame.local_mods = [
         SimpleNamespace(
             name="Fabric API",
-            status=mod_management_module.ModStatus.ENABLED,
+            status=models_module.ModStatus.ENABLED,
             filename="fabric-api-0.141.3+1.21.1.jar",
             version="0.141.3+1.21.1",
             author="FabricMC",
@@ -539,11 +538,11 @@ def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.Mon
         recorded_calls.append(list(command))
 
     monkeypatch.setattr(ui_utils_module, "os", SimpleNamespace(name="nt", environ={"WINDIR": "C:\\Windows"}))
-    monkeypatch.setattr(ui_utils_module.PathUtils, "find_executable", lambda _name: "explorer.exe")
-    monkeypatch.setattr(ui_utils_module.UIUtils, "_is_safe_windows_path_argument", lambda _path: True)
-    monkeypatch.setattr(ui_utils_module.SubprocessUtils, "run_checked", fake_run_checked)
+    monkeypatch.setattr(utils_module.PathUtils, "find_executable", lambda _name: "explorer.exe")
+    monkeypatch.setattr(utils_module.UIUtils, "_is_safe_windows_path_argument", lambda _path: True)
+    monkeypatch.setattr(utils_module.SubprocessUtils, "run_checked", fake_run_checked)
 
-    ui_utils_module.UIUtils.reveal_in_explorer(Path("C:/servers/Alpha/mods/example.jar"))
+    utils_module.UIUtils.reveal_in_explorer(Path("C:/servers/Alpha/mods/example.jar"))
 
     assert recorded_calls == [["explorer.exe", "/select,", "C:\\servers\\Alpha\\mods\\example.jar"]]
 
@@ -565,7 +564,7 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
         notes=[],
         local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/fabric-language-kotlin-1.13.9+kotlin.2.3.10.jar"),
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
@@ -588,17 +587,17 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
 def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
-    enabled_entry = mod_management_module.LocalUpdateReviewEntry(
+    enabled_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(actionable=True, recommendation_confidence="high"),
         dependency_plan=SimpleNamespace(items=[]),
         enabled=True,
     )
-    advisory_entry = mod_management_module.LocalUpdateReviewEntry(
+    advisory_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(actionable=True, recommendation_confidence="advisory"),
         dependency_plan=SimpleNamespace(items=[]),
         enabled=True,
     )
-    retryable_entry = mod_management_module.LocalUpdateReviewEntry(
+    retryable_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
             actionable=True,
             recommendation_confidence="retryable",
@@ -609,7 +608,7 @@ def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None
         blocking_reasons=["metadata 過期"],
         enabled=True,
     )
-    unknown_entry = mod_management_module.LocalUpdateReviewEntry(
+    unknown_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
             actionable=True,
             recommendation_confidence="blocked",
@@ -620,7 +619,7 @@ def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None
         blocking_reasons=["provider metadata 缺失"],
         enabled=True,
     )
-    blocked_entry = mod_management_module.LocalUpdateReviewEntry(
+    blocked_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(actionable=True, recommendation_confidence="blocked"),
         dependency_plan=SimpleNamespace(items=[]),
         blocking_reasons=["相依版本衝突"],
@@ -643,7 +642,7 @@ def test_build_local_update_execution_prompt_returns_none_for_advisory_only() ->
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
-        mod_management_module.LocalUpdateReviewEntry(
+        models_module.LocalUpdateReviewEntry(
             candidate=SimpleNamespace(actionable=True, recommendation_confidence="advisory"),
             dependency_plan=SimpleNamespace(items=[]),
             enabled=True,
@@ -796,14 +795,14 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
         del parent, show_cancel
         return True
 
-    monkeypatch.setattr(mod_management_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
+    monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
     monkeypatch.setattr(
-        mod_management_module.UIUtils,
+        utils_module.UIUtils,
         "show_info",
         lambda _title, message, _parent=None: shown_messages.append(message),
     )
     monkeypatch.setattr(
-        mod_management_module.UIUtils,
+        utils_module.UIUtils,
         "show_warning",
         lambda _title, message, _parent=None: shown_messages.append(f"warn:{message}"),
     )
@@ -842,10 +841,10 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
         del parent, show_cancel
         return True
 
-    monkeypatch.setattr(mod_management_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
-    monkeypatch.setattr(mod_management_module.UIUtils, "show_info", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
+    monkeypatch.setattr(utils_module.UIUtils, "show_info", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        mod_management_module.UIUtils,
+        utils_module.UIUtils,
         "show_warning",
         lambda _title, message, _parent=None: shown_messages.append(message),
     )
@@ -858,13 +857,13 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
 
 
 def test_set_review_entries_enabled_toggles_flags() -> None:
-    enabled_entry = mod_management_module.PendingInstallReviewEntry(
+    enabled_entry = models_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
         report=None,
         dependency_plan=cast(Any, object()),
         enabled=True,
     )
-    disabled_entry = mod_management_module.PendingInstallReviewEntry(
+    disabled_entry = models_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
         report=None,
         dependency_plan=cast(Any, object()),
@@ -883,19 +882,19 @@ def test_set_review_entries_enabled_toggles_flags() -> None:
 
 
 def test_review_entry_counters_distinguish_enabled_and_blocked_items() -> None:
-    runnable_enabled = mod_management_module.PendingInstallReviewEntry(
+    runnable_enabled = models_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
         report=None,
         dependency_plan=cast(Any, object()),
         enabled=True,
     )
-    runnable_disabled = mod_management_module.PendingInstallReviewEntry(
+    runnable_disabled = models_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
         report=None,
         dependency_plan=cast(Any, object()),
         enabled=False,
     )
-    blocked_enabled = mod_management_module.PendingInstallReviewEntry(
+    blocked_enabled = models_module.PendingInstallReviewEntry(
         pending=cast(Any, object()),
         report=None,
         dependency_plan=None,
@@ -955,12 +954,12 @@ def test_set_selected_advisory_dependency_items_enabled_supports_optional_parent
 def test_build_online_review_task_nodes_include_grouped_children() -> None:
     """驗證簡化版本：扁平列表結構、正確分組"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    pending = mod_management_module.PendingOnlineInstall(
+    pending = models_module.PendingOnlineInstall(
         project_id="fabric-api",
         project_name="Fabric API",
         version=cast(Any, type("Version", (), {"version_id": "abc", "display_name": "0.120.0"})()),
     )
-    review_entry = mod_management_module.PendingInstallReviewEntry(
+    review_entry = models_module.PendingInstallReviewEntry(
         pending=pending,
         report=None,
         dependency_plan=SimpleNamespace(items=[SimpleNamespace(project_name="Cloth Config", version_name="17.0.0")]),
@@ -991,8 +990,8 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
         project_name="Cloth Config",
         version_name="17.0.0",
     )
-    entry_a = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry_a = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
             project_name="Fabric API",
             version=cast(Any, type("Version", (), {"version_id": "v1", "display_name": "0.120.0"})()),
@@ -1001,8 +1000,8 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
         dependency_plan=SimpleNamespace(items=[dependency], notes=[]),
         enabled=True,
     )
-    entry_b = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry_b = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="lithium",
             project_name="Lithium",
             version=cast(Any, type("Version", (), {"version_id": "v2", "display_name": "0.13.0"})()),
@@ -1032,8 +1031,8 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
         project_name="Cloth Config",
         version_name="17.0.0",
     )
-    entry_a = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry_a = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
             project_name="Fabric API",
             version=cast(Any, type("Version", (), {"version_id": "v1", "display_name": "0.120.0"})()),
@@ -1042,8 +1041,8 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
         dependency_plan=SimpleNamespace(items=[dependency], notes=[]),
         enabled=True,
     )
-    entry_b = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry_b = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="lithium",
             project_name="Lithium",
             version=cast(Any, type("Version", (), {"version_id": "v2", "display_name": "0.13.0"})()),
@@ -1069,8 +1068,8 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
 
 def test_build_online_review_task_nodes_marks_advisory_dependency_as_skipped() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    entry = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
             project_name="Fabric API",
             version=cast(Any, type("Version", (), {"version_id": "v1", "display_name": "0.120.0"})()),
@@ -1120,8 +1119,8 @@ def test_build_dependency_status_text_uses_resolution_fallback_label() -> None:
 
 def test_build_online_review_root_status_text_summarizes_dependencies_warnings_and_blockers() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    entry = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
             project_name="Fabric API",
             version=cast(Any, type("Version", (), {"version_id": "v1", "display_name": "0.120.0"})()),
@@ -1143,12 +1142,12 @@ def test_build_online_review_root_status_text_summarizes_dependencies_warnings_a
 
 def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    pending = mod_management_module.PendingOnlineInstall(
+    pending = models_module.PendingOnlineInstall(
         project_id="fabric-api",
         project_name="Fabric API",
         version=cast(Any, type("Version", (), {"version_id": "abc", "display_name": "0.120.0"})()),
     )
-    review_entry = mod_management_module.PendingInstallReviewEntry(
+    review_entry = models_module.PendingInstallReviewEntry(
         pending=pending,
         report=None,
         dependency_plan=SimpleNamespace(items=[SimpleNamespace(project_name="Cloth Config", version_name="17.0.0")]),
@@ -1179,8 +1178,8 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         display_name="1.0.0",
         primary_file={"filename": "second.jar", "url": "https://example.com/second.jar"},
     )
-    first_pending = mod_management_module.PendingOnlineInstall("first-mod", "First Mod", first_version)
-    second_pending = mod_management_module.PendingOnlineInstall("second-mod", "Second Mod", second_version)
+    first_pending = models_module.PendingOnlineInstall("first-mod", "First Mod", first_version)
+    second_pending = models_module.PendingOnlineInstall("second-mod", "Second Mod", second_version)
     frame_any.pending_online_installs = [first_pending, second_pending]
 
     shared_dependency = SimpleNamespace(
@@ -1193,7 +1192,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     )
     dependency_plan = SimpleNamespace(items=[shared_dependency], advisory_items=[], unresolved_required=[], notes=[])
     review_entries = [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=first_pending,
             report=None,
             dependency_plan=dependency_plan,
@@ -1203,7 +1202,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
             provider="modrinth",
             version_type="release",
         ),
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=second_pending,
             report=None,
             dependency_plan=SimpleNamespace(
@@ -1247,7 +1246,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     frame_any.mod_manager = SimpleNamespace(install_remote_mod_file=_record_install)
 
     monkeypatch.setattr(
-        mod_management_module.TaskUtils, "run_async", lambda task, cancel_token=None: task(cancel_token=cancel_token)
+        utils_module.TaskUtils, "run_async", lambda task, cancel_token=None: task(cancel_token=cancel_token)
     )
 
     def _show_info(title: str, message: str, parent=None) -> None:
@@ -1257,8 +1256,8 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     def _confirm_dialog(*_args, **_kwargs) -> bool:
         return True
 
-    monkeypatch.setattr(mod_management_module.UIUtils, "ask_yes_no_cancel", _confirm_dialog)
-    monkeypatch.setattr(mod_management_module.UIUtils, "show_info", _show_info)
+    monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", _confirm_dialog)
+    monkeypatch.setattr(utils_module.UIUtils, "show_info", _show_info)
 
     dialog = SimpleNamespace(destroy=lambda: dialog_destroyed.append(True))
 
@@ -1299,8 +1298,8 @@ def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_fr
         primary_file={"filename": "second.jar"},
     )
     frame.pending_online_installs = [
-        mod_management_module.PendingOnlineInstall("first-mod", "First Mod", first_version),
-        mod_management_module.PendingOnlineInstall("second-mod", "Second Mod", second_version),
+        models_module.PendingOnlineInstall("first-mod", "First Mod", first_version),
+        models_module.PendingOnlineInstall("second-mod", "Second Mod", second_version),
     ]
 
     monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21", "fabric", "0.16.0"))
@@ -1355,7 +1354,7 @@ def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatc
         primary_file={"filename": "client-only.jar"},
     )
     frame.pending_online_installs = [
-        mod_management_module.PendingOnlineInstall(
+        models_module.PendingOnlineInstall(
             "client-only-mod",
             "Client Only Mod",
             client_only_version,
@@ -1399,7 +1398,7 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
         primary_file={"filename": "unknown-side.jar"},
     )
     frame.pending_online_installs = [
-        mod_management_module.PendingOnlineInstall(
+        models_module.PendingOnlineInstall(
             "unknown-side-mod",
             "Unknown Side Mod",
             unknown_side_version,
@@ -1432,7 +1431,7 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
 def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder() -> None:
     tree = _HeaderAutoFitTree()
 
-    column_id = mod_management_module.TreeUtils._get_treeview_separator_column_from_x(tree, 140)
+    column_id = utils_module.TreeUtils._get_treeview_separator_column_from_x(tree, 140)
 
     assert column_id == "name"
     assert tree.requested_columns == ["name", "version"]
@@ -1449,7 +1448,7 @@ def test_build_local_update_task_nodes_include_blocking_items() -> None:
         report=SimpleNamespace(warnings=["與現有設定可能衝突。"]),
         notes=["需要更新前先停機。"],
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[]),
         blocking_reasons=["缺少相容版本依賴"],
@@ -1479,7 +1478,7 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
         report=None,
         notes=[],
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
@@ -1510,7 +1509,7 @@ def test_build_local_update_task_nodes_groups_advisory_candidate_separately() ->
         report=None,
         notes=[],
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=[],
@@ -1540,7 +1539,7 @@ def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -
         report=None,
         notes=[],
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=["provider metadata 已過期且重查失敗，已暫停自動更新以避免錯誤建議。"],
@@ -1581,11 +1580,11 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
     def _show_warning(title: str, message: str, _parent=None) -> None:
         messages.append((title, message))
 
-    monkeypatch.setattr(mod_management_module.UIUtils, "show_warning", _show_warning)
+    monkeypatch.setattr(utils_module.UIUtils, "show_warning", _show_warning)
 
     blocked_version = SimpleNamespace(version_id="v-client-only", display_name="1.0.0")
     added = frame._add_pending_online_install(
-        mod_management_module.PendingOnlineInstall(
+        models_module.PendingOnlineInstall(
             "client-only-mod",
             "Client Only Mod",
             blocked_version,
@@ -1611,16 +1610,16 @@ def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> N
     frame_any.parent = SimpleNamespace()
     frame_any.update_status = lambda _message: None
     frame_any._refresh_online_queue_button = lambda: None
-    monkeypatch.setattr(mod_management_module.UIUtils, "show_warning", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(utils_module.UIUtils, "show_warning", lambda *_args, **_kwargs: None)
 
     first_version = SimpleNamespace(version_id="v1", display_name="1.0.0")
     second_version = SimpleNamespace(version_id="v1", display_name="1.0.1")
 
     first_added = frame._add_pending_online_install(
-        mod_management_module.PendingOnlineInstall("fabric-api", "Fabric API", first_version)
+        models_module.PendingOnlineInstall("fabric-api", "Fabric API", first_version)
     )
     second_added = frame._add_pending_online_install(
-        mod_management_module.PendingOnlineInstall("fabric-api", "Fabric API Updated", second_version)
+        models_module.PendingOnlineInstall("fabric-api", "Fabric API Updated", second_version)
     )
 
     assert first_added is True
@@ -1675,7 +1674,7 @@ def test_build_local_update_review_key_is_unique_for_same_project_id_with_differ
 def test_format_review_overview_text_includes_preflight_notes() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     entries = [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=cast(Any, object()),
             report=None,
             dependency_plan=cast(Any, object()),
@@ -1683,7 +1682,7 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
         )
     ]
     nodes = [
-        mod_management_module.ReviewTaskNode(
+        models_module.ReviewTaskNode(
             node_id="root",
             root_key="root",
             group_key="enabled",
@@ -1691,7 +1690,7 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
             values=("是", "Modrinth", "Fabric API", "0.120.0", "release", "可安裝"),
             node_kind="root",
         ),
-        mod_management_module.ReviewTaskNode(
+        models_module.ReviewTaskNode(
             node_id="root::warning::0",
             root_key="root",
             group_key="enabled",
@@ -1765,7 +1764,7 @@ def test_format_local_update_review_text_includes_metadata_source() -> None:
         notes=[],
         report=None,
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=[],
@@ -1801,8 +1800,8 @@ def test_format_pending_install_review_text_includes_summary_lines() -> None:
             },
         )(),
     )
-    review_entry = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    review_entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
             project_name="Fabric API",
             version=version,
@@ -1847,8 +1846,8 @@ def test_format_pending_install_review_text_includes_client_install_reminder_for
             },
         )(),
     )
-    review_entry = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    review_entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="sodium",
             project_name="Sodium",
             version=version,
@@ -1882,7 +1881,7 @@ def test_format_local_update_review_text_includes_unresolved_metadata_state() ->
         notes=[],
         report=None,
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
@@ -1915,7 +1914,7 @@ def test_format_local_update_review_text_includes_client_install_reminder_for_se
         server_side="required",
         client_side="optional",
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
         blocking_reasons=[],
@@ -1980,15 +1979,13 @@ def test_ensure_local_mod_project_ids_backfills_missing_slug() -> None:
         name="Sodium",
     )
 
-    original_resolve_provider_record = mod_management_module.resolve_modrinth_provider_record
+    original_resolve_provider_record = utils_module.resolve_modrinth_provider_record
     original_enhance_local_mod = mod_management_module.enhance_local_mod
     fallback_calls = {"count": 0}
-    mod_management_module.resolve_modrinth_provider_record = lambda _identifier: (
-        mod_management_module.ProviderMetadataRecord.from_values(
-            project_id="AANobbMI",
-            slug="sodium",
-            project_name="Sodium",
-        )
+    utils_module.resolve_modrinth_provider_record = lambda _identifier: utils_module.ProviderMetadataRecord.from_values(
+        project_id="AANobbMI",
+        slug="sodium",
+        project_name="Sodium",
     )
 
     def _counting_enhance(*_args, **_kwargs):
@@ -1999,7 +1996,7 @@ def test_ensure_local_mod_project_ids_backfills_missing_slug() -> None:
     try:
         frame._ensure_local_mod_project_ids([local_mod])
     finally:
-        mod_management_module.resolve_modrinth_provider_record = original_resolve_provider_record
+        utils_module.resolve_modrinth_provider_record = original_resolve_provider_record
         mod_management_module.enhance_local_mod = original_enhance_local_mod
 
     assert local_mod.platform_id == "AANobbMI"
@@ -2079,7 +2076,7 @@ def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path
         return [
             SimpleNamespace(
                 filename="example.jar",
-                status=mod_management_module.ModStatus.ENABLED,
+                status=models_module.ModStatus.ENABLED,
                 file_path=str(tmp_path / "server-a" / "mods" / "example.jar"),
                 name="Example Mod",
                 author="Example",
@@ -2090,7 +2087,7 @@ def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path
         ]
 
     frame.mod_manager.scan_mods = _scan_mods
-    monkeypatch.setattr(mod_management_module.TaskUtils, "run_async", lambda task, **_kwargs: task())
+    monkeypatch.setattr(utils_module.TaskUtils, "run_async", lambda task, **_kwargs: task())
 
     mod_management_module.LocalModListPresenter(frame).load_local_mods()
 
@@ -2101,8 +2098,8 @@ def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path
 
 
 def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() -> None:
-    review_entry = mod_management_module.PendingInstallReviewEntry(
-        pending=mod_management_module.PendingOnlineInstall(
+    review_entry = models_module.PendingInstallReviewEntry(
+        pending=models_module.PendingOnlineInstall(
             project_id="AABBCCDD",
             project_name="Sodium",
             version=SimpleNamespace(),
@@ -2120,7 +2117,7 @@ def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() 
 
 
 def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id() -> None:
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
             project_id="P7dR8mSH",
             local_mod=SimpleNamespace(platform_slug="fabric-api", platform_id="ignored-project-id"),
@@ -2135,7 +2132,7 @@ def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id(
 
 
 def test_resolve_local_update_review_project_page_url_skips_unresolved_candidates() -> None:
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(
             project_id="",
             local_mod=SimpleNamespace(platform_slug="", platform_id=""),
@@ -2490,7 +2487,7 @@ def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_
         unresolved_required=[],
         notes=[],
     )
-    review_entry = mod_management_module.LocalUpdateReviewEntry(
+    review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=dependency_plan,
         blocking_reasons=[],
@@ -2617,28 +2614,28 @@ def test_get_online_install_review_group_key_classifies_all_states() -> None:
     """線上安裝 review 分組應正確對應 enabled/advisory/disabled/blocked 四種狀態。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
-    runnable_no_warn = mod_management_module.PendingInstallReviewEntry(
+    runnable_no_warn = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=[],
     )
-    runnable_with_warn = mod_management_module.PendingInstallReviewEntry(
+    runnable_with_warn = models_module.PendingInstallReviewEntry(
         pending=_pending_install("b", "B", "v2"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=["建議手動確認 server_side 支援"],
     )
-    runnable_disabled = mod_management_module.PendingInstallReviewEntry(
+    runnable_disabled = models_module.PendingInstallReviewEntry(
         pending=_pending_install("c", "C", "v3"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=False,
         warning_messages=[],
     )
-    blocked_entry = mod_management_module.PendingInstallReviewEntry(
+    blocked_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("d", "D", "v4"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2658,7 +2655,7 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=_pending_install(f"mod{i}", f"Mod{i}", f"v{i}"),
             report=None,
             dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2667,14 +2664,14 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
         )
         for i in range(3)
     ] + [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=_pending_install("warn1", "Warn1", "vw1"),
             report=None,
             dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
             enabled=True,
             warning_messages=["注意相容性"],
         ),
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=_pending_install("block1", "Block1", "vb1"),
             report=None,
             dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2696,21 +2693,21 @@ def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
     """_build_online_install_execution_prompt 應對 advisory/blocked 項目提供摘要文字。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
-    actionable_entry = mod_management_module.PendingInstallReviewEntry(
+    actionable_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=[],
     )
-    advisory_entry = mod_management_module.PendingInstallReviewEntry(
+    advisory_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("b", "B", "v2"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=["client_side 支援請確認"],
     )
-    blocked_entry = mod_management_module.PendingInstallReviewEntry(
+    blocked_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("c", "C", "v3"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2732,7 +2729,7 @@ def test_build_online_install_execution_prompt_returns_none_for_clean_queue() ->
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=_pending_install(f"m{i}", f"M{i}", f"v{i}"),
             report=None,
             dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2749,7 +2746,7 @@ def test_build_online_install_execution_prompt_returns_none_for_advisory_only() 
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
-        mod_management_module.PendingInstallReviewEntry(
+        models_module.PendingInstallReviewEntry(
             pending=_pending_install(f"m{i}", f"M{i}", f"v{i}"),
             report=None,
             dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
@@ -2766,21 +2763,21 @@ def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
     """_build_online_review_root_status_text 根節點標籤應與 group key 映射一致。"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
-    clean_entry = mod_management_module.PendingInstallReviewEntry(
+    clean_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=[],
     )
-    advisory_entry = mod_management_module.PendingInstallReviewEntry(
+    advisory_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("b", "B", "v2"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
         enabled=True,
         warning_messages=["注意事項"],
     )
-    blocked_entry = mod_management_module.PendingInstallReviewEntry(
+    blocked_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("c", "C", "v3"),
         report=None,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),

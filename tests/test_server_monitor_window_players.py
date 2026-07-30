@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 from typing import Any, cast
 
-from src.ui.server_monitor_window import ServerMonitorWindow
+from src.ui import ServerMonitorWindow
 
 
 class _FakeServerManager:

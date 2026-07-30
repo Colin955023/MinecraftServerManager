@@ -10,7 +10,8 @@ OFFICIAL_DOWNLOAD_HOSTS: dict[str, frozenset[str]] = {
 
 
 def normalize_download_provider(provider: str | None) -> str:
-    """正規化下載來源 provider 名稱。
+    """
+    正規化下載來源 provider 名稱。
 
     Args:
         provider: 原始 provider 名稱。
@@ -23,7 +24,8 @@ def normalize_download_provider(provider: str | None) -> str:
 
 
 def get_official_download_hosts(provider: str | None) -> frozenset[str]:
-    """回傳 provider 對應的官方下載網域集合。
+    """
+    回傳 provider 對應的官方下載網域集合。
 
     Args:
         provider: 原始 provider 名稱。
@@ -36,7 +38,8 @@ def get_official_download_hosts(provider: str | None) -> frozenset[str]:
 
 
 def extract_download_host(download_url: str | None) -> str:
-    """從下載網址提取 host。
+    """
+    從下載網址提取 host。
 
     Args:
         download_url: 原始下載網址。
@@ -53,7 +56,8 @@ def extract_download_host(download_url: str | None) -> str:
 
 
 def get_non_official_download_host(download_url: str | None, provider: str | None) -> str:
-    """若下載來源不是官方網域，回傳其 host，否則回傳空字串。
+    """
+    若下載來源不是官方網域，回傳其 host，否則回傳空字串。
 
     Args:
         download_url: 原始下載網址。
@@ -70,7 +74,8 @@ def get_non_official_download_host(download_url: str | None, provider: str | Non
 
 
 def build_non_official_source_warning(download_url: str | None, provider: str | None) -> str:
-    """建立 core 層用的非官方下載來源警示字串。
+    """
+    建立 core 層用的非官方下載來源警示字串。
 
     Args:
         download_url: 原始下載網址。
@@ -95,7 +100,8 @@ def build_non_official_source_warning_message(
     *,
     provider_label: str | None = None,
 ) -> str:
-    """建立 UI 顯示用的非官方下載來源提醒。
+    """
+    建立 UI 顯示用的非官方下載來源提醒。
 
     Args:
         item_label: 顯示在 UI 的項目名稱。

@@ -1,4 +1,5 @@
-"""背景任務工具與取消標記
+"""
+背景任務工具與取消標記
 
 提供一個簡單的背景任務執行器（基於 QThreadPool）與協作式取消（CancellationToken），
 供 UI 與 core 層在不阻塞主執行緒下執行長時間任務。
@@ -50,7 +51,8 @@ def _make_done_callback(
     callback: Callable[[Any], None],
     task_label: str = "Background task",
 ) -> Callable[[concurrent.futures.Future | asyncio.Future], None]:
-    """建立統一的任務完成回呼包裝器，消除 run() 與 run_async() 中的重複邏輯。
+    """
+    建立統一的任務完成回呼包裝器，消除 run() 與 run_async() 中的重複邏輯。
 
     Args:
         callback: 任務完成後要執行的使用者回呼。
@@ -93,7 +95,8 @@ class BackgroundTaskManager:
         cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> concurrent.futures.Future:
-        """提交背景任務到 QThreadPool 執行。
+        """
+        提交背景任務到 QThreadPool 執行。
 
         Args:
             fn: 要執行的函式。
@@ -122,7 +125,8 @@ class BackgroundTaskManager:
         cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> asyncio.Task:
-        """以協程介面執行任務。
+        """
+        以協程介面執行任務。
 
         Args:
             fn: 要執行的函式或協程函式。
@@ -153,7 +157,8 @@ class BackgroundTaskManager:
         return task
 
     def shutdown(self, wait: bool = True) -> None:
-        """關閉 Qt 工作池，必要時等待既有任務完成。
+        """
+        關閉 Qt 工作池，必要時等待既有任務完成。
 
         Args:
             wait: 是否等待既有任務完成。
@@ -189,7 +194,8 @@ _shared_manager: BackgroundTaskManager | None = None
 
 
 def get_shared_manager() -> BackgroundTaskManager:
-    """取得全域共用的背景任務管理器。
+    """
+    取得全域共用的背景任務管理器。
 
     Returns:
         全域共用的 BackgroundTaskManager 實例。
@@ -204,7 +210,8 @@ def get_shared_manager() -> BackgroundTaskManager:
 def run_in_background(
     fn: Callable[..., Any], *args, callback: Callable[[Any], None] | None = None, **kwargs
 ) -> concurrent.futures.Future[Any] | None:
-    """使用共享 BackgroundTaskManager 的便利函式。
+    """
+    使用共享 BackgroundTaskManager 的便利函式。
 
     若無法使用共享 manager，會同步完成一個 Future 以保持錯誤可觀測。
     """
@@ -235,7 +242,8 @@ def submit_background_task(
     task_label: str = "Background task",
     **kwargs,
 ) -> concurrent.futures.Future[Any] | None:
-    """提交背景任務並分流成功與失敗回呼。
+    """
+    提交背景任務並分流成功與失敗回呼。
 
     Args:
         fn: 要執行的函式。

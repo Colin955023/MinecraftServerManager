@@ -190,7 +190,8 @@ class AppRestart:
 
     @staticmethod
     def can_restart() -> bool:
-        """檢查當前環境是否支援應用程式重啟功能。
+        """
+        檢查當前環境是否支援應用程式重啟功能。
 
         Returns:
             若可安全重啟則回傳 True。
@@ -257,7 +258,8 @@ class AppRestart:
 
     @staticmethod
     def get_restart_diagnostics() -> tuple[bool, str]:
-        """回傳是否可重啟與診斷文字說明。
+        """
+        回傳是否可重啟與診斷文字說明。
 
         Returns:
             可重啟狀態與診斷字串。
@@ -342,7 +344,8 @@ class AppRestart:
 
     @staticmethod
     def restart_application(delay: float = 1.0) -> bool:
-        """重啟應用程式，支援延遲啟動和狀態檢測。
+        """
+        重啟應用程式，支援延遲啟動和狀態檢測。
 
         Args:
             delay: 啟動新實例前的延遲秒數。
@@ -444,7 +447,8 @@ class AppRestart:
 
     @staticmethod
     def schedule_restart_and_exit(parent_window=None, delay: float = 1.0) -> None:
-        """安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理。
+        """
+        安排應用程式重啟並安全關閉當前實例，包含 GUI 視窗處理。
 
         Args:
             parent_window: 要關閉的父視窗。

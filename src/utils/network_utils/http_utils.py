@@ -1,4 +1,5 @@
-"""HTTP 網路請求工具模組
+"""
+HTTP 網路請求工具模組
 提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
 """
 
@@ -21,10 +22,7 @@ from requests import exceptions as requests_exceptions
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ...app_info import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO
-from .. import get_logger
-from ..runtime_utils.background_task import get_shared_manager
-from ..runtime_utils.worker_pool import run_blocking_io
+from .. import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO, get_logger, get_shared_manager, run_blocking_io
 
 logger = get_logger().bind(component="HTTPUtils")
 
@@ -38,7 +36,8 @@ class RateLimiter:
         self._lock = threading.Lock()
 
     def wait(self, domain: str) -> None:
-        """針對指定網域執行節流等待。
+        """
+        針對指定網域執行節流等待。
 
         Args:
             domain: 要限制請求頻率的網域名稱。
@@ -263,7 +262,8 @@ class HTTPUtils:
         params: dict[str, Any] | None = None,
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | None:
-        """發送 HTTP GET 請求並解析回傳的 JSON 資料。
+        """
+        發送 HTTP GET 請求並解析回傳的 JSON 資料。
 
         Args:
             url: 目標 URL。
@@ -304,7 +304,8 @@ class HTTPUtils:
         headers: dict[str, str] | None = None,
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | list[Any] | None:
-        """發送 HTTP POST 請求並解析回傳的 JSON 資料。
+        """
+        發送 HTTP POST 請求並解析回傳的 JSON 資料。
 
         Args:
             url: 目標 URL，必須為有效的 http/https 位址。
@@ -346,7 +347,8 @@ class HTTPUtils:
         headers: dict[str, str] | None = None,
         log_errors: bool = True,
     ) -> bytes | None:
-        """發送 HTTP GET 請求並回傳完整的回應內容。
+        """
+        發送 HTTP GET 請求並回傳完整的回應內容。
 
         Args:
             url: 目標 URL。
@@ -387,7 +389,8 @@ class HTTPUtils:
         expected_hash: str | None = None,
         failure_message_callback: Callable[[str], None] | None = None,
     ) -> bool:
-        """下載檔案並儲存到本機路徑。
+        """
+        下載檔案並儲存到本機路徑。
 
         Args:
             url: 下載網址。
@@ -540,7 +543,8 @@ class HTTPUtils:
     def get_json_batch(
         urls: list[str], timeout: int = 10, headers: dict[str, str] | None = None, max_workers: int = 5
     ) -> list[dict[str, Any] | None]:
-        """批次發送 HTTP GET 請求並解析回傳的 JSON 資料。
+        """
+        批次發送 HTTP GET 請求並解析回傳的 JSON 資料。
 
         Args:
             urls: 要請求的 URL 清單。

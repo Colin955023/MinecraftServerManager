@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import src.utils.network_utils.http_utils as http_utils_module
-from src.utils import HTTPUtils
 
 
 class _FakeResponse:
@@ -42,14 +41,16 @@ class _TimeoutSession:
 def test_download_file_without_expected_hash_skips_hashing(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
     monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
-    monkeypatch.setattr(HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes")))
+    monkeypatch.setattr(
+        http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
+    )
 
     def _unexpected_hash(_algorithm: str):
         raise AssertionError("hashlib.new should not be called without an expected hash")
 
     monkeypatch.setattr(http_utils_module.hashlib, "new", _unexpected_hash)
 
-    assert HTTPUtils.download_file("https://example.com/server.jar", str(target)) is True
+    assert http_utils_module.HTTPUtils.download_file("https://example.com/server.jar", str(target)) is True
     assert target.read_bytes() == b"new-bytes"
 
 
@@ -57,7 +58,9 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
     target = tmp_path / "server.jar"
     failure_messages: list[str] = []
     monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
-    monkeypatch.setattr(HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes")))
+    monkeypatch.setattr(
+        http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
+    )
     monkeypatch.setattr(
         http_utils_module.shutil,
         "disk_usage",
@@ -65,7 +68,7 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
     )
 
     assert (
-        HTTPUtils.download_file(
+        http_utils_module.HTTPUtils.download_file(
             "https://example.com/server.jar",
             str(target),
             failure_message_callback=failure_messages.append,
@@ -81,10 +84,10 @@ def test_download_file_reports_timeout_reason(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
     failure_messages: list[str] = []
     monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
-    monkeypatch.setattr(HTTPUtils, "_get_session", classmethod(lambda _cls: _TimeoutSession()))
+    monkeypatch.setattr(http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _TimeoutSession()))
 
     assert (
-        HTTPUtils.download_file(
+        http_utils_module.HTTPUtils.download_file(
             "https://example.com/server.jar",
             str(target),
             failure_message_callback=failure_messages.append,
@@ -99,7 +102,7 @@ def test_download_file_reports_invalid_url_reason(tmp_path) -> None:
     failure_messages: list[str] = []
 
     assert (
-        HTTPUtils.download_file(
+        http_utils_module.HTTPUtils.download_file(
             "not-a-url",
             str(target),
             failure_message_callback=failure_messages.append,
@@ -113,12 +116,14 @@ def test_download_file_keeps_existing_target_when_replace_fails(tmp_path, monkey
     target = tmp_path / "server.jar"
     target.write_bytes(b"old-bytes")
     monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
-    monkeypatch.setattr(HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes")))
+    monkeypatch.setattr(
+        http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
+    )
 
     def _fail_replace(_self: Path, _target: Path) -> Path:
         raise OSError("target locked")
 
     monkeypatch.setattr(Path, "replace", _fail_replace)
 
-    assert HTTPUtils.download_file("https://example.com/server.jar", str(target)) is False
+    assert http_utils_module.HTTPUtils.download_file("https://example.com/server.jar", str(target)) is False
     assert target.read_bytes() == b"old-bytes"

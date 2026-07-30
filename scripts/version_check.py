@@ -1,4 +1,5 @@
-"""版本與發行說明檢查工具。
+"""
+版本與發行說明檢查工具。
 
 集中管理版本解析、標籤驗證與 CHANGELOG 提取邏輯，
 避免在 GitHub Actions workflow 內重複維護字串與正則處理。
@@ -16,7 +17,7 @@ project_root = Path(__file__).resolve().parents[1]
 project_root_str = str(project_root)
 if project_root_str not in sys.path:
     sys.path.insert(0, project_root_str)
-from src.app_info.app_info import APP_VERSION
+from src.utils.runtime_utils.app_info import APP_VERSION
 
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 

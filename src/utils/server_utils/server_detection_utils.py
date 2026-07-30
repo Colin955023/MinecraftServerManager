@@ -1,4 +1,5 @@
-"""伺服器檢測工具模組
+"""
+伺服器檢測工具模組
 提供伺服器型態、版本、啟動檔與記憶體相關偵測能力。
 """
 
@@ -70,7 +71,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_loader_type(server_path: Path, jar_names: list[str]) -> str:
-        """偵測載入器類型。
+        """
+        偵測載入器類型。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -102,20 +104,9 @@ class ServerDetectionUtils:
         return "vanilla"
 
     @staticmethod
-    def detect_loader_from_text(text: str) -> str:
-        """相容層：從文字中偵測載入器類型。
-
-        Args:
-            text: 待分析的文字內容。
-
-        Returns:
-            偵測結果；找不到時回傳 `unknown`。
-        """
-        return ServerDetectionVersionUtils.detect_loader_from_text(text)
-
-    @staticmethod
     def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
-        """尋找主要 JAR 檔案，根據載入器類型和伺服器配置進行優先順序檢測。
+        """
+        尋找主要 JAR 檔案，根據載入器類型和伺服器配置進行優先順序檢測。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -166,7 +157,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
-        """尋找伺服器啟動腳本。
+        """
+        尋找伺服器啟動腳本。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -205,7 +197,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_eula_acceptance(server_path: Path) -> bool:
-        """檢測 `eula.txt` 檔案中是否已設定 `eula=true`。
+        """
+        檢測 `eula.txt` 檔案中是否已設定 `eula=true`。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -289,7 +282,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def update_forge_user_jvm_args(server_path: Path, config: ServerConfig) -> None:
-        """更新新版 Forge 的 `user_jvm_args.txt` 檔案，設定記憶體參數。
+        """
+        更新新版 Forge 的 `user_jvm_args.txt` 檔案，設定記憶體參數。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -319,7 +313,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_memory_from_sources(server_path: Path, config: ServerConfig) -> None:
-        """從多個來源檢測記憶體設定。
+        """
+        從多個來源檢測記憶體設定。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -367,7 +362,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def detect_server_type(server_path: Path, config: ServerConfig, print_result: bool = True) -> None:
-        """檢測伺服器類型和版本。
+        """
+        檢測伺服器類型和版本。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -439,7 +435,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def is_valid_server_folder(folder_path: Path) -> bool:
-        """檢查是否為有效的 Minecraft 伺服器資料夾。
+        """
+        檢查是否為有效的 Minecraft 伺服器資料夾。
 
         Args:
             folder_path: 待檢查的資料夾路徑。
@@ -490,7 +487,8 @@ class ServerDetectionUtils:
     def detect_loader_and_version_from_sources(
         server_path: Path, config, loader: str, detection_source: dict | None = None
     ) -> None:
-        """從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版本。
+        """
+        從多種來源偵測 Fabric/Forge 載入器與 Minecraft 版本。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -644,7 +642,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_forge_args_file(server_path: Path, server_config=None) -> Path | None:
-        """尋找 Forge 的 `win_args.txt` 啟動參數檔。
+        """
+        尋找 Forge 的 `win_args.txt` 啟動參數檔。
 
         Args:
             server_path: 伺服器資料夾路徑。
@@ -661,7 +660,8 @@ class ServerDetectionUtils:
 
     @staticmethod
     def find_neoforge_args_file(server_path: Path, server_config=None) -> Path | None:
-        """尋找 NeoForge 的 `win_args.txt` 啟動參數檔。
+        """
+        尋找 NeoForge 的 `win_args.txt` 啟動參數檔。
 
         Args:
             server_path: 伺服器資料夾路徑。

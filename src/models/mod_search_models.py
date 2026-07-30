@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...models import OnlineModVersion
-from ...utils import (
+from ..models import OnlineModVersion
+from ..utils import (
     MODRINTH_PREFERRED_HASH_ALGORITHM,
     RECOMMENDATION_CONFIDENCE_HIGH,
     RECOMMENDATION_SOURCE_HASH_METADATA,

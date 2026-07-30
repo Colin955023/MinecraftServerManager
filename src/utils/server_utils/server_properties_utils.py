@@ -1,4 +1,5 @@
-"""伺服器屬性工具模組
+"""
+伺服器屬性工具模組
 提供 server.properties 載入/儲存與驗證相關工具。
 """
 
@@ -20,7 +21,8 @@ class ServerPropertiesHelper:
 
     @classmethod
     def get_property_descriptions(cls) -> types.MappingProxyType:
-        """取得所有屬性說明的不可修改視圖（帶快取）
+        """
+        取得所有屬性說明的不可修改視圖（帶快取）
 
         Returns:
             types.MappingProxyType: 屬性名稱對應說明文字的不可修改視圖
@@ -104,7 +106,8 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def get_property_description(property_name: str) -> str:
-        """取得指定屬性的詳細說明文字
+        """
+        取得指定屬性的詳細說明文字
 
         Args:
             property_name: 屬性名稱
@@ -374,7 +377,8 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def load_properties(file_path) -> dict[str, str]:
-        """從 `server.properties` 檔案讀取屬性配置並解析為字典。
+        """
+        從 `server.properties` 檔案讀取屬性配置並解析為字典。
 
         Args:
             file_path: `server.properties` 檔案路徑。
@@ -404,7 +408,8 @@ class ServerPropertiesHelper:
 
     @staticmethod
     def save_properties(file_path, properties: dict[str, str]) -> bool:
-        """將屬性字典儲存為 `server.properties` 檔案格式。
+        """
+        將屬性字典儲存為 `server.properties` 檔案格式。
 
         Args:
             file_path: `server.properties` 檔案路徑。
@@ -535,7 +540,8 @@ class ServerPropertiesValidator:
 
     @classmethod
     def is_boolean_property(cls, prop_name: str) -> bool:
-        """判斷指定屬性是否應以布林值處理。
+        """
+        判斷指定屬性是否應以布林值處理。
 
         Args:
             prop_name: 屬性名稱。
@@ -548,7 +554,8 @@ class ServerPropertiesValidator:
 
     @staticmethod
     def validate_property(prop_name: str, value: str) -> tuple[bool, str]:
-        """驗證單一屬性。
+        """
+        驗證單一屬性。
 
         Args:
             prop_name: 屬性名稱。
@@ -594,7 +601,8 @@ class ServerPropertiesValidator:
 
     @staticmethod
     def validate_properties(properties: dict[str, str]) -> tuple[bool, list[str]]:
-        """驗證多個屬性。
+        """
+        驗證多個屬性。
 
         Args:
             properties: 要驗證的屬性字典。

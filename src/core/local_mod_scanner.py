@@ -10,17 +10,16 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 from ..utils import (
     ModIndexManager,
     PathUtils,
-    ServerDetectionUtils,
     ServerDetectionVersionUtils,
     derive_provider_lifecycle_state,
     get_logger,
     get_shared_manager,
     record_and_mark,
 )
-from .mod_models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 
 TomlDecodeError = tomllib.TOMLDecodeError
 logger = get_logger().bind(component="LocalModScanner")
@@ -295,7 +294,8 @@ class LocalModScanner:
             logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {exc}", "LocalModScanner")
 
     def extract_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
-        """從 `mods.toml` 提取 Forge 模組元資料。
+        """
+        從 `mods.toml` 提取 Forge 模組元資料。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -343,7 +343,8 @@ class LocalModScanner:
             logger.exception(f"解析 Forge 元資料時發生未預期錯誤: {exc}")
 
     def extract_legacy_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
-        """從 `mcmod.info` 提取舊版 Forge 模組元資料。
+        """
+        從 `mcmod.info` 提取舊版 Forge 模組元資料。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -381,7 +382,8 @@ class LocalModScanner:
 
     @staticmethod
     def read_zip_member_bytes(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> bytes | None:
-        """以大小上限讀取 JAR 內部檔案，避免惡意 metadata 造成記憶體暴增。
+        """
+        從 JAR/ZIP 檔案中讀取指定成員檔案的 bytes，並限制最大讀取大小。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -411,7 +413,8 @@ class LocalModScanner:
 
     @staticmethod
     def read_json_from_jar(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> dict | list | None:
-        """讀取 JAR 內的 JSON 檔案並解析。
+        """
+        讀取 JAR 內的 JSON 檔案並解析。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -434,7 +437,8 @@ class LocalModScanner:
     def read_toml_from_jar(
         jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES
     ) -> dict[str, Any] | None:
-        """讀取 JAR 內的 TOML 檔案並解析。
+        """
+        讀取 JAR 內的 TOML 檔案並解析。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -467,7 +471,8 @@ class LocalModScanner:
             return None
 
     def resolve_version(self, jar: Any, version: str) -> str:
-        """處理需要從 MANIFEST 補齊的版本字串。
+        """
+        處理需要從 MANIFEST 補齊的版本字串。
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件。
@@ -484,7 +489,8 @@ class LocalModScanner:
 
     @staticmethod
     def process_authors(authors: Any) -> str:
-        """將作者欄位整理為單一顯示字串。
+        """
+        將作者欄位整理為單一顯示字串。
 
         Args:
             authors: 原始作者欄位，可能為字串、列表或其他型別。
@@ -504,7 +510,8 @@ class LocalModScanner:
         return ""
 
     def apply_fallback_logic(self, base_name: str, mod_data: dict[str, str]) -> None:
-        """在 metadata 不完整時以檔名與預設規則補齊欄位。
+        """
+        在 metadata 不完整時以檔名與預設規則補齊欄位。
 
         Args:
             base_name: 檔名去除副檔名後的基底名稱。
@@ -519,11 +526,12 @@ class LocalModScanner:
         if not mod_data["mc_version"] or str(mod_data["mc_version"]).strip() in {"", "未知"}:
             mod_data["mc_version"] = self.extract_mc_version_from_filename(base_name)
         if mod_data["loader_type"] == "未知":
-            mod_data["loader_type"] = ServerDetectionUtils.detect_loader_from_text(base_name)
+            mod_data["loader_type"] = ServerDetectionVersionUtils.detect_loader_from_text(base_name)
 
     @staticmethod
     def extract_name_from_filename(base_name: str) -> str:
-        """從檔名推測模組名稱。
+        """
+        從檔名推測模組名稱。
 
         Args:
             base_name: 檔名去除副檔名後的基底名稱。
@@ -549,7 +557,8 @@ class LocalModScanner:
 
     @staticmethod
     def extract_version_from_filename(base_name: str) -> str:
-        """從檔名推測模組版本字串。
+        """
+        從檔名推測模組版本字串。
 
         Args:
             base_name: 檔名去除副檔名後的基底名稱。
@@ -568,7 +577,8 @@ class LocalModScanner:
 
     @staticmethod
     def extract_mc_version_from_filename(base_name: str) -> str:
-        """從檔名推測 Minecraft 版本。
+        """
+        從檔名推測 Minecraft 版本。
 
         Args:
             base_name: 檔名去除副檔名後的基底名稱。
@@ -585,7 +595,8 @@ class LocalModScanner:
         return "未知"
 
     def apply_server_config_overrides(self, mod_data: dict[str, str]) -> None:
-        """以伺服器設定覆寫缺漏或不可信的模組欄位。
+        """
+        以伺服器設定覆寫缺漏或不可信的模組欄位。
 
         Args:
             mod_data: 會被直接更新的模組元資料字典。
@@ -606,7 +617,8 @@ class LocalModScanner:
 
     @staticmethod
     def clean_author(author: str) -> str:
-        """清理作者欄位中的預設值與無效文字。
+        """
+        清理作者欄位中的預設值與無效文字。
 
         Args:
             author: 原始作者字串。

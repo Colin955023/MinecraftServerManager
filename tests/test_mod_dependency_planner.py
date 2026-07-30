@@ -3,13 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import src.utils as utils_module
 from src.models import OnlineModVersion, ResolvedDependencyReference
-from src.utils import (
-    DependencyPlanHooks,
-    OnlineDependencyInstallItem,
-    OnlineDependencyInstallPlan,
-    expand_required_dependency_install_plan,
-)
 
 
 def _make_version(
@@ -44,8 +39,8 @@ def _make_install_item(
     graph_depth: int,
     edge_kind: str,
     edge_source: str,
-) -> OnlineDependencyInstallItem:
-    return OnlineDependencyInstallItem(
+) -> utils_module.OnlineDependencyInstallItem:
+    return utils_module.OnlineDependencyInstallItem(
         project_id=resolved_dependency.project_id,
         project_name=dependency_label,
         version_id=best_version.version_id,
@@ -125,11 +120,11 @@ def test_expand_required_dependency_install_plan_splits_required_and_optional() 
             return None
         return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
 
-    plan = OnlineDependencyInstallPlan()
-    expand_required_dependency_install_plan(
+    plan = utils_module.OnlineDependencyInstallPlan()
+    utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=DependencyPlanHooks(
+        hooks=utils_module.DependencyPlanHooks(
             resolve_project_names=_resolve_project_names,
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_select_dependency_best_version,
@@ -177,11 +172,11 @@ def test_expand_required_dependency_install_plan_marks_installed_version_mismatc
     def _unexpected_select(_: ResolvedDependencyReference, __: bool) -> OnlineModVersion | None:
         raise AssertionError("installed mismatch path should not select remote versions")
 
-    plan = OnlineDependencyInstallPlan()
-    expand_required_dependency_install_plan(
+    plan = utils_module.OnlineDependencyInstallPlan()
+    utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=DependencyPlanHooks(
+        hooks=utils_module.DependencyPlanHooks(
             resolve_project_names=lambda _: {"dep-required": "Required Dep"},
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_unexpected_select,
@@ -235,11 +230,11 @@ def test_expand_required_dependency_install_plan_respects_max_depth() -> None:
             return None
         return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
 
-    plan = OnlineDependencyInstallPlan()
-    expand_required_dependency_install_plan(
+    plan = utils_module.OnlineDependencyInstallPlan()
+    utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=DependencyPlanHooks(
+        hooks=utils_module.DependencyPlanHooks(
             resolve_project_names=lambda _: {"dep-a": "Dependency A", "dep-b": "Dependency B"},
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_select_dependency_best_version,

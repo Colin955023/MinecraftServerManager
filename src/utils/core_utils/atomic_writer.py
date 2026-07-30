@@ -1,5 +1,5 @@
-"""原子性寫入工具。
-
+"""
+原子性寫入工具。
 提供 JSON、文字與 bytes 的同目錄臨時檔 + `os.replace` 寫入流程，並盡力 fsync。
 """
 
@@ -22,7 +22,8 @@ _RETRY_DELAY = 0.02
 
 
 def best_effort_fsync(file_obj) -> None:
-    """盡力對檔案描述元執行 fsync，不將平台限制視為錯誤。
+    """
+    對檔案描述元執行 fsync，不將平台限制視為錯誤。
 
     Args:
         file_obj: 已開啟且可取得 fileno 的檔案物件。
@@ -60,7 +61,8 @@ def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode:
 
 
 def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
-    """以原子方式寫入 JSON 檔案。
+    """
+    以原子方式寫入 JSON 檔案。
 
     Args:
         path: 目標檔案路徑。
@@ -93,7 +95,8 @@ def atomic_write_text(
     errors: str | None = None,
     newline: str | None = None,
 ) -> bool:
-    """以原子方式寫入文字檔案。
+    """
+    以原子方式寫入文字檔案。
 
     Args:
         path: 目標檔案路徑。
@@ -116,7 +119,8 @@ def atomic_write_text(
 
 
 def atomic_write_bytes(path: Path | str, content: bytes) -> bool:
-    """以原子方式寫入二進位檔案。
+    """
+    以原子方式寫入二進位檔案。
 
     Args:
         path: 目標檔案路徑。

@@ -1,4 +1,6 @@
-"""模組載入器管理器。
+"""
+模組載入器管理器。
+
 負責處理 Fabric、Forge、Quilt、NeoForge 載入器的版本管理與下載，支援自動取得最新版本資訊並提供相容性檢查。
 """
 
@@ -150,7 +152,8 @@ class LoaderManager(Singleton):
 
     @staticmethod
     def _extract_all_version_strings(content: bytes) -> list[str]:
-        """從 maven metadata 或類似 XML 回傳中擷取所有版本字串（包含無 '-' 的版本）。
+        """
+        從 maven metadata 或類似 XML 回傳中擷取所有版本字串（包含無 '-' 的版本）。
 
         支援兩種格式：
         - 含 '-' 的版本 (如 20.2.12-beta、26.1.2.36-beta)
@@ -167,7 +170,8 @@ class LoaderManager(Singleton):
 
     @staticmethod
     def _normalize_version_strings(versions: list[str]) -> list[str]:
-        """正規化版本字串為 'mc_version-loader_version' 的統一格式。
+        """
+        正規化版本字串為 'mc_version-loader_version' 的統一格式。
 
         支援格式：
         - Forge: 'X.Y.Z-A.B.C' → 'X.Y.Z-A.B.C' (保持完整)
@@ -230,7 +234,8 @@ class LoaderManager(Singleton):
     def _build_loader_version_dict_from_metadata(
         self, content: bytes, allow_prerelease: bool = False
     ) -> dict[str, list[str]]:
-        """從 metadata content 建立 mc_version -> [mc-version-loader-version,...] 的字典。
+        """
+        從 metadata content 建立 mc_version -> [mc-version-loader-version,...] 的字典。
 
         如果 allow_prerelease 為 True，將包含 pre-release/beta 版本；否則預設只包含 stable。
         """
@@ -296,7 +301,8 @@ class LoaderManager(Singleton):
         cancel_flag: dict | None = None,
         user_java_path: str | None = None,
     ) -> bool | str:
-        """依 loader_type 下載並部署伺服器檔案。
+        """
+        依 loader_type 下載並部署伺服器檔案。
 
         Args:
             loader_type: 載入器類型。
@@ -390,7 +396,8 @@ class LoaderManager(Singleton):
         )
 
     def get_installer_download_url(self, loader_type: str, minecraft_version: str, loader_version: str) -> str | None:
-        """取得建立伺服器時所需的安裝器下載 URL。
+        """
+        取得建立伺服器時所需的安裝器下載 URL。
 
         Args:
             loader_type: 載入器類型。
@@ -471,7 +478,8 @@ class LoaderManager(Singleton):
 
     @staticmethod
     def _parse_forge_version_tuple(version_text: str) -> tuple[int, ...]:
-        """將 Forge 版本字串轉成可比較的數值 tuple。
+        """
+        將 Forge 版本字串轉成可比較的數值 tuple。
 
         目前採用純數字段拆解並逐段整數比較，適合常見 `x.y.z` 版本。
         對包含複雜 pre-release metadata 的語意版本規則，僅提供近似排序能力。
@@ -821,7 +829,6 @@ class LoaderManager(Singleton):
                             if mc_version in loader_ver.game_versions:
                                 filtered_result.append(loader_ver)
                         else:
-                            # 相容舊快取：如果沒有 game_versions 資訊，假定相容
                             filtered_result.append(loader_ver)
                     if filtered_result:
                         self._version_cache[cache_key] = filtered_result
@@ -1051,7 +1058,7 @@ class LoaderManager(Singleton):
                                 java_line = line.strip()
                                 break
                     if java_line and installer_java_exe:
-                        java_line, _ = ServerCommands.replace_bare_java_command_line(java_line, installer_java_exe)
+                        java_line, _ = ServerCommands.replace_java_command_line(java_line, installer_java_exe)
                     if java_line and "nogui" not in java_line.lower():
                         java_line += " nogui"
                 except OSError as e:
