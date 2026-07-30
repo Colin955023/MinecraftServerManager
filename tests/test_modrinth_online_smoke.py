@@ -90,7 +90,7 @@ def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
 def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
     contract = mod_search_provider_module.get_modrinth_download_contract(
         project_id="proj123",
-        version=OnlineModVersion(
+        version=models_module.OnlineModVersion(
             version_id="ver123",
             version_number="1.0.0",
             display_name="1.0.0",
@@ -776,7 +776,7 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
 
 
 def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -802,7 +802,7 @@ def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
 
 
 def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_server() -> None:
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -823,7 +823,7 @@ def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_serv
 
 
 def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -874,7 +874,7 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
 
 
 def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatch(monkeypatch) -> None:
-    dependency_version = OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -882,7 +882,7 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
         loaders=["forge"],
         files=[{"filename": "dep.jar", "url": "https://example.invalid/dep.jar", "primary": True}],
     )
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -930,7 +930,7 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
 
 
 def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_installed(monkeypatch) -> None:
-    dependency_version = OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -940,7 +940,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
             {"filename": "cloth-config-2.0.0.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}
         ],
     )
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -978,7 +978,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
 
 
 def test_build_required_dependency_install_plan_resolves_version_id_dependency(monkeypatch) -> None:
-    dependency_version = OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -986,7 +986,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
         loaders=["forge"],
         files=[{"filename": "cloth-config.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}],
     )
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -1028,7 +1028,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
 
 
 def test_build_required_dependency_install_plan_marks_maybe_installed_dependency_as_unresolved(monkeypatch) -> None:
-    dependency_version = OnlineModVersion(
+    dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -1038,7 +1038,7 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
             {"filename": "cloth-config-2.0.0.jar", "url": "https://example.invalid/cloth-config.jar", "primary": True}
         ],
     )
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="12.0.0.4",
         display_name="12.0.0.4",
@@ -1249,7 +1249,7 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
         name="Inventory Profiles Next",
         author="Libz",
     )
-    recommended_version = OnlineModVersion(
+    recommended_version = models_module.OnlineModVersion(
         version_id="ver-new",
         version_number="2.2.2",
         display_name="2.2.2",
@@ -1317,7 +1317,7 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
 
 
 def test_build_required_dependency_install_plan_collects_recursive_dependencies(monkeypatch) -> None:
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1330,7 +1330,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         if project_id == "cloth-config":
             return [
-                OnlineModVersion(
+                models_module.OnlineModVersion(
                     version_id="cloth-v1",
                     version_number="15.0.0",
                     display_name="15.0.0",
@@ -1348,7 +1348,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
             ]
         if project_id == "fabric-api":
             return [
-                OnlineModVersion(
+                models_module.OnlineModVersion(
                     version_id="fabric-api-v1",
                     version_number="0.100.0",
                     display_name="0.100.0",
@@ -1388,7 +1388,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
 def test_build_required_dependency_install_plan_allows_prism_like_recursion_depth(monkeypatch) -> None:
     chain_length = 10
     dependency_ids = [f"dep-{index}" for index in range(chain_length)]
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1409,7 +1409,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
             dependencies.append({"project_id": dependency_ids[index + 1], "dependency_type": "required"})
 
         return [
-            OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id=f"{project_id}-v1",
                 version_number="1.0.0",
                 display_name="1.0.0",
@@ -1447,7 +1447,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
 
 
 def test_build_required_dependency_install_plan_preserves_dependency_project_id_case_for_api(monkeypatch) -> None:
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1484,7 +1484,7 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
 def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fabric_loader(
     monkeypatch,
 ) -> None:
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1498,7 +1498,7 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         captured_project_ids.append(project_id)
         return [
-            OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id="fabric-api-v1",
                 version_number="0.100.0",
                 display_name="0.100.0",
@@ -1544,7 +1544,7 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
 def test_build_required_dependency_install_plan_does_not_apply_quilt_override_for_forge_loader(
     monkeypatch,
 ) -> None:
-    root_version = OnlineModVersion(
+    root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1558,7 +1558,7 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
     def fake_get_mod_versions(project_id: str, minecraft_version=None, loader=None):
         captured_project_ids.append(project_id)
         return [
-            OnlineModVersion(
+            models_module.OnlineModVersion(
                 version_id="dep-v1",
                 version_number="1.0.0",
                 display_name="1.0.0",
@@ -1610,7 +1610,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
         minecraft_version="1.21",
         loader_type="Fabric",
     )
-    recommended_version = OnlineModVersion(
+    recommended_version = models_module.OnlineModVersion(
         version_id="ver2",
         version_number="1.1.0",
         display_name="1.1.0",
@@ -1670,7 +1670,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     file_path.write_bytes(b"old-mod")
     current_hash = utils_module.compute_file_hash(str(file_path), "sha512")
 
-    current_version = OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1685,7 +1685,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
             }
         ],
     )
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1775,7 +1775,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
 
 def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> None:
     cached_hash = "abc123cached"
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -1861,7 +1861,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
 
 def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_fallback(monkeypatch) -> None:
     cached_hash = "hash-current-only"
-    current_version = OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -1928,7 +1928,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
 
 def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_missing(monkeypatch) -> None:
     cached_hash = "hash-without-mapping"
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -2633,7 +2633,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
 
 
 def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads() -> None:
-    version = OnlineModVersion(
+    version = models_module.OnlineModVersion(
         version_id="ver-1",
         version_number="1.0.0",
         display_name="1.0.0",
@@ -2899,7 +2899,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
         current_hash="hash-old-001",
         hash_algorithm="sha512",
     )
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -2949,7 +2949,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
 
 def test_build_local_mod_update_plan_prefers_provider_current_version_over_local_version(monkeypatch) -> None:
     local_hash = "hash-001"
-    current_version = OnlineModVersion(
+    current_version = models_module.OnlineModVersion(
         version_id="ver-current",
         version_number="1.0.0",
         display_name="1.0.0-provider",
@@ -2964,7 +2964,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
             }
         ],
     )
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -3045,7 +3045,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
         current_hash="hash-without-map",
         hash_algorithm="sha512",
     )
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
         version_number="2.0.0",
         display_name="2.0.0",
@@ -3124,7 +3124,7 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         enabled=True,
     )
 
-    latest_version = OnlineModVersion(
+    latest_version = models_module.OnlineModVersion(
         version_id="sodium-v2",
         version_number="0.7.0",
         display_name="0.7.0",
