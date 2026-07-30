@@ -3,6 +3,7 @@
 處理伺服器的備份建立、還原、清單查詢邏輯。
 """
 
+import contextlib
 import os
 import shutil
 import time
@@ -148,11 +149,9 @@ class ServerBackup:
 
             is_internal_backup = False
             # 判斷備份目錄是否在伺服器目錄內部
-            try:
+            with contextlib.suppress(ValueError):
                 if original_backup_dir.is_relative_to(server_path):
                     is_internal_backup = True
-            except ValueError:
-                pass
 
             old_dir = None
             if server_path.exists():
