@@ -69,7 +69,7 @@ ignore_missing_imports = false
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["defusedxml", "defusedxml.*"]
+module = ["defusedxml", "defusedxml.*", "qfluentwidgets.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -41,6 +41,8 @@ def _check_file(path: pathlib.Path) -> list[str]:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     violations = [v for p in ROOT.rglob("*.py") for v in _check_file(p)]
     if violations:
         print("❌ 匯入邊界檢查失敗：\n" + "\n".join(violations))  # noqa: T201

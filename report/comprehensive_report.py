@@ -443,9 +443,9 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
         src_dir / "utils" / "ui_support" / "ui_utils.py",
         src_dir / "utils" / "ui_support" / "ui_tokens.py",
         src_dir / "utils" / "ui_support" / "qt_widgets.py",
-        src_dir / "ui" / "ui_config.py",
-        src_dir / "ui" / "font_manager.py",
-        src_dir / "ui" / "icon_utils.py",
+        src_dir / "utils" / "ui_support" / "ui_config.py",
+        src_dir / "utils" / "ui_support" / "font_manager.py",
+        src_dir / "utils" / "ui_support" / "icon_utils.py",
     }
 
     for file_path in gather_python_files(src_dir):
@@ -625,7 +625,6 @@ COMMON_EXEMPT_CALLABLE_NAMES = {
     "run_async",
     "run_async_in_background",
     "run_in_background",
-    "shutdown_logging",
     "show_message",
     "total_count",
 }

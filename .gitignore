@@ -71,6 +71,10 @@ report/*
 
 # other
 *.egg-info
-.github/copilot-instructions.md
-PRIORITIZED_IMPROVEMENT_PLAN.md
-AGENTS.md
+
+#文件
+docs/*
+!docs/USER_GUIDE.md
+!docs/PORTABLE_INSTALLER_MATRIX.md
+!docs/TECHNICAL_OVERVIEW.md
+.github/skills
