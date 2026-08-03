@@ -13,8 +13,10 @@ from .. import lazy_exports
 _EXPORTS: dict[str, tuple[str, str]] = {
     "ModManagementRuntimeBase": (".mod_management.online_mod_queue", "ModManagementRuntimeBase"),
     "CreateServerFrame": (".create_server_frame", "CreateServerFrame"),
-    "MinecraftServerManager": (".main_window", "MinecraftServerManager"),
+    "MainWindow": (".main_window", "MainWindow"),
+    "run_application": (".main_window", "run_application"),
     "ManageServerFrame": (".manage_server_frame", "ManageServerFrame"),
+    "RestoreBackupDialog": (".restore_backup_dialog", "RestoreBackupDialog"),
     "InstallReviewDialogBuilder": (".mod_management.install_review_dialog_builder", "InstallReviewDialogBuilder"),
     "LocalModListPresenter": (".mod_management.local_mod_list_presenter", "LocalModListPresenter"),
     "LocalTreeVirtualizationState": (
@@ -82,5 +84,12 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerPropertiesDialog": (".server_properties_dialog", "ServerPropertiesDialog"),
     "WindowPreferencesDialog": (".window_preferences_dialog", "WindowPreferencesDialog"),
     "resolve_local_mod_project_info": (".mod_search_service.modrinth_service", "resolve_local_mod_project_info"),
+    "TaskCoordinator": (".task_coordinator", "TaskCoordinator"),
+    "PageRouter": (".page_router", "PageRouter"),
+    "ManageServerService": (".manage_server_service", "ManageServerService"),
+    "ServerRefreshContext": (".manage_server_service", "ServerRefreshContext"),
+    "ServerRefreshExecutionPlan": (".manage_server_service", "ServerRefreshExecutionPlan"),
+    "ServerRefreshPayload": (".manage_server_service", "ServerRefreshPayload"),
+    "ServerTreeDiffPreparation": (".manage_server_service", "ServerTreeDiffPreparation"),
 }
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

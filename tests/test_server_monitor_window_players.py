@@ -6,7 +6,7 @@ from typing import Any, cast
 from src.ui import ServerMonitorWindow
 
 
-class _FakeServerManager:
+class _FakeServerCRUD:
     def __init__(self, output_lines: list[str] | None = None) -> None:
         self.output_lines = output_lines or []
 
@@ -27,7 +27,7 @@ class _FakeLabel:
 
 def _make_monitor(output_lines: list[str] | None = None) -> ServerMonitorWindow:
     monitor = object.__new__(ServerMonitorWindow)
-    monitor.server_manager = _FakeServerManager(output_lines)
+    monitor.server_manager = _FakeServerCRUD(output_lines)
     monitor.server_name = "minecraft_server"
     monitor.ui_queue = queue.Queue()
     monitor_any = cast(Any, monitor)

@@ -16,11 +16,11 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6 import QtCore
 
-from ..utils import SubprocessUtils, SystemUtils, get_logger
+from ...utils import SubprocessUtils, SystemUtils, get_logger
 
 if TYPE_CHECKING:
     # 僅在型別檢查時引入以避免執行時依賴循環
-    from . import ServerConfig
+    from .. import ServerConfig
 else:
     ServerConfig = Any
 

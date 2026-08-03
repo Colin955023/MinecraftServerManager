@@ -221,7 +221,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "GITHUB_OWNER": (".runtime_utils.app_info", "GITHUB_OWNER"),
     "GITHUB_REPO": (".runtime_utils.app_info", "GITHUB_REPO"),
     "APP_ID": (".runtime_utils.app_info", "APP_ID"),
-    "AppRestart": (".runtime_utils.app_restart", "AppRestart"),
     "BackgroundTaskManager": (".runtime_utils.background_task", "BackgroundTaskManager"),
     "run_in_background": (".runtime_utils.background_task", "run_in_background"),
     "run_async_in_background": (".runtime_utils.background_task", "run_async_in_background"),

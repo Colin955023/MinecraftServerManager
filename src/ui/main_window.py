@@ -15,7 +15,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from ..core import ConfigurationError, LoaderManager, MinecraftVersionManager, ServerManager
+from ..core import (
+    ConfigurationError,
+    LoaderManager,
+    MinecraftVersionManager,
+    ServerBackupManager,
+    ServerCRUD,
+    ServerStartup,
+)
 from ..models import ServerConfig
 from ..utils import (
     APP_VERSION,
@@ -27,14 +34,11 @@ from ..utils import (
     FontManager,
     FontSize,
     IconUtils,
-    JavaUtils,
     NativeQtStyle,
     PathUtils,
     QtCore,
     QtGui,
-    QtUpdateCheckerInteraction,
     QtWidgets,
-    RuntimePaths,
     ServerCommands,
     ServerDetectionUtils,
     ServerPropertiesHelper,
@@ -44,13 +48,13 @@ from ..utils import (
     SystemUtils,
     TaskUtils,
     UIUtils,
-    UpdateChecker,
     WindowManager,
+    ensure_application,
     get_logger,
     get_settings_manager,
     initialize_ui_theme,
     install_open_url_click,
-    is_qobject_alive,
+    record_and_mark,
     resolve_color,
     show_window,
 )
@@ -59,6 +63,8 @@ from . import (
     CreateServerFrame,
     ManageServerFrame,
     ModManagementFrame,
+    PageRouter,
+    TaskCoordinator,
     WindowPreferencesDialog,
 )
 
@@ -95,7 +101,7 @@ def _make_fluent_button(text: str, parent: QtWidgets.QWidget | None = None) -> Q
         return button
 
 
-class MinecraftServerManager:
+class MainWindow:
     """Minecraft 伺服器管理器主視窗類別"""
 
     def set_servers_root(self, new_root: str | None = None) -> str:
@@ -172,8 +178,8 @@ class MinecraftServerManager:
             WindowManager.save_main_window_state(self.root)
             logger.debug("清理字體快取...", "MainWindow")
             FontManager.clear_cache()
-            if getattr(self, "server_manager", None) is not None:
-                self.server_manager.write_servers_config()
+            if getattr(self, "server_crud", None) is not None:
+                self.server_crud.write_servers_config()
             app = QtWidgets.QApplication.instance()
             if isinstance(app, QtWidgets.QApplication):
                 for widget in app.topLevelWidgets():
@@ -216,7 +222,9 @@ class MinecraftServerManager:
         self.servers_root = self.set_servers_root()
         self.version_manager = MinecraftVersionManager()
         self.loader_manager = LoaderManager()
-        self.server_manager = ServerManager(servers_root=self.servers_root)
+        self.server_crud = ServerCRUD(servers_root=self.servers_root)
+        self.server_startup = ServerStartup(self.server_crud)
+        self.server_backup = ServerBackupManager(self.server_crud)
         self.create_widgets()
         WindowManager.setup_main_window(self.root)
         WindowManager.bind_window_state_tracking(self.root)
@@ -226,10 +234,12 @@ class MinecraftServerManager:
             UIUtils.schedule_debounce(
                 self.root, "_post_reveal_zoom_job", 160, lambda: DialogUtils.maximize_window(self.root), owner=self
             )
-        self.preload_java_candidates()
-        UIUtils.schedule_debounce(self.root, "_startup_tasks_job", 1000, self._handle_startup_tasks, owner=self)
-        self.preload_all_versions()
-        self.load_data_async()
+        TaskCoordinator.preload_java_candidates()
+        UIUtils.schedule_debounce(
+            self.root, "_startup_tasks_job", 1000, TaskCoordinator.handle_startup_tasks, owner=self
+        )
+        TaskCoordinator.preload_all_versions()
+        TaskCoordinator.load_data_async()
 
     def _ensure_manage_server_frame(self) -> None:
         """確保管理伺服器頁面已建立並放置於內容堆疊層。"""
@@ -237,118 +247,30 @@ class MinecraftServerManager:
             return
         manage_server_frame = ManageServerFrame(
             self.content_frame,
-            self.server_manager,
+            self.server_crud,
+            self.server_startup,
+            self.server_backup,
             self.on_server_selected,
-            self.show_create_server,
+            PageRouter.show_create_server,
             set_servers_root=self.set_servers_root,
         )
         self.manage_server_frame = manage_server_frame
-        self._add_page_widget(manage_server_frame)
+        PageRouter.add_page_widget(manage_server_frame)
 
     def _ensure_mod_management_frame(self) -> None:
         """確保模組管理頁面已建立並放置於內容堆疊層。"""
         if getattr(self, "mod_frame", None) is not None:
             return
         mod_frame = ModManagementFrame(
-            self.content_frame, self.server_manager, self.on_server_selected, self.version_manager
+            self.content_frame, self.server_crud, self.server_startup, self.on_server_selected, self.version_manager
         )
         self.mod_frame = mod_frame
         try:
             frame = mod_frame.get_frame()
             if frame is not None:
-                self._add_page_widget(frame)
+                PageRouter.add_page_widget(frame)
         except Exception as e:
             logger.debug(f"ModManagementFrame 加入頁面堆疊失敗: {e}", "MainWindow")
-
-    def preload_all_versions(self) -> None:
-        """啟動時預先抓取版本資訊"""
-
-        def fetch_loader_versions_only():
-            logger.debug("預先抓取所有載入器版本...", "MainWindow")
-            self.loader_manager.preload_loader_versions()
-            logger.debug("所有載入器版本載入完成", "MainWindow")
-
-        TaskUtils.run_async(fetch_loader_versions_only)
-
-    def preload_java_candidates(self) -> None:
-        """啟動時背景掃描本機 Java 並更新快取。"""
-
-        def refresh_java_cache():
-            logger.debug("預先掃描本機 Java 執行檔...", "MainWindow")
-            JavaUtils.refresh_java_candidates_cache()
-            logger.debug("本機 Java 快取更新完成", "MainWindow")
-
-        TaskUtils.run_async(refresh_java_cache)
-
-    def load_data_async(self) -> None:
-        """非同步載入資料"""
-
-        def load_versions():
-            try:
-                versions = self.version_manager.fetch_versions()
-                self.ui_queue.put(lambda: self.create_server_frame.update_versions(versions))
-            except Exception as e:
-                error_msg = f"載入版本資訊失敗: {e}\n{traceback.format_exc()}"
-                self.ui_queue.put(lambda: logger.error(error_msg))
-
-        TaskUtils.run_async(load_versions)
-
-    def _handle_startup_tasks(self) -> None:
-        """處理啟動時的任務：首次執行提示和自動更新檢查"""
-        settings = get_settings_manager()
-        if not settings.is_first_run_completed():
-            self._show_first_run_prompt()
-        elif settings.is_auto_update_enabled():
-            self._schedule_startup_update_check(delay_ms=600, show_msg=False)
-
-    def _schedule_startup_update_check(self, *, delay_ms: int = 600, show_msg: bool = False) -> None:
-        """延遲啟動更新檢查，避開 modal 對話框剛關閉時的 UI 卡頓。"""
-
-        def _run_update_check() -> None:
-            if not getattr(self, "root", None):
-                return
-            if not is_qobject_alive(self.root):
-                return
-            self._check_for_updates(show_msg=show_msg)
-
-        UIUtils.schedule_debounce(
-            self.root, "_startup_update_check_job", max(0, int(delay_ms)), _run_update_check, owner=self
-        )
-
-    def _show_first_run_prompt(self) -> None:
-        """顯示首次執行的自動更新設定提示"""
-        settings = get_settings_manager()
-        choice = UIUtils.ask_yes_no_cancel(
-            title="歡迎使用 Minecraft 伺服器管理器",
-            message="是否要啟用自動檢查更新功能？\n\n啟用後，程式會在啟動時自動檢查新版本。\n您可以隨時在「關於」視窗中更改此設定。",
-            parent=self.root,
-            show_cancel=False,
-            topmost=False,
-        )
-        logger.info(f"首次啟動設定對話結果: enable_auto_update={bool(choice)}", "MainWindow")
-        enable_auto_update = bool(choice)
-        settings.set_auto_update_enabled(enable_auto_update)
-        settings.mark_first_run_completed()
-        with contextlib.suppress(Exception):
-            self.root.setFocus()
-        if enable_auto_update:
-            self._schedule_startup_update_check(delay_ms=900, show_msg=False)
-
-    def _check_for_updates(self, show_msg: bool = True) -> None:
-        """檢查更新"""
-        try:
-            UpdateChecker.check_and_prompt_update(
-                APP_VERSION,
-                GITHUB_OWNER,
-                GITHUB_REPO,
-                show_up_to_date_message=show_msg,
-                parent=self.root,
-                interaction=QtUpdateCheckerInteraction(),
-            )
-        except Exception as e:
-            logger.error(f"自動更新檢查失敗: {e}\n{traceback.format_exc()}")
-            if show_msg:
-                UIUtils.show_error("更新檢查失敗", f"無法檢查更新：{e}", self.root)
 
     def setup_window(self) -> None:
         """設定主視窗標題、圖示和現代化樣式"""
@@ -386,7 +308,7 @@ class MinecraftServerManager:
         """建立所有介面元件，包含標題和主要內容"""
         self.create_header()
         self.create_main_content()
-        self.show_create_server()
+        PageRouter.show_create_server()
 
     def create_header(self) -> None:
         """建立原生 Qt 標題列。"""
@@ -518,9 +440,9 @@ class MinecraftServerManager:
         self.create_sidebar(self.nav_container)
 
         self.create_server_frame = CreateServerFrame(
-            self.content_frame, self.version_manager, self.loader_manager, self.on_server_created, self.server_manager
+            self.content_frame, self.version_manager, self.loader_manager, self.on_server_created, self.server_crud
         )
-        self._add_page_widget(self.create_server_frame)
+        PageRouter.add_page_widget(self.create_server_frame)
         self.manage_server_frame = None
         self.mod_frame = None
 
@@ -545,9 +467,9 @@ class MinecraftServerManager:
         self.nav_buttons = {}
         self.active_nav_key = None
         self._nav_items = [
-            ("🆕", "建立伺服器", "建立新的 Minecraft 伺服器", self.show_create_server, "create"),
-            ("🔧", "管理伺服器", "管理現有的伺服器", self.show_manage_server, "manage"),
-            ("🧩", "模組管理", "管理伺服器模組與資源", self.show_mod_management, "mods"),
+            ("🆕", "建立伺服器", "建立新的 Minecraft 伺服器", PageRouter.show_create_server, "create"),
+            ("🔧", "管理伺服器", "管理現有的伺服器", PageRouter.show_manage_server, "manage"),
+            ("🧩", "模組管理", "管理伺服器模組與資源", PageRouter.show_mod_management, "mods"),
             ("📥", "匯入伺服器", "匯入現有伺服器檔案", self.import_server, "import"),
             ("📁", "開啟資料夾", "開啟伺服器儲存資料夾", self.open_servers_folder, "folder"),
             ("ⓘ", "關於程式", "查看程式資訊", self.show_about, "about"),
@@ -607,7 +529,7 @@ class MinecraftServerManager:
 
         def on_click():
             if key in main_nav_keys:
-                self.set_active_nav_button(key)
+                PageRouter.set_active_nav_button(key)
             command()
 
         btn.clicked.connect(lambda _checked=False: on_click())
@@ -623,31 +545,6 @@ class MinecraftServerManager:
 
     def _nav_button_style(self, *, active: bool, mini: bool) -> str:
         return NativeQtStyle.nav_button(active=active, mini=mini)
-
-    def set_active_nav_button(self, key: str) -> None:
-        """
-        設定活動導航按鈕。
-
-        Args:
-            key: 要設為活動狀態的導航鍵。
-        """
-        if not key:
-            return
-        if getattr(self, "active_nav_key", None) == key:
-            return
-        prev_key = getattr(self, "active_nav_key", None)
-        if prev_key:
-            prev_btn = self.nav_buttons.get(prev_key, {}).get("button")
-            if prev_btn is not None:
-                prev_btn.setStyleSheet(
-                    self._nav_button_style(active=False, mini=not bool(getattr(self, "sidebar_visible", True)))
-                )
-        new_btn = self.nav_buttons.get(key, {}).get("button")
-        if new_btn is not None:
-            new_btn.setStyleSheet(
-                self._nav_button_style(active=True, mini=not bool(getattr(self, "sidebar_visible", True)))
-            )
-        self.active_nav_key = key
 
     def toggle_sidebar(self) -> None:
         """切換完整/迷你側欄。"""
@@ -710,29 +607,6 @@ class MinecraftServerManager:
         if native is not None and hasattr(native, "setToolTip"):
             native.setToolTip(str(text))
 
-    def _add_page_widget(self, frame) -> QtWidgets.QWidget | None:
-        """把頁面加入原生 Qt stack，回傳實際 QWidget。"""
-        widget = _native_widget(frame)
-        if widget is None:
-            return None
-        if self.content_frame.indexOf(widget) < 0:
-            self.content_frame.addWidget(widget)
-        return widget
-
-    def _show_page_frame(self, frame) -> None:
-        """切換 QStackedWidget 頁面。"""
-        if frame is None:
-            return
-        try:
-            widget = self._add_page_widget(frame)
-            if widget is None:
-                return
-            self.content_frame.setCurrentWidget(widget)
-            widget.show()
-            self._active_page_frame = widget
-        except Exception as e:
-            logger.exception(f"切換頁面失敗: {e}")
-
     def _lock_content_layout_for_sidebar_toggle(self) -> None:
         """側邊欄切換期間暫時鎖住主內容區，降低 resize 撕裂。"""
         if getattr(self, "_content_layout_locked", False):
@@ -770,59 +644,6 @@ class MinecraftServerManager:
             logger.debug(f"解除內容區佈局鎖失敗: {e}", "MainWindow")
         finally:
             self._content_layout_locked = False
-
-    def show_create_server(self) -> None:
-        """顯示建立伺服器頁面"""
-        if getattr(self, "manage_server_frame", None) is not None:
-            with contextlib.suppress(Exception):
-                self.manage_server_frame.set_auto_refresh_enabled(False)
-        self._show_page_frame(self.create_server_frame)
-        self.set_active_nav_button("create")
-
-    def show_manage_server(self, auto_select=None) -> None:
-        """
-        顯示管理伺服器頁面並強制刷新伺服器列表。
-
-        Args:
-            auto_select: 可選的伺服器名稱，用於刷新後自動選取。
-        """
-        self._ensure_manage_server_frame()
-        with contextlib.suppress(Exception):
-            self.manage_server_frame.set_auto_refresh_enabled(True)
-        self._show_page_frame(self.manage_server_frame)
-        self.set_active_nav_button("manage")
-
-        def _refresh_and_optionally_select() -> None:
-            try:
-                self.manage_server_frame.refresh_servers()
-                if (
-                    auto_select
-                    and hasattr(self.manage_server_frame, "server_tree")
-                    and self.manage_server_frame.server_tree
-                ):
-                    for item in self.manage_server_frame.server_tree.get_children():
-                        values = self.manage_server_frame.server_tree.item(item)["values"]
-                        if values and values[0] == auto_select:
-                            self.manage_server_frame.server_tree.selection_set(item)
-                            self.manage_server_frame.server_tree.see(item)
-                            self.manage_server_frame.selected_server = auto_select
-                            self.manage_server_frame.update_selection()
-                            break
-            except Exception as e:
-                logger.error(f"切換到管理伺服器頁面後刷新失敗: {e}\n{traceback.format_exc()}")
-
-        UIUtils.schedule_debounce(self.root, "_nav_refresh_job", 0, _refresh_and_optionally_select, owner=self)
-
-    def show_mod_management(self) -> None:
-        """顯示模組管理頁面"""
-        if getattr(self, "manage_server_frame", None) is not None:
-            with contextlib.suppress(Exception):
-                self.manage_server_frame.set_auto_refresh_enabled(False)
-        self._ensure_mod_management_frame()
-        self.mod_frame.load_servers()
-        frame = self.mod_frame.get_frame()
-        self._show_page_frame(frame)
-        self.set_active_nav_button("mods")
 
     def import_server(self) -> None:
         """
@@ -918,7 +739,7 @@ class MinecraftServerManager:
         folder_path = qt.get_existing_directory(
             parent=self.root,
             title="選擇伺服器資料夾",
-            initialdir=str(self.server_manager.servers_root),
+            initialdir=str(self.server_crud.servers_root),
         )
         if not folder_path:
             return None
@@ -935,7 +756,7 @@ class MinecraftServerManager:
             parent=self.root,
             title="選擇伺服器壓縮檔",
             filetypes=[("ZIP 壓縮檔", "*.zip"), ("所有檔案", "*.*")],
-            initialdir=str(self.server_manager.servers_root),
+            initialdir=str(self.server_crud.servers_root),
         )
         if not file_path:
             return None
@@ -984,11 +805,11 @@ class MinecraftServerManager:
             if not name:
                 UIUtils.show_error("輸入錯誤", "請輸入伺服器名稱", dialog)
                 return
-            root = self.server_manager.servers_root
+            root = self.server_crud.servers_root
             if (root / name).exists():
                 UIUtils.show_error("名稱重複", f"'{name}' 已存在，請換一個名稱", dialog)
                 return
-            if self.server_manager.server_exists(name) and (
+            if self.server_crud.server_exists(name) and (
                 not UIUtils.ask_yes_no_cancel(
                     "名稱衝突", f"'{name}' 已存在於設定，是否覆蓋?", dialog, show_cancel=False
                 )
@@ -1013,7 +834,7 @@ class MinecraftServerManager:
 
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
         """完成伺服器匯入流程"""
-        target_path = self.server_manager.servers_root / server_name
+        target_path = self.server_crud.servers_root / server_name
         progress_dialog = DialogUtils.create_toplevel_dialog(
             parent=self.root,
             title="正在匯入伺服器",
@@ -1108,7 +929,7 @@ class MinecraftServerManager:
 
                 def _on_import_success() -> None:
                     _close_progress_dialog()
-                    if not self.server_manager.add_server(server_config):
+                    if not self.server_crud.add_server(server_config):
                         UIUtils.show_error(
                             "匯入失敗", f"伺服器 '{server_name}' 匯入完成，但無法寫入伺服器設定。", self.root
                         )
@@ -1118,7 +939,7 @@ class MinecraftServerManager:
                         f"伺服器 '{server_name}' 匯入成功!\n\n類型: {server_config.loader_type}\n版本: {server_config.minecraft_version}",
                         self.root,
                     )
-                    self.show_manage_server(auto_select=server_name)
+                    PageRouter.show_manage_server(auto_select=server_name)
 
                 self.ui_queue.put(_on_import_success)
             except Exception as e:
@@ -1215,7 +1036,7 @@ class MinecraftServerManager:
 
         manual_check_btn = _make_fluent_button("檢查更新", scroll_content)
         manual_check_btn.setFont(_qt_font(FontManager.get_font(size=FontSize.NORMAL)))
-        manual_check_btn.clicked.connect(lambda _checked=False: self._manual_check_updates())
+        manual_check_btn.clicked.connect(lambda _checked=False: TaskCoordinator.manual_check_updates())
         manual_check_btn.setVisible(not settings.is_auto_update_enabled())
         content_layout.addWidget(manual_check_btn, 0, QtCore.Qt.AlignmentFlag.AlignLeft)
 
@@ -1224,12 +1045,7 @@ class MinecraftServerManager:
             manual_check_btn.setVisible(not enabled)
 
         auto_update_checkbox.toggled.connect(on_auto_update_toggled)
-        if RuntimePaths.is_portable_mode():
-            add_label("📦 便攜模式", size=FontSize.HEADING_LARGE, weight="bold")
-            add_label(
-                "您正在使用便攜模式。\n如需更新，請使用內建的檢查更新功能，或從 Releases 下載安裝程式 exe 後選擇可攜式安裝。",
-                size=FontSize.NORMAL_PLUS,
-            )
+
         prefs_btn = _make_fluent_button("視窗偏好設定", scroll_content)
         prefs_btn.setFont(_qt_font(FontManager.get_font(size=FontSize.NORMAL)))
         prefs_btn.clicked.connect(lambda _checked=False: self._show_window_preferences())
@@ -1255,10 +1071,6 @@ class MinecraftServerManager:
             manual_check_btn.hide_from_layout()
         else:
             manual_check_btn.attach(anchor="w", pady=(0, Spacing.SMALL_PLUS))
-
-    def _manual_check_updates(self) -> None:
-        """手動檢查更新"""
-        self._check_for_updates()
 
     def _show_window_preferences(self) -> None:
         """顯示視窗偏好設定對話框"""
@@ -1319,7 +1131,7 @@ class MinecraftServerManager:
                 server_config.properties = properties
         except Exception as e:
             logger.error(f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}")
-        self.show_manage_server(auto_select=server_config.name)
+        PageRouter.show_manage_server(auto_select=server_config.name)
         UIUtils.show_info(
             "初始化完成",
             f"伺服器 「{server_config.name}」 已成功初始化並可開始使用！\n\n你現在可以進一步調整伺服器設定或直接啟動",
@@ -1767,3 +1579,80 @@ class ServerInitializationDialog:
                     self.progress_label.configure(text="狀態: 啟動失敗")
 
         self._schedule_dialog_job("_init_error_job", 0, show_error)
+
+
+def show_message(title, message, message_type="error"):
+    """統一的訊息提示入口，提供 UI 與 logger fallback 機制"""
+    import contextlib
+
+    try:
+        if message_type == "error":
+            UIUtils.show_error(title, message, topmost=True)
+        elif message_type == "warning":
+            UIUtils.show_warning(title, message, topmost=True)
+        else:
+            UIUtils.show_info(title, message, topmost=True)
+        return True
+    except (RuntimeError, OSError, ValueError, TypeError, AttributeError) as ui_error:
+        with contextlib.suppress(Exception):
+            log_message = f"{title}: {message}"
+            if message_type == "error":
+                logger.error(log_message)
+            elif message_type == "warning":
+                logger.warning(log_message)
+            else:
+                logger.info(log_message)
+            logger.debug(f"UI 提示失敗，改用 logger。原因: {ui_error}")
+        return False
+
+
+def _initialize_managers():
+    """初始化全域管理器實例"""
+    LoaderManager()
+    MinecraftVersionManager()
+
+
+def _setup_ui_environment():
+    """設定 UI 環境和主題"""
+    settings = get_settings_manager()
+    from ..utils import initialize_ui_theme
+
+    initialize_ui_theme(settings.get_theme_mode())
+
+
+class _ApplicationRoot(QtWidgets.QWidget):
+    """主應用程式根視窗。"""
+
+    def closeEvent(self, event) -> None:
+        manager = getattr(self, "_msm_manager", None)
+        if manager is None or getattr(self, "_msm_closing", False):
+            event.accept()
+            return
+        event.ignore()
+        manager.on_closing()
+
+
+def run_application():
+    """初始化應用程式並啟動主視窗"""
+    _initialize_managers()
+    try:
+        settings = get_settings_manager()
+        if settings.get("auto_prune_markers_on_startup"):
+            PathUtils.auto_prune_markers()
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            record_and_mark(
+                e,
+                marker_path=PathUtils.get_project_root(),
+                reason="auto_prune_markers failed",
+                details={"context": "startup"},
+            )
+        logger.exception("auto_prune_markers failed")
+    _setup_ui_environment()
+
+    app = ensure_application()
+    root = _ApplicationRoot()
+    manager = MainWindow(root)
+    root._msm_manager = manager
+    root.show()
+    app.exec()

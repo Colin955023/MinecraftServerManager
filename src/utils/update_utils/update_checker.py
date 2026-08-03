@@ -171,70 +171,67 @@ class UpdateChecker:
         return UpdateParsing.select_update_asset(release)
 
     @staticmethod
-    def _build_installer_launch_args(installer_path: Path) -> list[str]:
-        args = [str(installer_path)]
-        if RuntimePaths.is_portable_mode():
-            args.extend(["/MSMPortable=1", f"/DIR={RuntimePaths.get_portable_base_dir()}"])
-        else:
-            args.append("/MSMPortable=0")
-        return args
-
-    @staticmethod
-    def _launch_installer(
-        installer_path: Path, parent=None, interaction: UpdateCheckerInteraction | None = None
-    ) -> bool:
+    def _apply_update(new_exe_path: Path, parent=None, interaction: UpdateCheckerInteraction | None = None) -> bool:
         """
-        啟動安裝程式
+        套用更新：建立並執行用來覆寫當前執行檔的批次腳本
 
         Args:
-            installer_path: 安裝程式檔案路徑
-            parent: 父視窗物件，用於在主執行緒顯示 UI 對話框
+            new_exe_path: 新版本的執行檔路徑。
+            parent: 父視窗物件。
             interaction: 更新流程互動介面。
 
         Returns:
-            成功啟動安裝程式時回傳 True，取消或啟動失敗時回傳 False。
+            是否成功啟動更新腳本。
         """
-        installer_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
+        update_interaction: UpdateCheckerInteraction = interaction or _DirectUpdateCheckerInteraction()
         try:
-            try:
-                temp_dir = Path(tempfile.gettempdir()).resolve(strict=True)
-                resolved_path = installer_path.resolve(strict=True)
-            except FileNotFoundError as e:
-                logger.error(f"安裝程式路徑解析失敗：{installer_path}，錯誤：{e}")
+            current_exe = Path(sys.executable)
+            if not current_exe.name.lower().endswith(".exe"):
+                logger.error("目前環境非打包之執行檔，無法進行自我替換更新。")
                 return False
-            except Exception as e:
-                logger.error(f"解析安裝程式路徑時發生未預期錯誤：{installer_path}，錯誤：{e}")
-                return False
-            if not PathUtils.is_path_within(temp_dir, resolved_path, strict=True):
-                logger.error(f"安裝程式路徑不在允許的暫存目錄中：{resolved_path}")
-                return False
+
+            resolved_path = new_exe_path.resolve(strict=True)
             if resolved_path.is_file():
-                confirm = installer_interaction.call_on_ui(
+                confirm = update_interaction.call_on_ui(
                     parent,
-                    lambda: installer_interaction.ask_yes_no_cancel(
-                        "執行安裝程式",
-                        f"即將執行安裝程式：\n{resolved_path}\n\n是否確定要執行？",
+                    lambda: update_interaction.ask_yes_no_cancel(
+                        "套用更新",
+                        "即將關閉程式並套用更新。\n\n是否確定要執行？",
                         parent=parent,
                         show_cancel=False,
                         topmost=True,
                     ),
                 )
                 if not confirm:
-                    logger.info(f"使用者取消執行安裝程式：{resolved_path}")
+                    logger.info("使用者取消套用更新")
                     return False
-                process = SubprocessUtils.popen_detached(UpdateChecker._build_installer_launch_args(resolved_path))
+
+                bat_script_path = resolved_path.with_suffix(".update.bat")
+                bat_content = f"""@echo off
+timeout /t 2 /nobreak >nul
+:loop
+move /Y "{resolved_path}" "{current_exe}" >nul 2>nul
+if errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto loop
+)
+start "" "{current_exe}"
+del "%~f0"
+"""
+                bat_script_path.write_text(bat_content, encoding="utf-8")
+
+                process = SubprocessUtils.popen_detached([str(bat_script_path)])
                 time.sleep(0.5)
                 returncode = process.poll()
                 if returncode is not None and returncode != 0:
-                    logger.error(f"安裝程式啟動失敗，退出碼：{returncode}")
+                    logger.error(f"更新腳本啟動失敗，退出碼：{returncode}")
                     return False
-                if returncode is not None:
-                    logger.debug(f"安裝程式進程已退出（可能啟動了子進程），退出碼：{returncode}")
-                logger.info(f"已啟動安裝程式（PID: {process.pid}）: {resolved_path}")
+
+                logger.info(f"已啟動更新腳本（PID: {process.pid}）: {bat_script_path}")
                 return True
-            logger.error(f"安裝程式不存在或不是檔案：{resolved_path}")
+            logger.error(f"新執行檔不存在或不是檔案：{resolved_path}")
         except Exception as e:
-            logger.exception(f"安裝程式啟動失敗: {e}")
+            logger.exception(f"套用更新失敗: {e}")
         return False
 
     @staticmethod
@@ -582,23 +579,21 @@ class UpdateChecker:
                         _handle_checksum_mismatch(asset.get("name") or "unknown", alg)
                         return
                     logger.info(f"[驗證通過] {alg.upper()} 驗證成功：{asset.get('name')}")
-                    installer_started = UpdateChecker._launch_installer(
-                        dest, parent=parent, interaction=update_interaction
-                    )
+                    installer_started = UpdateChecker._apply_update(dest, parent=parent, interaction=update_interaction)
                     if not installer_started:
-                        logger.info("安裝程式未啟動，更新流程已取消")
+                        logger.info("更新未套用，更新流程已取消")
                         _cleanup_temp_files(temp_files_to_cleanup)
                         TaskUtils.call_on_ui(
                             parent,
                             lambda: UIUtils.show_info(
                                 "更新已取消",
-                                "安裝程式未啟動，程式將繼續執行。請稍後重試或手動從 GitHub Releases 下載。",
+                                "套用更新已取消，程式將繼續執行。請稍後重試或手動從 GitHub Releases 下載。",
                                 parent=parent,
                                 topmost=True,
                             ),
                         )
                         return
-                    logger.info("安裝程式已啟動（獨立進程）")
+                    logger.info("更新腳本已啟動（獨立進程）")
                     if dest in temp_files_to_cleanup:
                         temp_files_to_cleanup.remove(dest)
                     _cleanup_temp_files(temp_files_to_cleanup)
@@ -606,7 +601,7 @@ class UpdateChecker:
                         parent,
                         lambda: UIUtils.show_info(
                             "更新準備就緒",
-                            "安裝程式已啟動。\n\n程式將在關閉此訊息後結束。\n請依安裝程式指示完成更新。",
+                            "更新腳本已啟動。\n\n程式即將自動關閉並在背景替換為新版本。\n替換完成後將自動重新啟動。",
                             parent=parent,
                             topmost=True,
                         ),

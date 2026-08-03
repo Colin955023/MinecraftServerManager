@@ -4,7 +4,8 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from src.core import ModManager, ModPlatform
+from src.core import ModManager
+from src.models import ModPlatform
 from src.utils import HTTPUtils, ModIndexManager, compute_file_hash
 
 

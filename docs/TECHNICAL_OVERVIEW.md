@@ -101,7 +101,7 @@ ui → core → models → utils
 | `network_utils/` | `http_utils` (集中 timeout/retry)、`request_retry_utils` |
 | `java_support/` | Java 自動偵測、winget 安裝支援 |
 | `ui_support/` | Fluent theme、window manager、DPI handling、dialog_utils、font_manager、icon_utils、qt_runtime、qt_widgets、task_utils、tree_utils、ui_config、ui_tokens、ui_utils、custom_dropdown |
-| `runtime_utils/` | 延遲匯出、版本資訊、環境檢查、OS 判斷、Python 版本檢查、app_info、app_restart、background_task、runtime_paths、settings_manager、singleton、subprocess_utils、worker_pool |
+| `runtime_utils/` | 延遲匯出、版本資訊、環境檢查、OS 判斷、Python 版本檢查、app_info、background_task、runtime_paths、settings_manager、singleton、subprocess_utils、worker_pool |
 | `mod_utils/` | 依賴規劃序列化、下載來源策略、本地模組 metadata 工具、Modrinth 查詢工具、Modrinth 版本查詢、模組依賴規劃、模組依賴參考工具、模組索引管理、模組 provider metadata、模組重新驗證批次工具、模組語意、模組版本過濾 |
 | `server_utils/` | 伺服器常數、伺服器偵測工具、伺服器偵測版本工具、伺服器記憶體工具、伺服器屬性工具、伺服器執行期工具 |
 | `update_utils/` | 更新檢查、更新解析、更新檢查適配器 |
@@ -150,10 +150,9 @@ ui → core → models → utils
 
 ## 8. 資料與設定路徑
 
-| 模式 | 設定 | 日誌 | 快取 |
-|------|------|------|------|
-| 一般安裝 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
-| 可攜式安裝 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
+- **設定**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- **日誌**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
+- **快取**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\`
 
 設定由 `runtime_utils/settings_manager.py` 統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
 

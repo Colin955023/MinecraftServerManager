@@ -125,8 +125,8 @@ jobs:
           $prereleaseArgs = @()
           if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
           $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
-              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe$' -or
-              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe\.sigstore\.json$'
+              $_.Name -match '^MinecraftServerManager.*\.exe$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.sigstore\.json$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
               Write-Host 'No release assets found in dist; aborting release creation'

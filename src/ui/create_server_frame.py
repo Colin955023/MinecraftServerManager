@@ -13,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..core import LoaderManager, MinecraftVersionManager, ServerManager
+from ..core import LoaderManager, MinecraftVersionManager, ServerCRUD
 from ..models import ServerConfig
 from ..utils import (
     CancellationToken,
@@ -210,13 +210,13 @@ class CreateServerFrame(QtWidgets.QWidget):
         version_manager: MinecraftVersionManager,
         loader_manager: LoaderManager,
         callback: Callable,
-        server_manager: ServerManager,
+        server_crud: ServerCRUD,
     ):
         super().__init__(parent)
         self.version_manager = version_manager
         self.loader_manager = loader_manager
         self.callback = callback
-        self.server_manager = server_manager
+        self.server_crud = server_crud
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
@@ -826,13 +826,13 @@ class CreateServerFrame(QtWidgets.QWidget):
         if not server_name:
             UIUtils.show_error("錯誤", "請輸入伺服器名稱", self.window())
             return False
-        servers_root = self.server_manager.servers_root
+        servers_root = self.server_crud.servers_root
         if (servers_root / server_name).exists():
             UIUtils.show_error(
                 "名稱重複", f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱。", self.window()
             )
             return False
-        if self.server_manager.server_exists(server_name) and (
+        if self.server_crud.server_exists(server_name) and (
             not UIUtils.ask_yes_no_cancel(
                 "名稱衝突",
                 f"伺服器名稱 '{server_name}' 已存在於設定。是否覆蓋?",
@@ -929,7 +929,7 @@ class CreateServerFrame(QtWidgets.QWidget):
                 raise Exception("建立進度對話框失敗")
             if not progress_dialog.update_progress(5, "建立伺服器目錄結構..."):
                 return
-            create_result = self.server_manager.create_server_result(config)
+            create_result = self.server_crud.create_server_result(config)
             if create_result.failed:
                 logger.error(f"建立伺服器基礎結構失敗 config: {config} | {create_result.message}")
                 progress_dialog.close()
@@ -952,7 +952,7 @@ class CreateServerFrame(QtWidgets.QWidget):
                 if not self.download_server_files(config, progress_dialog, server_path):
                     progress_dialog.close()
                     return
-                self.server_manager.create_launch_script(config)
+                self.server_crud.create_launch_script(config)
             except Exception as e:
                 with __import__("contextlib").suppress(Exception):
                     record_and_mark(

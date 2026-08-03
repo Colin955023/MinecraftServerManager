@@ -21,9 +21,10 @@ os.environ.setdefault("MSM_LOG_DIR", str(TEST_RUNTIME_ROOT / "log"))
 
 @pytest.fixture(autouse=True)
 def _suppress_server_manager_issue_markers(monkeypatch):
-    import src.core.server_manager as server_manager_module
+    from src.core.server import server_crud, server_startup
 
-    monkeypatch.setattr(server_manager_module, "record_and_mark", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(server_crud, "record_and_mark", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(server_startup, "record_and_mark", lambda *_args, **_kwargs: None)
     yield
     issues_root = PROJECT_ROOT / ".issues"
     if issues_root.exists():

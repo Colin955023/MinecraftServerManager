@@ -21,19 +21,18 @@ Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟�
 - **模組管理** — 本地掃描 + Modrinth 線上搜尋，線上安裝前 Review 確認
 - **模組更新** — Hash-first 批次比對，相依套件自動規劃
 - **匯入伺服器** — 掃描既有資料夾或壓縮檔快速匯入
-- **兩種安裝模式** — 同一個 installer 支援一般安裝與可攜式安裝
-
+- **單一執行檔** — 免安裝、無相依，下載後直接點擊即可執行
 ---
 
-## 安裝
+## 取得程式
 
-1. 前往 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新的 `*-Setup-*.exe`
-2. 執行安裝程式
-3. 選擇一般安裝，或選擇可攜式安裝並指定目標資料夾
+本程式為單一執行檔（Single Executable），免安裝即可使用。
 
-一般安裝會使用 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。可攜式安裝會在指定資料夾內建立 `.portable` 標記，並把資料寫入該資料夾下的 `.config` 與 `.log`。
+1. 前往 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新的 `MinecraftServerManager.exe`
+2. 將 `.exe` 放置於您方便的任何位置（如桌面或專屬資料夾）
+3. 雙擊執行即可
 
-可攜式安裝不會建立 Windows 解除安裝項目；如要移除，請關閉程式後直接刪除整個指定資料夾。
+所有設定、日誌與快取等資料將統一儲存於 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。若要徹底移除程式，只需刪除 `.exe` 檔案以及上述資料夾即可。
 
 ---
 
@@ -97,7 +96,6 @@ report/      產生綜合報告的腳本與輸出
 
 - [使用者手冊](docs/USER_GUIDE.md)
 - [技術手冊](docs/TECHNICAL_OVERVIEW.md)
-- [可攜式 / 一般安裝差異矩陣](docs/PORTABLE_INSTALLER_MATRIX.md)
 
 ---
 

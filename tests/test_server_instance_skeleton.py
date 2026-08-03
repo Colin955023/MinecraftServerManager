@@ -1,9 +1,10 @@
 from pathlib import Path
 
+from src.core.server.server_instance import ServerInstance
+from src.core.server.server_startup import ServerStartup
+
 
 def test_server_instance_init(tmp_path):
-    from src.models import ServerInstance
-
     inst = ServerInstance(id="s1", name="myserver", path=tmp_path)
 
     assert inst.id == "s1"
@@ -17,8 +18,6 @@ def test_server_instance_init(tmp_path):
 
 
 def test_server_instance_process_helpers(tmp_path):
-    from src.models import ServerInstance
-
     class DummyProcess:
         def poll(self):
             return None
@@ -36,30 +35,25 @@ def test_server_instance_process_helpers(tmp_path):
 
 
 def test_to_dict(tmp_path):
-    from src.models import ServerInstance
-
     inst = ServerInstance(id="s2", name="srv", path=tmp_path)
     d = inst.to_dict()
     assert d["id"] == "s2"
     assert d["path"] == str(tmp_path)
 
 
-def test_server_manager_reads_buffer_before_stopped_process_cleanup(tmp_path):
-    from src.core.server_manager import ServerManager
-    from src.models import ServerInstance
-
+def test_server_startup_reads_buffer_before_stopped_process_cleanup(tmp_path):
     class StoppedProcess:
         pid = 0
 
         def poll(self):
             return 0
 
-    manager = ServerManager(str(tmp_path))
+    startup = ServerStartup(str(tmp_path))
     inst = ServerInstance(id="srv", name="srv", path=tmp_path)
     inst.attach_process(StoppedProcess())
     inst.attach_output_buffer(10)
     inst.append_output_line("last line")
-    manager.running_servers["srv"] = inst
+    startup.running_servers["srv"] = inst
 
-    assert manager.read_server_output("srv") == ["last line"]
-    assert "srv" not in manager.running_servers
+    assert startup.read_server_output("srv") == ["last line"]
+    assert "srv" not in startup.running_servers

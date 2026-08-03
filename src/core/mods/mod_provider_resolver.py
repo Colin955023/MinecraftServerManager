@@ -9,8 +9,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ..models import MODRINTH_SEARCH_URL, ModPlatform, ModrinthIdentityCache
-from ..utils import (
+from ...models import MODRINTH_SEARCH_URL, ModPlatform, ModrinthIdentityCache
+from ...utils import (
     APP_VERSION,
     GITHUB_OWNER,
     GITHUB_REPO,

@@ -91,7 +91,7 @@ def main():
         "-m",
         "nuitka",
         "--quiet",
-        "--standalone",
+        "--onefile",
         "--enable-plugin=pyside6",
         "--assume-yes-for-downloads",
         "--remove-output",
@@ -127,72 +127,19 @@ def main():
     except subprocess.CalledProcessError:
         print_error_and_exit("Nuitka 編譯失敗")
 
-    logging.info("Step 3.5: 整理建置產出物目錄...")
+    logging.info("Step 4: 整理建置產出物目錄...")
 
     dist_dir = project_root / "dist"
-    dist_main_dist = dist_dir / "main.dist"
-    dist_msm_dist = dist_dir / "MinecraftServerManager.dist"
-    dist_target = dist_dir / "MinecraftServerManager"
+    executable_path = dist_dir / EXECUTABLE_NAME
 
-    if dist_main_dist.exists():
-        if dist_target.exists():
-            shutil.rmtree(dist_target, ignore_errors=True)
-        shutil.move(dist_main_dist, dist_target)
-    elif dist_msm_dist.exists():
-        if dist_target.exists():
-            shutil.rmtree(dist_target, ignore_errors=True)
-        shutil.move(dist_msm_dist, dist_target)
-
-    if not dist_target.exists():
-        print_error_and_exit(f"找不到 Nuitka 輸出目錄，預期 {dist_main_dist} 或 {dist_msm_dist}")
-
-    if not (dist_target / EXECUTABLE_NAME).exists():
-        print_error_and_exit("找不到已編譯的執行檔")
-
-    required_qt_plugins = [
-        dist_target / "PySide6" / "qt-plugins" / "platforms" / "qwindows.dll",
-        dist_target / "PySide6" / "qt-plugins" / "imageformats" / "qico.dll",
-    ]
-    missing_qt_plugins = [str(plugin.relative_to(dist_target)) for plugin in required_qt_plugins if not plugin.exists()]
-    if missing_qt_plugins:
-        error_msg = "Qt runtime 外掛遺失，打包後可能無法啟動：\n" + "\n".join(
-            [f" - {plugin}" for plugin in missing_qt_plugins]
-        )
-        print_error_and_exit(error_msg)
-
-    logging.info("Step 4: 封裝安裝程式 (Inno Setup)...")
-    iscc = shutil.which("iscc") or r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if not Path(iscc).exists():
-        print_error_and_exit("找不到 ISCC.exe")
-
-    subprocess.run(
-        [
-            str(iscc),
-            f"/DAppVersion={APP_VERSION}",
-            f"/DAppName={APP_NAME}",
-            f"/DAppId={APP_ID}",
-            "scripts/installer.iss",
-        ],
-        check=True,
-    )
-
-    logging.info("Step 5: 驗證建置產物...")
-    dist_dir = project_root / "dist"
-    setup_file = dist_dir / f"{APP_NAME}-Setup-{APP_VERSION}.exe"
-
-    missing_artifacts = []
-    if not setup_file.exists():
-        missing_artifacts.append(f"安裝程式 ({setup_file.name})")
-
-    if missing_artifacts:
-        error_msg = "遺失建置產物：\n" + "\n".join([f" - {a}" for a in missing_artifacts])
-        print_error_and_exit(error_msg)
+    if not executable_path.exists():
+        print_error_and_exit(f"找不到已編譯的執行檔：{executable_path}")
 
     logging.info("========================================================")
     logging.info("              建置成功完成！")
     logging.info("========================================================")
     logging.info("")
-    logging.info(f"安裝程式：{setup_file.relative_to(project_root)}")
+    logging.info(f"執行檔：{executable_path.relative_to(project_root)}")
     logging.info("SHA-256 將由 GitHub Release asset 的 digest 提供")
     logging.info("========================================================")
     logging.info("")

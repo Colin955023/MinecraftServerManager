@@ -1,16 +1,15 @@
 # 使用者手冊
 
-## 安裝
+## 取得程式
 
-| 類型 | 適合對象 | 取得方式 |
-|------|----------|----------|
-| **可攜式安裝** | 初次使用或需要自訂安裝位置 | 下載 `*-Setup-*.exe`，選擇可攜式安裝並指定資料夾 |
-| **一般安裝** | 日常長期使用 | 下載 `*-Setup-*.exe`，選擇一般安裝 |
+本程式為單一執行檔（Single Executable），免安裝即可使用。
 
-從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新版本。
+1. 從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載最新的 `MinecraftServerManager.exe`。
+2. 將 `.exe` 放置於您方便的任何位置（如桌面或專屬資料夾）。
+3. 雙擊執行即可。
 
-可攜式安裝不會建立 Windows 解除安裝項目。若要移除可攜式安裝，請先關閉程式，再直接刪除整個指定資料夾。
-
+### 解除安裝
+本程式不寫入 Windows Registry，也不產生系統解除安裝項目。若要徹底移除，請直接刪除 `.exe` 檔案，並刪除 `%LOCALAPPDATA%\Programs\MinecraftServerManager` 隱藏資料夾即可。
 ---
 
 ### Java 與 winget 安裝說明
@@ -96,7 +95,7 @@
 
 - 確認防毒軟體未封鎖 `MinecraftServerManager.exe`
 - 嘗試以系統管理員身分執行
-- 若使用可攜式安裝且遇到啟動或 Java 偵測問題，可改用簡短英文路徑重新測試
+- 請確認您的存放路徑不要包含過長的特殊字元，建議改用簡短英文路徑重新測試
 
 ### 伺服器無法啟動
 
@@ -110,20 +109,13 @@
 - 檔案副檔名需為 `.jar` 或 `.jar.disabled`
 - 按「**重新整理**」手動刷新清單
 
-### 如何移除可攜式安裝
-
-可攜式安裝的程式、設定、日誌與快取都在安裝時指定的資料夾內。關閉程式後直接刪除整個資料夾即可。
-
----
-
 ## 資料位置
 
-| 模式 | 設定檔 | 日誌 | 快取 |
-|------|--------|------|------|
-| 一般安裝 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | 同目錄 `log\` | 同目錄 `Cache\` |
-| 可攜式安裝 | 程式目錄 `.config\user_settings.json` | 程式目錄 `.log\` | 程式目錄 `.config\Cache\` |
+本程式的所有資料將統一儲存於系統的應用程式資料夾中：
 
-可攜式 / 一般安裝路徑與更新流程差異請見 [可攜式 / 一般安裝差異矩陣](PORTABLE_INSTALLER_MATRIX.md)。
+- **設定檔**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
+- **日誌**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
+- **快取**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\`
 
 ---
 

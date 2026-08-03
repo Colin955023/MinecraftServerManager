@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import src.core.mod_manager as mod_manager_module
+import src.core.mods.mod_manager as mod_manager_module
 import src.models as models_module
 import src.ui as mod_search_service_module
 import src.ui.mod_management.review as mod_management_review_module

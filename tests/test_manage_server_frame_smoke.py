@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 import src.ui.manage_server_frame as manage_server_frame_module
+import src.ui.manage_server_service as manage_server_service_module
 from src.models import ServerConfig
 
 
@@ -57,7 +58,7 @@ def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> Non
         ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
     ]
 
-    server_order, server_rows = manage_server_frame_module.ManageServerFrame._build_server_tree_payload(server_data)
+    server_order, server_rows = manage_server_service_module.ManageServerService._build_server_tree_payload(server_data)
 
     assert server_order == ["Alpha", "Beta"]
     assert server_rows["Alpha"] == tuple(server_data[0])
@@ -70,7 +71,7 @@ def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
         ["Alpha", "1.21.1", "Fabric", "已停止", "未備份", "servers\\Alpha"],
     ]
 
-    server_order, server_rows = manage_server_frame_module.ManageServerFrame._build_server_tree_payload(server_data)
+    server_order, server_rows = manage_server_service_module.ManageServerService._build_server_tree_payload(server_data)
 
     assert server_order == ["Alpha", "Alpha"]
     assert server_rows["Alpha"] == tuple(server_data[1])
@@ -82,7 +83,7 @@ def test_build_server_refresh_payload_combines_signature_order_and_rows() -> Non
         ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
     ]
 
-    payload = manage_server_frame_module.ManageServerFrame._build_server_refresh_payload(server_data)
+    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(server_data)
 
     assert payload.signature == (
         ("Alpha", tuple(server_data[0])),
@@ -96,17 +97,17 @@ def test_build_server_refresh_payload_combines_signature_order_and_rows() -> Non
 
 
 def test_should_apply_server_refresh_updates_hash_only_when_changed() -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    frame.__dict__["_last_server_data_hash"] = None
-    payload = manage_server_frame_module.ManageServerFrame._build_server_refresh_payload(
+    service = object.__new__(manage_server_service_module.ManageServerService)
+    service.__dict__["_last_server_data_hash"] = None
+    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
 
-    assert frame._should_apply_server_refresh(payload) is True
-    first_hash = frame._last_server_data_hash
+    assert service._should_apply_server_refresh(payload) is True
+    first_hash = service._last_server_data_hash
     assert isinstance(first_hash, int)
-    assert frame._should_apply_server_refresh(payload) is False
-    assert frame._last_server_data_hash == first_hash
+    assert service._should_apply_server_refresh(payload) is False
+    assert service._last_server_data_hash == first_hash
 
 
 def test_begin_server_refresh_cycle_cancels_old_job_and_increments_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,25 +180,17 @@ def test_remove_stale_server_items_recycles_and_prunes_names(monkeypatch: pytest
     assert frame._server_item_by_name == {"Alpha": "item-a", "Gamma": "item-c"}
 
 
-def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    frame._server_item_by_name = {"Alpha": "item-a", "Beta": "item-b"}
-    frame._server_rows_snapshot = {
+def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending() -> None:
+    service = object.__new__(manage_server_service_module.ManageServerService)
+    item_by_name = {"Alpha": "item-a", "Beta": "item-b"}
+    previous_snapshot = {
         "Alpha": ("Alpha", "old"),
         "Beta": ("Beta", "same"),
     }
-    recycled: list[str] = []
-    tree = FakeTreeview()
-    tree.fail_item_ids.add("item-b")
 
-    monkeypatch.setattr(
-        frame,
-        "_recycle_server_item",
-        lambda item_id: recycled.append(item_id),
-    )
-
-    preparation = frame._prepare_server_tree_diff(
-        tree=tree,
+    preparation = service.prepare_server_tree_diff(
+        server_item_by_name=item_by_name,
+        previous_snapshot=previous_snapshot,
         server_order=["Alpha", "Beta", "Gamma"],
         server_rows={
             "Alpha": ("Alpha", "new"),
@@ -206,9 +199,8 @@ def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending(mon
         },
     )
 
-    assert tree.updated == [("item-a", ("Alpha", "new"))]
-    assert recycled == ["item-b"]
-    assert frame._server_item_by_name == {"Alpha": "item-a"}
+    assert preparation.pending_update == [("item-a", ("Alpha", "new"))]
+    assert item_by_name == {"Alpha": "item-a"}
     assert preparation.rows_snapshot == {"Alpha": ("Alpha", "new")}
     assert preparation.pending_insert == [
         ("Beta", ("Beta", "changed")),
@@ -226,7 +218,7 @@ def test_build_server_display_row_formats_unknown_mc_version_with_loader_version
         path="servers\\Alpha",
     )
 
-    row = manage_server_frame_module.ManageServerFrame._build_server_display_row(
+    row = manage_server_service_module.ManageServerService._build_server_display_row(
         name="Alpha",
         config=config,
         status="已停止",
@@ -247,7 +239,7 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
         path="servers\\Beta",
     )
 
-    row = manage_server_frame_module.ManageServerFrame._build_server_display_row(
+    row = manage_server_service_module.ManageServerService._build_server_display_row(
         name="Beta",
         config=config,
         status="運行中",
@@ -261,14 +253,14 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
 def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    payload = manage_server_frame_module.ManageServerFrame._build_server_refresh_payload(
+    service = object.__new__(manage_server_service_module.ManageServerService)
+    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
 
-    monkeypatch.setattr(frame, "_should_apply_server_refresh", lambda _payload: False)
+    monkeypatch.setattr(service, "_should_apply_server_refresh", lambda _payload: False)
 
-    plan = frame._build_server_refresh_execution_plan(payload)
+    plan = service.build_server_refresh_execution_plan(payload, 6, "Alpha")
 
     assert plan.should_apply is False
     assert plan.refresh_context is None
@@ -277,16 +269,17 @@ def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
 def test_build_server_refresh_execution_plan_returns_refresh_context_when_changed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    payload = manage_server_frame_module.ManageServerFrame._build_server_refresh_payload(
+    object.__new__(manage_server_frame_module.ManageServerFrame)
+    service = object.__new__(manage_server_service_module.ManageServerService)
+    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
-    expected_context = manage_server_frame_module.ServerRefreshContext(refresh_token=7, previous_selection="Alpha")
+    expected_context = manage_server_service_module.ServerRefreshContext(refresh_token=7, previous_selection="Alpha")
 
-    monkeypatch.setattr(frame, "_should_apply_server_refresh", lambda _payload: True)
-    monkeypatch.setattr(frame, "_begin_server_refresh_cycle", lambda: expected_context)
+    monkeypatch.setattr(service, "_should_apply_server_refresh", lambda _payload: True)
+    monkeypatch.setattr(service, "_begin_server_refresh_cycle", lambda: expected_context)
 
-    plan = frame._build_server_refresh_execution_plan(payload)
+    plan = service.build_server_refresh_execution_plan(payload, 6, "Alpha")
 
     assert plan.should_apply is True
     assert plan.refresh_context == expected_context
@@ -295,18 +288,19 @@ def test_build_server_refresh_execution_plan_returns_refresh_context_when_change
 def test_refresh_servers_callback_applies_payload_with_execution_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = object.__new__(manage_server_frame_module.ManageServerFrame)
     frame.server_tree = cast(Any, object())
-    payload = manage_server_frame_module.ManageServerFrame._build_server_refresh_payload(
+    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
-    execution_plan = manage_server_frame_module.ServerRefreshExecutionPlan(
+    execution_plan = manage_server_service_module.ServerRefreshExecutionPlan(
         should_apply=True,
-        refresh_context=manage_server_frame_module.ServerRefreshContext(refresh_token=3, previous_selection="Alpha"),
+        refresh_context=manage_server_service_module.ServerRefreshContext(refresh_token=3, previous_selection="Alpha"),
     )
     calls: list[
-        tuple[manage_server_frame_module.ServerRefreshPayload, manage_server_frame_module.ServerRefreshContext]
+        tuple[manage_server_service_module.ServerRefreshPayload, manage_server_service_module.ServerRefreshContext]
     ] = []
 
-    monkeypatch.setattr(frame, "_build_server_refresh_execution_plan", lambda _payload: execution_plan)
+    frame.service = object.__new__(manage_server_service_module.ManageServerService)
+    monkeypatch.setattr(frame.service, "build_server_refresh_execution_plan", lambda _p, _t, _s: execution_plan)
     monkeypatch.setattr(
         frame, "_apply_server_refresh_payload", lambda _payload, context: calls.append((_payload, context))
     )

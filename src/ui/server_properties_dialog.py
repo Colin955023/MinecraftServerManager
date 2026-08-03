@@ -6,7 +6,7 @@ server.properties 設定對話框
 import traceback
 from typing import Any, ClassVar
 
-from ..core import ServerManager
+from ..core import ServerCRUD
 from ..models import ServerConfig
 from ..utils import (
     Colors,
@@ -69,10 +69,10 @@ class ServerPropertiesDialog:
         "text-filtering-version": (0, 1),
     }
 
-    def __init__(self, parent, server_config: ServerConfig, server_manager: ServerManager):
+    def __init__(self, parent, server_config: ServerConfig, server_crud: ServerCRUD):
         self.parent = parent
         self.server_config = server_config
-        self.server_manager = server_manager
+        self.server_crud = server_crud
         self.properties_helper = ServerPropertiesHelper()
         self._default_properties: dict[str, str] = self._load_default_properties()
         self.result = None
@@ -104,10 +104,10 @@ class ServerPropertiesDialog:
 
     def _load_default_properties(self) -> dict[str, str]:
         """載入伺服器預設設定，供欄位型別與重設流程共用。"""
-        if not hasattr(self.server_manager, "get_default_server_properties"):
+        if not hasattr(self.server_crud, "get_default_server_properties"):
             return {}
         try:
-            defaults = self.server_manager.get_default_server_properties()
+            defaults = self.server_crud.get_default_server_properties()
         except Exception as e:
             logger.exception(f"讀取預設 server.properties 失敗: {e}")
             return {}
@@ -489,10 +489,10 @@ class ServerPropertiesDialog:
 
     def load_properties(self) -> None:
         """載入屬性值"""
-        current_properties = self.server_manager.load_server_properties(self.server_config.name)
+        current_properties = self.server_crud.load_server_properties(self.server_config.name)
         if not current_properties:
             current_properties = dict(self.server_config.properties or {})
-        default_properties = self.server_manager.get_default_server_properties()
+        default_properties = self.server_crud.get_default_server_properties()
         all_properties = {**default_properties, **current_properties}
         self._property_value_cache = {prop: str(value) for prop, value in all_properties.items()}
         for prop_name, value in self._property_value_cache.items():
@@ -523,7 +523,7 @@ class ServerPropertiesDialog:
                 UIUtils.show_error("驗證失敗", error_message, self.dialog)
                 return
             logger.info(f"開始儲存 server.properties 對話框內容: server={self.server_config.name}")
-            success = self.server_manager.update_server_properties(self.server_config.name, properties)
+            success = self.server_crud.update_server_properties(self.server_config.name, properties)
             if success:
                 UIUtils.show_info(
                     "成功", "伺服器屬性已儲存\n若伺服器正在運行建議執行指令：/reload或是重新運行伺服器", self.dialog
@@ -544,7 +544,7 @@ class ServerPropertiesDialog:
     def reset_properties(self) -> None:
         """重設所有屬性為預設值"""
         if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self.dialog, show_cancel=False):
-            default_properties = self.server_manager.get_default_server_properties()
+            default_properties = self.server_crud.get_default_server_properties()
             for prop_name, value in default_properties.items():
                 value_str = str(value)
                 self._property_value_cache[prop_name] = value_str

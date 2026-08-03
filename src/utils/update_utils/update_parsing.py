@@ -85,7 +85,9 @@ class UpdateParsing:
                 name = (asset.get("name") or "").lower()
                 if (
                     name.endswith(".exe")
-                    and ("setup" in name or "installer" in name)
+                    and "minecraftservermanager" in name
+                    and "setup" not in name
+                    and "installer" not in name
                     and asset.get("browser_download_url")
                 ):
                     installer_assets.append(asset)

@@ -28,7 +28,7 @@ def test_get_latest_release_can_include_prerelease(monkeypatch) -> None:
     assert latest["tag_name"] == "v1.7.0-rc1"
 
 
-def test_select_update_asset_prefers_installer_exe() -> None:
+def test_select_update_asset_prefers_executable() -> None:
     release = {
         "assets": [
             {"name": "notes.txt", "browser_download_url": "https://example/notes.txt"},
@@ -36,7 +36,7 @@ def test_select_update_asset_prefers_installer_exe() -> None:
                 "name": "MinecraftServerManager-v1.6.7.zip",
                 "browser_download_url": "https://example/archive.zip",
             },
-            {"name": "MinecraftServerManager-Setup-1.6.7.exe", "browser_download_url": "https://example/installer.exe"},
+            {"name": "MinecraftServerManager.exe", "browser_download_url": "https://example/app.exe"},
         ]
     }
 
@@ -45,7 +45,7 @@ def test_select_update_asset_prefers_installer_exe() -> None:
     assert asset["name"].endswith(".exe")
 
 
-def test_select_update_asset_returns_none_when_installer_missing() -> None:
+def test_select_update_asset_returns_none_when_executable_missing() -> None:
     release = {
         "assets": [
             {
@@ -60,11 +60,11 @@ def test_select_update_asset_returns_none_when_installer_missing() -> None:
     assert asset == {}
 
 
-def test_select_update_asset_ignores_non_installer_exe() -> None:
+def test_select_update_asset_ignores_setup_exe() -> None:
     release = {
         "assets": [
             {
-                "name": "MinecraftServerManager.exe",
+                "name": "MinecraftServerManager-Setup.exe",
                 "browser_download_url": "https://example/app.exe",
             },
         ]

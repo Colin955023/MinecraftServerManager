@@ -46,7 +46,7 @@ class _FakeLayout:
 
 
 def test_mini_sidebar_width_tracks_button_width_and_padding() -> None:
-    manager: Any = object.__new__(main_window_module.MinecraftServerManager)
+    manager: Any = object.__new__(main_window_module.MainWindow)
     manager.sidebar_visible = False
     manager._nav_full_width = 225
     manager._nav_mini_button_width = 36

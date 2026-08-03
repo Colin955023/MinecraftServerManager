@@ -8,7 +8,7 @@ from collections.abc import Callable
 from html import escape
 from pathlib import Path
 
-from ..models import (
+from ...models import (
     LocalModInfo,
     LocalModMutationResult,
     ModFileOperationResult,
@@ -16,7 +16,7 @@ from ..models import (
     ModrinthIdentityCache,
     ModStatus,
 )
-from ..utils import (
+from ...utils import (
     LocalProviderEnsureResult,
     ModIndexManager,
     PathUtils,

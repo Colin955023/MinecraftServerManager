@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from src.core import ModManager, ModPlatform
-from src.models import ModrinthIdentityCache
+from src.core import ModManager
+from src.models import ModPlatform, ModrinthIdentityCache
 
 
 class _StubIndexManager:

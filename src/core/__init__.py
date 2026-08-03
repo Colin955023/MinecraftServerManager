@@ -11,11 +11,13 @@ from .. import lazy_exports
 _EXPORTS: dict[str, tuple[str, str]] = {
     "AppException": (".exceptions", "AppException"),
     "ConfigurationError": (".exceptions", "ConfigurationError"),
-    "LoaderManager": (".loader_manager", "LoaderManager"),
-    "ModManager": (".mod_manager", "ModManager"),
-    "ModPlatform": (".mod_manager", "ModPlatform"),
-    "ServerManager": (".server_manager", "ServerManager"),
-    "LocalModScanner": (".local_mod_scanner", "LocalModScanner"),
+    "LoaderManager": (".loaders.loader_manager", "LoaderManager"),
+    "ModManager": (".mods.mod_manager", "ModManager"),
+    "ServerCRUD": (".server.server_crud", "ServerCRUD"),
+    "ServerStartup": (".server.server_startup", "ServerStartup"),
+    "ServerBackupManager": (".server.server_backup", "ServerBackupManager"),
+    "ServerInstance": (".server.server_instance", "ServerInstance"),
+    "LocalModScanner": (".mods.local_mod_scanner", "LocalModScanner"),
     "MinecraftVersionManager": (".version_manager", "MinecraftVersionManager"),
 }
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

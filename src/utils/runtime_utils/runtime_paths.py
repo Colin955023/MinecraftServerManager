@@ -23,17 +23,9 @@ class RuntimePaths:
         )
 
     @staticmethod
-    def is_portable_mode() -> bool:
-        """檢測是否為便攜模式（可執行檔旁有 .portable 標記檔或 .config 資料夾）"""
-        exe_dir = RuntimePaths.get_exe_dir()
-        portable_marker = exe_dir / ".portable"
-        config_dir = exe_dir / ".config"
-        return portable_marker.exists() or config_dir.exists()
-
-    @staticmethod
     def is_development_environment() -> bool:
-        """回傳目前是否為非打包且非便攜的開發環境。"""
-        return not RuntimePaths.is_packaged() and not RuntimePaths.is_portable_mode()
+        """回傳目前是否為非打包的開發環境。"""
+        return not RuntimePaths.is_packaged()
 
     @staticmethod
     def _get_localappdata() -> Path:
@@ -42,11 +34,6 @@ class RuntimePaths:
         if not base:
             base = str(Path.home() / "AppData" / "Local")
         return Path(base)
-
-    @staticmethod
-    def get_portable_base_dir() -> Path:
-        """取得便攜模式的基礎目錄（可執行檔所在目錄）"""
-        return RuntimePaths.get_exe_dir()
 
     @staticmethod
     def get_exe_dir() -> Path:
@@ -80,8 +67,6 @@ class RuntimePaths:
         override = os.environ.get("MSM_USER_DATA_DIR")
         if override:
             return Path(override)
-        if RuntimePaths.is_portable_mode():
-            return RuntimePaths.get_portable_base_dir() / ".config"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager"
 
     @staticmethod
@@ -92,16 +77,12 @@ class RuntimePaths:
     @staticmethod
     def get_log_dir() -> Path:
         """取得應用程式的日誌存放目錄"""
-        override = os.environ.get("MSM_LOG_DIR")
-        if override:
-            return Path(override)
-        if RuntimePaths.is_portable_mode():
-            return RuntimePaths.get_portable_base_dir() / ".log"
-        return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager" / "log"
+        return RuntimePaths.get_user_data_dir() / "Logs"
 
     @staticmethod
     def ensure_dir(p: Path) -> Path:
-        """確保指定路徑的目錄存在，如果不存在則建立。
+        """
+        確保指定路徑的目錄存在，如果不存在則建立。
 
         Args:
             p: 要建立的目錄路徑。

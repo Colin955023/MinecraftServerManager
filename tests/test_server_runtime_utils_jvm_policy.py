@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import src.utils.server_utils.server_detection_utils as detection_utils_module
 import src.utils.server_utils.server_runtime_utils as runtime_utils_module
-from src.core import ServerManager
+from src.core import ServerCRUD, ServerStartup
 from src.models import ServerConfig
 from src.utils import JvmOptionPolicy, ServerCommands
 
@@ -245,7 +245,7 @@ def test_add_server_imports_startup_script_settings_and_removes_original(
         staticmethod(lambda *_args, **_kwargs: str(javaw)),
     )
 
-    manager = ServerManager(str(servers_root))
+    manager = ServerCRUD(str(servers_root))
 
     assert manager.add_server(config) is True
     assert not script_path.exists()
@@ -314,9 +314,9 @@ def test_resolve_startup_script_for_run_repairs_existing_script_without_creating
         "get_best_java_path",
         staticmethod(lambda *_args, **_kwargs: str(javaw)),
     )
-    manager = ServerManager(str(servers_root))
+    startup = ServerStartup(str(servers_root))
 
-    selected_script = manager._resolve_startup_script_for_run(config, server_path)
+    selected_script = startup._resolve_startup_script_for_run(config, server_path)
 
     assert selected_script == script_path
     assert not (server_path / "start_server.bat").exists()
@@ -351,9 +351,9 @@ def test_resolve_startup_script_for_run_prefers_generated_script_over_imported_l
         "get_best_java_path",
         staticmethod(lambda *_args, **_kwargs: str(javaw)),
     )
-    manager = ServerManager(str(servers_root))
+    startup = ServerStartup(str(servers_root))
 
-    selected_script = manager._resolve_startup_script_for_run(config, server_path)
+    selected_script = startup._resolve_startup_script_for_run(config, server_path)
 
     assert selected_script == generated_script
     assert f'"{javaw.with_name("java.exe")}" -Xmx2G -jar server.jar' in generated_script.read_text(encoding="utf-8-sig")
@@ -379,7 +379,7 @@ def test_create_launch_script_rewrites_existing_bom_script_without_bom(
         "get_best_java_path",
         staticmethod(lambda *_args, **_kwargs: None),
     )
-    manager = ServerManager(str(tmp_path))
+    manager = ServerCRUD(str(tmp_path))
     script_path = server_path / "start_server.bat"
 
     manager.create_launch_script(config)
