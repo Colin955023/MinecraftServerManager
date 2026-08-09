@@ -1,4 +1,4 @@
-"""本地模組中繼資料工具。"""
+"""本地模組中繼資料工具"""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ from .. import normalize_identifier
 
 def normalize_filename_stem(value: str | None) -> str:
     """
-    將檔名正規化為可比對的 stem。
+    將檔名正規化為可比對的 stem
 
     Args:
-        value: 原始檔名或空值。
+        value: 原始檔名或空值
 
     Returns:
-        去除常見 jar 副檔名後的小寫字串。
+        去除常見 jar 副檔名後的小寫字串
     """
 
     filename = str(value or "").strip().lower()
@@ -29,14 +29,14 @@ def normalize_filename_stem(value: str | None) -> str:
 
 def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -> str:
     """
-    將檔名正規化為較寬鬆的比對格式。
+    將檔名正規化為較寬鬆的比對格式
 
     Args:
-        value: 原始檔名或空值。
-        exclude_digits: 是否保留數字字元。
+        value: 原始檔名或空值
+        exclude_digits: 是否保留數字字元
 
     Returns:
-        已簡化並壓縮空白的字串。
+        已簡化並壓縮空白的字串
     """
 
     normalized = normalize_filename_stem(value)
@@ -49,13 +49,13 @@ def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -
 
 def dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
     """
-    從依賴資訊組出可能的檔名候選。
+    從依賴資訊組出可能的檔名候選
 
     Args:
-        resolved_dependency: 已解析的依賴資訊。
+        resolved_dependency: 已解析的依賴資訊
 
     Returns:
-        候選檔名清單。
+        候選檔名清單
     """
 
     candidates = [str(getattr(resolved_dependency, "file_name", "") or "").strip()]
@@ -68,14 +68,14 @@ def dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
 
 def dependency_maybe_installed_by_filename(resolved_dependency: Any, installed_mods: list[Any] | None) -> bool:
     """
-    以寬鬆檔名規則判斷依賴是否可能已安裝。
+    以寬鬆檔名規則判斷依賴是否可能已安裝
 
     Args:
-        resolved_dependency: 已解析的依賴資訊。
-        installed_mods: 已安裝模組清單。
+        resolved_dependency: 已解析的依賴資訊
+        installed_mods: 已安裝模組清單
 
     Returns:
-        若找到可能相符的檔名則回傳 True。
+        若找到可能相符的檔名則回傳 True
     """
 
     dependency_names = {
@@ -94,13 +94,13 @@ def dependency_maybe_installed_by_filename(resolved_dependency: Any, installed_m
 
 def collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tuple[set[str], set[str]]:
     """
-    蒐集已安裝模組的識別字與候選字串。
+    蒐集已安裝模組的識別字與候選字串
 
     Args:
-        installed_mods: 已安裝模組清單。
+        installed_mods: 已安裝模組清單
 
     Returns:
-        (project ids, identifiers) 的二元組。
+        (project ids, identifiers) 的二元組
     """
 
     installed_project_ids: set[str] = set()
@@ -122,13 +122,13 @@ def collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tuple
 
 def collect_installed_mod_versions(installed_mods: list[Any] | None) -> dict[str, set[str]]:
     """
-    依 project id 彙整已安裝版本。
+    依 project id 彙整已安裝版本
 
     Args:
-        installed_mods: 已安裝模組清單。
+        installed_mods: 已安裝模組清單
 
     Returns:
-        以 project id 為 key 的版本集合。
+        以 project id 為 key 的版本集合
     """
 
     versions_by_project: dict[str, set[str]] = {}

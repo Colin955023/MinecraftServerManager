@@ -1,6 +1,6 @@
 """
 伺服器備份功能
-負責管理伺服器的備份與還原。
+負責管理伺服器的備份與還原
 """
 
 from __future__ import annotations
@@ -8,11 +8,13 @@ from __future__ import annotations
 import datetime
 import os
 import zipfile
+from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...models import ServerConfig
-from ...utils import get_logger
+from ...utils import PathUtils, bytes_to_mb, get_logger
 
 logger = get_logger().bind(component="ServerBackup")
 
@@ -23,23 +25,21 @@ class ServerBackupManager:
     def __init__(self, server_crud):
         self.server_crud = server_crud
 
-    def _get_backup_dir(self, config: ServerConfig) -> Path:
-        """取得伺服器的備份存放目錄"""
-        if config.backup_path and config.backup_path.strip():
-            backup_dir = Path(config.backup_path)
-        else:
-            server_path = Path(config.path)
-            # 預設放在伺服器目錄外的備份區，或是伺服器目錄下的 backups 資料夾
-            backup_dir = server_path / "backups"
-
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        return backup_dir
-
-    def backup_server(self, server_name: str, max_backups: int = 10) -> bool:
+    def backup_server(
+        self, server_name: str, max_backups: int = 10, progress_callback: Callable[[float, str], None] | None = None
+    ) -> bool:
         """
-        備份伺服器。
-        使用 YYYYMMDDHHMM 格式。
-        最多保留 max_backups 份。
+        備份伺服器
+        使用 YYYYMMDDHHMM 格式
+        最多保留 max_backups 份
+
+        Args:
+            server_name: 伺服器名稱
+            max_backups: 最多保留的備份份數
+            progress_callback: 進度回呼，接收 (進度百分比 0-100, 狀態文字)
+
+        Returns:
+            備份成功回傳 True，失敗回傳 False
         """
         try:
             config = self.server_crud.servers.get(server_name)
@@ -60,51 +60,64 @@ class ServerBackupManager:
 
             logger.info(f"開始備份伺服器 {server_name} 至 {backup_file}")
 
-            # 排除的目錄
+            if progress_callback:
+                progress_callback(0, "正在掃描檔案...")
+
             excludes = {"logs", "crash-reports", "backups", ".git"}
+            files_to_backup = []
+            total_size = 0
 
+            for root, dirs, files in os.walk(server_path):
+                dirs[:] = [d for d in dirs if d not in excludes]
+                for file in files:
+                    file_path = Path(root) / file
+                    if backup_dir in file_path.parents:
+                        continue
+                    with suppress(Exception):
+                        total_size += file_path.stat().st_size
+                        files_to_backup.append(file_path)
+
+            if progress_callback:
+                progress_callback(5, f"準備備份 {len(files_to_backup)} 個檔案...")
+
+            processed_size = 0
             with zipfile.ZipFile(backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
-                for root, dirs, files in os.walk(server_path):
-                    dirs[:] = [d for d in dirs if d not in excludes]
-                    for file in files:
-                        file_path = Path(root) / file
-                        # 避免備份到備份檔自己（如果 backup_dir 在 server_path 下）
-                        if backup_dir in file_path.parents:
-                            continue
+                for i, file_path in enumerate(files_to_backup):
+                    try:
                         rel_path = file_path.relative_to(server_path)
+                        if progress_callback and i % 10 == 0:  # Update UI periodically to avoid overwhelming
+                            pct = 5 + (processed_size / total_size * 90 if total_size > 0 else 0)
+                            progress_callback(pct, f"正在壓縮: {rel_path.name}")
                         zf.write(file_path, arcname=str(rel_path))
+                        processed_size += file_path.stat().st_size
+                    except Exception as e:
+                        logger.warning(f"備份檔案 {file_path} 失敗: {e}")
 
-            logger.info(f"伺服器 {server_name} 備份成功。")
+            if progress_callback:
+                progress_callback(95, "正在清理舊備份...")
+
+            logger.info(f"伺服器 {server_name} 備份成功")
             self._cleanup_old_backups(backup_dir, server_name, max_backups)
+
+            if progress_callback:
+                progress_callback(100, "備份完成！")
             return True
         except Exception as e:
             logger.exception(f"伺服器 {server_name} 備份時發生錯誤: {e}")
             return False
 
-    def _cleanup_old_backups(self, backup_dir: Path, server_name: str, max_backups: int) -> None:
-        """清理超過保留數量的舊備份。"""
-        try:
-            backups = self.list_backups(server_name, backup_dir_override=backup_dir)
-            if len(backups) <= max_backups:
-                return
-
-            # backups 預設已依時間由新到舊排序
-            to_delete = backups[max_backups:]
-            for b in to_delete:
-                path = Path(b["path"])
-                try:
-                    path.unlink()
-                    logger.info(f"已刪除舊備份: {path.name}")
-                except Exception as e:
-                    logger.warning(f"刪除舊備份失敗 {path.name}: {e}")
-        except Exception as e:
-            logger.exception(f"清理舊備份時發生錯誤: {e}")
-
     def list_backups(self, server_name: str, backup_dir_override: Path | None = None) -> list[dict[str, Any]]:
         """
-        列出所有備份。
-        回傳清單依時間由新到舊排序。
+        列出所有備份
+        回傳清單依時間由新到舊排序
         回傳格式: [{"filename": str, "path": str, "timestamp": str, "readable_time": str, "size_mb": float}]
+
+        Args:
+            server_name: 伺服器名稱
+            backup_dir_override: 指定備份目錄；若為 None 則使用伺服器設定中的目錄
+
+        Returns:
+            備份資訊清單
         """
         if backup_dir_override:
             backup_dir = backup_dir_override
@@ -122,11 +135,11 @@ class ServerBackupManager:
         for file_path in backup_dir.glob(f"{prefix}*.zip"):
             name = file_path.stem
             timestamp_str = name[len(prefix) :]
-            if len(timestamp_str) == 12 and timestamp_str.isdigit():  # YYYYMMDDHHMM
+            if len(timestamp_str) == 12 and timestamp_str.isdigit():
                 try:
                     dt = datetime.datetime.strptime(timestamp_str, "%Y%m%d%H%M")
                     readable_time = dt.strftime("%Y/%m/%d %H:%M")
-                    size_mb = file_path.stat().st_size / (1024 * 1024)
+                    size_mb = bytes_to_mb(file_path.stat().st_size)
                     backups.append(
                         {
                             "filename": file_path.name,
@@ -140,12 +153,22 @@ class ServerBackupManager:
                 except ValueError:
                     continue
 
-        backups.sort(key=lambda x: x["datetime"], reverse=True)  # type: ignore
+        backups.sort(key=lambda x: cast(Any, x["datetime"]), reverse=True)
         return backups
 
-    def restore_backup(self, server_name: str, backup_path_str: str) -> bool:
+    def restore_backup(
+        self, server_name: str, backup_path_str: str, progress_callback: Callable[[float, str], None] | None = None
+    ) -> bool:
         """
-        從備份檔還原伺服器。會覆蓋現有檔案，但保留原本排除的資料夾（如 logs）。
+        從備份檔還原伺服器會覆蓋現有檔案，但保留原本排除的資料夾（如 logs）
+
+        Args:
+            server_name: 伺服器名稱
+            backup_path_str: 備份檔路徑
+            progress_callback: 進度回呼，接收 (進度百分比 0-100, 狀態文字)
+
+        Returns:
+            還原成功回傳 True，失敗回傳 False
         """
         try:
             config = self.server_crud.servers.get(server_name)
@@ -162,12 +185,48 @@ class ServerBackupManager:
 
             logger.info(f"開始從 {backup_file.name} 還原伺服器 {server_name}")
 
-            # 解壓縮覆蓋現有檔案
-            with zipfile.ZipFile(backup_file, "r") as zf:
-                zf.extractall(server_path)
+            if progress_callback:
+                progress_callback(0, f"準備還原 {backup_file.name}...")
 
-            logger.info(f"伺服器 {server_name} 還原成功。")
+            def _on_extract_progress(extracted_bytes: int, total_bytes: int) -> None:
+                if not progress_callback:
+                    return
+                pct = 5 + (extracted_bytes / total_bytes * 90 if total_bytes > 0 else 90)
+                progress_callback(pct, f"解壓縮中... {extracted_bytes}/{total_bytes} bytes")
+
+            PathUtils.safe_extract_zip(backup_file, server_path, progress_callback=_on_extract_progress)
+
+            if progress_callback:
+                progress_callback(100, "還原完成！")
+
+            logger.info(f"伺服器 {server_name} 還原成功")
             return True
-        except Exception as e:
+        except (OSError, ValueError, zipfile.BadZipFile) as e:
             logger.exception(f"還原伺服器時發生錯誤: {e}")
             return False
+
+    def _get_backup_dir(self, config: ServerConfig) -> Path:
+        """取得伺服器的備份存放目錄"""
+        server_path = Path(config.path)
+        backup_dir = server_path / "backups"
+
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return backup_dir
+
+    def _cleanup_old_backups(self, backup_dir: Path, server_name: str, max_backups: int) -> None:
+        """清理超過保留數量的舊備份"""
+        try:
+            backups = self.list_backups(server_name, backup_dir_override=backup_dir)
+            if len(backups) <= max_backups:
+                return
+
+            to_delete = backups[max_backups:]
+            for b in to_delete:
+                path = Path(b["path"])
+                try:
+                    path.unlink()
+                    logger.info(f"已刪除舊備份: {path.name}")
+                except Exception as e:
+                    logger.warning(f"刪除舊備份失敗 {path.name}: {e}")
+        except Exception as e:
+            logger.exception(f"清理舊備份時發生錯誤: {e}")

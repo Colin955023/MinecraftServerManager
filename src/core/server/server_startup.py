@@ -1,12 +1,12 @@
 """
 伺服器管理器
 
-負責建立、管理與配置 Minecraft 伺服器。
+負責建立、管理與配置 Minecraft 伺服器
 """
 
-import contextlib
 import os
 import time
+from contextlib import suppress
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, cast
@@ -15,13 +15,14 @@ from PySide6 import QtCore
 
 from ...models import ServerConfig, ServerOperationResult
 from ...utils import (
+    ExceptionUtils,
     PathUtils,
     ServerCommands,
     ServerDetectionUtils,
     SubprocessUtils,
     SystemUtils,
+    bytes_to_mb,
     get_logger,
-    record_and_mark,
 )
 from .. import ServerCRUD, ServerInstance
 
@@ -31,6 +32,11 @@ logger = get_logger().bind(component="ServerManager")
 class ServerStartup:
     """負責建立、管理和配置 Minecraft 伺服器"""
 
+    STARTUP_CHECK_DELAY = 0.1
+    STOP_CHECK_INTERVAL = 0.1
+    STOP_TIMEOUT_SECONDS = 5
+    OUTPUT_QUEUE_MAX_SIZE = 1000
+
     def __init__(self, server_crud):
         if isinstance(server_crud, (str, Path)):
             self.server_crud = ServerCRUD(str(server_crud))
@@ -38,82 +44,15 @@ class ServerStartup:
             self.server_crud = server_crud
         self.running_servers = {}
 
-    STARTUP_CHECK_DELAY = 0.1
-    STOP_CHECK_INTERVAL = 0.1
-    STOP_TIMEOUT_SECONDS = 5
-    OUTPUT_QUEUE_MAX_SIZE = 1000
+    @staticmethod
+    def _success_result(msg: str = "", *, server_name: str = "") -> ServerOperationResult:
+        """建立成功結果"""
+        return ServerOperationResult(success=True, message=msg, server_name=server_name)
 
     @staticmethod
-    def _success_result(message: str = "", *, server_name: str = "") -> ServerOperationResult:
-        """建立成功結果。"""
-        return ServerOperationResult(success=True, message=message, server_name=server_name)
-
-    @staticmethod
-    def _failure_result(title: str, message: str, *, server_name: str = "") -> ServerOperationResult:
-        """建立失敗結果。"""
-        return ServerOperationResult(success=False, title=title, message=message, server_name=server_name)
-
-    def _cleanup_running_server_state(self, server_name: str) -> None:
-        """清除執行中伺服器的 runtime 狀態。"""
-        instance = self.running_servers.pop(server_name, None)
-        if instance is not None:
-            process = instance.get_process()
-            if process is not None:
-                SystemUtils.unregister_managed_process(instance.path, self._process_pid(process))
-            instance.clear_process()
-            instance.clear_output_buffer()
-
-    def _cleanup_failed_runtime_process(self, server_name: str, server_path: Path | None, process: Any | None) -> bool:
-        """在建立/啟動流程異常時清理殘留進程。"""
-        cleaned = False
-        if process is not None:
-            try:
-                pid = self._process_pid(process)
-                if self._process_is_running(process):
-                    with contextlib.suppress(Exception):
-                        process.kill()
-                    cleaned = bool(SystemUtils.kill_process_tree(pid)) or cleaned
-                if server_path is not None:
-                    SystemUtils.unregister_managed_process(server_path, pid)
-            except Exception as e:
-                logger.warning(f"清理伺服器進程樹失敗: {server_name} | {e}")
-        try:
-            if server_path and server_path.exists():
-                cleaned = bool(SystemUtils.kill_java_processes_in_path(server_path)) or cleaned
-        except Exception as e:
-            logger.warning(f"清理伺服器資料夾下 Java 進程失敗: {server_name} | {e}")
-        if cleaned:
-            logger.warning(f"流程失敗後已清理伺服器殘留進程: {server_name}")
-        return cleaned
-
-    def _get_running_instance(self, server_name: str) -> ServerInstance | None:
-        """取得仍在執行中的 instance；若已過期則自動清理。"""
-        instance = self.running_servers.get(server_name)
-        if instance is None:
-            return None
-        try:
-            if instance.is_running():
-                return instance
-        except Exception as e:
-            logger.error(f"檢查伺服器狀態時發生錯誤: {e}")
-        process = instance.get_process()
-        if process is None:
-            self._cleanup_running_server_state(server_name)
-            return None
-        self._cleanup_running_server_state(server_name)
-        return None
-
-    @staticmethod
-    def _process_pid(process: Any) -> int:
-        return ServerInstance.process_pid(process)
-
-    @staticmethod
-    def _process_is_running(process: Any) -> bool:
-        return ServerInstance.process_is_running(process)
-
-    @staticmethod
-    def _process_returncode(process: Any) -> int | None:
-        return ServerInstance.process_returncode(process)
+    def _failure_result(err_title: str, err_msg: str, *, server_name: str = "") -> ServerOperationResult:
+        """建立失敗結果"""
+        return ServerOperationResult(success=False, title=err_title, message=err_msg, server_name=server_name)
 
     @staticmethod
     def _get_process_metadata(process: Any, key: str, default: Any = None) -> Any:
@@ -126,7 +65,7 @@ class ServerStartup:
     def _set_process_metadata(process: Any, key: str, value: Any) -> None:
         if isinstance(process, QtCore.QObject):
             process.setProperty(key, value)
-        with contextlib.suppress(Exception):
+        with suppress(Exception):
             setattr(process, key.removeprefix("_msm_"), value)
 
     @staticmethod
@@ -156,7 +95,7 @@ class ServerStartup:
 
     @staticmethod
     def _wait_for_process_exit(process: Any, timeout_seconds: float, interval_seconds: float | None = None) -> bool:
-        """在指定期限內等待 process 結束。"""
+        """在指定期限內等待 process 結束"""
         if isinstance(process, QtCore.QProcess):
             if timeout_seconds <= 0:
                 return process.state() == QtCore.QProcess.ProcessState.NotRunning
@@ -173,65 +112,15 @@ class ServerStartup:
                 return process.poll() is not None
             time.sleep(min(wait_interval, remaining))
 
-    def _validate_server_runtime_path(self, config: ServerConfig) -> tuple[Path | None, ServerOperationResult | None]:
-        """在啟動前驗證伺服器路徑是否安全且可用。"""
-        try:
-            server_path = Path(config.path).resolve(strict=False)
-        except Exception as e:
-            return (
-                None,
-                self._failure_result("伺服器路徑無效", f"伺服器路徑無效: {e}", server_name=getattr(config, "name", "")),
-            )
-        if not PathUtils.is_path_within(self.server_crud.servers_root, server_path, strict=False):
-            return (
-                None,
-                self._failure_result(
-                    "伺服器路徑無效",
-                    f"伺服器路徑必須位於伺服器資料夾內: {server_path}",
-                    server_name=getattr(config, "name", ""),
-                ),
-            )
-        if not server_path.exists():
-            return (
-                None,
-                self._failure_result(
-                    "伺服器路徑不存在",
-                    f"伺服器路徑不存在: {server_path}",
-                    server_name=getattr(config, "name", ""),
-                ),
-            )
-        if not server_path.is_dir():
-            return (
-                None,
-                self._failure_result(
-                    "伺服器路徑無效",
-                    f"伺服器路徑不是資料夾: {server_path}",
-                    server_name=getattr(config, "name", ""),
-                ),
-            )
-        return (server_path, None)
-
-    def _resolve_startup_script_for_run(self, config: ServerConfig, server_path: Path) -> Path | None:
-        """啟動前取得實際要執行的啟動腳本。"""
-        script_path = ServerDetectionUtils.find_startup_script(server_path)
-        if script_path is not None:
-            logger.debug(f"使用既有啟動腳本，啟動前確認 Java 路徑: {script_path}")
-            ServerCommands.repair_startup_script_java_command(script_path, config)
-            return script_path
-        if not ServerCRUD.create_launch_script(config):
-            logger.error(f"建立啟動腳本失敗: {server_path}")
-            return None
-        return ServerDetectionUtils.find_startup_script(server_path)
-
     def start_server_result(self, server_name: str) -> ServerOperationResult:
         """
-        啟動伺服器。
+        啟動伺服器
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            啟動流程結果。
+            啟動流程結果
         """
         process = None
         try:
@@ -274,7 +163,7 @@ class ServerStartup:
                 self._set_process_metadata(process, "_msm_create_time", time.time())
                 SystemUtils.register_managed_process(abs_server_path, pid)
                 if self._wait_for_process_exit(process, self.STARTUP_CHECK_DELAY):
-                    poll_result = self._process_returncode(process)
+                    poll_result = ServerInstance.process_returncode(process)
                     logger.error(f"進程立即結束，返回碼: {poll_result}")
                     try:
                         stdout = self._decode_process_output(process)
@@ -306,7 +195,7 @@ class ServerStartup:
                 def _on_finished(exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
                     _drain_output()
                     instance.flush_output_pending()
-                    with contextlib.suppress(Exception):
+                    with suppress(Exception):
                         SystemUtils.unregister_managed_process(abs_server_path, pid)
                     logger.info(f"伺服器 {server_name} 已停止 (Exit code: {exit_code})")
 
@@ -323,35 +212,37 @@ class ServerStartup:
             except Exception:
                 server_path = None
             cleaned = self._cleanup_failed_runtime_process(server_name, server_path, process)
-            record_and_mark(e, marker_path=server_path, reason="啟動伺服器失敗", details={"server": server_name})
-            cleanup_note = "已嘗試清理殘留進程。" if cleaned else "未偵測到可清理的殘留進程。"
+            ExceptionUtils.record_and_mark(
+                e, marker_path=server_path, reason="啟動伺服器失敗", details={"server": server_name}
+            )
+            cleanup_note = "已嘗試清理殘留進程" if cleaned else "未偵測到可清理的殘留進程"
             return self._failure_result(
                 "啟動失敗",
-                f"無法啟動伺服器 {server_name}。{cleanup_note}\n錯誤: {e}",
+                f"無法啟動伺服器 {server_name}{cleanup_note}\n錯誤: {e}",
                 server_name=server_name,
             )
 
     def is_server_running(self, server_name: str) -> bool:
         """
-        檢查伺服器是否正在運行。
+        檢查伺服器是否正在運行
 
         Args:
-            server_name: 伺服器名稱。
+            server_name: 伺服器名稱
 
         Returns:
-            正在運行時回傳 True，否則回傳 False。
+            正在運行時回傳 True，否則回傳 False
         """
         return self._get_running_instance(server_name) is not None
 
     def stop_server(self, server_name: str) -> bool:
         """
-        停止伺服器。
+        停止伺服器
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            成功停止或已處於停止狀態時回傳 True。
+            成功停止或已處於停止狀態時回傳 True
         """
         try:
             instance = self.running_servers.get(server_name)
@@ -363,7 +254,7 @@ class ServerStartup:
                 logger.info(f"伺服器 {server_name} 已停止")
                 return True
             try:
-                is_running = self._process_is_running(process)
+                is_running = ServerInstance.process_is_running(process)
             except Exception:
                 is_running = False
             if not is_running:
@@ -384,8 +275,8 @@ class ServerStartup:
                     else:
                         process.wait(timeout=5)
                 except SubprocessUtils.TimeoutExpired:
-                    SystemUtils.kill_process_tree(self._process_pid(process))
-                    with contextlib.suppress(SubprocessUtils.TimeoutExpired):
+                    SystemUtils.kill_process_tree(ServerInstance.process_pid(process))
+                    with suppress(SubprocessUtils.TimeoutExpired):
                         if isinstance(process, QtCore.QProcess):
                             process.waitForFinished(1000)
                         else:
@@ -396,8 +287,8 @@ class ServerStartup:
             logger.info(f"伺服器 {server_name} 已停止")
             return True
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="stop_server_failed", details={"server": server_name})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(e, reason="stop_server_failed", details={"server": server_name})
             logger.exception(f"停止伺服器失敗: {e}")
             return False
         finally:
@@ -405,13 +296,13 @@ class ServerStartup:
 
     def get_server_info(self, server_name: str) -> dict | None:
         """
-        獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位。
+        獲取伺服器資訊，包括運行狀態和資源使用，補齊 UI 需要的欄位
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            伺服器資訊字典；找不到伺服器時回傳 None。
+            伺服器資訊字典；找不到伺服器時回傳 None
         """
         try:
             if server_name not in self.server_crud.servers:
@@ -431,7 +322,7 @@ class ServerStartup:
                 "version": "N/A",
             }
             try:
-                properties = ServerCRUD.load_server_properties(server_name)
+                properties = self.server_crud.load_server_properties(server_name)
                 if properties:
                     max_players = properties.get("max-players") or properties.get("max_players")
                     if max_players:
@@ -455,7 +346,7 @@ class ServerStartup:
                 process = instance.get_process()
                 if process is None:
                     return info
-                pid = self._process_pid(process)
+                pid = ServerInstance.process_pid(process)
                 info["pid"] = pid
                 if not pid or not SystemUtils.is_process_running(pid):
                     info["is_running"] = False
@@ -471,7 +362,7 @@ class ServerStartup:
                 if java_pid:
                     info["pid"] = java_pid
                 mem_bytes = SystemUtils.get_process_memory_usage(target_pid)
-                info["memory"] = mem_bytes / (1024 * 1024)
+                info["memory"] = bytes_to_mb(mem_bytes)
                 info["memory_mb"] = info["memory"]
                 try:
                     create_time = self._get_process_metadata(process, "_msm_create_time")
@@ -485,21 +376,21 @@ class ServerStartup:
                     logger.exception(f"計算伺服器運行時間失敗: {e}")
             return info
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="get_server_info_failed", details={"server": server_name})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(e, reason="get_server_info_failed", details={"server": server_name})
             logger.exception(f"獲取伺服器資訊失敗: {e}")
             return None
 
     def send_command(self, server_name: str, command: str) -> bool:
         """
-        向運行中的伺服器發送命令。
+        向運行中的伺服器發送命令
 
         Args:
-            server_name: 目標伺服器名稱。
-            command: 要送出的控制台指令。
+            server_name: 目標伺服器名稱
+            command: 要送出的控制台指令
 
         Returns:
-            成功送出時回傳 True，失敗時回傳 False。
+            成功送出時回傳 True，失敗時回傳 False
         """
         try:
             instance = self._get_running_instance(server_name)
@@ -513,23 +404,25 @@ class ServerStartup:
             if self._write_process_command(process, command):
                 logger.debug(f"已向伺服器 {server_name} 發送命令: {command}")
                 return True
-            logger.error(f"無法向伺服器 {server_name} 發送命令：stdin 不可用", "ServerManager")
+            logger.error(f"無法向伺服器 {server_name} 發送命令：stdin 不可用")
             return False
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="send_command_failed", details={"server": server_name, "command": command})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
+                    e, reason="send_command_failed", details={"server": server_name, "command": command}
+                )
             logger.exception(f"發送命令失敗: {e}")
             return False
 
     def read_server_output(self, server_name: str) -> list[str]:
         """
-        讀取伺服器輸出。
+        讀取伺服器輸出
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            目前緩衝中的輸出行清單。
+            目前緩衝中的輸出行清單
         """
         try:
             instance = self.running_servers.get(server_name)
@@ -540,29 +433,29 @@ class ServerStartup:
                 self._cleanup_running_server_state(server_name)
                 return []
             if isinstance(process, QtCore.QProcess):
-                with contextlib.suppress(Exception):
+                with suppress(Exception):
                     instance.append_output_text(self._decode_process_output(process))
-            if not self._process_is_running(process):
+            if not ServerInstance.process_is_running(process):
                 instance.flush_output_pending()
                 lines = instance.consume_output_lines()
                 self._cleanup_running_server_state(server_name)
                 return lines
             return instance.consume_output_lines()
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="read_server_output_failed", details={"server": server_name})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(e, reason="read_server_output_failed", details={"server": server_name})
             logger.exception(f"讀取伺服器輸出失敗: {e}")
             return []
 
     def get_server_log_file(self, server_name: str) -> Path | None:
         """
-        獲取伺服器日誌檔案路徑。
+        獲取伺服器日誌檔案路徑
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            找到的日誌檔案路徑；找不到時回傳 None。
+            找到的日誌檔案路徑；找不到時回傳 None
         """
         try:
             if server_name not in self.server_crud.servers:
@@ -579,7 +472,107 @@ class ServerStartup:
                     return log_file
             return None
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="get_server_log_file_failed", details={"server": server_name})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(e, reason="get_server_log_file_failed", details={"server": server_name})
             logger.exception(f"獲取伺服器日誌檔案失敗: {e}")
             return None
+
+    def _cleanup_running_server_state(self, server_name: str) -> None:
+        """清除執行中伺服器的 runtime 狀態"""
+        instance = self.running_servers.pop(server_name, None)
+        if instance is not None:
+            process = instance.get_process()
+            if process is not None:
+                SystemUtils.unregister_managed_process(instance.path, ServerInstance.process_pid(process))
+            instance.clear_process()
+            instance.clear_output_buffer()
+
+    def _cleanup_failed_runtime_process(self, server_name: str, server_path: Path | None, process: Any | None) -> bool:
+        """在建立/啟動流程異常時清理殘留進程"""
+        cleaned = False
+        if process is not None:
+            try:
+                pid = ServerInstance.process_pid(process)
+                if ServerInstance.process_is_running(process):
+                    with suppress(Exception):
+                        process.kill()
+                    cleaned = bool(SystemUtils.kill_process_tree(pid)) or cleaned
+                if server_path is not None:
+                    SystemUtils.unregister_managed_process(server_path, pid)
+            except Exception as e:
+                logger.warning(f"清理伺服器進程樹失敗: {server_name} | {e}")
+        try:
+            if server_path and server_path.exists():
+                cleaned = bool(SystemUtils.kill_java_processes_in_path(server_path)) or cleaned
+        except Exception as e:
+            logger.warning(f"清理伺服器資料夾下 Java 進程失敗: {server_name} | {e}")
+        if cleaned:
+            logger.warning(f"流程失敗後已清理伺服器殘留進程: {server_name}")
+        return cleaned
+
+    def _get_running_instance(self, server_name: str) -> ServerInstance | None:
+        """取得仍在執行中的 instance；若已過期則自動清理"""
+        instance = self.running_servers.get(server_name)
+        if instance is None:
+            return None
+        try:
+            if instance.is_running():
+                return instance
+        except Exception as e:
+            logger.error(f"檢查伺服器狀態時發生錯誤: {e}")
+        process = instance.get_process()
+        if process is None:
+            self._cleanup_running_server_state(server_name)
+            return None
+        self._cleanup_running_server_state(server_name)
+        return None
+
+    def _validate_server_runtime_path(self, config: ServerConfig) -> tuple[Path | None, ServerOperationResult | None]:
+        """在啟動前驗證伺服器路徑是否安全且可用"""
+        try:
+            server_path = Path(config.path).resolve(strict=False)
+        except Exception as e:
+            return (
+                None,
+                self._failure_result("伺服器路徑無效", f"伺服器路徑無效: {e}", server_name=getattr(config, "name", "")),
+            )
+        if not PathUtils.is_path_within(self.server_crud.servers_root, server_path, strict=False):
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑無效",
+                    f"伺服器路徑必須位於伺服器資料夾內: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
+        if not server_path.exists():
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑不存在",
+                    f"伺服器路徑不存在: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
+        if not server_path.is_dir():
+            return (
+                None,
+                self._failure_result(
+                    "伺服器路徑無效",
+                    f"伺服器路徑不是資料夾: {server_path}",
+                    server_name=getattr(config, "name", ""),
+                ),
+            )
+        return (server_path, None)
+
+    def _resolve_startup_script_for_run(self, config: ServerConfig, server_path: Path) -> Path | None:
+        """啟動前取得實際要執行的啟動腳本"""
+        script_path = ServerDetectionUtils.find_startup_script(server_path)
+        if script_path is not None:
+            logger.debug(f"使用既有啟動腳本，啟動前確認 Java 路徑: {script_path}")
+            ServerCommands.repair_startup_script_java_command(script_path, config)
+            return script_path
+        if not self.server_crud.create_launch_script(config):
+            logger.error(f"建立啟動腳本失敗: {server_path}")
+            return None
+        return ServerDetectionUtils.find_startup_script(server_path)

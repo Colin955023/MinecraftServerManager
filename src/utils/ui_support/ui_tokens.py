@@ -1,7 +1,7 @@
 """
 UI Token 定義
-包含所有的視覺系統常數，包含字型大小、顏色、間距與元件基本尺寸。
-統一集中管理以消除硬編碼 (Hardcoding)。
+包含所有的視覺系統常數，包含字型大小、顏色、間距與元件基本尺寸
+統一集中管理以消除硬編碼 (Hardcoding)
 """
 
 from typing import Final
@@ -28,7 +28,7 @@ class FontSize:
 
 
 class Colors:
-    """顏色定義，包含按鈕、文本、背景與其他 UI 元件的顏色。每個顏色定義為一個二元組，包含 (light_mode_color, dark_mode_color)。"""
+    """顏色定義，包含按鈕、文本、背景與其他 UI 元件的顏色每個顏色定義為一個二元組，包含 (light_mode_color, dark_mode_color)"""
 
     # --- 基礎藍色系 (Primary / Info 共用) ---
     BUTTON_PRIMARY: Final[tuple[str, str]] = ("#2563eb", "#1d4ed8")
@@ -84,7 +84,6 @@ class Colors:
     BG_CONSOLE: Final[str] = "#000000"
     BG_LISTBOX_LIGHT: Final[str] = "#f8fafc"
     BG_LISTBOX_DARK: Final[str] = "#2b2b2b"
-    BG_TOOLTIP: Final[str] = "#2b2b2b"
     BG_ROW_SOFT_LIGHT: Final[str] = "#f1f5f9"
     BG_LISTBOX_ALT_LIGHT: Final[str] = "#e2e8f0"
     BG_LISTBOX_ALT_DARK: Final[str] = "#363636"

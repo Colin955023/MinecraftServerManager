@@ -84,7 +84,14 @@ def main():
 
     logging.info("Step 3: Nuitka 高效編譯...")
     python_exe = venv_path / "Scripts" / "python.exe"
-    num_jobs = max(1, int(os.cpu_count() or 1) - 1)
+    is_ci = os.environ.get("GITHUB_ACTIONS") == "true"
+    cpu_count = os.cpu_count() or 1
+    if is_ci:
+        num_jobs = cpu_count
+        logging.info(f"偵測到 CI 環境，啟用全數 CPU 核心編譯 (jobs={num_jobs})")
+    else:
+        num_jobs = max(1, cpu_count - 1)
+        logging.info(f"偵測到本地環境 (CPU 邏輯核心數: {cpu_count})，分配 jobs={num_jobs}")
 
     nuitka_args = [
         str(python_exe),
@@ -104,7 +111,13 @@ def main():
         "--python-flag=no_docstrings",
         "--python-flag=no_asserts",
         "--windows-console-mode=attach",
-        "--noinclude-qt-translations",
+        "--noinclude-qt-translations=1",
+        "--nofollow-import-to=PySide6.QtWebEngineCore",
+        "--nofollow-import-to=PySide6.QtWebEngineWidgets",
+        "--nofollow-import-to=PySide6.QtMultimedia",
+        "--nofollow-import-to=PySide6.QtSql",
+        "--nofollow-import-to=PySide6.QtNetwork",
+        "--nofollow-import-to=PySide6.QtPdf",
         f"--include-qt-plugins={QT_PLUGIN_INCLUDE_FAMILIES}",
         "--noinclude-setuptools-mode=nofollow",
         "--noinclude-pytest-mode=nofollow",

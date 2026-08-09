@@ -22,6 +22,7 @@ class _Combo:
         self.values: list[str] = []
         self.state = "disabled"
         self.selected = ""
+        self.enabled = True
 
     def configure(self, **kwargs) -> None:
         if "values" in kwargs:
@@ -31,6 +32,19 @@ class _Combo:
 
     def set(self, value: str) -> None:
         self.selected = value
+
+    def clear(self) -> None:
+        self.values.clear()
+
+    def addItem(self, text: str) -> None:
+        self.values.append(text)
+
+    def setEnabled(self, enabled: bool) -> None:
+        self.enabled = enabled
+        self.state = "normal" if enabled else "disabled"
+
+    def setCurrentText(self, text: str) -> None:
+        self.selected = text
 
 
 def _make_frame(

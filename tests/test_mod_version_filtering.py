@@ -8,7 +8,6 @@ from src.utils import (
     is_allowed_version_type,
     normalize_hash_algorithm,
     select_best_mod_version,
-    select_primary_file,
     version_type_priority,
 )
 
@@ -18,16 +17,6 @@ def test_normalize_hash_algorithm_falls_back_to_sha512() -> None:
     assert normalize_hash_algorithm("SHA1") == "sha1"
     assert normalize_hash_algorithm("sha256") == "sha256"
     assert normalize_hash_algorithm("md5") == MODRINTH_PREFERRED_HASH_ALGORITHM
-
-
-def test_select_primary_file_prefers_primary_jar_then_first_dict() -> None:
-    primary = {"filename": "beta.jar", "primary": True}
-    jar = {"filename": "alpha.jar"}
-    fallback = {"filename": "notes.txt"}
-
-    assert select_primary_file([fallback, jar, primary]) == primary
-    assert select_primary_file([fallback, jar]) == jar
-    assert select_primary_file([fallback]) == fallback
 
 
 def test_extract_primary_file_hash_uses_selected_algorithm() -> None:

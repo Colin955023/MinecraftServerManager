@@ -1,20 +1,21 @@
 """
 更新資訊解析工具
-集中處理版本字串、Release 資訊與更新資產選擇邏輯。
+集中處理版本字串、Release 資訊與更新資產選擇邏輯
 """
 
 from functools import lru_cache
 from typing import Any, ClassVar
 
-from packaging.version import InvalidVersion, Version
+from packaging.version import Version
 
 from .. import HTTPUtils, get_logger
+from ..core_utils.version_utils import parse_version_safe
 
 logger = get_logger().bind(component="UpdateParsing")
 
 
 class UpdateParsing:
-    """更新資訊解析與更新資源選擇邏輯。"""
+    """更新資訊解析與更新資源選擇邏輯"""
 
     _GITHUB_API = "https://api.github.com"
     _HEX_CHARS: ClassVar[frozenset[str]] = frozenset("0123456789abcdefABCDEF")
@@ -23,36 +24,34 @@ class UpdateParsing:
     @lru_cache(maxsize=256)
     def parse_version(version_str: str | None) -> Version | None:
         """
-        解析版本字串為 PEP 440 Version 物件。
+        解析版本字串為 PEP 440 Version 物件
 
         Args:
-            version_str: 原始版本字串。
+            version_str: 原始版本字串
 
         Returns:
-            解析後的 `Version`，失敗時回傳 None。
+            解析後的 `Version`，失敗時回傳 None
         """
-        try:
-            if not isinstance(version_str, str) or not version_str.strip():
-                logger.warning(f"無效的版本字串，version_str={version_str!r}")
-                return None
-            clean = version_str.strip().lstrip("vV")
-            return Version(clean)
-        except InvalidVersion:
-            logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
+        if not isinstance(version_str, str) or not version_str.strip():
+            logger.warning(f"無效的版本字串，version_str={version_str!r}")
             return None
+        result = parse_version_safe(version_str)
+        if result is None:
+            logger.warning(f"版本字串解析失敗，version_str={version_str!r}")
+        return result
 
     @staticmethod
     def get_latest_release(owner: str, repo: str, include_prerelease: bool = False) -> dict[str, Any] | None:
         """
-        取得最新 release（預設忽略 prerelease），失敗時回傳 None。
+        取得最新 release（預設忽略 prerelease），失敗時回傳 None
 
         Args:
-            owner: GitHub repository owner。
-            repo: GitHub repository 名稱。
-            include_prerelease: 是否包含 prerelease。
+            owner: GitHub repository owner
+            repo: GitHub repository 名稱
+            include_prerelease: 是否包含 prerelease
 
         Returns:
-            最新 release 資料，找不到時回傳 None。
+            最新 release 資料，找不到時回傳 None
         """
         url = f"{UpdateParsing._GITHUB_API}/repos/{owner}/{repo}/releases"
         data = HTTPUtils.get_json(url, timeout=15)
@@ -70,13 +69,13 @@ class UpdateParsing:
     @staticmethod
     def choose_installer_asset(release: dict[str, Any]) -> dict[str, Any]:
         """
-        挑選 installer.exe 更新檔。
+        挑選 installer.exe 更新檔
 
         Args:
-            release: GitHub release 資料。
+            release: GitHub release 資料
 
         Returns:
-            選中的 installer 資源，找不到時回傳空字典。
+            選中的 installer 資源，找不到時回傳空字典
         """
         assets = release.get("assets") or []
         installer_assets = []
@@ -101,10 +100,10 @@ class UpdateParsing:
     @staticmethod
     def select_update_asset(release: dict[str, Any]) -> tuple[dict[str, Any], str]:
         """
-        挑選更新資產，並回傳選擇策略。
+        挑選更新資產，並回傳選擇策略
 
         Args:
-            release: GitHub release 資料。
+            release: GitHub release 資料
 
         Returns:
             (asset, mode)
@@ -119,7 +118,7 @@ class UpdateParsing:
 
     @staticmethod
     def _is_hex_hash(token: str, expected_length: int) -> bool:
-        """檢查 token 是否為指定長度的十六進位雜湊字串。"""
+        """檢查 token 是否為指定長度的十六進位雜湊字串"""
         if len(token) != expected_length:
             return False
         return all(ch in UpdateParsing._HEX_CHARS for ch in token)
@@ -127,13 +126,13 @@ class UpdateParsing:
     @staticmethod
     def parse_asset_digest(asset: dict[str, Any]) -> tuple[str, str] | None:
         """
-        從 GitHub release asset 的 digest 欄位解析 checksum。
+        從 GitHub release asset 的 digest 欄位解析 checksum
 
         Args:
-            asset: GitHub release asset 資料。
+            asset: GitHub release asset 資料
 
         Returns:
-            `(algorithm, checksum)`，無法解析時回傳 None。
+            `(algorithm, checksum)`，無法解析時回傳 None
         """
         digest = (asset.get("digest") or "").strip()
         if not digest:

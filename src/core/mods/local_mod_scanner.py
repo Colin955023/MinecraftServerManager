@@ -1,24 +1,24 @@
-"""本地模組掃描與 metadata 解析 helper。"""
+"""本地模組掃描與 metadata 解析 helper"""
 
 from __future__ import annotations
 
-import contextlib
 import re
 import tomllib
 import zipfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from ...models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
 from ...utils import (
+    ExceptionUtils,
     ModIndexManager,
     PathUtils,
     ServerDetectionVersionUtils,
     derive_provider_lifecycle_state,
     get_logger,
     get_shared_manager,
-    record_and_mark,
 )
 
 TomlDecodeError = tomllib.TOMLDecodeError
@@ -27,7 +27,7 @@ MAX_JAR_METADATA_BYTES = 2 * 1024 * 1024
 
 
 class LocalModScanner:
-    """掃描 mods 目錄並建立 `LocalModInfo`。"""
+    """掃描 mods 目錄並建立 `LocalModInfo`"""
 
     MAX_METADATA_BYTES = MAX_JAR_METADATA_BYTES
 
@@ -46,14 +46,227 @@ class LocalModScanner:
         self._resolve_platform_info = resolve_platform_info
         self._quarantine_file = quarantine_file
 
-    def scan_mods(self, create_mod_info_from_file: Callable[[Path], LocalModInfo | None]) -> list[LocalModInfo]:
+    @staticmethod
+    def parse_file_info(file_path: Path) -> tuple[str, bool, str]:
         """
-        掃描 mods 目錄，對每個檔案呼叫 `create_mod_info_from_file` 以建立 `LocalModInfo`。
+        從檔案路徑解析出基本的檔案資訊，包括原始檔名、是否啟用（根據副檔名）以及基礎名稱（去除版本和 loader 等資訊）
 
         Args:
-            create_mod_info_from_file: 用於從檔案建立 `LocalModInfo` 的回呼函式。
+            file_path: 要解析的檔案路徑
+
         Returns:
-            LocalModInfo 物件的列表。
+            包含原始檔名、是否啟用以及基礎名稱的元組
+        """
+        filename = file_path.name
+        enabled = not filename.endswith(".jar.disabled")
+        base_name = filename.removesuffix(".jar.disabled").removesuffix(".jar")
+        return (filename, enabled, base_name)
+
+    @staticmethod
+    def read_zip_member_bytes(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> bytes | None:
+        """
+        從 JAR/ZIP 檔案中讀取指定成員檔案的 bytes，並限制最大讀取大小
+
+        Args:
+            jar: 已開啟的 JAR/ZIP 物件
+            file_path: JAR 內部檔案路徑
+            max_bytes: 允許讀取的最大位元組數
+
+        Returns:
+            讀取到的 bytes；找不到檔案、讀取失敗或超過上限時回傳 None
+        """
+
+        try:
+            info = jar.getinfo(file_path)
+            if int(info.file_size) > max_bytes:
+                logger.warning(f"略過過大的 JAR metadata: {file_path} ({info.file_size} bytes)")
+                return None
+            with jar.open(info) as file_obj:
+                payload = file_obj.read(max_bytes + 1)
+            if len(payload) > max_bytes:
+                logger.warning(f"略過超過讀取上限的 JAR metadata: {file_path}")
+                return None
+            return payload
+        except KeyError:
+            return None
+        except (OSError, ValueError) as exc:
+            logger.debug(f"讀取 JAR 內部檔案失敗 {file_path}: {exc}")
+            return None
+
+    @staticmethod
+    def read_json_from_jar(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> dict | list | None:
+        """
+        讀取 JAR 內的 JSON 檔案並解析
+
+        Args:
+            jar: 已開啟的 JAR/ZIP 物件
+            file_path: JAR 內的 JSON 檔案路徑
+            max_bytes: 最大允許讀取的位元組數
+
+        Returns:
+            解析成功時回傳 dict 或 list，失敗時回傳 None
+        """
+
+        try:
+            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            if payload is None:
+                return None
+            return PathUtils.from_json_str(payload.decode("utf-8"))
+        except (KeyError, OSError, ValueError) as exc:
+            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {exc}")
+            return None
+
+    @staticmethod
+    def read_toml_from_jar(
+        jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES
+    ) -> dict[str, Any] | None:
+        """
+        讀取 JAR 內的 TOML 檔案並解析
+
+        Args:
+            jar: 已開啟的 JAR/ZIP 物件
+            file_path: JAR 內的 TOML 檔案路徑
+            max_bytes: 最大允許讀取的位元組數
+
+        Returns:
+            解析成功時回傳 TOML 字典，失敗時回傳 None
+        """
+
+        try:
+            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            if payload is None:
+                return None
+            return tomllib.loads(payload.decode(errors="ignore"))
+        except (KeyError, TomlDecodeError) as exc:
+            logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {exc}")
+            return None
+        except (OSError, UnicodeDecodeError) as exc:
+            logger.debug(f"讀取 JAR 中的 TOML 失敗（IO/編碼）{file_path}: {exc}")
+            return None
+        except Exception as exc:
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
+                    exc,
+                    marker_path=None,
+                    reason="read_toml_from_jar_unexpected",
+                    details={"file": file_path},
+                )
+            logger.exception(f"讀取 JAR 中的 TOML 時發生未預期錯誤 {file_path}: {exc}")
+            return None
+
+    @staticmethod
+    def process_authors(authors: Any) -> str:
+        """
+        將作者欄位整理為單一顯示字串
+
+        Args:
+            authors: 原始作者欄位，可能為字串、列表或其他型別
+
+        Returns:
+            整理後的作者字串；無有效資料時回傳空字串
+        """
+
+        if isinstance(authors, list) and authors:
+            return ", ".join(
+                str(author)
+                for author in authors
+                if author and str(author).strip().lower() not in ["", "unknown", "author", "example author", "example"]
+            )
+        if isinstance(authors, str):
+            return authors
+        return ""
+
+    @staticmethod
+    def extract_name_from_filename(base_name: str) -> str:
+        """
+        從檔名推測模組名稱
+
+        Args:
+            base_name: 檔名去除副檔名後的基底名稱
+
+        Returns:
+            推測出的模組名稱
+        """
+
+        clean_base = re.sub(r"(?i)[-_]?(forge|fabric|litemod|mc\d+\.\d+\.\d+|mc\d+\.\d+)", "", base_name)
+        clean_base = re.sub(
+            r"(?i)[-_]?(api|mod|core|library|lib|addon|additions|compat|integration|essentials|tools|generators|reforged|restored|beta|alpha|snapshot|universal|common|b\d*)$",
+            "",
+            clean_base,
+        )
+        clean_base = clean_base.strip("-_")
+        parts = clean_base.split("-")
+        if len(parts) > 1:
+            for index, part in enumerate(parts):
+                if any(char.isdigit() for char in part):
+                    return "-".join(parts[:index]) if index > 0 else clean_base
+            return clean_base
+        return clean_base
+
+    @staticmethod
+    def extract_version_from_filename(base_name: str) -> str:
+        """
+        從檔名推測模組版本字串
+
+        Args:
+            base_name: 檔名去除副檔名後的基底名稱
+
+        Returns:
+            推測出的版本字串；無法判定時回傳 `未知`
+        """
+
+        parts = base_name.split("-")
+        if len(parts) > 1:
+            for index, part in enumerate(parts):
+                if any(char.isdigit() for char in part):
+                    version = "-".join(parts[index:])
+                    return ServerDetectionVersionUtils.clean_version(version)
+        return "未知"
+
+    @staticmethod
+    def extract_mc_version_from_filename(base_name: str) -> str:
+        """
+        從檔名推測 Minecraft 版本
+
+        Args:
+            base_name: 檔名去除副檔名後的基底名稱
+
+        Returns:
+            推測出的 Minecraft 版本；無法判定時回傳 `未知`
+        """
+
+        patterns = [r"mc(\d+\.\d+\.\d+)", r"(\d+\.\d+\.\d+)", r"mc(\d+\.\d+)", r"(\d+\.\d+)"]
+        for pattern in patterns:
+            match = re.search(pattern, base_name, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return "未知"
+
+    @staticmethod
+    def clean_author(author: str) -> str:
+        """
+        清理作者欄位中的預設值與無效文字
+
+        Args:
+            author: 原始作者字串
+
+        Returns:
+            清理後的作者字串；無有效內容時回傳空字串
+        """
+
+        if not author:
+            return ""
+        author = str(author).strip()
+        if author.lower() in {"", "unknown", "author", "example author", "example"}:
+            return ""
+        return author
+
+    def scan_mods(self) -> list[LocalModInfo]:
+        """
+        掃描 mods 目錄，對每個檔案呼叫 `create_mod_info_from_file` 以建立 `LocalModInfo`
+
+        Returns:
+            LocalModInfo 物件的列表
         """
         self.index_manager.cleanup_stale_entries()
         mods: list[LocalModInfo] = []
@@ -63,7 +276,7 @@ class LocalModScanner:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled")
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        futures = [get_shared_manager().run(create_mod_info_from_file, file_path) for file_path in files_to_scan]
+        futures = [get_shared_manager().run(self.create_mod_info_from_file, file_path) for file_path in files_to_scan]
         results = [future.result() for future in futures]
         for mod_info in results:
             if mod_info:
@@ -73,10 +286,11 @@ class LocalModScanner:
 
     def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
         """
-        從指定的檔案建立 LocalModInfo 物件。
+        從指定的檔案建立 LocalModInfo 物件
 
         Args:
-            file_path: 要處理的模組檔案的路徑。
+            file_path: 要處理的模組檔案的路徑
+
         Returns:
             LocalModInfo 物件，如果檔案無法處理或發生錯
         """
@@ -157,50 +371,36 @@ class LocalModScanner:
                 ).strip(),
             )
         except (OSError, zipfile.BadZipFile) as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="io_or_bad_zip",
                 details={"context": "create_mod_info_from_file"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip")
             return None
         except (TypeError, ValueError, KeyError) as exc:
             logger.debug(f"解析模組檔案時遇到格式/型別問題 {file_path}: {exc}")
             return None
         except Exception as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="unexpected_error",
                 details={"context": "create_mod_info_from_file"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_error")
             return None
 
-    @staticmethod
-    def parse_file_info(file_path: Path) -> tuple[str, bool, str]:
-        """
-        從檔案路徑解析出基本的檔案資訊，包括原始檔名、是否啟用（根據副檔名）以及基礎名稱（去除版本和 loader 等資訊）。
-        Args:
-            file_path: 要解析的檔案路徑。
-        Returns:
-            包含原始檔名、是否啟用以及基礎名稱的元組。
-        """
-        filename = file_path.name
-        enabled = not filename.endswith(".jar.disabled")
-        base_name = filename.removesuffix(".jar.disabled").removesuffix(".jar")
-        return (filename, enabled, base_name)
-
     def get_manifest_version(self, jar: Any) -> str | None:
         """
-        嘗試從 JAR 檔案的 MANIFEST.MF 中提取版本資訊，特別是當版本被指定為 ${file.jarVersion} 時。
+        嘗試從 JAR 檔案的 MANIFEST.MF 中提取版本資訊，特別是當版本被指定為 ${file.jarVersion} 時
         Args:
-            jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案。
+            jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案
         Returns:
-            從 MANIFEST.MF 中提取的版本字串，如果無法提取或發生錯誤則返回 None。
+            從 MANIFEST.MF 中提取的版本字串，如果無法提取或發生錯誤則返回 None
         """
         try:
             if "META-INF/MANIFEST.MF" in jar.namelist():
@@ -216,11 +416,11 @@ class LocalModScanner:
 
     def extract_metadata_from_jar(self, file_path: Path, mod_data: dict[str, str]) -> None:
         """
-        嘗試從 JAR 檔案中提取模組元資料，優先考慮 fabric.mod.json、META-INF/mods.toml 和 mcmod.info。
+        嘗試從 JAR 檔案中提取模組元資料，優先考慮 fabric.mod.json、META-INF/mods.toml 和 mcmod.info
 
         Args:
-            file_path: JAR 檔案的路徑。
-            mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊。
+            file_path: JAR 檔案的路徑
+            mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊
         """
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
@@ -241,8 +441,8 @@ class LocalModScanner:
                     except TypeError as exc:
                         logger.debug(f"讀取 {metadata_file} 時發生型別/編碼錯誤: {exc}")
                     except Exception as exc:
-                        with contextlib.suppress(Exception):
-                            record_and_mark(
+                        with suppress(Exception):
+                            ExceptionUtils.record_and_mark(
                                 exc,
                                 marker_path=file_path,
                                 reason="extract_metadata_unexpected",
@@ -250,30 +450,30 @@ class LocalModScanner:
                             )
                         logger.exception(f"讀取 {metadata_file} 時發生未預期錯誤: {exc}")
         except (zipfile.BadZipFile, OSError) as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="io_or_bad_zip_extract",
                 details={"context": "extract_metadata_from_jar"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip_extract")
         except Exception as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="unexpected_extract_error",
                 details={"context": "extract_metadata_from_jar"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_extract_error")
 
     def extract_fabric_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
-        從 fabric.mod.json 中提取模組元資料，並更新 mod_data 字典。
+        從 fabric.mod.json 中提取模組元資料，並更新 mod_data 字典
         Args:
-            jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案。
-            mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊。
+            jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案
+            mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊
         """
         try:
             meta = self.read_json_from_jar(jar, "fabric.mod.json")
@@ -291,15 +491,15 @@ class LocalModScanner:
                 mc_version = depends.get("minecraft", mod_data["mc_version"])
                 mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
         except (TypeError, ValueError) as exc:
-            logger.error(f"無法從 JAR 檔案提取 Fabric 元資料: {exc}", "LocalModScanner")
+            logger.exception(f"無法從 JAR 檔案提取 Fabric 元資料: {exc}")
 
     def extract_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
-        從 `mods.toml` 提取 Forge 模組元資料。
+        從 `mods.toml` 提取 Forge 模組元資料
 
         Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            mod_data: 會被直接更新的模組元資料字典。
+            jar: 已開啟的 JAR/ZIP 物件
+            mod_data: 會被直接更新的模組元資料字典
         """
 
         try:
@@ -333,8 +533,8 @@ class LocalModScanner:
         except TypeError as exc:
             logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {exc}")
         except Exception as exc:
-            with contextlib.suppress(Exception):
-                record_and_mark(
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
                     exc,
                     marker_path=None,
                     reason="extract_forge_metadata_unexpected",
@@ -344,11 +544,11 @@ class LocalModScanner:
 
     def extract_legacy_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
-        從 `mcmod.info` 提取舊版 Forge 模組元資料。
+        從 `mcmod.info` 提取舊版 Forge 模組元資料
 
         Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            mod_data: 會被直接更新的模組元資料字典。
+            jar: 已開啟的 JAR/ZIP 物件
+            mod_data: 會被直接更新的模組元資料字典
         """
 
         try:
@@ -371,8 +571,8 @@ class LocalModScanner:
         except (ValueError, TypeError) as exc:
             logger.debug(f"解析 legacy Forge mcmod.info 失敗（格式/型別）: {exc}")
         except Exception as exc:
-            with contextlib.suppress(Exception):
-                record_and_mark(
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
                     exc,
                     marker_path=None,
                     reason="extract_legacy_forge_metadata_unexpected",
@@ -380,106 +580,16 @@ class LocalModScanner:
                 )
             logger.exception(f"解析 legacy Forge mcmod.info 時發生未預期錯誤: {exc}")
 
-    @staticmethod
-    def read_zip_member_bytes(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> bytes | None:
-        """
-        從 JAR/ZIP 檔案中讀取指定成員檔案的 bytes，並限制最大讀取大小。
-
-        Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            file_path: JAR 內部檔案路徑。
-            max_bytes: 允許讀取的最大位元組數。
-
-        Returns:
-            讀取到的 bytes；找不到檔案、讀取失敗或超過上限時回傳 None。
-        """
-
-        try:
-            info = jar.getinfo(file_path)
-            if int(info.file_size) > max_bytes:
-                logger.warning(f"略過過大的 JAR metadata: {file_path} ({info.file_size} bytes)")
-                return None
-            with jar.open(info) as file_obj:
-                payload = file_obj.read(max_bytes + 1)
-            if len(payload) > max_bytes:
-                logger.warning(f"略過超過讀取上限的 JAR metadata: {file_path}")
-                return None
-            return payload
-        except KeyError:
-            return None
-        except (OSError, ValueError) as exc:
-            logger.debug(f"讀取 JAR 內部檔案失敗 {file_path}: {exc}")
-            return None
-
-    @staticmethod
-    def read_json_from_jar(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> dict | list | None:
-        """
-        讀取 JAR 內的 JSON 檔案並解析。
-
-        Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            file_path: JAR 內的 JSON 檔案路徑。
-
-        Returns:
-            解析成功時回傳 dict 或 list，失敗時回傳 None。
-        """
-
-        try:
-            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
-            if payload is None:
-                return None
-            return PathUtils.from_json_str(payload.decode("utf-8"))
-        except (KeyError, OSError, ValueError) as exc:
-            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {exc}")
-            return None
-
-    @staticmethod
-    def read_toml_from_jar(
-        jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES
-    ) -> dict[str, Any] | None:
-        """
-        讀取 JAR 內的 TOML 檔案並解析。
-
-        Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            file_path: JAR 內的 TOML 檔案路徑。
-
-        Returns:
-            解析成功時回傳 TOML 字典，失敗時回傳 None。
-        """
-
-        try:
-            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
-            if payload is None:
-                return None
-            return tomllib.loads(payload.decode(errors="ignore"))
-        except (KeyError, TomlDecodeError) as exc:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {exc}")
-            return None
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗（IO/編碼）{file_path}: {exc}")
-            return None
-        except Exception as exc:
-            with contextlib.suppress(Exception):
-                record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="read_toml_from_jar_unexpected",
-                    details={"file": file_path},
-                )
-            logger.exception(f"讀取 JAR 中的 TOML 時發生未預期錯誤 {file_path}: {exc}")
-            return None
-
     def resolve_version(self, jar: Any, version: str) -> str:
         """
-        處理需要從 MANIFEST 補齊的版本字串。
+        處理需要從 MANIFEST 補齊的版本字串
 
         Args:
-            jar: 已開啟的 JAR/ZIP 物件。
-            version: 原始版本字串。
+            jar: 已開啟的 JAR/ZIP 物件
+            version: 原始版本字串
 
         Returns:
-            已解析的版本字串。
+            已解析的版本字串
         """
 
         if version == "${file.jarVersion}":
@@ -487,35 +597,13 @@ class LocalModScanner:
             return manifest_version if manifest_version else version
         return version
 
-    @staticmethod
-    def process_authors(authors: Any) -> str:
-        """
-        將作者欄位整理為單一顯示字串。
-
-        Args:
-            authors: 原始作者欄位，可能為字串、列表或其他型別。
-
-        Returns:
-            整理後的作者字串；無有效資料時回傳空字串。
-        """
-
-        if isinstance(authors, list) and authors:
-            return ", ".join(
-                str(author)
-                for author in authors
-                if author and str(author).strip().lower() not in ["", "unknown", "author", "example author", "example"]
-            )
-        if isinstance(authors, str):
-            return authors
-        return ""
-
     def apply_fallback_logic(self, base_name: str, mod_data: dict[str, str]) -> None:
         """
-        在 metadata 不完整時以檔名與預設規則補齊欄位。
+        在 metadata 不完整時以檔名與預設規則補齊欄位
 
         Args:
-            base_name: 檔名去除副檔名後的基底名稱。
-            mod_data: 會被直接更新的模組元資料字典。
+            base_name: 檔名去除副檔名後的基底名稱
+            mod_data: 會被直接更新的模組元資料字典
         """
 
         mod_data["author"] = self.clean_author(mod_data["author"])
@@ -528,78 +616,12 @@ class LocalModScanner:
         if mod_data["loader_type"] == "未知":
             mod_data["loader_type"] = ServerDetectionVersionUtils.detect_loader_from_text(base_name)
 
-    @staticmethod
-    def extract_name_from_filename(base_name: str) -> str:
-        """
-        從檔名推測模組名稱。
-
-        Args:
-            base_name: 檔名去除副檔名後的基底名稱。
-
-        Returns:
-            推測出的模組名稱。
-        """
-
-        clean_base = re.sub(r"(?i)[-_]?(forge|fabric|litemod|mc\d+\.\d+\.\d+|mc\d+\.\d+)", "", base_name)
-        clean_base = re.sub(
-            r"(?i)[-_]?(api|mod|core|library|lib|addon|additions|compat|integration|essentials|tools|generators|reforged|restored|beta|alpha|snapshot|universal|common|b\d*)$",
-            "",
-            clean_base,
-        )
-        clean_base = clean_base.strip("-_")
-        parts = clean_base.split("-")
-        if len(parts) > 1:
-            for index, part in enumerate(parts):
-                if any(char.isdigit() for char in part):
-                    return "-".join(parts[:index]) if index > 0 else clean_base
-            return clean_base
-        return clean_base
-
-    @staticmethod
-    def extract_version_from_filename(base_name: str) -> str:
-        """
-        從檔名推測模組版本字串。
-
-        Args:
-            base_name: 檔名去除副檔名後的基底名稱。
-
-        Returns:
-            推測出的版本字串；無法判定時回傳 `未知`。
-        """
-
-        parts = base_name.split("-")
-        if len(parts) > 1:
-            for index, part in enumerate(parts):
-                if any(char.isdigit() for char in part):
-                    version = "-".join(parts[index:])
-                    return ServerDetectionVersionUtils.clean_version(version)
-        return "未知"
-
-    @staticmethod
-    def extract_mc_version_from_filename(base_name: str) -> str:
-        """
-        從檔名推測 Minecraft 版本。
-
-        Args:
-            base_name: 檔名去除副檔名後的基底名稱。
-
-        Returns:
-            推測出的 Minecraft 版本；無法判定時回傳 `未知`。
-        """
-
-        patterns = [r"mc(\d+\.\d+\.\d+)", r"(\d+\.\d+\.\d+)", r"mc(\d+\.\d+)", r"(\d+\.\d+)"]
-        for pattern in patterns:
-            match = re.search(pattern, base_name, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return "未知"
-
     def apply_server_config_overrides(self, mod_data: dict[str, str]) -> None:
         """
-        以伺服器設定覆寫缺漏或不可信的模組欄位。
+        以伺服器設定覆寫缺漏或不可信的模組欄位
 
         Args:
-            mod_data: 會被直接更新的模組元資料字典。
+            mod_data: 會被直接更新的模組元資料字典
         """
 
         if not self.server_config:
@@ -614,22 +636,3 @@ class LocalModScanner:
             mod_data["mc_version"] = mc_version_fallback
         loader_mapping = {"unknown": "未知", "fabric": "Fabric", "forge": "Forge", "vanilla": "原版"}
         mod_data["loader_type"] = loader_mapping.get(str(loader_type).lower(), loader_type)
-
-    @staticmethod
-    def clean_author(author: str) -> str:
-        """
-        清理作者欄位中的預設值與無效文字。
-
-        Args:
-            author: 原始作者字串。
-
-        Returns:
-            清理後的作者字串；無有效內容時回傳空字串。
-        """
-
-        if not author:
-            return ""
-        author = str(author).strip()
-        if author.lower() in {"", "unknown", "author", "example author", "example"}:
-            return ""
-        return author

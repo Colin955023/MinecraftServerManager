@@ -5,7 +5,7 @@ from src.utils import UpdateChecker
 
 
 class ImmediateUpdateInteraction:
-    """測試用的同步更新互動介面。"""
+    """測試用的同步更新互動介面"""
 
     def __init__(self, ask_result: bool | None = False) -> None:
         self.ask_result = ask_result
@@ -27,13 +27,12 @@ class ImmediateUpdateInteraction:
         _ = (title, message, kwargs)
         return self.ask_result
 
-    def show_info(self, title: str, message: str, **kwargs: Any) -> None:
+    def show_message(self, title: str, message: str, message_level: str = "info", **kwargs: Any) -> None:
         _ = kwargs
-        self.info_messages.append((title, message))
-
-    def show_error(self, title: str, message: str, **kwargs: Any) -> None:
-        _ = kwargs
-        self.error_messages.append((title, message))
+        if message_level == "error":
+            self.error_messages.append((title, message))
+        else:
+            self.info_messages.append((title, message))
 
     def open_external(self, target: str) -> None:
         self.info_messages.append(("open_external", target))
@@ -42,17 +41,24 @@ class ImmediateUpdateInteraction:
 def test_check_and_prompt_update_uses_injected_interaction(monkeypatch) -> None:
     interaction = ImmediateUpdateInteraction()
     monkeypatch.setattr(
-        UpdateChecker,
-        "_get_latest_release",
+        update_checker_module.UpdateParsing,
+        "get_latest_release",
         staticmethod(lambda *_args, **_kwargs: {"tag_name": "v1.0.0", "name": "v1.0.0", "assets": []}),
     )
+
+    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
+    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
+    monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
+    monkeypatch.setattr(update_checker_module.UIUtils, "schedule_debounce", interaction.schedule_debounce)
+    monkeypatch.setattr(update_checker_module.UIUtils, "open_external", interaction.open_external)
 
     UpdateChecker.check_and_prompt_update(
         "1.0.0",
         "owner",
         "repo",
         show_up_to_date_message=True,
-        interaction=interaction,
+        parent=None,
     )
 
     assert interaction.info_messages
@@ -64,6 +70,10 @@ def test_apply_update_returns_false_when_user_cancels(tmp_path, monkeypatch) -> 
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=False)
+    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
+    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
+    monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
     popen_calls: list[list[str]] = []
 
     monkeypatch.setattr(
@@ -74,7 +84,7 @@ def test_apply_update_returns_false_when_user_cancels(tmp_path, monkeypatch) -> 
 
     monkeypatch.setattr(update_checker_module.sys, "executable", str(tmp_path / "current_app.exe"))
 
-    assert UpdateChecker._apply_update(new_exe_path, interaction=interaction) is False
+    assert UpdateChecker._apply_update(new_exe_path) is False
     assert popen_calls == []
 
 
@@ -82,6 +92,10 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=True)
+    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
+    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
+    monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
     popen_calls: list[list[str]] = []
 
     class StubProcess:
@@ -103,14 +117,12 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     current_app_exe = tmp_path / "current_app.exe"
     monkeypatch.setattr(update_checker_module.sys, "executable", str(current_app_exe))
 
-    assert UpdateChecker._apply_update(new_exe_path, interaction=interaction) is True
+    assert UpdateChecker._apply_update(new_exe_path) is True
 
-    # Assert bat script was created
     bat_script_path = new_exe_path.with_suffix(".update.bat")
     assert bat_script_path.exists()
     bat_content = bat_script_path.read_text(encoding="utf-8")
     assert str(new_exe_path.resolve(strict=True)) in bat_content
     assert str(current_app_exe) in bat_content
 
-    # Assert popen was called with the bat script
     assert popen_calls == [[str(bat_script_path)]]

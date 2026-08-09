@@ -9,10 +9,10 @@ import pytest
 import src.core.mods.mod_manager as mod_manager_module
 import src.models as models_module
 import src.ui as mod_search_service_module
-import src.ui.mod_management.review as mod_management_review_module
-import src.ui.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
-import src.ui.mod_search_service.dependency_planner_facade as mod_search_planner_module
-import src.ui.mod_search_service.modrinth_service as mod_search_provider_module
+import src.ui.mods.mod_management.review as mod_management_review_module
+import src.ui.mods.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
+import src.ui.mods.mod_search_service.dependency_planner_facade as mod_search_planner_module
+import src.ui.mods.mod_search_service.modrinth_service as mod_search_provider_module
 import src.utils as utils_module
 
 
@@ -58,55 +58,6 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
     assert results[0].homepage_url == "https://modrinth.com/mod/sodium"
     assert results[0].server_side == "required"
     assert results[0].client_side == "optional"
-
-
-def test_get_modrinth_download_contract_exposes_download_metadata() -> None:
-    contract = mod_search_provider_module.get_modrinth_download_contract(
-        project_id="proj123",
-        version=models_module.OnlineModVersion(
-            version_id="ver123",
-            version_number="1.0.0",
-            display_name="1.0.0",
-            files=[
-                {
-                    "url": "https://cdn.modrinth.com/data/proj123/ver123/example.jar",
-                    "filename": "example.jar",
-                    "primary": True,
-                    "hashes": {"sha512": "a" * 128},
-                }
-            ],
-        ),
-    )
-
-    assert contract is not None
-    assert contract.provider == "modrinth"
-    assert contract.project_id == "proj123"
-    assert contract.version_id == "ver123"
-    assert contract.download_url.endswith("example.jar")
-    assert contract.filename == "example.jar"
-    assert contract.expected_hash == "a" * 128
-
-
-def test_get_modrinth_download_contract_falls_back_to_sha256_before_sha1() -> None:
-    contract = mod_search_provider_module.get_modrinth_download_contract(
-        project_id="proj123",
-        version=models_module.OnlineModVersion(
-            version_id="ver123",
-            version_number="1.0.0",
-            display_name="1.0.0",
-            files=[
-                {
-                    "url": "https://cdn.modrinth.com/data/proj123/ver123/example.jar",
-                    "filename": "example.jar",
-                    "primary": True,
-                    "hashes": {"sha1": "b" * 40, "sha256": "c" * 64},
-                }
-            ],
-        ),
-    )
-
-    assert contract is not None
-    assert contract.expected_hash == "c" * 64
 
 
 def test_search_mods_online_passes_category_facets(monkeypatch) -> None:
@@ -356,64 +307,6 @@ def test_get_mod_versions_preserves_project_id_case_for_api(monkeypatch) -> None
     assert captured_url["value"].endswith("/project/P7dR8mSH/version")
 
 
-def test_get_mod_versions_retries_single_request_after_transient_failure(monkeypatch) -> None:
-    call_counter = {"count": 0}
-
-    def fake_get_json(**_kwargs):
-        call_counter["count"] += 1
-        if call_counter["count"] == 1:
-            return None
-        return [
-            {
-                "id": "ver1",
-                "version_number": "1.0.0",
-                "game_versions": ["1.21"],
-                "loaders": ["fabric"],
-                "version_type": "release",
-                "files": [{"filename": "example.jar", "url": "https://example.invalid/example.jar", "primary": True}],
-            }
-        ]
-
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
-
-    versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
-
-    assert call_counter["count"] == 2
-    assert [version.version_id for version in versions] == ["ver1"]
-
-
-def test_get_mod_version_details_retries_single_request_after_transient_failure(monkeypatch) -> None:
-    call_counter = {"count": 0}
-
-    def fake_get_json(**_kwargs):
-        call_counter["count"] += 1
-        if call_counter["count"] == 1:
-            return None
-        return {
-            "id": "ver1",
-            "project_id": "P7dR8mSH",
-            "version_number": "1.0.0",
-            "game_versions": ["1.21"],
-            "loaders": ["fabric"],
-            "files": [{"filename": "example.jar", "url": "https://example.invalid/example.jar", "primary": True}],
-        }
-
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_REQUEST_THROTTLE_SECONDS", 0.0)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_BASE_SECONDS", 0.0)
-    _patch_mod_search_attr(monkeypatch, "MODRINTH_RETRY_BACKOFF_MAX_SECONDS", 0.0)
-
-    project_id, version = mod_search_service_module.get_mod_version_details("ver1")
-
-    assert call_counter["count"] == 2
-    assert project_id == "P7dR8mSH"
-    assert version is not None
-    assert version.version_id == "ver1"
-
-
 def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkeypatch) -> None:
     captured_request: dict[str, object] = {}
 
@@ -500,57 +393,6 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_neoforge_loader(monke
         "game_versions": ["1.20.1"],
         "loaders": ["neoforge"],
     }
-
-
-def test_get_modrinth_current_versions_by_hashes_splits_failed_batch_into_single_retries(monkeypatch) -> None:
-    call_chunks: list[list[str]] = []
-
-    def fake_post_json(**kwargs):
-        chunk = list(kwargs.get("json_body", {}).get("hashes", []))
-        call_chunks.append(chunk)
-        if len(chunk) > 1:
-            return None
-        file_hash = chunk[0]
-        return {
-            file_hash: {
-                "project_id": f"proj-{file_hash}",
-                "id": f"ver-{file_hash}",
-                "version_number": "1.0.0",
-                "files": [{"filename": f"{file_hash}.jar", "url": "https://example.invalid/mod.jar", "primary": True}],
-            }
-        }
-
-    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
-
-    results = mod_search_service_module.get_modrinth_current_versions_by_hashes(["hash-a", "hash-b"])
-
-    assert set(results.keys()) == {"hash-a", "hash-b"}
-    assert any(len(chunk) > 1 for chunk in call_chunks)
-    assert any(chunk == ["hash-a"] for chunk in call_chunks)
-    assert any(chunk == ["hash-b"] for chunk in call_chunks)
-
-
-def test_resolve_modrinth_project_names_splits_failed_batch_and_recovers(monkeypatch) -> None:
-    call_ids_payloads: list[str] = []
-
-    def fake_get_json(**kwargs):
-        ids_payload = str(kwargs.get("params", {}).get("ids", ""))
-        call_ids_payloads.append(ids_payload)
-        if "P7dR8mSH" in ids_payload and "AANobbMI" in ids_payload:
-            return None
-        if "P7dR8mSH" in ids_payload:
-            return [{"id": "P7dR8mSH", "title": "Fabric API"}]
-        if "AANobbMI" in ids_payload:
-            return [{"id": "AANobbMI", "title": "Sodium"}]
-        return []
-
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
-
-    names = mod_search_service_module.resolve_modrinth_project_names(["P7dR8mSH", "AANobbMI"])
-
-    assert names["p7dr8msh"] == "Fabric API"
-    assert names["aanobbmi"] == "Sodium"
-    assert any("P7dR8mSH" in payload and "AANobbMI" in payload for payload in call_ids_payloads)
 
 
 def test_search_mods_online_uses_exact_quilt_loader_facet(monkeypatch) -> None:
@@ -741,7 +583,8 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     next_retry_epoch_ms = int(time.time() * 1000) + (10 * 60 * 1000)
 
-    _patch_mod_search_attr(monkeypatch, "compute_file_hash", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(utils_module.HashUtils, "compute_file_hash", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(utils_module.HashUtils, "compute_file_hash_sync", lambda *_args, **_kwargs: "")
     _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
@@ -974,7 +817,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
 
     assert report.missing_required_dependencies == ["Cloth Config（需求版本：2.0.0）"]
     assert "必要依賴可能已存在但尚未能以 metadata 精確識別：Cloth Config（需求版本：2.0.0）" in report.warnings
-    assert "Cloth Config（需求版本：2.0.0） 可能已存在本地相近檔名，系統已先採安全略過策略。" in report.notes
+    assert "Cloth Config（需求版本：2.0.0） 可能已存在本地相近檔名，系統已先採安全略過策略" in report.notes
 
 
 def test_build_required_dependency_install_plan_resolves_version_id_dependency(monkeypatch) -> None:
@@ -1668,7 +1511,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     file_path = tmp_path / "mods" / "example-mod.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"old-mod")
-    current_hash = utils_module.compute_file_hash(str(file_path), "sha512")
+    current_hash = utils_module.HashUtils.compute_file_hash(str(file_path), "sha512")
 
     current_version = models_module.OnlineModVersion(
         version_id="ver-current",
@@ -1804,7 +1647,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
 
     _patch_mod_search_attr(
         monkeypatch,
-        "compute_file_hash",
+        "HashUtils",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached hash first")),
     )
     _patch_mod_search_attr(
@@ -2152,7 +1995,7 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
     assert candidate.recommendation_source == "metadata_unresolved"
     assert candidate.recommendation_confidence == "blocked"
     assert candidate.project_id.startswith("__unresolved__::")
-    assert candidate.hard_errors == ["metadata 未識別，暫時無法自動檢查更新。"]
+    assert candidate.hard_errors == ["metadata 未識別，暫時無法自動檢查更新"]
 
 
 def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryable(monkeypatch) -> None:
@@ -2295,7 +2138,6 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_
     assert any("批次上限（1）" in "\n".join(candidate.notes) for candidate in plan.candidates)
     assert any("批次上限（1）" in note for note in plan.metadata_summary.notes)
 
-    # 還原僅為保守防禦，避免後續測試依賴 module-level 常數。
     _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", original_limit)
 
 
@@ -3096,8 +2938,8 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
 
 
 def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkeypatch) -> None:
-    """混合情境：一個模組 hash 命中（enabled），一個 provider metadata 完全無法解析（unknown）。
-    兩者應在同一 LocalModUpdatePlan 中，且分配到不同 recommendation_confidence。
+    """混合情境：一個模組 hash 命中（enabled），一個 provider metadata 完全無法解析（unknown）
+    兩者應在同一 LocalModUpdatePlan 中，且分配到不同 recommendation_confidence
     """
     resolved_mod = SimpleNamespace(
         filename="sodium-0.6.0.jar",
@@ -3181,8 +3023,8 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
 
 
 def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolved(monkeypatch) -> None:
-    """混合情境：一個模組 metadata 已過期（retryable），一個有 dependency 無法解析的正常模組。
-    確認兩者共存在同一 plan，且 stale 模組被分配 RECOMMENDATION_CONFIDENCE_RETRYABLE。
+    """混合情境：一個模組 metadata 已過期（retryable），一個有 dependency 無法解析的正常模組
+    確認兩者共存在同一 plan，且 stale 模組被分配 RECOMMENDATION_CONFIDENCE_RETRYABLE
     """
     stale_mod = SimpleNamespace(
         filename="fabricapi-0.90.0.jar",

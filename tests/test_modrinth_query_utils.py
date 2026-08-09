@@ -16,7 +16,6 @@ def test_normalize_identifier_and_loader() -> None:
 
 
 def test_get_modrinth_loader_filters() -> None:
-    # 現在每個載入器都是獨立的，不再進行別名擴展
     assert query_utils.get_modrinth_loader_filters("quilt") == ["quilt"]
     assert query_utils.get_modrinth_loader_filters("neoforge") == ["neoforge"]
     assert query_utils.get_modrinth_loader_filters("fabric") == ["fabric"]
@@ -24,7 +23,6 @@ def test_get_modrinth_loader_filters() -> None:
 
 
 def test_loader_specific_dependency_override_no_longer_applied() -> None:
-    # 移除了別名依賴重定向，所有 project id 都直接回傳
     assert query_utils.apply_loader_specific_dependency_override("qvIfYCYJ") == "qvIfYCYJ"
     assert query_utils.apply_loader_specific_dependency_override("other") == "other"
 

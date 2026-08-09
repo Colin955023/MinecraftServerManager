@@ -1,6 +1,6 @@
 """
 運行時路徑管理工具
-提供應用程式運行時所需的路徑配置與管理功能。
+提供應用程式運行時所需的路徑配置與管理功能
 """
 
 import os
@@ -13,7 +13,7 @@ class RuntimePaths:
 
     @staticmethod
     def is_packaged() -> bool:
-        """檢測是否為打包執行環境。"""
+        """檢測是否為打包執行環境"""
         is_compiled_app = "__compiled__" in globals()
         return bool(
             getattr(sys, "frozen", False)
@@ -24,7 +24,7 @@ class RuntimePaths:
 
     @staticmethod
     def is_development_environment() -> bool:
-        """回傳目前是否為非打包的開發環境。"""
+        """回傳目前是否為非打包的開發環境"""
         return not RuntimePaths.is_packaged()
 
     @staticmethod
@@ -38,10 +38,10 @@ class RuntimePaths:
     @staticmethod
     def get_exe_dir() -> Path:
         """
-        取得當前執行檔或專案根目錄的基礎目錄。
+        取得當前執行檔或專案根目錄的基礎目錄
 
         Returns:
-            執行環境對應的基礎目錄 Path。
+            執行環境對應的基礎目錄 Path
         """
         if RuntimePaths.is_packaged():
             executable = getattr(sys, "executable", "")
@@ -82,13 +82,13 @@ class RuntimePaths:
     @staticmethod
     def ensure_dir(p: Path) -> Path:
         """
-        確保指定路徑的目錄存在，如果不存在則建立。
+        確保指定路徑的目錄存在，如果不存在則建立
 
         Args:
-            p: 要建立的目錄路徑。
+            p: 要建立的目錄路徑
 
         Returns:
-            已確認存在的目錄路徑。
+            已確認存在的目錄路徑
         """
         p.mkdir(parents=True, exist_ok=True)
         return p

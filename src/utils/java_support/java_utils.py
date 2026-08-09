@@ -1,66 +1,25 @@
 """
-在 Windows 上偵測與管理 Java 安裝的工具函式。
-本模組提供從 Windows 常見安裝路徑與環境變數中尋找 Java 安裝的功能。
+在 Windows 上偵測與管理 Java 安裝的工具函式
+本模組提供從 Windows 常見安裝路徑與環境變數中尋找 Java 安裝的功能
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 import re
 import threading
+from contextlib import suppress
 from pathlib import Path
-from typing import ClassVar, Protocol
+from typing import ClassVar
 
-from ...core import MinecraftVersionManager
-from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, get_logger, get_shared_manager
+from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, get_shared_manager
 from .java_downloader import JavaDownloader
 
 logger = get_logger().bind(component="JavaUtils")
 
 
-class JavaInstallInteraction(Protocol):
-    """Java 自動安裝流程需要的使用者互動介面。"""
-
-    @staticmethod
-    def ask_yes_no_cancel(title: str, message: str, **kwargs) -> bool | None:
-        """
-        詢問使用者是否同意動作。
-
-        Args:
-            title: 對話框標題。
-            message: 對話框訊息。
-            **kwargs: UI adapter 選項。
-
-        Returns:
-            使用者選擇；取消或無法判斷時回傳 None。
-        """
-
-    @staticmethod
-    def show_info(title: str, message: str, **kwargs) -> None:
-        """
-        顯示資訊訊息。
-
-        Args:
-            title: 訊息標題。
-            message: 訊息內容。
-            **kwargs: UI adapter 選項。
-        """
-
-    @staticmethod
-    def show_error(title: str, message: str, **kwargs) -> None:
-        """
-        顯示錯誤訊息。
-
-        Args:
-            title: 訊息標題。
-            message: 訊息內容。
-            **kwargs: UI adapter 選項。
-        """
-
-
 class JavaUtils:
-    """提供 Java 偵測、快取與安裝流程的工具集合。"""
+    """提供 Java 偵測、快取與安裝流程的工具集合"""
 
     COMMON_JAVA_PATHS: ClassVar[list[str]] = [
         "C:\\\\Program Files\\\\Java",
@@ -75,13 +34,13 @@ class JavaUtils:
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
         """
-        取得指定 `javaw.exe` 的主要版本號。
+        取得指定 `javaw.exe` 的主要版本號
 
         Args:
-            java_path: `javaw.exe` 的完整路徑。
+            java_path: `javaw.exe` 的完整路徑
 
         Returns:
-            Java major 版本，找不到或解析失敗時回傳 None。
+            Java major 版本，找不到或解析失敗時回傳 None
         """
         try:
             res = SubprocessUtils.run_checked(
@@ -208,7 +167,7 @@ class JavaUtils:
                 cached_items.append({"path": java_path_str, "major": major})
             PathUtils.save_json_if_changed(cache_path, {"candidates": cached_items})
         else:
-            with contextlib.suppress(OSError):
+            with suppress(OSError):
                 if cache_path.exists():
                     cache_path.unlink()
         return final_results
@@ -216,10 +175,10 @@ class JavaUtils:
     @staticmethod
     def refresh_java_candidates_cache() -> list[tuple[str, int]]:
         """
-        重新掃描本機 Java 並更新 JSON 快取。
+        重新掃描本機 Java 並更新 JSON 快取
 
         Returns:
-            最新掃描到的 Java 候選清單。
+            最新掃描到的 Java 候選清單
         """
         final_results = JavaUtils._scan_and_cache_local_java_candidates()
         with JavaUtils._java_cache_lock:
@@ -231,7 +190,9 @@ class JavaUtils:
         """確保快取檔案存在且非空"""
         if not cache_path.exists() or cache_path.stat().st_size == 0:
             try:
-                vm = MinecraftVersionManager()
+                from ...core import LoaderManager
+
+                vm = LoaderManager()
                 vm.fetch_versions()
             except Exception as e:
                 raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}") from e
@@ -241,13 +202,13 @@ class JavaUtils:
     @staticmethod
     def get_required_java_major(mc_version: str) -> int:
         """
-        根據 Minecraft 版本決定所需 Java major 版本。
+        根據 Minecraft 版本決定所需 Java major 版本
 
         Args:
-            mc_version: Minecraft 版本字串。
+            mc_version: Minecraft 版本字串
 
         Returns:
-            對應的 Java major 版本。
+            對應的 Java major 版本
         """
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
@@ -279,10 +240,10 @@ class JavaUtils:
     @staticmethod
     def get_all_local_java_candidates() -> list:
         """
-        取得所有可用的 `javaw.exe` 路徑及其主要版本號列表。
+        取得所有可用的 `javaw.exe` 路徑及其主要版本號列表
 
         Returns:
-            `javaw.exe` 路徑與 major 版本的配對清單。
+            `javaw.exe` 路徑與 major 版本的配對清單
         """
         with JavaUtils._java_cache_lock:
             if JavaUtils._cached_java_candidates:
@@ -309,39 +270,33 @@ class JavaUtils:
         mc_version: str,
         required_major: int | None = None,
         ask_download: bool = True,
-        interaction: JavaInstallInteraction | None = None,
     ) -> str | None:
         """
-        為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑。
+        為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑
 
         Args:
-            mc_version: Minecraft 版本字串。
-            required_major: 指定的 Java major 版本；未提供時會自動推導。
-            ask_download: 找不到符合版本時是否詢問自動安裝。
-            interaction: UI 層注入的互動介面；未提供時不會在工具層直接顯示對話框。
+            mc_version: Minecraft 版本字串
+            required_major: 指定的 Java major 版本；未提供時會自動推導
+            ask_download: 找不到符合版本時是否詢問自動安裝
 
         Returns:
-            找到時回傳 `javaw.exe` 路徑，否則回傳 None。
+            找到時回傳 `javaw.exe` 路徑，否則回傳 None
         """
         required_major = required_major if required_major else JavaUtils.get_required_java_major(mc_version)
         candidates = JavaUtils.get_all_local_java_candidates()
         for path, major in candidates:
             if major == required_major:
                 return path
-        if ask_download and interaction is None:
-            logger.info(f"找不到 Java {required_major}，但工具層未提供互動介面，因此不執行自動安裝提示。")
-            return None
-        if ask_download and interaction is not None:
+        if ask_download:
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
-            res = interaction.ask_yes_no_cancel(
+            res = UIUtils.ask_yes_no_cancel(
                 "Java 未找到",
                 (
-                    f"未找到合適的 Java {required_major}。是否由程式自動安裝 {vendor}？\n\n"
+                    f"未找到合適的 Java {required_major}是否由程式自動安裝 {vendor}？\n\n"
                     "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑。"
+                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
                 ),
                 show_cancel=False,
-                topmost=True,
             )
             if res:
                 try:
@@ -350,23 +305,23 @@ class JavaUtils:
                     candidates = JavaUtils.get_all_local_java_candidates()
                     for path, major in candidates:
                         if major == required_major:
-                            interaction.show_info(
+                            UIUtils.show_message(
                                 title=f"Java {required_major} 安裝成功",
-                                message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe。",
-                                topmost=True,
+                                message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe",
+                                message_level="info",
                             )
                             return path
                 except Exception as e:
                     logger.exception(f"自動下載 Microsoft JDK {required_major} 失敗：{e}")
-                    interaction.show_error(
+                    UIUtils.show_message(
                         "Java 下載失敗",
-                        f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑。",
-                        topmost=True,
+                        f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
+                        message_level="error",
                     )
             else:
-                interaction.show_info(
+                UIUtils.show_message(
                     "請手動下載 Java",
-                    f"請手動安裝或指定 Java 路徑。\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等。",
-                    topmost=True,
+                    f"請手動安裝或指定 Java 路徑\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等",
+                    message_level="info",
                 )
         return None

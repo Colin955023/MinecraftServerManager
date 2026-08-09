@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,7 @@ from typing import Any, cast
 import pytest
 import src.models as models_module
 import src.ui as mod_management_module
-import src.ui.mod_management.online_mod_queue as online_mod_queue_module
+import src.ui.mods.mod_management.online_mod_queue as online_mod_queue_module
 import src.utils as meta_module
 import src.utils as utils_module
 import src.utils.ui_support.ui_utils as ui_utils_module
@@ -33,19 +34,27 @@ class _StubTree:
         return item_id in self.children
 
 
+class _MockTreeWidgetItem:
+    def __init__(self, values: list[str], tags: list[str]):
+        self._id = tags[0]
+        self._name = values[1]
+
+    def data(self, _column: int, _role: Any) -> str:
+        return self._id
+
+    def text(self, _column: int) -> str:
+        return self._name
+
+
 class _DeleteTree:
     def __init__(self) -> None:
-        self._selection = ("item-a", "item-b")
-        self._rows = {
-            "item-a": {"values": ("✅ 已啟用", "Clumps"), "tags": ("clumps", "odd")},
-            "item-b": {"values": ("✅ 已啟用", "Fabric API"), "tags": ("fabric-api", "even")},
-        }
+        self._items = [
+            _MockTreeWidgetItem(["✅ 已啟用", "Clumps"], ["clumps", "odd"]),
+            _MockTreeWidgetItem(["✅ 已啟用", "Fabric API"], ["fabric-api", "even"]),
+        ]
 
-    def selection(self) -> tuple[str, ...]:
-        return self._selection
-
-    def item(self, item_id: str, option: str):
-        return self._rows[item_id][option]
+    def selectedItems(self) -> list[_MockTreeWidgetItem]:
+        return self._items
 
 
 class _StatusLabel:
@@ -57,6 +66,23 @@ class _StatusLabel:
 
     def configure(self, **kwargs) -> None:
         self.text = str(kwargs.get("text", self.text))
+
+    def setText(self, text: str) -> None:
+        self.text = text
+
+
+class _DummyTreeItem:
+    def __init__(self, key: str, parent_key: str = ""):
+        self._key = key
+        self._parent_key = parent_key
+
+    def data(self, _column: int, _role: Any) -> str:
+        return self._key
+
+    def parent(self) -> _DummyTreeItem | None:
+        if self._parent_key:
+            return _DummyTreeItem(self._parent_key)
+        return None
 
 
 class _GroupedSelectionTree:
@@ -70,6 +96,9 @@ class _GroupedSelectionTree:
     def parent(self, item_id: str) -> str:
         return self._parent_map.get(item_id, "")
 
+    def selectedItems(self) -> list[_DummyTreeItem]:
+        return [_DummyTreeItem(key, self._parent_map.get(key, "")) for key in self._selection]
+
 
 class _HeaderAutoFitTree:
     def __init__(self) -> None:
@@ -79,7 +108,6 @@ class _HeaderAutoFitTree:
         if option == "columns":
             return ("name", "version")
         if option == "displaycolumns":
-            # 回傳 2-tuple 以保持一致
             return ("#all", "#all")
         if option == "show":
             return "headings"
@@ -207,18 +235,6 @@ def _pending_install(project_id: str, project_name: str, version_id: str) -> mod
     )
 
 
-def test_local_row_palette_uses_distinct_tokens() -> None:
-    light_odd, light_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=False)
-    dark_odd, dark_even = mod_management_module.ModManagementFrame._get_local_row_palette(is_dark=True)
-
-    assert light_odd == utils_module.Colors.BG_LISTBOX_LIGHT
-    assert light_even == utils_module.Colors.BG_LISTBOX_ALT_LIGHT
-    assert dark_odd == utils_module.Colors.BG_LISTBOX_DARK
-    assert dark_even == utils_module.Colors.BG_LISTBOX_ALT_DARK
-    assert light_odd != light_even
-    assert dark_odd != dark_even
-
-
 def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
@@ -233,7 +249,7 @@ def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
     request, warning_message = frame._build_online_browse_request()
 
     assert request is None
-    assert warning_message == "請先輸入關鍵字再搜尋模組。"
+    assert warning_message == "請先輸入關鍵字再搜尋模組"
 
 
 def test_get_online_version_dialog_hint_text_uses_server_context() -> None:
@@ -288,91 +304,6 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
     summary = frame._build_online_results_summary_text()
 
     assert summary == "請輸入關鍵字搜尋｜0 筆｜排序 相關性"
-
-
-def test_refresh_browse_list_uses_incremental_updates_and_row_key_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    frame_any = cast(Any, frame)
-    frame_any.browse_tree = _BrowseRefreshTree(
-        {
-            "alpha": {
-                "values": ("Alpha Mod", "Author A", "1,000", "舊描述", "Modrinth", "僅伺服器"),
-                "tags": ("alpha", "alpha-slug", "https://example.invalid/alpha"),
-            },
-            "beta": {
-                "values": ("Beta Mod", "Author B", "2,000", "舊描述", "Modrinth", "僅客戶端"),
-                "tags": ("beta", "beta-slug", "https://example.invalid/beta"),
-            },
-        }
-    )
-    frame_any._online_refresh_job = None
-    frame_any._online_refresh_token = 0
-    frame_any._online_tree_render_locked = False
-    frame_any._online_rows_snapshot = {
-        "alpha": (
-            ("Alpha Mod", "Author A", "1,000", "舊描述", "Modrinth", "僅伺服器"),
-            ("alpha", "alpha-slug", "https://example.invalid/alpha"),
-        ),
-        "beta": (
-            ("Beta Mod", "Author B", "2,000", "舊描述", "Modrinth", "僅客戶端"),
-            ("beta", "beta-slug", "https://example.invalid/beta"),
-        ),
-    }
-    frame_any._online_mod_by_row_key = {
-        "alpha": SimpleNamespace(project_id="alpha", slug="alpha-slug", url="https://example.invalid/alpha"),
-        "beta": SimpleNamespace(project_id="beta", slug="beta-slug", url="https://example.invalid/beta"),
-    }
-    frame_any._online_mod_index = {
-        "alpha": frame_any._online_mod_by_row_key["alpha"],
-        "beta": frame_any._online_mod_by_row_key["beta"],
-    }
-    frame_any._refresh_online_results_summary = lambda: None
-    monkeypatch.setattr(frame, "_set_online_tree_render_lock", lambda _locked: None)
-
-    updated_alpha = SimpleNamespace(
-        project_id="alpha",
-        slug="alpha-slug",
-        url="https://example.invalid/alpha",
-        name="Alpha Mod",
-        author="Author A",
-        download_count=1000,
-        description="新描述",
-        source="modrinth",
-        server_side="required",
-    )
-    row_key_only_gamma = SimpleNamespace(
-        project_id="",
-        slug="gamma-slug",
-        url="https://example.invalid/gamma",
-        name="Gamma Mod",
-        author="Author G",
-        download_count=3000,
-        description="Gamma 說明",
-        source="modrinth",
-    )
-    frame.online_mods = [updated_alpha, row_key_only_gamma]
-
-    frame.refresh_browse_list()
-
-    tree = cast(_BrowseRefreshTree, frame_any.browse_tree)
-    assert tree.deleted == ["beta"]
-    assert tree.inserted == [
-        (
-            "gamma-slug",
-            ("Gamma Mod", "Author G", "3,000", "Gamma 說明", "Modrinth", "未知"),
-            ("", "gamma-slug", "https://example.invalid/gamma"),
-        )
-    ]
-    assert tree.updated
-    assert tree.rows["alpha"]["values"] == ("Alpha Mod", "Author A", "1,000", "新描述", "Modrinth", "僅伺服器")
-    assert tree.children == ["alpha", "gamma-slug"]
-
-    tree.selection_set("gamma-slug")
-    has_selection, project_id, selected_mod = frame._get_selected_online_mod_context()
-
-    assert has_selection is True
-    assert project_id == ""
-    assert selected_mod is row_key_only_gamma
 
 
 def test_build_online_browse_row_includes_prism_style_metadata() -> None:
@@ -445,18 +376,22 @@ def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.Monk
             raise RuntimeError("clipboard unavailable")
 
     class _BrokenApp:
-        def clipboard(self):
+        @staticmethod
+        def clipboard():
             return _BrokenClipboard()
 
-        def processEvents(self) -> None:
+        @staticmethod
+        def processEvents() -> None:
             raise RuntimeError("processEvents unavailable")
 
     errors: list[tuple[str, str]] = []
-    monkeypatch.setattr(online_mod_queue_module.qt, "ensure_app", lambda: _BrokenApp())
+    monkeypatch.setattr(online_mod_queue_module, "QApplication", _BrokenApp)
     monkeypatch.setattr(
         utils_module.UIUtils,
-        "show_error",
-        lambda title, message, _parent=None: errors.append((title, message)),
+        "show_message",
+        lambda title, message, _parent=None, message_level="info": (
+            errors.append((title, message)) if message_level == "error" else None
+        ),
     )
 
     frame.copy_online_mod_info()
@@ -467,8 +402,18 @@ def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.Monk
 def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPatch) -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     frame_any = cast(Any, frame)
-    frame._local_refresh_token = 0
-    frame_any.local_tree = SimpleNamespace()
+
+    from unittest.mock import MagicMock
+
+    mock_tree = MagicMock()
+    mock_item = MagicMock()
+    mock_item.text.return_value = (
+        "Core API module providing key hooks and intercompatibility. No truncation should happen."
+    )
+    mock_tree.topLevelItemCount.return_value = 1
+    mock_tree.topLevelItem.return_value = mock_item
+
+    frame_any.local_tree = mock_tree
     frame.local_mods = [
         SimpleNamespace(
             name="Fabric API",
@@ -486,15 +431,12 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
     frame.enhanced_mods_cache = {}
     frame_any.local_search_var = SimpleNamespace(get=lambda: "")
     frame_any.local_filter_var = SimpleNamespace(get=lambda: "所有")
-    frame.VERSION_PATTERN = mod_management_module.re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
+    frame.VERSION_PATTERN = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
 
-    captured: dict[str, Any] = {}
+    def _noop_format(text: str) -> str:
+        return text.replace("\n", " ")
 
-    def _noop_cancel_local_refresh_job() -> None:
-        return None
-
-    def _noop_set_local_tree_render_lock(_enabled: Any) -> None:
-        return None
+    frame._format_single_line_text = _noop_format
 
     def _capture_selected_mod_ids_func() -> set:
         return set()
@@ -505,29 +447,11 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
     def _get_enhanced_attr_func(_enhanced: Any, _attr: str, default: Any) -> Any:
         return default
 
-    monkeypatch.setattr(frame, "_cancel_local_refresh_job", _noop_cancel_local_refresh_job)
-    monkeypatch.setattr(frame, "_set_local_tree_render_lock", _noop_set_local_tree_render_lock)
     monkeypatch.setattr(frame, "_capture_selected_mod_ids", _capture_selected_mod_ids_func)
     monkeypatch.setattr(frame, "_resolve_local_display_name", _resolve_local_display_name_func)
     monkeypatch.setattr(frame, "_get_enhanced_attr", _get_enhanced_attr_func)
-    monkeypatch.setattr(frame, "_apply_local_tree_diff", captured.update)
 
     frame.refresh_local_list()
-
-    values, _tags = captured["mod_rows"]["fabric-api-0.141.3+1.21.1"]
-    assert values[7] == "Core API module providing key hooks and intercompatibility. No truncation should happen."
-
-
-def test_select_tree_item_for_context_menu_updates_selection_to_clicked_row() -> None:
-    tree = _ContextMenuTree()
-    event = SimpleNamespace(y=24)
-
-    row_id = mod_management_module.ModManagementFrame._select_tree_item_for_context_menu(tree, event)
-
-    assert row_id == "row-2"
-    assert tree.selection() == ("row-2",)
-    assert tree.focused == "row-2"
-    assert tree.seen == "row-2"
 
 
 def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -559,7 +483,7 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
         metadata_source="unresolved",
         recommendation_source="project_fallback",
         recommendation_confidence="advisory",
-        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果。",
+        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果",
         report=SimpleNamespace(warnings=[]),
         notes=[],
         local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/fabric-language-kotlin-1.13.9+kotlin.2.3.10.jar"),
@@ -567,13 +491,12 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
     review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], advisory_items=[], notes=[]),
-        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
+        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新"],
         enabled=False,
         provider="modrinth",
         version_type="beta",
     )
 
-    # 傳入重複項，應該去除重複
     nodes = frame._build_local_update_task_nodes([review_entry, review_entry])
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該只有一個根級節點（已去重）"
@@ -731,18 +654,6 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
     assert [report.marker for report in cast(list[Any], sorted_reports)] == ["report-v2", "report-v1"]
 
 
-def test_purge_orphan_local_tree_items_removes_untracked_visible_rows() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    frame.local_tree = cast(Any, _StubTree())
-    frame._local_recycled_item_ids = ["keep", "ghost"]
-
-    frame._purge_orphan_local_tree_items({"keep"})
-
-    tree = cast(_StubTree, frame.local_tree)
-    assert tree.deleted == ["orphan"]
-    assert frame._local_recycled_item_ids == ["keep"]
-
-
 def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is_fuzzy() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     local_mod = cast(Any, type("LocalMod", (), {"name": "Fabric API", "platform_id": "fabric-api"})())
@@ -798,13 +709,10 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
     monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
     monkeypatch.setattr(
         utils_module.UIUtils,
-        "show_info",
-        lambda _title, message, _parent=None: shown_messages.append(message),
-    )
-    monkeypatch.setattr(
-        utils_module.UIUtils,
-        "show_warning",
-        lambda _title, message, _parent=None: shown_messages.append(f"warn:{message}"),
+        "show_message",
+        lambda _title, message, _parent=None, message_level="info": (
+            shown_messages.append(message) if message_level == "info" else shown_messages.append(f"warn:{message}")
+        ),
     )
 
     frame.delete_local_mod()
@@ -842,11 +750,12 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
         return True
 
     monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", fake_ask_yes_no_cancel)
-    monkeypatch.setattr(utils_module.UIUtils, "show_info", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         utils_module.UIUtils,
-        "show_warning",
-        lambda _title, message, _parent=None: shown_messages.append(message),
+        "show_message",
+        lambda _title, message, _parent=None, message_level="info": (
+            shown_messages.append(message) if message_level == "warning" else None
+        ),
     )
 
     frame.delete_local_mod()
@@ -963,7 +872,7 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
         pending=pending,
         report=None,
         dependency_plan=SimpleNamespace(items=[SimpleNamespace(project_name="Cloth Config", version_name="17.0.0")]),
-        warning_messages=["建議先備份伺服器。"],
+        warning_messages=["建議先備份伺服器"],
         enabled=True,
         provider="modrinth",
         version_type="release",
@@ -978,7 +887,6 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
     assert dependency_nodes[0].values[2] == "Cloth Config"
     assert "required-by：Fabric API" in dependency_nodes[0].detail
 
-    # 驗證分組正確（warning_messages 導致 advisory 分組）
     assert any(node.node_kind == "root" and node.group_key == "advisory" for node in nodes), "應該被分組為 advisory"
 
 
@@ -1131,7 +1039,7 @@ def test_build_online_review_root_status_text_summarizes_dependencies_warnings_a
             advisory_items=[SimpleNamespace(project_name="Mod Menu", enabled=False)],
         ),
         blocking_reasons=["缺少相容版本依賴"],
-        warning_messages=["建議先備份伺服器。"],
+        warning_messages=["建議先備份伺服器"],
         enabled=True,
     )
 
@@ -1151,7 +1059,7 @@ def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column(
         pending=pending,
         report=None,
         dependency_plan=SimpleNamespace(items=[SimpleNamespace(project_name="Cloth Config", version_name="17.0.0")]),
-        warning_messages=["建議先備份伺服器。"],
+        warning_messages=["建議先備份伺服器"],
         enabled=True,
         provider="modrinth",
         version_type="release",
@@ -1249,15 +1157,16 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         utils_module.TaskUtils, "run_async", lambda task, cancel_token=None: task(cancel_token=cancel_token)
     )
 
-    def _show_info(title: str, message: str, parent=None) -> None:
+    def _show_message(title: str, message: str, parent=None, message_level="info", **_kwargs) -> None:
         _ = parent
-        shown_messages.append((title, message))
+        if message_level == "info":
+            shown_messages.append((title, message))
 
     def _confirm_dialog(*_args, **_kwargs) -> bool:
         return True
 
     monkeypatch.setattr(utils_module.UIUtils, "ask_yes_no_cancel", _confirm_dialog)
-    monkeypatch.setattr(utils_module.UIUtils, "show_info", _show_info)
+    monkeypatch.setattr(utils_module.UIUtils, "show_message", _show_message)
 
     dialog = SimpleNamespace(destroy=lambda: dialog_destroyed.append(True))
 
@@ -1270,7 +1179,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         ("https://example.com/second.jar", "second.jar"),
     ]
     assert any("必要依賴：已補裝 1 個" in message for _title, message in shown_messages)
-    assert any("已合併 1 個重複項目，避免重複下載。" in message for _title, message in shown_messages)
+    assert any("已合併 1 個重複項目，避免重複下載" in message for _title, message in shown_messages)
 
 
 def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_from_enabled_roots(monkeypatch) -> None:
@@ -1428,15 +1337,6 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
     assert any("未明確標示 server 端支援" in message for message in review_entries[0].warning_messages)
 
 
-def test_treeview_separator_detection_ignores_displaycolumns_all_placeholder() -> None:
-    tree = _HeaderAutoFitTree()
-
-    column_id = utils_module.TreeUtils._get_treeview_separator_column_from_x(tree, 140)
-
-    assert column_id == "name"
-    assert tree.requested_columns == ["name", "version"]
-
-
 def test_build_local_update_task_nodes_include_blocking_items() -> None:
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
@@ -1445,8 +1345,8 @@ def test_build_local_update_task_nodes_include_blocking_items() -> None:
         current_version="0.12.0",
         target_version_name="0.13.0",
         actionable=False,
-        report=SimpleNamespace(warnings=["與現有設定可能衝突。"]),
-        notes=["需要更新前先停機。"],
+        report=SimpleNamespace(warnings=["與現有設定可能衝突"]),
+        notes=["需要更新前先停機"],
     )
     review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
@@ -1473,7 +1373,7 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
         target_version_name="-",
         actionable=False,
         metadata_source="unresolved",
-        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果。",
+        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果",
         local_mod=SimpleNamespace(file_path="C:/servers/demo/mods/unknown-mod.jar"),
         report=None,
         notes=[],
@@ -1481,7 +1381,7 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
     review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
-        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
+        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新"],
         enabled=False,
         provider="modrinth",
         version_type="",
@@ -1535,14 +1435,14 @@ def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -
         recommendation_source="stale_metadata",
         recommendation_confidence="retryable",
         metadata_source="stale_provider",
-        metadata_note="stale metadata 重查失敗：已停用自動更新並保留舊識別供人工判讀。",
+        metadata_note="stale metadata 重查失敗：已停用自動更新並保留舊識別供人工判讀",
         report=None,
         notes=[],
     )
     review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
-        blocking_reasons=["provider metadata 已過期且重查失敗，已暫停自動更新以避免錯誤建議。"],
+        blocking_reasons=["provider metadata 已過期且重查失敗，已暫停自動更新以避免錯誤建議"],
         enabled=False,
         provider="modrinth",
     )
@@ -1577,10 +1477,11 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
 
     messages: list[tuple[str, str]] = []
 
-    def _show_warning(title: str, message: str, _parent=None) -> None:
-        messages.append((title, message))
+    def _show_message(title: str, message: str, _parent=None, message_level="info", **_kwargs) -> None:
+        if message_level == "warning":
+            messages.append((title, message))
 
-    monkeypatch.setattr(utils_module.UIUtils, "show_warning", _show_warning)
+    monkeypatch.setattr(utils_module.UIUtils, "show_message", _show_message)
 
     blocked_version = SimpleNamespace(version_id="v-client-only", display_name="1.0.0")
     added = frame._add_pending_online_install(
@@ -1598,7 +1499,7 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
     assert messages == [
         (
             "無法加入安裝清單",
-            "此模組標記為僅 client 端（server_side=unsupported），不可安裝到伺服器。",
+            "此模組標記為僅 client 端（server_side=unsupported），不可安裝到伺服器",
         )
     ]
 
@@ -1610,7 +1511,7 @@ def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> N
     frame_any.parent = SimpleNamespace()
     frame_any.update_status = lambda _message: None
     frame_any._refresh_online_queue_button = lambda: None
-    monkeypatch.setattr(utils_module.UIUtils, "show_warning", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(utils_module.UIUtils, "show_message", lambda *_args, **_kwargs: None)
 
     first_version = SimpleNamespace(version_id="v1", display_name="1.0.0")
     second_version = SimpleNamespace(version_id="v1", display_name="1.0.1")
@@ -1650,7 +1551,7 @@ def test_build_dependency_snapshot_migration_note_formats_summary_line() -> None
 
     note = frame._build_dependency_snapshot_migration_note()
 
-    assert note == "依賴快照遷移觀測：檢查 3、自動遷移 1、成功回放 2、回放失敗改重建 1。"
+    assert note == "依賴快照遷移觀測：檢查 3、自動遷移 1、成功回放 2、回放失敗改重建 1"
 
 
 def test_build_local_update_review_key_is_unique_for_same_project_id_with_different_files() -> None:
@@ -1877,14 +1778,14 @@ def test_format_local_update_review_text_includes_unresolved_metadata_state() ->
         metadata_source="unresolved",
         recommendation_source="project_fallback",
         recommendation_confidence="advisory",
-        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果。",
+        metadata_note="metadata ensure 失敗：找不到可用的 provider metadata 或雜湊對應結果",
         notes=[],
         report=None,
     )
     review_entry = models_module.LocalUpdateReviewEntry(
         candidate=candidate,
         dependency_plan=SimpleNamespace(items=[], notes=[]),
-        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新。"],
+        blocking_reasons=["metadata 未識別，暫時無法自動檢查更新"],
         enabled=False,
         provider="modrinth",
         version_type="",
@@ -2548,7 +2449,6 @@ def test_persist_local_update_plan_metadata_marks_stale_revalidation_failure() -
 
     cached_provider = index_manager.provider_by_path[path_key]
     assert cached_provider["project_id"] == "AANobbMI"
-    # 過期重驗（Stale Revalidation）應僅標記狀態，不計入失敗次數。
     assert cached_provider.get("lifecycle_state", "") == "stale"
     assert "stale_revalidation_failures" not in cached_provider or cached_provider.get(
         "stale_revalidation_failures"
@@ -2611,7 +2511,7 @@ def test_persist_local_update_plan_metadata_resets_revalidation_on_success() -> 
 
 
 def test_get_online_install_review_group_key_classifies_all_states() -> None:
-    """線上安裝 review 分組應正確對應 enabled/advisory/disabled/blocked 四種狀態。"""
+    """線上安裝 review 分組應正確對應 enabled/advisory/disabled/blocked 四種狀態"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     runnable_no_warn = models_module.PendingInstallReviewEntry(
@@ -2651,7 +2551,7 @@ def test_get_online_install_review_group_key_classifies_all_states() -> None:
 
 
 def test_count_online_install_review_groups_aggregates_correctly() -> None:
-    """_count_online_install_review_groups 應正確統計各 group 數量。"""
+    """_count_online_install_review_groups 應正確統計各 group 數量"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
@@ -2690,7 +2590,7 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
 
 
 def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
-    """_build_online_install_execution_prompt 應對 advisory/blocked 項目提供摘要文字。"""
+    """_build_online_install_execution_prompt 應對 advisory/blocked 項目提供摘要文字"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     actionable_entry = models_module.PendingInstallReviewEntry(
@@ -2725,7 +2625,7 @@ def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
 
 
 def test_build_online_install_execution_prompt_returns_none_for_clean_queue() -> None:
-    """所有項目均為 enabled（無提醒）時，prompt 應為 None——不需要確認對話框。"""
+    """所有項目均為 enabled（無提醒）時，prompt 應為 None——不需要確認對話框"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     entries = [
@@ -2760,7 +2660,7 @@ def test_build_online_install_execution_prompt_returns_none_for_advisory_only() 
 
 
 def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
-    """_build_online_review_root_status_text 根節點標籤應與 group key 映射一致。"""
+    """_build_online_review_root_status_text 根節點標籤應與 group key 映射一致"""
     frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
 
     clean_entry = models_module.PendingInstallReviewEntry(

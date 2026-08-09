@@ -1,7 +1,7 @@
 """
 src/__init__.py
 主套件
-提供延遲匯出與共用模組入口。
+提供延遲匯出與共用模組入口
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 def lazy_exports(
     module_globals: dict[str, Any], module_name: str, exports: Mapping[str, tuple[str, str]]
 ) -> tuple[Callable[[str], Any], Callable[[], list[str]], list[str]]:
-    """建立 PEP 562 的模組層級延遲匯出。"""
+    """建立 PEP 562 的模組層級延遲匯出"""
 
     def __getattr__(name: str) -> Any:
         target = exports.get(name)

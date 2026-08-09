@@ -40,7 +40,6 @@ class _TimeoutSession:
 
 def test_download_file_without_expected_hash_skips_hashing(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
-    monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
     monkeypatch.setattr(
         http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
     )
@@ -57,7 +56,6 @@ def test_download_file_without_expected_hash_skips_hashing(tmp_path, monkeypatch
 def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
     failure_messages: list[str] = []
-    monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
     monkeypatch.setattr(
         http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
     )
@@ -83,7 +81,6 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
 def test_download_file_reports_timeout_reason(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
     failure_messages: list[str] = []
-    monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
     monkeypatch.setattr(http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _TimeoutSession()))
 
     assert (
@@ -115,7 +112,6 @@ def test_download_file_reports_invalid_url_reason(tmp_path) -> None:
 def test_download_file_keeps_existing_target_when_replace_fails(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
     target.write_bytes(b"old-bytes")
-    monkeypatch.setattr(http_utils_module._rate_limiter, "wait", lambda _domain: None)
     monkeypatch.setattr(
         http_utils_module.HTTPUtils, "_get_session", classmethod(lambda _cls: _FakeSession(b"new-bytes"))
     )

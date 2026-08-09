@@ -1,4 +1,4 @@
-"""字體管理器模組。"""
+"""字體管理器模組"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ logger = get_logger().bind(component="FontManager")
 
 
 class FontManager:
-    """字體管理器類別，負責 UI 字體快取。"""
+    """字體管理器類別，負責 UI 字體快取"""
 
     _fonts: ClassVar[collections.OrderedDict] = collections.OrderedDict()
     _default_family_candidates: ClassVar[tuple[str, ...]] = (
@@ -64,18 +64,18 @@ class FontManager:
         overstrike: bool = False,
     ) -> QtGui.QFont:
         """
-        取得字體物件並快取。
+        取得字體物件並快取
 
         Args:
-            family: 字體名稱；未提供時使用預設字體。
-            size: 基準字號。
-            weight: 字重。
-            slant: 斜體樣式。
-            underline: 是否加底線。
-            overstrike: 是否加刪除線。
+            family: 字體名稱；未提供時使用預設字體
+            size: 基準字號
+            weight: 字重
+            slant: 斜體樣式
+            underline: 是否加底線
+            overstrike: 是否加刪除線
 
         Returns:
-            建立或快取中的 QFont 物件。
+            建立或快取中的 QFont 物件
         """
         family = cls._resolve_family(family)
         key = (family, size, weight, slant, underline, overstrike)
@@ -103,7 +103,7 @@ class FontManager:
 
     @classmethod
     def _get_fallback_font(cls) -> QtGui.QFont:
-        """取得回退字體。"""
+        """取得回退字體"""
         try:
             return QtGui.QFont(cls._resolve_default_family(), 9)
         except Exception:
@@ -111,7 +111,7 @@ class FontManager:
 
     @classmethod
     def clear_cache(cls) -> None:
-        """清空字體快取。"""
+        """清空字體快取"""
         try:
             cls._fonts.clear()
         except Exception as exc:

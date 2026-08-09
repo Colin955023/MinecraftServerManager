@@ -1,4 +1,4 @@
-"""stale metadata 重查批次策略工具。"""
+"""stale metadata 重查批次策略工具"""
 
 from __future__ import annotations
 
@@ -11,16 +11,16 @@ def resolve_revalidation_batch_limits(
     batch_max_limit: int | None,
 ) -> tuple[int, int, int, int]:
     """
-    計算重查批次策略的基準/最小/最大/初始上限。
+    計算重查批次策略的基準/最小/最大/初始上限
 
     Args:
-        default_base_limit: 預設的基準批次上限。
-        batch_base_limit: 使用者設定的基準批次上限。
-        batch_min_limit: 允許的最小批次上限。
-        batch_max_limit: 允許的最大批次上限。
+        default_base_limit: 預設的基準批次上限
+        batch_base_limit: 使用者設定的基準批次上限
+        batch_min_limit: 允許的最小批次上限
+        batch_max_limit: 允許的最大批次上限
 
     Returns:
-        `(基準上限, 最小上限, 最大上限, 初始自適應上限)`。
+        `(基準上限, 最小上限, 最大上限, 初始自適應上限)`
     """
 
     configured_batch_base_limit = max(
@@ -59,22 +59,22 @@ def recompute_adaptive_revalidation_batch_limit(
     max_limit: int,
 ) -> int:
     """
-    依重查結果動態調整下一輪批次上限。
+    依重查結果動態調整下一輪批次上限
 
     Args:
-        current_limit: 目前的批次上限。
-        attempted_count: 已嘗試處理的數量。
-        failure_count: 失敗數量。
-        total_latency_ms: 累積延遲毫秒數。
-        adaptive_enabled: 是否啟用自適應調整。
-        failure_high_watermark: 失敗率升高門檻。
-        failure_low_watermark: 失敗率降低門檻。
-        latency_threshold_ms: 延遲門檻毫秒數。
-        min_limit: 最小批次上限。
-        max_limit: 最大批次上限。
+        current_limit: 目前的批次上限
+        attempted_count: 已嘗試處理的數量
+        failure_count: 失敗數量
+        total_latency_ms: 累積延遲毫秒數
+        adaptive_enabled: 是否啟用自適應調整
+        failure_high_watermark: 失敗率升高門檻
+        failure_low_watermark: 失敗率降低門檻
+        latency_threshold_ms: 延遲門檻毫秒數
+        min_limit: 最小批次上限
+        max_limit: 最大批次上限
 
     Returns:
-        調整後的下一輪批次上限。
+        調整後的下一輪批次上限
     """
 
     if not adaptive_enabled or attempted_count < 3:

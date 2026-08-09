@@ -1,6 +1,6 @@
 """
 伺服器執行時工具
-集中啟停操作與 Java 命令建構。
+集中啟停操作與 Java 命令建構
 """
 
 from __future__ import annotations
@@ -12,12 +12,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from .. import JavaUtils, PathUtils, get_logger
-from .server_constants import (
-    MANAGED_STARTUP_SCRIPT_NAME as DEFAULT_MANAGED_STARTUP_SCRIPT_NAME,
-)
-from .server_constants import (
-    STARTUP_SCRIPT_CANDIDATES as DEFAULT_STARTUP_SCRIPT_CANDIDATES,
-)
+from .server_detection_utils import MANAGED_STARTUP_SCRIPT_NAME, STARTUP_SCRIPT_CANDIDATES
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
 __all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]
@@ -25,7 +20,7 @@ __all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]
 
 @dataclass(slots=True)
 class StartupScriptCommand:
-    """從既有啟動腳本擷取出的 Java 啟動命令。"""
+    """從既有啟動腳本擷取出的 Java 啟動命令"""
 
     command_line: str = ""
     memory_max_mb: int | None = None
@@ -37,24 +32,32 @@ class StartupScriptCommand:
 
 
 class ServerOperations:
-    """伺服器操作工具類別。"""
+    """伺服器操作工具類別"""
 
     @staticmethod
     def get_status_text(is_running: bool) -> tuple[str, str]:
-        """獲取狀態文字和顏色。"""
+        """
+        獲取狀態文字和顏色
+
+        Args:
+            is_running: 伺服器是否正在運行
+
+        Returns:
+            tuple: 狀態文字和顏色的元組，格式為 (文字, 顏色)
+        """
         return ("🟢 狀態: 運行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
 
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
         """
-        停止伺服器（先嘗試 stop 命令，失敗則強制停止）。
+        停止伺服器（先嘗試 stop 命令，失敗則強制停止）
 
         Args:
-            server_manager: 伺服器管理器實例。
-            server_name: 目標伺服器名稱。
+            server_manager: 伺服器管理器實例
+            server_name: 目標伺服器名稱
 
         Returns:
-            成功停止時回傳 True。
+            成功停止時回傳 True
         """
         try:
             command_success = server_manager.send_command(server_name, "stop")
@@ -65,7 +68,7 @@ class ServerOperations:
 
 
 class JvmOptionPolicy:
-    """集中產生 Minecraft 伺服器 JVM 啟動參數建議。"""
+    """集中產生 Minecraft 伺服器 JVM 啟動參數建議"""
 
     GC_OPTION_PREFIX = "-XX:+Use"
     LOW_LATENCY_PROFILE = "low_latency"
@@ -73,13 +76,13 @@ class JvmOptionPolicy:
     @staticmethod
     def normalize_jvm_args(raw_args: Any) -> list[str]:
         """
-        將使用者自訂 JVM 參數正規化為清單。
+        將使用者自訂 JVM 參數正規化為清單
 
         Args:
-            raw_args: 字串、序列或其他可忽略值。
+            raw_args: 字串、序列或其他可忽略值
 
         Returns:
-            正規化後的 JVM 參數清單。
+            正規化後的 JVM 參數清單
         """
 
         if raw_args is None:
@@ -95,7 +98,15 @@ class JvmOptionPolicy:
 
     @staticmethod
     def has_gc_option(args: list[str]) -> bool:
-        """檢查參數中是否已包含 GC 選項。"""
+        """
+        檢查參數中是否已包含 GC 選項
+
+        Args:
+            args: 待檢查的 JVM 參數清單
+
+        Returns:
+            若已包含 GC 選項則回傳 True
+        """
 
         return any(arg.startswith(JvmOptionPolicy.GC_OPTION_PREFIX) and arg.endswith("GC") for arg in args)
 
@@ -108,16 +119,16 @@ class JvmOptionPolicy:
         existing_args: list[str] | None = None,
     ) -> list[str]:
         """
-        依記憶體與 Java 版本產生 GC 建議。
+        依記憶體與 Java 版本產生 GC 建議
 
         Args:
-            memory_max_mb: 最大記憶體，單位 MB。
-            java_major: Java major 版本；未知時可為 None。
-            performance_profile: 效能設定檔，`low_latency` 表示偏低延遲。
-            existing_args: 既有 JVM 參數；若已有 GC 參數則不覆蓋。
+            memory_max_mb: 最大記憶體，單位 MB
+            java_major: Java major 版本；未知時可為 None
+            performance_profile: 效能設定檔，`low_latency` 表示偏低延遲
+            existing_args: 既有 JVM 參數；若已有 GC 參數則不覆蓋
 
         Returns:
-            建議加入的 JVM 參數清單。
+            建議加入的 JVM 參數清單
         """
 
         normalized_existing_args = list(existing_args or [])
@@ -132,10 +143,10 @@ class JvmOptionPolicy:
 
 
 class ServerCommands:
-    """伺服器指令工具類別。"""
+    """伺服器指令工具類別"""
 
-    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = DEFAULT_MANAGED_STARTUP_SCRIPT_NAME
-    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = DEFAULT_STARTUP_SCRIPT_CANDIDATES
+    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = MANAGED_STARTUP_SCRIPT_NAME
+    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = STARTUP_SCRIPT_CANDIDATES
 
     @staticmethod
     def _quote_windows_arg(arg: str) -> str:
@@ -165,13 +176,13 @@ class ServerCommands:
     @staticmethod
     def to_console_java_executable(java_path: str | None) -> str | None:
         """
-        將 `javaw.exe` 路徑轉為適合伺服器 console 使用的 `java.exe`。
+        將 `javaw.exe` 路徑轉為適合伺服器 console 使用的 `java.exe`
 
         Args:
-            java_path: 偵測到的 Java 執行檔路徑。
+            java_path: 偵測到的 Java 執行檔路徑
 
         Returns:
-            對應的 console Java 路徑；無輸入時回傳 None。
+            對應的 console Java 路徑；無輸入時回傳 None
         """
         if not java_path:
             return None
@@ -183,14 +194,14 @@ class ServerCommands:
     @staticmethod
     def resolve_java_executable(server_config, fallback: str = "java") -> str:
         """
-        依伺服器 Minecraft 版本解析應使用的 Java console 執行檔。
+        依伺服器 Minecraft 版本解析應使用的 Java console 執行檔
 
         Args:
-            server_config: 伺服器設定物件。
-            fallback: 找不到符合版本 Java 時使用的備援命令。
+            server_config: 伺服器設定物件
+            fallback: 找不到符合版本 Java 時使用的備援命令
 
         Returns:
-            完整 `java.exe` 路徑；找不到時回傳 fallback。
+            完整 `java.exe` 路徑；找不到時回傳 fallback
         """
         mc_version = str(getattr(server_config, "minecraft_version", "") or "").strip()
         if not mc_version or mc_version.lower() == "unknown":
@@ -213,13 +224,13 @@ class ServerCommands:
     @staticmethod
     def split_windows_command_line(command_line: str) -> list[str]:
         """
-        將 Windows bat 中的一行命令切成 `subprocess` 可用參數。
+        將 Windows bat 中的一行命令切成 `subprocess` 可用參數
 
         Args:
-            command_line: bat 檔中的單行命令。
+            command_line: bat 檔中的單行命令
 
         Returns:
-            命令參數清單；解析失敗時回退到空白切分。
+            命令參數清單；解析失敗時回退到空白切分
         """
         try:
             return [
@@ -264,13 +275,13 @@ class ServerCommands:
     @staticmethod
     def extract_startup_script_command(script_path: Path) -> StartupScriptCommand:
         """
-        讀取既有啟動腳本中的 Java 啟動命令。
+        讀取既有啟動腳本中的 Java 啟動命令
 
         Args:
-            script_path: 要讀取的啟動腳本路徑。
+            script_path: 要讀取的啟動腳本路徑
 
         Returns:
-            擷取到的 Java 啟動命令與記憶體設定；找不到時回傳空命令。
+            擷取到的 Java 啟動命令與記憶體設定；找不到時回傳空命令
         """
         from .server_memory_utils import MemoryUtils
 
@@ -298,14 +309,14 @@ class ServerCommands:
     @staticmethod
     def replace_java_command_line(line: str, java_exe: str) -> tuple[str, bool]:
         """
-        替換單行 bat 命令開頭的 Java 執行檔。
+        替換單行 bat 命令開頭的 Java 執行檔
 
         Args:
-            line: 原始 bat 單行內容。
-            java_exe: 要替換成的 Java 執行檔路徑。
+            line: 原始 bat 單行內容
+            java_exe: 要替換成的 Java 執行檔路徑
 
         Returns:
-            `(新行內容, 是否修改)`。
+            `(新行內容, 是否修改)`
         """
         body, newline = ServerCommands._split_line_ending(line)
         stripped = body.strip()
@@ -329,14 +340,14 @@ class ServerCommands:
     @staticmethod
     def replace_startup_command_java_path(command_line: str, server_config) -> str:
         """
-        將匯入啟動命令的 Java 執行檔替換為版本相符路徑。
+        將匯入啟動命令的 Java 執行檔替換為版本相符路徑
 
         Args:
-            command_line: 原始 Java 啟動命令。
-            server_config: 伺服器設定物件。
+            command_line: 原始 Java 啟動命令
+            server_config: 伺服器設定物件
 
         Returns:
-            替換後的啟動命令；無法解析完整 Java 路徑時保留原命令。
+            替換後的啟動命令；無法解析完整 Java 路徑時保留原命令
         """
         java_exe = ServerCommands.resolve_java_executable(server_config)
         if not ServerCommands._is_full_java_path(java_exe):
@@ -346,14 +357,14 @@ class ServerCommands:
 
     @staticmethod
     def repair_startup_script_java_command(script_path: Path, server_config) -> bool:
-        """將啟動腳本中的裸 `java` 改為符合 Minecraft 版本的完整 Java 路徑。
+        """將啟動腳本中的裸 `java` 改為符合 Minecraft 版本的完整 Java 路徑
 
         Args:
-            script_path: 要檢查的 bat 啟動腳本。
-            server_config: 伺服器設定物件。
+            script_path: 要檢查的 bat 啟動腳本
+            server_config: 伺服器設定物件
 
         Returns:
-            腳本有被修改時回傳 True。
+            腳本有被修改時回傳 True
         """
         java_exe = ServerCommands.resolve_java_executable(server_config)
         if not ServerCommands._is_full_java_path(java_exe):
@@ -383,14 +394,14 @@ class ServerCommands:
     @staticmethod
     def repair_startup_scripts_java_commands(server_path: Path, server_config) -> list[Path]:
         """
-        檢查並修補伺服器資料夾中的已知 bat 啟動腳本。
+        檢查並修補伺服器資料夾中的已知 bat 啟動腳本
 
         Args:
-            server_path: 伺服器資料夾路徑。
-            server_config: 伺服器設定物件。
+            server_path: 伺服器資料夾路徑
+            server_config: 伺服器設定物件
 
         Returns:
-            已被修改的啟動腳本路徑清單。
+            已被修改的啟動腳本路徑清單
         """
         repaired: list[Path] = []
         for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
@@ -402,14 +413,14 @@ class ServerCommands:
     @staticmethod
     def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
         """
-        構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型。
+        構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型
 
         Args:
-            server_config: 伺服器設定物件。
-            return_list: 是否回傳命令列清單。
+            server_config: 伺服器設定物件
+            return_list: 是否回傳命令列清單
 
         Returns:
-            Java 啟動命令字串或命令列清單。
+            Java 啟動命令字串或命令列清單
         """
         from .server_detection_utils import ServerDetectionUtils
 

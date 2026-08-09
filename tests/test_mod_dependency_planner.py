@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import src.utils as utils_module
-from src.models import OnlineModVersion, ResolvedDependencyReference
+from src.models import DependencyPlanHooks, OnlineModVersion, ResolvedDependencyReference
 
 
 def _make_version(
@@ -124,7 +124,7 @@ def test_expand_required_dependency_install_plan_splits_required_and_optional() 
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=utils_module.DependencyPlanHooks(
+        hooks=DependencyPlanHooks(
             resolve_project_names=_resolve_project_names,
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_select_dependency_best_version,
@@ -176,7 +176,7 @@ def test_expand_required_dependency_install_plan_marks_installed_version_mismatc
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=utils_module.DependencyPlanHooks(
+        hooks=DependencyPlanHooks(
             resolve_project_names=lambda _: {"dep-required": "Required Dep"},
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_unexpected_select,
@@ -234,7 +234,7 @@ def test_expand_required_dependency_install_plan_respects_max_depth() -> None:
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
-        hooks=utils_module.DependencyPlanHooks(
+        hooks=DependencyPlanHooks(
             resolve_project_names=lambda _: {"dep-a": "Dependency A", "dep-b": "Dependency B"},
             resolve_dependency_entry=_resolve_dependency_entry,
             select_dependency_best_version=_select_dependency_best_version,

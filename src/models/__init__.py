@@ -1,7 +1,7 @@
 """
 src/models/__init__.py
 資料模型套件
-提供 Minecraft 伺服器管理器的資料模型定義與相關類別。
+提供 Minecraft 伺服器管理器的資料模型定義與相關類別
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "LoaderVersion": (".models", "LoaderVersion"),
     "OnlineModVersion": (".models", "OnlineModVersion"),
     "ResolvedDependencyReference": (".models", "ResolvedDependencyReference"),
+    "DependencyPlanHooks": (".models", "DependencyPlanHooks"),
     "ServerConfig": (".models", "ServerConfig"),
     "ModStatus": (".models", "ModStatus"),
     "ModPlatform": (".models", "ModPlatform"),
@@ -34,6 +35,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "LocalModUpdateCandidate": (".models", "LocalModUpdateCandidate"),
     "LocalModUpdatePlan": (".models", "LocalModUpdatePlan"),
     "ServerOperationResult": (".models", "ServerOperationResult"),
+    "OperationResult": (".models", "OperationResult"),
 }
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

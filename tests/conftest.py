@@ -1,4 +1,4 @@
-"""pytest 共用設定。"""
+"""pytest 共用設定"""
 
 from __future__ import annotations
 
@@ -23,8 +23,13 @@ os.environ.setdefault("MSM_LOG_DIR", str(TEST_RUNTIME_ROOT / "log"))
 def _suppress_server_manager_issue_markers(monkeypatch):
     from src.core.server import server_crud, server_startup
 
-    monkeypatch.setattr(server_crud, "record_and_mark", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(server_startup, "record_and_mark", lambda *_args, **_kwargs: None)
+    class DummyExceptionUtils:
+        @staticmethod
+        def record_and_mark(*args, **kwargs):
+            pass
+
+    monkeypatch.setattr(server_crud, "ExceptionUtils", DummyExceptionUtils)
+    monkeypatch.setattr(server_startup, "ExceptionUtils", DummyExceptionUtils)
     yield
     issues_root = PROJECT_ROOT / ".issues"
     if issues_root.exists():

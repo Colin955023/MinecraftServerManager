@@ -12,6 +12,7 @@ dependencies = [
   "requests>=2.33.1",
   "defusedxml>=0.7.1",
   "packaging>=26.0",
+  "loguru>=0.7.3",
 ]
 
 [dependency-groups]
@@ -98,6 +99,7 @@ select = [
   "ARG",
   "ERA",
   "RUF",
+  "PTH",
 ]
 ignore = ["E402", "B023", "E501", "RUF001", "RUF002", "RUF003"]
 fixable = ["ALL"]

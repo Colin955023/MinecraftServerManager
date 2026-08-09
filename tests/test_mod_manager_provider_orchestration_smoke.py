@@ -22,8 +22,9 @@ def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypat
     manager.index_manager = _StubIndexManager()
     manager._modrinth_identity_cache = ModrinthIdentityCache()
 
+    resolver = manager._get_provider_resolver()
     monkeypatch.setattr(
-        manager,
+        resolver,
         "resolve_modrinth_project_identity",
         lambda _identifier: ("YL57xq9U", "inventory-profiles-next"),
     )
@@ -31,9 +32,9 @@ def test_resolve_platform_info_prefers_cached_slug_identifier_resolver(monkeypat
     def _unexpected_fallback(*_args: Any, **_kwargs: Any):
         raise AssertionError("fallback search should not be called when cached slug can be resolved")
 
-    monkeypatch.setattr(manager, "_detect_platform_info", _unexpected_fallback)
+    monkeypatch.setattr(resolver, "detect_platform_info", _unexpected_fallback)
 
-    platform, platform_id, platform_slug = manager._resolve_platform_info(
+    platform, platform_id, platform_slug = resolver.resolve_platform_info(
         file_path=Path("mods/inventoryprofilesnext.jar"),
         name="Inventory Profiles Next",
         base_name="inventoryprofilesnext",
@@ -55,13 +56,14 @@ def test_resolve_platform_info_uses_fallback_detection_when_no_cached_identifier
     manager.index_manager = _StubIndexManager()
     manager._modrinth_identity_cache = ModrinthIdentityCache()
 
+    resolver = manager._get_provider_resolver()
     monkeypatch.setattr(
-        manager,
-        "_detect_platform_info",
+        resolver,
+        "detect_platform_info",
         lambda *_args, **_kwargs: (ModPlatform.MODRINTH, "AANobbMI", "sodium"),
     )
 
-    platform, platform_id, platform_slug = manager._resolve_platform_info(
+    platform, platform_id, platform_slug = resolver.resolve_platform_info(
         file_path=Path("mods/sodium.jar"),
         name="Sodium",
         base_name="sodium",
@@ -85,9 +87,10 @@ def test_resolve_platform_info_keeps_local_without_lookup_when_cached_local_mark
     def _unexpected_detect(*_args: Any, **_kwargs: Any):
         raise AssertionError("cached local marker should short-circuit provider detection")
 
-    monkeypatch.setattr(manager, "_detect_platform_info", _unexpected_detect)
+    resolver = manager._get_provider_resolver()
+    monkeypatch.setattr(resolver, "detect_platform_info", _unexpected_detect)
 
-    platform, platform_id, platform_slug = manager._resolve_platform_info(
+    platform, platform_id, platform_slug = resolver.resolve_platform_info(
         file_path=Path("mods/local-only.jar"),
         name="Local Only",
         base_name="local-only",
@@ -114,19 +117,20 @@ def test_resolve_platform_info_re_resolves_when_cached_provider_is_stale(monkeyp
         resolve_calls["count"] += 1
         return "YL57xq9U", "inventory-profiles-next"
 
-    monkeypatch.setattr(manager, "resolve_modrinth_project_identity", _track_resolve)
+    resolver = manager._get_provider_resolver()
+    monkeypatch.setattr(resolver, "resolve_modrinth_project_identity", _track_resolve)
 
     def _track_detect(*_args: Any, **_kwargs: Any) -> tuple[ModPlatform, str, str]:
         detect_calls["count"] += 1
         return ModPlatform.MODRINTH, "YL57xq9U", "inventory-profiles-next"
 
     monkeypatch.setattr(
-        manager,
-        "_detect_platform_info",
+        resolver,
+        "detect_platform_info",
         _track_detect,
     )
 
-    platform, platform_id, platform_slug = manager._resolve_platform_info(
+    platform, platform_id, platform_slug = resolver.resolve_platform_info(
         file_path=Path("mods/inventoryprofilesnext.jar"),
         name="Inventory Profiles Next",
         base_name="inventoryprofilesnext",

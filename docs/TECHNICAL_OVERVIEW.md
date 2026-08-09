@@ -21,7 +21,11 @@
 ```
 src/main.py
  └── ui/main_window.py            主視窗、頁面組裝、背景工作排程
-     ├── core/server_manager.py   伺服器生命週期（建立／啟動／停止／備份）
+     ├── core/server/             伺服器生命週期
+     │   ├── server_crud.py       伺服器 CRUD
+     │   ├── server_startup.py    啟動／停止
+     │   ├── server_backup.py     備份還原
+     │   └── server_instance.py   伺服器實例與屬性
      ├── core/mod_manager.py      模組協調層（委派掃描／安裝／provider 辨識）
      ├── core/local_mod_scanner.py 本地模組掃描、JAR metadata 解析
      ├── core/mod_file_installer.py 模組檔案安裝、替換、回滾與刪改
@@ -71,7 +75,10 @@ ui → core → models → utils
 
 | 檔案 | 簡介 |
 |------|------|
-| `server_manager.py` | 伺服器 CRUD、啟動／停止、備份 |
+| `server/server_crud.py` | 伺服器 CRUD |
+| `server/server_startup.py` | 伺服器啟動／停止 |
+| `server/server_backup.py` | 伺服器備份 |
+| `server/server_instance.py` | 伺服器實例管理 |
 | `mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
 | `local_mod_scanner.py` | 本地模組掃描、JAR metadata 解析與快取回填 |
 | `mod_file_installer.py` | 模組下載、原子替換、回滾、匯入、刪除、啟停 |
@@ -186,7 +193,7 @@ uv run report\comprehensive_report.py
 1. `src/main.py` — 進入點，環境初始化
 2. `src/models/models.py` — 核心資料結構，貫穿全專案
 3. `src/ui/main_window.py` — 整體 UI 框架與頁面切換
-4. `src/core/server_manager.py` — 伺服器核心邏輯
+4. `src/core/server/` — 伺服器核心邏輯
 5. `src/core/mod_manager.py` — 模組服務
 6. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
 7. `src/utils/ui_support/window_manager.py` — 視窗管理慣例

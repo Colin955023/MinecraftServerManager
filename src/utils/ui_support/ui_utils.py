@@ -1,19 +1,21 @@
 """
 UI 工具函數
-提供常用的界面元件和工具函數，避免重複程式碼。
+提供常用的界面元件和工具函數，避免重複程式碼
 """
 
 import os
 import time
 import webbrowser
+import winsound
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtWidgets import QApplication
+from qfluentwidgets import ComboBox, MessageBox
+
 from .. import (
     Colors,
-    DialogUtils,
-    FontManager,
     PathUtils,
     QtCore,
     QtWidgets,
@@ -22,43 +24,11 @@ from .. import (
     get_logger,
     invoke_later,
     is_qobject_alive,
+    resolve_color,
     run_on_ui_thread,
 )
-from . import qt_widgets as qt
 
 logger = get_logger().bind(component="UIUtils")
-
-# 按鈕樣式字典，取代原本的 if/elif 鏈
-_BUTTON_STYLES: dict[str, dict[str, Any]] = {
-    "primary": {
-        "fg_color": ("#1f4e79", "#0f2a44"),
-        "hover_color": ("#0f2a44", "#071925"),
-        "text_color": ("#ffffff", "#ffffff"),
-        "width": 135,
-        "height": 45,
-    },
-    "secondary": {
-        "fg_color": ("#2d3748", "#1a202c"),
-        "hover_color": ("#1a202c", "#0d1117"),
-        "text_color": ("#ffffff", "#ffffff"),
-        "width": 90,
-        "height": 32,
-    },
-    "small": {
-        "fg_color": ("#4a5568", "#2d3748"),
-        "hover_color": ("#2d3748", "#1a202c"),
-        "text_color": ("#ffffff", "#ffffff"),
-        "width": 60,
-        "height": 23,
-    },
-    "cancel": {
-        "fg_color": ("#dc2626", "#991b1b"),
-        "hover_color": ("#991b1b", "#7f1d1d"),
-        "text_color": ("#ffffff", "#ffffff"),
-        "width": 90,
-        "height": 36,
-    },
-}
 
 
 def _is_ui_thread() -> bool:
@@ -66,99 +36,33 @@ def _is_ui_thread() -> bool:
     return app is None or QtCore.QThread.currentThread() is app.thread()
 
 
-def get_button_style(button_type: str = "primary") -> dict[str, tuple[str, str]]:
-    """
-    取得按鈕樣式配置
-
-    Args:
-        button_type: 按鈕類型 ("primary", "secondary", "warning", "danger")
-
-    Returns:
-        包含 fg_color 和 hover_color 的字典
-    """
-    styles = {
-        "primary": {"fg_color": Colors.BUTTON_PRIMARY, "hover_color": Colors.BUTTON_PRIMARY_HOVER},
-        "secondary": {"fg_color": Colors.BUTTON_SECONDARY, "hover_color": Colors.BUTTON_SECONDARY_HOVER},
-        "warning": {"fg_color": Colors.BUTTON_WARNING, "hover_color": Colors.BUTTON_WARNING_HOVER},
-        "danger": {"fg_color": Colors.BUTTON_DANGER, "hover_color": Colors.BUTTON_DANGER_HOVER},
-    }
-    return styles.get(button_type, styles["primary"])
-
-
-def compute_adaptive_pool_limit(
-    *,
-    current: int,
-    min_size: int,
-    cap_size: int,
-    step: int,
-    pool_len: int,
-    hit_rate: float,
-    low_hit_threshold: float = 35.0,
-    high_hit_threshold: float = 90.0,
-    idle_divisor: int = 4,
-) -> int:
-    """
-    依命中率與池使用狀態，回傳建議的 recycle pool 上限。
-
-    Args:
-        current: 目前池大小。
-        min_size: 最小池大小。
-        cap_size: 最大池大小。
-        step: 每次調整的步進值。
-        pool_len: 目前池中元素數量。
-        hit_rate: 命中率百分比。
-        low_hit_threshold: 低命中率門檻。
-        high_hit_threshold: 高命中率門檻。
-        idle_divisor: 低使用率時的縮減比例。
-
-    Returns:
-        建議的池上限值。
-    """
-    current = max(1, int(current))
-    min_size = max(1, int(min_size))
-    cap_size = max(min_size, int(cap_size))
-    step = max(1, int(step))
-    pool_len = max(0, int(pool_len))
-    idle_divisor = max(1, int(idle_divisor))
-    new_size = current
-    if hit_rate < low_hit_threshold and current < cap_size:
-        new_size = min(cap_size, current + step)
-    elif hit_rate > high_hit_threshold and pool_len < max(1, current // idle_divisor) and (current > min_size):
-        new_size = max(min_size, current - step)
-    return new_size
-
-
-def compute_exponential_moving_average(*, previous: float | None, current: float, alpha: float = 0.35) -> float:
-    """
-    計算 EMA（Exponential Moving Average）並限制 alpha 於 [0, 1]。
-
-    Args:
-        previous: 前一筆 EMA 值。
-        current: 目前樣本值。
-        alpha: 平滑係數。
-
-    Returns:
-        更新後的 EMA 值。
-    """
-    clamped_alpha = max(0.0, min(1.0, float(alpha)))
-    current_value = float(current)
-    if previous is None:
-        return current_value
-    return clamped_alpha * current_value + (1.0 - clamped_alpha) * float(previous)
-
-
 class UIUtils:
-    """UI 共用工具與對話框包裝。"""
+    """UI 共用工具與對話框包裝"""
+
+    _DANGER_BUTTON_STYLE = (
+        "QPushButton {{ background-color: {color}; color: white;"
+        " border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 5px 10px; }}"
+    )
+
+    @staticmethod
+    def apply_danger_style(button: Any) -> None:
+        """
+        套用危險操作按鈕樣式（紅色背景）
+
+        Args:
+            button: 要套用樣式的按鈕元件
+        """
+        button.setStyleSheet(UIUtils._DANGER_BUTTON_STYLE.format(color=resolve_color(Colors.BUTTON_DANGER)))
 
     @staticmethod
     def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
         """
-        統一的主框架布局方法。
+        統一設定框架的邊距與尺寸策略，使其填滿可用空間
 
         Args:
-            frame: 要配置的主框架。
-            padx: 水平邊距。
-            pady: 垂直邊距。
+            frame: 要設定的框架元件
+            padx: 水平邊距，預設 12
+            pady: 垂直邊距，預設 12
         """
         if padx is None:
             padx = 12
@@ -170,15 +74,11 @@ class UIUtils:
             if hasattr(frame, "attach"):
                 frame.attach(fill="both", expand=True)
             return
-        frame.attach(fill="both", expand=True, padx=padx, pady=pady)
+        if hasattr(frame, "attach"):
+            frame.attach(fill="both", expand=True, padx=padx, pady=pady)
 
     @staticmethod
     def get_mousewheel_units(delta: int) -> int:
-        """
-        將原生 MouseWheel 的 delta 轉為視窗滾動單位。
-
-        回傳值符合清單滾動介面的單位格式。
-        """
         if delta == 0:
             return 0
         units = int(-delta / 120)
@@ -189,12 +89,12 @@ class UIUtils:
     @staticmethod
     def cancel_scheduled_job(widget, job_attr: str, *, owner: Any | None = None) -> None:
         """
-        取消指定的排程工作。
+        取消指定的排程工作並將其屬性設為 None
 
         Args:
-            widget: 排程所在的 widget。
-            job_attr: 用來保存 job id 的屬性名稱。
-            owner: 自訂 job holder 物件。
+            widget: 關聯的 UI 元件
+            job_attr: 儲存 Job ID 的屬性名稱
+            owner: Job ID 實際儲存的物件，若為 None 則使用 widget
         """
         holder = owner if owner is not None else widget
         job_id = getattr(holder, job_attr, None)
@@ -231,17 +131,18 @@ class UIUtils:
         widget, job_attr: str, delay_ms: int, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any | None:
         """
-        以 debounce 方式排程：新的呼叫會覆蓋尚未執行的舊工作。
+        建立防抖 (Debounce) 排程
+        在指定延遲時間內若再次呼叫，將重設計時器，僅在最後一次呼叫後執行
 
         Args:
-            widget: 排程所在的 widget。
-            job_attr: 用來保存 job id 的屬性名稱。
-            delay_ms: 延遲毫秒數。
-            callback: 要執行的回呼。
-            owner: 自訂 job holder 物件。
+            widget: 關聯的 UI 元件，用於生命週期管理
+            job_attr: 儲存 job ID 的屬性名稱
+            delay_ms: 延遲毫秒數
+            callback: 延遲結束後執行的回呼函式
+            owner: 持有 job 屬性的物件，若未指定則使用 widget
 
         Returns:
-            建立的 job id，失敗時回傳 None。
+            Any | None: 建立成功的 Job ID，失敗則回傳 None
         """
         holder = owner if owner is not None else widget
         if not UIUtils._is_schedulable_widget(widget, holder, job_attr):
@@ -274,16 +175,17 @@ class UIUtils:
         widget, job_attr: str, callback: Callable[[], Any], *, owner: Any | None = None
     ) -> Any | None:
         """
-        合併多次請求為單次 `schedule_idle` 執行。
+        建立合併的閒置排程 (Coalesced Idle)
+        將任務排在 UI 執行緒的下一次閒置週期執行，避免重複排程
 
         Args:
-            widget: 排程所在的 widget。
-            job_attr: 用來保存 job id 的屬性名稱。
-            callback: 要執行的回呼。
-            owner: 自訂 job holder 物件。
+            widget: 關聯的 UI 元件，用於生命週期管理
+            job_attr: 儲存 job ID 的屬性名稱
+            callback: 閒置時執行的回呼函式
+            owner: 持有 job 屬性的物件，若未指定則使用 widget
 
         Returns:
-            建立的 job id，失敗時回傳 None。
+            Any | None: 建立成功的 Job ID，失敗則回傳 None
         """
         holder = owner if owner is not None else widget
         if getattr(holder, job_attr, None):
@@ -326,19 +228,20 @@ class UIUtils:
         last_run_attr: str | None = None,
     ) -> bool:
         """
-        節流排程：限制 callback 執行頻率，必要時保留尾端一次執行。
+        建立節流 (Throttle) 排程
+        確保回呼函式在指定時間間隔內最多僅執行一次
 
         Args:
-            widget: 排程所在的 widget。
-            job_attr: 用來保存 job id 的屬性名稱。
-            interval_ms: 最小執行間隔毫秒數。
-            callback: 要執行的回呼。
-            owner: 自訂 job holder 物件。
-            trailing: 是否在節流期間保留尾端執行。
-            last_run_attr: 保存上次執行時間的屬性名稱。
+            widget: 關聯的 UI 元件，用於生命週期管理
+            job_attr: 儲存 job ID 的屬性名稱
+            interval_ms: 節流間隔毫秒數
+            callback: 要執行的回呼函式
+            owner: 持有 job 屬性的物件，若未指定則使用 widget
+            trailing: 是否在節流結束後執行最後一次呼叫
+            last_run_attr: 儲存最後執行時間的屬性名稱
 
         Returns:
-            若 callback 立即執行則回傳 True，否則回傳 False。
+            bool: 是否成功排程或立即執行
         """
         holder = owner if owner is not None else widget
         if not widget:
@@ -389,132 +292,90 @@ class UIUtils:
         return False
 
     @staticmethod
-    def attach_tooltip(
-        widget,
-        text: str,
-        *,
-        bg: str = "#2b2b2b",
-        fg: str = "white",
-        font=None,
-        padx: int = 4,
-        pady: int = 2,
-        wraplength: int | None = None,
-        justify: str = "left",
-        borderwidth: int = 0,
-        relief: str = "flat",
-        offset_x: int = 5,
-        offset_y: int = 5,
-        show_delay_ms: int = 0,
-        auto_hide_ms: int | None = None,
-    ) -> None:
-        """
-        替 widget 綁定原生 Qt tooltip。
-
-        Args:
-            widget: 要綁定提示的 widget。
-            text: 提示文字。
-            bg: 背景色。
-            fg: 文字顏色。
-            font: 字型設定。
-            padx: 內距水平值。
-            pady: 內距垂直值。
-            wraplength: 換行寬度。
-            justify: 文字對齊方式。
-            borderwidth: 邊框寬度。
-            relief: 邊框樣式。
-            offset_x: 水平偏移量。
-            offset_y: 垂直偏移量。
-            show_delay_ms: 顯示延遲毫秒數。
-            auto_hide_ms: 自動隱藏毫秒數。
-        """
-        _ = (bg, fg, font, padx, pady, wraplength, justify, borderwidth, relief, offset_x, offset_y, show_delay_ms)
-        if not widget:
-            return
-        try:
-            if hasattr(widget, "setToolTip"):
-                widget.setToolTip(text or "")
-                if auto_hide_ms and hasattr(widget, "setToolTipDuration"):
-                    widget.setToolTipDuration(int(auto_hide_ms))
-                return
-            widget._tooltip_text = text or ""
-        except Exception as e:
-            logger.exception(f"綁定 tooltip 事件失敗: {e}")
-
-    @staticmethod
     def _dispatch_dialog(fn: Callable, *args, **kwargs) -> Any:
-        """確保對話框在 UI 執行緒執行。"""
         if _is_ui_thread():
             return fn(*args, **kwargs)
         return run_on_ui_thread(lambda: fn(*args, **kwargs), timeout=None)
 
     @staticmethod
-    def show_error(title: str = "錯誤", message: str = "發生未知錯誤", parent=None, topmost: bool = False) -> None:
-        """
-        顯示錯誤訊息對話框。
-
-        Args:
-            title: 對話框標題。
-            message: 錯誤訊息。
-            parent: 父視窗。
-            topmost: 是否置頂。
-        """
-        UIUtils._dispatch_dialog(DialogUtils.show_error, title, message, parent, topmost)
-
-    @staticmethod
-    def show_warning(title: str = "警告", message: str = "警告訊息", parent=None, topmost: bool = False) -> None:
-        """
-        顯示警告訊息對話框。
-
-        Args:
-            title: 對話框標題。
-            message: 警告訊息。
-            parent: 父視窗。
-            topmost: 是否置頂。
-        """
-        UIUtils._dispatch_dialog(DialogUtils.show_warning, title, message, parent, topmost)
+    def _play_message_sound(level: str) -> None:
+        """根據訊息層級播放對應的系統音效"""
+        sound_map = {
+            "error": winsound.MB_ICONHAND,
+            "warning": winsound.MB_ICONEXCLAMATION,
+            "info": winsound.MB_ICONASTERISK,
+        }
+        flag = sound_map.get(level)
+        if flag is not None:
+            winsound.MessageBeep(flag)
 
     @staticmethod
-    def show_info(title: str = "資訊", message: str = "資訊訊息", parent=None, topmost: bool = False) -> None:
+    def show_message(
+        title: str,
+        message: str,
+        parent=None,
+        message_level: str = "info",
+    ) -> None:
         """
-        顯示資訊對話框。
+        顯示訊息對話框，並根據層級播放對應的系統音效
 
         Args:
-            title: 對話框標題。
-            message: 資訊訊息。
-            parent: 父視窗。
-            topmost: 是否置頂。
+            title: 對話框標題
+            message: 對話框訊息內容
+            parent: 父層視窗
+            message_level: 訊息層級，'error'、'warning' 或 'info'
         """
-        UIUtils._dispatch_dialog(DialogUtils.show_info, title, message, parent, topmost)
+
+        def _show():
+            nonlocal parent
+            if parent is None:
+                parent = QApplication.activeWindow()
+            UIUtils._play_message_sound(message_level)
+            w = MessageBox(title, message, parent)
+            w.yesButton.setText("確定")
+            w.cancelButton.hide()
+            w.exec()
+
+        UIUtils._dispatch_dialog(_show)
 
     @staticmethod
     def ask_yes_no_cancel(
-        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True, topmost: bool = False
+        title: str = "確認", message: str = "請選擇操作", parent=None, show_cancel: bool = True
     ) -> bool | None:
         """
-        顯示確認對話框，支援是/否/取消選項。
+        顯示是/否/取消確認對話框
 
         Args:
-            title: 對話框標題。
-            message: 提示訊息。
-            parent: 父視窗。
-            show_cancel: 是否顯示取消按鈕。
-            topmost: 是否置頂。
+            title: 對話框標題
+            message: 對話框訊息內容
+            parent: 父層視窗
+            show_cancel: 是否顯示取消按鈕；若為 False，取消按鈕將顯示為「否」
+
         Returns:
-            True 表示使用者選擇「是」，False 表示使用者選擇「否」，None 表示使用者選擇「取消」或關閉對話框
+            bool | None: 是回傳 True，否/取消回傳 False 或 None
         """
-        if _is_ui_thread():
-            return DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost)
-        return run_on_ui_thread(
-            lambda: DialogUtils.ask_yes_no_cancel(title, message, parent, show_cancel, topmost), timeout=None
-        )
+
+        def _show():
+            nonlocal parent
+            if parent is None:
+                parent = QApplication.activeWindow()
+            w = MessageBox(title, message, parent)
+            w.yesButton.setText("是")
+            if show_cancel:
+                w.cancelButton.setText("取消")
+            else:
+                w.cancelButton.setText("否")
+            return bool(w.exec())
+
+        return UIUtils._dispatch_dialog(_show)
 
     @staticmethod
     def reveal_in_explorer(target) -> None:
         """
-        在檔案總管中顯示。
+        在檔案總管中顯示指定路徑
 
         Args:
-            target: 要顯示的檔案或資料夾路徑。
+            target: 要在檔案總管中顯示的檔案或資料夾路徑
         """
         target_path = Path(target)
         try:
@@ -539,7 +400,6 @@ class UIUtils:
 
     @staticmethod
     def _is_safe_windows_path_argument(path_text: str) -> bool:
-        """檢查 Windows 指令列參數是否含有危險控制字元。"""
         if not path_text:
             return False
         return all(ch not in path_text for ch in ('"', "\x00", "\r", "\n"))
@@ -547,10 +407,10 @@ class UIUtils:
     @staticmethod
     def open_external(target) -> None:
         """
-        使用系統預設程式開啟。
+        使用系統預設程式開啟外部資源（網址或檔案路徑）
 
         Args:
-            target: 要開啟的檔案、資料夾或 URL。
+            target: 要開啟的 URL 或檔案路徑
         """
         try:
             target_str = str(target)
@@ -587,73 +447,26 @@ class UIUtils:
         except Exception as e:
             logger.exception(f"開啟外部資源失敗: {e}")
 
-    @staticmethod
-    def sync_bool_string_state(bool_var, string_var) -> None:
+
+class ScrollableComboBox(ComboBox):
+    """支援滾輪切換選項的下拉選單"""
+
+    def wheelEvent(self, event):
         """
-        建立 BoolState 與 TextState 的雙向綁定（用於 server.properties 等場景）
+        處理滾輪事件以切換下拉選單選項
 
         Args:
-            bool_var: qt.BoolState 布林變數
-            string_var: qt.TextState 字串變數（"true"/"false"）
+            event: 滾輪事件物件
         """
-        in_sync = False
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
 
-        def update_string_var(*_args):
-            nonlocal in_sync
-            if in_sync:
-                return
-            in_sync = True
-            try:
-                new_value = "true" if bool_var.get() else "false"
-                if string_var.get() != new_value:
-                    string_var.set(new_value)
-            finally:
-                in_sync = False
+        step = -1 if delta > 0 else 1
+        current_index = self.currentIndex()
+        new_index = current_index + step
 
-        def update_bool_var(*_args):
-            nonlocal in_sync
-            if in_sync:
-                return
-            in_sync = True
-            try:
-                current = string_var.get().strip().lower()
-                if current in ("true", "1", "yes", "on"):
-                    normalized = "true"
-                    new_bool = True
-                else:
-                    normalized = "false"
-                    new_bool = False
-                if string_var.get() != normalized:
-                    string_var.set(normalized)
-                if bool_var.get() != new_bool:
-                    bool_var.set(new_bool)
-            finally:
-                in_sync = False
+        if 0 <= new_index < self.count():
+            self.setCurrentIndex(new_index)
 
-        bool_var.trace_add("write", update_string_var)
-        string_var.trace_add("write", update_bool_var)
-
-    @staticmethod
-    def create_styled_button(parent, text, command, button_type="secondary", **kwargs) -> qt.Button:
-        """
-        建立統一樣式的按鈕。
-
-        Args:
-            parent: 父容器。
-            text: 按鈕文字。
-            command: 按鈕點擊回呼。
-            button_type: 按鈕樣式類型（primary / secondary / small / cancel）。
-            **kwargs: 額外的 Button 參數，會覆蓋預設樣式。
-
-        Returns:
-            建立完成的 Button。
-        """
-        base_style = dict(_BUTTON_STYLES.get(button_type, {}))
-        is_primary = button_type == "primary"
-        base_style["font"] = FontManager.get_font(
-            family="Microsoft JhengHei",
-            size=14,
-            weight="bold" if is_primary else "normal",
-        )
-        final_style = {**base_style, **kwargs}
-        return qt.Button(parent, text=text, command=command, **final_style)
+        event.accept()

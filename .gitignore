@@ -61,19 +61,17 @@ cache/
 *.msm
 *.msp
 
-# =====================
-# Report directory
-# =====================
-report/*
-!report/comprehensive_report.py
-*.xml
-.vscode/tasks.json
-
 # other
 *.egg-info
-
-#文件
 docs/*
 !docs/USER_GUIDE.md
 !docs/TECHNICAL_OVERVIEW.md
 .github/skills
+report/*
+!report/comprehensive_report.py
+.vscode/tasks.json
+scripts/*
+!scripts\build_installer_nuitka.py
+!scripts\check_import_boundaries.py
+!scripts\format_lint_check.bat
+!scripts\version_check.py

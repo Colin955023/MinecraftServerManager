@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.8.0 - 2026-08-03
+
+### 新增
+- **QFluentWidgets 原生元件全面導入**：導入並套用 PySide6-Fluent-Widgets 核心元件，完成主視窗與子選單的完整 Fluent Design 替換。
+- **Component 層半自動測試體系**：加入對 UI 元件層級的測試覆蓋，大幅提高修改 UI 程式碼的信心度。
+
+### 調整
+- **移除相容層與舊風格適配**：全面移除 `fluent.py`、`custom_dropdown.py` 等 Fallback 相容層，以及 `qt_widgets.py` 的 tkinter 風格適配器，完全改用 Qt 與 QFluentWidgets 原生 API 開發。
+- **手動 QSS 系統移除**：刪除 `NativeQtStyle`，不再手動重算所有 QSS 字串屬性，交由 `qfluentwidgets.setTheme` 自動處理深淺主題切換。
+- **文件同步更新**：修正並同步 `docs/TECHNICAL_OVERVIEW.md` 與 `AGENTS.md` 等架構文件。
+
+### 修正
+- 修正文件與程式碼結構不一致的過時引用。
+- 修復元件升級後的相依性警告與未使用的導入（ARG002, ARG004, F821）。
+
+### 重大變更
+- **UI 框架底層全面替換**：移除所有 `qt_widgets.py` wrapper 類別。專案徹底捨棄與 Tkinter 相容的舊有介面包裝器。
+
 ## v1.7.2 - 2026-06-05
 
 ### 新增

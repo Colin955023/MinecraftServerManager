@@ -1,11 +1,11 @@
-"""模組 provider 解析 helper。"""
+"""模組 provider 解析 helper"""
 
 from __future__ import annotations
 
-import contextlib
 import re
 import zipfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from ...utils import (
     APP_VERSION,
     GITHUB_OWNER,
     GITHUB_REPO,
+    ExceptionUtils,
     HTTPUtils,
     LocalProviderEnsureResult,
     ProviderMetadataRecord,
@@ -21,7 +22,6 @@ from ...utils import (
     ensure_local_mod_provider_record,
     get_logger,
     is_cached_provider_metadata_fresh,
-    record_and_mark,
     resolve_modrinth_provider_record,
 )
 
@@ -37,17 +37,17 @@ def resolve_platform_info_from_cache(
     ensure_platform_provider_record: Callable[[ProviderMetadataRecord], LocalProviderEnsureResult],
 ) -> tuple[ModPlatform, str, str]:
     """
-    依快取 provider metadata 解析平台資訊，必要時才重新偵測。
+    依快取 provider metadata 解析平台資訊，必要時才重新偵測
 
     Args:
-        index_manager: 用於快取 provider metadata 的索引管理器。
-        file_path: 目前掃描中的模組檔案路徑。
-        name: 模組顯示名稱。
-        cached_provider: 既有的 provider metadata 快取內容。
-        ensure_platform_provider_record: 建立或補齊 provider record 的回呼。
+        index_manager: 用於快取 provider metadata 的索引管理器
+        file_path: 目前掃描中的模組檔案路徑
+        name: 模組顯示名稱
+        cached_provider: 既有的 provider metadata 快取內容
+        ensure_platform_provider_record: 建立或補齊 provider record 的回呼
 
     Returns:
-        由平台、project id 與 slug 組成的解析結果。
+        由平台、project id 與 slug 組成的解析結果
     """
 
     raw_cached_provider = dict(cached_provider or {})
@@ -79,15 +79,15 @@ def resolve_platform_info_from_cache(
 
 def search_on_modrinth_candidates(name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
     """
-    依多組候選關鍵字搜尋 Modrinth 專案。
+    依多組候選關鍵字搜尋 Modrinth 專案
 
     Args:
-        name: 模組顯示名稱。
-        base_name: 檔名去除副檔名後的基底名稱。
-        filename: 原始檔名。
+        name: 模組顯示名稱
+        base_name: 檔名去除副檔名後的基底名稱
+        filename: 原始檔名
 
     Returns:
-        找到時回傳平台、project id 與 slug；找不到時回傳本地平台與空值。
+        找到時回傳平台、project id 與 slug；找不到時回傳本地平台與空值
     """
 
     try:
@@ -109,8 +109,8 @@ def search_on_modrinth_candidates(name: str, base_name: str, filename: str) -> t
     except (ValueError, TypeError) as exc:
         logger.debug(f"Modrinth 搜尋遇到解析/型別錯誤: {exc}")
     except Exception as exc:
-        with contextlib.suppress(Exception):
-            record_and_mark(
+        with suppress(Exception):
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=None,
                 reason="modrinth_search_failed",
@@ -121,7 +121,7 @@ def search_on_modrinth_candidates(name: str, base_name: str, filename: str) -> t
 
 
 class ModProviderResolver:
-    """集中管理 provider metadata 與 Modrinth 身分解析。"""
+    """集中管理 provider metadata 與 Modrinth 身分解析"""
 
     def __init__(
         self,
@@ -145,17 +145,17 @@ class ModProviderResolver:
         cached_provider: dict[str, object] | None = None,
     ) -> tuple[ModPlatform, str, str]:
         """
-        優先使用快取 metadata，必要時再重新解析 provider 身分。
+        優先使用快取 metadata，必要時再重新解析 provider 身分
 
         Args:
-            file_path: 目前掃描中的模組檔案路徑。
-            name: 模組顯示名稱。
-            base_name: 檔名去除副檔名後的基底名稱。
-            filename: 原始檔名。
-            cached_provider: 現有的 provider metadata 快取內容。
+            file_path: 目前掃描中的模組檔案路徑
+            name: 模組顯示名稱
+            base_name: 檔名去除副檔名後的基底名稱
+            filename: 原始檔名
+            cached_provider: 現有的 provider metadata 快取內容
 
         Returns:
-            由平台、project id 與 slug 組成的解析結果。
+            由平台、project id 與 slug 組成的解析結果
         """
 
         return resolve_platform_info_from_cache(
@@ -182,17 +182,17 @@ class ModProviderResolver:
         cached_record: ProviderMetadataRecord,
     ) -> LocalProviderEnsureResult:
         """
-        補齊或建立模組的 provider metadata record。
+        補齊或建立模組的 provider metadata record
 
         Args:
-            file_path: 模組檔案路徑。
-            name: 模組顯示名稱。
-            base_name: 檔名去除副檔名後的基底名稱。
-            filename: 原始檔名。
-            cached_record: 目前可用的快取 record。
+            file_path: 模組檔案路徑
+            name: 模組顯示名稱
+            base_name: 檔名去除副檔名後的基底名稱
+            filename: 原始檔名
+            cached_record: 目前可用的快取 record
 
         Returns:
-            provider record 補齊結果，包含來源與最終 record。
+            provider record 補齊結果，包含來源與最終 record
         """
 
         return ensure_local_mod_provider_record(
@@ -205,13 +205,13 @@ class ModProviderResolver:
 
     def resolve_modrinth_provider_record_for_scan(self, identifier: str) -> ProviderMetadataRecord:
         """
-        將掃描到的識別字轉成標準化的 Modrinth provider record。
+        將掃描到的識別字轉成標準化的 Modrinth provider record
 
         Args:
-            identifier: 可能是 slug 或 project id 的識別字。
+            identifier: 可能是 slug 或 project id 的識別字
 
         Returns:
-            已標準化的 provider record。
+            已標準化的 provider record
         """
 
         project_id, slug = self.resolve_modrinth_project_identity(identifier)
@@ -229,16 +229,16 @@ class ModProviderResolver:
         filename: str,
     ) -> ProviderMetadataRecord:
         """
-        以 provider 偵測結果建立完整 record。
+        以 provider 偵測結果建立完整 record
 
         Args:
-            file_path: 模組檔案路徑。
-            name: 模組顯示名稱。
-            base_name: 檔名去除副檔名後的基底名稱。
-            filename: 原始檔名。
+            file_path: 模組檔案路徑
+            name: 模組顯示名稱
+            base_name: 檔名去除副檔名後的基底名稱
+            filename: 原始檔名
 
         Returns:
-            含平台、project id、slug 與名稱的 provider record。
+            含平台、project id、slug 與名稱的 provider record
         """
 
         platform, platform_id, platform_slug = self.detect_platform_info(file_path, name, base_name, filename)
@@ -251,13 +251,13 @@ class ModProviderResolver:
 
     def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
         """
-        將 slug 或 project id 解析為 canonical project id 與 slug。
+        將 slug 或 project id 解析為 canonical project id 與 slug
 
         Args:
-            identifier: 可能是 Modrinth slug 或 project id。
+            identifier: 可能是 Modrinth slug 或 project id
 
         Returns:
-            由 canonical project id 與 slug 組成的 tuple。
+            由 canonical project id 與 slug 組成的 tuple
         """
 
         clean_identifier = str(identifier or "").strip()
@@ -277,13 +277,13 @@ class ModProviderResolver:
 
     def build_provider_record_from_search(self, query: str) -> ProviderMetadataRecord | None:
         """
-        透過搜尋結果建立 provider record。
+        透過搜尋結果建立 provider record
 
         Args:
-            query: 用於搜尋 Modrinth 的查詢字串。
+            query: 用於搜尋 Modrinth 的查詢字串
 
         Returns:
-            成功解析時回傳 provider record，否則回傳 None。
+            成功解析時回傳 provider record，否則回傳 None
         """
 
         platform, project_id, slug = self.search_on_modrinth(query, query, query)
@@ -295,16 +295,16 @@ class ModProviderResolver:
         self, file_path: Path, name: str, base_name: str, filename: str
     ) -> tuple[ModPlatform, str, str]:
         """
-        從本地模組檔案與檔名線索偵測平台資訊。
+        從本地模組檔案與檔名線索偵測平台資訊
 
         Args:
-            file_path: 模組檔案路徑。
-            name: 模組顯示名稱。
-            base_name: 檔名去除副檔名後的基底名稱。
-            filename: 原始檔名。
+            file_path: 模組檔案路徑
+            name: 模組顯示名稱
+            base_name: 檔名去除副檔名後的基底名稱
+            filename: 原始檔名
 
         Returns:
-            由平台、project id 與 slug 組成的偵測結果。
+            由平台、project id 與 slug 組成的偵測結果
         """
 
         platform = ModPlatform.LOCAL
@@ -323,22 +323,22 @@ class ModProviderResolver:
                 if platform_id:
                     platform = ModPlatform.MODRINTH
         except (zipfile.BadZipFile, OSError) as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="io_or_bad_zip_detect",
                 details={"context": "detect_platform_info"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip_detect")
         except Exception as exc:
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 exc,
                 marker_path=file_path,
                 reason="unexpected_detect_error",
                 details={"context": "detect_platform_info"},
             )
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_detect_error")
         if platform == ModPlatform.LOCAL or not platform_id:
             platform, platform_id, searched_slug = self.search_on_modrinth(name, base_name, filename)
@@ -347,13 +347,13 @@ class ModProviderResolver:
 
     def extract_platform_id_from_fabric(self, jar: Any) -> str:
         """
-        從 `fabric.mod.json` 提取平台識別字。
+        從 `fabric.mod.json` 提取平台識別字
 
         Args:
-            jar: 已開啟的 JAR/ZIP 物件。
+            jar: 已開啟的 JAR/ZIP 物件
 
         Returns:
-            解析出的平台識別字；失敗時回傳空字串。
+            解析出的平台識別字；失敗時回傳空字串
         """
 
         try:
@@ -361,8 +361,8 @@ class ModProviderResolver:
             if meta and isinstance(meta, dict):
                 return str(meta.get("id", "") or "")
         except Exception as exc:
-            with contextlib.suppress(Exception):
-                record_and_mark(
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
                     exc,
                     marker_path=None,
                     reason="extract_platform_id_from_fabric_failed",
@@ -373,13 +373,13 @@ class ModProviderResolver:
 
     def extract_platform_id_from_forge(self, jar: Any) -> str:
         """
-        從 `mods.toml` 提取平台識別字。
+        從 `mods.toml` 提取平台識別字
 
         Args:
-            jar: 已開啟的 JAR/ZIP 物件。
+            jar: 已開啟的 JAR/ZIP 物件
 
         Returns:
-            解析出的平台識別字；失敗時回傳空字串。
+            解析出的平台識別字；失敗時回傳空字串
         """
 
         try:
@@ -390,8 +390,8 @@ class ModProviderResolver:
                     if match:
                         return str(match.group(2) or "")
         except Exception as exc:
-            with contextlib.suppress(Exception):
-                record_and_mark(
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
                     exc,
                     marker_path=None,
                     reason="extract_platform_id_from_forge_failed",
@@ -402,15 +402,15 @@ class ModProviderResolver:
 
     def search_on_modrinth(self, name: str, base_name: str, filename: str) -> tuple[ModPlatform, str, str]:
         """
-        使用多組名稱候選在 Modrinth 搜尋對應專案。
+        使用多組名稱候選在 Modrinth 搜尋對應專案
 
         Args:
-            name: 模組顯示名稱。
-            base_name: 檔名去除副檔名後的基底名稱。
-            filename: 原始檔名。
+            name: 模組顯示名稱
+            base_name: 檔名去除副檔名後的基底名稱
+            filename: 原始檔名
 
         Returns:
-            找到時回傳平台、project id 與 slug；找不到時回傳本地平台與空值。
+            找到時回傳平台、project id 與 slug；找不到時回傳本地平台與空值
         """
 
         return search_on_modrinth_candidates(name, base_name, filename)

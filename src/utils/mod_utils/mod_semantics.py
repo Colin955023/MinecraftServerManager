@@ -1,8 +1,8 @@
 """
-Mod metadata/recommendation 語意常數。
+Mod metadata/recommendation 語意常數
 
 集中管理本地更新流程會用到的 metadata source 與 recommendation
-source/confidence 欄位值，避免不同路徑各自硬編碼造成語意漂移。
+source/confidence 欄位值，避免不同路徑各自硬編碼造成語意漂移
 """
 
 from __future__ import annotations
@@ -52,28 +52,26 @@ RECOMMENDATION_CONFIDENCE_LABELS = {
     RECOMMENDATION_CONFIDENCE_RETRYABLE: "可重試",
     RECOMMENDATION_CONFIDENCE_BLOCKED: "阻擋",
 }
-ONLINE_REVIEW_PRECHECK_NOTE = "已完成安裝前預檢：伺服器條件、本地模組與必要依賴已重新驗證。"
-LOCAL_UPDATE_REVIEW_PRECHECK_NOTE = "已完成更新前預檢：優先用本地雜湊與已快取 metadata 檢查最新版本。"
-LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED = "metadata 重查失敗，已暫停自動更新以避免錯誤建議。"
+ONLINE_REVIEW_PRECHECK_NOTE = "已完成安裝前預檢：伺服器條件、本地模組與必要依賴已重新驗證"
+LOCAL_UPDATE_REVIEW_PRECHECK_NOTE = "已完成更新前預檢：優先用本地雜湊與已快取 metadata 檢查最新版本"
+LOCAL_UPDATE_ERROR_STALE_REVALIDATION_FAILED = "metadata 重查失敗，已暫停自動更新以避免錯誤建議"
 LOCAL_UPDATE_ERROR_STALE_REVALIDATION_INVALIDATED = (
-    "metadata 連續重查失敗，暫時鎖定為 invalidated，系統將在後續檢查自動再試。"
+    "metadata 連續重查失敗，暫時鎖定為 invalidated，系統將在後續檢查自動再試"
 )
-LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO = "已保留舊識別供比對，稍後會再自動重查。"
-LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED = "仍在退避視窗，系統會於到期後自動再試。"
-LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING = "仍在 retrying 退避視窗，系統會於到期後自動再試。"
-LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED = "stale metadata 重查失敗：暫停自動更新並保留舊識別供比對。"
-LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED = "metadata 未識別，暫時無法自動檢查更新。"
-LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED = "系統會在後續檢查自動再試識別，暫時先略過本次更新。"
+LOCAL_UPDATE_NOTE_STALE_RETRY_AUTO = "已保留舊識別供比對，稍後會再自動重查"
+LOCAL_UPDATE_NOTE_STALE_BACKOFF_INVALIDATED = "仍在退避視窗，系統會於到期後自動再試"
+LOCAL_UPDATE_NOTE_STALE_BACKOFF_RETRYING = "仍在 retrying 退避視窗，系統會於到期後自動再試"
+LOCAL_UPDATE_METADATA_NOTE_STALE_REVALIDATION_FAILED = "stale metadata 重查失敗：暫停自動更新並保留舊識別供比對"
+LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED = "metadata 未識別，暫時無法自動檢查更新"
+LOCAL_UPDATE_NOTE_METADATA_UNRESOLVED = "系統會在後續檢查自動再試識別，暫時先略過本次更新"
 LOCAL_UPDATE_NOTE_PROJECT_FALLBACK_ADVISORY = (
-    "此候選版本來自 project fallback；待 hash metadata 補齊後可提升更新判定精確度。"
+    "此候選版本來自 project fallback；待 hash metadata 補齊後可提升更新判定精確度"
 )
-LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED = (
-    "目前版本尚未由 provider metadata 確認；目前版本欄位僅為本地資訊輔助顯示。"
-)
-LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE = "所有已識別的本地模組目前都沒有可用更新，且未偵測到明顯相容性問題。"
+LOCAL_UPDATE_NOTE_CURRENT_VERSION_UNVERIFIED = "目前版本尚未由 provider metadata 確認；目前版本欄位僅為本地資訊輔助顯示"
+LOCAL_UPDATE_NOTE_IDENTIFIED_NO_UPDATE = "所有已識別的本地模組目前都沒有可用更新，且未偵測到明顯相容性問題"
 ONLINE_INSTALL_PROMPT_ADVISORY_LINE_TEMPLATE = "建議確認：{count} 項（有相容性提醒），將依目前啟用狀態一併安裝"
 ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE = "需先處理：{count} 項，本次先略過，未完成項目將保留在安裝清單中"
-ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE = "安裝清單中的項目目前都無法安裝，本次先略過，後續檢查會自動再試可執行項目。"
+ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE = "安裝清單中的項目目前都無法安裝，本次先略過，後續檢查會自動再試可執行項目"
 LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE = "建議確認：{count} 項，將依目前啟用狀態一併更新"
 LOCAL_UPDATE_PROMPT_RETRYABLE_LINE_TEMPLATE = "可重試：{count} 項，本次先略過，系統將於後續檢查自動重試"
 LOCAL_UPDATE_PROMPT_UNKNOWN_LINE_TEMPLATE = "待識別：{count} 項，本次先略過，系統將於後續檢查自動再試"

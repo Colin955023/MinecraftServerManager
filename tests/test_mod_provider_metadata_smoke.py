@@ -4,10 +4,8 @@ from src.utils import (
     PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN,
     ProviderMetadataRecord,
     cache_provider_metadata_record,
-    compute_provider_revalidation_backoff_seconds,
     ensure_local_mod_provider_record,
     is_provider_revalidation_retry_due,
-    register_provider_revalidation_failure,
     register_provider_revalidation_success,
     should_attempt_provider_revalidation,
 )
@@ -99,43 +97,6 @@ def test_ensure_local_mod_provider_record_uses_fallback_when_cached_identifier_a
     assert calls["fallback"] == 1
 
 
-def test_register_provider_revalidation_failure_sets_retrying_backoff() -> None:
-    payload = register_provider_revalidation_failure(
-        {"project_id": "P7dR8mSH", "slug": "fabric-api", "stale_revalidation_failures": "1"},
-        now_epoch_ms=1_000,
-    )
-
-    assert payload["stale_revalidation_failures"] == "2"
-    assert payload["lifecycle_state"] == "retrying"
-    assert payload["next_retry_not_before_epoch_ms"] == "121000"
-    assert payload["last_revalidation_failed_at_epoch_ms"] == "1000"
-
-
-def test_register_provider_revalidation_failure_sets_invalidated_after_threshold() -> None:
-    payload = register_provider_revalidation_failure(
-        {"project_id": "P7dR8mSH", "slug": "fabric-api", "stale_revalidation_failures": "3"},
-        now_epoch_ms=2_000,
-    )
-
-    assert payload["stale_revalidation_failures"] == "4"
-    assert payload["lifecycle_state"] == "invalidated"
-
-
-def test_register_provider_revalidation_failure_ignores_manual_override_field() -> None:
-    payload = register_provider_revalidation_failure(
-        {
-            "project_id": "P7dR8mSH",
-            "slug": "fabric-api",
-            "manual_override": True,
-            "stale_revalidation_failures": "1",
-        },
-        now_epoch_ms=2_000,
-    )
-
-    assert payload["lifecycle_state"] == "retrying"
-    assert payload["stale_revalidation_failures"] == "2"
-
-
 def test_register_provider_revalidation_success_resets_backoff_fields() -> None:
     payload = register_provider_revalidation_success(
         {
@@ -175,12 +136,6 @@ def test_is_provider_revalidation_retry_due_follows_retry_window() -> None:
 
     assert is_provider_revalidation_retry_due(raw, now_epoch_ms=1_000) is False
     assert is_provider_revalidation_retry_due(raw, now_epoch_ms=2_000) is True
-
-
-def test_compute_provider_revalidation_backoff_seconds_uses_exponential_growth_with_cap() -> None:
-    assert compute_provider_revalidation_backoff_seconds(1) == 60
-    assert compute_provider_revalidation_backoff_seconds(2) == 120
-    assert compute_provider_revalidation_backoff_seconds(10) == 1800
 
 
 def test_should_attempt_provider_revalidation_returns_false_when_retry_not_due() -> None:

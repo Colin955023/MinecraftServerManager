@@ -54,7 +54,6 @@ def test_delete_local_mods_result_deletes_existing_files_and_reports_missing(tmp
 
 def test_download_source_policy_flags_non_official_hosts_only() -> None:
     assert get_non_official_download_host("https://cdn.modrinth.com/data/example.jar", "modrinth") == ""
-    # 測試 mirror.example.com
     assert (
         get_non_official_download_host("https://mirror.example.com/files/example.jar", "modrinth")
         == "mirror.example.com"
@@ -71,9 +70,7 @@ def test_download_source_policy_flags_non_official_hosts_only() -> None:
         "https://mirror.example.com/files/example.jar",
         "modrinth",
         provider_label="Modrinth",
-    ) == ("非官方下載來源：Example Mod 將從 mirror.example.com 下載，非 Modrinth 官方網域，請再次確認來源可信度。")
-
-    # 測試 edge.example.net
+    ) == ("非官方下載來源：Example Mod 將從 mirror.example.com 下載，非 Modrinth 官方網域，請再次確認來源可信度")
     assert (
         get_non_official_download_host("https://edge.example.net/files/example2.jar", "modrinth") == "edge.example.net"
     )
@@ -88,7 +85,7 @@ def test_download_source_policy_flags_non_official_hosts_only() -> None:
         "https://edge.example.net/files/example2.jar",
         "modrinth",
         provider_label="Modrinth",
-    ) == ("非官方下載來源：Edge Mod 將從 edge.example.net 下載，非 Modrinth 官方網域，請再次確認來源可信度。")
+    ) == ("非官方下載來源：Edge Mod 將從 edge.example.net 下載，非 Modrinth 官方網域，請再次確認來源可信度")
 
 
 def test_export_mod_list_html_escapes_mod_metadata() -> None:

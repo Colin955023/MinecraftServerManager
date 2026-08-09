@@ -6,7 +6,7 @@ from pathlib import Path
 
 from src.core import ModManager
 from src.models import ModPlatform
-from src.utils import HTTPUtils, ModIndexManager, compute_file_hash
+from src.utils import HashUtils, HTTPUtils, ModIndexManager
 
 
 def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
@@ -71,8 +71,8 @@ def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: P
     manager.index_manager.cache_file_hash(file_path, "sha512", "deadbeef")
 
     monkeypatch.setattr(
-        manager,
-        "_detect_platform_info",
+        manager._get_provider_resolver(),
+        "detect_platform_info",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached provider metadata")),
     )
 
@@ -100,8 +100,8 @@ def test_mod_index_manager_ensure_cached_hash_defaults_to_sha512(tmp_path: Path)
     assert manager.get_cached_hash(file_path, "sha512") == computed_hash
 
 
-def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tmp_path: Path, monkeypatch) -> None:
-    manager = ModManager(str(tmp_path))
+def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(monkeypatch) -> None:
+    from src.core.mods.mod_provider_resolver import search_on_modrinth_candidates
 
     def fake_get_json(url, timeout=None, headers=None, params=None):
         del timeout, headers
@@ -118,7 +118,7 @@ def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(tm
 
     monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
 
-    platform, project_id, slug = manager._search_on_modrinth("Fabric API", "fabric-api", "fabric-api.jar")
+    platform, project_id, slug = search_on_modrinth_candidates("Fabric API", "fabric-api", "fabric-api.jar")
 
     assert platform == ModPlatform.MODRINTH
     assert project_id == "P7dR8mSH"
@@ -153,12 +153,12 @@ def test_compute_file_hash_recomputes_when_file_content_changes(tmp_path: Path) 
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"first-content")
 
-    first_hash = compute_file_hash(str(file_path), "sha512")
+    first_hash = HashUtils.compute_file_hash_sync(file_path, algorithm="sha512")
     assert first_hash
 
     file_path.write_bytes(b"second-content")
 
-    second_hash = compute_file_hash(str(file_path), "sha512")
+    second_hash = HashUtils.compute_file_hash_sync(file_path, algorithm="sha512")
     assert second_hash
     assert second_hash != first_hash
 

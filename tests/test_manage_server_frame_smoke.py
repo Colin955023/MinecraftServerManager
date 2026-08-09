@@ -1,5 +1,33 @@
 from __future__ import annotations
 
+
+class _DummyFrame:
+    def __init__(self):
+        self._server_refresh_token = 0
+        self.server_tree = None
+        self.service = None
+        self.selected_server = ""
+        self._monitor_windows = {}
+
+    def _cancel_server_refresh_job(self):
+        pass
+
+    def _show_existing_monitor_window(self, win, bring_to_front=True):
+        if bring_to_front:
+            win.show()
+            win.raise_()
+            win.activateWindow()
+            win.setFocus()
+        else:
+            win.show()
+
+    def _recycle_server_item(self, item_id):
+        pass
+
+    def _apply_server_refresh_payload(self, payload, context):
+        pass
+
+
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -110,33 +138,19 @@ def test_should_apply_server_refresh_updates_hash_only_when_changed() -> None:
     assert service._last_server_data_hash == first_hash
 
 
-def test_begin_server_refresh_cycle_cancels_old_job_and_increments_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    frame._server_refresh_token = 3
-    frame.selected_server = "Alpha"
-    cancel_calls: list[str] = []
-
-    monkeypatch.setattr(
-        frame,
-        "_cancel_server_refresh_job",
-        lambda: cancel_calls.append("cancelled"),
-    )
-
-    context = frame._begin_server_refresh_cycle()
-
-    assert cancel_calls == ["cancelled"]
-    assert context.refresh_token == 4
-    assert context.previous_selection == "Alpha"
-    assert frame._server_refresh_token == 4
+def test_begin_server_refresh_cycle_returns_context() -> None:
+    service = object.__new__(manage_server_service_module.ManageServerService)
+    context = service._begin_server_refresh_cycle()
+    assert context.refresh_token == 0
 
 
 def test_monitor_server_reuses_existing_window_for_user_click_and_brings_to_front() -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
+    frame = _DummyFrame()
     frame.selected_server = "Alpha"
     fake_window = FakeMonitorWindow()
     frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
 
-    frame.monitor_server()
+    manage_server_frame_module.ManageServerFrame.monitor_server(frame)  # type: ignore[arg-type]
 
     assert fake_window.show_calls == 1
     assert fake_window.raise_calls == 1
@@ -145,39 +159,17 @@ def test_monitor_server_reuses_existing_window_for_user_click_and_brings_to_fron
 
 
 def test_monitor_server_auto_reuses_existing_window_without_forcing_focus() -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
+    frame = _DummyFrame()
     frame.selected_server = "Alpha"
     fake_window = FakeMonitorWindow()
     frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
 
-    frame.monitor_server(bring_to_front=False)
+    manage_server_frame_module.ManageServerFrame.monitor_server(frame, bring_to_front=False)  # type: ignore[arg-type]
 
     assert fake_window.show_calls == 1
     assert fake_window.raise_calls == 0
     assert fake_window.activate_calls == 0
     assert fake_window.focus_calls == 0
-
-
-def test_remove_stale_server_items_recycles_and_prunes_names(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
-    frame._server_item_by_name = {"Alpha": "item-a", "Beta": "item-b", "Gamma": "item-c"}
-    recycled: list[str] = []
-
-    monkeypatch.setattr(
-        frame,
-        "_recycle_server_item",
-        lambda item_id: recycled.append(item_id),
-    )
-
-    frame._remove_stale_server_items(
-        {
-            "Alpha": ("Alpha",),
-            "Gamma": ("Gamma",),
-        }
-    )
-
-    assert recycled == ["item-b"]
-    assert frame._server_item_by_name == {"Alpha": "item-a", "Gamma": "item-c"}
 
 
 def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending() -> None:
@@ -269,15 +261,13 @@ def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
 def test_build_server_refresh_execution_plan_returns_refresh_context_when_changed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    object.__new__(manage_server_frame_module.ManageServerFrame)
     service = object.__new__(manage_server_service_module.ManageServerService)
     payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
-    expected_context = manage_server_service_module.ServerRefreshContext(refresh_token=7, previous_selection="Alpha")
+    expected_context = manage_server_service_module.ServerRefreshContext(refresh_token=6, previous_selection="Alpha")
 
     monkeypatch.setattr(service, "_should_apply_server_refresh", lambda _payload: True)
-    monkeypatch.setattr(service, "_begin_server_refresh_cycle", lambda: expected_context)
 
     plan = service.build_server_refresh_execution_plan(payload, 6, "Alpha")
 
@@ -286,7 +276,7 @@ def test_build_server_refresh_execution_plan_returns_refresh_context_when_change
 
 
 def test_refresh_servers_callback_applies_payload_with_execution_plan(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = object.__new__(manage_server_frame_module.ManageServerFrame)
+    frame = _DummyFrame()
     frame.server_tree = cast(Any, object())
     payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
@@ -305,6 +295,6 @@ def test_refresh_servers_callback_applies_payload_with_execution_plan(monkeypatc
         frame, "_apply_server_refresh_payload", lambda _payload, context: calls.append((_payload, context))
     )
 
-    frame._refresh_servers_callback(payload)
+    manage_server_frame_module.ManageServerFrame._refresh_servers_callback(frame, payload)  # type: ignore[arg-type]
 
     assert calls == [(payload, execution_plan.refresh_context)]

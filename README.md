@@ -9,7 +9,7 @@
 Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟動監控到模組安裝更新，主要流程都可在圖形介面內完成；線上模組安裝與本地更新提供可審查的 Review 步驟。
 
 > **僅支援 Windows 10 / 11（64-bit）**
-> 介面使用 PySide6 / Qt Widgets，顯示縮放跟隨 Windows 與 Qt 高 DPI 行為。
+> 介面使用 PySide6 + QFluentWidgets (Fluent Design)，顯示縮放跟隨 Windows 與 Qt 高 DPI 行為。
 
 ---
 

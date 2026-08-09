@@ -1,22 +1,22 @@
-"""伺服器記憶體工具模組。"""
+"""伺服器記憶體工具模組"""
 
 import re
 
 
 class MemoryUtils:
-    """記憶體工具類別，提供記憶體相關的解析和格式化功能。"""
+    """記憶體工具類別，提供記憶體相關的解析和格式化功能"""
 
     @staticmethod
     def parse_memory_setting(text: str, setting_type: str = "Xmx") -> int | None:
         """
-        解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數。
+        解析 Java 記憶體設定，統一處理 -Xmx 和 -Xms 參數
 
         Args:
-            text: 含有 Java 記憶體參數的文字。
-            setting_type: 設定類型，通常為 `Xmx` 或 `Xms`。
+            text: 含有 Java 記憶體參數的文字
+            setting_type: 設定類型，通常為 `Xmx` 或 `Xms`
 
         Returns:
-            以 MB 表示的記憶體大小；解析失敗時回傳 `None`。
+            以 MB 表示的記憶體大小；解析失敗時回傳 `None`
         """
         if not text or not isinstance(text, str):
             return None
@@ -38,14 +38,14 @@ class MemoryUtils:
     @staticmethod
     def format_memory_mb(memory_mb: int, compact: bool = True) -> str:
         """
-        格式化記憶體大小（MB），自動選擇單位顯示。
+        格式化記憶體大小（MB），自動選擇單位顯示
 
         Args:
-            memory_mb: 以 MB 表示的記憶體數值。
-            compact: 是否使用簡寫格式。
+            memory_mb: 以 MB 表示的記憶體數值
+            compact: 是否使用簡寫格式
 
         Returns:
-            格式化後的字串。
+            格式化後的字串
         """
         if compact:
             if memory_mb >= 1024:

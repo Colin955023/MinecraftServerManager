@@ -9,7 +9,9 @@
 3. 雙擊執行即可。
 
 ### 解除安裝
+
 本程式不寫入 Windows Registry，也不產生系統解除安裝項目。若要徹底移除，請直接刪除 `.exe` 檔案，並刪除 `%LOCALAPPDATA%\Programs\MinecraftServerManager` 隱藏資料夾即可。
+
 ---
 
 ### Java 與 winget 安裝說明

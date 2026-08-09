@@ -1,15 +1,16 @@
 """
 系統工具模組
-提供系統資訊查詢與進程管理功能，使用原生 Windows API 與受管理 PID 清理。
+提供系統資訊查詢與進程管理功能，使用原生 Windows API 與受管理 PID 清理
 """
 
 import ctypes
 import ctypes.wintypes as wintypes
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .. import SubprocessUtils, get_logger
+from .. import SubprocessUtils, bytes_to_mb, get_logger
 
 logger = get_logger().bind(component="SystemUtils")
 TH32CS_SNAPPROCESS = 2
@@ -88,11 +89,11 @@ class SystemUtils:
     @classmethod
     def register_managed_process(cls, path, pid: int) -> None:
         """
-        記錄由本程式啟動、可安全用 taskkill /T 清理的 process。
+        記錄由本程式啟動、可安全用 taskkill /T 清理的 process
 
         Args:
-            path: process 所屬的伺服器或安裝工作目錄。
-            pid: process ID。
+            path: process 所屬的伺服器或安裝工作目錄
+            pid: process ID
         """
         try:
             normalized_path = cls._normalize_managed_path(path)
@@ -105,11 +106,11 @@ class SystemUtils:
     @classmethod
     def unregister_managed_process(cls, path, pid: int) -> None:
         """
-        移除已結束或已清理的受管理 process。
+        移除已結束或已清理的受管理 process
 
         Args:
-            path: process 所屬的伺服器或安裝工作目錄。
-            pid: process ID。
+            path: process 所屬的伺服器或安裝工作目錄
+            pid: process ID
         """
         normalized_path = cls._normalize_managed_path(path)
         pids = cls._managed_processes_by_path.get(normalized_path)
@@ -122,13 +123,13 @@ class SystemUtils:
     @staticmethod
     def kill_java_processes_in_path(path) -> bool:
         """
-        終止本程式在指定路徑啟動過的 Java/啟動腳本 process tree。
+        終止本程式在指定路徑啟動過的 Java/啟動腳本 process tree
 
         Args:
-            path: 目標資料夾。
+            path: 目標資料夾
 
         Returns:
-            至少有一個進程被終止則回傳 True。
+            至少有一個進程被終止則回傳 True
         """
         killed = False
         try:
@@ -176,17 +177,17 @@ class SystemUtils:
     @staticmethod
     def get_total_memory_mb() -> int:
         """
-        獲取系統總實體記憶體。
+        獲取系統總實體記憶體
 
         Returns:
-            系統總實體記憶體（MB）。
+            系統總實體記憶體（MB）
         """
         try:
             stat = MEMORYSTATUSEX()
             stat.dwLength = sizeof(stat)
             if not _kernel32.GlobalMemoryStatusEx(byref(stat)):
                 return 4096
-            return int(stat.ullTotalPhys / (1024 * 1024))
+            return int(bytes_to_mb(stat.ullTotalPhys))
         except Exception as e:
             logger.error(f"獲取記憶體資訊失敗: {e}")
             return 4096
@@ -194,13 +195,13 @@ class SystemUtils:
     @staticmethod
     def get_process_name(pid: int) -> str:
         """
-        獲取指定 PID 的進程名稱。
+        獲取指定 PID 的進程名稱
 
         Args:
-            pid: 進程 ID。
+            pid: 進程 ID
 
         Returns:
-            進程名稱；找不到時回傳空字串。
+            進程名稱；找不到時回傳空字串
         """
         try:
             for entry in SystemUtils._iterate_process_snapshot():
@@ -213,13 +214,13 @@ class SystemUtils:
     @staticmethod
     def get_process_children(pid_root: int) -> list[tuple[int, str]]:
         """
-        獲取子進程列表 [(pid, name), ...]。
+        獲取子進程列表 [(pid, name), ...]
 
         Args:
-            pid_root: 父進程 ID。
+            pid_root: 父進程 ID
 
         Returns:
-            子進程清單。
+            子進程清單
         """
         children: list[tuple[int, str]] = []
         try:
@@ -243,13 +244,13 @@ class SystemUtils:
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
         """
-        獲取進程記憶體使用量（bytes）。
+        獲取進程記憶體使用量（bytes）
 
         Args:
-            pid: 進程 ID。
+            pid: 進程 ID
 
         Returns:
-            進程記憶體使用量（位元組）。
+            進程記憶體使用量（位元組）
         """
         h_process = 0
         try:
@@ -271,13 +272,13 @@ class SystemUtils:
     @staticmethod
     def find_java_process(parent_pid: int) -> int | None:
         """
-        從父進程查找 Java 子進程 PID。
+        從父進程查找 Java 子進程 PID
 
         Args:
-            parent_pid: 父進程 ID。
+            parent_pid: 父進程 ID
 
         Returns:
-            Java 子進程 PID；找不到時回傳 None。
+            Java 子進程 PID；找不到時回傳 None
         """
         try:
             parent_name = SystemUtils.get_process_name(parent_pid)
@@ -294,13 +295,13 @@ class SystemUtils:
     @staticmethod
     def kill_process_tree(pid: int) -> bool:
         """
-        強制結束進程樹。
+        強制結束進程樹
 
         Args:
-            pid: 要結束的進程 ID。
+            pid: 要結束的進程 ID
 
         Returns:
-            成功執行 taskkill 時回傳 True。
+            成功執行 taskkill 時回傳 True
         """
         try:
             cmd = ["taskkill", "/PID", str(pid), "/T", "/F"]
@@ -313,13 +314,13 @@ class SystemUtils:
     @staticmethod
     def is_process_running(pid: int) -> bool:
         """
-        檢查進程是否運行中。
+        檢查進程是否運行中
 
         Args:
-            pid: 進程 ID。
+            pid: 進程 ID
 
         Returns:
-            進程仍在執行時回傳 True。
+            進程仍在執行時回傳 True
         """
         h_process = 0
         try:
@@ -336,3 +337,24 @@ class SystemUtils:
         finally:
             if h_process:
                 _kernel32.CloseHandle(h_process)
+
+
+class SingletonMeta(type):
+    """執行緒安全的 Singleton metaclass"""
+
+    _instances: ClassVar[dict[type, object]] = {}
+    _lock: ClassVar[threading.Lock] = threading.Lock()
+
+    def __call__(cls, *args: object, **kwargs: object) -> object:
+        instance = cls._instances.get(cls)
+        if instance is None:
+            with cls._lock:
+                instance = cls._instances.get(cls)
+                if instance is None:
+                    instance = super().__call__(*args, **kwargs)
+                    cls._instances[cls] = instance
+        return instance
+
+
+class Singleton(metaclass=SingletonMeta):
+    """繼承此類別即可獲得執行緒安全的單例行為，子類別無需額外處理"""

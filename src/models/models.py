@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -25,15 +26,28 @@ MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
 _IDENTITY_CACHE_DEFAULT_MAX_SIZE = 512
 
 
+@dataclass(slots=True)
+class DependencyPlanHooks:
+    """必要依賴安裝計畫展開所需的 callback 集合"""
+
+    resolve_project_names: Callable[[set[str]], dict[str, str]]
+    resolve_dependency_entry: Callable[[dict[str, Any], dict[str, str]], ResolvedDependencyReference]
+    select_dependency_best_version: Callable[[ResolvedDependencyReference, bool], OnlineModVersion | None]
+    analyze_dependency_best_version: Callable[[OnlineModVersion, ResolvedDependencyReference, str, dict[str, str]], Any]
+    extract_dependency_download_target: Callable[[OnlineModVersion], tuple[str, str] | None]
+    make_dependency_install_item: Callable[..., Any]
+    maybe_installed_checker: Callable[[ResolvedDependencyReference, list[Any] | None], bool]
+
+
 class ModStatus(Enum):
-    """模組狀態。"""
+    """模組狀態"""
 
     ENABLED = "enabled"
     DISABLED = "disabled"
 
 
 class ModPlatform(Enum):
-    """模組來源平台。"""
+    """模組來源平台"""
 
     MODRINTH = "modrinth"
     LOCAL = "local"
@@ -41,7 +55,7 @@ class ModPlatform(Enum):
 
 @dataclass
 class OnlineModVersion:
-    """Modrinth 上單一模組版本資訊。"""
+    """Modrinth 上單一模組版本資訊"""
 
     version_id: str
     version_number: str
@@ -75,7 +89,7 @@ class OnlineModVersion:
 
 @dataclass
 class ModrinthVersionLookupResult:
-    """以雜湊查詢 Modrinth 版本後的結果。"""
+    """以雜湊查詢 Modrinth 版本後的結果"""
 
     file_hash: str
     algorithm: str
@@ -85,7 +99,7 @@ class ModrinthVersionLookupResult:
 
 @dataclass(slots=True)
 class ResolvedDependencyReference:
-    """解析後的依賴資訊，支援 project_id 與 version_id 兩種來源。"""
+    """解析後的依賴資訊，支援 project_id 與 version_id 兩種來源"""
 
     project_id: str = ""
     project_name: str = ""
@@ -142,7 +156,6 @@ class ServerConfig:
     path: str = ""
     eula_accepted: bool = False
     properties: dict[str, str] | None = None
-    backup_path: str | None = None
     jvm_args: list[str] = field(default_factory=list)
     performance_profile: str = ""
 
@@ -157,7 +170,7 @@ class ServerConfig:
 
 @dataclass
 class LocalModInfo:
-    """本地模組資訊。"""
+    """本地模組資訊"""
 
     id: str
     name: str
@@ -191,7 +204,7 @@ class LocalModInfo:
 
 @dataclass(slots=True)
 class ModFileOperationResult:
-    """描述遠端下載/覆蓋流程的最終狀態。"""
+    """描述遠端下載/覆蓋流程的最終狀態"""
 
     status: str
     final_path: Path | None = None
@@ -209,7 +222,7 @@ class ModFileOperationResult:
 
 @dataclass(slots=True)
 class LocalModMutationResult:
-    """描述本地模組檔案異動結果，供 UI 層決定呈現方式。"""
+    """描述本地模組檔案異動結果，供 UI 層決定呈現方式"""
 
     status: str
     title: str = ""
@@ -234,7 +247,7 @@ class LocalModMutationResult:
 @dataclass(slots=True)
 class ModrinthIdentityCache:
     """
-    執行緒安全、具容量上限的 Modrinth project identity 快取。
+    執行緒安全、具容量上限的 Modrinth project identity 快取
     """
 
     max_size: int = _IDENTITY_CACHE_DEFAULT_MAX_SIZE
@@ -245,7 +258,20 @@ class ModrinthIdentityCache:
         if self.max_size < 0:
             raise ValueError("ModrinthIdentityCache.max_size must be >= 0")
 
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
     def get(self, key: str) -> tuple[str, str] | None:
+        """
+        取得快取中對應 key 的值，並將該項目移至末端
+
+        Args:
+            key: 要查詢的快取鍵值
+
+        Returns:
+            tuple: 對應的值（包含 project_id 與 slug），若不存在則回傳 None
+        """
         with self._lock:
             value = self._store.get(key)
             if value is not None:
@@ -253,6 +279,13 @@ class ModrinthIdentityCache:
             return value
 
     def set(self, key: str, value: tuple[str, str]) -> None:
+        """
+        設定快取值，並在超過 max_size 時淘汰最舊項目
+
+        Args:
+            key: 要設定的快取鍵值
+            value: 要設定的快取值（包含 project_id 與 slug）
+        """
         with self._lock:
             self._store[key] = value
             self._store.move_to_end(key)
@@ -263,14 +296,10 @@ class ModrinthIdentityCache:
         with self._lock:
             self._store.clear()
 
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._store)
-
 
 @dataclass(slots=True)
 class PendingOnlineInstall:
-    """待安裝的線上模組項目。"""
+    """待安裝的線上模組項目"""
 
     project_id: str
     project_name: str
@@ -284,7 +313,7 @@ class PendingOnlineInstall:
 
 @dataclass(slots=True, kw_only=True)
 class AbstractReviewEntry:
-    """Review 項目共用屬性與狀態判斷。"""
+    """Review 項目共用屬性與狀態判斷"""
 
     blocking_reasons: list[str] = field(default_factory=list)
     warning_messages: list[str] = field(default_factory=list)
@@ -305,7 +334,7 @@ class AbstractReviewEntry:
 
 @dataclass(slots=True, kw_only=True)
 class PendingInstallReviewEntry(AbstractReviewEntry):
-    """待安裝項目的最終驗證結果。"""
+    """待安裝項目的最終驗證結果"""
 
     pending: PendingOnlineInstall
     report: Any | None
@@ -314,7 +343,7 @@ class PendingInstallReviewEntry(AbstractReviewEntry):
 
 @dataclass(slots=True, kw_only=True)
 class LocalUpdateReviewEntry(AbstractReviewEntry):
-    """本地模組更新 review 項目。"""
+    """本地模組更新 review 項目"""
 
     candidate: Any
     dependency_plan: Any
@@ -326,7 +355,7 @@ class LocalUpdateReviewEntry(AbstractReviewEntry):
 
 @dataclass(slots=True)
 class ReviewTaskNode:
-    """Review 對話框中的共用 task 節點。"""
+    """Review 對話框中的共用 task 節點"""
 
     node_id: str
     root_key: str
@@ -340,7 +369,7 @@ class ReviewTaskNode:
 
 @dataclass(frozen=True, slots=True)
 class OnlineBrowseRequest:
-    """線上模組瀏覽/搜尋請求。"""
+    """線上模組瀏覽/搜尋請求"""
 
     query: str
     minecraft_version: str | None
@@ -350,7 +379,7 @@ class OnlineBrowseRequest:
 
 @dataclass(slots=True)
 class OnlineModInfo:
-    """線上模組資訊。"""
+    """線上模組資訊"""
 
     project_id: str
     slug: str
@@ -372,7 +401,7 @@ class OnlineModInfo:
 
 @dataclass(slots=True)
 class OnlineModCompatibilityReport:
-    """安裝前版本相容性與依賴分析結果。"""
+    """安裝前版本相容性與依賴分析結果"""
 
     hard_errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -391,7 +420,7 @@ class OnlineModCompatibilityReport:
 
 @dataclass(slots=True)
 class LocalMetadataEnsureSummary:
-    """本地模組 metadata ensure / 專案識別摘要。"""
+    """本地模組 metadata ensure / 專案識別摘要"""
 
     total_scanned: int = 0
     resolved_by_hash: int = 0
@@ -407,7 +436,7 @@ class LocalMetadataEnsureSummary:
 
 @dataclass(slots=True)
 class LocalModUpdateCandidate:
-    """本地模組更新檢查結果。"""
+    """本地模組更新檢查結果"""
 
     project_id: str
     project_name: str
@@ -454,7 +483,7 @@ class LocalModUpdateCandidate:
 
 @dataclass(slots=True)
 class LocalModUpdatePlan:
-    """本地模組更新檢查彙總。"""
+    """本地模組更新檢查彙總"""
 
     candidates: list[LocalModUpdateCandidate] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -462,15 +491,8 @@ class LocalModUpdatePlan:
     _has_candidates: bool = field(default=False, init=False, repr=False)
     _actionable_count: int = field(default=0, init=False, repr=False)
 
-    @property
-    def has_candidates(self) -> bool:
-        return self._has_candidates
-
-    @property
-    def actionable_count(self) -> int:
-        return self._actionable_count
-
     def finalize_summary(self) -> None:
+        """彙總候選項目並更新可執行數量"""
         actionable_count = 0
         has_candidates = False
         for candidate in self.candidates:
@@ -480,10 +502,18 @@ class LocalModUpdatePlan:
         self._has_candidates = has_candidates
         self._actionable_count = actionable_count
 
+    @property
+    def has_candidates(self) -> bool:
+        return self._has_candidates
+
+    @property
+    def actionable_count(self) -> int:
+        return self._actionable_count
+
 
 @dataclass(slots=True)
 class ServerOperationResult:
-    """描述伺服器操作結果，供 UI 層決定如何呈現。"""
+    """描述伺服器操作結果，供 UI 層決定如何呈現"""
 
     success: bool
     title: str = ""
@@ -493,3 +523,13 @@ class ServerOperationResult:
     @property
     def failed(self) -> bool:
         return not self.success
+
+
+@dataclass
+class OperationResult:
+    """通用操作結果類別，用於統一表示方法執行的成功與失敗狀態，以及相關訊息和錯誤資訊"""
+
+    success: bool
+    message: str = ""
+    error: Exception | None = None
+    extra: dict = field(default_factory=dict)

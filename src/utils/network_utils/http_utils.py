@@ -1,17 +1,15 @@
 """
 HTTP 網路請求工具模組
-提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作。
+提供標準化的 HTTP 請求功能，包含 JSON 取得、檔案下載與通用重試策略等常用操作
 """
 
-import contextlib
 import errno
 import hashlib
-import os
 import shutil
 import tempfile
 import threading
-import time
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -22,40 +20,19 @@ from requests import exceptions as requests_exceptions
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .. import APP_NAME, APP_VERSION, GITHUB_OWNER, GITHUB_REPO, get_logger, get_shared_manager, run_blocking_io
+from .. import (
+    APP_NAME,
+    APP_VERSION,
+    GITHUB_OWNER,
+    GITHUB_REPO,
+    HashUtils,
+    PathUtils,
+    format_bytes,
+    get_logger,
+    get_shared_manager,
+)
 
 logger = get_logger().bind(component="HTTPUtils")
-
-
-class RateLimiter:
-    """簡單的本機頻率限制器（Token Bucket / 時間戳記延遲）。"""
-
-    def __init__(self, calls_per_second: int = 10):
-        self.delay = 1.0 / calls_per_second
-        self.last_call_time: dict[str, float] = {}
-        self._lock = threading.Lock()
-
-    def wait(self, domain: str) -> None:
-        """
-        針對指定網域執行節流等待。
-
-        Args:
-            domain: 要限制請求頻率的網域名稱。
-        """
-
-        with self._lock:
-            now = time.time()
-            last = self.last_call_time.get(domain, 0.0)
-            elapsed = now - last
-            if elapsed < self.delay:
-                sleep_time = self.delay - elapsed
-                time.sleep(sleep_time)
-                self.last_call_time[domain] = now + sleep_time
-            else:
-                self.last_call_time[domain] = now
-
-
-_rate_limiter = RateLimiter(calls_per_second=10)
 
 
 class HTTPUtils:
@@ -77,7 +54,12 @@ class HTTPUtils:
 
     @classmethod
     def get_timeout_retry_policy(cls) -> dict[str, Any]:
-        """回傳目前 HTTP timeout/retry policy（供文件與診斷使用）。"""
+        """
+        回傳目前 HTTP timeout/retry policy（供文件與診斷使用）
+
+        Returns:
+            dict: 包含 timeout 與 retry 設定的字典
+        """
         return {
             "json_timeout_min_seconds": cls.JSON_TIMEOUT_MIN_SECONDS,
             "content_timeout_min_seconds": cls.CONTENT_TIMEOUT_MIN_SECONDS,
@@ -91,10 +73,16 @@ class HTTPUtils:
             "retry_allowed_methods": sorted(cls.RETRY_ALLOWED_METHODS),
         }
 
-    @staticmethod
-    def _normalize_int_value(value: int, minimum: int) -> int:
+    @classmethod
+    def _normalize_timeout(cls, timeout: int, minimum: int, context: str = "") -> int:
         try:
-            return max(minimum, int(value))
+            val = int(timeout)
+            if val < minimum:
+                get_logger().bind(component="HttpUtils").debug(
+                    f"{context} timeout {val}s is below minimum {minimum}s, overriding to {minimum}s"
+                )
+                return minimum
+            return val
         except TypeError, ValueError:
             return minimum
 
@@ -135,17 +123,6 @@ class HTTPUtils:
         return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
     @staticmethod
-    def _format_bytes(size: int) -> str:
-        size = max(0, int(size))
-        units = ["B", "KiB", "MiB", "GiB", "TiB"]
-        value = float(size)
-        for unit in units:
-            if value < 1024 or unit == units[-1]:
-                return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
-            value /= 1024
-        return f"{size} B"
-
-    @staticmethod
     def _describe_request_failure(exc: Exception) -> str:
         if isinstance(exc, HTTPError):
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
@@ -182,7 +159,7 @@ class HTTPUtils:
     def _cleanup_temp_file(temp_path: Path | None) -> None:
         if temp_path is None:
             return
-        with contextlib.suppress(OSError):
+        with suppress(OSError):
             if temp_path.exists():
                 temp_path.unlink()
 
@@ -227,27 +204,28 @@ class HTTPUtils:
         expected_hash_algorithm: str,
         progress_callback: Callable[[int, int], None] | None,
     ) -> bool:
-        try:
-            hasher = hashlib.new(expected_hash_algorithm)
-            with local_path.open("rb") as file_obj:
-                for chunk in iter(lambda: file_obj.read(8192), b""):
-                    hasher.update(chunk)
-            if hasher.hexdigest().lower() != expected_hash:
-                return False
-            if progress_callback:
-                try:
-                    size = local_path.stat().st_size
-                    progress_callback(size, size)
-                except Exception as exc:
-                    logger.debug(f"progress_callback/stat failed: {exc}")
-            return True
-        except OSError as exc:
-            logger.debug(f"檢查本地檔案雜湊失敗，將進行下載: {exc}")
+        computed_hash = HashUtils.compute_file_hash_sync(local_path, expected_hash_algorithm)
+        if not computed_hash or computed_hash.lower() != expected_hash:
             return False
+        if progress_callback:
+            try:
+                size = local_path.stat().st_size
+                progress_callback(size, size)
+            except OSError as exc:
+                logger.debug(f"progress_callback/stat failed: {exc}")
+        return True
 
     @staticmethod
     def get_default_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
-        """獲取包含預設 User-Agent 的標頭"""
+        """
+        獲取包含預設 User-Agent 的標頭
+
+        Args:
+            headers: 額外 HTTP headers，會與預設 User-Agent 合併
+
+        Returns:
+            dict: 合併後的 HTTP headers 字典
+        """
         default_headers = {"User-Agent": f"{APP_NAME}/{APP_VERSION} (github.com/{GITHUB_OWNER}/{GITHUB_REPO})"}
         if headers:
             default_headers.update(headers)
@@ -263,25 +241,25 @@ class HTTPUtils:
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | None:
         """
-        發送 HTTP GET 請求並解析回傳的 JSON 資料。
+        發送 HTTP GET 請求並解析回傳的 JSON 資料
 
         Args:
-            url: 目標 URL。
-            timeout: 請求逾時秒數。
-            headers: 額外 HTTP headers。
-            params: 查詢參數。
-            suppress_status_codes: 需要靜默處理的 HTTP 狀態碼集合。
+            url: 目標 URL
+            timeout: 請求逾時秒數
+            headers: 額外 HTTP headers
+            params: 查詢參數
+            suppress_status_codes: 需要靜默處理的 HTTP 狀態碼集合
 
         Returns:
-            成功時回傳 JSON 內容，失敗或被 suppress 時回傳 None。
+            成功時回傳 dict 型別的 JSON 內容；失敗或被 suppress 時回傳 None
         """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET JSON 請求失敗: URL 參數無效")
             return None
-        timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
+        timeout = cls._normalize_timeout(timeout, cls.JSON_TIMEOUT_MIN_SECONDS, context="json_request")
         try:
             final_headers = cls.get_default_headers(headers)
-            _rate_limiter.wait(urlparse(url).netloc)
+
             resp = cls._get_session().get(url, headers=final_headers, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
@@ -305,26 +283,26 @@ class HTTPUtils:
         suppress_status_codes: set[int] | None = None,
     ) -> dict[str, Any] | list[Any] | None:
         """
-        發送 HTTP POST 請求並解析回傳的 JSON 資料。
+        發送 HTTP POST 請求並解析回傳的 JSON 資料
 
         Args:
-            url: 目標 URL，必須為有效的 http/https 位址。
-            json_body: 要送出的 JSON request body。
-            timeout: 請求逾時秒數，會自動正規化為允許的最小值以上。
-            headers: 額外 HTTP headers，會與預設 User-Agent 合併。
-            suppress_status_codes: 指定需靜默處理的 HTTP 狀態碼集合。
-                當回應狀態碼在此集合中時，函式回傳 None 並不記錄錯誤堆疊。
+            url: 目標 URL，必須為有效的 http/https 位址
+            json_body: 要送出的 JSON request body
+            timeout: 請求逾時秒數，會自動正規化為允許的最小值以上
+            headers: 額外 HTTP headers，會與預設 User-Agent 合併
+            suppress_status_codes: 指定需靜默處理的 HTTP 狀態碼集合
+                當回應狀態碼在此集合中時，函式回傳 None 並不記錄錯誤堆疊
 
         Returns:
-            成功時回傳 dict 或 list 型別的 JSON 內容；失敗或被 suppress 時回傳 None。
+            成功時回傳 dict 或 list 型別的 JSON 內容；失敗或被 suppress 時回傳 None
         """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP POST JSON 請求失敗: URL 參數無效")
             return None
-        timeout = cls._normalize_int_value(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
+        timeout = cls._normalize_timeout(timeout, cls.JSON_TIMEOUT_MIN_SECONDS, context="async_json_request")
         try:
             final_headers = cls.get_default_headers(headers)
-            _rate_limiter.wait(urlparse(url).netloc)
+
             resp = cls._get_session().post(url, headers=final_headers, json=json_body, timeout=timeout)
             resp.raise_for_status()
             return resp.json()
@@ -348,24 +326,25 @@ class HTTPUtils:
         log_errors: bool = True,
     ) -> bytes | None:
         """
-        發送 HTTP GET 請求並回傳完整的回應內容。
+        發送 HTTP GET 請求並回傳完整的回應內容
 
         Args:
-            url: 目標 URL。
-            timeout: 請求逾時秒數。
-            stream: 是否以串流方式請求。
-            headers: 額外 HTTP headers。
+            url: 目標 URL
+            timeout: 請求逾時秒數
+            stream: 是否以串流方式請求
+            headers: 額外 HTTP headers
+            log_errors: 是否記錄錯誤堆疊，若為 False 則僅記錄 debug 訊息
 
         Returns:
-            回應內容 bytes；失敗時回傳 None。
+            回應內容 bytes；失敗時回傳 None
         """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             logger.error("HTTP GET 請求失敗: URL 參數無效")
             return None
-        timeout = cls._normalize_int_value(timeout, cls.CONTENT_TIMEOUT_MIN_SECONDS)
+        timeout = cls._normalize_timeout(timeout, cls.CONTENT_TIMEOUT_MIN_SECONDS, context="content_request")
         try:
             final_headers = cls.get_default_headers(headers)
-            _rate_limiter.wait(urlparse(url).netloc)
+
             resp = cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=stream)
             resp.raise_for_status()
             return resp.content
@@ -390,21 +369,21 @@ class HTTPUtils:
         failure_message_callback: Callable[[str], None] | None = None,
     ) -> bool:
         """
-        下載檔案並儲存到本機路徑。
+        下載檔案並儲存到本機路徑
 
         Args:
-            url: 下載網址。
-            local_path: 本機儲存路徑。
-            progress_callback: 下載進度回呼。
-            timeout: 逾時秒數。
-            chunk_size: 每次讀取的區塊大小。
-            cancel_check: 取消檢查回呼。
-            expected_sha256: 預期的 SHA-256 雜湊。
-            expected_hash: 預期的雜湊值，僅支援 sha256 / sha512。
-            failure_message_callback: 可選的失敗原因回呼，用於回傳更具體的錯誤訊息。
+            url: 下載網址
+            local_path: 本機儲存路徑
+            progress_callback: 下載進度回呼
+            timeout: 逾時秒數
+            chunk_size: 每次讀取的區塊大小
+            cancel_check: 取消檢查回呼
+            expected_sha256: 預期的 SHA-256 雜湊
+            expected_hash: 預期的雜湊值，僅支援 sha256 / sha512
+            failure_message_callback: 可選的失敗原因回呼，用於回傳更具體的錯誤訊息
 
         Returns:
-            下載成功時回傳 True，失敗時回傳 False。
+            下載成功時回傳 True，失敗時回傳 False
         """
         if not url or not isinstance(url, str) or (not cls._is_valid_url(url)):
             cls._report_download_failure(
@@ -422,8 +401,8 @@ class HTTPUtils:
                 failure_message_callback=failure_message_callback,
             )
             return False
-        timeout = cls._normalize_int_value(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
-        chunk_size = cls._normalize_int_value(chunk_size, cls.MIN_CHUNK_SIZE)
+        timeout = cls._normalize_timeout(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS, context="download")
+        chunk_size = cls._normalize_timeout(chunk_size, cls.MIN_CHUNK_SIZE, context="chunk_size")
         local_path_obj = Path(local_path)
         local_path_obj.parents[0].mkdir(parents=True, exist_ok=True)
         normalized_expected_hash = str(expected_hash or expected_sha256 or "").strip().lower()
@@ -457,7 +436,7 @@ class HTTPUtils:
             temp_path_obj = local_path_obj.with_name(local_path_obj.name + ".part")
         try:
             final_headers = cls.get_default_headers()
-            _rate_limiter.wait(urlparse(url).netloc)
+
             with cls._get_session().get(url, headers=final_headers, timeout=timeout, stream=True) as resp:
                 resp.raise_for_status()
                 total_size = int(resp.headers.get("Content-Length", 0))
@@ -469,8 +448,8 @@ class HTTPUtils:
                     else:
                         if free_space < total_size:
                             failure_message = (
-                                f"磁碟空間不足：目的地 {local_path_obj.parent} 需要至少 {cls._format_bytes(total_size)}，"
-                                f"目前剩餘 {cls._format_bytes(free_space)}。"
+                                f"磁碟空間不足：目的地 {local_path_obj.parent} 需要至少 {format_bytes(total_size)}，"
+                                f"目前剩餘 {format_bytes(free_space)}"
                             )
                             cls._report_download_failure(
                                 url=url,
@@ -482,7 +461,7 @@ class HTTPUtils:
                             return False
                 downloaded = 0
                 hasher = hashlib.new(expected_hash_algorithm) if normalized_expected_hash else None
-                with open(temp_path_obj, "wb") as f:
+                with temp_path_obj.open("wb") as f:
                     for chunk in resp.iter_content(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
                             cls._report_download_failure(
@@ -504,7 +483,7 @@ class HTTPUtils:
                 if normalized_expected_hash and hasher is not None:
                     computed = hasher.hexdigest().lower()
                     if computed != normalized_expected_hash:
-                        failure_message = f"下載檔案雜湊驗證失敗：預期 {expected_hash_algorithm.upper()} 不符。"
+                        failure_message = f"下載檔案雜湊驗證失敗：預期 {expected_hash_algorithm.upper()} 不符"
                         cls._report_download_failure(
                             url=url,
                             local_path=local_path,
@@ -518,14 +497,7 @@ class HTTPUtils:
                         cls._cleanup_temp_file(temp_path_obj)
                         return False
             temp_path_obj.replace(local_path_obj)
-            try:
-                fd = os.open(str(local_path_obj.parents[0]), os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            except OSError as e:
-                logger.debug(f"目錄 fsync 失敗 (path={local_path_obj.parents[0]}): {e}")
+            PathUtils.best_effort_sync_dir(local_path_obj.parents[0])
             return True
         except (RequestException, OSError) as e:
             failure_message = cls._describe_request_failure(e)
@@ -544,16 +516,16 @@ class HTTPUtils:
         urls: list[str], timeout: int = 10, headers: dict[str, str] | None = None, max_workers: int = 5
     ) -> list[dict[str, Any] | None]:
         """
-        批次發送 HTTP GET 請求並解析回傳的 JSON 資料。
+        批次發送 HTTP GET 請求並解析回傳的 JSON 資料
 
         Args:
-            urls: 要請求的 URL 清單。
-            timeout: 請求逾時秒數。
-            headers: 額外 HTTP headers。
-            max_workers: 同時執行的工作數量。
+            urls: 要請求的 URL 清單
+            timeout: 請求逾時秒數
+            headers: 額外 HTTP headers
+            max_workers: 同時執行的工作數量
 
         Returns:
-            對應每個 URL 的 JSON 結果清單。
+            對應每個 URL 的 JSON 結果清單
         """
         if not urls:
             return []
@@ -569,23 +541,3 @@ class HTTPUtils:
         except Exception as e:
             logger.exception(f"批次 HTTP 請求失敗: {e}")
             return [None] * len(urls)
-
-    @classmethod
-    async def get_json_async(cls, *args, **kwargs):
-        """非同步版 get_json。"""
-        return await run_blocking_io(cls.get_json, *args, **kwargs)
-
-    @classmethod
-    async def post_json_async(cls, *args, **kwargs):
-        """非同步版 post_json。"""
-        return await run_blocking_io(cls.post_json, *args, **kwargs)
-
-    @classmethod
-    async def get_content_async(cls, *args, **kwargs):
-        """非同步版 get_content。"""
-        return await run_blocking_io(cls.get_content, *args, **kwargs)
-
-    @classmethod
-    async def download_file_async(cls, *args, **kwargs):
-        """非同步版 download_file。"""
-        return await run_blocking_io(cls.download_file, *args, **kwargs)

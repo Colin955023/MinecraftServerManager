@@ -16,17 +16,30 @@ class _FakeServerCRUD:
 
 class _FakeLabel:
     def __init__(self) -> None:
-        self.text = ""
+        self._text = ""
+
+    @property
+    def text(self) -> str:
+        return self._text
+
+    def text_val(self) -> str:
+        return self._text
 
     def is_alive(self) -> bool:
         return True
 
     def configure(self, **kwargs: str) -> None:
-        self.text = kwargs.get("text", self.text)
+        self._text = kwargs.get("text", self._text)
+
+    def setText(self, text: str) -> None:
+        self._text = text
+
+    def text_func(self) -> str:
+        return self._text
 
 
 def _make_monitor(output_lines: list[str] | None = None) -> ServerMonitorWindow:
-    monitor = object.__new__(ServerMonitorWindow)
+    monitor = ServerMonitorWindow.__new__(ServerMonitorWindow)
     monitor.server_manager = _FakeServerCRUD(output_lines)
     monitor.server_name = "minecraft_server"
     monitor.ui_queue = queue.Queue()

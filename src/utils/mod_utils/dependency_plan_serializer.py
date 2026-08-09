@@ -1,7 +1,7 @@
 """
-依賴計畫序列化工具。
+依賴計畫序列化工具
 集中處理 dependency plan 的資料模型、序列化、遷移與驗證邏輯，
-讓 UI 層只保留查詢與流程組裝責任。
+讓 UI 層只保留查詢與流程組裝責任
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 1
 
 @dataclass(slots=True)
 class OnlineDependencyInstallItem:
-    """必要依賴的自動安裝項目。"""
+    """必要依賴的自動安裝項目"""
 
     project_id: str
     project_name: str
@@ -37,10 +37,51 @@ class OnlineDependencyInstallItem:
     edge_kind: str = "required"
     edge_source: str = "required:modrinth_dependency"
 
+    @classmethod
+    def from_dict(cls, payload: Any) -> OnlineDependencyInstallItem | None:
+        """
+        從 payload 還原實例
+
+        Args:
+            payload: 包含 OnlineDependencyInstallItem 欄位的字典資料
+
+        Returns:
+            OnlineDependencyInstallItem | None: 還原成功的實例，若 payload 無效則回傳 None
+        """
+        if not isinstance(payload, dict):
+            return None
+        graph_depth = _normalize_positive_int_value(payload, "graph_depth")
+        edge_kind = _normalize_text_value(payload, "edge_kind", "required", lowercase=True) or "required"
+        edge_source = _normalize_text_value(payload, "edge_source", "", lowercase=True)
+        if not edge_source:
+            edge_source = f"{edge_kind}:modrinth_dependency"
+        return cls(
+            project_id=_normalize_text_value(payload, "project_id"),
+            project_name=_normalize_text_value(payload, "project_name"),
+            version_id=_normalize_text_value(payload, "version_id"),
+            version_name=_normalize_text_value(payload, "version_name"),
+            filename=_normalize_text_value(payload, "filename"),
+            download_url=_normalize_text_value(payload, "download_url"),
+            parent_name=_normalize_text_value(payload, "parent_name"),
+            maybe_installed=bool(payload.get("maybe_installed", False)),
+            status_note=_normalize_text_value(payload, "status_note"),
+            resolution_source=_normalize_text_value(payload, "resolution_source", "project_id"),
+            resolution_confidence=_normalize_text_value(payload, "resolution_confidence", "direct"),
+            enabled=bool(payload.get("enabled", True)),
+            is_optional=bool(payload.get("is_optional", False)),
+            provider=_normalize_text_value(payload, "provider", "modrinth") or "modrinth",
+            expected_hash=_normalize_text_value(payload, "expected_hash"),
+            required_by=_normalize_string_list(payload.get("required_by", [])),
+            decision_source=_normalize_text_value(payload, "decision_source") or "required:auto",
+            graph_depth=graph_depth,
+            edge_kind=edge_kind,
+            edge_source=edge_source,
+        )
+
 
 @dataclass(slots=True)
 class OnlineDependencyInstallPlan:
-    """必要依賴的連鎖安裝計畫。"""
+    """必要依賴的連鎖安裝計畫"""
 
     items: list[OnlineDependencyInstallItem] = field(default_factory=list)
     advisory_items: list[OnlineDependencyInstallItem] = field(default_factory=list)
@@ -49,12 +90,22 @@ class OnlineDependencyInstallPlan:
 
     @property
     def auto_install_count(self) -> int:
-        """取得可自動安裝的項目數量。"""
+        """
+        取得可自動安裝的項目數量
+
+        Returns:
+            int: 可自動安裝的項目數量
+        """
         return len(self.items)
 
     @property
     def has_unresolved_required(self) -> bool:
-        """判斷是否存在無法解析的必要依賴。"""
+        """
+        判斷是否存在無法解析的必要依賴
+
+        Returns:
+            bool: 若存在無法解析的必要依賴則回傳 True，否則回傳 False
+        """
         return bool(self.unresolved_required)
 
 
@@ -90,7 +141,7 @@ def _normalize_required_by(item: Any) -> list[str]:
 
 
 def _normalize_text_value(source: Any, key: str, default: str = "", *, lowercase: bool = False) -> str:
-    """正規化物件或映射中的文字欄位。"""
+    """正規化物件或映射中的文字欄位"""
     raw_value = _get_source_value(source, key, default)
     value = str(raw_value or default).strip()
     if lowercase:
@@ -99,7 +150,7 @@ def _normalize_text_value(source: Any, key: str, default: str = "", *, lowercase
 
 
 def _normalize_positive_int_value(source: Any, key: str, default: int = 1, min_value: int = 1) -> int:
-    """正規化物件或映射中的正整數欄位。"""
+    """正規化物件或映射中的正整數欄位"""
     raw_value = _get_source_value(source, key, default)
     try:
         value = int(raw_value)
@@ -111,7 +162,7 @@ def _normalize_positive_int_value(source: Any, key: str, default: int = 1, min_v
 
 
 def _build_dependency_graph_edge_payload(item_payload: Any, *, default_edge_kind: str = "required") -> dict[str, Any]:
-    """將 dependency item 正規化為 graph edge payload。"""
+    """將 dependency item 正規化為 graph edge payload"""
     edge_kind = _normalize_text_value(item_payload, "edge_kind", default_edge_kind, lowercase=True) or default_edge_kind
     edge_source = _normalize_text_value(item_payload, "edge_source", "", lowercase=True)
     if not edge_source:
@@ -128,48 +179,15 @@ def _build_dependency_graph_edge_payload(item_payload: Any, *, default_edge_kind
     }
 
 
-def _build_online_dependency_install_item(payload: Any) -> OnlineDependencyInstallItem | None:
-    """將 payload 還原為 `OnlineDependencyInstallItem`。"""
-    if not isinstance(payload, dict):
-        return None
-    graph_depth = _normalize_positive_int_value(payload, "graph_depth")
-    edge_kind = _normalize_text_value(payload, "edge_kind", "required", lowercase=True) or "required"
-    edge_source = _normalize_text_value(payload, "edge_source", "", lowercase=True)
-    if not edge_source:
-        edge_source = f"{edge_kind}:modrinth_dependency"
-    return OnlineDependencyInstallItem(
-        project_id=_normalize_text_value(payload, "project_id"),
-        project_name=_normalize_text_value(payload, "project_name"),
-        version_id=_normalize_text_value(payload, "version_id"),
-        version_name=_normalize_text_value(payload, "version_name"),
-        filename=_normalize_text_value(payload, "filename"),
-        download_url=_normalize_text_value(payload, "download_url"),
-        parent_name=_normalize_text_value(payload, "parent_name"),
-        maybe_installed=bool(payload.get("maybe_installed", False)),
-        status_note=_normalize_text_value(payload, "status_note"),
-        resolution_source=_normalize_text_value(payload, "resolution_source", "project_id"),
-        resolution_confidence=_normalize_text_value(payload, "resolution_confidence", "direct"),
-        enabled=bool(payload.get("enabled", True)),
-        is_optional=bool(payload.get("is_optional", False)),
-        provider=_normalize_text_value(payload, "provider", "modrinth") or "modrinth",
-        expected_hash=_normalize_text_value(payload, "expected_hash"),
-        required_by=_normalize_string_list(payload.get("required_by", [])),
-        decision_source=_normalize_text_value(payload, "decision_source") or "required:auto",
-        graph_depth=graph_depth,
-        edge_kind=edge_kind,
-        edge_source=edge_source,
-    )
-
-
 def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
     """
-    將依賴安裝項目正規化為可持久化 payload。
+    將依賴安裝項目正規化為可持久化 payload
 
     Args:
-        item: 原始依賴安裝項目，可以是物件或映射。
+        item: 原始依賴安裝項目，可以是物件或映射
 
     Returns:
-        可直接序列化與持久化的標準化字典。
+        可直接序列化與持久化的標準化字典
     """
     graph_depth = _normalize_positive_int_value(item, "graph_depth")
     edge_kind = _normalize_text_value(item, "edge_kind", "required", lowercase=True) or "required"
@@ -211,19 +229,19 @@ def serialize_online_dependency_install_plan(
     plan_source: str = "review",
 ) -> dict[str, Any]:
     """
-    將依賴安裝計畫轉為可持久化 payload。
+    將依賴安裝計畫轉為可持久化 payload
 
     Args:
-        plan: 原始依賴安裝計畫。
-        root_project_id: 根專案 ID。
-        root_project_name: 根專案名稱。
-        root_target_version_id: 根目標版本 ID。
-        root_target_version_name: 根目標版本名稱。
-        root_enabled: 根專案是否啟用。
-        plan_source: 計畫來源標記。
+        plan: 原始依賴安裝計畫
+        root_project_id: 根專案 ID
+        root_project_name: 根專案名稱
+        root_target_version_id: 根目標版本 ID
+        root_target_version_name: 根目標版本名稱
+        root_enabled: 根專案是否啟用
+        plan_source: 計畫來源標記
 
     Returns:
-        可寫入快取或檔案的計畫 payload。
+        可寫入快取或檔案的計畫 payload
     """
     serialized_items = [
         serialize_online_dependency_install_item(item) for item in list(getattr(plan, "items", []) or [])
@@ -255,13 +273,13 @@ def serialize_online_dependency_install_plan(
 
 def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[bool, str]:
     """
-    驗證 dependency plan 快照是否符合 replay 契約。
+    驗證 dependency plan 快照是否符合 replay 契約
 
     Args:
-        raw: 待驗證的原始 payload。
+        raw: 待驗證的原始 payload
 
     Returns:
-        `(是否通過, 原因碼)` 的驗證結果。
+        `(是否通過, 原因碼)` 的驗證結果
     """
     if not isinstance(raw, dict):
         return (False, "payload-not-dict")
@@ -313,13 +331,13 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
 
 def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
     """
-    嘗試遷移舊版 dependency plan payload 至可回放格式。
+    嘗試遷移舊版 dependency plan payload 至可回放格式
 
     Args:
-        raw: 待遷移的原始 payload。
+        raw: 待遷移的原始 payload
 
     Returns:
-        `(遷移後 payload, 狀態碼)` 的結果；失敗時回傳 `(None, 原因碼)`。
+        `(遷移後 payload, 狀態碼)` 的結果；失敗時回傳 `(None, 原因碼)`
     """
     if not isinstance(raw, dict):
         return (None, "payload-not-dict")
@@ -374,7 +392,7 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
         migrated = True
     if migrated:
         notes = _normalize_string_list(migrated_payload.get("notes", []))
-        migration_note = "已套用 dependency snapshot v1 遷移：補齊 graph_edges 與舊欄位預設值。"
+        migration_note = "已套用 dependency snapshot v1 遷移：補齊 graph_edges 與舊欄位預設值"
         if migration_note not in notes:
             notes.append(migration_note)
         migrated_payload["notes"] = notes
@@ -388,19 +406,19 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
 
 def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
     """
-    從持久化 payload 還原 `OnlineDependencyInstallPlan`。
+    從持久化 payload 還原 `OnlineDependencyInstallPlan`
 
     Args:
-        raw: 已序列化的原始 payload。
+        raw: 已序列化的原始 payload
 
     Returns:
-        還原後的 `OnlineDependencyInstallPlan`。
+        還原後的 `OnlineDependencyInstallPlan`
     """
     if not isinstance(raw, dict):
         return OnlineDependencyInstallPlan()
 
-    items = [_build_online_dependency_install_item(item) for item in list(raw.get("items", []) or [])]
-    advisory_items = [_build_online_dependency_install_item(item) for item in list(raw.get("advisory_items", []) or [])]
+    items = [OnlineDependencyInstallItem.from_dict(item) for item in list(raw.get("items", []) or [])]
+    advisory_items = [OnlineDependencyInstallItem.from_dict(item) for item in list(raw.get("advisory_items", []) or [])]
     return OnlineDependencyInstallPlan(
         items=[item for item in items if item is not None],
         advisory_items=[item for item in advisory_items if item is not None],

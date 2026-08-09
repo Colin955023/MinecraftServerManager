@@ -1,18 +1,19 @@
 """
 伺服器管理器
 
-負責建立、管理與配置 Minecraft 伺服器。
+負責建立、管理與配置 Minecraft 伺服器
 """
 
-import contextlib
 import threading
 import time
-from dataclasses import asdict, is_dataclass
+from contextlib import suppress
+from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
 from ...models import ServerConfig, ServerOperationResult
 from ...utils import (
+    ExceptionUtils,
     PathUtils,
     ServerCommands,
     ServerDetectionUtils,
@@ -20,7 +21,6 @@ from ...utils import (
     SystemUtils,
     atomic_write_json,
     get_logger,
-    record_and_mark,
 )
 
 logger = get_logger().bind(component="ServerManager")
@@ -38,11 +38,11 @@ class ServerCRUD:
 
     def __init__(self, servers_root: str | None = None):
         if not servers_root:
-            raise ValueError("ServerManager 必須指定 servers_root 路徑，且不可為空。請於 UI 層先處理。")
+            raise ValueError("ServerManager 必須指定 servers_root 路徑，且不可為空請於 UI 層先處理")
         self.servers_root = Path(servers_root).resolve()
         self.servers_root.mkdir(parents=True, exist_ok=True)
         self.config_file = self.servers_root / "servers_config.json"
-        # 若有其他 ServerCRUD 已針對相同 servers_root 建立過，重用其 servers 字典
+
         key = str(self.servers_root)
         if key in ServerCRUD._shared_servers:
             self.servers = ServerCRUD._shared_servers[key]
@@ -58,26 +58,76 @@ class ServerCRUD:
 
     @staticmethod
     def _success_result(message: str = "", *, server_name: str = "") -> ServerOperationResult:
-        """建立成功結果。"""
+        """建立成功結果"""
         return ServerOperationResult(success=True, message=message, server_name=server_name)
 
     @staticmethod
     def _failure_result(title: str, message: str, *, server_name: str = "") -> ServerOperationResult:
-        """建立失敗結果。"""
+        """建立失敗結果"""
         return ServerOperationResult(success=False, title=title, message=message, server_name=server_name)
+
+    @staticmethod
+    def _collect_imported_startup_scripts(server_path: Path) -> list[Path]:
+        server_root = server_path.resolve(strict=False)
+        managed_name = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
+        scripts: list[Path] = []
+        seen: set[Path] = set()
+
+        def append_script(script_path: Path) -> None:
+            resolved_path = script_path.resolve(strict=False)
+            if resolved_path in seen or resolved_path.parent != server_root or not script_path.is_file():
+                return
+            scripts.append(script_path)
+            seen.add(resolved_path)
+
+        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+            if script_name.lower() == managed_name:
+                continue
+            append_script(server_path / script_name)
+
+        for script_path in sorted(server_path.glob("*.bat")):
+            if script_path.name.lower() == managed_name:
+                continue
+            resolved_path = script_path.resolve(strict=False)
+            if resolved_path in seen:
+                continue
+            startup_command = ServerCommands.extract_startup_script_command(script_path)
+            if startup_command.has_java_command:
+                append_script(script_path)
+        return scripts
+
+    @staticmethod
+    def _extract_imported_startup_command(config: ServerConfig, script_path: Path) -> str | None:
+        startup_command = ServerCommands.extract_startup_script_command(script_path)
+        if not startup_command.has_java_command:
+            return None
+        if startup_command.memory_max_mb is not None:
+            config.memory_max_mb = startup_command.memory_max_mb
+        if startup_command.memory_min_mb is not None:
+            config.memory_min_mb = startup_command.memory_min_mb
+        return ServerCommands.replace_startup_command_java_path(startup_command.command_line, config)
+
+    @staticmethod
+    def _delete_root_startup_script(server_path: Path, script_path: Path) -> bool:
+        server_root = server_path.resolve(strict=False)
+        resolved_path = script_path.resolve(strict=False)
+        if resolved_path.parent != server_root or not script_path.is_file():
+            return False
+        script_path.unlink()
+        return True
 
     def create_server_result(
         self, config: ServerConfig, properties: dict[str, str] | None = None
     ) -> ServerOperationResult:
         """
-        建立新伺服器並初始化設定。
+        建立新伺服器並初始化設定
 
         Args:
-            config: 要建立的伺服器設定。
-            properties: 要寫入 server.properties 的初始屬性。
+            config: 要建立的伺服器設定
+            properties: 要寫入 server.properties 的初始屬性
 
         Returns:
-            建立流程結果，供 UI 或呼叫端決定後續呈現。
+            建立流程結果，供 UI 或呼叫端決定後續呈現
         """
         server_path: Path | None = None
         previous_config = self.servers.get(config.name)
@@ -153,66 +203,48 @@ class ServerCRUD:
                     PathUtils.delete_within(self.servers_root, server_path)
             except Exception:
                 logger.warning(f"建立失敗後清理伺服器資料夾失敗: {server_path}")
-            # 嘗試終止殘留 Java 進程
+
             try:
                 killed = False
                 if server_path and server_path.exists():
-                    # 掃描該資料夾下的 java 進程
                     killed = SystemUtils.kill_java_processes_in_path(server_path)
                     if killed:
                         logger.warning(f"異常建立失敗，自動終止殘留 Java 進程於: {server_path}")
             except Exception as kill_exc:
                 logger.error(f"自動終止殘留 Java 進程失敗: {kill_exc}")
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 e, marker_path=server_path, reason="建立伺服器失敗", details={"server": getattr(config, "name", None)}
             )
             return self._failure_result(
                 "建立失敗",
-                f"建立過程發生錯誤，已嘗試清理殘留 Java 進程。請檢查日誌與 .issues 目錄。\n錯誤: {e}",
+                f"建立過程發生錯誤，已嘗試清理殘留 Java 進程請檢查日誌與 .issues 目錄\n錯誤: {e}",
                 server_name=getattr(config, "name", ""),
             )
 
     def create_server(self, config: ServerConfig, properties: dict[str, str] | None = None) -> bool:
         """
-        建立新伺服器並初始化設定。
+        建立新伺服器並初始化設定
 
         Args:
-            config: 要建立的伺服器設定。
-            properties: 建立後要額外寫入的 `server.properties` 內容。
+            config: 要建立的伺服器設定
+            properties: 建立後要額外寫入的 `server.properties` 內容
 
         Returns:
-            建立成功時回傳 True，否則回傳 False。
+            建立成功時回傳 True，否則回傳 False
         """
 
         return self.create_server_result(config, properties).success
 
-    def _create_eula_file(self, server_path: Path) -> bool:
-        """建立並同意 EULA 檔案。"""
-        eula_content = "eula=true"
-        return PathUtils.write_text_file(server_path / "eula.txt", eula_content)
-
-    def _create_server_structure(self, path: Path, loader_type: str) -> None:
-        """建立伺服器檔案結構"""
-        if loader_type.lower() == "vanilla":
-            directories = ["world", "logs"]
-        elif loader_type.lower() in ["forge", "fabric"]:
-            directories = ["world", "plugins", "mods", "config", "logs"]
-        else:
-            directories = ["world", "logs"]
-            logger.warning(f"未知 loader_type: {loader_type}，使用預設目錄結構")
-        for directory in directories:
-            (path / directory).mkdir(exist_ok=True)
-
     def create_launch_script(self, config: ServerConfig, java_command_override: str | None = None) -> bool:
         """
-        建立伺服器啟動腳本。
+        建立伺服器啟動腳本
 
         Args:
-            config: 伺服器設定與啟動參數來源。
-            java_command_override: 匯入既有伺服器時保留的原始 Java 啟動命令。
+            config: 伺服器設定與啟動參數來源
+            java_command_override: 匯入既有伺服器時保留的原始 Java 啟動命令
 
         Returns:
-            啟動腳本寫入成功時回傳 True，失敗時回傳 False。
+            啟動腳本寫入成功時回傳 True，失敗時回傳 False
         """
         server_path = Path(config.path)
         if java_command_override:
@@ -269,8 +301,8 @@ class ServerCRUD:
                     logger.debug("啟動腳本內容未變更，跳過寫入")
                     return True
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(
                     e,
                     marker_path=start_script_path,
                     reason="compare_start_script_failed",
@@ -281,14 +313,14 @@ class ServerCRUD:
 
     def update_server_properties(self, server_name: str, properties: dict[str, str]) -> bool:
         """
-        更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值。
+        更新 server.properties，只覆蓋有變動的欄位，其餘欄位保留原值
 
         Args:
-            server_name: 目標伺服器名稱。
-            properties: 要合併寫入的屬性。
+            server_name: 目標伺服器名稱
+            properties: 要合併寫入的屬性
 
         Returns:
-            成功時回傳 True，失敗時回傳 False。
+            成功時回傳 True，失敗時回傳 False
         """
         try:
             config = self.servers.get(server_name)
@@ -297,7 +329,7 @@ class ServerCRUD:
                 return False
             server_path = getattr(config, "path", None) or getattr(config, "server_path", None)
             if not server_path:
-                logger.error(f"找不到伺服器路徑，無法儲存 server.properties。config={config}")
+                logger.error(f"找不到伺服器路徑，無法儲存 server.propertiesconfig={config}")
                 return False
             properties_path = Path(server_path) / "server.properties"
             original = ServerPropertiesHelper.load_properties(properties_path)
@@ -327,7 +359,7 @@ class ServerCRUD:
                 properties_path = Path(getattr(self.servers.get(server_name), "path", "")) / "server.properties"
             except Exception:
                 properties_path = None
-            record_and_mark(
+            ExceptionUtils.record_and_mark(
                 e,
                 marker_path=properties_path,
                 reason="update_server_properties 儲存失敗",
@@ -337,13 +369,13 @@ class ServerCRUD:
 
     def delete_server_result(self, server_name: str) -> ServerOperationResult:
         """
-        刪除伺服器。
+        刪除伺服器
 
         Args:
-            server_name: 要刪除的伺服器名稱。
+            server_name: 要刪除的伺服器名稱
 
         Returns:
-            刪除流程結果。
+            刪除流程結果
         """
         try:
             if server_name not in self.servers:
@@ -375,18 +407,20 @@ class ServerCRUD:
                 server_path = Path(getattr(self.servers.get(server_name), "path", ""))
             except Exception:
                 server_path = None
-            record_and_mark(e, marker_path=server_path, reason="刪除伺服器失敗", details={"server": server_name})
-            return self._failure_result("刪除失敗", f"無法刪除伺服器 {server_name}。錯誤: {e}", server_name=server_name)
+            ExceptionUtils.record_and_mark(
+                e, marker_path=server_path, reason="刪除伺服器失敗", details={"server": server_name}
+            )
+            return self._failure_result("刪除失敗", f"無法刪除伺服器 {server_name}錯誤: {e}", server_name=server_name)
 
     def delete_server(self, server_name: str) -> bool:
         """
-        刪除伺服器。
+        刪除伺服器
 
         Args:
-            server_name: 要刪除的伺服器名稱。
+            server_name: 要刪除的伺服器名稱
 
         Returns:
-            刪除成功時回傳 True，否則回傳 False。
+            刪除成功時回傳 True，否則回傳 False
         """
 
         return self.delete_server_result(server_name).success
@@ -398,27 +432,38 @@ class ServerCRUD:
                 data = PathUtils.load_json(self.config_file)
                 if data is not None:
                     self.servers.clear()
+                    valid_keys = {f.name for f in fields(ServerConfig)}
                     for name, config_data in data.items():
-                        self.servers[name] = ServerConfig(**config_data)
+                        filtered_data = {k: v for k, v in config_data.items() if k in valid_keys}
+                        self.servers[name] = ServerConfig(**filtered_data)
                 else:
                     logger.warning("伺服器配置文件為空或無法解析")
             except Exception as e:
-                with contextlib.suppress(Exception):
-                    record_and_mark(e, marker_path=self.config_file, reason="load_servers_config_failed")
+                with suppress(Exception):
+                    ExceptionUtils.record_and_mark(e, marker_path=self.config_file, reason="load_servers_config_failed")
 
     def write_servers_config(self) -> bool:
         """
-        實際執行保存伺服器配置到 servers_config.json。
+        實際執行保存伺服器配置到 servers_config.json
 
         Returns:
-            成功寫入時回傳 True，失敗時回傳 False。
+            成功寫入時回傳 True，失敗時回傳 False
         """
         with self._config_lock:
             try:
                 data: dict[str, dict[str, Any]] = {}
                 for name, config in self.servers.items():
                     if is_dataclass(config) and not isinstance(config, type):
-                        data[name] = asdict(config)
+                        raw_dict = asdict(config)
+
+                        def _remove_callables(d: Any) -> Any:
+                            if isinstance(d, dict):
+                                return {k: _remove_callables(v) for k, v in d.items() if not callable(v)}
+                            if isinstance(d, list):
+                                return [_remove_callables(v) for v in d if not callable(v)]
+                            return d
+
+                        data[name] = _remove_callables(raw_dict)
                     elif isinstance(config, dict):
                         data[name] = config
                     else:
@@ -431,13 +476,20 @@ class ServerCRUD:
                 logger.info("伺服器配置已保存到 servers_config.json")
                 return True
             except Exception as e:
-                with contextlib.suppress(Exception):
-                    record_and_mark(e, marker_path=self.config_file, reason="write_servers_config_failed")
+                with suppress(Exception):
+                    ExceptionUtils.record_and_mark(
+                        e, marker_path=self.config_file, reason="write_servers_config_failed"
+                    )
                 logger.exception(f"保存伺服器配置失敗: {e}")
                 return False
 
     def get_default_server_properties(self) -> dict[str, str]:
-        """獲取預設伺服器屬性"""
+        """
+        獲取預設伺服器屬性
+
+        Returns:
+            預設的 server.properties 屬性字典
+        """
         return {
             "accepts-transfers": "false",
             "allow-flight": "false",
@@ -510,111 +562,25 @@ class ServerCRUD:
 
     def server_exists(self, name: str) -> bool:
         """
-        檢查伺服器是否已存在。
+        檢查伺服器是否已存在
 
         Args:
-            name: 伺服器名稱。
+            name: 伺服器名稱
 
         Returns:
-            若伺服器存在則回傳 True。
+            若伺服器存在則回傳 True
         """
         return name in self.servers
 
-    @staticmethod
-    def _collect_imported_startup_scripts(server_path: Path) -> list[Path]:
-        server_root = server_path.resolve(strict=False)
-        managed_name = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
-        scripts: list[Path] = []
-        seen: set[Path] = set()
-
-        def append_script(script_path: Path) -> None:
-            resolved_path = script_path.resolve(strict=False)
-            if resolved_path in seen or resolved_path.parent != server_root or not script_path.is_file():
-                return
-            scripts.append(script_path)
-            seen.add(resolved_path)
-
-        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
-            if script_name.lower() == managed_name:
-                continue
-            append_script(server_path / script_name)
-
-        for script_path in sorted(server_path.glob("*.bat")):
-            if script_path.name.lower() == managed_name:
-                continue
-            resolved_path = script_path.resolve(strict=False)
-            if resolved_path in seen:
-                continue
-            startup_command = ServerCommands.extract_startup_script_command(script_path)
-            if startup_command.has_java_command:
-                append_script(script_path)
-        return scripts
-
-    @staticmethod
-    def _extract_imported_startup_command(config: ServerConfig, script_path: Path) -> str | None:
-        startup_command = ServerCommands.extract_startup_script_command(script_path)
-        if not startup_command.has_java_command:
-            return None
-        if startup_command.memory_max_mb is not None:
-            config.memory_max_mb = startup_command.memory_max_mb
-        if startup_command.memory_min_mb is not None:
-            config.memory_min_mb = startup_command.memory_min_mb
-        return ServerCommands.replace_startup_command_java_path(startup_command.command_line, config)
-
-    @staticmethod
-    def _delete_root_startup_script(server_path: Path, script_path: Path) -> bool:
-        server_root = server_path.resolve(strict=False)
-        resolved_path = script_path.resolve(strict=False)
-        if resolved_path.parent != server_root or not script_path.is_file():
-            return False
-        script_path.unlink()
-        return True
-
-    def _prepare_imported_startup_scripts(self, config: ServerConfig) -> None:
-        """匯入伺服器時轉移原始腳本設定，並只留下程式管理的標準啟動腳本。"""
-        server_path = Path(config.path)
-        managed_script = server_path / ServerCommands.MANAGED_STARTUP_SCRIPT_NAME
-        try:
-            imported_scripts = self._collect_imported_startup_scripts(server_path)
-            setting_sources = imported_scripts or ([managed_script] if managed_script.is_file() else [])
-            java_command_override = None
-            command_source = ""
-            for script_path in setting_sources:
-                java_command_override = self._extract_imported_startup_command(config, script_path)
-                if java_command_override:
-                    command_source = script_path.name
-                    break
-            if command_source:
-                logger.info(f"已從匯入啟動腳本保留啟動命令: {command_source}")
-
-            removed_scripts: list[str] = []
-            for script_path in [*imported_scripts, managed_script]:
-                if not script_path.exists():
-                    continue
-                try:
-                    if self._delete_root_startup_script(server_path, script_path):
-                        removed_scripts.append(script_path.name)
-                except Exception as exc:
-                    logger.warning(f"無法刪除匯入啟動腳本 {script_path.name}: {exc}")
-            if removed_scripts:
-                logger.info("已移除匯入啟動腳本: " + ", ".join(removed_scripts))
-
-            if not self.create_launch_script(config, java_command_override=java_command_override):
-                raise RuntimeError(f"匯入伺服器啟動腳本建立失敗: {config.name}")
-            logger.info(f"匯入伺服器已建立/更新標準啟動腳本 start_server.bat: {config.name}")
-        except Exception as exc:
-            logger.warning(f"匯入伺服器啟動腳本整理失敗，保留原始檔案: {exc}")
-            raise
-
     def add_server(self, config: ServerConfig) -> bool:
         """
-        添加伺服器配置（用於匯入）。
+        添加伺服器配置（用於匯入）
 
         Args:
-            config: 要加入的伺服器設定。
+            config: 要加入的伺服器設定
 
         Returns:
-            成功寫入設定時回傳 True，失敗時回傳 False。
+            成功寫入設定時回傳 True，失敗時回傳 False
         """
         previous_config = self.servers.get(config.name)
         try:
@@ -633,13 +599,13 @@ class ServerCRUD:
 
     def load_server_properties(self, server_name: str) -> dict[str, str]:
         """
-        載入伺服器的 server.properties 檔案內容（附帶快取機制）。
+        載入伺服器的 server.properties 檔案內容（附帶快取機制）
 
         Args:
-            server_name: 伺服器名稱。
+            server_name: 伺服器名稱
 
         Returns:
-            讀取到的屬性字典；找不到或失敗時回傳空字典。
+            讀取到的屬性字典；找不到或失敗時回傳空字典
         """
         try:
             if server_name not in self.servers:
@@ -673,12 +639,12 @@ class ServerCRUD:
 
     def invalidate_server_properties_cache(self, server_name: str | None = None) -> None:
         """
-        清除 server.properties 快取。
+        清除 server.properties 快取
 
-        傳入 server_name 時僅清除單一伺服器，否則清除全部。
+        傳入 server_name 時僅清除單一伺服器，否則清除全部
 
         Args:
-            server_name: 要清除快取的伺服器名稱；為 None 時清除全部。
+            server_name: 要清除快取的伺服器名稱；為 None 時清除全部
         """
         if server_name is None:
             self._properties_cache.clear()
@@ -687,13 +653,13 @@ class ServerCRUD:
 
     def get_server_log_file(self, server_name: str) -> Path | None:
         """
-        獲取伺服器日誌檔案路徑。
+        獲取伺服器日誌檔案路徑
 
         Args:
-            server_name: 目標伺服器名稱。
+            server_name: 目標伺服器名稱
 
         Returns:
-            找到的日誌檔案路徑；找不到時回傳 None。
+            找到的日誌檔案路徑；找不到時回傳 None
         """
         try:
             if server_name not in self.servers:
@@ -705,12 +671,62 @@ class ServerCRUD:
                 server_path / "server.log",
                 server_path / "logs" / "server.log",
             ]
-            for log_file in log_files:
-                if log_file.exists():
-                    return log_file
-            return None
+            return next((f for f in log_files if f.exists()), None)
         except Exception as e:
-            with contextlib.suppress(Exception):
-                record_and_mark(e, reason="get_server_log_file_failed", details={"server": server_name})
+            with suppress(Exception):
+                ExceptionUtils.record_and_mark(e, reason="get_server_log_file_failed", details={"server": server_name})
             logger.exception(f"獲取伺服器日誌檔案失敗: {e}")
             return None
+
+    def _create_eula_file(self, server_path: Path) -> bool:
+        """建立並同意 EULA 檔案"""
+        eula_content = "eula=true"
+        return PathUtils.write_text_file(server_path / "eula.txt", eula_content)
+
+    def _create_server_structure(self, path: Path, loader_type: str) -> None:
+        """建立伺服器檔案結構"""
+        if loader_type.lower() == "vanilla":
+            directories = ["world", "logs"]
+        elif loader_type.lower() in ["forge", "fabric"]:
+            directories = ["world", "plugins", "mods", "config", "logs"]
+        else:
+            directories = ["world", "logs"]
+            logger.warning(f"未知 loader_type: {loader_type}，使用預設目錄結構")
+        for directory in directories:
+            (path / directory).mkdir(exist_ok=True)
+
+    def _prepare_imported_startup_scripts(self, config: ServerConfig) -> None:
+        """匯入伺服器時轉移原始腳本設定，並只留下程式管理的標準啟動腳本"""
+        server_path = Path(config.path)
+        managed_script = server_path / ServerCommands.MANAGED_STARTUP_SCRIPT_NAME
+        try:
+            imported_scripts = self._collect_imported_startup_scripts(server_path)
+            setting_sources = imported_scripts or ([managed_script] if managed_script.is_file() else [])
+            java_command_override = None
+            command_source = ""
+            for script_path in setting_sources:
+                java_command_override = self._extract_imported_startup_command(config, script_path)
+                if java_command_override:
+                    command_source = script_path.name
+                    break
+            if command_source:
+                logger.info(f"已從匯入啟動腳本保留啟動命令: {command_source}")
+
+            removed_scripts: list[str] = []
+            for script_path in [*imported_scripts, managed_script]:
+                if not script_path.exists():
+                    continue
+                try:
+                    if self._delete_root_startup_script(server_path, script_path):
+                        removed_scripts.append(script_path.name)
+                except Exception as exc:
+                    logger.warning(f"無法刪除匯入啟動腳本 {script_path.name}: {exc}")
+            if removed_scripts:
+                logger.info("已移除匯入啟動腳本: " + ", ".join(removed_scripts))
+
+            if not self.create_launch_script(config, java_command_override=java_command_override):
+                raise RuntimeError(f"匯入伺服器啟動腳本建立失敗: {config.name}")
+            logger.info(f"匯入伺服器已建立/更新標準啟動腳本 start_server.bat: {config.name}")
+        except Exception as exc:
+            logger.warning(f"匯入伺服器啟動腳本整理失敗，保留原始檔案: {exc}")
+            raise

@@ -1,6 +1,6 @@
 """
 安全的 subprocess 包裝器
-提供驗證可執行檔存在或可在 PATH 中找到的 run/popen 包裝函式，強制使用 shell=False。
+提供驗證可執行檔存在或可在 PATH 中找到的 run/popen 包裝函式，強制使用 shell=False
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ logger = get_logger().bind(component="SubprocessUtils")
 
 @dataclass(slots=True)
 class QProcessResult:
-    """QProcess 執行結果封裝。"""
+    """QProcess 執行結果封裝"""
 
     args: list[str]
     returncode: int
@@ -33,16 +33,16 @@ class QProcessResult:
 
     def poll(self) -> int:
         """
-        模擬 subprocess.CompletedProcess 的 poll 方法。
+        模擬 subprocess.CompletedProcess 的 poll 方法
 
         Returns:
-            QProcess 結束代碼。
+            QProcess 結束代碼
         """
         return self.returncode
 
 
 class SubprocessUtils:
-    """提供安全的 subprocess 包裝，強制使用 shell=False。"""
+    """提供安全的 subprocess 包裝，強制使用 shell=False"""
 
     PIPE = subprocess.PIPE
     STDOUT = subprocess.STDOUT
@@ -56,7 +56,12 @@ class SubprocessUtils:
 
     @staticmethod
     def get_hidden_windows_kwargs() -> dict:
-        """回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict。"""
+        """
+        回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict
+
+        Returns:
+            dict: Windows 隱藏視窗所需參數，非 Windows 平台回傳空 dict
+        """
         if os.name != "nt":
             return {}
         hidden_kwargs: dict = {"creationflags": SubprocessUtils.CREATE_NO_WINDOW}
@@ -111,36 +116,58 @@ class SubprocessUtils:
     @staticmethod
     def run_checked(cmd: Iterable[str], **kwargs) -> subprocess.CompletedProcess:
         """
-        像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`。
+        像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`
 
         Args:
-            cmd: 命令列參數序列。
-            **kwargs: 傳遞給 `subprocess.run` 的其他參數。
+            cmd: 命令列參數序列
+            **kwargs: 傳遞給 `subprocess.run` 的其他參數
 
         Returns:
-            `subprocess.run` 的執行結果。
+            `subprocess.run` 的執行結果
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
-        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
+        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False
         return subprocess.run(cmd_list, **kwargs)  # nosec B603
 
     @staticmethod
     def popen_checked(cmd: Iterable[str], **kwargs) -> subprocess.Popen:
         """
-        像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`。
+        像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`
 
         Args:
-            cmd: 命令列參數序列。
-            **kwargs: 傳遞給 `subprocess.Popen` 的其他參數。
+            cmd: 命令列參數序列
+            **kwargs: 傳遞給 `subprocess.Popen` 的其他參數
 
         Returns:
-            建立完成的 `subprocess.Popen` 物件。
+            建立完成的 `subprocess.Popen` 物件
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
-        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
+        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False
         return subprocess.Popen(cmd_list, **kwargs)  # nosec B603
+
+    @staticmethod
+    def query_winget(args: list[str], check: bool = False) -> subprocess.CompletedProcess:
+        """
+        執行 winget 指令並回傳結果自動包含必要的環境與編碼設定
+
+        Args:
+            args: winget 的參數列表
+            check: 是否在回傳碼非零時拋出 CalledProcessError
+
+        Returns:
+            subprocess.CompletedProcess 物件
+        """
+        return SubprocessUtils.run_checked(
+            ["winget", *args],
+            capture_output=True,
+            text=True,
+            check=check,
+            encoding="utf-8",
+            stdin=SubprocessUtils.DEVNULL,
+            creationflags=SubprocessUtils.CREATE_NO_WINDOW,
+        )
 
     @staticmethod
     def create_qprocess_checked(
@@ -151,16 +178,16 @@ class SubprocessUtils:
         parent: QtCore.QObject | None = None,
     ) -> QtCore.QProcess:
         """
-        建立已驗證 argv 的 QProcess。
+        建立已驗證 argv 的 QProcess
 
         Args:
-            cmd: 命令列參數序列。
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
-            merged_channels: 是否合併 stdout/stderr。
-            parent: QProcess 的 Qt parent。
+            cmd: 命令列參數序列
+            cwd: 工作目錄；未提供時沿用目前程序工作目錄
+            merged_channels: 是否合併 stdout/stderr
+            parent: QProcess 的 Qt parent
 
         Returns:
-            已設定 program、arguments 與 channel mode 的 QProcess。
+            已設定 program、arguments 與 channel mode 的 QProcess
         """
 
         cmd_list = SubprocessUtils._validate_cmd(cmd)
@@ -186,20 +213,20 @@ class SubprocessUtils:
         timeout_ms: int | None = None,
     ) -> QProcessResult:
         """
-        以 QProcess signal 同步執行命令並收集輸出。
+        以 QProcess signal 同步執行命令並收集輸出
 
         Args:
-            cmd: 命令列參數序列。
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
-            encoding: stdout 解碼使用的文字編碼。
-            on_stdout: 每次收到 stdout 片段時呼叫的回呼。
-            on_started: QProcess 啟動後以 PID 呼叫的回呼。
-            cancel_check: 輪詢取消狀態的回呼。
-            cancel_poll_ms: 取消與 stdout 輪詢間隔毫秒數。
-            timeout_ms: 執行逾時毫秒數；未提供時不限制。
+            cmd: 命令列參數序列
+            cwd: 工作目錄；未提供時沿用目前程序工作目錄
+            encoding: stdout 解碼使用的文字編碼
+            on_stdout: 每次收到 stdout 片段時呼叫的回呼
+            on_started: QProcess 啟動後以 PID 呼叫的回呼
+            cancel_check: 輪詢取消狀態的回呼
+            cancel_poll_ms: 取消與 stdout 輪詢間隔毫秒數
+            timeout_ms: 執行逾時毫秒數；未提供時不限制
 
         Returns:
-            QProcess 的結束代碼、輸出與取消狀態。
+            QProcess 的結束代碼、輸出與取消狀態
         """
 
         app = QtWidgets.QApplication.instance()
@@ -279,11 +306,11 @@ class SubprocessUtils:
     @staticmethod
     def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
         """
-        啟動分離的子進程，隔離 I/O 和生命周期，不顯示控制台視窗。
+        啟動分離的子進程，隔離 I/O 和生命周期，不顯示控制台視窗
 
-        用於重啟/更新等場景，避免主進程退出時留下孤兒進程。
-        Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗。
-        自動配置 DEVNULL、close_fds 和平台相關的分離旗標。
+        用於重啟/更新等場景，避免主進程退出時留下孤兒進程
+        Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗
+        自動配置 DEVNULL、close_fds 和平台相關的分離旗標
 
         Args:
             cmd: 命令列表
