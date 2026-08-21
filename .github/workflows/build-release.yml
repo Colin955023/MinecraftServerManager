@@ -13,14 +13,17 @@ permissions:
 jobs:
   build:
     name: Build and Release
+    if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
       RELEASE_TAG: ''
+      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
 
     permissions:
       contents: write
-      discussions: write
+      attestations: write
       id-token: write
 
     steps:
@@ -36,6 +39,15 @@ jobs:
           python-version: '3.14'
           uv-sync: 'false'
 
+      - name: Restore Nuitka compilation cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-cache-windows-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            nuitka-cache-windows-${{ hashFiles('uv.lock') }}-
+            nuitka-cache-windows-
+
       - name: Resolve release tag
         id: release_tag
         shell: pwsh
@@ -45,7 +57,7 @@ jobs:
             Write-Error "取得版本資訊與驗證失敗"
             exit $LASTEXITCODE
           }
-          
+
           $output = $json | ConvertFrom-Json
           $tag = $output.Tag
           $version = $output.Version
@@ -54,25 +66,34 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build executable and installer
+      - name: Build executable
         shell: pwsh
-        run: python scripts\build_installer_nuitka.py
+        run: .\scripts\build_nuitka.ps1
 
       - name: Extract release notes
         id: release_notes
         shell: pwsh
         run: |
-          python .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
+          .\.venv\Scripts\python.exe .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
           if ($LASTEXITCODE -ne 0) {
             Write-Error "提取 release notes 失敗"
             exit $LASTEXITCODE
           }
 
-      - name: Sign release artifacts
-        uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
+      - name: Attest release executable provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          inputs: |
-            dist/*.exe
+          subject-path: 'dist/*.exe'
+
+      - name: Verify generated attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+              gh attestation verify $_.FullName --repo $env:GITHUB_REPOSITORY
+              if ($LASTEXITCODE -ne 0) { throw "Artifact attestation verification failed: $($_.Name)" }
+          }
 
       - name: Create and push release tag
         shell: pwsh
@@ -125,25 +146,31 @@ jobs:
           $prereleaseArgs = @()
           if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
           $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
-              $_.Name -match '^MinecraftServerManager.*\.exe$' -or
-              $_.Name -match '^MinecraftServerManager.*\.exe\.sigstore\.json$'
+              $_.Name -match '^MinecraftServerManager.*\.exe$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
-              Write-Host 'No release assets found in dist; aborting release creation'
+              Write-Error "No release executable was found in dist."
               exit 1
           }
           $args = @('release', 'create', $tag) + $assets + @(
-              '--title', "Minecraft Server Manager $tag", 
-              '--notes-file', 'release_notes.md', 
+              '--title', "Minecraft Server Manager $tag",
+              '--notes-file', 'release_notes.md',
               '--verify-tag'
           ) + $prereleaseArgs
-          
+
           Write-Host "Executing: gh $args"
           & gh @args
           if ($LASTEXITCODE -ne 0) {
               Write-Error "GitHub CLI failed with exit code $LASTEXITCODE"
               exit $LASTEXITCODE
           }
+
+      - name: Save Nuitka compilation cache
+        if: always()
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-cache-windows-${{ hashFiles('uv.lock') }}-${{ github.run_id }}
 
       - name: Upload build artifacts
         if: always()

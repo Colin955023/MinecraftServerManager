@@ -16,6 +16,7 @@ Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟�
 ## 功能特色
 
 - **建立伺服器** — Vanilla／Fabric／Forge／Quilt／NeoForge 精靈式設定流程
+- **JVM 參數最佳化** — 支援 Java 21+ ZGC 及 Java 8/16/17 G1GC 的自動優化與視覺化設定
 - **Java 管理** — 自動偵測已安裝 Java，缺少時可引導 winget 或手動安裝
 - **即時監控** — 控制台輸出、記憶體、運行狀態與玩家資訊集中顯示
 - **模組管理** — 本地掃描 + Modrinth 線上搜尋，線上安裝前 Review 確認
@@ -64,8 +65,9 @@ uv run python -m src.main
 **品質檢查：**
 
 ```bash
-# 快速 test
-uv run quick_test.py
+# 測試（先同步測試套件）
+uv sync --group test
+uv run pytest -q
 
 # 格式、型別、測試檢查
 scripts/format_lint_check.bat
@@ -80,9 +82,9 @@ uv run report\comprehensive_report.py
 
 ```
 src/
-  core/      核心邏輯（版本管理、伺服器控制、模組服務）
+  core/      核心邏輯（載入器管理、伺服器控制、模組協調與 Modrinth 搜尋服務）
   models/    資料模型
-  ui/        主視窗、功能頁、對話框、模組管理、模組搜尋服務
+  ui/        主視窗、功能分頁、對話框、模組管理介面、監控視窗與協調服務
   utils/     共用基礎設施（設定、HTTP、日誌、視窗管理、Java 支援、更新檢查）
 docs/        文件
 tests/       自動化測試

@@ -20,6 +20,7 @@ jobs:
   bandit-scan:
     name: CI-Tests / Bandit Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
@@ -36,6 +37,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group security'
 
       - name: Run Bandit security scan
         run: |
@@ -53,6 +55,7 @@ jobs:
   detect-secrets-scan:
     name: CI-Tests / detect-secrets
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -67,6 +70,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group security'
 
       - name: Run detect-secrets privacy scan
         run: |
@@ -86,18 +90,10 @@ jobs:
           path: detect-secrets-results.json
           retention-days: 2
 
-  lint-and-test:
-    name: CI-Tests / ${{ matrix.task }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - task: lint
-            os: windows-latest
-          - task: test
-            os: windows-latest
-
+  lint:
+    name: CI-Tests / lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -109,25 +105,39 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group lint --group typecheck'
 
       - name: Run Ruff (Lint & Format)
-        if: matrix.task == 'lint'
-        run: uv run ruff check src tests quick_test.py && uv run ruff format --check src tests quick_test.py
+        run: uv run ruff check src tests && uv run ruff format --check src tests
 
       - name: Run mypy
-        if: matrix.task == 'lint'
-        run: uv run mypy src tests quick_test.py
+        run: uv run mypy src tests
 
       - name: Run Pylint (cyclic import check)
-        if: matrix.task == 'lint'
         run: uv run pylint --disable=all --enable=cyclic-import src
 
+  test:
+    name: CI-Tests / test
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          uv-sync: 'true'
+          uv-groups: '--group test'
+
       - name: Run tests (pytest)
-        if: matrix.task == 'test'
         run: uv run pytest -q --junitxml=pytest-results.xml
 
       - name: Upload pytest JUnit report
-        if: always() && matrix.task == 'test'
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pytest_junit_report_windows

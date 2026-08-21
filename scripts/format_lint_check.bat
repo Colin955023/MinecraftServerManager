@@ -13,20 +13,20 @@ if not exist "pyproject.toml" (
 )
 
 echo === Sync Dependencies ===
-uv sync --all-groups --frozen
+uv sync --group lint --group typecheck --group test --group security --frozen
 if errorlevel 1 exit /b 1
 
 echo === Ruff Format ===
-uv run ruff format src tests quick_test.py
+uv run ruff format src tests
 if errorlevel 1 exit /b 1
 
 echo === Ruff Lint ===
-uv run ruff check src tests quick_test.py --unsafe-fixes --fix
+uv run ruff check src tests --unsafe-fixes --fix
 if errorlevel 1 exit /b 1
 echo.
 
 echo === Type Check ===
-uv run mypy src tests quick_test.py
+uv run mypy src tests
 if errorlevel 1 exit /b 1
 echo.
 

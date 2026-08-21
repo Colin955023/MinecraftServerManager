@@ -26,16 +26,7 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# OS
-.DS_Store
-Thumbs.db
-ehthumbs.db
-ehthumbs_vista.db
-*.stackdump
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.lnk
+.import_linter_cache/
 
 # VS Code
 .vscode/*
@@ -54,12 +45,8 @@ temp/
 tmp/
 cache/
 
-# Binaries (do not commit)
+# Binaries
 *.exe
-*.msi
-*.msix
-*.msm
-*.msp
 
 # other
 *.egg-info
@@ -69,9 +56,3 @@ docs/*
 .github/skills
 report/*
 !report/comprehensive_report.py
-.vscode/tasks.json
-scripts/*
-!scripts\build_installer_nuitka.py
-!scripts\check_import_boundaries.py
-!scripts\format_lint_check.bat
-!scripts\version_check.py
