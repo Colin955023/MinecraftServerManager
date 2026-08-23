@@ -1,37 +1,82 @@
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+
 import src.models as models_module
-import src.ui as mod_management_module
-import src.ui.mods.mod_management.online_mod_queue as online_mod_queue_module
-import src.utils as meta_module
+import src.ui as ui_module
+import src.ui.mods.online_mod_queue as online_mod_queue_module
+import src.ui.mods.review_contracts as review_contracts_module
+import src.ui.mods.review_workflow as review_workflow_module
 import src.utils as utils_module
 import src.utils.ui_support.ui_utils as ui_utils_module
+from src.ui import (
+    LocalReviewSnapshotStore,
+    ModManagementSession,
+    ModReviewWorkflow,
+    build_dependency_status_text,
+    build_local_update_execution_prompt,
+    build_local_update_review_key,
+    build_local_update_review_subtitle,
+    build_online_install_execution_prompt,
+    build_online_review_root_status_text,
+    build_review_context_stamp,
+    count_enabled_runnable_entries,
+    count_online_install_review_groups,
+    format_completion_notes,
+    format_local_update_review_text,
+    format_online_version_report,
+    format_pending_install_review_text,
+    format_review_overview_text,
+    get_online_install_review_group_key,
+    get_online_version_status_text,
+    resolve_local_update_review_project_page_url,
+    resolve_pending_install_review_project_page_url,
+    set_review_entries_enabled,
+    sort_online_versions_for_server,
+)
 
 
-class _StubTree:
-    def __init__(self) -> None:
-        self.children = ["keep", "orphan"]
-        self.deleted: list[str] = []
+def _review_presentation(
+    telemetry: dict[str, int] | None = None,
+) -> review_workflow_module._ReviewPresentation:
+    return review_workflow_module._ReviewPresentation(
+        telemetry or {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
+    )
 
-    def is_alive(self) -> bool:
-        return True
 
-    def get_children(self, _item: str = "") -> list[str]:
-        return list(self.children)
+def _review_server() -> SimpleNamespace:
+    return SimpleNamespace(
+        name="Test Server",
+        path="C:/servers/Test",
+        minecraft_version="1.21.1",
+        loader_type="fabric",
+        loader_version="0.16.0",
+    )
 
-    def delete(self, item_id: str) -> None:
-        self.deleted.append(item_id)
-        self.children = [item for item in self.children if item != item_id]
 
-    def exists(self, item_id: str) -> bool:
-        return item_id in self.children
+def _mod_session(
+    server: Any | None = None,
+    *,
+    local_mods: list[Any] | None = None,
+    online_mods: list[Any] | None = None,
+    pending: list[models_module.PendingOnlineInstall] | None = None,
+) -> ModManagementSession:
+    session = ModManagementSession(cast(Any, server))
+    if local_mods is not None:
+        scope = session.begin_local_scan()
+        assert session.accept_local_results(scope, local_mods)
+    if online_mods is not None:
+        request = models_module.OnlineBrowseRequest("test", "1.21.1", "fabric", "relevance")
+        scope = session.begin_online_search(request)
+        assert session.accept_online_results(scope, request, online_mods)
+    for item in pending or []:
+        session.add_pending_install(item)
+    return session
 
 
 class _MockTreeWidgetItem:
@@ -85,148 +130,6 @@ class _DummyTreeItem:
         return None
 
 
-class _GroupedSelectionTree:
-    def __init__(self, parent_map: dict[str, str], selection: tuple[str, ...]) -> None:
-        self._parent_map = parent_map
-        self._selection = selection
-
-    def selection(self) -> tuple[str, ...]:
-        return self._selection
-
-    def parent(self, item_id: str) -> str:
-        return self._parent_map.get(item_id, "")
-
-    def selectedItems(self) -> list[_DummyTreeItem]:
-        return [_DummyTreeItem(key, self._parent_map.get(key, "")) for key in self._selection]
-
-
-class _HeaderAutoFitTree:
-    def __init__(self) -> None:
-        self.requested_columns: list[str] = []
-
-    def cget(self, option: str):
-        if option == "columns":
-            return ("name", "version")
-        if option == "displaycolumns":
-            return ("#all", "#all")
-        if option == "show":
-            return "headings"
-        raise KeyError(option)
-
-    def column(self, column_id: str, option: str):
-        assert option == "width"
-        self.requested_columns.append(column_id)
-        if column_id == "name":
-            return 140
-        if column_id == "version":
-            return 100
-        raise AssertionError(f"unexpected column lookup: {column_id}")
-
-    def xview(self) -> tuple[float, float]:
-        return (0.0, 1.0)
-
-
-class _ContextMenuTree:
-    def __init__(self, *, row_id: str = "row-2", selection: tuple[str, ...] = ("row-1",)) -> None:
-        self._row_id = row_id
-        self._selection = selection
-        self.focused = ""
-        self.seen = ""
-
-    def identify_row(self, _y: int) -> str:
-        return self._row_id
-
-    def selection(self) -> tuple[str, ...]:
-        return self._selection
-
-    def selection_set(self, item_id: str) -> None:
-        self._selection = (item_id,)
-
-    def focus(self, item_id: str) -> None:
-        self.focused = item_id
-
-    def see(self, item_id: str) -> None:
-        self.seen = item_id
-
-
-class _BrowseRefreshTree:
-    def __init__(self, rows: dict[str, dict[str, tuple[str, ...]]], selection: tuple[str, ...] = ()) -> None:
-        self.children = list(rows.keys())
-        self.rows = {
-            item_id: {"values": tuple(row["values"]), "tags": tuple(row["tags"])} for item_id, row in rows.items()
-        }
-        self.deleted: list[str] = []
-        self.inserted: list[tuple[str | None, tuple[str, ...], tuple[str, ...]]] = []
-        self.updated: list[tuple[str, dict[str, tuple[str, ...]]]] = []
-        self.moved: list[tuple[str, int]] = []
-        self._selection = selection
-
-    def is_alive(self) -> bool:
-        return True
-
-    def get_children(self, _item: str = "") -> list[str]:
-        return list(self.children)
-
-    def exists(self, item_id: str) -> bool:
-        return item_id in self.rows
-
-    def delete(self, item_id: str) -> None:
-        self.deleted.append(item_id)
-        self.rows.pop(item_id, None)
-        self.children = [child for child in self.children if child != item_id]
-        self._selection = tuple(item for item in self._selection if item != item_id)
-
-    def insert(
-        self,
-        _parent: str,
-        _index: str,
-        *,
-        iid: str | None = None,
-        values: tuple[str, ...] = (),
-        tags: tuple[str, ...] = (),
-    ) -> str:
-        self.inserted.append((iid, tuple(values), tuple(tags)))
-        item_id = iid or f"item-{len(self.children)}"
-        self.rows[item_id] = {"values": tuple(values), "tags": tuple(tags)}
-        self.children.append(item_id)
-        return item_id
-
-    def item(self, item_id: str, option: str | None = None, **kwargs):
-        if kwargs:
-            row = self.rows.setdefault(item_id, {"values": (), "tags": ()})
-            if "values" in kwargs:
-                row["values"] = tuple(kwargs["values"])
-            if "tags" in kwargs:
-                row["tags"] = tuple(kwargs["tags"])
-            self.updated.append((item_id, kwargs))
-            return None
-        row = self.rows[item_id]
-        if option == "values":
-            return row["values"]
-        if option == "tags":
-            return row["tags"]
-        return row
-
-    def move(self, item_id: str, _parent: str, index: int) -> None:
-        if item_id in self.children:
-            self.children.remove(item_id)
-        self.children.insert(index, item_id)
-        self.moved.append((item_id, index))
-
-    def tag_configure(self, *_args, **_kwargs) -> None:
-        return None
-
-    def selection(self) -> tuple[str, ...]:
-        return self._selection
-
-    def selection_set(self, *items: str) -> None:
-        self._selection = tuple(items)
-
-    def schedule(self, _delay_ms: int, callback):
-        callback()
-        return "schedule-id"
-
-
 def _pending_install(project_id: str, project_name: str, version_id: str) -> models_module.PendingOnlineInstall:
     return models_module.PendingOnlineInstall(
         project_id=project_id,
@@ -236,14 +139,13 @@ def _pending_install(project_id: str, project_name: str, version_id: str) -> mod
 
 
 def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
     frame_any.browse_sort_var = SimpleNamespace(get=lambda: "相關性")
     frame_any.browse_sort_options = {"相關性": "relevance"}
     frame_any.search_var = SimpleNamespace(get=lambda: "")
-    frame.current_server = cast(
-        Any,
-        SimpleNamespace(minecraft_version="1.21.1", loader_type="fabric", loader_version="0.16.10"),
+    frame.mod_session = _mod_session(
+        SimpleNamespace(minecraft_version="1.21.1", loader_type="fabric", loader_version="0.16.10")
     )
 
     request, warning_message = frame._build_online_browse_request()
@@ -253,10 +155,9 @@ def test_build_online_browse_request_returns_warning_when_query_empty() -> None:
 
 
 def test_get_online_version_dialog_hint_text_uses_server_context() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    frame.current_server = cast(
-        Any,
-        SimpleNamespace(minecraft_version="1.21.1", loader_type="fabric", loader_version="0.16.10"),
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
+    frame.mod_session = _mod_session(
+        SimpleNamespace(minecraft_version="1.21.1", loader_type="fabric", loader_version="0.16.10")
     )
 
     hint_text = frame._get_online_version_dialog_hint_text()
@@ -266,7 +167,7 @@ def test_get_online_version_dialog_hint_text_uses_server_context() -> None:
 
 
 def test_on_online_browse_filters_changed_refreshes_hint_and_reloads(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     called: list[tuple[bool, bool] | str] = []
 
     monkeypatch.setattr(frame, "_refresh_online_filter_hint", lambda: called.append("hint"))
@@ -283,11 +184,11 @@ def test_on_online_browse_filters_changed_refreshes_hint_and_reloads(monkeypatch
 
 
 def test_build_online_results_summary_text_shows_mode_sort_and_count() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
     frame_any.search_var = SimpleNamespace(get=lambda: "sodium")
     frame_any.browse_sort_var = SimpleNamespace(get=lambda: "下載量")
-    frame.online_mods = [object(), object()]
+    frame.mod_session = _mod_session(online_mods=[object(), object()])
 
     summary = frame._build_online_results_summary_text()
 
@@ -295,11 +196,11 @@ def test_build_online_results_summary_text_shows_mode_sort_and_count() -> None:
 
 
 def test_build_online_results_summary_text_prompts_keyword_when_query_empty() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
     frame_any.search_var = SimpleNamespace(get=lambda: "")
     frame_any.browse_sort_var = SimpleNamespace(get=lambda: "相關性")
-    frame.online_mods = []
+    frame.mod_session = _mod_session(online_mods=[])
 
     summary = frame._build_online_results_summary_text()
 
@@ -307,7 +208,7 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
 
 
 def test_build_online_browse_row_includes_prism_style_metadata() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     mod = SimpleNamespace(
         name="Sodium",
@@ -325,14 +226,14 @@ def test_build_online_browse_row_includes_prism_style_metadata() -> None:
         "Sodium",
         "jellysquid3",
         "1,234,567",
-        "Client and server rendering optimizations.",
         "Modrinth",
         "未知",
+        "Client and server rendering optimizations.",
     )
 
 
 def test_build_online_browse_row_keeps_full_description() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     long_description = (
         "You can drink from a water source, cauldron or with vanilla items.\n"
@@ -350,14 +251,14 @@ def test_build_online_browse_row_keeps_full_description() -> None:
 
     row = frame._build_online_browse_row(mod)
 
-    assert row[3] == (
+    assert row[5] == (
         "You can drink from a water source, cauldron or with vanilla items. "
         "Items have fluid compatibility and the full description should stay intact."
     )
 
 
 def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
     selected_mod = SimpleNamespace(
         name="Fabric API",
@@ -400,7 +301,7 @@ def test_copy_online_mod_info_handles_clipboard_failure(monkeypatch: pytest.Monk
 
 
 def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
 
     from unittest.mock import MagicMock
@@ -414,7 +315,7 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
     mock_tree.topLevelItem.return_value = mock_item
 
     frame_any.local_tree = mock_tree
-    frame.local_mods = [
+    local_mods = [
         SimpleNamespace(
             name="Fabric API",
             status=models_module.ModStatus.ENABLED,
@@ -428,7 +329,11 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
             _cached_mtime=1743494400.0,
         )
     ]
-    frame.enhanced_mods_cache = {}
+    frame.mod_session = _mod_session(local_mods=local_mods)
+    frame.local_mod_list_presenter = SimpleNamespace(
+        apply_local_tree_theme=lambda: None,
+        on_tree_selection_changed=lambda: None,
+    )
     frame_any.local_search_var = SimpleNamespace(get=lambda: "")
     frame_any.local_filter_var = SimpleNamespace(get=lambda: "所有")
     frame.VERSION_PATTERN = re.compile(r"-([\dv.]+)(?:\.jar(?:\.disabled)?)?$")
@@ -472,8 +377,7 @@ def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.Mon
 
 
 def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_metadata_messages() -> None:
-    """驗證簡化版本：扁平列表結構、去重、按優先度排序"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_id="Ha28R6CL",
         project_name="Fabric Language Kotlin",
@@ -497,7 +401,7 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
         version_type="beta",
     )
 
-    nodes = frame._build_local_update_task_nodes([review_entry, review_entry])
+    nodes = _review_presentation()._build_local_update_task_nodes([review_entry, review_entry])
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該只有一個根級節點（已去重）"
     root_node = root_nodes[0]
@@ -508,7 +412,7 @@ def test_build_local_update_task_nodes_dedupes_duplicate_entries_and_merges_meta
 
 
 def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     enabled_entry = models_module.LocalUpdateReviewEntry(
         candidate=SimpleNamespace(actionable=True, recommendation_confidence="high"),
@@ -549,7 +453,7 @@ def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None
         enabled=True,
     )
 
-    prompt = frame._build_local_update_execution_prompt(
+    prompt = build_local_update_execution_prompt(
         [enabled_entry, advisory_entry, retryable_entry, unknown_entry, blocked_entry]
     )
 
@@ -562,7 +466,7 @@ def test_build_local_update_execution_prompt_summarizes_failure_matrix() -> None
 
 
 def test_build_local_update_execution_prompt_returns_none_for_advisory_only() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     entries = [
         models_module.LocalUpdateReviewEntry(
@@ -573,14 +477,14 @@ def test_build_local_update_execution_prompt_returns_none_for_advisory_only() ->
         for _ in range(2)
     ]
 
-    assert frame._build_local_update_execution_prompt(entries) is None
+    assert build_local_update_execution_prompt(entries) is None
 
 
 def test_get_online_version_status_text_distinguishes_key_states() -> None:
-    assert mod_management_module.ModManagementFrame._get_online_version_status_text(None) == "未分析"
+    assert get_online_version_status_text(None) == "未分析"
 
     incompatible_report = SimpleNamespace(compatible=False)
-    assert mod_management_module.ModManagementFrame._get_online_version_status_text(incompatible_report) == "不相容"
+    assert get_online_version_status_text(incompatible_report) == "不相容"
 
     dependency_report = SimpleNamespace(
         compatible=True,
@@ -589,9 +493,7 @@ def test_get_online_version_status_text_distinguishes_key_states() -> None:
         installed_version_mismatches=[],
         warnings=[],
     )
-    assert (
-        mod_management_module.ModManagementFrame._get_online_version_status_text(dependency_report) == "可安裝，含依賴"
-    )
+    assert get_online_version_status_text(dependency_report) == "可安裝，含依賴"
 
     warning_report = SimpleNamespace(
         compatible=True,
@@ -600,7 +502,7 @@ def test_get_online_version_status_text_distinguishes_key_states() -> None:
         installed_version_mismatches=[],
         warnings=["optional"],
     )
-    assert mod_management_module.ModManagementFrame._get_online_version_status_text(warning_report) == "可安裝，需注意"
+    assert get_online_version_status_text(warning_report) == "可安裝，需注意"
 
     clean_report = SimpleNamespace(
         compatible=True,
@@ -609,7 +511,7 @@ def test_get_online_version_status_text_distinguishes_key_states() -> None:
         installed_version_mismatches=[],
         warnings=[],
     )
-    assert mod_management_module.ModManagementFrame._get_online_version_status_text(clean_report) == "可安裝"
+    assert get_online_version_status_text(clean_report) == "可安裝"
 
 
 def test_sort_online_versions_for_server_prefers_compatible_then_stable_then_newer() -> None:
@@ -626,7 +528,7 @@ def test_sort_online_versions_for_server_prefers_compatible_then_stable_then_new
         SimpleNamespace(compatible=False),
     ]
 
-    sorted_versions, _ = mod_management_module.ModManagementFrame._sort_online_versions_for_server(versions, reports)
+    sorted_versions, _ = sort_online_versions_for_server(versions, reports)
 
     assert [version.version_id for version in sorted_versions] == [
         "release-old",
@@ -645,7 +547,7 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
         SimpleNamespace(compatible=True, marker="report-v2"),
     ]
 
-    sorted_versions, sorted_reports = mod_management_module.ModManagementFrame._sort_online_versions_for_server(
+    sorted_versions, sorted_reports = sort_online_versions_for_server(
         versions,
         reports,
     )
@@ -655,7 +557,7 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
 
 
 def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is_fuzzy() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     local_mod = cast(Any, type("LocalMod", (), {"name": "Fabric API", "platform_id": "fabric-api"})())
     enhanced = cast(Any, type("EnhancedMod", (), {"name": "Dawn API", "project_id": "dawn-api", "slug": "dawn-api"})())
 
@@ -665,7 +567,7 @@ def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is
 
 
 def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unknown() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     local_mod = cast(Any, type("LocalMod", (), {"name": "Unknown Mod", "platform_id": "fabric-api"})())
     enhanced = cast(
         Any, type("EnhancedMod", (), {"name": "Fabric API", "project_id": "P7dR8mSH", "slug": "fabric-api"})()
@@ -677,11 +579,11 @@ def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unkno
 
 
 def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path, monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     deleted_ids: list[list[str]] = []
     shown_messages: list[str] = []
     frame.local_tree = cast(Any, _DeleteTree())
-    frame.current_server = cast(Any, type("Server", (), {"path": str(tmp_path)})())
+    frame.mod_session = _mod_session(type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
 
@@ -700,7 +602,7 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
         Any,
         SimpleNamespace(delete_local_mods_result=_delete_local_mods_result),
     )
-    monkeypatch.setattr(frame, "load_local_mods", lambda: shown_messages.append("reloaded"))
+    frame.local_mod_list_presenter = SimpleNamespace(load_local_mods=lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
         del parent, show_cancel
@@ -724,10 +626,10 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
 
 
 def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     shown_messages: list[str] = []
     frame.local_tree = cast(Any, _DeleteTree())
-    frame.current_server = cast(Any, type("Server", (), {"path": str(tmp_path)})())
+    frame.mod_session = _mod_session(type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
     frame.mod_manager = cast(
@@ -743,7 +645,7 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
             )
         ),
     )
-    monkeypatch.setattr(frame, "load_local_mods", lambda: shown_messages.append("reloaded"))
+    frame.local_mod_list_presenter = SimpleNamespace(load_local_mods=lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
         del parent, show_cancel
@@ -779,7 +681,7 @@ def test_set_review_entries_enabled_toggles_flags() -> None:
         enabled=False,
     )
 
-    changed = mod_management_module.ModManagementFrame._set_review_entries_enabled(
+    changed = set_review_entries_enabled(
         {"a": enabled_entry, "b": disabled_entry},
         {"a", "b"},
         False,
@@ -813,56 +715,11 @@ def test_review_entry_counters_distinguish_enabled_and_blocked_items() -> None:
 
     entries = [runnable_enabled, runnable_disabled, blocked_enabled]
 
-    assert mod_management_module.ModManagementFrame._count_enabled_runnable_entries(entries) == 1
-    assert mod_management_module.ModManagementFrame._count_blocked_entries(entries) == 1
-
-
-def test_collect_selected_root_keys_from_grouped_tree_returns_review_roots() -> None:
-    tree = _GroupedSelectionTree(
-        {
-            "group::enabled": "",
-            "fabric-api::dependency::0": "fabric-api",
-            "fabric-api": "group::enabled",
-            "group::blocked": "",
-            "lithium::blocked::0": "lithium",
-            "lithium": "group::blocked",
-        },
-        ("fabric-api::dependency::0", "lithium::blocked::0"),
-    )
-
-    selected = mod_management_module.ModManagementFrame._collect_selected_root_keys_from(
-        cast(Any, tree),
-        {"fabric-api", "lithium"},
-    )
-
-    assert selected == {"fabric-api", "lithium"}
-
-
-def test_set_selected_advisory_dependency_items_enabled_supports_optional_parent_node() -> None:
-    root_key = "fabric-api::v1"
-    advisory_a = SimpleNamespace(project_name="Mod Menu", enabled=False)
-    advisory_b = SimpleNamespace(project_name="FerriteCore", enabled=False)
-    tree = _GroupedSelectionTree({}, (f"{root_key}::optional-dependencies",))
-    entry_map = {
-        root_key: SimpleNamespace(
-            dependency_plan=SimpleNamespace(advisory_items=[advisory_a, advisory_b]),
-        )
-    }
-
-    changed = mod_management_module.ModManagementFrame._set_selected_advisory_dependency_items_enabled(
-        cast(Any, tree),
-        entry_map,
-        True,
-    )
-
-    assert changed is True
-    assert advisory_a.enabled is True
-    assert advisory_b.enabled is True
+    assert count_enabled_runnable_entries(entries) == 1
 
 
 def test_build_online_review_task_nodes_include_grouped_children() -> None:
-    """驗證簡化版本：扁平列表結構、正確分組"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     pending = models_module.PendingOnlineInstall(
         project_id="fabric-api",
         project_name="Fabric API",
@@ -878,7 +735,7 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
         version_type="release",
     )
 
-    nodes = frame._build_online_review_task_nodes([review_entry])
+    nodes = _review_presentation()._build_online_review_task_nodes([review_entry])
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該只有一個根級節點"
 
@@ -891,7 +748,6 @@ def test_build_online_review_task_nodes_include_grouped_children() -> None:
 
 
 def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     dependency = SimpleNamespace(
         project_id="cloth-config",
         version_id="dep-1",
@@ -919,7 +775,7 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
         enabled=True,
     )
 
-    nodes = frame._build_online_review_task_nodes([entry_a, entry_b])
+    nodes = _review_presentation()._build_online_review_task_nodes([entry_a, entry_b])
 
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 2, "應該有兩個根級節點"
@@ -932,7 +788,6 @@ def test_build_online_review_task_nodes_aggregate_required_by_labels() -> None:
 
 
 def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     dependency = SimpleNamespace(
         project_id="cloth-config",
         version_id="dep-1",
@@ -960,7 +815,7 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
         enabled=False,
     )
 
-    nodes = frame._build_online_review_task_nodes([entry_a, entry_b])
+    nodes = _review_presentation()._build_online_review_task_nodes([entry_a, entry_b])
 
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 2, "應該有兩個根級節點"
@@ -975,7 +830,6 @@ def test_build_online_review_task_nodes_required_by_ignores_disabled_roots() -> 
 
 
 def test_build_online_review_task_nodes_marks_advisory_dependency_as_skipped() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     entry = models_module.PendingInstallReviewEntry(
         pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
@@ -999,7 +853,7 @@ def test_build_online_review_task_nodes_marks_advisory_dependency_as_skipped() -
         enabled=True,
     )
 
-    nodes = frame._build_online_review_task_nodes([entry])
+    nodes = _review_presentation()._build_online_review_task_nodes([entry])
 
     root_nodes = [node for node in nodes if node.node_kind == "root"]
     assert len(root_nodes) == 1, "應該有一個根級節點"
@@ -1014,7 +868,7 @@ def test_build_dependency_status_text_uses_resolution_fallback_label() -> None:
         status_note="",
     )
 
-    status_text = mod_management_module.ModManagementFrame._build_dependency_status_text(
+    status_text = build_dependency_status_text(
         dependency,
         "Fabric API",
         "Fabric API",
@@ -1026,7 +880,7 @@ def test_build_dependency_status_text_uses_resolution_fallback_label() -> None:
 
 
 def test_build_online_review_root_status_text_summarizes_dependencies_warnings_and_blockers() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     entry = models_module.PendingInstallReviewEntry(
         pending=models_module.PendingOnlineInstall(
             project_id="fabric-api",
@@ -1043,13 +897,12 @@ def test_build_online_review_root_status_text_summarizes_dependencies_warnings_a
         enabled=True,
     )
 
-    status_text = frame._build_online_review_root_status_text(entry)
+    status_text = build_online_review_root_status_text(entry)
 
     assert status_text == "需先處理｜依賴 1｜可選 1｜提醒 1｜阻擋 1"
 
 
 def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     pending = models_module.PendingOnlineInstall(
         project_id="fabric-api",
         project_name="Fabric API",
@@ -1065,14 +918,14 @@ def test_build_online_review_task_nodes_puts_summary_text_in_root_status_column(
         version_type="release",
     )
 
-    nodes = frame._build_online_review_task_nodes([review_entry])
+    nodes = _review_presentation()._build_online_review_task_nodes([review_entry])
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert root_node.values[5] == "建議確認｜依賴 1｜提醒 1"
 
 
 def test_install_pending_online_install_queue_deduplicates_shared_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
     frame_any.parent = SimpleNamespace()
 
@@ -1088,7 +941,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     )
     first_pending = models_module.PendingOnlineInstall("first-mod", "First Mod", first_version)
     second_pending = models_module.PendingOnlineInstall("second-mod", "Second Mod", second_version)
-    frame_any.pending_online_installs = [first_pending, second_pending]
+    frame_any.mod_session = _mod_session(_review_server(), pending=[first_pending, second_pending])
 
     shared_dependency = SimpleNamespace(
         project_id="cloth-config",
@@ -1098,31 +951,50 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         filename="cloth-config.jar",
         download_url="https://example.com/cloth-config.jar",
     )
-    dependency_plan = SimpleNamespace(items=[shared_dependency], advisory_items=[], unresolved_required=[], notes=[])
-    review_entries = [
-        models_module.PendingInstallReviewEntry(
-            pending=first_pending,
-            report=None,
-            dependency_plan=dependency_plan,
-            blocking_reasons=[],
-            warning_messages=[],
-            enabled=True,
-            provider="modrinth",
-            version_type="release",
-        ),
-        models_module.PendingInstallReviewEntry(
-            pending=second_pending,
-            report=None,
-            dependency_plan=SimpleNamespace(
-                items=[shared_dependency], advisory_items=[], unresolved_required=[], notes=[]
+    handoff = review_contracts_module.ReviewExecutionHandoff(
+        mode="online_install",
+        context_stamp=build_review_context_stamp(_review_server(), []),
+        steps=(
+            review_contracts_module.ReviewInstallStep(
+                kind="dependency",
+                root_key="first-mod::v1",
+                project_name=shared_dependency.project_name,
+                version_name=shared_dependency.version_name,
+                download_url=shared_dependency.download_url,
+                filename=shared_dependency.filename,
+                expected_hash="",
+                provider="modrinth",
             ),
-            blocking_reasons=[],
-            warning_messages=[],
-            enabled=True,
-            provider="modrinth",
-            version_type="release",
+            review_contracts_module.ReviewInstallStep(
+                kind="online_root",
+                root_key="first-mod::v1",
+                project_name="First Mod",
+                version_name="1.0.0",
+                download_url="https://example.com/first.jar",
+                filename="first.jar",
+                expected_hash="",
+                provider="modrinth",
+            ),
+            review_contracts_module.ReviewInstallStep(
+                kind="online_root",
+                root_key="second-mod::v2",
+                project_name="Second Mod",
+                version_name="1.0.0",
+                download_url="https://example.com/second.jar",
+                filename="second.jar",
+                expected_hash="",
+                provider="modrinth",
+            ),
         ),
-    ]
+        root_keys=("first-mod::v1", "second-mod::v2"),
+        confirmation_prompt="",
+        source_confirmation_prompt="",
+        skipped_text="",
+        completion_notes="",
+        disabled_count=0,
+        dependency_count=1,
+        duplicate_dependency_count=1,
+    )
 
     install_calls: list[tuple[str, str]] = []
     shown_messages: list[tuple[str, str]] = []
@@ -1147,15 +1019,20 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         return f"/tmp/{filename}"
 
     frame_any.ui_queue = _ImmediateQueue()
-    frame_any.load_local_mods = lambda: queued_items.append("load_local_mods")
+    frame_any.local_mod_list_presenter = SimpleNamespace(load_local_mods=lambda: queued_items.append("load_local_mods"))
+    frame_any._refresh_online_queue_button = lambda: None
     frame_any.update_status_safe = lambda _message: None
     frame_any.update_progress_safe = lambda _value: None
     frame_any._make_step_progress_callback = lambda *_args, **_kwargs: lambda *_inner_args, **_inner_kwargs: None
+    frame_any._validate_review_handoff = lambda *_args, **_kwargs: True
     frame_any.mod_manager = SimpleNamespace(install_remote_mod_file=_record_install)
 
-    monkeypatch.setattr(
-        utils_module.TaskUtils, "run_async", lambda task, cancel_token=None: task(cancel_token=cancel_token)
-    )
+    class _ImmediateScope:
+        def submit(self, work, **_kwargs):
+            work()
+            return
+
+    frame_any.scope = _ImmediateScope()
 
     def _show_message(title: str, message: str, parent=None, message_level="info", **_kwargs) -> None:
         _ = parent
@@ -1170,7 +1047,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
 
     dialog = SimpleNamespace(destroy=lambda: dialog_destroyed.append(True))
 
-    frame._install_pending_online_install_queue(dialog, review_entries)
+    frame._install_pending_online_install_queue(dialog, handoff)
 
     assert dialog_destroyed == [True]
     assert install_calls == [
@@ -1183,7 +1060,6 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
 
 
 def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_from_enabled_roots(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     first_version = SimpleNamespace(
         version_id="v1",
         display_name="1.0.0",
@@ -1206,16 +1082,14 @@ def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_fr
         dependencies=[],
         primary_file={"filename": "second.jar"},
     )
-    frame.pending_online_installs = [
+    pending_items = [
         models_module.PendingOnlineInstall("first-mod", "First Mod", first_version),
         models_module.PendingOnlineInstall("second-mod", "Second Mod", second_version),
     ]
 
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21", "fabric", "0.16.0"))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(mod_management_module, "resolve_modrinth_project_names", lambda _project_ids: {})
+    monkeypatch.setattr(review_workflow_module, "resolve_modrinth_project_names", lambda _project_ids: {})
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: SimpleNamespace(hard_errors=[], warnings=[]),
     )
@@ -1239,18 +1113,22 @@ def test_prepare_online_install_review_entries_rebuilds_dependency_simulation_fr
         return SimpleNamespace(items=[dependency_item], advisory_items=[], unresolved_required=[], notes=[])
 
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "build_required_dependency_install_plan",
         fake_build_required_dependency_install_plan,
     )
 
-    review_entries = frame._prepare_online_install_review_entries()
+    handoff = (
+        ModReviewWorkflow(server=_review_server(), installed_mods=[])
+        .start_online_session(pending_items)
+        .build_handoff()
+    )
 
-    assert len(review_entries[1].dependency_plan.items) == 0
+    assert handoff.dependency_count == 1
+    assert handoff.duplicate_dependency_count == 0
 
 
 def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     client_only_version = SimpleNamespace(
         version_id="v-client-only",
         display_name="1.0.0",
@@ -1262,7 +1140,7 @@ def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatc
         dependencies=[],
         primary_file={"filename": "client-only.jar"},
     )
-    frame.pending_online_installs = [
+    pending_items = [
         models_module.PendingOnlineInstall(
             "client-only-mod",
             "Client Only Mod",
@@ -1272,29 +1150,28 @@ def test_prepare_online_install_review_entries_blocks_client_only_mod(monkeypatc
         )
     ]
 
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21", "fabric", "0.16.0"))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(mod_management_module, "resolve_modrinth_project_names", lambda _project_ids: {})
+    monkeypatch.setattr(review_workflow_module, "resolve_modrinth_project_names", lambda _project_ids: {})
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: SimpleNamespace(hard_errors=[], warnings=[]),
     )
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "build_required_dependency_install_plan",
         lambda *_args, **_kwargs: SimpleNamespace(items=[], advisory_items=[], unresolved_required=[], notes=[]),
     )
 
-    review_entries = frame._prepare_online_install_review_entries()
+    snapshot = (
+        ModReviewWorkflow(server=_review_server(), installed_mods=[]).start_online_session(pending_items).snapshot()
+    )
 
-    assert len(review_entries) == 1
-    assert review_entries[0].enabled is False
-    assert any("僅 client 端" in message for message in review_entries[0].blocking_reasons)
+    assert snapshot.actionable_count == 0
+    assert snapshot.roots[0].root_key == "client-only-mod::v-client-only"
+    assert "僅 client 端" in snapshot.roots[0].summary
 
 
 def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     unknown_side_version = SimpleNamespace(
         version_id="v-unknown",
         display_name="1.0.1",
@@ -1306,7 +1183,7 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
         dependencies=[],
         primary_file={"filename": "unknown-side.jar"},
     )
-    frame.pending_online_installs = [
+    pending_items = [
         models_module.PendingOnlineInstall(
             "unknown-side-mod",
             "Unknown Side Mod",
@@ -1316,29 +1193,28 @@ def test_prepare_online_install_review_entries_warns_unknown_server_side(monkeyp
         )
     ]
 
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21", "fabric", "0.16.0"))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(mod_management_module, "resolve_modrinth_project_names", lambda _project_ids: {})
+    monkeypatch.setattr(review_workflow_module, "resolve_modrinth_project_names", lambda _project_ids: {})
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "analyze_mod_version_compatibility",
         lambda *_args, **_kwargs: SimpleNamespace(hard_errors=[], warnings=[]),
     )
     monkeypatch.setattr(
-        mod_management_module,
+        review_workflow_module,
         "build_required_dependency_install_plan",
         lambda *_args, **_kwargs: SimpleNamespace(items=[], advisory_items=[], unresolved_required=[], notes=[]),
     )
 
-    review_entries = frame._prepare_online_install_review_entries()
+    snapshot = (
+        ModReviewWorkflow(server=_review_server(), installed_mods=[]).start_online_session(pending_items).snapshot()
+    )
 
-    assert len(review_entries) == 1
-    assert review_entries[0].enabled is True
-    assert any("未明確標示 server 端支援" in message for message in review_entries[0].warning_messages)
+    assert snapshot.actionable_count == 1
+    assert "未明確標示 server 端支援" in snapshot.roots[0].summary
 
 
 def test_build_local_update_task_nodes_include_blocking_items() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_id="lithium",
         project_name="Lithium",
@@ -1357,7 +1233,7 @@ def test_build_local_update_task_nodes_include_blocking_items() -> None:
         version_type="beta",
     )
 
-    nodes = frame._build_local_update_task_nodes([review_entry])
+    nodes = _review_presentation()._build_local_update_task_nodes([review_entry])
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert any(node.node_kind == "root" and node.group_key == "blocked" for node in nodes)
@@ -1365,7 +1241,6 @@ def test_build_local_update_task_nodes_include_blocking_items() -> None:
 
 
 def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_child_node() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_id="",
         project_name="Unknown Mod",
@@ -1387,7 +1262,7 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
         version_type="",
     )
 
-    nodes = frame._build_local_update_task_nodes([review_entry])
+    nodes = _review_presentation()._build_local_update_task_nodes([review_entry])
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert root_node.group_key == "unknown"
@@ -1396,7 +1271,6 @@ def test_build_local_update_task_nodes_surfaces_metadata_source_in_root_and_chil
 
 
 def test_build_local_update_task_nodes_groups_advisory_candidate_separately() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_id="sodium",
         project_name="Sodium",
@@ -1417,7 +1291,7 @@ def test_build_local_update_task_nodes_groups_advisory_candidate_separately() ->
         provider="modrinth",
     )
 
-    nodes = frame._build_local_update_task_nodes([review_entry])
+    nodes = _review_presentation()._build_local_update_task_nodes([review_entry])
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert root_node.group_key == "advisory"
@@ -1425,9 +1299,8 @@ def test_build_local_update_task_nodes_groups_advisory_candidate_separately() ->
 
 
 def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     candidate = SimpleNamespace(
-        project_id="__stale__::sodium",
+        project_id="",
         project_name="Sodium",
         current_version="0.6.0",
         target_version_name="",
@@ -1447,7 +1320,7 @@ def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -
         provider="modrinth",
     )
 
-    nodes = frame._build_local_update_task_nodes([review_entry])
+    nodes = _review_presentation()._build_local_update_task_nodes([review_entry])
 
     root_node = next(node for node in nodes if node.node_kind == "root")
     assert root_node.group_key == "retryable"
@@ -1455,7 +1328,7 @@ def test_build_local_update_task_nodes_groups_retryable_candidate_separately() -
 
 
 def test_build_local_update_review_subtitle_includes_failure_matrix_counts() -> None:
-    text = mod_management_module.ModManagementFrame._build_local_update_review_subtitle(
+    text = build_local_update_review_subtitle(
         "全部模組",
         2,
         1,
@@ -1468,11 +1341,12 @@ def test_build_local_update_review_subtitle_includes_failure_matrix_counts() -> 
 
 
 def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
-    frame_any.pending_online_installs = []
+    frame_any.mod_session = _mod_session()
     frame_any.parent = SimpleNamespace()
     frame_any.update_status = lambda _message: None
+    frame_any.update_status_safe = lambda _message: None
     frame_any._refresh_online_queue_button = lambda: None
 
     messages: list[tuple[str, str]] = []
@@ -1495,7 +1369,7 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
     )
 
     assert added is False
-    assert frame_any.pending_online_installs == []
+    assert frame_any.mod_session.pending_online_installs == ()
     assert messages == [
         (
             "無法加入安裝清單",
@@ -1505,11 +1379,12 @@ def test_add_pending_online_install_blocks_client_only_mod(monkeypatch) -> None:
 
 
 def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     frame_any = cast(Any, frame)
-    frame_any.pending_online_installs = []
+    frame_any.mod_session = _mod_session()
     frame_any.parent = SimpleNamespace()
     frame_any.update_status = lambda _message: None
+    frame_any.update_status_safe = lambda _message: None
     frame_any._refresh_online_queue_button = lambda: None
     monkeypatch.setattr(utils_module.UIUtils, "show_message", lambda *_args, **_kwargs: None)
 
@@ -1525,12 +1400,12 @@ def test_add_pending_online_install_replaces_same_version_item(monkeypatch) -> N
 
     assert first_added is True
     assert second_added is True
-    assert len(frame_any.pending_online_installs) == 1
-    assert frame_any.pending_online_installs[0].project_name == "Fabric API Updated"
+    assert len(frame_any.mod_session.pending_online_installs) == 1
+    assert frame_any.mod_session.pending_online_installs[0].project_name == "Fabric API Updated"
 
 
 def test_build_local_update_review_subtitle_includes_migrated_snapshot_count() -> None:
-    text = mod_management_module.ModManagementFrame._build_local_update_review_subtitle(
+    text = build_local_update_review_subtitle(
         "全部模組",
         1,
         0,
@@ -1541,15 +1416,14 @@ def test_build_local_update_review_subtitle_includes_migrated_snapshot_count() -
 
 
 def test_build_dependency_snapshot_migration_note_formats_summary_line() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    frame._dependency_snapshot_migration_totals = {
+    telemetry = {
         "checked": 3,
         "migrated": 1,
         "replayed": 2,
         "fallback_rebuild": 1,
     }
 
-    note = frame._build_dependency_snapshot_migration_note()
+    note = _review_presentation(telemetry)._build_dependency_snapshot_migration_note()
 
     assert note == "依賴快照遷移觀測：檢查 3、自動遷移 1、成功回放 2、回放失敗改重建 1"
 
@@ -1564,8 +1438,8 @@ def test_build_local_update_review_key_is_unique_for_same_project_id_with_differ
         local_mod=SimpleNamespace(file_path="C:/servers/a/mods/kotlin-b.jar"),
     )
 
-    key_a = mod_management_module.ModManagementFrame._build_local_update_review_key(candidate_a)
-    key_b = mod_management_module.ModManagementFrame._build_local_update_review_key(candidate_b)
+    key_a = build_local_update_review_key(candidate_a)
+    key_b = build_local_update_review_key(candidate_b)
 
     assert key_a != key_b
     assert key_a.startswith("project::Ha28R6CL::")
@@ -1573,7 +1447,7 @@ def test_build_local_update_review_key_is_unique_for_same_project_id_with_differ
 
 
 def test_format_review_overview_text_includes_preflight_notes() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     entries = [
         models_module.PendingInstallReviewEntry(
             pending=cast(Any, object()),
@@ -1602,7 +1476,7 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
         ),
     ]
 
-    text = frame._format_review_overview_text(
+    text = format_review_overview_text(
         entries,
         nodes,
         action_label="安裝",
@@ -1617,16 +1491,14 @@ def test_format_review_overview_text_includes_preflight_notes() -> None:
 
 
 def test_format_completion_notes_deduplicates_messages() -> None:
-    text = mod_management_module.ModManagementFrame._format_completion_notes(
-        ["建議先備份", "建議先備份", "需重啟伺服器"]
-    )
+    text = format_completion_notes(["建議先備份", "建議先備份", "需重啟伺服器"])
 
     assert text.count("建議先備份") == 1
     assert "需重啟伺服器" in text
 
 
 def test_format_online_version_report_includes_provider_and_changelog() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     version = cast(
         Any,
         type(
@@ -1644,7 +1516,7 @@ def test_format_online_version_report_includes_provider_and_changelog() -> None:
         )(),
     )
 
-    report_text = frame._format_online_version_report(version, None)
+    report_text = format_online_version_report(version, None)
 
     assert "來源：Modrinth" in report_text
     assert "版本類型：release" in report_text
@@ -1654,7 +1526,7 @@ def test_format_online_version_report_includes_provider_and_changelog() -> None:
 
 
 def test_format_local_update_review_text_includes_metadata_source() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_name="Sodium",
         current_version="0.6.0",
@@ -1676,7 +1548,7 @@ def test_format_local_update_review_text_includes_metadata_source() -> None:
         changelog="",
     )
 
-    text = frame._format_local_update_review_text(review_entry)
+    text = format_local_update_review_text(review_entry)
 
     assert "Metadata 來源：雜湊比對" in text
     assert "更新建議來源：雜湊 metadata" in text
@@ -1684,7 +1556,7 @@ def test_format_local_update_review_text_includes_metadata_source() -> None:
 
 
 def test_format_pending_install_review_text_includes_summary_lines() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     version = cast(
         Any,
         type(
@@ -1720,7 +1592,7 @@ def test_format_pending_install_review_text_includes_summary_lines() -> None:
         version_type="release",
     )
 
-    text = frame._format_pending_install_review_text(review_entry)
+    text = format_pending_install_review_text(review_entry)
 
     assert "摘要：需先處理｜依賴 1｜可選 1｜阻擋 1" in text
     assert "處理等級：需先處理" in text
@@ -1730,7 +1602,7 @@ def test_format_pending_install_review_text_includes_summary_lines() -> None:
 
 
 def test_format_pending_install_review_text_includes_client_install_reminder_for_server_and_client_mod() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     version = cast(
         Any,
         type(
@@ -1764,13 +1636,13 @@ def test_format_pending_install_review_text_includes_client_install_reminder_for
         version_type="release",
     )
 
-    text = frame._format_pending_install_review_text(review_entry)
+    text = format_pending_install_review_text(review_entry)
 
     assert "提醒：此模組同時支援 client 端" in text
 
 
 def test_format_local_update_review_text_includes_unresolved_metadata_state() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_name="Unknown Mod",
         current_version="1.0.0",
@@ -1793,7 +1665,7 @@ def test_format_local_update_review_text_includes_unresolved_metadata_state() ->
         changelog="",
     )
 
-    text = frame._format_local_update_review_text(review_entry)
+    text = format_local_update_review_text(review_entry)
 
     assert "Metadata 來源：尚未識別" in text
     assert "更新建議來源：專案 fallback" in text
@@ -1802,7 +1674,7 @@ def test_format_local_update_review_text_includes_unresolved_metadata_state() ->
 
 
 def test_format_local_update_review_text_includes_client_install_reminder_for_server_and_client_mod() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     candidate = SimpleNamespace(
         project_name="Sodium",
         current_version="0.6.0",
@@ -1826,88 +1698,9 @@ def test_format_local_update_review_text_includes_client_install_reminder_for_se
         changelog="",
     )
 
-    text = frame._format_local_update_review_text(review_entry)
+    text = format_local_update_review_text(review_entry)
 
     assert "提醒：此模組同時支援 client 端" in text
-
-
-def test_cache_local_provider_metadata_uses_shared_provider_contract() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    captured: dict[str, Any] = {}
-
-    class _StubIndexManager:
-        def cache_provider_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
-            captured["file_path"] = file_path
-            captured["provider_metadata"] = provider_metadata
-
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
-    mod = SimpleNamespace(
-        file_path="C:/servers/Fabric/mods/sodium.jar",
-        platform_id="",
-        platform_slug="",
-        name="Sodium",
-    )
-    enhanced = SimpleNamespace(project_id="AANobbMI", slug="sodium", name="Sodium")
-
-    frame._cache_local_provider_metadata(mod, enhanced)
-
-    assert mod.platform_id == "AANobbMI"
-    assert mod.platform_slug == "sodium"
-    assert captured["file_path"] == Path("C:/servers/Fabric/mods/sodium.jar")
-    assert captured["provider_metadata"].get("platform") == "modrinth"
-    assert captured["provider_metadata"].get("project_id") == "AANobbMI"
-    assert captured["provider_metadata"].get("slug") == "sodium"
-    assert captured["provider_metadata"].get("project_name") == "Sodium"
-
-
-def test_ensure_local_mod_project_ids_backfills_missing_slug() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    captured: dict[str, Any] = {}
-
-    class _StubIndexManager:
-        def cache_provider_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
-            captured["file_path"] = file_path
-            captured["provider_metadata"] = provider_metadata
-
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
-    frame.enhanced_mods_cache = {}
-
-    local_mod = SimpleNamespace(
-        filename="sodium-fabric.jar",
-        file_path="C:/servers/Fabric/mods/sodium-fabric.jar",
-        platform_id="AANobbMI",
-        platform_slug="",
-        name="Sodium",
-    )
-
-    original_resolve_provider_record = utils_module.resolve_modrinth_provider_record
-    original_enhance_local_mod = mod_management_module.enhance_local_mod
-    fallback_calls = {"count": 0}
-    utils_module.resolve_modrinth_provider_record = lambda _identifier: utils_module.ProviderMetadataRecord.from_values(
-        project_id="AANobbMI",
-        slug="sodium",
-        project_name="Sodium",
-    )
-
-    def _counting_enhance(*_args, **_kwargs):
-        fallback_calls["count"] += 1
-        return SimpleNamespace(project_id="AANobbMI", slug="sodium", name="Sodium")
-
-    mod_management_module.enhance_local_mod = _counting_enhance
-    try:
-        frame._ensure_local_mod_project_ids([local_mod])
-    finally:
-        utils_module.resolve_modrinth_provider_record = original_resolve_provider_record
-        mod_management_module.enhance_local_mod = original_enhance_local_mod
-
-    assert local_mod.platform_id == "AANobbMI"
-    assert local_mod.platform_slug == "sodium"
-    assert fallback_calls["count"] == 0
-    assert captured["file_path"] == Path("C:/servers/Fabric/mods/sodium-fabric.jar")
-    assert captured["provider_metadata"].get("platform") == "modrinth"
-    assert captured["provider_metadata"].get("project_id") == "AANobbMI"
-    assert captured["provider_metadata"].get("slug") == "sodium"
-    assert captured["provider_metadata"].get("project_name") == "Sodium"
 
 
 def test_build_local_update_review_key_falls_back_to_file_path_when_project_id_missing() -> None:
@@ -1917,21 +1710,12 @@ def test_build_local_update_review_key_falls_back_to_file_path_when_project_id_m
         local_mod=SimpleNamespace(file_path="C:/servers/demo/mods/unknown-mod.jar", filename="unknown-mod.jar"),
     )
 
-    key = mod_management_module.ModManagementFrame._build_local_update_review_key(candidate)
+    key = build_local_update_review_key(candidate)
 
     assert key == "local::C:/servers/demo/mods/unknown-mod.jar"
 
 
-def test_prepare_local_update_review_entries_uses_fallback_root_key_when_project_id_missing(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21.1", "fabric", ""))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(frame, "_dedupe_review_messages", list)
-    monkeypatch.setattr(frame, "_apply_review_advisory_enabled_overrides", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_enabled_dependency_simulations", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_simulated_installed_mod", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_build_installed_mod_simulation_item", lambda *_args, **_kwargs: SimpleNamespace())
-
+def test_prepare_local_update_review_entries_uses_fallback_root_key_when_project_id_missing() -> None:
     candidate = SimpleNamespace(
         project_id="",
         project_name="Unknown Mod",
@@ -1943,37 +1727,48 @@ def test_prepare_local_update_review_entries_uses_fallback_root_key_when_project
         dependency_issues=[],
         notes=[],
         update_available=False,
+        target_filename="",
+        target_version_name="",
+        current_version="1.0.0",
+        metadata_source="unresolved",
+        metadata_note="",
+        recommendation_source="metadata_unresolved",
+        recommendation_confidence="blocked",
     )
 
-    review_entries = frame._prepare_local_update_review_entries(
-        SimpleNamespace(candidates=[candidate]),
-        root_enabled_overrides={"local::C:/servers/demo/mods/unknown-mod.jar": False},
+    session = ModReviewWorkflow(server=_review_server(), installed_mods=[]).start_local_update_session(
+        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
+        "全部模組",
     )
+    root_key = "local::C:/servers/demo/mods/unknown-mod.jar"
+    assert session.apply_selection({root_key}, False) is True
+    snapshot = session.snapshot()
 
-    assert len(review_entries) == 1
-    assert review_entries[0].enabled is False
+    assert snapshot.roots[0].root_key == root_key
+    assert snapshot.enabled_count == 0
 
 
-def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+def test_load_local_mods_discards_stale_scan_results(tmp_path: Path) -> None:
+    frame = ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
     server_a = SimpleNamespace(name="server-a", path=str(tmp_path / "server-a"))
     server_b = SimpleNamespace(name="server-b", path=str(tmp_path / "server-b"))
     sentinel_mods = [SimpleNamespace(filename="sentinel.jar")]
     enhancement_calls: list[str] = []
     queued_items: list[Any] = []
 
-    frame.current_server = server_a
+    old_session = _mod_session(server_a, local_mods=sentinel_mods)
+    frame.mod_session = old_session
     frame.mod_manager = SimpleNamespace()
-    frame.local_mods = sentinel_mods
-    frame.enhanced_mods_cache = {"keep": object()}
     frame.update_status_safe = lambda _message: None
     frame.update_progress_safe = lambda _value: None
     frame.refresh_local_list = lambda: queued_items.append("refresh_local_list")
     frame.ui_queue = SimpleNamespace(put=lambda item: queued_items.append(item))
-    frame.enhance_local_mods = lambda: enhancement_calls.append("called")
+    presenter = ui_module.LocalModListPresenter(frame)
+    presenter.enhance_local_mods = lambda _scope=None: enhancement_calls.append("called")
 
     def _scan_mods() -> list[Any]:
-        frame.current_server = server_b
+        old_session.invalidate()
+        frame.mod_session = _mod_session(server_b, local_mods=sentinel_mods)
         return [
             SimpleNamespace(
                 filename="example.jar",
@@ -1988,12 +1783,17 @@ def test_load_local_mods_discards_stale_scan_results(monkeypatch, tmp_path: Path
         ]
 
     frame.mod_manager.scan_mods = _scan_mods
-    monkeypatch.setattr(utils_module.TaskUtils, "run_async", lambda task, **_kwargs: task())
 
-    mod_management_module.LocalModListPresenter(frame).load_local_mods()
+    class _ImmediateScope:
+        def submit(self, work, **_kwargs):
+            work()
+            return
 
-    assert frame.local_mods is sentinel_mods
-    assert frame.enhanced_mods_cache == {"keep": frame.enhanced_mods_cache["keep"]}
+    frame.scope = _ImmediateScope()
+
+    presenter.load_local_mods()
+
+    assert frame.mod_session.local_mods == tuple(sentinel_mods)
     assert enhancement_calls == []
     assert queued_items == []
 
@@ -2011,10 +1811,7 @@ def test_resolve_pending_install_review_project_page_url_prefers_homepage_url() 
         dependency_plan=SimpleNamespace(items=[], notes=[]),
     )
 
-    assert (
-        mod_management_module.ModManagementFrame._resolve_pending_install_review_project_page_url(review_entry)
-        == "https://example.com/sodium"
-    )
+    assert resolve_pending_install_review_project_page_url(review_entry) == "https://example.com/sodium"
 
 
 def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id() -> None:
@@ -2026,10 +1823,7 @@ def test_resolve_local_update_review_project_page_url_uses_slug_then_project_id(
         dependency_plan=SimpleNamespace(items=[], notes=[]),
     )
 
-    assert (
-        mod_management_module.ModManagementFrame._resolve_local_update_review_project_page_url(review_entry)
-        == "https://modrinth.com/mod/fabric-api"
-    )
+    assert resolve_local_update_review_project_page_url(review_entry) == "https://modrinth.com/mod/fabric-api"
 
 
 def test_resolve_local_update_review_project_page_url_skips_unresolved_candidates() -> None:
@@ -2041,19 +1835,24 @@ def test_resolve_local_update_review_project_page_url_skips_unresolved_candidate
         dependency_plan=SimpleNamespace(items=[], notes=[]),
     )
 
-    assert mod_management_module.ModManagementFrame._resolve_local_update_review_project_page_url(review_entry) == ""
+    assert resolve_local_update_review_project_page_url(review_entry) == ""
 
 
 def test_cache_local_dependency_plan_snapshot_persists_provider_aware_payload() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
 
     class _StubIndexManager:
-        def cache_provider_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
+        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
+            return {}
+
+        def replace_review_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
             captured["file_path"] = file_path
             captured["provider_metadata"] = provider_metadata
 
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
+    snapshot_store = LocalReviewSnapshotStore(
+        SimpleNamespace(index_manager=_StubIndexManager()),
+        {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0},
+    )
     candidate = SimpleNamespace(
         project_id="AANobbMI",
         project_name="Sodium",
@@ -2082,7 +1881,7 @@ def test_cache_local_dependency_plan_snapshot_persists_provider_aware_payload() 
         notes=["dep-note"],
     )
 
-    frame._cache_local_dependency_plan_snapshot(candidate, dependency_plan)
+    snapshot_store.save(candidate, dependency_plan)
 
     payload = captured["provider_metadata"]["dependency_plan_v1"]
     assert captured["file_path"] == Path("C:/servers/Fabric/mods/sodium.jar")
@@ -2103,10 +1902,8 @@ def test_cache_local_dependency_plan_snapshot_persists_provider_aware_payload() 
 
 
 def test_prepare_local_update_review_entries_replays_cached_dependency_plan_snapshot(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-
     class _StubIndexManager:
-        def get_cached_provider_metadata(self, _file_path: Path) -> dict[str, Any]:
+        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
             return {
                 "dependency_plan_v1": {
                     "schema_version": 1,
@@ -2152,54 +1949,53 @@ def test_prepare_local_update_review_entries_replays_cached_dependency_plan_snap
                 }
             }
 
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21.1", "fabric", ""))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(frame, "_dedupe_review_messages", list)
-    monkeypatch.setattr(frame, "_apply_review_advisory_enabled_overrides", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_enabled_dependency_simulations", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_simulated_installed_mod", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_build_installed_mod_simulation_item", lambda *_args, **_kwargs: SimpleNamespace())
-
-    original_builder = mod_management_module.build_required_dependency_install_plan
-    mod_management_module.build_required_dependency_install_plan = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("should use cached dependency plan snapshot")
+    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
+    manager = SimpleNamespace(index_manager=_StubIndexManager())
+    monkeypatch.setattr(
+        review_workflow_module,
+        "build_required_dependency_install_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached dependency plan snapshot")),
     )
-    try:
-        candidate = SimpleNamespace(
-            project_id="AANobbMI",
-            project_name="Sodium",
-            target_version_id="target-ver-1",
-            target_version_name="1.0.0",
-            target_filename="sodium-new.jar",
-            target_version=SimpleNamespace(provider="modrinth"),
-            update_available=True,
-            actionable=True,
-            hard_errors=[],
-            current_issues=[],
-            dependency_issues=[],
-            notes=[],
-            local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-            filename="sodium.jar",
-        )
-        review_entries = frame._prepare_local_update_review_entries(SimpleNamespace(candidates=[candidate]))
-    finally:
-        mod_management_module.build_required_dependency_install_plan = original_builder
+    candidate = SimpleNamespace(
+        project_id="AANobbMI",
+        project_name="Sodium",
+        target_version_id="target-ver-1",
+        target_version_name="1.0.0",
+        target_filename="sodium-new.jar",
+        target_version=SimpleNamespace(provider="modrinth"),
+        current_version="0.6.0",
+        metadata_source="cached",
+        metadata_note="",
+        recommendation_source="hash_metadata",
+        recommendation_confidence="high",
+        update_available=True,
+        actionable=True,
+        hard_errors=[],
+        current_issues=[],
+        dependency_issues=[],
+        notes=[],
+        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
+        filename="sodium.jar",
+    )
+    session = ModReviewWorkflow(
+        server=_review_server(),
+        installed_mods=[],
+        telemetry=telemetry,
+        snapshot_store=LocalReviewSnapshotStore(manager, telemetry),
+    ).start_local_update_session(
+        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
+        "全部模組",
+    )
+    snapshot = session.snapshot()
 
-    assert len(review_entries) == 1
-    restored_plan = review_entries[0].dependency_plan
-    assert len(getattr(restored_plan, "items", [])) == 1
-    assert restored_plan.items[0].project_id == "P7dR8mSH"
-    assert restored_plan.items[0].required_by == ["Sodium"]
-    assert restored_plan.items[0].decision_source == "required:auto"
-    assert review_entries[0].enabled is False
+    assert snapshot.enabled_count == 0
+    assert "Fabric API" in snapshot.roots[0].summary
+    assert telemetry["replayed"] == 1
 
 
 def test_prepare_local_update_review_entries_rebuilds_when_cached_snapshot_version_mismatch(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-
     class _StubIndexManager:
-        def get_cached_provider_metadata(self, _file_path: Path) -> dict[str, Any]:
+        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
             return {
                 "dependency_plan_v1": {
                     "schema_version": 1,
@@ -2215,62 +2011,75 @@ def test_prepare_local_update_review_entries_rebuilds_when_cached_snapshot_versi
                 }
             }
 
-        def cache_provider_metadata(self, _file_path: Path, _provider_metadata: dict[str, Any]) -> None:
+        def replace_review_metadata(self, _file_path: Path, _provider_metadata: dict[str, Any]) -> None:
             return
 
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21.1", "fabric", ""))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(frame, "_dedupe_review_messages", list)
-    monkeypatch.setattr(frame, "_apply_review_advisory_enabled_overrides", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_enabled_dependency_simulations", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_simulated_installed_mod", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_build_installed_mod_simulation_item", lambda *_args, **_kwargs: SimpleNamespace())
-
+    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
+    manager = SimpleNamespace(index_manager=_StubIndexManager())
     calls = {"count": 0}
-    original_builder = mod_management_module.build_required_dependency_install_plan
 
     def _rebuilt_dependency_plan(*_args, **_kwargs):
         calls["count"] += 1
         return SimpleNamespace(
-            items=[SimpleNamespace(project_id="rebuilt")],
+            items=[
+                SimpleNamespace(
+                    project_id="rebuilt",
+                    project_name="Rebuilt Dependency",
+                    version_id="dep-v1",
+                    version_name="1.0.0",
+                    filename="rebuilt.jar",
+                    download_url="https://example.com/rebuilt.jar",
+                    enabled=True,
+                    is_optional=False,
+                )
+            ],
             advisory_items=[],
             unresolved_required=[],
             notes=[],
         )
 
-    mod_management_module.build_required_dependency_install_plan = _rebuilt_dependency_plan
-    try:
-        candidate = SimpleNamespace(
-            project_id="AANobbMI",
-            project_name="Sodium",
-            target_version_id="target-ver-1",
-            target_version_name="1.0.0",
-            target_filename="sodium-new.jar",
-            target_version=SimpleNamespace(provider="modrinth"),
-            update_available=True,
-            actionable=True,
-            hard_errors=[],
-            current_issues=[],
-            dependency_issues=[],
-            notes=[],
-            local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-            filename="sodium.jar",
-        )
-        review_entries = frame._prepare_local_update_review_entries(SimpleNamespace(candidates=[candidate]))
-    finally:
-        mod_management_module.build_required_dependency_install_plan = original_builder
+    monkeypatch.setattr(review_workflow_module, "build_required_dependency_install_plan", _rebuilt_dependency_plan)
+    candidate = SimpleNamespace(
+        project_id="AANobbMI",
+        project_name="Sodium",
+        target_version_id="target-ver-1",
+        target_version_name="1.0.0",
+        target_filename="sodium-new.jar",
+        target_version=SimpleNamespace(provider="modrinth"),
+        current_version="0.6.0",
+        metadata_source="cached",
+        metadata_note="",
+        recommendation_source="hash_metadata",
+        recommendation_confidence="high",
+        update_available=True,
+        actionable=True,
+        hard_errors=[],
+        current_issues=[],
+        dependency_issues=[],
+        notes=[],
+        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
+        filename="sodium.jar",
+    )
+    session = ModReviewWorkflow(
+        server=_review_server(),
+        installed_mods=[],
+        telemetry=telemetry,
+        snapshot_store=LocalReviewSnapshotStore(manager, telemetry),
+    ).start_local_update_session(
+        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
+        "全部模組",
+    )
 
     assert calls["count"] == 1
-    assert review_entries[0].dependency_plan.items[0].project_id == "rebuilt"
+    assert "Rebuilt Dependency" in session.snapshot().roots[0].summary
+    assert telemetry["fallback_rebuild"] == 1
 
 
 def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persists(monkeypatch) -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured_writes: list[dict[str, Any]] = []
 
     class _StubIndexManager:
-        def get_cached_provider_metadata(self, _file_path: Path) -> dict[str, Any]:
+        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
             return {
                 "dependency_plan_v1": {
                     "schema_version": 1,
@@ -2299,52 +2108,54 @@ def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persis
                 }
             }
 
-        def cache_provider_metadata(self, _file_path: Path, provider_metadata: dict[str, Any]) -> None:
+        def replace_review_metadata(self, _file_path: Path, provider_metadata: dict[str, Any]) -> None:
             captured_writes.append(provider_metadata)
 
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
-    monkeypatch.setattr(frame, "_get_current_modrinth_context", lambda: ("1.21.1", "fabric", ""))
-    monkeypatch.setattr(frame, "_get_current_installed_mods", list)
-    monkeypatch.setattr(frame, "_dedupe_review_messages", list)
-    monkeypatch.setattr(frame, "_apply_review_advisory_enabled_overrides", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_enabled_dependency_simulations", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_append_simulated_installed_mod", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(frame, "_build_installed_mod_simulation_item", lambda *_args, **_kwargs: SimpleNamespace())
-
-    original_builder = mod_management_module.build_required_dependency_install_plan
-    mod_management_module.build_required_dependency_install_plan = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-        AssertionError("should replay migrated snapshot instead of rebuilding")
+    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
+    manager = SimpleNamespace(index_manager=_StubIndexManager())
+    monkeypatch.setattr(
+        review_workflow_module,
+        "build_required_dependency_install_plan",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should replay migrated snapshot instead of rebuilding")
+        ),
     )
-    try:
-        candidate = SimpleNamespace(
-            project_id="AANobbMI",
-            project_name="Sodium",
-            target_version_id="target-ver-1",
-            target_version_name="1.0.0",
-            target_filename="sodium-new.jar",
-            target_version=SimpleNamespace(provider="modrinth"),
-            update_available=True,
-            actionable=True,
-            hard_errors=[],
-            current_issues=[],
-            dependency_issues=[],
-            notes=[],
-            local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-            filename="sodium.jar",
-        )
-        review_entries = frame._prepare_local_update_review_entries(SimpleNamespace(candidates=[candidate]))
-    finally:
-        mod_management_module.build_required_dependency_install_plan = original_builder
+    candidate = SimpleNamespace(
+        project_id="AANobbMI",
+        project_name="Sodium",
+        target_version_id="target-ver-1",
+        target_version_name="1.0.0",
+        target_filename="sodium-new.jar",
+        target_version=SimpleNamespace(provider="modrinth"),
+        current_version="0.6.0",
+        metadata_source="cached",
+        metadata_note="",
+        recommendation_source="hash_metadata",
+        recommendation_confidence="high",
+        update_available=True,
+        actionable=True,
+        hard_errors=[],
+        current_issues=[],
+        dependency_issues=[],
+        notes=[],
+        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
+        filename="sodium.jar",
+    )
+    session = ModReviewWorkflow(
+        server=_review_server(),
+        installed_mods=[],
+        telemetry=telemetry,
+        snapshot_store=LocalReviewSnapshotStore(manager, telemetry),
+    ).start_local_update_session(
+        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
+        "全部模組",
+    )
 
-    assert len(review_entries) == 1
-    restored_plan = review_entries[0].dependency_plan
-    assert len(getattr(restored_plan, "items", [])) == 1
-    assert restored_plan.items[0].project_id == "P7dR8mSH"
+    assert "Fabric API" in session.snapshot().roots[0].summary
     assert any("dependency_plan_v1" in payload for payload in captured_writes)
     migrated_snapshot = captured_writes[0]["dependency_plan_v1"]
     assert isinstance(migrated_snapshot.get("graph_edges"), list)
     assert migrated_snapshot["graph_edges"][0]["edge"] == "required"
-    telemetry = getattr(frame, "_dependency_snapshot_migration_totals", {})
     assert telemetry.get("checked", 0) == 1
     assert telemetry.get("migrated", 0) == 1
     assert telemetry.get("replayed", 0) == 1
@@ -2352,15 +2163,20 @@ def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persis
 
 
 def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_enabled_state() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
     captured: dict[str, Any] = {}
 
     class _StubIndexManager:
-        def cache_provider_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
+        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
+            return {}
+
+        def replace_review_metadata(self, file_path: Path, provider_metadata: dict[str, Any]) -> None:
             captured["file_path"] = file_path
             captured["provider_metadata"] = provider_metadata
 
-    frame.mod_manager = SimpleNamespace(index_manager=_StubIndexManager())
+    snapshot_store = LocalReviewSnapshotStore(
+        SimpleNamespace(index_manager=_StubIndexManager()),
+        {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0},
+    )
     candidate = SimpleNamespace(
         project_id="AANobbMI",
         project_name="Sodium",
@@ -2395,7 +2211,7 @@ def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_
         enabled=True,
     )
 
-    frame._persist_local_update_dependency_plan_snapshots([review_entry])
+    snapshot_store.save_entries((review_entry,))
 
     payload = captured["provider_metadata"]["dependency_plan_v1"]
     assert captured["file_path"] == Path("C:/servers/Fabric/mods/sodium.jar")
@@ -2404,115 +2220,8 @@ def test_persist_local_update_dependency_plan_snapshots_writes_current_advisory_
     assert payload["advisory_items"][0]["enabled"] is True
 
 
-def test_persist_local_update_plan_metadata_marks_stale_revalidation_failure() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    path_key = str(Path("C:/servers/Fabric/mods/sodium.jar"))
-
-    class _StubIndexManager:
-        def __init__(self) -> None:
-            self.provider_by_path: dict[str, dict[str, Any]] = {
-                path_key: {
-                    "platform": "modrinth",
-                    "project_id": "AANobbMI",
-                    "slug": "sodium",
-                }
-            }
-
-        def cache_file_hash(self, _file_path: Path, _algorithm: str, _file_hash: str) -> None:
-            return
-
-        def get_cached_provider_metadata(self, file_path: Path) -> dict[str, Any]:
-            return dict(self.provider_by_path.get(str(file_path), {}))
-
-        def cache_provider_metadata(
-            self, file_path: Path, provider_metadata: dict[str, Any], *, merge: bool = True
-        ) -> None:
-            key = str(file_path)
-            previous = dict(self.provider_by_path.get(key, {}))
-            updated = previous if merge else {}
-            updated.update(provider_metadata)
-            self.provider_by_path[key] = updated
-
-        def flush(self) -> None:
-            return
-
-    index_manager = _StubIndexManager()
-    frame.mod_manager = SimpleNamespace(index_manager=index_manager)
-    stale_candidate = SimpleNamespace(
-        project_id="__stale__::AANobbMI",
-        current_hash="deadbeef",
-        hash_algorithm="sha512",
-        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar", platform_slug="sodium"),
-    )
-
-    frame._persist_local_update_plan_metadata(SimpleNamespace(candidates=[stale_candidate]))
-
-    cached_provider = index_manager.provider_by_path[path_key]
-    assert cached_provider["project_id"] == "AANobbMI"
-    assert cached_provider.get("lifecycle_state", "") == "stale"
-    assert "stale_revalidation_failures" not in cached_provider or cached_provider.get(
-        "stale_revalidation_failures"
-    ) in ("0", "")
-
-
-def test_persist_local_update_plan_metadata_resets_revalidation_on_success() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
-    path_key = str(Path("C:/servers/Fabric/mods/sodium.jar"))
-
-    class _StubIndexManager:
-        def __init__(self) -> None:
-            self.provider_by_path: dict[str, dict[str, Any]] = {
-                path_key: {
-                    "platform": "modrinth",
-                    "project_id": "AANobbMI",
-                    "slug": "sodium",
-                    "lifecycle_state": "invalidated",
-                    "stale_revalidation_failures": "5",
-                    "next_retry_not_before_epoch_ms": "999999999",
-                }
-            }
-
-        def cache_file_hash(self, _file_path: Path, _algorithm: str, _file_hash: str) -> None:
-            return
-
-        def get_cached_provider_metadata(self, file_path: Path) -> dict[str, Any]:
-            return dict(self.provider_by_path.get(str(file_path), {}))
-
-        def cache_provider_metadata(
-            self, file_path: Path, provider_metadata: dict[str, Any], *, merge: bool = True
-        ) -> None:
-            key = str(file_path)
-            previous = dict(self.provider_by_path.get(key, {}))
-            updated = previous if merge else {}
-            updated.update(provider_metadata)
-            self.provider_by_path[key] = updated
-
-        def flush(self) -> None:
-            return
-
-    index_manager = _StubIndexManager()
-    frame.mod_manager = SimpleNamespace(index_manager=index_manager)
-    success_candidate = SimpleNamespace(
-        project_id="AANobbMI",
-        project_name="Sodium",
-        metadata_source="hash",
-        current_hash="deadbeef",
-        hash_algorithm="sha512",
-        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar", platform_slug="sodium"),
-    )
-
-    frame._persist_local_update_plan_metadata(SimpleNamespace(candidates=[success_candidate]))
-
-    cached_provider = index_manager.provider_by_path[path_key]
-    assert cached_provider["project_id"] == "AANobbMI"
-    assert cached_provider["lifecycle_state"] == "fresh"
-    assert cached_provider["stale_revalidation_failures"] == "0"
-    assert cached_provider["next_retry_not_before_epoch_ms"] == "0"
-
-
 def test_get_online_install_review_group_key_classifies_all_states() -> None:
-    """線上安裝 review 分組應正確對應 enabled/advisory/disabled/blocked 四種狀態"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     runnable_no_warn = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
@@ -2544,15 +2253,14 @@ def test_get_online_install_review_group_key_classifies_all_states() -> None:
         warning_messages=[],
     )
 
-    assert frame._get_online_install_review_group_key(runnable_no_warn) == "enabled"
-    assert frame._get_online_install_review_group_key(runnable_with_warn) == "advisory"
-    assert frame._get_online_install_review_group_key(runnable_disabled) == "disabled"
-    assert frame._get_online_install_review_group_key(blocked_entry) == "blocked"
+    assert get_online_install_review_group_key(runnable_no_warn) == "enabled"
+    assert get_online_install_review_group_key(runnable_with_warn) == "advisory"
+    assert get_online_install_review_group_key(runnable_disabled) == "disabled"
+    assert get_online_install_review_group_key(blocked_entry) == "blocked"
 
 
 def test_count_online_install_review_groups_aggregates_correctly() -> None:
-    """_count_online_install_review_groups 應正確統計各 group 數量"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     entries = [
         models_module.PendingInstallReviewEntry(
@@ -2581,7 +2289,7 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
         ),
     ]
 
-    counts = frame._count_online_install_review_groups(entries)
+    counts = count_online_install_review_groups(entries)
 
     assert counts["enabled"] == 3
     assert counts["advisory"] == 1
@@ -2590,8 +2298,7 @@ def test_count_online_install_review_groups_aggregates_correctly() -> None:
 
 
 def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
-    """_build_online_install_execution_prompt 應對 advisory/blocked 項目提供摘要文字"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     actionable_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
@@ -2616,7 +2323,7 @@ def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
         warning_messages=[],
     )
 
-    prompt = frame._build_online_install_execution_prompt([actionable_entry, advisory_entry, blocked_entry])
+    prompt = build_online_install_execution_prompt([actionable_entry, advisory_entry, blocked_entry])
 
     assert prompt is not None
     assert "建議確認：1 項" in prompt
@@ -2625,8 +2332,7 @@ def test_build_online_install_execution_prompt_advisory_and_blocked() -> None:
 
 
 def test_build_online_install_execution_prompt_returns_none_for_clean_queue() -> None:
-    """所有項目均為 enabled（無提醒）時，prompt 應為 None——不需要確認對話框"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     entries = [
         models_module.PendingInstallReviewEntry(
@@ -2639,11 +2345,11 @@ def test_build_online_install_execution_prompt_returns_none_for_clean_queue() ->
         for i in range(3)
     ]
 
-    assert frame._build_online_install_execution_prompt(entries) is None
+    assert build_online_install_execution_prompt(entries) is None
 
 
 def test_build_online_install_execution_prompt_returns_none_for_advisory_only() -> None:
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     entries = [
         models_module.PendingInstallReviewEntry(
@@ -2656,12 +2362,11 @@ def test_build_online_install_execution_prompt_returns_none_for_advisory_only() 
         for i in range(2)
     ]
 
-    assert frame._build_online_install_execution_prompt(entries) is None
+    assert build_online_install_execution_prompt(entries) is None
 
 
 def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
-    """_build_online_review_root_status_text 根節點標籤應與 group key 映射一致"""
-    frame = mod_management_module.ModManagementFrame.__new__(mod_management_module.ModManagementFrame)
+    ui_module.ModManagementFrame.__new__(ui_module.ModManagementFrame)
 
     clean_entry = models_module.PendingInstallReviewEntry(
         pending=_pending_install("a", "A", "v1"),
@@ -2686,61 +2391,6 @@ def test_build_online_review_root_status_text_uses_shared_group_label() -> None:
         warning_messages=[],
     )
 
-    assert "可安裝" in frame._build_online_review_root_status_text(clean_entry)
-    assert "建議確認" in frame._build_online_review_root_status_text(advisory_entry)
-    assert "需先處理" in frame._build_online_review_root_status_text(blocked_entry)
-
-
-def test_derive_provider_lifecycle_state_fresh_within_ttl() -> None:
-    now_ms = int(time.time() * 1000)
-    raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(now_ms - 60_000)}
-
-    assert meta_module.derive_provider_lifecycle_state(raw) == meta_module.PROVIDER_LIFECYCLE_FRESH
-
-
-def test_derive_provider_lifecycle_state_stale_past_ttl() -> None:
-    expired_ms = 1_000
-    raw = {"project_id": "sodium", "slug": "sodium", "resolved_at_epoch_ms": str(expired_ms)}
-
-    assert meta_module.derive_provider_lifecycle_state(raw, ttl_seconds=3600) == meta_module.PROVIDER_LIFECYCLE_STALE
-
-
-def test_derive_provider_lifecycle_state_missing_when_no_data() -> None:
-    assert meta_module.derive_provider_lifecycle_state(None) == meta_module.PROVIDER_LIFECYCLE_MISSING
-    assert meta_module.derive_provider_lifecycle_state({}) == meta_module.PROVIDER_LIFECYCLE_MISSING
-    assert (
-        meta_module.derive_provider_lifecycle_state({"project_id": "", "slug": ""})
-        == meta_module.PROVIDER_LIFECYCLE_MISSING
-    )
-
-
-def test_derive_provider_lifecycle_state_ignores_manual_override_flag() -> None:
-    expired_ms = 1_000
-    raw = {
-        "project_id": "sodium",
-        "slug": "sodium",
-        "resolved_at_epoch_ms": str(expired_ms),
-        "manual_override": True,
-    }
-
-    assert meta_module.derive_provider_lifecycle_state(raw, ttl_seconds=3600) == meta_module.PROVIDER_LIFECYCLE_STALE
-
-
-def test_ensure_local_mod_provider_record_sets_lifecycle_fresh_when_both_ids_present() -> None:
-    result = meta_module.ensure_local_mod_provider_record(
-        platform_id="sodium",
-        platform_slug="sodium",
-        project_name="Sodium",
-    )
-
-    assert result.lifecycle_state == meta_module.PROVIDER_LIFECYCLE_FRESH
-
-
-def test_ensure_local_mod_provider_record_sets_lifecycle_missing_when_unresolved() -> None:
-    result = meta_module.ensure_local_mod_provider_record(
-        platform_id="",
-        platform_slug="",
-        project_name="Unknown Mod",
-    )
-
-    assert result.lifecycle_state == meta_module.PROVIDER_LIFECYCLE_MISSING
+    assert "可安裝" in build_online_review_root_status_text(clean_entry)
+    assert "建議確認" in build_online_review_root_status_text(advisory_entry)
+    assert "需先處理" in build_online_review_root_status_text(blocked_entry)

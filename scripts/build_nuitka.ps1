@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param()
 
 Set-StrictMode -Version Latest
@@ -12,20 +12,13 @@ try {
     Write-Host '========================================================'
     Write-Host 'Nuitka Build'
     Write-Host '========================================================'
-
-    Write-Host '[1/4] Cleaning build environment...'
-    foreach ($path in @('.venv', 'dist')) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Recurse -Force
-        }
-    }
-    Write-Host '[2/4] Synchronizing build environment...'
+    Write-Host '[1/3] Synchronizing build environment...'
     & uv sync --group build --locked
     if ($LASTEXITCODE -ne 0) {
         throw "uv sync failed. ExitCode=$LASTEXITCODE"
     }
 
-    Write-Host '[3/4] Loading application information...'
+    Write-Host '[2/3] Loading application information...'
     $metadataCode = @'
 import json
 from src.utils.runtime_utils.app_info import (
@@ -50,6 +43,9 @@ print(json.dumps({
         throw "Failed to load application information. ExitCode=$LASTEXITCODE"
     }
     $appInfo = $metadataJson | ConvertFrom-Json
+
+    Write-Host "Checking for running instances of $($appInfo.GITHUB_REPO)..."
+    Get-Process -Name "$($appInfo.GITHUB_REPO)" -ErrorAction SilentlyContinue | Stop-Process -Force
 
     $qtUnusedModules = @(
         'PySide6.QtWebEngineCore',
@@ -84,13 +80,10 @@ print(json.dumps({
         'PySide6.QtUiTools',
         'PySide6.QtTest',
         'PySide6.QtWebSockets',
-        'PySide6.QtWebChannel',
-        'PySide6.iconengines'
+        'PySide6.QtWebChannel'
     )
 
     $qtPluginExcludeFamilies = @(
-        'iconengines',
-        'imageformats',
         'printsupport',
         'tls',
         'generic',
@@ -99,7 +92,7 @@ print(json.dumps({
 
     $numJobs = [Math]::Max(1, [System.Environment]::ProcessorCount - 1)
 
-    Write-Host '[4/4] Building executable with Nuitka...'
+    Write-Host '[3/3] Building executable with Nuitka...'
     $nuitkaArgs = @(
         '-m',
         'nuitka',
@@ -113,14 +106,15 @@ print(json.dumps({
         '--include-data-files=LICENSE=LICENSE',
         '--include-data-dir=assets=assets',
         '--python-flag=no_docstrings',
-        '--windows-console-mode=attach',
+        '--include-windows-runtime-dlls=yes',
+        '--windows-console-mode=disable',
         '--noinclude-qt-translations',
         '--noinclude-setuptools-mode=nofollow',
         '--noinclude-pytest-mode=nofollow',
         '--noinclude-unittest-mode=nofollow',
         '--noinclude-pydoc-mode=nofollow',
         '--noinclude-IPython-mode=nofollow',
-        '--include-qt-plugins=platforms',
+        '--include-qt-plugins=platforms,imageformats,iconengines',
         '--windows-icon-from-ico=assets/icon.ico',
         "--file-version=$($appInfo.APP_VERSION)",
         "--product-version=$($appInfo.APP_VERSION)",

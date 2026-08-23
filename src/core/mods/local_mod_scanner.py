@@ -10,13 +10,20 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from ...models import MODRINTH_HASH_ALGORITHM, LocalModInfo, ModPlatform, ModStatus
-from ...utils import (
-    ExceptionUtils,
+import orjson
+
+from src.core import ProviderIdentityService
+from src.models import (
+    MODRINTH_HASH_ALGORITHM,
+    LocalModInfo,
+    ModPlatform,
+    ModStatus,
+    ProviderIdentityEvidence,
+)
+from src.utils import (
     ModIndexManager,
-    PathUtils,
+    ProviderIdentityPersistenceError,
     ServerDetectionVersionUtils,
-    derive_provider_lifecycle_state,
     get_logger,
     get_shared_manager,
 )
@@ -27,9 +34,7 @@ MAX_JAR_METADATA_BYTES = 2 * 1024 * 1024
 
 
 class LocalModScanner:
-    """掃描 mods 目錄並建立 `LocalModInfo`"""
-
-    MAX_METADATA_BYTES = MAX_JAR_METADATA_BYTES
+    """掃描 mods 目錄並建立 LocalModInfo"""
 
     def __init__(
         self,
@@ -37,13 +42,13 @@ class LocalModScanner:
         index_manager: ModIndexManager,
         mods_path: Path,
         server_config: Any,
-        resolve_platform_info: Callable[..., tuple[ModPlatform, str, str]],
+        provider_identity_service: ProviderIdentityService,
         quarantine_file: Callable[[Path, str], None],
     ) -> None:
         self.index_manager = index_manager
         self.mods_path = mods_path
         self.server_config = server_config
-        self._resolve_platform_info = resolve_platform_info
+        self._provider_identity_service = provider_identity_service
         self._quarantine_file = quarantine_file
 
     @staticmethod
@@ -87,10 +92,7 @@ class LocalModScanner:
                 logger.warning(f"略過超過讀取上限的 JAR metadata: {file_path}")
                 return None
             return payload
-        except KeyError:
-            return None
-        except (OSError, ValueError) as exc:
-            logger.debug(f"讀取 JAR 內部檔案失敗 {file_path}: {exc}")
+        except KeyError, OSError, orjson.JSONDecodeError:
             return None
 
     @staticmethod
@@ -111,9 +113,8 @@ class LocalModScanner:
             payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
             if payload is None:
                 return None
-            return PathUtils.from_json_str(payload.decode("utf-8"))
-        except (KeyError, OSError, ValueError) as exc:
-            logger.debug(f"讀取 JAR 中的 JSON 失敗 {file_path}: {exc}")
+            return orjson.loads(payload)
+        except KeyError, OSError, ValueError:
             return None
 
     @staticmethod
@@ -136,22 +137,11 @@ class LocalModScanner:
             payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
             if payload is None:
                 return None
-            return tomllib.loads(payload.decode(errors="ignore"))
-        except (KeyError, TomlDecodeError) as exc:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗 {file_path}: {exc}")
-            return None
-        except (OSError, UnicodeDecodeError) as exc:
-            logger.debug(f"讀取 JAR 中的 TOML 失敗（IO/編碼）{file_path}: {exc}")
+            return tomllib.loads(payload.decode("utf-8"))
+        except KeyError, TomlDecodeError, OSError, UnicodeDecodeError:
             return None
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="read_toml_from_jar_unexpected",
-                    details={"file": file_path},
-                )
-            logger.exception(f"讀取 JAR 中的 TOML 時發生未預期錯誤 {file_path}: {exc}")
+            logger.debug(f"讀取 JAR 中的 TOML 時發生非預期錯誤 {file_path}: {exc}")
             return None
 
     @staticmethod
@@ -212,7 +202,7 @@ class LocalModScanner:
             base_name: 檔名去除副檔名後的基底名稱
 
         Returns:
-            推測出的版本字串；無法判定時回傳 `未知`
+            推測出的版本字串；無法判定時回傳"未知"
         """
 
         parts = base_name.split("-")
@@ -232,7 +222,7 @@ class LocalModScanner:
             base_name: 檔名去除副檔名後的基底名稱
 
         Returns:
-            推測出的 Minecraft 版本；無法判定時回傳 `未知`
+            推測出的 Minecraft 版本；無法判定時回傳"未知"
         """
 
         patterns = [r"mc(\d+\.\d+\.\d+)", r"(\d+\.\d+\.\d+)", r"mc(\d+\.\d+)", r"(\d+\.\d+)"]
@@ -263,7 +253,7 @@ class LocalModScanner:
 
     def scan_mods(self) -> list[LocalModInfo]:
         """
-        掃描 mods 目錄，對每個檔案呼叫 `create_mod_info_from_file` 以建立 `LocalModInfo`
+        掃描 mods 目錄，對每個檔案呼叫 create_mod_info_from_file 以建立 LocalModInfo
 
         Returns:
             LocalModInfo 物件的列表
@@ -276,8 +266,14 @@ class LocalModScanner:
             if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled")
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        futures = [get_shared_manager().run(self.create_mod_info_from_file, file_path) for file_path in files_to_scan]
-        results = [future.result() for future in futures]
+        self._provider_identity_service.begin_resolution_batch()
+        try:
+            futures = [
+                get_shared_manager().run(self.create_mod_info_from_file, file_path) for file_path in files_to_scan
+            ]
+            results = [future.result() for future in futures]
+        finally:
+            self._provider_identity_service.end_resolution_batch()
         for mod_info in results:
             if mod_info:
                 mods.append(mod_info)
@@ -292,11 +288,10 @@ class LocalModScanner:
             file_path: 要處理的模組檔案的路徑
 
         Returns:
-            LocalModInfo 物件，如果檔案無法處理或發生錯
+            若檔案無法處理或發生錯誤時回傳 None，否則回傳 LocalModInfo 物件
         """
         try:
             filename, enabled, base_name = self.parse_file_info(file_path)
-            cached_provider = self.index_manager.get_cached_provider_metadata(file_path) or {}
             mod_data = {
                 "name": base_name,
                 "version": "未知",
@@ -322,30 +317,28 @@ class LocalModScanner:
                     },
                 )
             self.apply_server_config_overrides(mod_data)
-            platform, platform_id, platform_slug = self._resolve_platform_info(
-                file_path,
-                mod_data["name"],
-                base_name,
-                filename,
-                cached_provider,
-            )
+            try:
+                identity = self._provider_identity_service.resolve(
+                    ProviderIdentityEvidence(
+                        file_path=file_path,
+                        display_name=str(mod_data["name"] or "").strip(),
+                        jar_aliases=self.extract_provider_aliases(file_path),
+                        search_terms=(str(mod_data["name"] or ""), base_name, filename),
+                    )
+                )
+            except ProviderIdentityPersistenceError as exc:
+                logger.warning(f"provider identity 無法提交，保留既有 snapshot: {file_path.name} - {exc}")
+                identity = self._provider_identity_service.load(file_path)
+            platform = ModPlatform.MODRINTH if identity.canonical else ModPlatform.LOCAL
+            platform_id = identity.project_id if identity.canonical else ""
+            platform_slug = identity.alias
             current_hash = ""
             hash_algorithm = ""
             if platform == ModPlatform.MODRINTH and platform_id:
                 current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_HASH_ALGORITHM)
                 hash_algorithm = MODRINTH_HASH_ALGORITHM if current_hash else ""
-            refreshed_provider = self.index_manager.get_cached_provider_metadata(file_path) or cached_provider
-            provider_lifecycle_state = str(
-                refreshed_provider.get("lifecycle_state", "") or derive_provider_lifecycle_state(refreshed_provider)
-            ).strip()
-            try:
-                stale_revalidation_failures = max(
-                    0,
-                    int(str(refreshed_provider.get("stale_revalidation_failures", "0") or "0").strip() or 0),
-                )
-            except TypeError, ValueError:
-                stale_revalidation_failures = 0
-            return LocalModInfo(
+            file_stat = file_path.stat()
+            mod_info = LocalModInfo(
                 id=base_name,
                 name=mod_data["name"],
                 filename=filename,
@@ -359,48 +352,62 @@ class LocalModScanner:
                 platform_slug=platform_slug,
                 status=ModStatus.ENABLED if enabled else ModStatus.DISABLED,
                 file_path=str(file_path),
-                file_size=file_path.stat().st_size,
+                file_size=file_stat.st_size,
+                file_mtime=file_stat.st_mtime,
                 current_hash=current_hash,
                 hash_algorithm=hash_algorithm,
-                resolution_source=str(refreshed_provider.get("resolution_source", "") or "").strip(),
-                resolved_at_epoch_ms=str(refreshed_provider.get("resolved_at_epoch_ms", "") or "").strip(),
-                provider_lifecycle_state=provider_lifecycle_state,
-                stale_revalidation_failures=stale_revalidation_failures,
-                next_retry_not_before_epoch_ms=str(
-                    refreshed_provider.get("next_retry_not_before_epoch_ms", "") or ""
-                ).strip(),
+                provider_identity=identity,
             )
+            self._provider_identity_service.project(mod_info, identity)
+            return mod_info
         except (OSError, zipfile.BadZipFile) as exc:
-            ExceptionUtils.record_and_mark(
-                exc,
-                marker_path=file_path,
-                reason="io_or_bad_zip",
-                details={"context": "create_mod_info_from_file"},
-            )
+            logger.warning(f"解析模組檔案失敗（檔案損毀或 IO 錯誤）: {file_path} - {exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip")
             return None
-        except (TypeError, ValueError, KeyError) as exc:
-            logger.debug(f"解析模組檔案時遇到格式/型別問題 {file_path}: {exc}")
+        except TypeError, ValueError, KeyError:
             return None
         except Exception as exc:
-            ExceptionUtils.record_and_mark(
-                exc,
-                marker_path=file_path,
-                reason="unexpected_error",
-                details={"context": "create_mod_info_from_file"},
-            )
+            logger.warning(f"提取模組元資料時發生未預期錯誤: {file_path} - {exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_error")
             return None
 
+    def extract_provider_aliases(self, file_path: Path) -> tuple[str, ...]:
+        """
+        只提取 JAR evidence；canonicalization 一律交由 identity service
+
+        Args:
+            file_path: 要檢查的 Mod JAR 路徑
+
+        Returns:
+            依出現順序去重的 provider alias
+        """
+        aliases: list[str] = []
+        try:
+            with zipfile.ZipFile(file_path, "r") as jar:
+                fabric = self.read_json_from_jar(jar, "fabric.mod.json")
+                if isinstance(fabric, dict):
+                    aliases.append(str(fabric.get("id", "") or "").strip())
+                forge = self.read_toml_from_jar(jar, "META-INF/mods.toml")
+                if isinstance(forge, dict):
+                    mods = forge.get("mods")
+                    for mod in mods if isinstance(mods, list) else []:
+                        if isinstance(mod, dict):
+                            aliases.append(str(mod.get("modId", "") or "").strip())
+        except OSError, zipfile.BadZipFile:
+            return ()
+        return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
     def get_manifest_version(self, jar: Any) -> str | None:
         """
         嘗試從 JAR 檔案的 MANIFEST.MF 中提取版本資訊，特別是當版本被指定為 ${file.jarVersion} 時
+
         Args:
             jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案
+
         Returns:
-            從 MANIFEST.MF 中提取的版本字串，如果無法提取或發生錯誤則返回 None
+            從 MANIFEST.MF 中提取的版本字串，如果無法提取或發生錯誤則回傳 None
         """
         try:
             if "META-INF/MANIFEST.MF" in jar.namelist():
@@ -436,41 +443,21 @@ class LocalModScanner:
                         break
                     except KeyError:
                         continue
-                    except (ValueError, TomlDecodeError) as exc:
-                        logger.debug(f"讀取 {metadata_file} 時發生解析錯誤: {exc}")
-                    except TypeError as exc:
-                        logger.debug(f"讀取 {metadata_file} 時發生型別/編碼錯誤: {exc}")
                     except Exception as exc:
-                        with suppress(Exception):
-                            ExceptionUtils.record_and_mark(
-                                exc,
-                                marker_path=file_path,
-                                reason="extract_metadata_unexpected",
-                                details={"metadata_file": metadata_file},
-                            )
                         logger.exception(f"讀取 {metadata_file} 時發生未預期錯誤: {exc}")
         except (zipfile.BadZipFile, OSError) as exc:
-            ExceptionUtils.record_and_mark(
-                exc,
-                marker_path=file_path,
-                reason="io_or_bad_zip_extract",
-                details={"context": "extract_metadata_from_jar"},
-            )
+            logger.exception(f"提取模組元資料失敗: {file_path}\n{exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip_extract")
         except Exception as exc:
-            ExceptionUtils.record_and_mark(
-                exc,
-                marker_path=file_path,
-                reason="unexpected_extract_error",
-                details={"context": "extract_metadata_from_jar"},
-            )
+            logger.exception(f"提取模組元資料時發生未預期錯誤: {file_path}\n{exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_extract_error")
 
     def extract_fabric_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
         從 fabric.mod.json 中提取模組元資料，並更新 mod_data 字典
+
         Args:
             jar: 已開啟的 zipfile.ZipFile 物件，代表 JAR 檔案
             mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊
@@ -495,7 +482,7 @@ class LocalModScanner:
 
     def extract_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
-        從 `mods.toml` 提取 Forge 模組元資料
+        從 mods.toml 提取 Forge 模組元資料
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件
@@ -528,23 +515,12 @@ class LocalModScanner:
                                 mc_version = dependency.get("versionRange", mod_data["mc_version"])
                                 mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
                                 break
-        except (KeyError, TomlDecodeError, ValueError) as exc:
-            logger.debug(f"解析 Forge 元資料失敗（解析/格式）: {exc}")
-        except TypeError as exc:
-            logger.debug(f"解析 Forge 元資料失敗（型別/編碼）: {exc}")
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="extract_forge_metadata_unexpected",
-                    details={"context": "extract_forge_metadata"},
-                )
             logger.exception(f"解析 Forge 元資料時發生未預期錯誤: {exc}")
 
     def extract_legacy_forge_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
-        從 `mcmod.info` 提取舊版 Forge 模組元資料
+        從 mcmod.info 提取舊版 Forge 模組元資料
 
         Args:
             jar: 已開啟的 JAR/ZIP 物件
@@ -568,16 +544,7 @@ class LocalModScanner:
             mod_data["author"] = self.process_authors(authors)
             mod_data["mc_version"] = str(info.get("mcversion", mod_data["mc_version"]) or mod_data["mc_version"])
             mod_data["loader_type"] = "Forge"
-        except (ValueError, TypeError) as exc:
-            logger.debug(f"解析 legacy Forge mcmod.info 失敗（格式/型別）: {exc}")
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="extract_legacy_forge_metadata_unexpected",
-                    details={"context": "extract_legacy_forge_metadata"},
-                )
             logger.exception(f"解析 legacy Forge mcmod.info 時發生未預期錯誤: {exc}")
 
     def resolve_version(self, jar: Any, version: str) -> str:
@@ -636,3 +603,6 @@ class LocalModScanner:
             mod_data["mc_version"] = mc_version_fallback
         loader_mapping = {"unknown": "未知", "fabric": "Fabric", "forge": "Forge", "vanilla": "原版"}
         mod_data["loader_type"] = loader_mapping.get(str(loader_type).lower(), loader_type)
+
+
+__all__ = ["LocalModScanner"]

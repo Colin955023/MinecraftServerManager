@@ -17,7 +17,7 @@ def normalize_download_provider(provider: str | None) -> str:
         provider: 原始 provider 名稱
 
     Returns:
-        正規化後的 provider 名稱；空值時回傳 `unknown`
+        正規化後的 provider 名稱；空值時回傳 unknown
     """
 
     return str(provider or "").strip().lower() or "unknown"
@@ -39,7 +39,7 @@ def get_official_download_hosts(provider: str | None) -> frozenset[str]:
 
 def extract_download_host(download_url: str | None) -> str:
     """
-    從下載網址提取 host
+    從下載網址擷取 host
 
     Args:
         download_url: 原始下載網址
@@ -122,3 +122,14 @@ def build_non_official_source_warning_message(
         f"非官方下載來源：{normalized_label} 將從 {host} 下載，"
         f"非 {display_provider_label} 官方網域，請再次確認來源可信度"
     )
+
+
+__all__ = [
+    "OFFICIAL_DOWNLOAD_HOSTS",
+    "build_non_official_source_warning",
+    "build_non_official_source_warning_message",
+    "extract_download_host",
+    "get_non_official_download_host",
+    "get_official_download_hosts",
+    "normalize_download_provider",
+]

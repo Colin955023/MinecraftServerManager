@@ -37,4 +37,4 @@ runs:
     - name: Install dependencies
       if: ${{ inputs.uv-sync == 'true' }}
       shell: bash
-      run: uv sync --frozen ${{ inputs.uv-groups }}
+      run: uv sync --locked ${{ inputs.uv-groups }}

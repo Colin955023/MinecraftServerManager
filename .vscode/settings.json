@@ -1,25 +1,48 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
-  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.analysis.typeCheckingMode": "off",
   "python.analysis.diagnosticMode": "workspace",
-  "mypy-type-checker.reportingScope": "workspace",
-  "mypy-type-checker.args": [
-    "--ignore-missing-imports",
-    "--follow-imports=silent",
-    "--show-column-numbers"
+  "python.analysis.include": [
+    "src",
+    "tests",
+    "scripts",
+    "report"
   ],
+  "python.analysis.exclude": [
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "**/.pytest_cache/**",
+    "**/.mypy_cache/**",
+    "**/.ruff_cache/**",
+    "**/.import_linter_cache/**",
+    "build/**",
+    "dist/**"
+  ],
+  "python.analysis.ignore": [
+    "**/.venv/**"
+  ],
+  "python.analysis.includeVenvInWorkspaceSymbols": false,
+  "mypy-type-checker.cwd": "${workspaceFolder}",
+  "mypy-type-checker.path": [
+    "${workspaceFolder}/.venv/Scripts/mypy.exe"
+  ],
+  "mypy-type-checker.reportingScope": "custom",
+  "mypy-type-checker.ignorePatterns": [
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "build/**",
+    "dist/**"
+  ],
+  "ruff.path": [
+    "${workspaceFolder}/.venv/Scripts/ruff.exe"
+  ],
+  "ruff.configurationPreference": "filesystemFirst",
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
-      "source.fixAll": "explicit"
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
     }
-  },
-  "python-envs.pythonProjects": [
-    {
-      "path": ".",
-      "envManager": "ms-python.python:venv",
-      "packageManager": "ms-python.python:pip"
-    }
-  ]
+  }
 }

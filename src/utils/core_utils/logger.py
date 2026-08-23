@@ -8,7 +8,7 @@ from datetime import datetime
 
 from loguru import logger as _base
 
-from .. import RuntimePaths
+from src.utils import RuntimePaths
 
 _LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {extra[component]} | {message}"
 _INITIALIZED = False
@@ -21,21 +21,17 @@ def _setup() -> None:
     _INITIALIZED = True
 
     _base.remove()
-    _base.add(
-        sys.stderr,
-        level="INFO",
-        format=_LOG_FORMAT,
-        colorize=False,
-    )
+    if sys.stderr is not None:
+        _base.add(
+            sys.stderr,
+            level="INFO",
+            format=_LOG_FORMAT,
+            colorize=False,
+            enqueue=True,
+        )
     try:
         log_dir = RuntimePaths.get_log_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
-        logs = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime)
-        while len(logs) >= 10:
-            try:
-                logs.pop(0).unlink()
-            except Exception as cleanup_err:
-                _base.warning(f"移除舊日誌檔案失敗: {cleanup_err}")
 
         log_file = log_dir / datetime.now().strftime(f"%Y-%m-%d-%H-%M-%S-p{os.getpid()}.log")
         file_level = "DEBUG" if RuntimePaths.is_development_environment() else "INFO"
@@ -44,10 +40,12 @@ def _setup() -> None:
             level=file_level,
             format=_LOG_FORMAT,
             encoding="utf-8",
-            enqueue=False,
+            enqueue=True,
+            retention=10,
+            rotation="10 MB",
         )
-    except Exception as log_err:
-        _base.warning(f"初始化檔案日誌處理器失敗: {log_err}")
+    except Exception as e:
+        _base.warning(f"初始化檔案日誌處理器失敗: {e}")
 
 
 _setup()

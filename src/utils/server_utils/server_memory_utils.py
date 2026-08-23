@@ -1,5 +1,7 @@
 """伺服器記憶體工具模組"""
 
+from __future__ import annotations
+
 import re
 
 
@@ -13,10 +15,10 @@ class MemoryUtils:
 
         Args:
             text: 含有 Java 記憶體參數的文字
-            setting_type: 設定類型，通常為 `Xmx` 或 `Xms`
+            setting_type: 設定類型，通常為 Xmx 或 Xms
 
         Returns:
-            以 MB 表示的記憶體大小；解析失敗時回傳 `None`
+            以 MB 表示的記憶體大小；解析失敗時回傳 None
         """
         if not text or not isinstance(text, str):
             return None
@@ -54,3 +56,6 @@ class MemoryUtils:
         if memory_mb >= 1024:
             return f"{memory_mb / 1024:.1f} GB"
         return f"{memory_mb:.1f} MB"
+
+
+__all__ = ["MemoryUtils"]

@@ -1,24 +1,27 @@
 """模組索引管理器：提供增量索引以加速模組掃描"""
 
+from __future__ import annotations
+
 import ctypes
-import json
 import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from .. import HashUtils, PathUtils, atomic_write_json, get_logger
+import orjson
+
+from src.utils import HashUtils, PathUtils, atomic_write_json, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 
 
 class ModIndexManager:
     """
     管理模組 JAR 檔案的增量索引
-    通過快取檔案哈希值和元資料，避免重複掃描未變更的檔案
+    通過快取檔案雜湊值和中繼資料，避免重複掃描未變更的檔案
     """
 
     def __init__(self, server_path: str, index_dir: str | None = None):
@@ -33,7 +36,7 @@ class ModIndexManager:
             readme = self.index_dir / "README.txt"
             if not readme.exists():
                 readme_content = (
-                    "這個目錄由 Minecraft Server Manager 用於快取模組索引與檔案hash\n"
+                    "這個目錄由 Minecraft Server Manager 用於快取模組索引與檔案雜湊\n"
                     "可安全刪除，程式會在下次掃描/啟動時重建索引，但刪除會造成下次掃描較慢\n"
                 )
                 PathUtils.write_text_file(readme, readme_content, encoding="utf-8")
@@ -41,7 +44,7 @@ class ModIndexManager:
                 try:
                     FILE_ATTRIBUTE_HIDDEN = 0x02
                     ctypes.windll.kernel32.SetFileAttributesW(str(self.index_dir), FILE_ATTRIBUTE_HIDDEN)
-                except (AttributeError, OSError) as _:
+                except AttributeError, OSError:
                     logger.debug("無法設定資料夾隱藏屬性，已略過")
         except OSError as e:
             logger.debug(f"初始化索引目錄時發生 OSError: {e}")
@@ -82,34 +85,16 @@ class ModIndexManager:
                 if provider_metadata is not None and (not isinstance(provider_metadata, dict)):
                     normalized_entry.pop("provider_metadata", None)
                     repaired_count += 1
+                for namespace in ("provider_identity", "review_metadata"):
+                    value = normalized_entry.get(namespace)
+                    if value is not None and not isinstance(value, dict):
+                        normalized_entry.pop(namespace, None)
+                        repaired_count += 1
                 sanitized[file_name] = normalized_entry
             if repaired_count > 0:
                 self._index = sanitized
                 self._dirty = True
         return repaired_count
-
-    def get_index_consistency_report(self) -> dict[str, Any]:
-        """
-        回傳索引一致性檢查結果，供觀測與診斷使用
-
-        Returns:
-            索引一致性摘要資料
-        """
-        with self._index_lock:
-            invalid_entries = 0
-            missing_stats = 0
-            for entry in self._index.values():
-                if not isinstance(entry, dict):
-                    invalid_entries += 1
-                    continue
-                if "size" not in entry or "mtime" not in entry:
-                    missing_stats += 1
-            return {
-                "schema_version": INDEX_SCHEMA_VERSION,
-                "total_entries": len(self._index),
-                "invalid_entries": invalid_entries,
-                "entries_missing_file_stats": missing_stats,
-            }
 
     def should_reindex_file(self, file_path: Path) -> bool:
         """
@@ -117,8 +102,9 @@ class ModIndexManager:
 
         Args:
             file_path: JAR 檔案路徑
+
         Returns:
-            True 如果檔案需要重新索引，False 表示可以使用快取
+            若檔案需要重新索引回傳 True，否則回傳 False 表示可以使用快取
         """
         with self._index_lock:
             file_name = file_path.name
@@ -137,45 +123,70 @@ class ModIndexManager:
 
     def get_cached_metadata(self, file_path: Path) -> dict[str, Any] | None:
         """
-        獲取快取的模組元資料
+        取得快取的模組中繼資料
 
         Args:
             file_path: JAR 檔案路徑
+
         Returns:
-            快取的元資料字典，如果檔案變更則返回 None
+            快取的中繼資料字典，如果檔案變更則回傳 None
         """
         cached = self._get_valid_entry(file_path)
         if cached:
             metadata = cached.get("metadata")
             if isinstance(metadata, dict) and metadata:
-                logger.debug(f"使用快取元資料: {file_path.name}")
+                logger.debug(f"使用快取中繼資料: {file_path.name}")
                 return metadata
         return None
 
-    def get_cached_provider_metadata(self, file_path: Path) -> dict[str, Any] | None:
+    def get_provider_identity(self, file_path: Path) -> dict[str, Any] | None:
         """
-        獲取快取的 provider metadata
+        讀取 provider identity；舊 provider_metadata 只作一次性 migration evidence
 
         Args:
             file_path: 檔案路徑
 
         Returns:
-            快取的 provider metadata 字典，如果檔案變更則返回 None
+            快取的 provider metadata 字典，如果檔案變更則回傳 None
         """
         cached = self._get_valid_entry(file_path)
         if cached:
-            provider_metadata = cached.get("provider_metadata")
-            if isinstance(provider_metadata, dict) and provider_metadata:
-                logger.debug(f"使用快取 provider metadata: {file_path.name}")
-                return provider_metadata
+            identity = cached.get("provider_identity")
+            if isinstance(identity, dict) and identity:
+                return dict(identity)
+            legacy = cached.get("provider_metadata")
+            if isinstance(legacy, dict) and legacy:
+                return {key: value for key, value in legacy.items() if key != "dependency_plan_v1"}
         return None
 
-    def get_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
-        """獲取快取的指定演算法哈希值
+    def get_review_metadata(self, file_path: Path) -> dict[str, Any] | None:
+        """
+        讀取與 provider identity 分離的 Review cache namespace
 
         Args:
             file_path: 檔案路徑
-            algorithm: 哈希演算法名稱
+
+        Returns:
+            快取的 Review metadata 字典，如果檔案變更則回傳 None
+        """
+        cached = self._get_valid_entry(file_path)
+        if not cached:
+            return None
+        review_metadata = cached.get("review_metadata")
+        if isinstance(review_metadata, dict) and review_metadata:
+            return dict(review_metadata)
+        legacy = cached.get("provider_metadata")
+        if isinstance(legacy, dict) and isinstance(legacy.get("dependency_plan_v1"), dict):
+            return {"dependency_plan_v1": legacy["dependency_plan_v1"]}
+        return None
+
+    def get_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
+        """
+        取得快取的指定演算法雜湊值
+
+        Args:
+            file_path: 檔案路徑
+            algorithm: 雜湊演算法名稱
 
         Returns:
             快取中的雜湊值；不存在時回傳空字串
@@ -193,50 +204,68 @@ class ModIndexManager:
 
     def cache_metadata(self, file_path: Path, metadata: dict[str, Any]) -> None:
         """
-        快取模組元資料
+        快取模組中繼資料
 
         Args:
             file_path: JAR 檔案路徑
-            metadata: 模組元資料
+            metadata: 模組中繼資料
         """
         try:
             self._update_entry(file_path, metadata=dict(metadata or {}))
-            logger.debug(f"已快取元資料: {file_path.name}")
+            logger.debug(f"已快取中繼資料: {file_path.name}")
         except Exception as e:
-            logger.warning(f"無法快取模組元資料: {e}")
+            logger.warning(f"無法快取模組中繼資料: {e}")
 
-    def cache_provider_metadata(
-        self, file_path: Path, provider_metadata: dict[str, Any], *, merge: bool = True
-    ) -> None:
+    def replace_provider_identity(self, file_path: Path, provider_identity: dict[str, Any]) -> bool:
         """
-        快取 provider metadata，供後續更新與比對使用
+        原子替換完整 identity payload，並搬移 legacy Review snapshot
 
         Args:
             file_path: 檔案路徑
-            provider_metadata: 要寫入的 provider metadata
-            merge: 是否與既有快取合併
+            provider_identity: 要寫入的 provider identity
+
+        Returns:
+            完整 payload 已持久化時為 True
         """
-        normalized_metadata = {
-            str(key): value for key, value in dict(provider_metadata or {}).items() if value not in (None, "", [], {})
-        }
-        if not normalized_metadata:
-            return
         try:
-            cached_provider = self.get_cached_provider_metadata(file_path) or {}
-            merged_provider = dict(cached_provider) if merge else {}
-            merged_provider.update(normalized_metadata)
-            self._update_entry(file_path, provider_metadata=merged_provider)
-            logger.debug(f"已快取 provider metadata: {file_path.name}")
+            with self._index_lock:
+                cached = self._get_valid_entry(file_path) or {}
+                legacy = cached.get("provider_metadata")
+                review_metadata = dict(cached.get("review_metadata", {})) if isinstance(cached, dict) else {}
+                if isinstance(legacy, dict) and isinstance(legacy.get("dependency_plan_v1"), dict):
+                    review_metadata.setdefault("dependency_plan_v1", legacy["dependency_plan_v1"])
+                self._update_entry(
+                    file_path,
+                    provider_identity=dict(provider_identity),
+                    provider_metadata={},
+                    review_metadata=review_metadata,
+                )
+            logger.debug(f"已替換 provider identity: {file_path.name}")
+            return True
         except Exception as e:
-            logger.warning(f"無法快取 provider metadata: {e}")
+            logger.warning(f"無法替換 provider identity: {e}")
+            return False
+
+    def replace_review_metadata(self, file_path: Path, review_metadata: dict[str, Any]) -> None:
+        """
+        原子替換 Review cache namespace，不得改寫 provider identity
+
+        Args:
+            file_path: Review metadata 所屬的本地 Mod 檔案
+            review_metadata: 要完整取代舊值的 Review cache payload
+        """
+        try:
+            self._update_entry(file_path, review_metadata=dict(review_metadata))
+        except Exception as e:
+            logger.warning(f"無法替換 Review metadata: {e}")
 
     def cache_file_hash(self, file_path: Path, algorithm: str, file_hash: str) -> None:
         """
-        快取指定演算法的檔案哈希值
+        快取指定演算法的檔案雜湊值
 
         Args:
             file_path: 檔案路徑
-            algorithm: 哈希演算法名稱
+            algorithm: 雜湊演算法名稱
             file_hash: 計算後的雜湊值
         """
         normalized_algorithm = (
@@ -250,17 +279,17 @@ class ModIndexManager:
             hashes = dict(cached.get("hashes", {})) if isinstance(cached, dict) else {}
             hashes[normalized_algorithm] = normalized_hash
             self._update_entry(file_path, hashes=hashes)
-            logger.debug(f"已快取檔案哈希: {file_path.name} ({normalized_algorithm})")
+            logger.debug(f"已快取檔案雜湊: {file_path.name} ({normalized_algorithm})")
         except Exception as e:
-            logger.warning(f"無法快取檔案哈希: {e}")
+            logger.warning(f"無法快取檔案雜湊: {e}")
 
     def ensure_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
         """
-        確保指定演算法的檔案哈希已寫入索引，並回傳該值
+        確保指定演算法的檔案雜湊已寫入索引，並回傳該值
 
         Args:
             file_path: 檔案路徑
-            algorithm: 哈希演算法名稱
+            algorithm: 雜湊演算法名稱
 
         Returns:
             索引中的雜湊值；若尚未存在且無法計算，回傳空字串
@@ -297,19 +326,6 @@ class ModIndexManager:
                 self._save_index_if_due(force=True)
             return len(files_to_remove)
 
-    def get_statistics(self) -> dict[str, Any]:
-        """獲取索引統計資訊
-
-        Returns:
-            索引統計摘要
-        """
-        with self._index_lock:
-            return {
-                "total_cached": len(self._index),
-                "index_file": str(self.index_file),
-                "last_updated": self.index_file.stat().st_mtime if self.index_file.exists() else 0,
-            }
-
     def clear_cache(self) -> None:
         """清空整個索引快取"""
         with self._index_lock:
@@ -320,7 +336,7 @@ class ModIndexManager:
             logger.info("已清空模組索引快取")
 
     def flush(self) -> None:
-        """立即保存尚未落盤的索引內容"""
+        """立即儲存尚未落盤的索引內容"""
         self._save_index_if_due(force=True)
 
     def _load_index(self) -> None:
@@ -328,11 +344,10 @@ class ModIndexManager:
         with self._index_lock:
             if self.index_file.exists():
                 try:
-                    with self.index_file.open(encoding="utf-8") as f:
-                        raw_payload = json.load(f)
+                    raw_payload = orjson.loads(self.index_file.read_bytes())
                     self._index = self._normalize_loaded_payload(raw_payload)
                     logger.info(f"模組索引已載入，包含 {len(self._index)} 個項目")
-                except (OSError, json.JSONDecodeError, ValueError) as e:
+                except (OSError, orjson.JSONDecodeError, ValueError) as e:
                     logger.warning(f"無法載入索引檔案: {e}，將重新建立")
                     self._index = {}
             else:
@@ -361,7 +376,7 @@ class ModIndexManager:
                 if isinstance(key, str) and isinstance(value, dict):
                     normalized_entries[key] = dict(value)
             return normalized_entries
-        logger.info("偵測到舊版索引格式，將自動遷移至 schema v1")
+        logger.info(f"偵測到舊版索引格式，將自動遷移至 schema v{INDEX_SCHEMA_VERSION}")
         normalized_entries = {}
         for key, value in payload.items():
             if isinstance(key, str) and isinstance(value, dict):
@@ -373,22 +388,22 @@ class ModIndexManager:
         return {"schema_version": INDEX_SCHEMA_VERSION, "entries": self._index}
 
     def _save_index(self) -> None:
-        """將索引保存為 JSON"""
+        """將索引儲存為 JSON"""
         with self._index_lock:
             try:
                 payload = self._build_persist_payload()
                 ok = atomic_write_json(self.index_file, payload)
                 if ok:
-                    logger.debug("模組索引已保存 (atomic)")
+                    logger.debug("模組索引已儲存 (atomic)")
                     self._dirty = False
                     self._last_save_ts = time.time()
                 else:
-                    logger.warning("模組索引保存失敗（atomic write 返回 false）")
+                    logger.warning("模組索引儲存失敗（atomic write 回傳 false）")
             except (OSError, TypeError, ValueError) as e:
-                logger.warning(f"無法保存索引檔案: {e}")
+                logger.warning(f"無法儲存索引檔案: {e}")
 
     def _save_index_if_due(self, *, force: bool = False) -> None:
-        """依時間節流保存索引，避免每個檔案都立即落盤"""
+        """依時間節流儲存索引，避免每個檔案都立即落盤"""
         with self._index_lock:
             if not self._dirty and (not force):
                 return
@@ -421,3 +436,13 @@ class ModIndexManager:
                 self._save_index_if_due()
             except Exception as e:
                 logger.warning(f"無法更新模組索引項目 {file_name}: {e}")
+
+    def clear_index(self) -> None:
+        """清空所有快取項目並將空索引寫入磁碟"""
+        with self._index_lock:
+            self._index = {}
+            self._dirty = True
+            self.flush()
+
+
+__all__ = ["ModIndexManager"]

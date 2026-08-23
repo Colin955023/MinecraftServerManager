@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.utils import HTTPUtils, UpdateParsing
+from src.utils import HTTPClient, UpdateParsing
 
 
 def test_get_latest_release_skips_draft_and_prerelease(monkeypatch) -> None:
@@ -10,7 +10,7 @@ def test_get_latest_release_skips_draft_and_prerelease(monkeypatch) -> None:
         {"tag_name": "v1.6.7", "draft": False, "prerelease": False},
     ]
     monkeypatch.setattr(UpdateParsing, "_GITHUB_API", "https://example.invalid")
-    monkeypatch.setattr(HTTPUtils, "get_json", lambda *_args, **_kwargs: payload)
+    monkeypatch.setattr(HTTPClient, "fetch_json", lambda *_args, **_kwargs: payload)
 
     latest = UpdateParsing.get_latest_release("owner", "repo")
     assert latest["tag_name"] == "v1.6.7"
@@ -22,7 +22,7 @@ def test_get_latest_release_can_include_prerelease(monkeypatch) -> None:
         {"tag_name": "v1.6.7", "draft": False, "prerelease": False},
     ]
     monkeypatch.setattr(UpdateParsing, "_GITHUB_API", "https://example.invalid")
-    monkeypatch.setattr(HTTPUtils, "get_json", lambda *_args, **_kwargs: payload)
+    monkeypatch.setattr(HTTPClient, "fetch_json", lambda *_args, **_kwargs: payload)
 
     latest = UpdateParsing.get_latest_release("owner", "repo", include_prerelease=True)
     assert latest["tag_name"] == "v1.7.0-rc1"

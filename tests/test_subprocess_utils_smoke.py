@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import sys
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
+
 import src.utils.runtime_utils.subprocess_utils as subprocess_utils_module
+from src.utils import SubprocessUtils
 
 
 def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp_path) -> None:
@@ -26,7 +27,7 @@ def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp
     )
     monkeypatch.setattr(subprocess_utils_module.subprocess, "run", fake_run)
 
-    result = subprocess_utils_module.SubprocessUtils.run_checked(["java", "-version"], shell=True, check=False)
+    result = SubprocessUtils.run_checked(["java", "-version"], shell=True, check=False)
 
     assert result.returncode == 0
     assert captured["cmd"] == [str(resolved_executable), "-version"]
@@ -45,7 +46,7 @@ def test_popen_checked_forces_shell_false_for_absolute_path(monkeypatch, tmp_pat
 
     monkeypatch.setattr(subprocess_utils_module.subprocess, "Popen", fake_popen)
 
-    process = subprocess_utils_module.SubprocessUtils.popen_checked(
+    process = SubprocessUtils.popen_checked(
         [str(executable), "-jar", "server.jar"],
         shell=True,
         cwd=str(tmp_path),
@@ -68,7 +69,7 @@ def test_popen_checked_defaults_text_mode_decode_errors_to_replace(monkeypatch, 
 
     monkeypatch.setattr(subprocess_utils_module.subprocess, "Popen", fake_popen)
 
-    subprocess_utils_module.SubprocessUtils.popen_checked([str(executable), "-version"], text=True)
+    SubprocessUtils.popen_checked([str(executable), "-version"], text=True)
 
     kwargs = cast(dict[str, object], captured["kwargs"])
     assert kwargs["shell"] is False
@@ -93,21 +94,11 @@ def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_
         staticmethod(lambda name: str(resolved_executable) if name == "java" else None),
     )
 
-    method = getattr(subprocess_utils_module.SubprocessUtils, method_name)
+    method = getattr(SubprocessUtils, method_name)
     with pytest.raises(ValueError, match="不允許覆寫 executable"):
         method(["java", "-version"], executable="cmd.exe")
 
 
 def test_validate_cmd_rejects_blank_executable() -> None:
     with pytest.raises(ValueError, match="cmd\\[0\\] 不得為空"):
-        subprocess_utils_module.SubprocessUtils._validate_cmd(["   "])
-
-
-def test_run_qprocess_checked_collects_stdout() -> None:
-    result = subprocess_utils_module.SubprocessUtils.run_qprocess_checked(
-        [sys.executable, "-c", "print('qprocess-ok')"]
-    )
-
-    assert result.returncode == 0
-    assert "qprocess-ok" in result.stdout
-    assert result.pid > 0
+        SubprocessUtils._validate_cmd(["   "])

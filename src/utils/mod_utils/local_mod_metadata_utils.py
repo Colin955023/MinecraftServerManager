@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .. import normalize_identifier
+from src.utils import normalize_identifier
 
 
 def normalize_filename_stem(value: str | None) -> str:

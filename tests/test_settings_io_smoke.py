@@ -7,8 +7,9 @@ import time
 from typing import Any
 
 import pytest
+
 import src.utils.runtime_utils.settings_manager as settings_module
-from src.core import ConfigurationError
+from src.utils import ConfigurationError
 
 
 def test_settings_manager_read_write_roundtrip(tmp_path, monkeypatch) -> None:

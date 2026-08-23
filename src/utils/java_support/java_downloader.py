@@ -3,8 +3,9 @@ Java 下載工具模組
 提供 Java 安裝包下載與管理功能，支援 Microsoft OpenJDK 的自動下載與安裝流程
 """
 
-from ...core import JavaInstallError
-from .. import SubprocessUtils, get_logger
+from __future__ import annotations
+
+from src.utils import JavaInstallError, SubprocessUtils, get_logger
 
 logger = get_logger().bind(component="JavaDownloader")
 
@@ -27,7 +28,7 @@ class JavaDownloader:
             return False
         except SubprocessUtils.CalledProcessError as e:
             error_msg = e.stderr.strip() if e.stderr else "無錯誤輸出 (stderr)"
-            logger.error(f"winget 存在但回傳錯誤代碼 ({e.returncode})錯誤內容: {error_msg}")
+            logger.error(f"winget 存在但回傳錯誤代碼 ({e.returncode})，錯誤內容: {error_msg}")
             return False
         except Exception as e:
             logger.exception(f"檢查 winget 時發生未預期的異常: {e}")
@@ -44,11 +45,11 @@ class JavaDownloader:
 
         if not JavaDownloader._is_winget_available():
             raise JavaInstallError(
-                "無法調用 winget 工具這可能是因為：\n"
+                "無法呼叫 winget 工具。這可能是因為：\n"
                 "1. 系統未安裝「應用程式安裝員 (App Installer)」\n"
                 "2. 您的 Windows 版本過舊\n"
                 "3. 環境變數中缺少 %LocalAppData%\\Microsoft\\WindowsApps\n"
-                "請檢查程式日誌以獲取詳細錯誤代碼"
+                "請檢查程式日誌以取得詳細錯誤代碼。"
             )
 
         if major == 8:
@@ -60,10 +61,17 @@ class JavaDownloader:
 
         try:
             logger.info(f"正在執行安裝指令: winget install {pkg}")
-            SubprocessUtils.query_winget(
-                ["install", "--accept-package-agreements", "--accept-source-agreements", pkg], check=True
+            returncode = SubprocessUtils.run_winget_interactive(
+                ["install", "--accept-package-agreements", "--accept-source-agreements", pkg]
             )
+            if returncode != 0:
+                raise JavaInstallError(f"winget 安裝程序回傳錯誤代碼 ({returncode})")
             logger.info(f"Java {major} ({pkg}) 安裝程序已完成")
         except Exception as e:
             logger.exception(f"winget 安裝過程發生異常: {e}")
-            raise JavaInstallError(f"透過 winget 安裝 {pkg} 失敗建議手動開啟終端機執行：\nwinget install {pkg}") from e
+            raise JavaInstallError(
+                f"透過 winget 安裝 {pkg} 失敗。建議手動開啟終端機執行：\nwinget install {pkg}"
+            ) from e
+
+
+__all__ = ["JavaDownloader"]

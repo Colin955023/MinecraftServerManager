@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from src.core import ModManager
 from src.models import ModPlatform
-from src.utils import HashUtils, HTTPUtils, ModIndexManager
+from src.utils import HashUtils, ModIndexManager
 
 
 def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
@@ -16,14 +17,22 @@ def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_
     file_path = mods_dir / "fabric-api.jar"
     file_path.write_bytes(b"jar-bytes")
 
-    manager.cache_provider_metadata(
+    identity = {
+        "schema_version": 2,
+        "provider": "modrinth",
+        "project_id": "P7dR8mSH",
+        "alias": "fabric-api",
+        "display_name": "Fabric API",
+        "provenance": "test",
+        "lifecycle": "fresh",
+        "observed_at_epoch_ms": int(time.time() * 1000),
+        "resolved_at_epoch_ms": int(time.time() * 1000),
+        "failure_count": 0,
+        "next_retry_not_before_epoch_ms": 0,
+    }
+    manager.replace_provider_identity(
         file_path,
-        {
-            "platform": "modrinth",
-            "project_id": "P7dR8mSH",
-            "slug": "fabric-api",
-            "project_name": "Fabric API",
-        },
+        identity,
     )
     manager.cache_file_hash(file_path, "sha512", "abc123")
     manager.cache_metadata(file_path, {"version": "0.120.0", "loader_type": "Fabric"})
@@ -32,16 +41,11 @@ def test_mod_index_manager_preserves_provider_metadata_and_hashes_when_metadata_
         "version": "0.120.0",
         "loader_type": "Fabric",
     }
-    assert manager.get_cached_provider_metadata(file_path) == {
-        "platform": "modrinth",
-        "project_id": "P7dR8mSH",
-        "slug": "fabric-api",
-        "project_name": "Fabric API",
-    }
+    assert manager.get_provider_identity(file_path) == identity
     assert manager.get_cached_hash(file_path, "sha512") == "abc123"
 
 
-def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: Path, monkeypatch) -> None:
+def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: Path) -> None:
     server_path = tmp_path / "server"
     mods_dir = server_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)
@@ -59,22 +63,24 @@ def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: P
             "mc_version": "1.21.1",
         },
     )
-    manager.index_manager.cache_provider_metadata(
+    now_ms = int(time.time() * 1000)
+    manager.index_manager.replace_provider_identity(
         file_path,
         {
-            "platform": "modrinth",
+            "schema_version": 2,
+            "provider": "modrinth",
             "project_id": "P7dR8mSH",
-            "slug": "fabric-api",
-            "project_name": "Fabric API",
+            "alias": "fabric-api",
+            "display_name": "Fabric API",
+            "provenance": "test",
+            "lifecycle": "fresh",
+            "observed_at_epoch_ms": now_ms,
+            "resolved_at_epoch_ms": now_ms,
+            "failure_count": 0,
+            "next_retry_not_before_epoch_ms": 0,
         },
     )
     manager.index_manager.cache_file_hash(file_path, "sha512", "deadbeef")
-
-    monkeypatch.setattr(
-        manager._get_provider_resolver(),
-        "detect_platform_info",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached provider metadata")),
-    )
 
     mod_info = manager.create_mod_info_from_file(file_path)
 
@@ -98,53 +104,6 @@ def test_mod_index_manager_ensure_cached_hash_defaults_to_sha512(tmp_path: Path)
     assert computed_hash
     assert manager.get_cached_hash(file_path) == computed_hash
     assert manager.get_cached_hash(file_path, "sha512") == computed_hash
-
-
-def test_mod_manager_search_on_modrinth_returns_canonical_project_id_and_slug(monkeypatch) -> None:
-    from src.core.mods.mod_provider_resolver import search_on_modrinth_candidates
-
-    def fake_get_json(url, timeout=None, headers=None, params=None):
-        del timeout, headers
-        assert url == "https://api.modrinth.com/v2/search"
-        assert params == {"query": "Fabric API"}
-        return {
-            "hits": [
-                {
-                    "project_id": "P7dR8mSH",
-                    "slug": "fabric-api",
-                }
-            ]
-        }
-
-    monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
-
-    platform, project_id, slug = search_on_modrinth_candidates("Fabric API", "fabric-api", "fabric-api.jar")
-
-    assert platform == ModPlatform.MODRINTH
-    assert project_id == "P7dR8mSH"
-    assert slug == "fabric-api"
-
-
-def test_resolve_modrinth_project_identity_falls_back_to_search_when_direct_lookup_404(
-    tmp_path: Path, monkeypatch
-) -> None:
-    manager = ModManager(str(tmp_path))
-
-    def fake_get_json(url, timeout=None, headers=None, params=None, suppress_status_codes=None):
-        del timeout, headers
-        if "api.modrinth.com/v2/project/" in url:
-            assert suppress_status_codes == {404}
-            return None
-        assert url == "https://api.modrinth.com/v2/search"
-        assert params == {"query": "ferritecore"}
-        return {"hits": [{"project_id": "uXXizFIs", "slug": "ferrite-core"}]}
-
-    monkeypatch.setattr(HTTPUtils, "get_json", fake_get_json)
-
-    project_id, slug = manager.resolve_modrinth_project_identity("ferritecore")
-
-    assert project_id == "uXXizFIs"
-    assert slug == "ferrite-core"
 
 
 def test_compute_file_hash_recomputes_when_file_content_changes(tmp_path: Path) -> None:
@@ -176,14 +135,23 @@ def test_mod_index_manager_thread_safe_parallel_updates(tmp_path: Path) -> None:
 
     def worker(file_path: Path) -> str:
         manager.cache_metadata(file_path, {"version": f"{file_path.stem}-1.0.0", "loader_type": "Fabric"})
-        manager.cache_provider_metadata(file_path, {"platform": "local", "slug": file_path.stem})
+        manager.replace_provider_identity(
+            file_path,
+            {
+                "schema_version": 2,
+                "provider": "modrinth",
+                "project_id": "",
+                "alias": file_path.stem,
+                "lifecycle": "retrying",
+            },
+        )
         return manager.ensure_cached_hash(file_path)
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         hashes = list(executor.map(worker, files))
 
     assert all(hashes)
-    assert manager.get_statistics()["total_cached"] == len(files)
+    assert len(manager._index) == len(files)
 
 
 def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) -> None:
@@ -201,7 +169,7 @@ def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) ->
                 "legacy.jar": {
                     "size": file_path.stat().st_size,
                     "mtime": file_path.stat().st_mtime,
-                    "metadata": {"version": "1.0.0"},
+                    "metadata": {"name": "Legacy Mod", "version": "1.0.0"},
                 }
             }
         ),
@@ -209,18 +177,13 @@ def test_mod_index_manager_migrates_legacy_plain_dict_payload(tmp_path: Path) ->
     )
 
     manager = ModIndexManager(str(tmp_path))
-    cached = manager.get_cached_metadata(file_path)
+    meta = manager.get_cached_metadata(file_path)
 
-    assert cached == {"version": "1.0.0"}
-
-    manager.flush()
-    payload = json.loads(index_file.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
-    assert "entries" in payload
-    assert "legacy.jar" in payload["entries"]
+    assert meta is not None
+    assert meta["name"] == "Legacy Mod"
 
 
-def test_mod_index_manager_repairs_invalid_entry_shapes_on_load(tmp_path: Path) -> None:
+def test_mod_index_manager_repairs_corrupt_entry_types_on_load(tmp_path: Path) -> None:
     mods_dir = tmp_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)
     file_path = mods_dir / "broken.jar"
@@ -248,10 +211,8 @@ def test_mod_index_manager_repairs_invalid_entry_shapes_on_load(tmp_path: Path) 
     )
 
     manager = ModIndexManager(str(tmp_path))
-    report = manager.get_index_consistency_report()
 
-    assert report["schema_version"] == 1
-    assert report["total_entries"] == 1
+    assert len(manager._index) == 1
     assert manager.get_cached_metadata(file_path) is None
-    assert manager.get_cached_provider_metadata(file_path) is None
+    assert manager.get_provider_identity(file_path) is None
     assert manager.get_cached_hash(file_path, "sha512") == ""

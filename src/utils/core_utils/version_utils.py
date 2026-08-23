@@ -11,10 +11,9 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 
 from packaging.version import InvalidVersion, Version
-
-__all__ = ["parse_version_safe"]
 
 
 def parse_version_safe(
@@ -48,8 +47,9 @@ def parse_version_safe(
     except InvalidVersion:
         match = re.search(r"\d+(?:\.\d+){0,3}", candidate)
         if match:
-            try:
+            with suppress(InvalidVersion):
                 return Version(match.group(0))
-            except InvalidVersion:
-                pass
         return fallback
+
+
+__all__ = ["parse_version_safe"]

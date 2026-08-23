@@ -1,10 +1,12 @@
+"""檔案原子寫入工具測試模組"""
+
 import json
 
 from src.utils import atomic_write_bytes, atomic_write_json, atomic_write_text
 
 
 def test_atomic_write_json_creates_file(tmp_path):
-    payload = {"a": 1, "b": "测试"}
+    payload = {"a": 1, "b": "測試"}
     target = tmp_path / "test_index.json"
     ok = atomic_write_json(target, payload)
     assert ok is True

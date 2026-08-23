@@ -17,7 +17,7 @@ project_root = Path(__file__).resolve().parents[1]
 project_root_str = str(project_root)
 if project_root_str not in sys.path:
     sys.path.insert(0, project_root_str)
-from src.utils.runtime_utils.app_info import APP_VERSION
+from src.utils import APP_VERSION
 
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 

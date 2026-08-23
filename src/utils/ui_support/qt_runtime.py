@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import sys
+import threading
 from collections.abc import Callable
+from contextlib import suppress
+from pathlib import Path
 from typing import Any, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -16,6 +19,53 @@ except ImportError:
     shiboken_is_valid = None
 
 _dispatcher: _UiDispatcher | None = None
+_dispatcher_lock = threading.Lock()
+
+
+def get_icon_path() -> str:
+    """
+    自動偵測 icon.ico 絕對路徑，支援開發環境與打包後 (Nuitka) 的路徑
+
+    Returns:
+        icon.ico 的絕對路徑，若找不到則回傳空字串
+    """
+    if hasattr(sys, "_MEIPASS"):
+        with suppress(Exception):
+            candidate = Path(sys._MEIPASS) / "assets" / "icon.ico"
+            if candidate.exists():
+                return str(candidate)
+
+    if getattr(sys, "frozen", False) or hasattr(sys, "executable"):
+        with suppress(Exception):
+            base_dir = Path(sys.executable).resolve().parent
+            candidate = base_dir / "assets" / "icon.ico"
+            if candidate.exists():
+                return str(candidate)
+            candidate2 = base_dir / "icon.ico"
+            if candidate2.exists():
+                return str(candidate2)
+
+    with suppress(Exception):
+        base_dir = Path(__file__).resolve().parents[3]
+        candidate = base_dir / "assets" / "icon.ico"
+        if candidate.exists():
+            return str(candidate)
+
+    with suppress(Exception):
+        base_dir = Path(sys.argv[0]).resolve().parent
+        candidate = base_dir / "assets" / "icon.ico"
+        if candidate.exists():
+            return str(candidate)
+        candidate2 = base_dir / "icon.ico"
+        if candidate2.exists():
+            return str(candidate2)
+
+    with suppress(Exception):
+        candidate = Path("assets/icon.ico").resolve()
+        if candidate.exists():
+            return str(candidate)
+
+    return ""
 
 
 def ensure_application() -> QtWidgets.QApplication:
@@ -25,9 +75,19 @@ def ensure_application() -> QtWidgets.QApplication:
     Returns:
         目前行程可使用的 QApplication 實例
     """
+    global _dispatcher
     app = QtWidgets.QApplication.instance()
     if not isinstance(app, QtWidgets.QApplication):
         app = QtWidgets.QApplication(sys.argv[:1])
+        icon_path = get_icon_path()
+        if icon_path:
+            app.setWindowIcon(QtGui.QIcon(icon_path))
+
+    if QtCore.QThread.currentThread() is app.thread() and (_dispatcher is None or not is_qobject_alive(_dispatcher)):
+        with _dispatcher_lock:
+            if _dispatcher is None or not is_qobject_alive(_dispatcher):
+                _dispatcher = _UiDispatcher()
+
     return app
 
 
@@ -77,6 +137,8 @@ def invoke_later(delay_ms: int, callback: Callable[[], Any], *, parent: QtCore.Q
 
         def _bg_run() -> None:
             try:
+                if parent is not None and not is_qobject_alive(parent):
+                    return
                 callback()
             finally:
                 if is_qobject_alive(timer):
@@ -176,7 +238,7 @@ class _UiDispatcher(QtCore.QObject):
             done.release()
 
 
-def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = None) -> Any:
+def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = 30.0) -> Any:
     """
     在 Qt UI thread 執行 callable，必要時等待結果
 
@@ -193,15 +255,17 @@ def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = None) -> A
 
     global _dispatcher
     if _dispatcher is None or not is_qobject_alive(_dispatcher):
-        _dispatcher = _UiDispatcher()
-        _dispatcher.moveToThread(app.thread())
+        with _dispatcher_lock:
+            if _dispatcher is None or not is_qobject_alive(_dispatcher):
+                _dispatcher = _UiDispatcher()
+                _dispatcher.moveToThread(app.thread())
     done = QtCore.QSemaphore(0)
     result: dict[str, Any] = {"value": None, "exc": None}
     _dispatcher.dispatched.emit((func, done, result))
     if timeout is None:
         done.acquire()
     elif not done.tryAcquire(1, max(0, int(timeout * 1000))):
-        raise TimeoutError(f"UI 任務等待逾時 ({timeout}秒)")
+        raise TimeoutError(f"UI 任務等待逾時 ({timeout} 秒)")
     if result["exc"] is not None:
         raise result["exc"]
     return result["value"]
@@ -221,13 +285,13 @@ class ValueState(QtCore.QObject):
         取得目前值
 
         Returns:
-            目前保存的狀態值
+            目前儲存的狀態值
         """
         return self._value
 
     def set(self, value: Any) -> None:
         """
-        設定值並發送變更通知
+        設定值並送出變更通知
 
         Args:
             value: 新狀態值
@@ -257,12 +321,10 @@ class ValueState(QtCore.QObject):
 
 
 __all__ = [
-    "QtCore",
-    "QtGui",
-    "QtWidgets",
     "ValueState",
     "cancel_timer",
     "ensure_application",
+    "get_icon_path",
     "install_open_url_click",
     "invoke_later",
     "is_qobject_alive",

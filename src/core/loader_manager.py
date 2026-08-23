@@ -2,29 +2,27 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import re
 import threading
 import time
 from collections.abc import Callable
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import orjson
 from defusedxml import ElementTree as ET
 from packaging.version import Version
 
-from ..models import LoaderVersion, OperationResult
-from ..utils import (
+from src.models import LoaderInstallerArtifact, LoaderSpec, LoaderVersion, OperationResult
+from src.utils import (
     CancellationToken,
-    ExceptionUtils,
-    HTTPUtils,
+    HTTPClient,
     JavaUtils,
     PathUtils,
     RuntimePaths,
-    ServerCommands,
     ServerDetectionVersionUtils,
-    Singleton,
     SubprocessUtils,
     SystemUtils,
     atomic_write_json,
@@ -35,31 +33,16 @@ from ..utils import (
 logger = get_logger().bind(component="LoaderManager")
 
 
-@dataclass(frozen=True, slots=True)
-class LoaderSpec:
-    """五種 server 類型的統一描述；差異資料化，共同流程留在 LoaderManager"""
-
-    id: str
-    cache_name: str
-    api_url: str | None = None
-    api_kind: str | None = None  # mojang_manifest / json / maven_xml
-    stable_only: bool = True
-    keep_latest: int | None = None
-    installer_url: Callable[[str, str], str | None] | None = None
-    installer_args: Callable[[str, str, str, str], list[str]] | None = None
-    needs_vanilla: bool = False
-    candidate_keys: Callable[[str], list[str]] | None = None
-    normalize_loader_version: Callable[[str, str], str] | None = None
-    parse_fallback_full_version: bool = False
-    direct_download: bool = False
-
-
-class LoaderManager(Singleton):
+class LoaderManager:
     """五種 Minecraft server 載入器的單一管理入口"""
 
     _initialized: bool = False
     LOADER_CACHE_TTL_SECONDS: int = 12 * 60 * 60
-    SECURE_CHECKSUM_SUFFIXES: tuple[tuple[str, str], ...] = (("sha256", ".sha256"), ("sha512", ".sha512"))
+    SECURE_CHECKSUM_SUFFIXES: tuple[tuple[str, str], ...] = (
+        (".sha512", "sha512"),
+        (".sha256", "sha256"),
+        (".sha1", "sha1"),
+    )
 
     def __init__(self):
         if self._initialized:
@@ -67,9 +50,12 @@ class LoaderManager(Singleton):
 
         cache_dir = RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir())
         self.cache_dir = Path(cache_dir)
+        self.version_cache_dir = Path(RuntimePaths.get_version_cache_dir())
+        self.installer_cache_dir = Path(RuntimePaths.get_installer_cache_dir())
+        self._migrate_legacy_cache()
+
         self._version_cache: dict[str, list[LoaderVersion]] = {}
         self._preload_lock = threading.Lock()
-        self._version_lock = threading.Lock()
         self._preloaded_once = False
 
         self.LOADER_SPECS: dict[str, LoaderSpec] = {
@@ -91,6 +77,9 @@ class LoaderManager(Singleton):
                 ),
                 installer_args=lambda java, mc, loader, installer: [
                     java,
+                    "-Dfile.encoding=UTF-8",
+                    "-Dsun.stdout.encoding=UTF-8",
+                    "-Dsun.stderr.encoding=UTF-8",
                     "-jar",
                     installer,
                     "server",
@@ -112,15 +101,17 @@ class LoaderManager(Singleton):
                 installer_url=self._quilt_installer_url,
                 installer_args=lambda java, mc, loader, installer: [
                     java,
+                    "-Dfile.encoding=UTF-8",
+                    "-Dsun.stdout.encoding=UTF-8",
+                    "-Dsun.stderr.encoding=UTF-8",
                     "-jar",
                     installer,
+                    "install",
                     "server",
-                    "-mcversion",
                     mc,
-                    "-loader",
                     loader,
-                    "-dir",
-                    "{base_dir}",
+                    "--install-dir={base_dir}",
+                    "--download-server",
                 ],
             ),
             "forge": LoaderSpec(
@@ -131,7 +122,15 @@ class LoaderManager(Singleton):
                 installer_url=lambda mc, loader: (
                     f"https://maven.minecraftforge.net/net/minecraftforge/forge/{mc}-{loader}/forge-{mc}-{loader}-installer.jar"
                 ),
-                installer_args=lambda java, _mc, _loader, installer: [java, "-jar", installer, "--installServer"],
+                installer_args=lambda java, _mc, _loader, installer: [
+                    java,
+                    "-Dfile.encoding=UTF-8",
+                    "-Dsun.stdout.encoding=UTF-8",
+                    "-Dsun.stderr.encoding=UTF-8",
+                    "-jar",
+                    installer,
+                    "--installServer",
+                ],
             ),
             "neoforge": LoaderSpec(
                 id="neoforge",
@@ -143,13 +142,21 @@ class LoaderManager(Singleton):
                 installer_url=lambda _mc, loader: (
                     f"https://maven.neoforged.net/releases/net/neoforged/neoforge/{loader}/neoforge-{loader}-installer.jar"
                 ),
-                installer_args=lambda java, _mc, _loader, installer: [java, "-jar", installer, "--installServer"],
+                installer_args=lambda java, _mc, _loader, installer: [
+                    java,
+                    "-Dfile.encoding=UTF-8",
+                    "-Dsun.stdout.encoding=UTF-8",
+                    "-Dsun.stderr.encoding=UTF-8",
+                    "-jar",
+                    installer,
+                    "--installServer",
+                ],
                 candidate_keys=self._build_neoforge_mc_version_candidates,
                 normalize_loader_version=self._normalize_neoforge_loader_version,
             ),
         }
         for loader_id, spec in self.LOADER_SPECS.items():
-            setattr(self, f"{loader_id}_cache_file", str(self.cache_dir / spec.cache_name))
+            setattr(self, f"{loader_id}_cache_file", str(self.version_cache_dir / spec.cache_name))
 
         self._initialized = True
 
@@ -203,7 +210,7 @@ class LoaderManager(Singleton):
                 suffix_text = suffix_part.strip().rstrip(".")
                 suffix_has_label = bool(re.search(r"[A-Za-z]", suffix_text))
 
-                if mc_clean and suffix_clean and mc_parts:
+                if mc_clean and mc_parts:
                     if mc_parts[0] == "1" and len(mc_parts) <= 3:
                         result.append(f"{mc_clean}-{suffix_text}")
                     elif len(mc_parts) > 3:
@@ -220,7 +227,7 @@ class LoaderManager(Singleton):
                     elif mc_parts[0] in {"20", "21"} and suffix_has_label:
                         result.append(f"1.{mc_parts[0]}.{mc_parts[1]}-{mc_clean}-{suffix_text}")
                     else:
-                        result.append(f"{mc_clean}-{suffix_clean}")
+                        result.append(f"{mc_clean}-{suffix_text or suffix_clean}")
                 elif mc_clean:
                     result.append(version)
                 continue
@@ -231,10 +238,15 @@ class LoaderManager(Singleton):
             parts = clean.split(".")
             if len(parts) >= 6 and parts[0] == "1":
                 result.append(f"{'.'.join(parts[:3])}-{'.'.join(parts[3:])}")
-            elif len(parts) >= 3 and parts[0] in {"20", "21"}:
-                result.append(f"1.{parts[0]}.{parts[1]}-{clean}")
+            elif len(parts) >= 3 and parts[0] == "47" and parts[1] == "1":
+                result.append(f"1.20.1-{version}")
+            elif len(parts) >= 2 and parts[0].isdigit() and int(parts[0]) >= 20:
+                major = int(parts[0])
+                minor = int(parts[1]) if parts[1].isdigit() else 0
+                mc_str = f"1.{major}" if minor == 0 else f"1.{major}.{minor}"
+                result.append(f"{mc_str}-{version}")
             elif len(parts) >= 3:
-                result.append(f"{parts[0]}.{parts[1]}-{parts[-1]}")
+                result.append(f"{parts[0]}.{parts[1]}-{version}")
             elif len(parts) >= 2:
                 result.append(clean)
 
@@ -259,15 +271,6 @@ class LoaderManager(Singleton):
         versions = self._extract_xml_versions(content, stable_only=not allow_prerelease)
         return self._build_version_dict(self._normalize_version_strings(versions))
 
-    def _record_cache_error(self, cache_file: str | Path, reason: str, details: dict | None = None):
-        with suppress(Exception):
-            ExceptionUtils.record_and_mark(
-                RuntimeError(reason),
-                Path(cache_file),
-                reason=reason,
-                details=details or {"cache_file": str(cache_file)},
-            )
-
     def _write_cache(self, cache_file: str | Path, data: Any, label: str = "版本"):
         if not atomic_write_json(Path(cache_file), data):
             logger.warning(f"寫入 {label} 快取失敗: {cache_file}")
@@ -291,9 +294,6 @@ class LoaderManager(Singleton):
                 try:
                     self._preload_loader(spec)
                 except Exception as exc:
-                    self._record_cache_error(
-                        self._cache_path(spec.id), f"載入 {spec.id} 版本失敗", {"url": spec.api_url}
-                    )
                     logger.exception(f"預抓 {spec.id} 版本失敗: {exc}")
             self._preloaded_once = True
 
@@ -304,7 +304,7 @@ class LoaderManager(Singleton):
         if spec.api_kind == "mojang_manifest":
             data = self._fetch_minecraft_versions(spec)
         else:
-            content = HTTPUtils.get_content(spec.api_url, timeout=15)
+            content = HTTPClient.fetch_bytes(spec.api_url, timeout=30)
             if not content:
                 return
             if spec.api_kind == "json":
@@ -319,15 +319,15 @@ class LoaderManager(Singleton):
 
     @staticmethod
     def _decode_json(content: bytes) -> Any:
-        import json
-
-        return json.loads(content.decode("utf-8"))
+        return orjson.loads(content)
 
     def _fetch_minecraft_versions(self, spec: LoaderSpec) -> list[dict]:
-        manifest = self._decode_json(HTTPUtils.get_content(spec.api_url, timeout=15) or b"{}")
+        manifest = self._decode_json(HTTPClient.fetch_bytes(spec.api_url, timeout=30) or b"{}")
         versions = []
         cached = self._read_json_cache(self._cache_path(spec.id)) or []
         cache_map = {v["id"]: v for v in cached if isinstance(v, dict) and v.get("id")}
+
+        entries_to_fetch = []
         for item in manifest.get("versions", []):
             if item.get("type") != "release":
                 continue
@@ -344,13 +344,22 @@ class LoaderManager(Singleton):
             if old and old.get("time") == entry["time"] and old.get("server_url") is not None:
                 entry["server_url"] = old["server_url"]
             else:
-                try:
-                    detail = HTTPUtils.get_json(entry["url"], timeout=10)
-                    entry["server_url"] = detail.get("downloads", {}).get("server", {}).get("url", "") if detail else ""
-                except Exception as exc:
-                    entry["server_url"] = ""
-                    logger.debug(f"查詢 Minecraft {entry['id']} server URL 失敗: {exc}")
+                entries_to_fetch.append(entry)
             versions.append(entry)
+
+        if entries_to_fetch:
+
+            def fetch_single_server_url(ent: dict) -> None:
+                try:
+                    detail = HTTPClient.fetch_json(ent["url"], timeout=10)
+                    ent["server_url"] = detail.get("downloads", {}).get("server", {}).get("url", "") if detail else ""
+                except Exception as exc:
+                    ent["server_url"] = ""
+                    logger.debug(f"查詢 Minecraft {ent['id']} server URL 失敗: {exc}")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                list(executor.map(fetch_single_server_url, entries_to_fetch))
+
         return versions
 
     def _filter_loader_json(self, spec: LoaderSpec, data: list[dict]) -> list[dict]:
@@ -396,8 +405,8 @@ class LoaderManager(Singleton):
         取得指定 Minecraft 版本的相容載入器版本列表
 
         Args:
-            mc_version: 目标 Minecraft 版本
-            loader_type: 載入器类型
+            mc_version: 目標 Minecraft 版本
+            loader_type: 載入器類型
 
         Returns:
             相容的載入器版本列表
@@ -444,9 +453,6 @@ class LoaderManager(Singleton):
                 self._version_cache[cache_key] = result
             return result
         except Exception as exc:
-            self._record_cache_error(
-                self._cache_path(loader_id), f"get_compatible_loader_versions_{loader_id}", {"mc_version": mc_version}
-            )
             logger.exception(f"讀取 {loader_id} 相容版本失敗: {exc}")
             return []
 
@@ -457,16 +463,6 @@ class LoaderManager(Singleton):
     @staticmethod
     def _has_valid_server_url(version: dict) -> bool:
         return bool(version.get("server_url"))
-
-    def fetch_versions(self) -> list[dict]:
-        """
-        取得所有 Minecraft 版本資訊，並更新快取
-
-        Returns:
-            Minecraft 版本資訊列表
-        """
-        self._preload_loader(self.LOADER_SPECS["vanilla"])
-        return self.get_versions(force_fetch=False)
 
     def get_versions(self, force_fetch: bool = False) -> list[dict]:
         """
@@ -485,13 +481,28 @@ class LoaderManager(Singleton):
             versions = self._read_json_cache(self._cache_path(spec.id)) or []
             return [v for v in versions if isinstance(v, dict) and self._has_valid_server_url(v)]
         except Exception as exc:
-            self._record_cache_error(self._cache_path(spec.id), "get_versions failed", {"context": "get_versions"})
             logger.exception(f"取得 Minecraft 版本失敗: {exc}")
             return []
 
     def get_server_download_url(self, version_id: str) -> str | None:
         target = next((v for v in self.get_versions(False) if v.get("id") == version_id), None)
         return target.get("server_url") if target else None
+
+    def _download_vanilla_server(
+        self, minecraft_version: str, download_path: str, progress_callback=None, cancel_flag=None
+    ) -> bool:
+        """下載載入器安裝器所需的官方原版 server.jar"""
+        url = self.get_server_download_url(minecraft_version)
+        if not url:
+            self._fail(progress_callback, f"找不到 {minecraft_version} 的 Vanilla 伺服器下載位址")
+            return False
+        return HTTPClient.download_file(
+            url,
+            download_path,
+            progress_callback=progress_callback,
+            cancel_check=lambda: self._is_cancel_requested(cancel_flag),
+            failure_message_callback=progress_callback if callable(progress_callback) else None,
+        )
 
     # ------------------------------------------------------------------
     # 下載 / installer：五種載入器共用同一條流程
@@ -506,6 +517,7 @@ class LoaderManager(Singleton):
         progress_callback=None,
         cancel_flag: dict | CancellationToken | Callable | None = None,
         user_java_path: str | None = None,
+        installer_artifact: LoaderInstallerArtifact | None = None,
     ) -> bool | str:
         """
         下載指定載入器的伺服器檔案，並在需要時執行安裝器
@@ -532,7 +544,7 @@ class LoaderManager(Singleton):
             url = self.get_server_download_url(minecraft_version)
             if not url:
                 return self._fail(progress_callback, f"找不到 {minecraft_version} 的 Vanilla 伺服器下載位址")
-            return HTTPUtils.download_file(
+            return HTTPClient.download_file(
                 url=url,
                 local_path=str(download_path),
                 progress_callback=None,
@@ -550,8 +562,17 @@ class LoaderManager(Singleton):
         installer_url = spec.installer_url(minecraft_version, loader_version) if spec.installer_url else None
         if not installer_url:
             return self._fail(progress_callback, f"找不到 {loader_id} 安裝器下載網址")
+        if installer_artifact is not None and installer_artifact.url != installer_url:
+            return self._fail(progress_callback, "Loader installer 建立計畫已失效")
+        artifact = installer_artifact or self.resolve_installer_artifact(
+            loader_type,
+            minecraft_version,
+            loader_version,
+        )
+        if artifact is None:
+            return self._fail(progress_callback, f"找不到 {loader_id} 安裝器下載資訊")
         base_dir = Path(download_path).parent
-        installer_path = str(self.cache_dir / f"{loader_id}-installer.jar")
+        installer_path = str(self.installer_cache_dir / f"{loader_id}-installer.jar")
         args = (
             spec.installer_args(java_path, minecraft_version, loader_version, installer_path)
             if spec.installer_args
@@ -567,25 +588,54 @@ class LoaderManager(Singleton):
             cancel_flag=cancel_flag,
             need_vanilla=spec.needs_vanilla,
             loader_type=loader_id,
+            expected_hash=artifact.expected_hash,
+            hash_algorithm=artifact.hash_algorithm,
         )
 
-    def get_installer_download_url(self, loader_type: str, minecraft_version: str, loader_version: str) -> str | None:
+    def resolve_installer_artifact(
+        self,
+        loader_type: str,
+        minecraft_version: str,
+        loader_version: str,
+    ) -> LoaderInstallerArtifact | None:
+        """
+        解析並固定一次建立流程使用的 installer URL 與 checksum
+
+        Args:
+            loader_type: 載入器類型
+            minecraft_version: Minecraft 版本
+            loader_version: 載入器版本
+
+        Returns:
+            需要安裝器時回傳下載資訊；直接下載型載入器回傳 None
+        """
         loader_id = self._standardize_loader_id(loader_type, loader_version)
         spec = self.LOADER_SPECS.get(loader_id)
-        return spec.installer_url(minecraft_version, loader_version) if spec and spec.installer_url else None
-
-    def _get_loader_installer_checksum(self, url: str) -> tuple[str | None, str | None]:
+        if spec is None:
+            raise ValueError(f"不支援或無法識別的載入器類型: {loader_type}")
+        if spec.direct_download:
+            return None
+        url = spec.installer_url(minecraft_version, loader_version) if spec.installer_url else None
+        if not url:
+            raise ValueError(f"找不到 {loader_id} 安裝器下載網址")
         for suffix, algorithm in self.SECURE_CHECKSUM_SUFFIXES:
-            try:
-                content = HTTPUtils.get_content(f"{url}{suffix}")
-                if not content:
-                    continue
-                value = content.decode("utf-8", errors="replace").strip().split()
-                if value:
-                    return value[0], algorithm
-            except Exception as exc:
-                logger.debug(f"讀取 installer {algorithm} checksum 失敗: {exc}")
-        return None, None
+            urls_to_try = []
+            if url.lower().endswith(".jar"):
+                urls_to_try.append(url[:-4] + suffix)
+            urls_to_try.append(url + suffix)
+
+            for target_url in urls_to_try:
+                try:
+                    content = HTTPClient.fetch_bytes(target_url, timeout=5, log_errors=False)
+                    if not content:
+                        continue
+                    value = content.decode("utf-8", errors="replace").strip().split()
+                    if value:
+                        logger.info(f"成功取得校驗碼 (網址: {target_url}, 演算法: {algorithm})")
+                        return LoaderInstallerArtifact(url, value[0], algorithm)
+                except Exception as exc:
+                    logger.debug(f"讀取 installer {algorithm} checksum 失敗 ({target_url}): {exc}")
+        return LoaderInstallerArtifact(url, None, None)
 
     def _download_and_run_installer(
         self,
@@ -598,12 +648,14 @@ class LoaderManager(Singleton):
         cancel_flag=None,
         need_vanilla: bool = False,
         loader_type: str = "loader",
+        expected_hash: str | None = None,
+        hash_algorithm: str | None = None,
     ) -> bool | str:
         if self._is_cancel_requested(cancel_flag):
             return False
 
         base_dir = Path(download_path).parent
-        installer_path = str(self.cache_dir / f"{loader_type}-installer.jar")
+        installer_path = str(self.installer_cache_dir / f"{loader_type}-installer.jar")
 
         if need_vanilla:
             if progress_callback:
@@ -622,14 +674,13 @@ class LoaderManager(Singleton):
         if progress_callback:
             progress_callback(f"正在下載 {loader_type} 安裝器...")
 
-        expected_hash, hash_algo = self._get_loader_installer_checksum(installer_url)
-        if not HTTPUtils.download_file_with_progress(
+        if not HTTPClient.download_file(
             installer_url,
             installer_path,
             progress_callback=progress_callback,
-            cancel_flag=cancel_flag,
+            cancel_check=lambda: self._is_cancel_requested(cancel_flag),
             expected_hash=expected_hash,
-            hash_algo=hash_algo,
+            expected_hash_algorithm=hash_algorithm,
         ):
             return self._fail(
                 progress_callback,
@@ -647,31 +698,72 @@ class LoaderManager(Singleton):
             process = SubprocessUtils.create_no_window_process(installer_args, cwd=str(base_dir))
             SystemUtils.register_managed_process(base_dir, process.pid)
 
+            output_lines: list[str] = []
+            error_lines: list[str] = []
+
+            def _decode_stream_line(raw: bytes) -> str:
+                if not raw:
+                    return ""
+                with suppress(UnicodeDecodeError):
+                    return raw.decode("utf-8")
+                import locale
+
+                encodings_to_try = ("cp950", "big5", "gbk", "cp936", locale.getpreferredencoding(False))
+                for enc in encodings_to_try:
+                    if not enc:
+                        continue
+                    try:
+                        return raw.decode(enc)
+                    except UnicodeDecodeError, LookupError:
+                        continue
+                return raw.decode("utf-8", errors="replace")
+
+            def read_stream(stream, sink: list[str], is_err: bool = False) -> None:
+                try:
+                    for line in iter(stream.readline, b""):
+                        text = _decode_stream_line(line).strip()
+                        if text:
+                            sink.append(text)
+                            if is_err:
+                                logger.warning(f"[{loader_type} stderr] {text}")
+                            else:
+                                logger.info(f"[{loader_type}] {text}")
+                                if progress_callback and not self._is_cancel_requested(cancel_flag):
+                                    display_text = text if len(text) <= 80 else text[:77] + "..."
+                                    progress_callback(f"正在執行 {loader_type} 安裝: {display_text}")
+                except Exception as ex:
+                    logger.debug(f"讀取安裝程序輸出例外: {ex}")
+                finally:
+                    with suppress(Exception):
+                        stream.close()
+
+            t_out = threading.Thread(target=read_stream, args=(process.stdout, output_lines, False), daemon=True)
+            t_err = threading.Thread(target=read_stream, args=(process.stderr, error_lines, True), daemon=True)
+            t_out.start()
+            t_err.start()
+
             while process.poll() is None:
                 if self._is_cancel_requested(cancel_flag):
                     process.cancelled = True
                     self._cleanup_installer_process(
                         process,
                         base_dir,
-                        installer_path,
-                        f"使用者取消了 {loader_type} 安裝程序",
                     )
                     return False
-                time.sleep(0.5)
+                time.sleep(0.3)
+
+            t_out.join(timeout=2.0)
+            t_err.join(timeout=2.0)
 
             if process.returncode != 0:
-                stdout, stderr = process.communicate()
-                out_str = stdout.decode("utf-8", errors="replace") if stdout else ""
-                err_str = stderr.decode("utf-8", errors="replace") if stderr else ""
+                out_str = "\n".join(output_lines[-50:])
+                err_str = "\n".join(error_lines[-50:])
                 logger.error(
                     f"{loader_type} 安裝程序失敗 (代碼 {process.returncode})\nSTDOUT: {out_str}\nSTDERR: {err_str}"
                 )
                 self._cleanup_installer_process(
                     process,
                     base_dir,
-                    installer_path,
-                    f"{loader_type} 安裝失敗",
-                    {"returncode": process.returncode, "stderr": err_str},
                 )
                 return self._fail(
                     progress_callback,
@@ -685,9 +777,14 @@ class LoaderManager(Singleton):
                 progress_callback("安裝成功，正在清理臨時檔案...")
 
             if loader_type in {"forge", "neoforge"}:
-                ServerCommands.grant_execution_permission(str(base_dir))
                 run_bat = base_dir / "run.bat"
                 if run_bat.exists():
+                    return "run.bat"
+                forge_jars = list(base_dir.glob(f"{loader_type}*.jar")) or list(base_dir.glob("*.jar"))
+                for jar in forge_jars:
+                    if loader_type in jar.name.lower() and "installer" not in jar.name.lower():
+                        return jar.name
+                if (base_dir / "win_args.txt").exists() or (base_dir / "user_jvm_args.txt").exists():
                     return "run.bat"
                 return self._fail(
                     progress_callback,
@@ -701,9 +798,6 @@ class LoaderManager(Singleton):
             self._cleanup_installer_process(
                 process,
                 base_dir,
-                installer_path,
-                f"執行 {loader_type} 安裝程序發生例外",
-                {"error": str(exc)},
             )
             return self._fail(
                 progress_callback,
@@ -714,9 +808,6 @@ class LoaderManager(Singleton):
         self,
         process,
         base_dir: Path,
-        installer_path: str,
-        reason: str,
-        details: dict | None = None,
     ):
         if process is None:
             return
@@ -726,27 +817,41 @@ class LoaderManager(Singleton):
             if pid and (process.poll() is None or bool(getattr(process, "cancelled", False))):
                 SystemUtils.kill_process_tree(pid)
         except Exception as exc:
-            logger.warning(f"終止安裝器進程樹失敗: {exc}")
+            logger.warning(f"終止安裝器行程樹失敗: {exc}")
 
         try:
             SystemUtils.kill_java_processes_in_path(base_dir)
         except Exception as exc:
-            logger.warning(f"清理安裝器 Java 進程失敗: {exc}")
+            logger.warning(f"清理安裝器 Java 行程失敗: {exc}")
 
         with suppress(Exception):
             SystemUtils.unregister_managed_process(base_dir, pid)
 
-        with suppress(Exception):
-            ExceptionUtils.record_and_mark(
-                RuntimeError(reason),
-                Path(installer_path),
-                reason=reason,
-                details=details or {"installer": installer_path, "base_dir": str(base_dir)},
-            )
-
     # ------------------------------------------------------------------
     # Cache / loader identity / 特殊差異
     # ------------------------------------------------------------------
+
+    def _migrate_legacy_cache(self) -> None:
+        """將舊版扁平 Cache 目錄內的快取檔案自動遷移至子目錄"""
+        try:
+            if not self.cache_dir.exists():
+                return
+            for item in self.cache_dir.iterdir():
+                if item.is_file():
+                    if item.name.endswith("_cache.json") or item.name.endswith(".json"):
+                        target = self.version_cache_dir / item.name
+                        if not target.exists():
+                            item.rename(target)
+                        else:
+                            item.unlink(missing_ok=True)
+                    elif item.name.endswith("-installer.jar") or item.name.endswith(".jar"):
+                        target = self.installer_cache_dir / item.name
+                        if not target.exists():
+                            item.rename(target)
+                        else:
+                            item.unlink(missing_ok=True)
+        except Exception as exc:
+            logger.debug(f"快取檔案遷移跳過或發生例外: {exc}")
 
     def clear_cache_file(self) -> OperationResult:
         """
@@ -757,10 +862,17 @@ class LoaderManager(Singleton):
         """
         try:
             for spec in self.LOADER_SPECS.values():
-                self._cache_path(spec.id)
                 Path(self._cache_path(spec.id)).unlink(missing_ok=True)
+                (self.cache_dir / spec.cache_name).unlink(missing_ok=True)
+                (self.version_cache_dir / spec.cache_name).unlink(missing_ok=True)
 
-            Path(self.version_cache_file).unlink(missing_ok=True)
+            if self.installer_cache_dir.exists():
+                for jar in self.installer_cache_dir.glob("*.jar"):
+                    jar.unlink(missing_ok=True)
+            if self.cache_dir.exists():
+                for jar in self.cache_dir.glob("*-installer.jar"):
+                    jar.unlink(missing_ok=True)
+
             self._version_cache.clear()
             self._preloaded_once = False
             return OperationResult(True, "快取檔案已成功清除")
@@ -769,7 +881,10 @@ class LoaderManager(Singleton):
             return OperationResult(False, f"清除 Loader 快取檔案失敗: {exc}")
 
     def _cache_path(self, loader_id: str) -> str:
-        return str(self.cache_dir / self.LOADER_SPECS[loader_id].cache_name)
+        cache_name = self.LOADER_SPECS[loader_id].cache_name
+        if self.cache_dir != Path(RuntimePaths.get_cache_dir()):
+            return str(self.cache_dir / cache_name)
+        return str(self.version_cache_dir / cache_name)
 
     def _loader_cache_files_exist(self) -> bool:
         return all(Path(self._cache_path(loader_id)).exists() for loader_id in self.LOADER_SPECS)
@@ -808,13 +923,18 @@ class LoaderManager(Singleton):
             if tail:
                 candidates.append(tail)
             tail_parts = tail.split(".") if tail else []
-            if tail_parts and tail_parts[0] in {"20", "21"}:
+            if tail_parts and tail_parts[0].isdigit() and int(tail_parts[0]) >= 20:
                 if len(tail_parts) == 1:
                     candidates.append(f"{tail_parts[0]}.0")
                 else:
                     candidates.append(f"{tail_parts[0]}.{tail_parts[1]}")
                 if len(tail_parts) >= 2:
                     candidates.append(f"{tail_parts[0]}.{tail_parts[1]}.0.0")
+        elif len(parts) >= 2 and parts[0].isdigit() and int(parts[0]) >= 20:
+            candidates.append(f"1.{parts[0]}.{parts[1]}")
+            candidates.append(f"1.{normalized}")
+            candidates.append(f"{parts[0]}.{parts[1]}.0.0")
+            candidates.append(f"1.{parts[0]}")
         elif len(parts) >= 2 and all(p.isdigit() for p in parts[:2]):
             candidates.append(f"{parts[0]}.{parts[1]}.0.0")
 
@@ -834,7 +954,7 @@ class LoaderManager(Singleton):
     def _get_latest_quilt_installer_version(self) -> str | None:
         url = "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/maven-metadata.xml"
         try:
-            content = HTTPUtils.get_content(url, timeout=15)
+            content = HTTPClient.fetch_bytes(url, timeout=30)
             if not content:
                 return None
             root = ET.fromstring(content)
@@ -853,3 +973,6 @@ class LoaderManager(Singleton):
         else:
             logger.warning(message)
         return False
+
+
+__all__ = ["LoaderManager"]

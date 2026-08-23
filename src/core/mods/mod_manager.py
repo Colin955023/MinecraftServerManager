@@ -4,27 +4,30 @@
 負責管理 Minecraft 伺服器的模組，提供啟用/停用、移除等功能
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from html import escape
 from pathlib import Path
 
-from ...models import (
+from src.core import (
+    LocalModScanner,
+    ModFileInstaller,
+    ModIndexProviderIdentityStore,
+    ModrinthProviderAdapter,
+    ProviderCatalogPort,
+    ProviderIdentityService,
+)
+from src.models import (
     LocalModInfo,
     LocalModMutationResult,
     ModFileOperationResult,
-    ModrinthIdentityCache,
     ModStatus,
 )
-from ...utils import (
-    ExceptionUtils,
+from src.utils import (
     ModIndexManager,
     PathUtils,
     get_logger,
-)
-from .local_mod_scanner import LocalModScanner
-from .mod_file_installer import ModFileInstaller
-from .mod_provider_resolver import (
-    ModProviderResolver,
 )
 
 logger = get_logger().bind(component="ModManager")
@@ -35,19 +38,27 @@ class ModManager:
 
     index_manager: ModIndexManager
 
-    def __init__(self, server_path: str, server_config=None) -> None:
+    def __init__(
+        self,
+        server_path: str,
+        server_config=None,
+        *,
+        provider_catalog: ProviderCatalogPort | None = None,
+    ) -> None:
         self.server_path = Path(server_path)
         self.mods_path = self.server_path / "mods"
         self.download_staging_root = self.server_path / ".download_staging"
         self.server_config = server_config
-        self._modrinth_identity_cache = ModrinthIdentityCache()
         self.mods_path.mkdir(parents=True, exist_ok=True)
         self.download_staging_root.mkdir(parents=True, exist_ok=True)
         self.index_manager: ModIndexManager = ModIndexManager(server_path)
+        self._provider_identity_service = ProviderIdentityService(
+            store=ModIndexProviderIdentityStore(self.index_manager),
+            catalog=provider_catalog or ModrinthProviderAdapter(),
+        )
         self.on_mod_list_changed: Callable | None = None
         self._local_mod_scanner: LocalModScanner | None = None
         self._mod_file_installer: ModFileInstaller | None = None
-        self._provider_resolver: ModProviderResolver | None = None
 
     def scan_mods(self) -> list[LocalModInfo]:
         """
@@ -70,24 +81,16 @@ class ModManager:
         """
         return self._get_local_mod_scanner().create_mod_info_from_file(file_path)
 
-    def resolve_modrinth_project_identity(self, identifier: str) -> tuple[str, str]:
-        """
-        將使用者輸入的 Modrinth project id 或 slug 正規化
-
-        Args:
-            identifier: 使用者輸入的 project id 或 slug
-
-        Returns:
-            tuple[str, str]: 解析後的規範（canonical）project id 與 slug
-        """
-        return self._get_provider_resolver().resolve_modrinth_project_identity(identifier)
+    @property
+    def provider_identity_service(self) -> ProviderIdentityService:
+        return self._provider_identity_service
 
     def set_mod_state_result(self, mod_id: str, enable: bool, notify_change: bool = True) -> LocalModMutationResult:
         """
         設定模組啟用或停用狀態
 
         Args:
-            mod_id:模組的識別名稱（不含副檔名）
+            mod_id: 模組的識別名稱（不含副檔名）
             enable: 是否啟用模組，True 表示啟用，False 表示停用
             notify_change: 是否在狀態變更後觸發 on_mod_list_changed 回呼，預設為 True
 
@@ -124,7 +127,7 @@ class ModManager:
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:
         """
-        獲取模組列表
+        取得模組列表
 
         Args:
             include_disabled: 是否包含已停用的模組，預設為 True
@@ -208,7 +211,7 @@ class ModManager:
             cancel_check=cancel_check,
         )
 
-    def export_mod_list(self, format_type: str = "text") -> str:
+    def export_mod_list(self, format_type: str = "text") -> str | bytes:
         """
         匯出模組列表，支援 text、json、html 格式
 
@@ -256,7 +259,7 @@ class ModManager:
                 "</head><body>",
                 "<h2>模組列表</h2>",
                 "<table>",
-                "<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>描述</th></tr>",
+                "<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>描述</th></tr>",
             ]
             for mod in mods:
                 html.append(
@@ -265,22 +268,50 @@ class ModManager:
                     f"<td>{_html(mod.name)}</td>"
                     f"<td>{_html(mod.version)}</td>"
                     f"<td>{_html(mod.author)}</td>"
+                    f"<td>{_html(mod.filename)}</td>"
+                    f"<td>{_html(mod.id)}</td>"
                     f"<td>{_html(mod.description)}</td>"
                     "</tr>"
                 )
             html.append("</table></body></html>")
             return "\n".join(html)
+        if format_type == "xlsx":
+            import io
+
+            from openpyxl import Workbook
+            from openpyxl.worksheet.worksheet import Worksheet
+
+            wb = Workbook()
+            ws = wb.active
+            if isinstance(ws, Worksheet):
+                ws.title = "模組列表"
+                ws.append(["啟用狀態", "模組名稱", "版本", "作者", "檔案名稱", "模組ID", "描述"])
+                for mod in mods:
+                    ws.append(
+                        [
+                            "是" if mod.status == ModStatus.ENABLED else "否",
+                            mod.name or "",
+                            mod.version or "",
+                            mod.author or "",
+                            mod.filename or "",
+                            mod.id or "",
+                            mod.description or "",
+                        ]
+                    )
+            output = io.BytesIO()
+            wb.save(output)
+            return output.getvalue()
         return ""
 
     def _get_local_mod_scanner(self) -> LocalModScanner:
-        """延後建立本地模組掃描器，讓 `ModManager` 保持 orchestration 角色"""
+        """延後建立本地模組掃描器，讓 ModManager 保持 orchestration 角色"""
         scanner = getattr(self, "_local_mod_scanner", None)
         if scanner is None:
             scanner = LocalModScanner(
                 index_manager=self.index_manager,
                 mods_path=self.mods_path,
                 server_config=self.server_config,
-                resolve_platform_info=self._get_provider_resolver().resolve_platform_info,
+                provider_identity_service=self.provider_identity_service,
                 quarantine_file=self._quarantine_file,
             )
             self._local_mod_scanner = scanner
@@ -300,19 +331,6 @@ class ModManager:
             self._mod_file_installer = installer
         installer.on_mod_list_changed = self.on_mod_list_changed
         return installer
-
-    def _get_provider_resolver(self) -> ModProviderResolver:
-        """延後建立 provider 解析器，避免 `__new__` 測試案例需要完整初始化"""
-        resolver = getattr(self, "_provider_resolver", None)
-        if resolver is None:
-            resolver = ModProviderResolver(
-                index_manager=self.index_manager,
-                modrinth_identity_cache=self._modrinth_identity_cache,
-                read_json_from_jar=LocalModScanner.read_json_from_jar,
-                quarantine_file=self._quarantine_file,
-            )
-            self._provider_resolver = resolver
-        return resolver
 
     def _install_remote_mod_file_result(
         self,
@@ -336,11 +354,7 @@ class ModManager:
         )
 
     def _quarantine_file(self, file_path: Path, reason: str) -> None:
-        """
-        標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動
-
-        會在同一目錄下建立隱藏 marker 檔案 `.{filename}.issue.json`，包含原因與時間戳
-        """
+        """標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動"""
         try:
             marked = PathUtils.mark_issue(file_path, reason)
             if marked:
@@ -348,9 +362,12 @@ class ModManager:
             else:
                 logger.warning(f"建立檔案問題標記失敗: {file_path} ({reason})")
         except Exception as exc:
-            ExceptionUtils.record_and_mark(
-                exc,
-                marker_path=None,
-                reason="mark_issue_failed",
-                details={"file": str(file_path), "context": "_quarantine_file", "reason": reason},
-            )
+            logger.exception(f"標記檔案為有問題時發生未預期錯誤: {file_path}\n{exc}")
+
+    def clear_mod_index(self) -> None:
+        """清空模組快取索引"""
+        if hasattr(self, "index_manager") and self.index_manager:
+            self.index_manager.clear_index()
+
+
+__all__ = ["ModManager"]

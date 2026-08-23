@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .. import normalize_identifier
+from src.utils import normalize_identifier
 
 MODRINTH_PREFERRED_HASH_ALGORITHM = "sha512"
 

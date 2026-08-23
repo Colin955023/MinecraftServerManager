@@ -1,11 +1,10 @@
 """
 原子性寫入工具
-提供 JSON、文字與 bytes 的同目錄臨時檔 + `os.replace` 寫入流程，並盡力 fsync
+提供 JSON、文字與 bytes 的同目錄臨時檔案寫入，並在成功後以原子方式替換目標檔案
 """
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
@@ -13,7 +12,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .logger import get_logger
+import orjson
+
+from src.utils import get_logger
 
 logger = get_logger().bind(component="AtomicWriter")
 
@@ -67,7 +68,7 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
     Args:
         path: 目標檔案路徑
         data: 要寫入的資料
-        indent: JSON 縮排層級
+        indent: JSON 縮排層級（支援 0 或 2）
         skip_if_unchanged: 若內容相同則略過寫入
 
     Returns:
@@ -75,16 +76,21 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
     """
     p = Path(path)
     p.parents[0].mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(data, indent=indent, ensure_ascii=False)
+    try:
+        opt = orjson.OPT_INDENT_2 if indent == 2 else 0
+        opt |= orjson.OPT_NON_STR_KEYS
+        payload_bytes = orjson.dumps(data, option=opt)
+    except TypeError:
+        return False
 
     if skip_if_unchanged and p.exists():
         try:
-            if p.read_text(encoding="utf-8") == payload:
+            if p.read_bytes() == payload_bytes:
                 return True
-        except OSError, UnicodeDecodeError:
+        except OSError:
             logger.debug(f"無法讀取現有檔案以判斷是否相同，將覆寫: {p}")
 
-    return atomic_write_text(p, payload, encoding="utf-8", newline="\n")
+    return atomic_write_bytes(p, payload_bytes)
 
 
 def atomic_write_text(
@@ -130,3 +136,11 @@ def atomic_write_bytes(path: Path | str, content: bytes) -> bool:
         寫入成功時回傳 True，失敗時回傳 False
     """
     return _atomic_write_payload(path, lambda f: f.write(content), "wb")
+
+
+__all__ = [
+    "atomic_write_bytes",
+    "atomic_write_json",
+    "atomic_write_text",
+    "best_effort_fsync",
+]

@@ -13,8 +13,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, cast
 
-from ...models import ServerConfig
-from ...utils import PathUtils, bytes_to_mb, get_logger
+from src.models import ServerConfig
+from src.utils import PathUtils, bytes_to_mb, get_logger
 
 logger = get_logger().bind(component="ServerBackup")
 
@@ -85,7 +85,7 @@ class ServerBackupManager:
                 for i, file_path in enumerate(files_to_backup):
                     try:
                         rel_path = file_path.relative_to(server_path)
-                        if progress_callback and i % 10 == 0:  # Update UI periodically to avoid overwhelming
+                        if progress_callback and i % 10 == 0:
                             pct = 5 + (processed_size / total_size * 90 if total_size > 0 else 0)
                             progress_callback(pct, f"正在壓縮: {rel_path.name}")
                         zf.write(file_path, arcname=str(rel_path))
@@ -103,6 +103,8 @@ class ServerBackupManager:
                 progress_callback(100, "備份完成！")
             return True
         except Exception as e:
+            with suppress(Exception):
+                backup_file.unlink(missing_ok=True)
             logger.exception(f"伺服器 {server_name} 備份時發生錯誤: {e}")
             return False
 
@@ -230,3 +232,6 @@ class ServerBackupManager:
                     logger.warning(f"刪除舊備份失敗 {path.name}: {e}")
         except Exception as e:
             logger.exception(f"清理舊備份時發生錯誤: {e}")
+
+
+__all__ = ["ServerBackupManager"]

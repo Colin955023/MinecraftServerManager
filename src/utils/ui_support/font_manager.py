@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import collections
+from contextlib import suppress
 from typing import ClassVar
 
 from PySide6 import QtGui
 
-from .. import get_logger
+from src.utils import get_logger
 
 logger = get_logger().bind(component="FontManager")
 
@@ -33,24 +34,19 @@ class FontManager:
             for family in cls._default_family_candidates:
                 if family in families:
                     cls._default_family = family
-                    logger.debug(f"已解析預設字體為: {family}")
                     return family
             cls._default_family = QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.GeneralFont).family()
-            logger.debug(f"找不到首選字體，使用系統預設: {cls._default_family}")
         except Exception:
             cls._default_family = "Arial"
-            logger.debug("字體解析發生例外，回退至 Arial")
         return cls._default_family
 
     @classmethod
     def _resolve_family(cls, family: str | None) -> str:
         if not family:
             return cls._resolve_default_family()
-        try:
+        with suppress(Exception):
             if family in set(QtGui.QFontDatabase.families()):
                 return family
-        except Exception as exc:
-            logger.debug(f"字體資料庫查詢失敗，改用預設字體: {exc}")
         return cls._resolve_default_family()
 
     @classmethod

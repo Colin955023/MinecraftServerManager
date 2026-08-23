@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import src.utils as utils_module
-from src.models import DependencyPlanHooks, OnlineModVersion, ResolvedDependencyReference
+from src.models import (
+    DependencyPlanHooks,
+    OnlineDependencyInstallItem,
+    OnlineDependencyInstallPlan,
+    OnlineModVersion,
+    ResolvedDependencyReference,
+)
 
 
 def _make_version(
@@ -39,8 +45,8 @@ def _make_install_item(
     graph_depth: int,
     edge_kind: str,
     edge_source: str,
-) -> utils_module.OnlineDependencyInstallItem:
-    return utils_module.OnlineDependencyInstallItem(
+) -> OnlineDependencyInstallItem:
+    return OnlineDependencyInstallItem(
         project_id=resolved_dependency.project_id,
         project_name=dependency_label,
         version_id=best_version.version_id,
@@ -120,7 +126,7 @@ def test_expand_required_dependency_install_plan_splits_required_and_optional() 
             return None
         return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
 
-    plan = utils_module.OnlineDependencyInstallPlan()
+    plan = OnlineDependencyInstallPlan()
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
@@ -172,7 +178,7 @@ def test_expand_required_dependency_install_plan_marks_installed_version_mismatc
     def _unexpected_select(_: ResolvedDependencyReference, __: bool) -> OnlineModVersion | None:
         raise AssertionError("installed mismatch path should not select remote versions")
 
-    plan = utils_module.OnlineDependencyInstallPlan()
+    plan = OnlineDependencyInstallPlan()
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,
@@ -230,7 +236,7 @@ def test_expand_required_dependency_install_plan_respects_max_depth() -> None:
             return None
         return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
 
-    plan = utils_module.OnlineDependencyInstallPlan()
+    plan = OnlineDependencyInstallPlan()
     utils_module.expand_required_dependency_install_plan(
         root_version=root_version,
         plan=plan,

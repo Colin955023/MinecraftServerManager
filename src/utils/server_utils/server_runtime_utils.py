@@ -1,34 +1,28 @@
 """
 伺服器執行時工具
-集中啟停操作與 Java 命令建構
+集中啟停操作與 Java 指令建構
 """
 
 from __future__ import annotations
 
 import re
 import shlex
-from dataclasses import dataclass
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, ClassVar
 
-from .. import JavaUtils, PathUtils, get_logger
-from .server_detection_utils import MANAGED_STARTUP_SCRIPT_NAME, STARTUP_SCRIPT_CANDIDATES
+from src.models import StartupScriptCommand
+from src.utils import (
+    MANAGED_STARTUP_SCRIPT_NAME,
+    STARTUP_SCRIPT_CANDIDATES,
+    JavaUtils,
+    MemoryUtils,
+    PathUtils,
+    ServerDetectionUtils,
+    get_logger,
+)
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
-__all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]
-
-
-@dataclass(slots=True)
-class StartupScriptCommand:
-    """從既有啟動腳本擷取出的 Java 啟動命令"""
-
-    command_line: str = ""
-    memory_max_mb: int | None = None
-    memory_min_mb: int | None = None
-
-    @property
-    def has_java_command(self) -> bool:
-        return bool(self.command_line)
 
 
 class ServerOperations:
@@ -37,20 +31,20 @@ class ServerOperations:
     @staticmethod
     def get_status_text(is_running: bool) -> tuple[str, str]:
         """
-        獲取狀態文字和顏色
+        取得狀態文字和顏色
 
         Args:
-            is_running: 伺服器是否正在運行
+            is_running: 伺服器是否正在執行
 
         Returns:
-            tuple: 狀態文字和顏色的元組，格式為 (文字, 顏色)
+            狀態文字和顏色的元組，格式為 (文字, 顏色)
         """
-        return ("🟢 狀態: 運行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
+        return ("🟢 狀態: 執行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
 
     @staticmethod
     def graceful_stop_server(server_manager, server_name: str) -> bool:
         """
-        停止伺服器（先嘗試 stop 命令，失敗則強制停止）
+        停止伺服器（先嘗試 stop 指令，失敗則強制停止）
 
         Args:
             server_manager: 伺服器管理器實例
@@ -71,7 +65,6 @@ class JvmOptionPolicy:
     """集中產生 Minecraft 伺服器 JVM 啟動參數建議"""
 
     GC_OPTION_PREFIX = "-XX:+Use"
-    LOW_LATENCY_PROFILE = "low_latency"
 
     @staticmethod
     def normalize_jvm_args(raw_args: Any) -> list[str]:
@@ -111,35 +104,97 @@ class JvmOptionPolicy:
         return any(arg.startswith(JvmOptionPolicy.GC_OPTION_PREFIX) and arg.endswith("GC") for arg in args)
 
     @staticmethod
+    def get_recommended_jvm_args_details(
+        java_major: int | None, memory_max_mb: int, loader_type: str = ""
+    ) -> list[tuple[str, str]]:
+        """
+        取得建議的 JVM 參數與其對應的說明 (用於 UI 顯示與參數注入)
+
+        Args:
+            java_major: Java major 版本 (未知時將視為小於 21，使用 G1GC)
+            memory_max_mb: 最大記憶體 (MB)
+            loader_type: 載入器類型 (如 forge, neoforge 等)
+
+        Returns:
+            (參數, 說明) 的清單
+        """
+        args = []
+
+        if java_major and java_major >= 21:
+            # ZGC (Java 21+)
+            args.append(("-XX:+UseZGC", "啟用 ZGC (Z Garbage Collector)，專為低延遲設計的垃圾回收器"))
+            if java_major < 24:
+                args.append(("-XX:+ZGenerational", "啟用分代 ZGC，能大幅降低 CPU 使用率並減少記憶體分配停頓"))
+            args.append(("-XX:+AlwaysPreTouch", "在伺服器啟動時預先設定記憶體，避免執行中分配導致延遲"))
+            args.append(("-XX:+DisableExplicitGC", "禁止插件或模組手動觸發 GC，避免不必要的伺服器卡頓"))
+        else:
+            # G1GC (Aikar's Flags)
+            args.append(("-XX:+UseG1GC", "啟用 G1GC (Garbage-First GC)，適合多數伺服器，能有效平衡吞吐量與延遲"))
+            args.append(("-XX:+ParallelRefProcEnabled", "啟用多執行緒處理弱引用，減少 GC 暫停時間"))
+            args.append(("-XX:MaxGCPauseMillis=200", "設定最大 GC 暫停時間目標為 200 毫秒"))
+            args.append(("-XX:+UnlockExperimentalVMOptions", "解鎖實驗性 JVM 參數，允許進階效能調校"))
+            args.append(("-XX:+DisableExplicitGC", "禁止手動觸發 System.gc()"))
+            args.append(("-XX:+AlwaysPreTouch", "啟動時即分配完整記憶體分頁"))
+            args.append(("-XX:G1NewSizePercent=30", "設定年輕代初始大小佔總堆疊的 30%"))
+            args.append(("-XX:G1MaxNewSizePercent=40", "設定年輕代最大可佔堆疊的 40%"))
+
+            if memory_max_mb >= 12288:
+                args.append(("-XX:G1HeapRegionSize=16M", "設定 G1GC 的區域大小為 16M (針對大記憶體最佳化)"))
+            else:
+                args.append(("-XX:G1HeapRegionSize=8M", "設定 G1GC 的區域大小為 8M"))
+
+            args.append(("-XX:G1ReservePercent=20", "保留 20% 記憶體作為 GC 緩衝，防止晉升失敗"))
+            args.append(("-XX:G1HeapWastePercent=5", "允許浪費 5% 的記憶體以換取更短的回收時間"))
+            args.append(("-XX:G1MixedGCCountTarget=4", "設定混合 GC 目標次數，分攤回收壓力"))
+            args.append(("-XX:InitiatingHeapOccupancyPercent=15", "提早至 15% 佔用率即開始並行標記，適合 Minecraft"))
+            args.append(("-XX:G1MixedGCLiveThresholdPercent=90", "提高舊生代回收閾值，增加回收效率"))
+            args.append(("-XX:G1RSetUpdatingPauseTimePercent=5", "限制更新記憶集時間比例為 5%，縮短暫停時間"))
+            args.append(("-XX:SurvivorRatio=32", "增大 Survivor 區比例，減少物件過早晉升至舊生代"))
+            args.append(("-XX:+PerfDisableSharedMem", "停用效能監控資料的共享記憶體，防止 I/O 延遲"))
+            args.append(("-XX:MaxTenuringThreshold=1", "設定物件最大晉升年齡為 1，加速回收短命物件"))
+            args.append(("-Dusing.aikars.flags=https://mcflags.emc.gs", "Aikar 參數的標識屬性"))
+            args.append(("-Daikars.new.flags=true", "標記使用新版 Aikar 參數"))
+
+        if java_major and java_major >= 22:
+            args.append(
+                ("--enable-native-access=ALL-UNNAMED", "允許未命名模組呼叫原生方法，消除 Java 22+ 原生存取警告")
+            )
+
+        # 載入器專用參數
+        if str(loader_type).lower() in ("forge", "neoforge"):
+            args.append(("-Dfml.readTimeout=120", "增加 FML 讀取逾時至 120 秒，避免載入大型模組包時斷線"))
+            args.append(("-Dfml.queryResult=confirm", "自動確認 FML 模組變更警告，避免啟動卡住"))
+
+        return args
+
+    @staticmethod
     def recommend_gc_args(
         *,
         memory_max_mb: int,
         java_major: int | None = None,
-        performance_profile: str = "",
+        loader_type: str = "",
         existing_args: list[str] | None = None,
     ) -> list[str]:
         """
-        依記憶體與 Java 版本產生 GC 建議
+        依記憶體、Java 版本與載入器產生 JVM 建議參數
 
         Args:
-            memory_max_mb: 最大記憶體，單位 MB
-            java_major: Java major 版本；未知時可為 None
-            performance_profile: 效能設定檔，`low_latency` 表示偏低延遲
+            memory_max_mb: 最大記憶體 (MB)
+            java_major: Java major 版本
+            loader_type: 載入器類型
             existing_args: 既有 JVM 參數；若已有 GC 參數則不覆蓋
 
         Returns:
             建議加入的 JVM 參數清單
         """
-
         normalized_existing_args = list(existing_args or [])
         if JvmOptionPolicy.has_gc_option(normalized_existing_args):
             return []
-        normalized_profile = str(performance_profile or "").strip().lower()
-        if normalized_profile == JvmOptionPolicy.LOW_LATENCY_PROFILE and java_major and java_major >= 17:
-            return ["-XX:+UseZGC"]
-        if int(memory_max_mb or 0) > 4096:
-            return ["-XX:+UseG1GC"]
-        return []
+
+        details = JvmOptionPolicy.get_recommended_jvm_args_details(
+            java_major=java_major, memory_max_mb=memory_max_mb, loader_type=loader_type
+        )
+        return [arg[0] for arg in details]
 
 
 class ServerCommands:
@@ -167,7 +222,7 @@ class ServerCommands:
         normalized = str(java_exe or "").strip().strip('"')
         if not normalized:
             return False
-        if normalized.lower() in {"java", "java.exe", "javaw", "javaw.exe"}:
+        if normalized.lower() in JavaUtils.JAVA_EXECUTABLE_NAMES:
             return False
         return bool(
             Path(normalized).is_absolute() or re.match(r"^[A-Za-z]:[\\/]", normalized) or normalized.startswith("\\\\")
@@ -176,7 +231,7 @@ class ServerCommands:
     @staticmethod
     def to_console_java_executable(java_path: str | None) -> str | None:
         """
-        將 `javaw.exe` 路徑轉為適合伺服器 console 使用的 `java.exe`
+        將 javaw.exe 路徑轉為適合伺服器 console 使用的 java.exe
 
         Args:
             java_path: 偵測到的 Java 執行檔路徑
@@ -198,10 +253,10 @@ class ServerCommands:
 
         Args:
             server_config: 伺服器設定物件
-            fallback: 找不到符合版本 Java 時使用的備援命令
+            fallback: 找不到符合版本 Java 時使用的備援指令
 
         Returns:
-            完整 `java.exe` 路徑；找不到時回傳 fallback
+            完整 java.exe 路徑；找不到時回傳 fallback
         """
         mc_version = str(getattr(server_config, "minecraft_version", "") or "").strip()
         if not mc_version or mc_version.lower() == "unknown":
@@ -224,13 +279,13 @@ class ServerCommands:
     @staticmethod
     def split_windows_command_line(command_line: str) -> list[str]:
         """
-        將 Windows bat 中的一行命令切成 `subprocess` 可用參數
+        將 Windows bat 中的一行指令切成 subprocess 可用參數
 
         Args:
-            command_line: bat 檔中的單行命令
+            command_line: bat 檔中的單行指令
 
         Returns:
-            命令參數清單；解析失敗時回退到空白切分
+            指令參數清單；解析失敗時回退到空白切分
         """
         try:
             return [
@@ -247,12 +302,7 @@ class ServerCommands:
         if not normalized:
             return False
         token_path = Path(normalized)
-        return normalized in {"java", "java.exe", "javaw", "javaw.exe"} or token_path.name in {
-            "java",
-            "java.exe",
-            "javaw",
-            "javaw.exe",
-        }
+        return normalized in JavaUtils.JAVA_EXECUTABLE_NAMES or token_path.name in JavaUtils.JAVA_EXECUTABLE_NAMES
 
     @staticmethod
     def _java_command_tokens_from_line(line: str) -> list[str]:
@@ -275,16 +325,14 @@ class ServerCommands:
     @staticmethod
     def extract_startup_script_command(script_path: Path) -> StartupScriptCommand:
         """
-        讀取既有啟動腳本中的 Java 啟動命令
+        讀取既有啟動腳本中的 Java 啟動指令
 
         Args:
             script_path: 要讀取的啟動腳本路徑
 
         Returns:
-            擷取到的 Java 啟動命令與記憶體設定；找不到時回傳空命令
+            擷取到的 Java 啟動指令與記憶體設定；找不到時回傳空指令
         """
-        from .server_memory_utils import MemoryUtils
-
         content = PathUtils.read_text_file(script_path, encoding="utf-8", errors="replace") or ""
         startup_command = StartupScriptCommand()
         if content.startswith("\ufeff"):
@@ -309,14 +357,14 @@ class ServerCommands:
     @staticmethod
     def replace_java_command_line(line: str, java_exe: str) -> tuple[str, bool]:
         """
-        替換單行 bat 命令開頭的 Java 執行檔
+        替換單行 bat 指令開頭的 Java 執行檔
 
         Args:
             line: 原始 bat 單行內容
             java_exe: 要替換成的 Java 執行檔路徑
 
         Returns:
-            `(新行內容, 是否修改)`
+            (新行內容, 是否修改)
         """
         body, newline = ServerCommands._split_line_ending(line)
         stripped = body.strip()
@@ -338,16 +386,57 @@ class ServerCommands:
         return (replacement, replacement != line)
 
     @staticmethod
-    def replace_startup_command_java_path(command_line: str, server_config) -> str:
+    def ensure_nogui_in_command(command_line: str) -> str:
         """
-        將匯入啟動命令的 Java 執行檔替換為版本相符路徑
+        確保啟動指令行帶有 nogui 參數
 
         Args:
-            command_line: 原始 Java 啟動命令
+            command_line: 原始啟動指令行
+
+        Returns:
+            若原本未包含 nogui 則補上後的指令行
+        """
+        raw = str(command_line or "").strip()
+        if not raw:
+            return raw
+        if not re.search(r"(?i)\bnogui\b", raw):
+            return f"{raw} nogui"
+        return raw
+
+    @staticmethod
+    def cleanup_redundant_startup_scripts(path: Path) -> list[str]:
+        """
+        在伺服器目錄中只保留標準 start_server.bat，清理其他多餘的 .bat 啟動腳本
+
+        Args:
+            path: 伺服器資料夾路徑
+
+        Returns:
+            被移除的腳本名稱清單
+        """
+        removed: list[str] = []
+        if not path.is_dir():
+            return removed
+        managed = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
+        for bat_file in path.glob("*.bat"):
+            if bat_file.name.lower() == managed:
+                continue
+            with suppress(Exception):
+                bat_file.unlink()
+                removed.append(bat_file.name)
+        return removed
+
+    @staticmethod
+    def replace_startup_command_java_path(command_line: str, server_config) -> str:
+        """
+        將匯入啟動指令的 Java 執行檔替換為版本相符路徑
+
+        Args:
+            command_line: 原始 Java 啟動指令
             server_config: 伺服器設定物件
 
         Returns:
-            替換後的啟動命令；無法解析完整 Java 路徑時保留原命令
+            替換後的啟動指令；無法解析完整 Java 路徑時保留原指令
         """
         java_exe = ServerCommands.resolve_java_executable(server_config)
         if not ServerCommands._is_full_java_path(java_exe):
@@ -357,7 +446,8 @@ class ServerCommands:
 
     @staticmethod
     def repair_startup_script_java_command(script_path: Path, server_config) -> bool:
-        """將啟動腳本中的裸 `java` 改為符合 Minecraft 版本的完整 Java 路徑
+        """
+        將啟動腳本中的裸 java 改為符合 Minecraft 版本的完整 Java 路徑
 
         Args:
             script_path: 要檢查的 bat 啟動腳本
@@ -392,38 +482,17 @@ class ServerCommands:
         return True
 
     @staticmethod
-    def repair_startup_scripts_java_commands(server_path: Path, server_config) -> list[Path]:
-        """
-        檢查並修補伺服器資料夾中的已知 bat 啟動腳本
-
-        Args:
-            server_path: 伺服器資料夾路徑
-            server_config: 伺服器設定物件
-
-        Returns:
-            已被修改的啟動腳本路徑清單
-        """
-        repaired: list[Path] = []
-        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
-            script_path = server_path / script_name
-            if script_path.exists() and ServerCommands.repair_startup_script_java_command(script_path, server_config):
-                repaired.append(script_path)
-        return repaired
-
-    @staticmethod
     def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
         """
-        構建 Java 啟動命令，根據伺服器配置自動偵測主要 JAR 和載入器類型
+        建構 Java 啟動指令，根據伺服器設定自動偵測主要 JAR 和載入器類型
 
         Args:
             server_config: 伺服器設定物件
-            return_list: 是否回傳命令列清單
+            return_list: 是否回傳指令列清單
 
         Returns:
-            Java 啟動命令字串或命令列清單
+            Java 啟動指令字串或指令列清單
         """
-        from .server_detection_utils import ServerDetectionUtils
-
         server_path = Path(server_config.path)
         loader_type = str(server_config.loader_type or "").lower()
         memory_min = server_config.memory_min_mb if server_config.memory_min_mb else None
@@ -432,11 +501,10 @@ class ServerCommands:
             memory_max = memory_min
         custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(server_config, "jvm_args", []))
         java_major = getattr(server_config, "java_major", None) or getattr(server_config, "java_major_version", None)
-        performance_profile = str(getattr(server_config, "performance_profile", "") or "")
         recommended_jvm_args = JvmOptionPolicy.recommend_gc_args(
             memory_max_mb=int(memory_max),
             java_major=int(java_major) if java_major else None,
-            performance_profile=performance_profile,
+            loader_type=loader_type,
             existing_args=custom_jvm_args,
         )
         jvm_args = [*recommended_jvm_args, *custom_jvm_args]
@@ -467,3 +535,6 @@ class ServerCommands:
         if return_list:
             return cmd_list
         return result_cmd
+
+
+__all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]

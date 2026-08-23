@@ -4,8 +4,9 @@ import zipfile
 
 import pytest
 from packaging.version import Version
-from src.models import ServerConfig
-from src.utils import ServerDetectionUtils, ServerDetectionVersionUtils, UpdateParsing
+
+from src.core import ServerCRUD, ServerImportService
+from src.utils import ServerDetectionVersionUtils, UpdateParsing
 
 
 @pytest.mark.parametrize(
@@ -67,21 +68,15 @@ def test_is_fabric_compatible_version_uses_standard_version_parser() -> None:
     assert ServerDetectionVersionUtils.is_fabric_compatible_version("v1.20.1") is True
 
 
-def test_detect_server_type_reads_minecraft_version_from_server_jar_metadata(tmp_path) -> None:
-    server_jar = tmp_path / "server.jar"
+def test_import_inspection_reads_minecraft_version_from_server_jar_metadata(tmp_path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    server_jar = source / "server.jar"
     with zipfile.ZipFile(server_jar, "w") as jar_file:
         jar_file.writestr("version.json", '{"id": "1.21.1", "name": "1.21.1"}')
-    (tmp_path / "eula.txt").write_text("eula=true", encoding="utf-8")
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="Unknown",
-        loader_type="Unknown",
-        loader_version="Unknown",
-        memory_max_mb=2048,
-        path=str(tmp_path),
-    )
+    (source / "eula.txt").write_text("eula=true", encoding="utf-8")
 
-    ServerDetectionUtils.detect_server_type(tmp_path, config, print_result=False)
+    inspection = ServerImportService(ServerCRUD(str(tmp_path / "servers"))).inspect(source, "imported")
 
-    assert config.loader_type == "vanilla"
-    assert config.minecraft_version == "1.21.1"
+    assert inspection.loader_type == "vanilla"
+    assert inspection.minecraft_version == "1.21.1"

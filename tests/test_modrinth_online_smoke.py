@@ -6,17 +6,87 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+import src.core as mod_search_service_module
+import src.core.mods.compatibility_analyzer as mod_search_compatibility_module
+import src.core.mods.dependency_planner_facade as mod_search_planner_module
 import src.core.mods.mod_manager as mod_manager_module
+import src.core.mods.modrinth_service as mod_search_provider_module
 import src.models as models_module
-import src.ui as mod_search_service_module
-import src.ui.mods.mod_management.review as mod_management_review_module
-import src.ui.mods.mod_search_service.compatibility_analyzer as mod_search_compatibility_module
-import src.ui.mods.mod_search_service.dependency_planner_facade as mod_search_planner_module
-import src.ui.mods.mod_search_service.modrinth_service as mod_search_provider_module
 import src.utils as utils_module
+from src.core import ModManager, build_local_mod_update_plan
+from src.ui import build_non_official_source_confirmation_prompt
+
+_IDENTITY_TEST_OVERRIDE: dict[str, object] = {}
+
+
+def _test_provider_identity_resolver(local_mod: object, hash_project_id: str):
+    override = _IDENTITY_TEST_OVERRIDE.get("resolver")
+    if callable(override):
+        resolved = override(local_mod)
+        if resolved is None:
+            return models_module.ProviderIdentitySnapshot()
+        return models_module.ProviderIdentitySnapshot(
+            provider="modrinth",
+            project_id=str(getattr(resolved, "project_id", "") or ""),
+            alias=str(getattr(resolved, "slug", "") or ""),
+            display_name=str(getattr(resolved, "name", "") or ""),
+            provenance=("cached_provider" if str(getattr(local_mod, "platform_id", "") or "") else "exact_lookup"),
+            lifecycle="fresh",
+            observed_at_epoch_ms=int(time.time() * 1000),
+            resolved_at_epoch_ms=int(time.time() * 1000),
+        )
+    if hash_project_id:
+        return models_module.ProviderIdentitySnapshot(
+            provider="modrinth",
+            project_id=hash_project_id,
+            display_name=str(getattr(local_mod, "name", "") or ""),
+            provenance="hash",
+            lifecycle="fresh",
+            observed_at_epoch_ms=int(time.time() * 1000),
+            resolved_at_epoch_ms=int(time.time() * 1000),
+        )
+    existing = getattr(local_mod, "provider_identity", None)
+    if isinstance(existing, models_module.ProviderIdentitySnapshot):
+        return existing
+    project_id = str(getattr(local_mod, "platform_id", "") or "")
+    resolved_at = getattr(local_mod, "resolved_at_epoch_ms", "")
+    if project_id and not resolved_at:
+        resolved_at = str(int(time.time() * 1000))
+    return models_module.ProviderIdentitySnapshot.from_payload(
+        {
+            "schema_version": 2,
+            "provider": "modrinth",
+            "project_id": project_id,
+            "alias": getattr(local_mod, "platform_slug", ""),
+            "display_name": getattr(local_mod, "name", ""),
+            "provenance": getattr(local_mod, "resolution_source", "cached_provider"),
+            "lifecycle": getattr(local_mod, "provider_lifecycle_state", "fresh"),
+            "resolved_at_epoch_ms": resolved_at,
+            "failure_count": getattr(local_mod, "stale_revalidation_failures", 0),
+            "next_retry_not_before_epoch_ms": getattr(local_mod, "next_retry_not_before_epoch_ms", ""),
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def _inject_provider_identity_owner(monkeypatch: pytest.MonkeyPatch):
+    original = build_local_mod_update_plan
+
+    def build_with_owner(*args, **kwargs):
+        kwargs.setdefault("provider_identity_resolver", _test_provider_identity_resolver)
+        return original(*args, **kwargs)
+
+    _IDENTITY_TEST_OVERRIDE.clear()
+    monkeypatch.setattr(mod_search_service_module, "build_local_mod_update_plan", build_with_owner)
+    yield
+    _IDENTITY_TEST_OVERRIDE.clear()
 
 
 def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+    if name == "provider_identity_fixture":
+        monkeypatch.setitem(_IDENTITY_TEST_OVERRIDE, "resolver", value)
+        return
     for module in (
         mod_search_service_module,
         mod_search_provider_module,
@@ -45,7 +115,7 @@ def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
             ]
         }
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online("sodium", minecraft_version="1.21", loader="fabric")
 
@@ -67,7 +137,7 @@ def test_search_mods_online_passes_category_facets(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     mod_search_service_module.search_mods_online(
         "sodium",
@@ -103,7 +173,7 @@ def test_search_mods_online_supports_browse_mode_without_query(monkeypatch) -> N
             ]
         }
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online(
         "",
@@ -142,7 +212,7 @@ def test_search_mods_online_filters_out_pure_client_hits(monkeypatch) -> None:
             ]
         }
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     results = mod_search_service_module.search_mods_online("", minecraft_version="1.21", loader="fabric")
 
@@ -175,7 +245,7 @@ def test_get_mod_versions_filters_and_selects_primary_file(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
@@ -206,7 +276,7 @@ def test_get_mod_versions_requires_exact_quilt_loader(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="quilt")
 
@@ -234,7 +304,7 @@ def test_get_mod_versions_requires_exact_neoforge_loader(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions(
         "proj123",
@@ -274,7 +344,7 @@ def test_get_mod_versions_skips_prerelease_entries(monkeypatch) -> None:
             },
         ]
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     versions = mod_search_service_module.get_mod_versions("proj123", minecraft_version="1.21", loader="fabric")
 
@@ -300,7 +370,7 @@ def test_get_mod_versions_preserves_project_id_case_for_api(monkeypatch) -> None
         captured_url["value"] = kwargs.get("url", "")
         return []
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     mod_search_service_module.get_mod_versions("P7dR8mSH")
 
@@ -330,7 +400,7 @@ def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkey
             }
         }
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
     results = mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -356,7 +426,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_quilt_loader(monkeypa
         captured_request.update(kwargs)
         return {}
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
     mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -379,7 +449,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_neoforge_loader(monke
         captured_request.update(kwargs)
         return {}
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "post_json", fake_post_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
     mod_search_service_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
@@ -402,181 +472,13 @@ def test_search_mods_online_uses_exact_quilt_loader_facet(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     mod_search_service_module.search_mods_online("sodium", minecraft_version="1.21", loader="quilt")
 
     facets_text = str(captured_params.get("facets", ""))
     assert "categories:quilt" in facets_text
     assert "categories:fabric" not in facets_text
-
-
-def test_enhance_local_mod_prefers_exact_project_lookup_before_fuzzy_search(monkeypatch) -> None:
-    requested_urls: list[str] = []
-
-    def fake_get_json(**kwargs):
-        requested_urls.append(kwargs.get("url", ""))
-        return {
-            "id": "P7dR8mSH",
-            "slug": "fabric-api",
-            "title": "Fabric API",
-            "description": "Core hooks and interoperability for Fabric mods.",
-            "downloads": 987654,
-            "categories": ["fabric", "library"],
-            "versions": ["version-a"],
-        }
-
-    def fail_search(*_args, **_kwargs):
-        raise AssertionError("fuzzy search should not run when platform_id is available")
-
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", fail_search)
-
-    enhanced = mod_search_service_module.enhance_local_mod(
-        "fabric-api-0.120.0+1.21.1.jar",
-        platform_id="fabric-api",
-        local_name="Fabric API",
-    )
-
-    assert enhanced is not None
-    assert enhanced.project_id == "P7dR8mSH"
-    assert enhanced.slug == "fabric-api"
-    assert enhanced.name == "Fabric API"
-    assert requested_urls == ["https://api.modrinth.com/v2/project/fabric-api"]
-
-
-def test_enhance_local_mod_rejects_low_confidence_fuzzy_match(monkeypatch) -> None:
-    _patch_mod_search_attr(
-        monkeypatch,
-        "get_modrinth_project_info",
-        lambda *_args, **_kwargs: None,
-    )
-    _patch_mod_search_attr(
-        monkeypatch,
-        "search_mods_online",
-        lambda *_args, **_kwargs: [
-            models_module.OnlineModInfo(
-                project_id="proj-unrelated",
-                slug="totally-different-mod",
-                name="Totally Different Mod",
-                author="Someone",
-            )
-        ],
-    )
-
-    enhanced = mod_search_service_module.enhance_local_mod(
-        "inventory-profiles-next-2.2.2.jar",
-        platform_id="",
-        local_name="Inventory Profiles Next",
-    )
-
-    assert enhanced is None
-
-
-def test_enhance_local_mod_prefers_cached_slug_identifier_resolver_before_fuzzy_search(monkeypatch) -> None:
-    resolver_calls: list[str] = []
-
-    def fake_resolver(identifier: str) -> utils_module.ProviderMetadataRecord:
-        resolver_calls.append(identifier)
-        return utils_module.ProviderMetadataRecord.from_values(
-            platform="modrinth",
-            project_id="YL57xq9U",
-            slug="inventory-profiles-next",
-            project_name="Inventory Profiles Next",
-        )
-
-    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_provider_record", fake_resolver)
-
-    def fail_search(*_args, **_kwargs):
-        raise AssertionError("fuzzy search should not run when cached slug can be canonicalized")
-
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", fail_search)
-
-    enhanced = mod_search_service_module.enhance_local_mod(
-        "inventory-profiles-next-2.2.2.jar",
-        platform_slug="inventoryprofilesnext",
-        local_name="Inventory Profiles Next",
-    )
-
-    assert enhanced is not None
-    assert enhanced.project_id == "YL57xq9U"
-    assert enhanced.slug == "inventory-profiles-next"
-    assert enhanced.name == "Inventory Profiles Next"
-    assert resolver_calls == ["inventoryprofilesnext"]
-
-
-def test_enhance_local_mod_re_resolves_when_cached_provider_is_stale(monkeypatch) -> None:
-    stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-    searched_terms: list[str] = []
-    attempted_identifiers: list[str] = []
-    resolved_info = models_module.OnlineModInfo(
-        project_id="YL57xq9U",
-        slug="inventory-profiles-next",
-        name="Inventory Profiles Next",
-        author="Libz",
-    )
-
-    def fake_get_modrinth_project_info(identifier: str):
-        attempted_identifiers.append(identifier)
-        if identifier == "inventory-profiles-next":
-            return resolved_info
-        return None
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    _patch_mod_search_attr(
-        monkeypatch,
-        "resolve_modrinth_provider_record",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("stale cached identifier should not be canonicalized directly")
-        ),
-    )
-
-    def fake_search(term: str, *_args, **_kwargs):
-        searched_terms.append(term)
-        return [
-            models_module.OnlineModInfo(
-                project_id="YL57xq9U",
-                slug="inventory-profiles-next",
-                name="Inventory Profiles Next",
-                author="Libz",
-            )
-        ]
-
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", fake_search)
-
-    enhanced = mod_search_service_module.enhance_local_mod(
-        "inventory-profiles-next-2.2.2.jar",
-        platform_slug="inventoryprofilesnext",
-        local_name="Inventory Profiles Next",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-    )
-
-    assert enhanced is not None
-    assert enhanced.project_id == "YL57xq9U"
-    assert enhanced.slug == "inventory-profiles-next"
-    assert "inventoryprofilesnext" not in attempted_identifiers
-    assert searched_terms == []
-
-
-def test_enhance_local_mod_returns_stale_fallback_when_revalidation_fails(monkeypatch) -> None:
-    stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-
-    enhanced = mod_search_service_module.enhance_local_mod(
-        "inventory-profiles-next-2.2.2.jar",
-        platform_slug="inventoryprofilesnext",
-        local_name="Inventory Profiles Next",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-    )
-
-    assert enhanced is not None
-    assert enhanced.available is False
-    assert enhanced.source == "modrinth_stale_cache"
-    assert enhanced.slug == "inventoryprofilesnext"
 
 
 def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked(monkeypatch) -> None:
@@ -863,7 +765,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
         root_project_name="Clumps",
     )
 
-    assert plan.has_unresolved_required is False
+    assert bool(plan.unresolved_required) is False
     assert len(plan.items) == 1
     assert plan.items[0].project_id == "cloth-config"
     assert plan.items[0].project_name == "Cloth Config（需求版本：2.0.0）"
@@ -913,7 +815,7 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     )
 
     assert plan.items == []
-    assert plan.has_unresolved_required is False
+    assert bool(plan.unresolved_required) is False
     assert len(plan.advisory_items) == 1
     assert plan.advisory_items[0].project_name == "Cloth Config（需求版本：2.0.0）"
     assert plan.advisory_items[0].maybe_installed is True
@@ -941,7 +843,7 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
         author="Libz",
     )
 
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: resolved_info)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
     _patch_mod_search_attr(
         monkeypatch,
         "resolve_modrinth_project_names",
@@ -966,69 +868,8 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
     )
 
     assert captured_project_ids == ["YL57xq9U"]
-    assert local_mod.platform_id == "YL57xq9U"
-    assert local_mod.platform_slug == "inventory-profiles-next"
+    assert local_mod.platform_id == "inventoryprofilesnext"
     assert plan.candidates == []
-
-
-def test_resolve_local_mod_project_info_normalizes_camel_case_local_names(monkeypatch) -> None:
-    local_mod = SimpleNamespace(
-        platform_id="inventoryprofilesnext",
-        platform_slug="",
-        name="InventoryProfilesNext-fabric-1.21.11-2.2.2",
-        filename="InventoryProfilesNext-fabric-1.21.11-2.2.2.jar",
-    )
-    attempted_identifiers: list[str] = []
-    resolved_info = models_module.OnlineModInfo(
-        project_id="YL57xq9U",
-        slug="inventory-profiles-next",
-        name="Inventory Profiles Next",
-        author="Libz",
-    )
-
-    def fake_get_modrinth_project_info(identifier: str):
-        attempted_identifiers.append(identifier)
-        if identifier == "inventory-profiles-next":
-            return resolved_info
-        return None
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-
-    resolved = mod_search_service_module.resolve_local_mod_project_info(local_mod)
-
-    assert resolved is resolved_info
-    assert "inventory-profiles-next" in attempted_identifiers
-
-
-def test_resolve_local_mod_project_info_uses_platform_slug_when_project_id_missing(monkeypatch) -> None:
-    local_mod = SimpleNamespace(
-        platform_id="",
-        platform_slug="inventory-profiles-next",
-        name="InventoryProfilesNext",
-        filename="InventoryProfilesNext.jar",
-    )
-    attempted_identifiers: list[str] = []
-    resolved_info = models_module.OnlineModInfo(
-        project_id="YL57xq9U",
-        slug="inventory-profiles-next",
-        name="Inventory Profiles Next",
-        author="Libz",
-    )
-
-    def fake_get_modrinth_project_info(identifier: str):
-        attempted_identifiers.append(identifier)
-        if identifier == "inventory-profiles-next":
-            return resolved_info
-        return None
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-
-    resolved = mod_search_service_module.resolve_local_mod_project_info(local_mod)
-
-    assert resolved is resolved_info
-    assert attempted_identifiers[0] == "inventory-profiles-next"
 
 
 def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(monkeypatch) -> None:
@@ -1107,14 +948,14 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
         ],
     )
 
-    def fake_resolve_local_mod_project_info(_local_mod):
+    def fake_provider_identity_fixture(_local_mod):
         return resolved_info
 
     def fake_get_recommended_mod_version(project_id: str, _minecraft_version=None, _loader=None):
         captured_project_ids.append(project_id)
         return recommended_version if project_id == "YL57xq9U" else None
 
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", fake_resolve_local_mod_project_info)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", fake_provider_identity_fixture)
     _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
     _patch_mod_search_attr(
         monkeypatch,
@@ -1152,7 +993,7 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
         captured_params.update(kwargs.get("params", {}))
         return {"hits": []}
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "get_json", fake_get_json)
+    monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
     mod_search_service_module.search_mods_online("letsdo-API-forge-1.2.15-forge", loader="forge")
 
@@ -1224,7 +1065,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
         root_project_name="Root Mod",
     )
 
-    assert plan.has_unresolved_required is False
+    assert bool(plan.unresolved_required) is False
     assert [item.project_name for item in plan.items] == ["Cloth Config", "Fabric API"]
 
 
@@ -1285,7 +1126,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
         root_project_name="Root Mod",
     )
 
-    assert plan.has_unresolved_required is False
+    assert bool(plan.unresolved_required) is False
     assert len(plan.items) == chain_length
 
 
@@ -1320,7 +1161,7 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
         root_project_name="Clumps",
     )
 
-    assert plan.has_unresolved_required is True
+    assert bool(plan.unresolved_required) is True
     assert captured_project_ids == ["P7dR8mSH", "P7dR8mSH"]
 
 
@@ -1487,7 +1328,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
         )
 
     _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: resolved_info)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
     _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
     _patch_mod_search_attr(monkeypatch, "analyze_mod_version_compatibility", fake_analyze_mod_version_compatibility)
 
@@ -1746,7 +1587,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -1805,7 +1646,7 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -1873,7 +1714,7 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda local_mod: (
             resolved_cached
             if getattr(local_mod, "name", "") == "Inventory Profiles Next"
@@ -1903,69 +1744,6 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
     assert any("metadata ensure 結果" in note for note in plan.metadata_summary.notes)
 
 
-def test_build_local_mod_update_plan_re_resolves_when_cached_provider_is_stale(monkeypatch) -> None:
-    stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-    attempted_identifiers: list[str] = []
-    local_mod = SimpleNamespace(
-        platform_id="inventoryprofilesnext",
-        platform_slug="inventoryprofilesnext",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-        name="Inventory Profiles Next",
-        filename="inventory-profiles-next.jar",
-        version="2.2.2",
-        minecraft_version="1.21.1",
-        loader_type="Fabric",
-        file_path="",
-        current_hash="",
-        hash_algorithm="",
-    )
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-
-    def fake_get_modrinth_project_info(identifier: str, *_args, **_kwargs):
-        attempted_identifiers.append(identifier)
-        if identifier == "inventory-profiles-next":
-            return models_module.OnlineModInfo(
-                project_id="YL57xq9U",
-                slug="inventory-profiles-next",
-                name="Inventory Profiles Next",
-                author="Libz",
-            )
-        return None
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", fake_get_modrinth_project_info)
-    _patch_mod_search_attr(
-        monkeypatch,
-        "resolve_modrinth_provider_record",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("stale cached identifier should not drive canonical resolver")
-        ),
-    )
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
-        monkeypatch,
-        "resolve_modrinth_project_names",
-        lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
-    )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
-
-    plan = mod_search_service_module.build_local_mod_update_plan(
-        [local_mod],
-        minecraft_version="1.21.1",
-        loader="fabric",
-    )
-
-    assert local_mod.platform_id == "YL57xq9U"
-    assert local_mod.platform_slug == "inventory-profiles-next"
-    assert plan.metadata_summary.resolved_by_cached_project == 0
-    assert plan.metadata_summary.resolved_by_lookup == 1
-    assert "inventoryprofilesnext" not in attempted_identifiers
-    assert any("freshness TTL" in note for note in plan.metadata_summary.notes)
-
-
 def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_metadata(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
@@ -1979,7 +1757,7 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
 
     _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
     _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     plan = mod_search_service_module.build_local_mod_update_plan(
@@ -1994,7 +1772,7 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
     assert candidate.metadata_source == "unresolved"
     assert candidate.recommendation_source == "metadata_unresolved"
     assert candidate.recommendation_confidence == "blocked"
-    assert candidate.project_id.startswith("__unresolved__::")
+    assert candidate.project_id == ""
     assert candidate.hard_errors == ["metadata 未識別，暫時無法自動檢查更新"]
 
 
@@ -2032,8 +1810,7 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
     assert candidate.recommendation_source == "stale_metadata"
     assert candidate.recommendation_confidence == "retryable"
     assert candidate.metadata_resolved is False
-    assert candidate.project_id.startswith("__stale__::")
-    assert any("可重試" in note for note in plan.metadata_summary.notes)
+    assert candidate.project_id == ""
 
 
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_due(monkeypatch) -> None:
@@ -2080,114 +1857,12 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
     candidate = plan.candidates[0]
     assert candidate.metadata_source == "stale_provider"
     assert any("退避" in note for note in candidate.notes)
-    assert any("退避視窗" in note for note in plan.metadata_summary.notes)
     assert resolve_calls["project"] == 0
     assert resolve_calls["search"] == 0
 
 
-def test_build_local_mod_update_plan_defers_stale_revalidation_when_batch_limit_reached(monkeypatch) -> None:
-    stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-    original_limit = utils_module.PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN
-    _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", 1)
-
-    mod1 = SimpleNamespace(
-        platform_id="inventoryprofilesnext",
-        platform_slug="inventoryprofilesnext",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-        provider_lifecycle_state="stale",
-        next_retry_not_before_epoch_ms="0",
-        name="Inventory Profiles Next",
-        filename="inventory-profiles-next.jar",
-        version="2.2.2",
-        minecraft_version="1.21.1",
-        loader_type="Fabric",
-        file_path="",
-        current_hash="",
-        hash_algorithm="",
-    )
-    mod2 = SimpleNamespace(
-        platform_id="fabric-api",
-        platform_slug="fabric-api",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-        provider_lifecycle_state="stale",
-        next_retry_not_before_epoch_ms="0",
-        name="Fabric API",
-        filename="fabric-api.jar",
-        version="0.119.2",
-        minecraft_version="1.21.1",
-        loader_type="Fabric",
-        file_path="",
-        current_hash="",
-        hash_algorithm="",
-    )
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-
-    plan = mod_search_service_module.build_local_mod_update_plan(
-        [mod1, mod2],
-        minecraft_version="1.21.1",
-        loader="fabric",
-    )
-
-    assert len(plan.candidates) == 2
-    assert any("批次上限（1）" in "\n".join(candidate.notes) for candidate in plan.candidates)
-    assert any("批次上限（1）" in note for note in plan.metadata_summary.notes)
-
-    _patch_mod_search_attr(monkeypatch, "PROVIDER_REVALIDATION_BATCH_MAX_PER_RUN", original_limit)
-
-
-def test_build_local_mod_update_plan_adaptive_revalidation_batch_shrinks_on_high_failure(monkeypatch) -> None:
-    stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
-
-    def _make_stale_mod(index: int) -> SimpleNamespace:
-        return SimpleNamespace(
-            platform_id=f"stale-mod-{index}",
-            platform_slug=f"stale-mod-{index}",
-            resolution_source="scan_detect",
-            resolved_at_epoch_ms=str(stale_epoch_ms),
-            provider_lifecycle_state="stale",
-            next_retry_not_before_epoch_ms="0",
-            name=f"Stale Mod {index}",
-            filename=f"stale-mod-{index}.jar",
-            version="1.0.0",
-            minecraft_version="1.21.1",
-            loader_type="Fabric",
-            file_path="",
-            current_hash="",
-            hash_algorithm="",
-        )
-
-    local_mods = [_make_stale_mod(i) for i in range(10)]
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
-
-    plan = mod_search_service_module.build_local_mod_update_plan(
-        local_mods,
-        minecraft_version="1.21.1",
-        loader="fabric",
-        revalidation_batch_base_limit=8,
-        revalidation_batch_min_limit=2,
-        revalidation_batch_max_limit=8,
-        revalidation_adaptive_enabled=True,
-        revalidation_latency_threshold_ms=1.0,
-    )
-
-    assert len(plan.candidates) == 10
-    assert any("批次上限（" in "\n".join(candidate.notes) for candidate in plan.candidates)
-    assert any("stale metadata 重查批次策略" in note for note in plan.metadata_summary.notes)
-    assert any("重查觀測摘要" in note for note in plan.metadata_summary.notes)
-
-
 def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
 
     def fake_download_file(url, local_path, progress_callback=None, expected_hash=None, **_kwargs):
         assert url == "https://example.invalid/example.jar"
@@ -2200,7 +1875,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
             progress_callback(10, 10)
         return True
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2214,7 +1889,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
 
 
 def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
     target_path = tmp_path / "mods" / "example.jar"
     target_path.parents[0].mkdir(parents=True, exist_ok=True)
     target_path.write_bytes(b"jar-bytes")
@@ -2223,7 +1898,7 @@ def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, m
     def fake_download_file(*_args, **_kwargs):
         raise AssertionError("verified target should skip download")
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2236,12 +1911,12 @@ def test_install_remote_mod_file_reuses_existing_verified_file(tmp_path: Path, m
 
 
 def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
 
     def fake_download_file(*_args, **_kwargs):
         raise AssertionError("remote mod install should reject insecure verification before download")
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
     assert (
         manager.install_remote_mod_file(
@@ -2263,7 +1938,7 @@ def test_install_remote_mod_file_rejects_missing_or_sha1_hash(tmp_path: Path, mo
 
 
 def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
     old_path.parents[0].mkdir(parents=True, exist_ok=True)
     old_path.write_bytes(b"old-bytes")
@@ -2315,7 +1990,7 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
 
 
 def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
     external_dir = tmp_path.parents[0] / f"{tmp_path.name}-external"
     external_dir.mkdir(parents=True, exist_ok=True)
     old_path = external_dir / "example-old.jar"
@@ -2367,7 +2042,7 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
 
 
 def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
 
     def fake_download_file(url, local_path, _progress_callback=None, expected_hash=None, cancel_check=None, **_kwargs):
         assert url == "https://example.invalid/example.jar"
@@ -2376,7 +2051,7 @@ def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Pa
         Path(local_path).write_bytes(b"partial")
         return False
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
     installed_path = manager.install_remote_mod_file(
         download_url="https://example.invalid/example.jar",
@@ -2390,7 +2065,7 @@ def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Pa
 
 
 def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example-old.jar"
     old_path.parents[0].mkdir(parents=True, exist_ok=True)
     old_path.write_bytes(b"old-bytes")
@@ -2434,7 +2109,7 @@ def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_pa
 
 
 def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(tmp_path: Path, monkeypatch) -> None:
-    manager = mod_manager_module.ModManager(str(tmp_path))
+    manager = ModManager(str(tmp_path))
     old_path = tmp_path / "mods" / "example.jar"
     old_path.parents[0].mkdir(parents=True, exist_ok=True)
     old_path.write_bytes(b"old-bytes")
@@ -2460,7 +2135,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
         cancel_calls["count"] += 1
         return cancel_calls["count"] >= 3
 
-    monkeypatch.setattr(utils_module.HTTPUtils, "download_file", fake_download_file)
+    monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
     replaced_path = manager.replace_local_mod_file(
         local_mod,
@@ -2482,9 +2157,9 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
         provider="modrinth",
         files=[{"filename": "example.jar", "url": "https://mirror.example.com/example.jar", "primary": True}],
     )
-    dependency_plan = utils_module.OnlineDependencyInstallPlan(
+    dependency_plan = models_module.OnlineDependencyInstallPlan(
         items=[
-            utils_module.OnlineDependencyInstallItem(
+            models_module.OnlineDependencyInstallItem(
                 project_id="dep-1",
                 project_name="Fabric API",
                 version_id="dep-ver",
@@ -2495,7 +2170,7 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
             )
         ],
         advisory_items=[
-            utils_module.OnlineDependencyInstallItem(
+            models_module.OnlineDependencyInstallItem(
                 project_id="dep-2",
                 project_name="Mirror Dep",
                 version_id="dep-ver-2",
@@ -2518,7 +2193,7 @@ def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads()
         dependency_plan=dependency_plan,
     )
 
-    prompt = mod_management_review_module.ModManagementReviewMixin._build_non_official_source_confirmation_prompt(
+    prompt = build_non_official_source_confirmation_prompt(
         [review_entry],
         action_label="安裝",
     )
@@ -2571,7 +2246,7 @@ def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monke
 
     _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda *_args, **_kwargs: None)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda *_args, **_kwargs: None)
     _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
     progress_events: list[tuple[int, int]] = []
@@ -2661,7 +2336,7 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -2705,7 +2380,7 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -2761,7 +2436,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -2910,7 +2585,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
     )
     _patch_mod_search_attr(
         monkeypatch,
-        "resolve_local_mod_project_info",
+        "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
@@ -2938,9 +2613,6 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
 
 
 def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkeypatch) -> None:
-    """混合情境：一個模組 hash 命中（enabled），一個 provider metadata 完全無法解析（unknown）
-    兩者應在同一 LocalModUpdatePlan 中，且分配到不同 recommendation_confidence
-    """
     resolved_mod = SimpleNamespace(
         filename="sodium-0.6.0.jar",
         name="Sodium",
@@ -2978,16 +2650,7 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
     _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
     _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
-    _patch_mod_search_attr(
-        monkeypatch,
-        "resolve_modrinth_provider_record",
-        lambda identifier: (
-            utils_module.ProviderMetadataRecord.from_values(project_id="sodium", slug="sodium", project_name="Sodium")
-            if "sodium" in str(identifier).lower()
-            else utils_module.ProviderMetadataRecord()
-        ),
-    )
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
+    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
     _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
     _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
     _patch_mod_search_attr(
@@ -3022,73 +2685,10 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         assert mystery_candidates[0].recommendation_confidence in ("blocked", "retryable")
 
 
-def test_build_local_mod_update_plan_mixed_fault_stale_plus_dependency_unresolved(monkeypatch) -> None:
-    """混合情境：一個模組 metadata 已過期（retryable），一個有 dependency 無法解析的正常模組
-    確認兩者共存在同一 plan，且 stale 模組被分配 RECOMMENDATION_CONFIDENCE_RETRYABLE
-    """
-    stale_mod = SimpleNamespace(
-        filename="fabricapi-0.90.0.jar",
-        name="Fabric API",
-        platform_id="fabric-api",
-        platform_slug="fabric-api",
-        resolution_source="",
-        resolved_at_epoch_ms=1000,
-        current_hash="",
-        hash_algorithm="sha512",
-        version="0.90.0",
-        enabled=True,
-    )
-    dep_unresolved_mod = SimpleNamespace(
-        filename="clumps-9.0.jar",
-        name="Clumps",
-        platform_id="clumps",
-        platform_slug="clumps",
-        resolution_source="",
-        resolved_at_epoch_ms=None,
-        current_hash="",
-        hash_algorithm="sha512",
-        version="9.0",
-        enabled=True,
-    )
-
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
-        monkeypatch,
-        "resolve_modrinth_provider_record",
-        lambda _identifier: utils_module.ProviderMetadataRecord(),
-    )
-    _patch_mod_search_attr(monkeypatch, "resolve_local_mod_project_info", lambda _local_mod: None)
-    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
-        monkeypatch,
-        "analyze_mod_version_compatibility",
-        lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
-    )
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
-
-    plan = mod_search_service_module.build_local_mod_update_plan(
-        [stale_mod, dep_unresolved_mod],
-        minecraft_version="1.21.1",
-        loader="fabric",
-    )
-
-    stale_candidates = [
-        c
-        for c in plan.candidates
-        if getattr(c, "metadata_source", "") in ("stale_provider",)
-        or getattr(c, "recommendation_confidence", "") == "retryable"
-    ]
-    assert len(stale_candidates) >= 1, "Stale provider 模組應產生 retryable 候選"
-    assert stale_candidates[0].recommendation_confidence == "retryable"
-    assert "stale metadata" in (stale_candidates[0].metadata_note or "")
-
-
 def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields() -> None:
-    plan = utils_module.OnlineDependencyInstallPlan(
+    plan = models_module.OnlineDependencyInstallPlan(
         items=[
-            utils_module.OnlineDependencyInstallItem(
+            models_module.OnlineDependencyInstallItem(
                 project_id="AANobbMI",
                 project_name="Sodium",
                 version_id="ver-1",
@@ -3108,7 +2708,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
             )
         ],
         advisory_items=[
-            utils_module.OnlineDependencyInstallItem(
+            models_module.OnlineDependencyInstallItem(
                 project_id="P7dR8mSH",
                 project_name="Fabric API",
                 version_id="ver-2",

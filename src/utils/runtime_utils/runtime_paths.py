@@ -1,7 +1,9 @@
 """
-運行時路徑管理工具
-提供應用程式運行時所需的路徑配置與管理功能
+執行時路徑管理工具
+提供應用程式執行時所需的路徑設定與管理功能
 """
+
+from __future__ import annotations
 
 import os
 import sys
@@ -9,7 +11,7 @@ from pathlib import Path
 
 
 class RuntimePaths:
-    """運行時路徑管理工具類"""
+    """執行時路徑管理工具類別"""
 
     @staticmethod
     def is_packaged() -> bool:
@@ -36,32 +38,6 @@ class RuntimePaths:
         return Path(base)
 
     @staticmethod
-    def get_exe_dir() -> Path:
-        """
-        取得當前執行檔或專案根目錄的基礎目錄
-
-        Returns:
-            執行環境對應的基礎目錄 Path
-        """
-        if RuntimePaths.is_packaged():
-            executable = getattr(sys, "executable", "")
-            if executable:
-                try:
-                    return Path(executable).resolve().parents[0]
-                except OSError:
-                    return Path(executable).parents[0]
-        try:
-            from ..core_utils.path_utils import PathUtils
-
-            return PathUtils.get_project_root()
-        except Exception:
-            current_file = Path(__file__).resolve()
-            for parent in current_file.parents:
-                if (parent / "pyproject.toml").exists():
-                    return parent
-            return current_file.parents[3]
-
-    @staticmethod
     def get_user_data_dir() -> Path:
         """取得應用程式的使用者資料存放目錄"""
         override = os.environ.get("MSM_USER_DATA_DIR")
@@ -73,6 +49,16 @@ class RuntimePaths:
     def get_cache_dir() -> Path:
         """取得應用程式的快取檔案存放目錄"""
         return RuntimePaths.get_user_data_dir() / "Cache"
+
+    @staticmethod
+    def get_version_cache_dir() -> Path:
+        """取得版本列表快取檔案存放目錄"""
+        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir() / "versions")
+
+    @staticmethod
+    def get_installer_cache_dir() -> Path:
+        """取得模組安裝器檔案存放目錄"""
+        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir() / "installers")
 
     @staticmethod
     def get_log_dir() -> Path:
@@ -92,3 +78,6 @@ class RuntimePaths:
         """
         p.mkdir(parents=True, exist_ok=True)
         return p
+
+
+__all__ = ["RuntimePaths"]

@@ -3,6 +3,8 @@
 提供 GitHub Release 版本檢查與自動下載安裝功能
 """
 
+from __future__ import annotations
+
 import html
 import re
 import shutil
@@ -12,7 +14,22 @@ import time
 from pathlib import Path
 from typing import TypeVar
 
-from .. import HashUtils, HTTPUtils, RuntimePaths, SubprocessUtils, TaskUtils, UIUtils, UpdateParsing, get_logger
+from PySide6 import QtWidgets
+
+from src.utils import (
+    HashUtils,
+    HTTPClient,
+    RuntimePaths,
+    SubprocessUtils,
+    UIUtils,
+    UpdateParsing,
+    atomic_write_text,
+    get_logger,
+    invoke_later,
+    is_qobject_alive,
+    run_in_background,
+    run_on_ui_thread,
+)
 
 logger = get_logger().bind(component="UpdateChecker")
 _UpdateResultT = TypeVar("_UpdateResultT")
@@ -32,8 +49,7 @@ class UpdateChecker:
 
             resolved_path = new_exe_path.resolve(strict=True)
             if resolved_path.is_file():
-                confirm = TaskUtils.call_on_ui(
-                    parent,
+                confirm = run_on_ui_thread(
                     lambda: UIUtils.ask_yes_no_cancel(
                         "套用更新",
                         "即將關閉程式並套用更新\n\n是否確定要執行？",
@@ -57,13 +73,15 @@ if errorlevel 1 (
 start "" "{current_exe}"
 del "%~f0"
 """
-                bat_script_path.write_text(bat_content, encoding="utf-8")
+                if not atomic_write_text(bat_script_path, bat_content, encoding="utf-8", newline="\r\n"):
+                    logger.error(f"無法原子建立更新腳本：{bat_script_path}")
+                    return False
 
                 process = SubprocessUtils.popen_detached([str(bat_script_path)])
                 time.sleep(0.5)
                 returncode = process.poll()
                 if returncode is not None and returncode != 0:
-                    logger.error(f"更新腳本啟動失敗，退出碼：{returncode}")
+                    logger.error(f"更新腳本啟動失敗，結束代碼：{returncode}")
                     return False
 
                 logger.info(f"已啟動更新腳本（PID: {process.pid}）: {bat_script_path}")
@@ -74,24 +92,25 @@ del "%~f0"
         return False
 
     @staticmethod
-    def _graceful_exit(parent, delay_ms: int = 100) -> None:
-        """地關閉應用程式"""
+    def _exit(parent, delay_ms: int = 100) -> None:
+        """關閉應用程式"""
         try:
-            if parent is not None and hasattr(parent, "schedule") and hasattr(parent, "is_alive") and parent.is_alive():
 
-                def _close():
-                    try:
-                        if parent.is_alive():
-                            parent.quit()
-                            parent.destroy()
-                    except Exception as e:
-                        logger.exception(f"關閉視窗失敗: {e}")
-                    finally:
+            def _close():
+                try:
+                    if parent is not None and is_qobject_alive(parent):
+                        parent.close()
+                except Exception as e:
+                    logger.exception(f"關閉視窗失敗: {e}")
+                finally:
+                    app = QtWidgets.QApplication.instance()
+                    if app is not None:
+                        app.quit()
+                    else:
                         sys.exit(0)
 
-                TaskUtils.schedule_debounce(
-                    parent, "_update_graceful_exit_job", max(0, int(delay_ms)), _close, owner=parent
-                )
+            if parent is not None and is_qobject_alive(parent):
+                invoke_later(max(0, int(delay_ms)), _close, parent=parent)
                 return
         except Exception as e:
             logger.debug(f"安排視窗關閉時發生錯誤: {e}")
@@ -101,7 +120,7 @@ del "%~f0"
     def _clean_release_notes(body: str) -> str:
         """
         清理並篩選釋出說明，過濾開發者資訊與過長內容
-        僅保留: 新增功能、修改、刪除、優化等使用者相關資訊
+        僅保留: 新增功能、修改、刪除、最佳化等使用者相關資訊
         濾除: 開發者資訊 (contributors, full changelog 連結, PR 作者資訊)
         """
         if not body:
@@ -159,6 +178,7 @@ del "%~f0"
         repo: str,
         show_up_to_date_message: bool = True,
         parent=None,
+        work_scope=None,
     ) -> None:
         """
         檢查最新版本並在需要時提示使用者進行更新
@@ -169,6 +189,7 @@ del "%~f0"
             repo: GitHub repository 名稱
             show_up_to_date_message: 是否在已是最新版本時顯示提示
             parent: 父視窗物件
+            work_scope: 可選的 UIWorkScope；提供時由此提交背景工作
         """
 
         def _work() -> None:
@@ -192,11 +213,10 @@ del "%~f0"
                 """統一處理下載檔案雜湊驗證失敗"""
                 algorithm_label = algorithm.upper()
                 logger.error(f"[驗證失敗] {algorithm_label} 不符合！檔案: {asset_name}")
-                TaskUtils.call_on_ui(
-                    parent,
+                run_on_ui_thread(
                     lambda: UIUtils.show_message(
                         "檔案雜湊驗證失敗",
-                        f"下載的檔案 {algorithm_label} 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意篡改\n• 網路傳輸錯誤\n\n為了您的安全：\n- 已立即刪除下載的檔案\n- 更新已取消\n\n請稍後重試，或手動從 GitHub 下載",
+                        f"下載的檔案 {algorithm_label} 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意竄改\n• 網路傳輸錯誤\n\n為了您的安全：\n- 已立即刪除下載的檔案\n- 更新已取消\n\n請稍後重試，或手動從 GitHub 下載",
                         parent=parent,
                         message_level="error",
                     ),
@@ -210,8 +230,7 @@ del "%~f0"
                 if not latest:
                     logger.info("無法從 GitHub 取得最新版本資訊")
                     if show_up_to_date_message:
-                        TaskUtils.call_on_ui(
-                            parent,
+                        run_on_ui_thread(
                             lambda: UIUtils.show_message(
                                 "檢查更新",
                                 "無法取得最新版本資訊，或沒有可用的正式發布版本",
@@ -224,17 +243,16 @@ del "%~f0"
                 latest_ver = UpdateParsing.parse_version(latest_tag)
                 current_ver = UpdateParsing.parse_version(current_version)
                 if not latest_ver or not current_ver:
-                    logger.warning("無法解析版本號，跳過更新檢查")
+                    logger.warning("無法解析版本號，略過更新檢查")
                     return
                 logger.info(f"版本檢查: 目前版本={current_ver}, 最新版本={latest_ver} ({latest_tag})")
                 if latest_ver <= current_ver:
                     logger.info("目前已是最新版本")
                     if show_up_to_date_message:
-                        TaskUtils.call_on_ui(
-                            parent,
+                        run_on_ui_thread(
                             lambda: UIUtils.show_message(
                                 "檢查更新",
-                                f"目前版本 {current_version} 已是最新版本，無須更新",
+                                f"目前版本 {current_version} 已是最新版本，無須更新。",
                                 parent=parent,
                                 message_level="info",
                             ),
@@ -246,8 +264,7 @@ del "%~f0"
                 rendered = UpdateChecker._clean_release_notes(body)
                 html_url = latest.get("html_url")
                 msg = f"發現新版本：{name}\n目前版本：{current_version}\n\n釋出說明：\n{rendered}\n\n是否下載並安裝？"
-                result = TaskUtils.call_on_ui(
-                    parent,
+                result = run_on_ui_thread(
                     lambda: UIUtils.ask_yes_no_cancel("更新可用", msg, parent=parent, show_cancel=False),
                 )
                 if not result:
@@ -255,25 +272,25 @@ del "%~f0"
                 logger.info("使用者確認更新，準備下載...")
                 asset, _ = UpdateParsing.select_update_asset(latest)
                 if not asset:
-                    TaskUtils.call_on_ui(
-                        parent,
+                    invoke_later(
+                        0,
                         lambda: UIUtils.show_message(
                             "無安裝檔",
-                            "找不到可用的安裝檔（.exe）將開啟發行頁面，請手動下載",
+                            "找不到可用的安裝檔（.exe）。將開啟發行頁面，請手動下載。",
                             parent=parent,
                             message_level="info",
                         ),
+                        parent=parent,
                     )
                     if html_url:
                         UIUtils.open_external(html_url)
                     return
                 download_url = asset.get("browser_download_url")
                 if not download_url:
-                    TaskUtils.call_on_ui(
-                        parent,
+                    run_on_ui_thread(
                         lambda: UIUtils.show_message(
                             "無下載連結",
-                            "選取的安裝檔缺少下載連結將開啟發行頁面，請手動下載最新版本",
+                            "選取的安裝檔缺少下載連結。將開啟發行頁面，請手動下載最新版本。",
                             parent=parent,
                             message_level="error",
                         ),
@@ -316,8 +333,7 @@ del "%~f0"
                     chk = _fetch_checksum_for_asset(latest)
                     if not chk:
                         logger.error("[安全檢查失敗] 未找到可用 digest，拒絕下載未經驗證的檔案")
-                        TaskUtils.call_on_ui(
-                            parent,
+                        run_on_ui_thread(
                             lambda: UIUtils.show_message(
                                 "缺少 digest 驗證資訊",
                                 "無法從 GitHub Release 中取得此安裝程式的 SHA-256 digest 驗證資訊\n\n為了您的系統安全：\n- 將不會下載任何檔案\n- 更新已取消\n\n建議聯絡開發者確認 Release 是否包含 digest 資訊",
@@ -332,8 +348,7 @@ del "%~f0"
                     logger.info("[開始下載] 確認有 digest 可驗證，現在開始安全下載安裝程式")
                 except Exception:
                     logger.exception("[安全檢查錯誤] 在查詢 digest 時發生錯誤，為避免風險將中止更新")
-                    TaskUtils.call_on_ui(
-                        parent,
+                    run_on_ui_thread(
                         lambda: UIUtils.show_message(
                             "安全驗證錯誤",
                             "在線上查詢 digest 驗證資訊時發生錯誤\n\n為了您的系統安全：\n- 將不會下載任何檔案\n- 更新已取消",
@@ -354,7 +369,7 @@ del "%~f0"
                     nonlocal download_failure_reason
                     download_failure_reason = message
 
-                if HTTPUtils.download_file(
+                if HTTPClient.download_file(
                     download_url,
                     str(dest),
                     failure_message_callback=_capture_download_failure,
@@ -370,22 +385,20 @@ del "%~f0"
                     if not installer_started:
                         logger.info("更新未套用，更新流程已取消")
                         _cleanup_temp_files(temp_files_to_cleanup)
-                        TaskUtils.call_on_ui(
-                            parent,
+                        run_on_ui_thread(
                             lambda: UIUtils.show_message(
                                 "更新已取消",
-                                "套用更新已取消，程式將繼續執行請稍後重試或手動從 GitHub Releases 下載",
+                                "套用更新已取消，程式將繼續執行。請稍後重試或手動從 GitHub Releases 下載。",
                                 parent=parent,
                                 message_level="info",
                             ),
                         )
                         return
-                    logger.info("更新腳本已啟動（獨立進程）")
+                    logger.info("更新腳本已啟動（獨立行程）")
                     if dest in temp_files_to_cleanup:
                         temp_files_to_cleanup.remove(dest)
                     _cleanup_temp_files(temp_files_to_cleanup)
-                    TaskUtils.call_on_ui(
-                        parent,
+                    run_on_ui_thread(
                         lambda: UIUtils.show_message(
                             "更新準備就緒",
                             "更新腳本已啟動\n\n程式即將自動關閉並在背景替換為新版本\n替換完成後將自動重新啟動",
@@ -398,22 +411,26 @@ del "%~f0"
                 else:
                     failure_message = download_failure_reason or "無法下載安裝程式"
                     logger.warning(f"[下載失敗] {failure_message}")
-                    TaskUtils.call_on_ui(
-                        parent,
+                    run_on_ui_thread(
                         lambda: UIUtils.show_message("下載失敗", failure_message, parent=parent, message_level="error"),
                     )
                     _cleanup_temp_files(temp_files_to_cleanup)
                     return
-                UpdateChecker._graceful_exit(parent)
+                UpdateChecker._exit(parent)
             except Exception as e:
                 logger.exception(f"更新檢查失敗: {e}")
                 error_msg = str(e)
-                TaskUtils.call_on_ui(
-                    parent,
+                run_on_ui_thread(
                     lambda: UIUtils.show_message(
                         "更新檢查失敗", f"無法完成更新檢查或下載：{error_msg}", parent=parent, message_level="error"
                     ),
                 )
                 _cleanup_temp_files(temp_files_to_cleanup)
 
-        TaskUtils.run_async(_work)
+        if work_scope is not None:
+            work_scope.submit(_work, key="app_update_check", replace=True)
+        else:
+            run_in_background(_work)
+
+
+__all__ = ["UpdateChecker"]

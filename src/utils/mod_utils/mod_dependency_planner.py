@@ -5,9 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ...models import DependencyPlanHooks, OnlineModVersion, ResolvedDependencyReference
-from .dependency_plan_serializer import OnlineDependencyInstallPlan
-from .modrinth_query_utils import (
+from src.models import DependencyPlanHooks, OnlineDependencyInstallPlan, OnlineModVersion, ResolvedDependencyReference
+from src.utils import (
     apply_loader_specific_dependency_override,
     clean_api_identifier,
     normalize_identifier,
@@ -29,7 +28,7 @@ def resolve_dependency_reference(
         dependency: 原始依賴資料
         dependency_names: 依賴名稱快取（key 為 normalize 後 project id）
         version_details_cache: 版本詳情快取，避免重複查詢 version id
-        get_mod_version_details: 依 version id 取得 `(project_id, version)` 的函式
+        get_mod_version_details: 依 version id 取得 (project_id, version) 的函式
         fetch_project_name: 依 project id 查詢專案名稱的函式
 
     Returns:
@@ -286,3 +285,6 @@ def expand_required_dependency_install_plan(
 
     initial_stack: set[str] = {normalized_root_project_id} if normalized_root_project_id else set()
     walk_dependencies(root_version, root_project_name or root_project_id or "根模組", 0, initial_stack)
+
+
+__all__ = ["expand_required_dependency_install_plan", "resolve_dependency_reference"]

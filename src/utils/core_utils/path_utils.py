@@ -3,26 +3,26 @@
 提供專案中的路徑處理與檔案操作輔助函式
 """
 
-import ctypes
-import datetime
-import hashlib
-import json
+from __future__ import annotations
+
 import os
 import shutil
 import sys
 import threading
-import time
 import zipfile
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
-from ...core.exceptions import ArchiveSecurityError
-from .atomic_writer import atomic_write_bytes, atomic_write_json, atomic_write_text
-from .logger import get_logger
+import orjson
 
-_windll = getattr(ctypes, "windll", None)
+from src.utils import (
+    ArchiveSecurityError,
+    atomic_write_json,
+    atomic_write_text,
+    get_logger,
+)
+
 logger = get_logger().bind(component="PathUtils")
 
 
@@ -34,8 +34,6 @@ class PathUtils:
     SAFE_ZIP_MAX_COMPRESSION_RATIO: ClassVar[int] = 200
     _json_lock_registry_lock = threading.Lock()
     _json_path_locks: ClassVar[dict[str, threading.RLock]] = {}
-    _json_write_retry_count = 3
-    _json_write_retry_delay_sec = 0.03
 
     @staticmethod
     def best_effort_sync_dir(path: Path) -> None:
@@ -67,7 +65,7 @@ class PathUtils:
 
     @staticmethod
     def _get_json_path_lock(path: Path | str) -> threading.RLock:
-        """取得 JSON 路徑專用鎖，避免同進程併發覆寫"""
+        """取得 JSON 路徑專用鎖，避免同行程併發覆寫"""
         key = PathUtils._normalize_lock_key(path)
         with PathUtils._json_lock_registry_lock:
             lock = PathUtils._json_path_locks.get(key)
@@ -77,8 +75,19 @@ class PathUtils:
             return lock
 
     @staticmethod
-    def _save_json_internal(path: Path | str, data: Any, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
-        """JSON 寫入核心：使用路徑專屬鎖後呼叫統一的 atomic_write_json"""
+    def save_json_internal(path: Path | str, data: Any, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
+        """
+        JSON 寫入核心：使用路徑專屬鎖後呼叫統一的 atomic_write_json
+
+        Args:
+            path: 要寫入的 JSON 檔案路徑
+            data: 要寫入的資料
+            indent: JSON 格式化縮排
+            skip_if_unchanged: 是否在內容未變更時略過寫入
+
+        Returns:
+            寫入成功回傳 True，否則回傳 False
+        """
         try:
             p = Path(path)
             p.parents[0].mkdir(parents=True, exist_ok=True)
@@ -88,13 +97,13 @@ class PathUtils:
                 if ok:
                     PathUtils.best_effort_sync_dir(p.parents[0])
                 return bool(ok)
-        except (OSError, TypeError, ValueError) as _:
+        except OSError, TypeError, ValueError:
             return False
 
     @staticmethod
     def is_path_within(base_dir: Path, target_path: Path, *, strict: bool = True) -> bool:
         """
-        檢查 `target_path` 是否位於 `base_dir` 之下
+        檢查 target_path 是否位於 base_dir 之下
 
         Args:
             base_dir: 基準目錄
@@ -165,21 +174,6 @@ class PathUtils:
             raise ArchiveSecurityError(f"壓縮檔成員壓縮比例過高: {member.filename}")
 
     @staticmethod
-    def sanitize_filename(filename: str) -> str:
-        """
-        取得傳入字串的安全檔名（basename）
-
-        Args:
-            filename: 原始檔名字串
-        Returns:
-            安全的檔名，若無法解析則回傳空字串
-        """
-        try:
-            return Path(str(filename or "")).name
-        except Exception:
-            return ""
-
-    @staticmethod
     def safe_extract_zip(
         zip_path: Path,
         dest_dir: Path,
@@ -195,8 +189,7 @@ class PathUtils:
         Args:
             zip_path: Zip 檔案路徑
             dest_dir: 解壓縮目的地
-            progress_callback: 進度回呼，接收 `(已處理位元組數, 總位元組數)`
-            progress_callback 會收到 (已解壓位元組數, 總位元組數)
+            progress_callback: 進度回呼，接收 (已處理位元組數, 總位元組數)
             max_total_uncompressed_bytes: 最大解壓縮總位元組數，超過則拋出 ArchiveSecurityError
             max_member_uncompressed_bytes: 最大單一成員解壓縮位元組數，超過則拋出 ArchiveSecurityError
             max_compression_ratio: 最大壓縮比例，超過則拋出 ArchiveSecurityError
@@ -259,11 +252,11 @@ class PathUtils:
     @staticmethod
     def get_project_root() -> Path:
         """
-        獲取專案根目錄的絕對路徑
+        取得專案根目錄的絕對路徑
 
-        優先沿著目前模組位置向上尋找 `pyproject.toml`，這樣即使本檔案
-        被搬到不同子目錄，仍可正確定位專案根目錄若為 frozen 執行，
-        則退回可執行檔所在目錄
+        優先沿著目前模組位置向上尋找 pyproject.toml，這樣即使本檔案
+        被搬到不同子目錄，仍可正確定位專案根目錄
+        若為 frozen 執行，則退回可執行檔所在目錄
 
         Returns:
             專案根目錄的絕對 Path
@@ -277,16 +270,6 @@ class PathUtils:
                 return parent
 
         return current.parents[3]
-
-    @staticmethod
-    def get_assets_path() -> Path:
-        """
-        獲取 assets 目錄路徑
-
-        Returns:
-            專案 assets 目錄的絕對 Path
-        """
-        return PathUtils.get_project_root() / "assets"
 
     @staticmethod
     def load_json(path: Path | str, default: Any = None) -> Any:
@@ -304,72 +287,9 @@ class PathUtils:
             p = Path(path)
             if not p.exists():
                 return default
-            with p.open(encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+            return orjson.loads(p.read_bytes())
+        except OSError, orjson.JSONDecodeError:
             return default
-
-    @staticmethod
-    def save_json(path: Path | str, data: Any, indent: int = 2) -> bool:
-        """
-        安全寫入 JSON 檔案
-
-        Args:
-            path: JSON 檔案路徑
-            data: 要寫入的資料
-            indent: JSON 縮排層級
-
-        Returns:
-            若寫入成功則回傳 True，否則回傳 False
-        """
-        return PathUtils._save_json_internal(path, data, indent=indent, skip_if_unchanged=False)
-
-    @staticmethod
-    def save_json_if_changed(path: Path | str, data: Any, indent: int = 2) -> bool:
-        """
-        僅在內容異動時才寫入 JSON
-
-        Args:
-            path: JSON 檔案路徑
-            data: 要寫入的資料
-            indent: JSON 縮排層級
-
-        Returns:
-            若寫入成功或內容未變更則回傳 True，否則回傳 False
-        """
-        return PathUtils._save_json_internal(path, data, indent=indent, skip_if_unchanged=True)
-
-    @staticmethod
-    def read_json_from_zip(zip_path: Path | str, internal_path: str) -> Any | None:
-        """
-        從 Zip 檔案中讀取 JSON
-
-        Args:
-            zip_path: Zip 檔案路徑
-            internal_path: Zip 內部檔案路徑
-
-        Returns:
-            解析後的 JSON 內容，找不到或失敗時回傳 None
-        """
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                sanitized = PathUtils._sanitize_archive_member_name(internal_path)
-                if sanitized is None:
-                    return None
-                member_name = "/".join(sanitized.parts)
-                if member_name in zf.namelist():
-                    with zf.open(member_name) as f:
-                        return json.load(f)
-        except (zipfile.BadZipFile, OSError, json.JSONDecodeError) as exc:
-            logger.debug(
-                "從 Zip 檔案讀取 JSON 失敗",
-                zip_path=str(zip_path),
-                internal_path=internal_path,
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-            return None
-        return None
 
     @staticmethod
     def to_json_str(data: Any, indent: int | None = None) -> str:
@@ -384,54 +304,11 @@ class PathUtils:
             JSON 字串，失敗時回傳空字串
         """
         try:
-            return json.dumps(data, indent=indent, ensure_ascii=False)
-        except (TypeError, ValueError) as _:
+            opt = orjson.OPT_INDENT_2 if indent == 2 else 0
+            opt |= orjson.OPT_NON_STR_KEYS
+            return orjson.dumps(data, option=opt).decode("utf-8")
+        except TypeError:
             return ""
-
-    @staticmethod
-    def from_json_str(json_str: str) -> Any:
-        """
-        從 JSON 字串解析資料
-
-        Args:
-            json_str: JSON 文字
-
-        Returns:
-            解析後的資料，失敗時回傳 None
-        """
-        try:
-            return json.loads(json_str)
-        except (json.JSONDecodeError, TypeError, ValueError) as _:
-            return None
-
-    @staticmethod
-    def _file_io_operation(path: Path, operation: str, **kwargs) -> Any:
-        """通用的檔案 I/O 操作（內部使用）"""
-        try:
-            if operation == "read_text":
-                if not path.exists():
-                    return None
-                encoding = kwargs.get("encoding", "utf-8")
-                errors = kwargs.get("errors", "replace")
-                return path.read_text(encoding=encoding, errors=errors)
-            if operation == "write_text":
-                path.parents[0].mkdir(parents=True, exist_ok=True)
-                content = kwargs.get("content", "")
-                encoding = kwargs.get("encoding", "utf-8")
-                errors = kwargs.get("errors")
-                return atomic_write_text(path, content, encoding=encoding, errors=errors)
-            if operation == "read_bytes":
-                if not path.exists():
-                    return None
-                return path.read_bytes()
-            if operation == "write_bytes":
-                path.parents[0].mkdir(parents=True, exist_ok=True)
-                content = kwargs.get("content", b"")
-                return atomic_write_bytes(path, content)
-        except OSError:
-            return None if operation.startswith("read") else False
-        else:
-            raise ValueError(f"Unknown operation: {operation}")
 
     @staticmethod
     def read_text_file(path: Path, encoding: str = "utf-8", errors: str = "replace") -> str | None:
@@ -446,7 +323,12 @@ class PathUtils:
         Returns:
             讀取到的文字內容，失敗時回傳 None
         """
-        return PathUtils._file_io_operation(path, "read_text", encoding=encoding, errors=errors)
+        try:
+            if not path.exists():
+                return None
+            return path.read_text(encoding=encoding, errors=errors)
+        except OSError:
+            return None
 
     @staticmethod
     def write_text_file(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
@@ -466,36 +348,6 @@ class PathUtils:
             return atomic_write_text(path, content, encoding=encoding, errors=errors)
         except OSError:
             return False
-
-    @staticmethod
-    def ensure_dir_exists(path: Path) -> bool:
-        """
-        確保目錄存在，不存在則建立
-
-        Args:
-            path: 目錄路徑
-
-        Returns:
-            若建立成功則回傳 True，否則回傳 False
-        """
-        try:
-            path.mkdir(parents=True, exist_ok=True)
-            return True
-        except OSError:
-            return False
-
-    @staticmethod
-    def read_bytes_file(path: Path) -> bytes | None:
-        """
-        讀取二進位檔案
-
-        Args:
-            path: 檔案路徑
-
-        Returns:
-            檔案位元組內容，失敗時回傳 None
-        """
-        return PathUtils._file_io_operation(path, "read_bytes")
 
     @staticmethod
     def delete_path(path: Path | str) -> bool:
@@ -526,7 +378,7 @@ class PathUtils:
     @staticmethod
     def delete_within(base_dir: Path | str, path: Path | str) -> bool:
         """
-        僅在 `path` 位於 `base_dir` 之下時才刪除
+        僅在 path 位於 base_dir 之下時才刪除
 
         Args:
             base_dir: 允許刪除的根目錄
@@ -568,7 +420,7 @@ class PathUtils:
     @staticmethod
     def move_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
         """
-        僅在來源與目的地都位於 `base_dir` 之下時才搬移
+        僅在來源與目的地都位於 base_dir 之下時才搬移
 
         Args:
             base_dir: 允許搬移的根目錄
@@ -593,12 +445,13 @@ class PathUtils:
     @staticmethod
     def replace_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
         """
-        僅在來源與目的地都位於 `base_dir` 之下時才以原子替換檔案
+        僅在來源與目的地都位於 base_dir 之下時才以原子替換檔案
 
         Args:
             base_dir: 允許操作的根目錄
             src: 來源檔案路徑
             dst: 目的地檔案路徑
+
         Returns:
             若替換成功則回傳 True，否則回傳 False
         """
@@ -620,7 +473,8 @@ class PathUtils:
 
     @staticmethod
     def copy_file(src: Path, dst: Path) -> bool:
-        """複製檔案
+        """
+        複製檔案
 
         Args:
             src: 來源檔案路徑
@@ -652,9 +506,7 @@ class PathUtils:
             src: 來源目錄
             dst: 目的地目錄
             ignore_patterns: 要忽略的樣式列表
-            progress_callback: 進度回呼，接收 `(已複製檔案數, 總檔案數)`
-
-        progress_callback 會收到 (已複製檔案數, 總檔案數)
+            progress_callback: 進度回呼，接收 (已複製檔案數, 總檔案數)
 
         Returns:
             若複製成功則回傳 True，否則回傳 False
@@ -711,254 +563,5 @@ class PathUtils:
         """
         return shutil.which(name)
 
-    @staticmethod
-    def get_long_path(path: Path | str) -> Path:
-        """
-        將 Windows 的短路徑（8.3 格式）展開為完整長路徑
 
-        Args:
-            path: 原始路徑
-
-        Returns:
-            展開後的長路徑；失敗時回傳原始 Path
-        """
-        try:
-            p_obj = Path(path)
-            p_str = str(p_obj)
-            if _windll is None:
-                return p_obj
-            GetLongPathNameW = _windll.kernel32.GetLongPathNameW
-            GetLongPathNameW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
-            GetLongPathNameW.restype = ctypes.c_uint
-            buf_len = 260
-            while True:
-                buf = ctypes.create_unicode_buffer(buf_len)
-                needed = GetLongPathNameW(p_str, buf, buf_len)
-                if needed == 0:
-                    return p_obj
-                if needed > buf_len:
-                    buf_len = needed
-                    continue
-                return Path(buf.value)
-        except (OSError, AttributeError) as _:
-            return Path(path)
-
-    @staticmethod
-    def mark_issue(path: Path | str, reason: str, details: Any | None = None) -> bool:
-        """
-        在專案根目錄下的 `.issues/` 中建立或更新聚合的 issue marker
-
-                Args:
-                        path: 原始檔案路徑
-                        reason: issue 原因
-                        details: 額外細節資訊
-
-        行為：
-        - 針對同一個原始檔案（原始路徑相同）會聚合至同一份 JSON 檔，位於
-          `<project>/.issues/<relative_path>/<filename>.issue.json`
-        - 若原始檔不在專案根目錄下，會放在 `<project>/.issues/external/<name>.<sha256>.issue.json`
-        - 每個 marker 檔案包含 `path` (原始路徑) 與 `entries` (issue 列表)，新的 issue 會附加到 `entries`
-
-        這樣可減少檔案數量，且利於集中清理、UI 掃描與 TTL 管理
-
-        Returns:
-            若建立或更新成功則回傳 True，否則回傳 False
-        """
-        try:
-            p = Path(path)
-            project_root = PathUtils.get_project_root()
-            issues_root = project_root / ".issues"
-            issues_root.mkdir(parents=True, exist_ok=True)
-
-            try:
-                rel = p.relative_to(project_root)
-                agg_dir = issues_root / rel.parents[0]
-                agg_dir.mkdir(parents=True, exist_ok=True)
-                agg_marker = agg_dir / f"{rel.name}.issue.json"
-            except ValueError:
-                key = hashlib.sha256(str(p).encode("utf-8")).hexdigest()
-                ext_dir = issues_root / "external"
-                ext_dir.mkdir(parents=True, exist_ok=True)
-                agg_marker = ext_dir / f"{p.name}.{key}.issue.json"
-
-            now = int(time.time())
-            now_fmt = datetime.datetime.fromtimestamp(now).strftime("%Y-%m-%d-%H-%M-%S")
-            exc_type = ""
-            if isinstance(details, dict):
-                exc_type = str(details.get("exception_type") or "")
-            elif isinstance(details, BaseException):
-                exc_type = type(details).__name__
-                details = {"exception_type": exc_type}
-
-            entry = {
-                "timestamp": now,
-                "timestamp_fmt": now_fmt,
-                "reason": str(reason),
-                "details": details if details is not None else "",
-                "exception_type": exc_type,
-            }
-
-            lock = PathUtils._get_json_path_lock(agg_marker)
-            with lock:
-                existing: dict[str, Any] | None = None
-                if agg_marker.exists():
-                    try:
-                        with agg_marker.open(encoding="utf-8") as f:
-                            loaded = json.load(f)
-                        if isinstance(loaded, dict):
-                            existing = loaded
-                    except (OSError, json.JSONDecodeError) as _:
-                        existing = None
-                if not existing or not isinstance(existing, dict):
-                    payload = {"path": str(p), "entries": [entry], "last_updated": now}
-                else:
-                    entries_raw = existing.get("entries")
-                    entries: list[Any] = cast(list[Any], entries_raw) if isinstance(entries_raw, list) else []
-                    entries.append(entry)
-                    existing["entries"] = entries
-                    existing["last_updated"] = now
-                    payload = existing
-
-                ok = PathUtils._save_json_internal(agg_marker, payload, indent=2, skip_if_unchanged=False)
-                if not ok:
-                    logger.debug(f"建立或更新聚合 issue marker 失敗: {agg_marker}")
-                return bool(ok)
-        except Exception as e:
-            logger.debug(f"建立聚合 issue marker 發生錯誤: {path} | {e}")
-            return False
-
-    @staticmethod
-    def list_issue_markers(root: Path | str | None = None) -> list[dict]:
-        """
-        列出集中儲存的聚合 issue marker
-
-        Args:
-            root: 掃描根目錄；未提供時預設為專案根目錄
-
-        Returns:
-            由 marker 路徑與內容組成的清單
-
-        若 `root` 為 None，預設掃描專案根目錄下的 `.issues/`
-        回傳格式：[{"marker": "<path>", "data": {...}}, ...]
-        """
-        try:
-            root_path = Path(root) if root is not None else PathUtils.get_project_root()
-            issues_root = root_path / ".issues"
-            markers: list[dict] = []
-            if not issues_root.exists():
-                return markers
-            for p in set(issues_root.rglob("*.issue.json")).union(issues_root.rglob(".*.issue.json")):
-                try:
-                    with p.open(encoding="utf-8") as f:
-                        data = json.load(f)
-                except (OSError, json.JSONDecodeError) as _:
-                    data = None
-                markers.append({"marker": str(p), "data": data})
-            return markers
-        except OSError:
-            return []
-
-    @staticmethod
-    def recover_issue_marker(marker_path: Path | str, remove_marker: bool = True) -> bool:
-        """
-        嘗試從標記檔回復/清理
-
-        Args:
-            marker_path: 標記檔或原始檔路徑
-            remove_marker: 是否在成功時刪除 marker
-
-        Returns:
-            若成功找到並處理 marker 則回傳 True，否則回傳 False
-
-        - 如果標記檔存在且 remove_marker=True，會刪除該標記（因為原始檔仍保留）
-        - 若需要更進一步的自動復原（例如移動檔案），應在外層實作並在執行前徵求使用者同意
-        此方法設計為非破壞性（只移除標記），避免在自動化時造成檔案遺失
-        """
-        try:
-            p = Path(marker_path)
-            project_root = PathUtils.get_project_root()
-            issues_root = project_root / ".issues"
-
-            if p.exists() and issues_root in p.parents:
-                if remove_marker:
-                    p.unlink()
-                return True
-
-            try:
-                rel = Path(p).relative_to(project_root)
-                candidate = issues_root / rel.parents[0] / f"{rel.name}.issue.json"
-            except ValueError:
-                key = hashlib.sha256(str(p).encode("utf-8")).hexdigest()
-                candidate = issues_root / "external" / f"{p.name}.{key}.issue.json"
-
-            if candidate.exists():
-                if remove_marker:
-                    candidate.unlink()
-                return True
-            return False
-        except OSError:
-            return False
-
-    @staticmethod
-    def auto_prune_markers(root: Path | str | None = None, max_age_days: int = 365) -> list[str]:
-        """
-        針對集中式聚合 markers 執行過期清理與條目修剪
-
-        Args:
-            root: 掃描根目錄；未提供時預設為專案根目錄
-            max_age_days: 保留天數上限
-
-        規則（保守）：針對每個聚合檔案，會移除 entries 中 timestamp 早於 cutoff 的項目；
-        若 entries 被清空且原始檔不存在，則刪除整個聚合檔
-
-        Returns:
-            被移除或更新的聚合檔路徑清單
-        回傳被移除的聚合檔路徑清單
-        """
-        removed: list[str] = []
-        try:
-            root_path = Path(root) if root is not None else PathUtils.get_project_root()
-            issues_root = root_path / ".issues"
-            if not issues_root.exists():
-                return removed
-            cutoff = time.time() - max_age_days * 24 * 3600
-            for p in issues_root.rglob("*.issue.json"):
-                try:
-                    st = p.stat()
-                except OSError:
-                    continue
-                try:
-                    with p.open(encoding="utf-8") as f:
-                        data = json.load(f)
-                except (OSError, json.JSONDecodeError) as _:
-                    data = None
-                if not data or not isinstance(data, dict):
-                    if st.st_mtime < cutoff:
-                        try:
-                            p.unlink()
-                            removed.append(str(p))
-                        except OSError:
-                            continue
-                    continue
-
-                entries_raw = data.get("entries")
-                entries: list[Any] = cast(list[Any], entries_raw) if isinstance(entries_raw, list) else []
-                new_entries = [e for e in entries if isinstance(e, dict) and int(e.get("timestamp", 0)) >= cutoff]
-                if len(new_entries) != len(entries):
-                    if new_entries:
-                        data["entries"] = new_entries
-                        data["last_updated"] = int(time.time())
-                        with suppress(Exception):
-                            PathUtils._save_json_internal(p, data, indent=2, skip_if_unchanged=False)
-                    else:
-                        path_val = data.get("path", "")
-                        orig = Path(path_val).resolve() if isinstance(path_val, str) and path_val else None
-                        if orig is None or not orig.exists():
-                            try:
-                                p.unlink()
-                                removed.append(str(p))
-                            except OSError:
-                                continue
-            return removed
-        except OSError:
-            return removed
+__all__ = ["PathUtils"]

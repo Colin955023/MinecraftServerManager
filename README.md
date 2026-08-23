@@ -16,9 +16,9 @@ Windows 上的 Minecraft 伺服器 GUI 管理工具。從建立伺服器、啟�
 ## 功能特色
 
 - **建立伺服器** — Vanilla／Fabric／Forge／Quilt／NeoForge 精靈式設定流程
-- **JVM 參數最佳化** — 支援 Java 21+ ZGC 及 Java 8/16/17 G1GC 的自動優化與視覺化設定
+- **JVM 參數最佳化** — 支援 Java 21+ ZGC 及 Java 8/16/17 G1GC 的自動最佳化與視覺化設定
 - **Java 管理** — 自動偵測已安裝 Java，缺少時可引導 winget 或手動安裝
-- **即時監控** — 控制台輸出、記憶體、運行狀態與玩家資訊集中顯示
+- **即時監控** — 控制台輸出、記憶體、運作狀態與玩家資訊集中顯示
 - **模組管理** — 本地掃描 + Modrinth 線上搜尋，線上安裝前 Review 確認
 - **模組更新** — Hash-first 批次比對，相依套件自動規劃
 - **匯入伺服器** — 掃描既有資料夾或壓縮檔快速匯入
@@ -82,14 +82,14 @@ uv run report\comprehensive_report.py
 
 ```
 src/
-  core/      核心邏輯（載入器管理、伺服器控制、模組協調與 Modrinth 搜尋服務）
+  core/      核心邏輯（CreateServerJourney、ServerInstance、模組協調、Modrinth）
   models/    資料模型
-  ui/        主視窗、功能分頁、對話框、模組管理介面、監控視窗與協調服務
-  utils/     共用基礎設施（設定、HTTP、日誌、視窗管理、Java 支援、更新檢查）
-docs/        文件
+  ui/        主視窗、分頁、對話框、模組 Session/ops、監控與 UIWorkScope 協調
+  utils/     基礎設施（設定、HTTP、日誌、UIWorkScope、Java、更新檢查）
+docs/        使用者手冊、技術手冊
 tests/       自動化測試
 scripts/     建置與品質腳本
-report/      產生綜合報告的腳本與輸出
+report/      綜合報告腳本與輸出
 ```
 
 ---

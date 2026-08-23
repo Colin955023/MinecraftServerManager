@@ -41,7 +41,7 @@ jobs:
 
       - name: Run Bandit security scan
         run: |
-          uv run bandit -r src tests -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
+          uv run bandit -r src tests scripts report -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
 
       - name: Upload Bandit SARIF
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -74,7 +74,7 @@ jobs:
 
       - name: Run detect-secrets privacy scan
         run: |
-          EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.github|\.tox)'
+          EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.mypy_cache|\.ruff_cache|\.import_linter_cache|build|dist|\.tox)'
           if [ -f .secrets.baseline ]; then
             uv run detect-secrets scan --baseline .secrets.baseline --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
           else
@@ -108,13 +108,21 @@ jobs:
           uv-groups: '--group lint --group typecheck'
 
       - name: Run Ruff (Lint & Format)
-        run: uv run ruff check src tests && uv run ruff format --check src tests
+        run: uv run ruff check src tests scripts report && uv run ruff format --check src tests scripts report
 
       - name: Run mypy
-        run: uv run mypy src tests
+        run: uv run mypy
 
       - name: Run Pylint (cyclic import check)
         run: uv run pylint --disable=all --enable=cyclic-import src
+
+      - name: Run import architecture checks
+        run: |
+          uv run lint-imports
+          uv run python scripts/check_import_boundaries.py
+
+      - name: Compile first-party Python sources
+        run: uv run python -m compileall -q src tests scripts report
 
   test:
     name: CI-Tests / test

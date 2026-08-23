@@ -3,13 +3,14 @@
 集中處理版本字串、Release 資訊與更新資產選擇邏輯
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import Any, ClassVar
+from typing import Any
 
 from packaging.version import Version
 
-from .. import HTTPUtils, get_logger
-from ..core_utils.version_utils import parse_version_safe
+from src.utils import HTTPClient, get_logger, parse_version_safe
 
 logger = get_logger().bind(component="UpdateParsing")
 
@@ -18,7 +19,6 @@ class UpdateParsing:
     """更新資訊解析與更新資源選擇邏輯"""
 
     _GITHUB_API = "https://api.github.com"
-    _HEX_CHARS: ClassVar[frozenset[str]] = frozenset("0123456789abcdefABCDEF")
 
     @staticmethod
     @lru_cache(maxsize=256)
@@ -30,7 +30,7 @@ class UpdateParsing:
             version_str: 原始版本字串
 
         Returns:
-            解析後的 `Version`，失敗時回傳 None
+            解析後的 Version，失敗時回傳 None
         """
         if not isinstance(version_str, str) or not version_str.strip():
             logger.warning(f"無效的版本字串，version_str={version_str!r}")
@@ -54,7 +54,7 @@ class UpdateParsing:
             最新 release 資料，找不到時回傳 None
         """
         url = f"{UpdateParsing._GITHUB_API}/repos/{owner}/{repo}/releases"
-        data = HTTPUtils.get_json(url, timeout=15)
+        data = HTTPClient.fetch_json(url, timeout=30)
         if not data or isinstance(data, dict):
             return None
         for rel in data:
@@ -121,7 +121,11 @@ class UpdateParsing:
         """檢查 token 是否為指定長度的十六進位雜湊字串"""
         if len(token) != expected_length:
             return False
-        return all(ch in UpdateParsing._HEX_CHARS for ch in token)
+        try:
+            bytes.fromhex(token)
+            return True
+        except ValueError:
+            return False
 
     @staticmethod
     def parse_asset_digest(asset: dict[str, Any]) -> tuple[str, str] | None:
@@ -132,7 +136,7 @@ class UpdateParsing:
             asset: GitHub release asset 資料
 
         Returns:
-            `(algorithm, checksum)`，無法解析時回傳 None
+            (algorithm, checksum)，無法解析時回傳 None
         """
         digest = (asset.get("digest") or "").strip()
         if not digest:
@@ -145,3 +149,6 @@ class UpdateParsing:
         if algorithm == "sha256" and UpdateParsing._is_hex_hash(checksum, 64):
             return (algorithm, checksum)
         return None
+
+
+__all__ = ["UpdateParsing"]

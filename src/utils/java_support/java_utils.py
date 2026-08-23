@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import threading
 from contextlib import suppress
 from pathlib import Path
 from typing import ClassVar
 
-from .. import HTTPUtils, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger, get_shared_manager
-from .java_downloader import JavaDownloader
+from src.utils import HTTPClient, JavaDownloader, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -26,6 +26,7 @@ class JavaUtils:
         "C:\\\\Program Files (x86)\\\\Java",
         "C:\\\\Program Files\\\\Microsoft",
     ]
+    JAVA_EXECUTABLE_NAMES: ClassVar[frozenset[str]] = frozenset({"java", "java.exe", "javaw", "javaw.exe"})
     ENV_VARS: ClassVar[list[str]] = ["JAVA_HOME"]
     JAVA_CACHE_FILE_NAME: ClassVar[str] = "java_candidates_cache.json"
     _java_cache_lock: ClassVar[threading.Lock] = threading.Lock()
@@ -34,22 +35,34 @@ class JavaUtils:
     @staticmethod
     def get_java_version(java_path: str) -> int | None:
         """
-        取得指定 `javaw.exe` 的主要版本號
+        取得指定 javaw.exe 的主要版本號
 
         Args:
-            java_path: `javaw.exe` 的完整路徑
+            java_path: javaw.exe 的完整路徑
 
         Returns:
             Java major 版本，找不到或解析失敗時回傳 None
         """
         try:
+            target_path = Path(java_path)
+            exec_path = str(target_path)
+            if target_path.name.lower() == "javaw.exe":
+                console_exe = target_path.with_name("java.exe")
+                if console_exe.exists():
+                    exec_path = str(console_exe)
+            elif target_path.name.lower() == "javaw":
+                console_bin = target_path.with_name("java")
+                if console_bin.exists():
+                    exec_path = str(console_bin)
+
             res = SubprocessUtils.run_checked(
-                [java_path, "-version"],
+                [exec_path, "-version"],
                 stdin=SubprocessUtils.DEVNULL,
                 stdout=SubprocessUtils.PIPE,
                 text=True,
                 stderr=SubprocessUtils.STDOUT,
                 check=True,
+                timeout=5,
             )
             out = res.stdout or ""
             m = re.search('version "(\\d+)\\.(\\d+)', out)
@@ -67,7 +80,7 @@ class JavaUtils:
 
     @staticmethod
     def _get_java_cache_path() -> Path:
-        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir()) / JavaUtils.JAVA_CACHE_FILE_NAME
+        return RuntimePaths.ensure_dir(RuntimePaths.get_version_cache_dir()) / JavaUtils.JAVA_CACHE_FILE_NAME
 
     @staticmethod
     def _load_java_candidates_from_cache() -> list[tuple[str, int]] | None:
@@ -125,19 +138,9 @@ class JavaUtils:
                     search_paths.add(str(java_bin))
         candidates: list[tuple[str, int]] = []
         candidate_paths: set[Path] = set()
-        try:
-            where_path = PathUtils.find_executable("where")
-            if where_path:
-                result = SubprocessUtils.run_checked(
-                    [where_path, "javaw"], stdin=SubprocessUtils.DEVNULL, capture_output=True, text=True, check=False
-                )
-                if result.returncode == 0:
-                    for java_path_str in (result.stdout or "").strip().splitlines():
-                        java_path_obj = Path(java_path_str)
-                        if java_path_obj.name.lower() == "javaw.exe":
-                            candidate_paths.add(java_path_obj)
-        except Exception as e:
-            logger.exception(f"搜尋 Java 失敗: {e}")
+        javaw_which = shutil.which("javaw")
+        if javaw_which:
+            candidate_paths.add(Path(javaw_which))
         for p_str in search_paths:
             search_path_obj = Path(p_str).resolve()
             javaw_exe = search_path_obj / "javaw.exe"
@@ -145,16 +148,13 @@ class JavaUtils:
                 candidate_paths.add(javaw_exe)
         if not candidate_paths:
             return candidates
-        futures = [
-            get_shared_manager().run(JavaUtils._resolve_java_candidate, javaw_exe)
-            for javaw_exe in sorted(candidate_paths)
-        ]
-        for future in futures:
-            resolved_candidate = future.result()
-            if resolved_candidate:
-                candidates.append(resolved_candidate)
-        seen = set()
+        for javaw_exe in sorted(candidate_paths):
+            result = JavaUtils._resolve_java_candidate(javaw_exe)
+            if result:
+                candidates.append(result)
+        candidates.sort(key=lambda x: (x[1], x[0]), reverse=True)
         final_results = []
+        seen = set()
         for c_path, c_major in candidates:
             if (c_path, c_major) not in seen:
                 seen.add((c_path, c_major))
@@ -165,7 +165,7 @@ class JavaUtils:
             cached_items: list[dict[str, object]] = []
             for java_path_str, major in final_results:
                 cached_items.append({"path": java_path_str, "major": major})
-            PathUtils.save_json_if_changed(cache_path, {"candidates": cached_items})
+            PathUtils.save_json_internal(cache_path, {"candidates": cached_items}, skip_if_unchanged=True)
         else:
             with suppress(OSError):
                 if cache_path.exists():
@@ -186,18 +186,28 @@ class JavaUtils:
         return final_results
 
     @staticmethod
-    def _ensure_cache_exists(cache_path: Path):
-        """確保快取檔案存在且非空"""
+    def _ensure_cache_exists(cache_path: Path) -> None:
+        """確保快取檔案存在且非空，若不存在則嘗試下載 Mojang version manifest"""
+        legacy_path = RuntimePaths.get_cache_dir() / "mc_versions_cache.json"
+        if legacy_path.exists() and legacy_path != cache_path:
+            if not cache_path.exists() and legacy_path.stat().st_size > 0:
+                with suppress(Exception):
+                    legacy_path.rename(cache_path)
+            else:
+                with suppress(Exception):
+                    legacy_path.unlink(missing_ok=True)
+        if cache_path.exists() and cache_path.stat().st_size > 0:
+            return
+        manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+        try:
+            data = HTTPClient.fetch_json(manifest_url, timeout=10)
+            if data and isinstance(data, dict) and "versions" in data:
+                PathUtils.save_json_internal(cache_path, data["versions"])
+                return
+        except Exception as e:
+            logger.debug(f"無法自動下載 Mojang manifest: {e}")
         if not cache_path.exists() or cache_path.stat().st_size == 0:
-            try:
-                from ...core import LoaderManager
-
-                vm = LoaderManager()
-                vm.fetch_versions()
-            except Exception as e:
-                raise FileNotFoundError(f"找不到 {cache_path}，且自動建立快取失敗: {e}") from e
-            if not cache_path.exists() or cache_path.stat().st_size == 0:
-                raise FileNotFoundError(f"找不到 {cache_path} 或檔案為空")
+            raise FileNotFoundError(f"找不到版本快取 {cache_path}")
 
     @staticmethod
     def get_required_java_major(mc_version: str) -> int:
@@ -212,7 +222,7 @@ class JavaUtils:
         """
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
-        cache_path = RuntimePaths.get_cache_dir() / "mc_versions_cache.json"
+        cache_path = RuntimePaths.get_version_cache_dir() / "mc_versions_cache.json"
         JavaUtils._ensure_cache_exists(cache_path)
         data = PathUtils.load_json(cache_path)
         if data is None:
@@ -222,7 +232,7 @@ class JavaUtils:
         for v in data:
             if v.get("id") == mc_version and "url" in v:
                 url = v["url"]
-                ver_json = HTTPUtils.get_json(url, timeout=8)
+                ver_json = HTTPClient.fetch_json(url, timeout=10)
                 if ver_json:
                     java_info = ver_json.get("javaVersion")
                     if java_info and "majorVersion" in java_info:
@@ -240,10 +250,10 @@ class JavaUtils:
     @staticmethod
     def get_all_local_java_candidates() -> list:
         """
-        取得所有可用的 `javaw.exe` 路徑及其主要版本號列表
+        取得所有可用的 javaw.exe 路徑及其主要版本號列表
 
         Returns:
-            `javaw.exe` 路徑與 major 版本的配對清單
+            javaw.exe 路徑與 major 版本的配對清單
         """
         with JavaUtils._java_cache_lock:
             if JavaUtils._cached_java_candidates:
@@ -253,16 +263,12 @@ class JavaUtils:
         if cached_candidates:
             with JavaUtils._java_cache_lock:
                 JavaUtils._cached_java_candidates = list(cached_candidates)
-            logger.debug(f"使用快取的 Java 偵測結果：{len(cached_candidates)} 筆")
             return cached_candidates
 
         final_results = JavaUtils._scan_and_cache_local_java_candidates()
         if final_results:
             with JavaUtils._java_cache_lock:
                 JavaUtils._cached_java_candidates = list(final_results)
-        logger.debug(f"找到 {len(final_results)} 個 Java 執行檔選擇：")
-        for r_path, r_major in final_results:
-            logger.debug(f"  {r_path} -> {r_major}")
         return final_results
 
     @staticmethod
@@ -272,7 +278,7 @@ class JavaUtils:
         ask_download: bool = True,
     ) -> str | None:
         """
-        為指定 Minecraft 版本選擇最合適的 `javaw.exe` 路徑
+        為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑
 
         Args:
             mc_version: Minecraft 版本字串
@@ -280,7 +286,7 @@ class JavaUtils:
             ask_download: 找不到符合版本時是否詢問自動安裝
 
         Returns:
-            找到時回傳 `javaw.exe` 路徑，否則回傳 None
+            找到時回傳 javaw.exe 路徑，否則回傳 None
         """
         required_major = required_major if required_major else JavaUtils.get_required_java_major(mc_version)
         candidates = JavaUtils.get_all_local_java_candidates()
@@ -292,9 +298,9 @@ class JavaUtils:
             res = UIUtils.ask_yes_no_cancel(
                 "Java 未找到",
                 (
-                    f"未找到合適的 Java {required_major}是否由程式自動安裝 {vendor}？\n\n"
+                    f"未找到合適的 Java {required_major}。是否由程式自動安裝 {vendor}？\n\n"
                     "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
+                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑。"
                 ),
                 show_cancel=False,
             )
@@ -325,3 +331,6 @@ class JavaUtils:
                     message_level="info",
                 )
         return None
+
+
+__all__ = ["JavaUtils"]

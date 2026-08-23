@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ...models import ModrinthVersionLookupResult, OnlineModVersion
+if TYPE_CHECKING:
+    from src.models import ModrinthVersionLookupResult, OnlineModVersion
 
 SUPPORTED_MODRINTH_UPDATE_LOADERS: set[str] = {"fabric", "forge", "quilt", "neoforge"}
 
@@ -186,14 +187,16 @@ def build_local_mod_lookup_candidates(
 
 def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:
     """
-    將 Modrinth API 的版本資料轉為內部資料模型
+    將 Modrinth 版本 API payload 轉換為內部版本模型
 
     Args:
-        item: Modrinth 版本原始回應
+        item: Modrinth 版本 API 回應，包含版本號、loader、檔案與 dependency 欄位
 
     Returns:
-        轉換後的版本資料模型
+        填入 provider、版本資訊、檔案與 dependency 的 OnlineModVersion
     """
+    from src.models import OnlineModVersion
+
     game_versions = [str(v) for v in item.get("game_versions", []) if v]
     loaders = [str(v) for v in item.get("loaders", []) if v]
     version_number = str(item.get("version_number", "") or "")
@@ -217,16 +220,17 @@ def parse_modrinth_version_lookup_response(
     response: dict[str, Any] | None, algorithm: str
 ) -> dict[str, ModrinthVersionLookupResult]:
     """
-    將 Modrinth 雜湊查詢回應轉為 lookup 結果
+    將 Modrinth 以雜湊查詢的回應轉成 lookup result 對照表
 
     Args:
-        response: Modrinth API 雜湊查詢回應
-        algorithm: 雜湊演算法名稱
+        response: Modrinth 雜湊查詢 API 回應；None 表示查詢沒有結果
+        algorithm: 查詢使用的雜湊演算法名稱，例如 sha1 或 sha512
 
     Returns:
-        以雜湊值為 key 的 lookup 結果表
+        以雜湊值為 key、ModrinthVersionLookupResult 為 value 的字典
     """
-    from .mod_version_filtering import normalize_hash_algorithm
+    from src.models import ModrinthVersionLookupResult
+    from src.utils import normalize_hash_algorithm
 
     normalized_algorithm = normalize_hash_algorithm(algorithm)
     if not isinstance(response, dict):
@@ -245,7 +249,6 @@ def parse_modrinth_version_lookup_response(
 
 
 __all__ = [
-    "SUPPORTED_MODRINTH_UPDATE_LOADERS",
     "apply_loader_specific_dependency_override",
     "build_local_mod_lookup_candidates",
     "canonical_lookup_key",

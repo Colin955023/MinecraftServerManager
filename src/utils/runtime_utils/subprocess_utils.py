@@ -7,38 +7,15 @@ from __future__ import annotations
 
 import os
 import subprocess  # nosec B404
-import time
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
 
-from .. import PathUtils, get_logger
+from src.utils import PathUtils, get_logger
 
 logger = get_logger().bind(component="SubprocessUtils")
-
-
-@dataclass(slots=True)
-class QProcessResult:
-    """QProcess 執行結果封裝"""
-
-    args: list[str]
-    returncode: int
-    stdout: str = ""
-    pid: int = 0
-    cancelled: bool = False
-    error_text: str = ""
-
-    def poll(self) -> int:
-        """
-        模擬 subprocess.CompletedProcess 的 poll 方法
-
-        Returns:
-            QProcess 結束代碼
-        """
-        return self.returncode
 
 
 class SubprocessUtils:
@@ -53,6 +30,7 @@ class SubprocessUtils:
     STARTF_USESHOWWINDOW = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
     SW_HIDE = 0
     CREATE_NO_WINDOW = 134217728
+    CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 
     @staticmethod
     def get_hidden_windows_kwargs() -> dict:
@@ -60,7 +38,7 @@ class SubprocessUtils:
         回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict
 
         Returns:
-            dict: Windows 隱藏視窗所需參數，非 Windows 平台回傳空 dict
+            Windows 隱藏視窗所需參數，非 Windows 平台回傳空 dict
         """
         if os.name != "nt":
             return {}
@@ -116,14 +94,14 @@ class SubprocessUtils:
     @staticmethod
     def run_checked(cmd: Iterable[str], **kwargs) -> subprocess.CompletedProcess:
         """
-        像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`
+        像 subprocess.run，但先驗證 cmd 並強制 shell=False
 
         Args:
             cmd: 命令列參數序列
-            **kwargs: 傳遞給 `subprocess.run` 的其他參數
+            **kwargs: 傳遞給 subprocess.run 的其他參數
 
         Returns:
-            `subprocess.run` 的執行結果
+            subprocess.run 的執行結果
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
@@ -133,14 +111,14 @@ class SubprocessUtils:
     @staticmethod
     def popen_checked(cmd: Iterable[str], **kwargs) -> subprocess.Popen:
         """
-        像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`
+        像 subprocess.Popen，但先驗證 cmd 並強制 shell=False
 
         Args:
             cmd: 命令列參數序列
-            **kwargs: 傳遞給 `subprocess.Popen` 的其他參數
+            **kwargs: 傳遞給 subprocess.Popen 的其他參數
 
         Returns:
-            建立完成的 `subprocess.Popen` 物件
+            建立完成的 subprocess.Popen 物件
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
@@ -150,7 +128,7 @@ class SubprocessUtils:
     @staticmethod
     def query_winget(args: list[str], check: bool = False) -> subprocess.CompletedProcess:
         """
-        執行 winget 指令並回傳結果自動包含必要的環境與編碼設定
+        執行 winget 指令並回傳結果。自動包含必要的環境與編碼設定
 
         Args:
             args: winget 的參數列表
@@ -168,6 +146,47 @@ class SubprocessUtils:
             stdin=SubprocessUtils.DEVNULL,
             creationflags=SubprocessUtils.CREATE_NO_WINDOW,
         )
+
+    @staticmethod
+    def create_console_process(
+        cmd: Iterable[str],
+        *,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.Popen:
+        """
+        在獨立控制台視窗中啟動子行程 (Windows CREATE_NEW_CONSOLE)
+
+        Args:
+            cmd: 要執行的命令清單
+            cwd: 工作目錄
+            env: 環境變數
+
+        Returns:
+            subprocess.Popen 實例
+        """
+        resolved_cmd = SubprocessUtils._validate_cmd(cmd)
+        kwargs: dict[str, Any] = {
+            "cwd": str(cwd) if cwd else None,
+            "env": env,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = SubprocessUtils.CREATE_NEW_CONSOLE
+        return subprocess.Popen(resolved_cmd, **kwargs)  # nosec B603
+
+    @staticmethod
+    def run_winget_interactive(args: list[str]) -> int:
+        """
+        在獨立終端機視窗中執行 winget 指令，並等待其結束回傳結束代碼
+
+        Args:
+            args: winget 參數清單
+
+        Returns:
+            行程結束代碼
+        """
+        proc = SubprocessUtils.create_console_process(["winget", *args])
+        return proc.wait()
 
     @staticmethod
     def create_qprocess_checked(
@@ -201,116 +220,13 @@ class SubprocessUtils:
         return process
 
     @staticmethod
-    def run_qprocess_checked(
-        cmd: Iterable[str],
-        *,
-        cwd: str | None = None,
-        encoding: str = "utf-8",
-        on_stdout: Callable[[str], Any] | None = None,
-        on_started: Callable[[int], Any] | None = None,
-        cancel_check: Callable[[], bool] | None = None,
-        cancel_poll_ms: int = 100,
-        timeout_ms: int | None = None,
-    ) -> QProcessResult:
-        """
-        以 QProcess signal 同步執行命令並收集輸出
-
-        Args:
-            cmd: 命令列參數序列
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄
-            encoding: stdout 解碼使用的文字編碼
-            on_stdout: 每次收到 stdout 片段時呼叫的回呼
-            on_started: QProcess 啟動後以 PID 呼叫的回呼
-            cancel_check: 輪詢取消狀態的回呼
-            cancel_poll_ms: 取消與 stdout 輪詢間隔毫秒數
-            timeout_ms: 執行逾時毫秒數；未提供時不限制
-
-        Returns:
-            QProcess 的結束代碼、輸出與取消狀態
-        """
-
-        app = QtWidgets.QApplication.instance()
-        if not isinstance(app, QtWidgets.QApplication):
-            app = QtWidgets.QApplication([])
-
-        process = SubprocessUtils.create_qprocess_checked(cmd, cwd=cwd)
-        stdout_chunks: list[str] = []
-        state: dict[str, Any] = {
-            "returncode": -1,
-            "pid": 0,
-            "cancelled": False,
-            "error_text": "",
-            "finished": False,
-        }
-
-        def _decode(data: QtCore.QByteArray) -> str:
-            return bytes(cast(Any, data)).decode(encoding, errors="replace")
-
-        def _drain_stdout() -> None:
-            text = _decode(process.readAllStandardOutput())
-            if not text:
-                return
-            stdout_chunks.append(text)
-            if on_stdout is not None:
-                on_stdout(text)
-
-        def _finish(exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
-            _drain_stdout()
-            state["returncode"] = int(exit_code)
-            state["finished"] = True
-
-        def _error(_error: QtCore.QProcess.ProcessError) -> None:
-            state["error_text"] = process.errorString()
-
-        process.readyReadStandardOutput.connect(_drain_stdout)
-        process.finished.connect(_finish)
-        process.errorOccurred.connect(_error)
-        process.start()
-        if not process.waitForStarted(10000):
-            raise OSError(process.errorString() or "QProcess 啟動失敗")
-        state["pid"] = int(process.processId())
-        if on_started is not None:
-            on_started(int(state["pid"]))
-
-        deadline = None if timeout_ms is None else time.monotonic() + max(0, int(timeout_ms)) / 1000
-        poll_ms = max(25, int(cancel_poll_ms))
-        while process.state() != QtCore.QProcess.ProcessState.NotRunning:
-            if cancel_check is not None:
-                try:
-                    should_cancel = bool(cancel_check())
-                except Exception:
-                    should_cancel = False
-                if should_cancel:
-                    state["cancelled"] = True
-                    process.kill()
-            if deadline is not None and time.monotonic() >= deadline:
-                state["error_text"] = f"QProcess 執行逾時 ({timeout_ms} ms)"
-                process.kill()
-            if process.waitForReadyRead(poll_ms):
-                _drain_stdout()
-            else:
-                _drain_stdout()
-        process.waitForFinished(1000)
-        _drain_stdout()
-        if not state["finished"]:
-            state["returncode"] = int(process.exitCode())
-        return QProcessResult(
-            args=SubprocessUtils._validate_cmd(cmd),
-            returncode=int(state["returncode"]),
-            stdout="".join(stdout_chunks),
-            pid=int(state["pid"]),
-            cancelled=bool(state["cancelled"]),
-            error_text=str(state["error_text"] or ""),
-        )
-
-    @staticmethod
     def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
         """
-        啟動分離的子進程，隔離 I/O 和生命周期，不顯示控制台視窗
+        啟動分離的子行程，隔離 I/O 和生命週期，不顯示控制台視窗
 
-        用於重啟/更新等場景，避免主進程退出時留下孤兒進程
+        用於重新啟動/更新等場景，避免主行程結束時留下孤兒行程
         Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗
-        自動配置 DEVNULL、close_fds 和平台相關的分離旗標
+        自動設定 DEVNULL、close_fds 和平台相關的分離旗標
 
         Args:
             cmd: 命令列表
@@ -333,3 +249,28 @@ class SubprocessUtils:
             creationflags=creation_flags,
             **hidden_kwargs,
         )
+
+    @staticmethod
+    def create_no_window_process(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
+        """
+        建立背景執行且不顯示控制台視窗的 Popen 行程
+
+        Args:
+            cmd: 命令列表
+            cwd: 工作目錄（可選）
+
+        Returns:
+            Popen 物件
+        """
+        hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
+        return SubprocessUtils.popen_checked(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=SubprocessUtils.DEVNULL,
+            **hidden_kwargs,
+        )
+
+
+__all__ = ["SubprocessUtils"]

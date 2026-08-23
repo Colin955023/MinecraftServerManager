@@ -4,109 +4,14 @@
 讓 UI 層只保留查詢與流程組裝責任
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass, field
 from typing import Any
 
+from src.models import OnlineDependencyInstallItem, OnlineDependencyInstallPlan
+from src.utils import get_logger
+
+logger = get_logger().bind(component="DependencyPlanSerializer")
+
 DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 1
-
-
-@dataclass(slots=True)
-class OnlineDependencyInstallItem:
-    """必要依賴的自動安裝項目"""
-
-    project_id: str
-    project_name: str
-    version_id: str
-    version_name: str
-    filename: str
-    download_url: str
-    parent_name: str = ""
-    maybe_installed: bool = False
-    status_note: str = ""
-    resolution_source: str = "project_id"
-    resolution_confidence: str = "direct"
-    enabled: bool = True
-    is_optional: bool = False
-    provider: str = "modrinth"
-    expected_hash: str = ""
-    required_by: list[str] = field(default_factory=list)
-    decision_source: str = "required:auto"
-    graph_depth: int = 1
-    edge_kind: str = "required"
-    edge_source: str = "required:modrinth_dependency"
-
-    @classmethod
-    def from_dict(cls, payload: Any) -> OnlineDependencyInstallItem | None:
-        """
-        從 payload 還原實例
-
-        Args:
-            payload: 包含 OnlineDependencyInstallItem 欄位的字典資料
-
-        Returns:
-            OnlineDependencyInstallItem | None: 還原成功的實例，若 payload 無效則回傳 None
-        """
-        if not isinstance(payload, dict):
-            return None
-        graph_depth = _normalize_positive_int_value(payload, "graph_depth")
-        edge_kind = _normalize_text_value(payload, "edge_kind", "required", lowercase=True) or "required"
-        edge_source = _normalize_text_value(payload, "edge_source", "", lowercase=True)
-        if not edge_source:
-            edge_source = f"{edge_kind}:modrinth_dependency"
-        return cls(
-            project_id=_normalize_text_value(payload, "project_id"),
-            project_name=_normalize_text_value(payload, "project_name"),
-            version_id=_normalize_text_value(payload, "version_id"),
-            version_name=_normalize_text_value(payload, "version_name"),
-            filename=_normalize_text_value(payload, "filename"),
-            download_url=_normalize_text_value(payload, "download_url"),
-            parent_name=_normalize_text_value(payload, "parent_name"),
-            maybe_installed=bool(payload.get("maybe_installed", False)),
-            status_note=_normalize_text_value(payload, "status_note"),
-            resolution_source=_normalize_text_value(payload, "resolution_source", "project_id"),
-            resolution_confidence=_normalize_text_value(payload, "resolution_confidence", "direct"),
-            enabled=bool(payload.get("enabled", True)),
-            is_optional=bool(payload.get("is_optional", False)),
-            provider=_normalize_text_value(payload, "provider", "modrinth") or "modrinth",
-            expected_hash=_normalize_text_value(payload, "expected_hash"),
-            required_by=_normalize_string_list(payload.get("required_by", [])),
-            decision_source=_normalize_text_value(payload, "decision_source") or "required:auto",
-            graph_depth=graph_depth,
-            edge_kind=edge_kind,
-            edge_source=edge_source,
-        )
-
-
-@dataclass(slots=True)
-class OnlineDependencyInstallPlan:
-    """必要依賴的連鎖安裝計畫"""
-
-    items: list[OnlineDependencyInstallItem] = field(default_factory=list)
-    advisory_items: list[OnlineDependencyInstallItem] = field(default_factory=list)
-    unresolved_required: list[str] = field(default_factory=list)
-    notes: list[str] = field(default_factory=list)
-
-    @property
-    def auto_install_count(self) -> int:
-        """
-        取得可自動安裝的項目數量
-
-        Returns:
-            int: 可自動安裝的項目數量
-        """
-        return len(self.items)
-
-    @property
-    def has_unresolved_required(self) -> bool:
-        """
-        判斷是否存在無法解析的必要依賴
-
-        Returns:
-            bool: 若存在無法解析的必要依賴則回傳 True，否則回傳 False
-        """
-        return bool(self.unresolved_required)
 
 
 def _get_source_value(source: Any, key: str, default: Any = None) -> Any:
@@ -154,7 +59,8 @@ def _normalize_positive_int_value(source: Any, key: str, default: int = 1, min_v
     raw_value = _get_source_value(source, key, default)
     try:
         value = int(raw_value)
-    except (TypeError, ValueError) as _:
+    except (TypeError, ValueError) as e:
+        logger.debug(f"解析 {key} 為整數失敗 (值: {raw_value}): {e}")
         value = default
     if value < min_value:
         return min_value
@@ -279,7 +185,7 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
         raw: 待驗證的原始 payload
 
     Returns:
-        `(是否通過, 原因碼)` 的驗證結果
+        (是否通過, 原因碼) 的驗證結果
     """
     if not isinstance(raw, dict):
         return (False, "payload-not-dict")
@@ -294,7 +200,8 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
             return (False, "invalid-graph-edge")
         try:
             depth = int(edge_payload.get("depth", 0) or 0)
-        except (TypeError, ValueError) as _:
+        except (TypeError, ValueError) as e:
+            logger.debug(f"反序列化 Modrinth graph_depth 失敗: {e}")
             return (False, "invalid-graph-depth")
         if depth < 1:
             return (False, "invalid-graph-depth")
@@ -316,7 +223,8 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
                 return (False, f"invalid-{collection_key}-entry")
             try:
                 item_depth = int(item_payload.get("graph_depth", 0) or 0)
-            except (TypeError, ValueError) as _:
+            except (TypeError, ValueError) as e:
+                logger.debug(f"反序列化 Modrinth 依賴項目失敗: {e}")
                 return (False, "invalid-item-depth")
             if item_depth < 1:
                 return (False, "invalid-item-depth")
@@ -337,7 +245,7 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
         raw: 待遷移的原始 payload
 
     Returns:
-        `(遷移後 payload, 狀態碼)` 的結果；失敗時回傳 `(None, 原因碼)`
+        (遷移後 payload, 狀態碼) 的結果；失敗時回傳 (None, 原因碼)
     """
     if not isinstance(raw, dict):
         return (None, "payload-not-dict")
@@ -406,13 +314,13 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
 
 def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
     """
-    從持久化 payload 還原 `OnlineDependencyInstallPlan`
+    從持久化 payload 還原 OnlineDependencyInstallPlan
 
     Args:
         raw: 已序列化的原始 payload
 
     Returns:
-        還原後的 `OnlineDependencyInstallPlan`
+        還原後的 OnlineDependencyInstallPlan
     """
     if not isinstance(raw, dict):
         return OnlineDependencyInstallPlan()
@@ -425,3 +333,12 @@ def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> On
         unresolved_required=_normalize_string_list(raw.get("unresolved_required", [])),
         notes=_normalize_string_list(raw.get("notes", [])),
     )
+
+
+__all__ = [
+    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
+    "deserialize_online_dependency_install_plan",
+    "migrate_online_dependency_install_plan_payload",
+    "serialize_online_dependency_install_plan",
+    "validate_online_dependency_install_plan_payload",
+]

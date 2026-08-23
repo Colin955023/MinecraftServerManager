@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from src.core import LoaderManager
 from src.utils import PathUtils
 
@@ -30,7 +31,6 @@ def test_clear_cache_file_resets_preload_guard(tmp_path: Path) -> None:
 
 
 def _build_manager_for_preload_tests(tmp_path: Path, *, preloaded_once: bool, calls: list[str]) -> LoaderManager:
-    """建立 LoaderManager 並 mock _preload_loader 以記錄呼叫"""
     manager = LoaderManager.__new__(LoaderManager)
     manager._initialized = False
     manager.__init__()
@@ -105,7 +105,7 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
 """
 
     monkeypatch.setattr(
-        "src.utils.network_utils.http_utils.HTTPUtils.get_content", lambda *_args, **_kwargs: xml_content
+        "src.utils.network_utils.http_client.HTTPClient.fetch_bytes", lambda *_args, **_kwargs: xml_content
     )
 
     spec = manager.LOADER_SPECS["forge"]
@@ -114,30 +114,6 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
     cache = PathUtils.load_json(forge_cache)
     assert isinstance(cache, dict)
     assert cache.get("1.21.1", [])[:3] == ["1.21.1-54.0.10", "1.21.1-54.0.9", "1.21.1-54.0.2"]
-
-
-def test_get_installer_download_url_supports_known_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
-    monkeypatch.setattr(manager, "_get_latest_quilt_installer_version", lambda: "0.12.1")
-
-    assert manager.get_installer_download_url("fabric", "1.21.1", "0.16.0") == (
-        "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.1/fabric-installer-1.1.1.jar"
-    )
-    assert manager.get_installer_download_url("forge", "1.21.1", "54.0.10") == (
-        "https://maven.minecraftforge.net/net/minecraftforge/forge/1.21.1-54.0.10/forge-1.21.1-54.0.10-installer.jar"
-    )
-    assert manager.get_installer_download_url("neoforge", "1.21.1", "21.1.165") == (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.165/neoforge-21.1.165-installer.jar"
-    )
-    assert manager.get_installer_download_url("neoforge", "1.21.5", "21.5.52-beta") == (
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.5.52-beta/neoforge-21.5.52-beta-installer.jar"
-    )
-    assert manager.get_installer_download_url("quilt", "1.21.1", "0.26.0") == (
-        "https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-installer/0.12.1/quilt-installer-0.12.1.jar"
-    )
-    assert manager.get_installer_download_url("vanilla", "1.21.1", "") is None
 
 
 def _build_manager(tmp_path: Path) -> LoaderManager:

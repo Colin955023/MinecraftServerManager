@@ -3,36 +3,18 @@
 提供統一的使用者設定管理功能，包含自動更新與視窗偏好等
 """
 
+from __future__ import annotations
+
 import copy
 import threading
 import time
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
-from ...core import ConfigurationError
-from .. import PathUtils, RuntimePaths, atomic_write_json, get_logger
+from src.models import MainWindowSettings, WindowPreferences
+from src.utils import ConfigurationError, PathUtils, RuntimePaths, atomic_write_json, get_logger
 
 logger = get_logger().bind(component="SettingsManager")
-
-
-class MainWindowSettings(TypedDict):
-    """主視窗尺寸與狀態設定"""
-
-    width: int
-    height: int
-    x: int | None
-    y: int | None
-    maximized: bool
-
-
-class WindowPreferences(TypedDict):
-    """視窗偏好設定"""
-
-    remember_size_position: bool
-    main_window: MainWindowSettings
-    auto_center: bool
-    adaptive_sizing: bool
-    theme_mode: str
 
 
 DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
@@ -70,7 +52,6 @@ def _get_default_settings() -> dict[str, Any]:
         "servers_root": "",
         "auto_update_enabled": True,
         "first_run_completed": False,
-        "auto_prune_markers_on_startup": False,
         "window_preferences": _copy_window_preferences(),
     }
 
@@ -182,17 +163,6 @@ class SettingsManager:
             if immediate_save:
                 self._save_settings(self._settings)
 
-    def update_batch(self, updates: dict) -> None:
-        """
-        批次更新多個設定值並一次性儲存
-
-        Args:
-            updates: 要合併寫入的設定更新項目
-        """
-        with self._lock:
-            self._settings.update(cast(dict[str, Any], _clone_settings_payload(updates)))
-            self._save_settings(self._settings)
-
     def get_servers_root(self) -> str:
         """
         取得使用者設定的伺服器主資料夾路徑
@@ -232,15 +202,12 @@ class SettingsManager:
             raise ConfigurationError(f"無法建立伺服器資料夾： {servers_root}") from exc
         return servers_root
 
-    def get_validated_servers_root(self, *, create: bool = False) -> str:
-        return str(self.get_validated_servers_root_path(create=create))
-
     def is_auto_update_enabled(self) -> bool:
         """
         檢查自動更新功能是否啟用
 
         Returns:
-            bool: 若啟用則回傳 True，否則回傳 False
+            若啟用則回傳 True，否則回傳 False
         """
         with self._lock:
             return bool(self._settings.get("auto_update_enabled", _BOOL_SETTINGS["auto_update_enabled"]))
@@ -259,7 +226,7 @@ class SettingsManager:
         檢查首次啟動流程是否已完成
 
         Returns:
-            bool: 若已完成則回傳 True，否則回傳 False
+            若已完成則回傳 True，否則回傳 False
         """
         with self._lock:
             return bool(self._settings.get("first_run_completed", _BOOL_SETTINGS["first_run_completed"]))
@@ -406,7 +373,7 @@ class SettingsManager:
                             or (now_monotonic - self._no_change_last_log_monotonic)
                             >= self._no_change_log_interval_seconds
                         ):
-                            logger.debug(f"settings 未變更，跳過寫入（最近累計 {self._no_change_skip_count} 次）")
+                            logger.debug(f"settings 未變更，略過寫入（最近累計 {self._no_change_skip_count} 次）")
                             self._no_change_skip_count = 0
                             self._no_change_last_log_monotonic = now_monotonic
                         return
@@ -433,9 +400,12 @@ def get_settings_manager() -> SettingsManager:
     取得全域設定管理器的單例實例
 
     Returns:
-        全域共用的 `SettingsManager` 實例
+        全域共用的 SettingsManager 實例
     """
     global _settings_manager
     if _settings_manager is None:
         _settings_manager = SettingsManager()
     return _settings_manager
+
+
+__all__ = ["SettingsManager", "get_settings_manager"]

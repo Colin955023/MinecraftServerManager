@@ -3,6 +3,7 @@ from __future__ import annotations
 import zipfile
 
 import pytest
+
 import src.utils.core_utils.path_utils as path_utils_module
 from src.utils import PathUtils
 
@@ -11,7 +12,7 @@ def test_save_json_roundtrip_immediate(tmp_path) -> None:
     target = tmp_path / "state.json"
     payload = {"server": "alpha", "ports": [25565, 25566], "enabled": True}
 
-    assert PathUtils.save_json(target, payload) is True
+    assert PathUtils.save_json_internal(target, payload) is True
     assert PathUtils.load_json(target) == payload
 
 
@@ -27,15 +28,15 @@ def test_save_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypat
 
     monkeypatch.setattr(path_utils_module.os, "replace", _counting_replace)
 
-    assert PathUtils.save_json_if_changed(target, {"value": 1}) is True
+    assert PathUtils.save_json_internal(target, {"value": 1}, skip_if_unchanged=True) is True
     assert replace_call_count == 1
 
     count_before_no_change = replace_call_count
-    assert PathUtils.save_json_if_changed(target, {"value": 1}) is True
+    assert PathUtils.save_json_internal(target, {"value": 1}, skip_if_unchanged=True) is True
     assert replace_call_count == count_before_no_change
 
     count_before_change = replace_call_count
-    assert PathUtils.save_json_if_changed(target, {"value": 2}) is True
+    assert PathUtils.save_json_internal(target, {"value": 2}, skip_if_unchanged=True) is True
     assert replace_call_count == count_before_change + 1
 
 
@@ -43,8 +44,8 @@ def test_save_json_keeps_existing_file_when_new_payload_not_serializable(tmp_pat
     target = tmp_path / "state.json"
     original = {"ok": True}
 
-    assert PathUtils.save_json(target, original) is True
-    assert PathUtils.save_json(target, {"bad": {1, 2, 3}}) is False
+    assert PathUtils.save_json_internal(target, original) is True
+    assert PathUtils.save_json_internal(target, {"bad": {1, 2, 3}}) is False
     assert PathUtils.load_json(target) == original
 
 
@@ -111,7 +112,6 @@ def test_safe_extract_zip_rejects_unsafe_member_names(tmp_path, member_name: str
 
 
 def test_safe_extract_zip_rejects_symlink_entry(tmp_path) -> None:
-    """宣告為 Unix symlink 的 entry 應被拒絕，避免指向 dest_dir 外部的符號連結"""
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
 
@@ -127,7 +127,6 @@ def test_safe_extract_zip_rejects_symlink_entry(tmp_path) -> None:
 
 
 def test_safe_extract_zip_rejects_oversized_single_member(tmp_path) -> None:
-    """單一 entry 實際大小超過 `max_member_uncompressed_bytes` 時應被拒絕（與總大小上限為不同檢查路徑）"""
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
 
@@ -146,7 +145,6 @@ def test_safe_extract_zip_rejects_oversized_single_member(tmp_path) -> None:
 
 
 def test_safe_extract_zip_rejects_excessive_compression_ratio(tmp_path) -> None:
-    """壓縮比例異常過高（典型 zip bomb 特徵）時應被拒絕"""
     zip_path = tmp_path / "server.zip"
     extract_dir = tmp_path / "extracted"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:

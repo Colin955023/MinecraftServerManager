@@ -5,18 +5,16 @@ from src.utils import UpdateChecker
 
 
 class ImmediateUpdateInteraction:
-    """測試用的同步更新互動介面"""
-
     def __init__(self, ask_result: bool | None = False) -> None:
         self.ask_result = ask_result
         self.info_messages: list[tuple[str, str]] = []
         self.error_messages: list[tuple[str, str]] = []
 
-    def run_async(self, work) -> None:
+    def run_sync(self, work) -> None:
         work()
 
-    def call_on_ui(self, parent: Any, callback):
-        _ = parent
+    def call_on_ui(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
+        _ = (args, kwargs)
         return callback()
 
     def schedule_debounce(self, widget: Any, job_attr: str, delay_ms: int, callback, *, owner: Any | None = None):
@@ -46,8 +44,8 @@ def test_check_and_prompt_update_uses_injected_interaction(monkeypatch) -> None:
         staticmethod(lambda *_args, **_kwargs: {"tag_name": "v1.0.0", "name": "v1.0.0", "assets": []}),
     )
 
-    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
-    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
+    monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
     monkeypatch.setattr(update_checker_module.UIUtils, "schedule_debounce", interaction.schedule_debounce)
@@ -70,8 +68,8 @@ def test_apply_update_returns_false_when_user_cancels(tmp_path, monkeypatch) -> 
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=False)
-    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
-    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
+    monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
     popen_calls: list[list[str]] = []
@@ -92,8 +90,8 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=True)
-    monkeypatch.setattr(update_checker_module.TaskUtils, "run_async", interaction.run_async)
-    monkeypatch.setattr(update_checker_module.TaskUtils, "call_on_ui", interaction.call_on_ui)
+    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
+    monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
     popen_calls: list[list[str]] = []

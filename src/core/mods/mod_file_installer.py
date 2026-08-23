@@ -6,12 +6,11 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from ...models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
-from ...utils import ExceptionUtils, HashUtils, HTTPUtils, PathUtils, build_non_official_source_warning
+from src.models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
+from src.utils import HashUtils, HTTPClient, PathUtils, build_non_official_source_warning
 
 
 class ModFileInstaller:
@@ -202,7 +201,7 @@ class ModFileInstaller:
         notify_change: bool = True,
     ) -> ModFileOperationResult:
         """
-        下載遠端模組並以原子方式安裝到 `mods` 目錄
+        下載遠端模組並以原子方式安裝到 mods 目錄
 
         Args:
             download_url: 遠端檔案下載網址
@@ -228,7 +227,7 @@ class ModFileInstaller:
             return ModFileOperationResult(status="failed", message="unsupported_file_type")
         non_official_warning = build_non_official_source_warning(normalized_url, provider)
         if non_official_warning:
-            self.logger.warning(non_official_warning, "ModFileInstaller")
+            self.logger.warning(non_official_warning)
         if self.is_operation_cancelled(cancel_check):
             self.logger.info(f"遠端模組安裝在下載前已取消: {safe_filename}")
             return ModFileOperationResult(status="cancelled", message="cancelled_before_download")
@@ -236,15 +235,11 @@ class ModFileInstaller:
             target_path = self.mods_path / safe_filename
             normalized_expected_hash, expected_hash_algorithm = self.normalize_expected_hash(expected_hash)
             if not normalized_expected_hash:
-                self.logger.error(
-                    f"安裝遠端模組失敗：缺少 SHA-256 以上的預期雜湊，拒絕下載 {safe_filename}",
-                    "ModFileInstaller",
-                )
+                self.logger.error(f"安裝遠端模組失敗：缺少 SHA-256 以上的預期雜湊，拒絕下載 {safe_filename}")
                 return ModFileOperationResult(status="failed", message="missing_secure_hash")
             if normalized_expected_hash and not expected_hash_algorithm:
                 self.logger.error(
-                    f"安裝遠端模組失敗：僅接受 SHA-256 / SHA-512 雜湊（長度 {len(normalized_expected_hash)}）",
-                    "ModFileInstaller",
+                    f"安裝遠端模組失敗：僅接受 SHA-256 / SHA-512 雜湊（長度 {len(normalized_expected_hash)}）"
                 )
                 return ModFileOperationResult(status="failed", message="unsupported_hash_algorithm")
             if normalized_expected_hash and target_path.exists():
@@ -259,9 +254,7 @@ class ModFileInstaller:
                     self.logger.info(f"遠端模組已存在且雜湊一致，略過下載: {safe_filename}")
                     return ModFileOperationResult(status="completed", final_path=target_path)
             verification_note = f"，含雜湊驗證({expected_hash_algorithm})" if normalized_expected_hash else ""
-            self.logger.info(
-                f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}", "ModFileInstaller"
-            )
+            self.logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}")
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename
                 download_failure_reason = ""
@@ -278,7 +271,7 @@ class ModFileInstaller:
                     download_kwargs["expected_hash"] = normalized_expected_hash
                 if cancel_check is not None:
                     download_kwargs["cancel_check"] = cancel_check
-                downloaded = HTTPUtils.download_file(normalized_url, str(staging_path), **download_kwargs)
+                downloaded = HTTPClient.download_file(normalized_url, str(staging_path), **download_kwargs)
                 if not downloaded:
                     if self.is_operation_cancelled(cancel_check):
                         self.logger.info(f"遠端模組下載已取消: {safe_filename}")
@@ -309,13 +302,6 @@ class ModFileInstaller:
             self.logger.exception(f"安裝遠端模組失敗（IO/參數） {safe_filename}: {exc}")
             return ModFileOperationResult(status="failed", message=str(exc))
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=target_path if "target_path" in locals() else None,
-                    reason="install_remote_mod_file_unexpected",
-                    details={"filename": safe_filename, "url": normalized_url},
-                )
             self.logger.exception(f"安裝遠端模組失敗 {safe_filename}: {exc}")
             return ModFileOperationResult(status="failed", message=str(exc))
 
@@ -428,13 +414,6 @@ class ModFileInstaller:
             return None
         except Exception as exc:
             rollback_and_stop(cancelled=False)
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="replace_local_mod_file_unexpected",
-                    details={"local_mod_filename": getattr(local_mod, "filename", None)},
-                )
             self.logger.exception(f"更新本地模組失敗 {getattr(local_mod, 'filename', 'unknown')}: {exc}")
             return None
 
@@ -444,7 +423,7 @@ class ModFileInstaller:
 
         Args:
             mod_id: 模組識別值，不含副檔名
-            enable: `True` 表示啟用，`False` 表示停用
+            enable: True 表示啟用，False 表示停用
             notify_change: 是否觸發模組列表變更通知
 
         Returns:
@@ -518,19 +497,12 @@ class ModFileInstaller:
             self.logger.exception(f"{action}模組失敗（IO/權限）: {exc}")
             return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {exc}")
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=None,
-                    reason="set_mod_state_unexpected",
-                    details={"mod": mod_id},
-                )
             self.logger.exception(f"{action}模組時發生未預期錯誤: {exc}")
             return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {exc}")
 
     def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
         """
-        匯入本地模組檔案到目前伺服器的 `mods` 目錄
+        匯入本地模組檔案到目前伺服器的 mods 目錄
 
         Args:
             source_path: 要匯入的本地模組檔案路徑
@@ -563,13 +535,6 @@ class ModFileInstaller:
                 affected_count=1,
             )
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=self.mods_path / safe_filename,
-                    reason="import_local_mod_file_failed",
-                    details={"source_path": str(normalized_source)},
-                )
             self.logger.exception(f"匯入本地模組失敗 {safe_filename}: {exc}")
             return self.failure_mutation_result("匯入失敗", f"匯入模組失敗: {exc}")
 
@@ -628,12 +593,8 @@ class ModFileInstaller:
                 missing_ids=tuple(missing_ids),
             )
         except Exception as exc:
-            with suppress(Exception):
-                ExceptionUtils.record_and_mark(
-                    exc,
-                    marker_path=self.mods_path,
-                    reason="delete_local_mods_failed",
-                    details={"mod_ids": normalized_ids},
-                )
             self.logger.exception(f"刪除本地模組失敗 {normalized_ids}: {exc}")
             return self.failure_mutation_result("刪除失敗", f"刪除模組失敗: {exc}")
+
+
+__all__ = ["ModFileInstaller"]

@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import src.ui.create_server_frame as create_server_module
-import src.utils as utils_module
+from src.ui import CreateServerFrame
 
 
 class _Var:
@@ -47,10 +46,8 @@ class _Combo:
         self.selected = text
 
 
-def _make_frame(
-    name: str, loader_type: str = "Vanilla", mc_version: str = "1.21.1"
-) -> create_server_module.CreateServerFrame:
-    frame = create_server_module.CreateServerFrame.__new__(create_server_module.CreateServerFrame)
+def _make_frame(name: str, loader_type: str = "Vanilla", mc_version: str = "1.21.1") -> CreateServerFrame:
+    frame = CreateServerFrame.__new__(CreateServerFrame)
     frame_any = cast(Any, frame)
     frame_any.mc_version_var = _Var(mc_version)
     frame_any.loader_type_var = _Var(loader_type)
@@ -58,31 +55,35 @@ def _make_frame(
     frame_any.loader_version_var = _Var("無")
     frame_any.loader_version_combo = _Combo()
     frame_any.load_loader_versions = lambda *_args, **_kwargs: None
+
+    class _Scope:
+        def submit(self, *_args, **_kwargs):
+            return None
+
+    frame_any.scope = _Scope()
     return frame
 
 
-def test_server_name_keeps_manual_suffix_when_switching_loader(monkeypatch) -> None:
-    monkeypatch.setattr(utils_module.TaskUtils, "run_async", lambda *_args, **_kwargs: None)
+def test_server_name_keeps_manual_suffix_when_switching_loader() -> None:
     frame = _make_frame("1.21.1 我的服")
     frame.old_mc_version = "1.21.1"
 
     frame.loader_type_var.set("Fabric")
-    create_server_module.CreateServerFrame.update_server_config_ui(frame)
+    CreateServerFrame.update_server_config_ui(frame)
     assert frame.server_name_var.get() == "Fabric 1.21.1 我的服"
 
     frame.loader_type_var.set("Forge")
-    create_server_module.CreateServerFrame.update_server_config_ui(frame)
+    CreateServerFrame.update_server_config_ui(frame)
     assert frame.server_name_var.get() == "Forge 1.21.1 我的服"
 
     frame.loader_type_var.set("Vanilla")
-    create_server_module.CreateServerFrame.update_server_config_ui(frame)
+    CreateServerFrame.update_server_config_ui(frame)
     assert frame.server_name_var.get() == "1.21.1 我的服"
 
 
-def test_server_name_keeps_manual_suffix_when_mc_version_changes(monkeypatch) -> None:
-    monkeypatch.setattr(utils_module.TaskUtils, "run_async", lambda *_args, **_kwargs: None)
+def test_server_name_keeps_manual_suffix_when_mc_version_changes() -> None:
     frame = _make_frame("Fabric 1.21.1 我的服", loader_type="Fabric", mc_version="1.20.6")
     frame.old_mc_version = "1.21.1"
 
-    create_server_module.CreateServerFrame.update_server_config_ui(frame)
+    CreateServerFrame.update_server_config_ui(frame)
     assert frame.server_name_var.get() == "Fabric 1.20.6 我的服"

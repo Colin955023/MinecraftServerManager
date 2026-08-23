@@ -1,7 +1,9 @@
 """
-UI 工具函數
-提供常用的界面元件和工具函數，避免重複程式碼
+UI 工具函式
+提供常用的界面元件和工具函式，避免重複程式碼
 """
+
+from __future__ import annotations
 
 import os
 import time
@@ -11,14 +13,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from PySide6 import QtCore, QtWidgets
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import ComboBox, MessageBox
+from qfluentwidgets import (
+    ComboBox,
+    qconfig,
+)
 
-from .. import (
+from src.ui import MessageDialog
+from src.utils import (
     Colors,
     PathUtils,
-    QtCore,
-    QtWidgets,
     SubprocessUtils,
     cancel_timer,
     get_logger,
@@ -39,52 +44,35 @@ def _is_ui_thread() -> bool:
 class UIUtils:
     """UI 共用工具與對話框包裝"""
 
-    _DANGER_BUTTON_STYLE = (
-        "QPushButton {{ background-color: {color}; color: white;"
-        " border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 5px 10px; }}"
-    )
-
     @staticmethod
     def apply_danger_style(button: Any) -> None:
         """
-        套用危險操作按鈕樣式（紅色背景）
+        套用危險操作按鈕樣式（紅色背景、黑色文字）
+        支援動態主題更新
 
         Args:
             button: 要套用樣式的按鈕元件
         """
-        button.setStyleSheet(UIUtils._DANGER_BUTTON_STYLE.format(color=resolve_color(Colors.BUTTON_DANGER)))
 
-    @staticmethod
-    def pack_main_frame(frame, padx: int | None = None, pady: int | None = None) -> None:
-        """
-        統一設定框架的邊距與尺寸策略，使其填滿可用空間
+        def _apply():
+            if not is_qobject_alive(button):
+                return
+            bg_normal = resolve_color(Colors.BUTTON_DANGER)
+            bg_hover = resolve_color(Colors.BUTTON_DANGER_HOVER)
+            bg_disabled = resolve_color(Colors.BUTTON_LIGHT)
+            color_disabled = resolve_color(Colors.TEXT_MUTED)
+            button.setStyleSheet(
+                f"QPushButton, PushButton, PrimaryPushButton {{ background-color: {bg_normal}; color: black; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 5px 10px; }}"
+                f"QPushButton:hover, PushButton:hover, PrimaryPushButton:hover {{ background-color: {bg_hover}; color: black; }}"
+                f"QPushButton:pressed, PushButton:pressed, PrimaryPushButton:pressed {{ background-color: {bg_normal}; color: black; }}"
+                f"QPushButton:disabled, PushButton:disabled, PrimaryPushButton:disabled {{ background-color: {bg_disabled}; color: {color_disabled}; border: 1px solid rgba(0, 0, 0, 0.05); }}"
+            )
 
-        Args:
-            frame: 要設定的框架元件
-            padx: 水平邊距，預設 12
-            pady: 垂直邊距，預設 12
-        """
-        if padx is None:
-            padx = 12
-        if pady is None:
-            pady = 12
-        if isinstance(frame, QtWidgets.QWidget):
-            frame.setContentsMargins(padx, pady, padx, pady)
-            frame.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Expanding)
-            if hasattr(frame, "attach"):
-                frame.attach(fill="both", expand=True)
-            return
-        if hasattr(frame, "attach"):
-            frame.attach(fill="both", expand=True, padx=padx, pady=pady)
+        _apply()
 
-    @staticmethod
-    def get_mousewheel_units(delta: int) -> int:
-        if delta == 0:
-            return 0
-        units = int(-delta / 120)
-        if units == 0:
-            return -1 if delta > 0 else 1
-        return units
+        if not hasattr(button, "_msm_danger_connected"):
+            qconfig.themeChangedFinished.connect(_apply)
+            button._msm_danger_connected = True
 
     @staticmethod
     def cancel_scheduled_job(widget, job_attr: str, *, owner: Any | None = None) -> None:
@@ -106,8 +94,6 @@ class UIUtils:
                 cancel_timer(job_id)
             elif widget and hasattr(widget, "cancel_schedule"):
                 widget.cancel_schedule(job_id)
-        except Exception as e:
-            logger.debug(f"取消排程失敗 {job_attr}={job_id}: {e}")
         finally:
             setattr(holder, job_attr, None)
 
@@ -142,7 +128,7 @@ class UIUtils:
             owner: 持有 job 屬性的物件，若未指定則使用 widget
 
         Returns:
-            Any | None: 建立成功的 Job ID，失敗則回傳 None
+            建立成功的 Job ID，失敗則回傳 None
         """
         holder = owner if owner is not None else widget
         if not UIUtils._is_schedulable_widget(widget, holder, job_attr):
@@ -165,8 +151,7 @@ class UIUtils:
                 return None
             setattr(holder, job_attr, job_id)
             return job_id
-        except Exception as e:
-            logger.debug(f"建立 debounce 排程失敗 {job_attr}: {e}")
+        except Exception:
             setattr(holder, job_attr, None)
             return None
 
@@ -185,7 +170,7 @@ class UIUtils:
             owner: 持有 job 屬性的物件，若未指定則使用 widget
 
         Returns:
-            Any | None: 建立成功的 Job ID，失敗則回傳 None
+            建立成功的 Job ID，失敗則回傳 None
         """
         holder = owner if owner is not None else widget
         if getattr(holder, job_attr, None):
@@ -211,8 +196,7 @@ class UIUtils:
                 return None
             setattr(holder, job_attr, job_id)
             return job_id
-        except Exception as e:
-            logger.debug(f"建立 idle 合併排程失敗 {job_attr}: {e}")
+        except Exception:
             setattr(holder, job_attr, None)
             return None
 
@@ -241,7 +225,7 @@ class UIUtils:
             last_run_attr: 儲存最後執行時間的屬性名稱
 
         Returns:
-            bool: 是否成功排程或立即執行
+            是否成功排程或立即執行
         """
         holder = owner if owner is not None else widget
         if not widget:
@@ -285,8 +269,7 @@ class UIUtils:
                     setattr(holder, job_attr, widget.schedule(remaining, _runner))
                 else:
                     return False
-            except Exception as e:
-                logger.debug(f"建立 throttle 排程失敗 {job_attr}: {e}")
+            except Exception:
                 setattr(holder, job_attr, None)
                 return False
         return False
@@ -323,7 +306,7 @@ class UIUtils:
             title: 對話框標題
             message: 對話框訊息內容
             parent: 父層視窗
-            message_level: 訊息層級，'error'、'warning' 或 'info'
+            message_level: 訊息層級，error、warning 或 info
         """
 
         def _show():
@@ -331,9 +314,7 @@ class UIUtils:
             if parent is None:
                 parent = QApplication.activeWindow()
             UIUtils._play_message_sound(message_level)
-            w = MessageBox(title, message, parent)
-            w.yesButton.setText("確定")
-            w.cancelButton.hide()
+            w = MessageDialog(title, message, parent)
             w.exec()
 
         UIUtils._dispatch_dialog(_show)
@@ -352,20 +333,16 @@ class UIUtils:
             show_cancel: 是否顯示取消按鈕；若為 False，取消按鈕將顯示為「否」
 
         Returns:
-            bool | None: 是回傳 True，否/取消回傳 False 或 None
+            是回傳 True，否/取消回傳 False 或 None
         """
 
         def _show():
             nonlocal parent
             if parent is None:
                 parent = QApplication.activeWindow()
-            w = MessageBox(title, message, parent)
-            w.yesButton.setText("是")
-            if show_cancel:
-                w.cancelButton.setText("取消")
-            else:
-                w.cancelButton.setText("否")
-            return bool(w.exec())
+            w = MessageDialog(title, message, parent, question=True, show_cancel=show_cancel)
+            res = w.exec()
+            return res if res else (None if show_cancel and not res else False)
 
         return UIUtils._dispatch_dialog(_show)
 
@@ -470,3 +447,6 @@ class ScrollableComboBox(ComboBox):
             self.setCurrentIndex(new_index)
 
         event.accept()
+
+
+__all__ = ["ScrollableComboBox", "UIUtils"]

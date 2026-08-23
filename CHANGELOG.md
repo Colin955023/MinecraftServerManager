@@ -1,22 +1,30 @@
 # Changelog
 
-## v1.8.0 - 2026-08-03
+## v1.8.0 - 2026-08-23
 
 ### 新增
-- **QFluentWidgets 原生元件全面導入**：導入並套用 PySide6-Fluent-Widgets 核心元件，完成主視窗與子選單的完整 Fluent Design 替換。
-- **Component 層半自動測試體系**：加入對 UI 元件層級的測試覆蓋，大幅提高修改 UI 程式碼的信心度。
+- **交易式伺服器建立與匯入流程**：新增 `server_creation.py`（`CreateServerJourney`）與 `server_import.py`，支援 Plan-Execute 兩階段建立、伺服器批次探索、重新偵測以及建立前參數與指令核對對話框（`server_creation_confirm_dialog.py`）。
+- **模組狀態機與審查工作流程體系**：新增 `ModManagementSession` 作為本地、線上與佇列狀態的單一資料來源，並將模組安裝審查流程拆分為模組化工作流程（`review_workflow.py`、`review_contracts.py`、`review_grouping.py`、`review_dependency.py` 等）。
+- **Provider Metadata 與身分快取管理**：新增 `provider_identity.py` 與 `modrinth_provider_adapter.py`，統一管理模組提供者身分解析、雜湊對應與生命週期快取。
+- **集中化網路客戶端與背景協調**：新增 `http_client.py` 整合逾時、重試與連線集區管理；新增 `UIWorkScope` 統一控管 UI 背景非同步任務生命週期；新增 `status_button.py` 狀態按鈕元件。
+- **JVM 參數自訂與最佳化對話框**：新增獨立的 `jvm_args_dialog.py`，提供 JVM 參數自訂、記憶體配置建議與語法驗證。
+- **擴充自動化測試**：新增交易式建立與匯入、模組 Session 與 Review 工作流程、Provider 身分解析、HTTP Client 下載以及 UI 回歸等測試套件。
 
 ### 調整
-- **移除相容層與舊風格適配**：全面移除 `fluent.py`、`custom_dropdown.py` 等 Fallback 相容層，以及 `qt_widgets.py` 的 tkinter 風格適配器，完全改用 Qt 與 QFluentWidgets 原生 API 開發。
-- **手動 QSS 系統移除**：刪除 `NativeQtStyle`，不再手動重算所有 QSS 字串屬性，交由 `qfluentwidgets.setTheme` 自動處理深淺主題切換。
-- **文件同步更新**：修正並同步 `docs/TECHNICAL_OVERVIEW.md` 與 `AGENTS.md` 等架構文件。
+- **UI 架構模組化與目錄分層**：重組 `src/ui/` 目錄為 `core_frames/`（主頁面框架）、`dialogs/`（對話框與彈窗）、`services/`（如 `application_shell.py`）、`windows/`（獨立監控視窗），並以 `HostBound` 委派模式解耦 View 與狀態操作。
+- **模組搜尋與相容性核心遷移**：將 Modrinth 搜尋服務與相容性分析模組（`modrinth_service.py`、`compatibility_analyzer.py`、`dependency_planner_facade.py` 等）由 UI 層遷入 `src/core/mods/`。
+- **底層工具、日誌與例外處理簡化**：以 `exceptions.py` 取代 `exception_utils.py`；全面改採 `loguru` 非同步分級日誌與 `psutil` 處理程序監控；全面移除舊版 `http_utils.py`、`task_utils.py`、`mod_provider_resolver.py`，並大幅精簡 `path_utils.py`、`system_utils.py` 與 `server_detection_utils.py`。
+- **QFluentWidgets 原生元件全面導入**：全面移除舊有相容層與手動 QSS 計算，改採 QFluentWidgets 原生元件與主題切換機制。
 
 ### 修正
-- 修正文件與程式碼結構不一致的過時引用。
-- 修復元件升級後的相依性警告與未使用的導入（ARG002, ARG004, F821）。
+- 修正伺服器建立與匯入過程中的交易回滾機制與路徑安全驗證。
+- 修正模組依賴解析與 Provider 身分匹配中的快取一致性與型別轉換異常。
+- 修復背景執行緒與 UI 元件互動時可能產生的競爭條件與例外捕捉缺漏。
+- 修復元件升級後的相依性警告與未使用的匯入。
 
 ### 重大變更
-- **UI 框架底層全面替換**：移除所有 `qt_widgets.py` wrapper 類別。專案徹底捨棄與 Tkinter 相容的舊有介面包裝器。
+- **架構分層與命名空間變更**：重構 `src/ui/` 與 `src/core/mods/` 命名空間，移除舊版 `mod_provider_resolver.py`、`http_utils.py` 與 `mod_management/review.py`，相關呼叫端需適配新的 Session 與 WorkScope 介面。
+- **UI 框架底層全面替換**：移除所有舊有 Tkinter 風格適配器與相容層，完全以 PySide6 與 QFluentWidgets 原生 API 開發。
 
 ## v1.7.2 - 2026-06-05
 
@@ -85,7 +93,7 @@
 
 ### 調整
 - `HTTPUtils` 新增 URL 驗證、每執行緒 Session 重用，並強化下載時的目錄建立與原子替換流程。
-- `PathUtils` 強化 ZIP 解壓安全流程，並將 JSON 寫入改為 `os.replace` 原子更新。
+- `PathUtils` 強化 ZIP 解壓縮安全流程，並將 JSON 寫入改為 `os.replace` 原子更新。
 - `SystemUtils` 重構程序快照與記憶體查詢流程，降低重複呼叫與資源洩漏風險。
 - 關於視窗連結文字改用主題色 token，並統一對話框 icon 綁定行為。
 

@@ -1,7 +1,7 @@
 """
 伺服器實例封裝
 
-封裝單一伺服器的基礎屬性與基本 process 管理，供逐步遷移用
+單一伺服器執行期狀態的唯一 owner
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from typing import Any
 
 from PySide6 import QtCore
 
-from ...models import ServerConfig
-from ...utils import SubprocessUtils, SystemUtils, get_logger
+from src.models import ServerConfig
+from src.utils import SubprocessUtils, SystemUtils, get_logger
 
 logger = get_logger().bind(component="ServerInstance")
 
@@ -34,21 +34,8 @@ class ServerInstance:
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
     process: Any | None = field(default=None, init=False, repr=False)
     _output_buffer: deque[str] | None = field(default=None, init=False, repr=False)
-    _output_lock: threading.Lock | None = field(default=None, init=False, repr=False)
+    _output_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
     _output_pending: str = field(default="", init=False, repr=False)
-
-    @staticmethod
-    def is_qprocess(process: Any) -> bool:
-        """
-        判斷物件是否為 Qt 的 QProcess
-
-        Args:
-            process: 要檢查的程序物件
-
-        Returns:
-            若物件為 `QProcess` 則回傳 True
-        """
-        return isinstance(process, QtCore.QProcess)
 
     @staticmethod
     def process_pid(process: Any) -> int:
@@ -121,6 +108,37 @@ class ServerInstance:
         with self._lock:
             self.process = None
 
+    def is_running(self) -> bool:
+        """
+        目前是否綁定仍在執行的 process
+
+        Returns:
+            若伺服器正在執行中則回傳 True
+        """
+        with self._lock:
+            process = self.process
+        if process is None:
+            return False
+        try:
+            return self.process_is_running(process)
+        except Exception:
+            return False
+
+    def get_process(self) -> Any | None:
+        """
+        取得目前綁定的 process
+
+        Returns:
+            目前綁定的 process；若無則回傳 None
+        """
+        with self._lock:
+            return self.process
+
+    def release_runtime(self) -> None:
+        """釋放執行期資源：process 參考與輸出緩衝（不負責 kill）"""
+        self.clear_process()
+        self.clear_output_buffer()
+
     def attach_output_buffer(self, max_size: int) -> None:
         """
         建立或重設伺服器輸出緩衝
@@ -128,32 +146,15 @@ class ServerInstance:
         Args:
             max_size: 緩衝區最大行數
         """
-        with self._lock:
+        with self._output_lock:
             self._output_buffer = deque(maxlen=max_size)
-            self._output_lock = threading.Lock()
             self._output_pending = ""
 
     def clear_output_buffer(self) -> None:
         """清除伺服器輸出緩衝"""
-        with self._lock:
+        with self._output_lock:
             self._output_buffer = None
-            self._output_lock = None
             self._output_pending = ""
-
-    def append_output_line(self, line: str) -> None:
-        """
-        將一行伺服器輸出寫入緩衝
-
-        Args:
-            line: 伺服器輸出內容
-        """
-        with self._lock:
-            output_buffer = self._output_buffer
-            output_lock = self._output_lock
-        if output_buffer is None or output_lock is None:
-            return
-        with output_lock:
-            output_buffer.append(line.rstrip("\r\n"))
 
     def append_output_text(self, text: str) -> None:
         """
@@ -164,12 +165,9 @@ class ServerInstance:
         """
         if not text:
             return
-        with self._lock:
-            output_buffer = self._output_buffer
-            output_lock = self._output_lock
-        if output_buffer is None or output_lock is None:
-            return
-        with output_lock:
+        with self._output_lock:
+            if self._output_buffer is None:
+                return
             combined = self._output_pending + text
             lines = combined.splitlines()
             if combined and not combined.endswith(("\n", "\r")):
@@ -177,18 +175,13 @@ class ServerInstance:
             else:
                 self._output_pending = ""
             for line in lines:
-                output_buffer.append(line.rstrip("\r\n"))
+                self._output_buffer.append(line.rstrip("\r\n"))
 
     def flush_output_pending(self) -> None:
         """把尚未換行的輸出片段送入緩衝"""
-        with self._lock:
-            output_buffer = self._output_buffer
-            output_lock = self._output_lock
-        if output_buffer is None or output_lock is None:
-            return
-        with output_lock:
-            if self._output_pending:
-                output_buffer.append(self._output_pending.rstrip("\r\n"))
+        with self._output_lock:
+            if self._output_buffer is not None and self._output_pending:
+                self._output_buffer.append(self._output_pending.rstrip("\r\n"))
                 self._output_pending = ""
 
     def consume_output_lines(self) -> list[str]:
@@ -198,25 +191,12 @@ class ServerInstance:
         Returns:
             目前累積的輸出行清單
         """
-        with self._lock:
-            output_buffer = self._output_buffer
-            output_lock = self._output_lock
-        if output_buffer is None or output_lock is None:
-            return []
-        with output_lock:
-            lines = list(output_buffer)
-            output_buffer.clear()
-        return lines
-
-    def get_process(self) -> Any | None:
-        """
-        取得目前的 process
-
-        Returns:
-            目前綁定的程序物件，若尚未啟動則回傳 None
-        """
-        with self._lock:
-            return self.process
+        with self._output_lock:
+            if self._output_buffer is None:
+                return []
+            lines = list(self._output_buffer)
+            self._output_buffer.clear()
+            return lines
 
     def start(self, cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> Any:
         """
@@ -284,22 +264,24 @@ class ServerInstance:
                 try:
                     process.kill()
                     process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError) as _:
+                except (SubprocessUtils.TimeoutExpired, OSError) as e:
                     logger.warning(
-                        "強制終止超時伺服器進程失敗 (id=%s, name=%s).",
+                        "強制終止逾時伺服器行程失敗 (id=%s, name=%s): %s",
                         getattr(self, "id", None),
                         getattr(self, "name", None),
+                        e,
                         exc_info=True,
                     )
             except OSError:
                 try:
                     process.kill()
                     process.wait(timeout=1)
-                except (SubprocessUtils.TimeoutExpired, OSError) as _:
+                except (SubprocessUtils.TimeoutExpired, OSError) as e:
                     logger.warning(
-                        "強制終止伺服器進程失敗 (id=%s, name=%s).",
+                        "強制終止伺服器行程失敗 (id=%s, name=%s): %s",
                         getattr(self, "id", None),
                         getattr(self, "name", None),
+                        e,
                         exc_info=True,
                     )
             finally:
@@ -308,21 +290,5 @@ class ServerInstance:
                 self.clear_process()
             return True
 
-    def is_running(self) -> bool:
-        """
-        回傳是否有正在執行的 process
 
-        Returns:
-            若伺服器正在執行中則回傳 True
-        """
-        process = self.get_process()
-        return process is not None and self.process_is_running(process)
-
-    def to_dict(self) -> dict[str, Any]:
-        """
-        序列化不含 process 的 instance 資料，用於儲存或 UI 顯示
-
-        Returns:
-            可序列化的 instance 資料字典
-        """
-        return {"id": self.id, "name": self.name, "path": str(self.path), "metadata": dict(self.metadata)}
+__all__ = ["ServerInstance"]

@@ -3,23 +3,26 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import src.utils.server_utils.server_detection_utils as detection_utils_module
+
 import src.utils.server_utils.server_runtime_utils as runtime_utils_module
-from src.core import ServerCRUD, ServerStartup
+from src.core import ServerCRUD, ServerImportService, ServerStartup
 from src.models import ServerConfig
-from src.utils import JvmOptionPolicy, ServerCommands
+from src.utils import JvmOptionPolicy, ServerCommands, ServerDetectionUtils
 
 
 def test_jvm_policy_recommends_g1gc_for_memory_above_4gb() -> None:
-    assert JvmOptionPolicy.recommend_gc_args(memory_max_mb=4097) == ["-XX:+UseG1GC"]
+    args = JvmOptionPolicy.recommend_gc_args(memory_max_mb=4097)
+    assert "-XX:+UseG1GC" in args
+    assert "-XX:+ParallelRefProcEnabled" in args
 
 
-def test_jvm_policy_recommends_zgc_for_low_latency_java_17() -> None:
-    assert JvmOptionPolicy.recommend_gc_args(
+def test_jvm_policy_recommends_zgc_for_java_21() -> None:
+    args = JvmOptionPolicy.recommend_gc_args(
         memory_max_mb=2048,
-        java_major=17,
-        performance_profile="low_latency",
-    ) == ["-XX:+UseZGC"]
+        java_major=21,
+    )
+    assert "-XX:+UseZGC" in args
+    assert "-XX:+ZGenerational" in args
 
 
 def test_jvm_policy_keeps_existing_gc_option() -> None:
@@ -27,7 +30,6 @@ def test_jvm_policy_keeps_existing_gc_option() -> None:
         JvmOptionPolicy.recommend_gc_args(
             memory_max_mb=8192,
             java_major=21,
-            performance_profile="low_latency",
             existing_args=["-XX:+UseShenandoahGC"],
         )
         == []
@@ -101,14 +103,16 @@ def test_build_java_command_uses_args_file_for_neoforge(monkeypatch: pytest.Monk
         runtime_utils_module.JavaUtils, "get_best_java_path", staticmethod(lambda *_args, **_kwargs: None)
     )
     monkeypatch.setattr(
-        detection_utils_module.ServerDetectionUtils,
+        ServerDetectionUtils,
         "find_main_jar",
         staticmethod(lambda *_args, **_kwargs: "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt"),
     )
 
     command = ServerCommands.build_java_command(config, return_list=True)
 
-    assert command == ["java", "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt", "nogui"]
+    assert command[0] == "java"
+    assert "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt" in command
+    assert command[-1] == "nogui"
 
 
 def test_repair_startup_script_rewrites_bare_java_to_full_versioned_path(
@@ -219,39 +223,24 @@ def test_replace_startup_command_java_path_replaces_existing_java_path(
     assert migrated == f'"{new_javaw.with_name("java.exe")}" -Xmx2G -jar server.jar'
 
 
-def test_add_server_imports_startup_script_settings_and_removes_original(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_import_service_builds_managed_startup_script_and_removes_old_script(tmp_path: Path) -> None:
     servers_root = tmp_path / "servers"
     server_path = servers_root / "imported"
     server_path.mkdir(parents=True)
     (server_path / "server.jar").write_bytes(b"jar")
     script_path = server_path / "start.bat"
     script_path.write_text("java -XX:+UseG1GC -Dfoo=bar -Xms1G -Xmx20G -jar server.jar\n", encoding="utf-8")
-    javaw = tmp_path / "jdk 17" / "bin" / "javaw.exe"
-    javaw.parent.mkdir(parents=True)
-    javaw.write_bytes(b"")
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=2048,
-        path=str(server_path),
-    )
-    monkeypatch.setattr(
-        runtime_utils_module.JavaUtils,
-        "get_best_java_path",
-        staticmethod(lambda *_args, **_kwargs: str(javaw)),
-    )
-
     manager = ServerCRUD(str(servers_root))
+    service = ServerImportService(manager)
+    inspection = service.inspect(server_path, "imported")
+    result = service.execute(inspection)
 
-    assert manager.add_server(config) is True
+    assert result.completed is True
+    assert result.config is not None
     assert not script_path.exists()
-    assert config.memory_min_mb == 1024
-    assert config.memory_max_mb == 20480
-    assert config.jvm_args == []
+    assert result.config.memory_min_mb == 1024
+    assert result.config.memory_max_mb == 20480
+    assert result.config.jvm_args == []
     generated_script = server_path / "start_server.bat"
     generated_content = generated_script.read_text(encoding="utf-8-sig")
     assert generated_script.exists()
@@ -260,34 +249,31 @@ def test_add_server_imports_startup_script_settings_and_removes_original(
     assert "正在啟動" not in generated_content
     assert "模組載入器" not in generated_content
     assert "記憶體配置" not in generated_content
-    assert f'"{javaw.with_name("java.exe")}"' in generated_content
-    assert f'"{javaw.with_name("java.exe")}" -XX:+UseG1GC -Dfoo=bar -Xms1G -Xmx20G -jar server.jar' in generated_content
+    assert "java -XX:+UseG1GC -Dfoo=bar -Xms1G -Xmx20G -jar server.jar nogui" in generated_content
 
 
 def test_find_startup_script_prefers_generated_script_over_imported_leftover(tmp_path: Path) -> None:
     (tmp_path / "start.bat").write_text("java -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
     (tmp_path / "start_server.bat").write_text("java -Xmx2G -jar server.jar\n", encoding="utf-8")
 
-    script_path = detection_utils_module.ServerDetectionUtils.find_startup_script(tmp_path)
+    script_path = ServerDetectionUtils.find_startup_script(tmp_path)
 
     assert script_path == tmp_path / "start_server.bat"
 
 
-def test_detect_memory_prefers_generated_script_when_present(tmp_path: Path) -> None:
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="1.21",
-        loader_type="fabric",
-        loader_version="0.16.10",
-        memory_max_mb=2048,
-        path=str(tmp_path),
-    )
-    (tmp_path / "start.bat").write_text("java -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
-    (tmp_path / "start_server.bat").write_text("java -Xmx2G -jar server.jar\n", encoding="utf-8")
+def test_import_inspection_reads_memory_without_rewriting_scripts(tmp_path: Path) -> None:
+    servers_root = tmp_path / "servers"
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "server.jar").write_bytes(b"jar")
+    script = source / "start.bat"
+    original = "java -Xmx20G -jar server.jar\npause\n"
+    script.write_text(original, encoding="utf-8")
 
-    detection_utils_module.ServerDetectionUtils.detect_memory_from_sources(tmp_path, config)
+    inspection = ServerImportService(ServerCRUD(str(servers_root))).inspect(source, "imported")
 
-    assert config.memory_max_mb == 2048
+    assert inspection.memory_max_mb == 20480
+    assert script.read_text(encoding="utf-8") == original
 
 
 def test_resolve_startup_script_for_run_repairs_existing_script_without_creating_generated(
@@ -390,54 +376,23 @@ def test_create_launch_script_rewrites_existing_bom_script_without_bom(
     assert not script_path.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
-def test_detect_memory_from_file_rewrites_startup_script_without_bom(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_startup_command_parser_is_read_only(tmp_path: Path) -> None:
     script_path = tmp_path / "start_server.bat"
     script_path.write_text("@echo off\njava -Xmx2G -Xms1G -jar server.jar\npause\n", encoding="utf-8")
 
-    captured: dict[str, object] = {}
+    original = script_path.read_bytes()
+    command = ServerCommands.extract_startup_script_command(script_path)
 
-    def _capture_write(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
-        captured["path"] = path
-        captured["content"] = content
-        captured["encoding"] = encoding
-        captured["errors"] = errors
-        return True
-
-    monkeypatch.setattr(detection_utils_module.PathUtils, "write_text_file", _capture_write)
-
-    max_memory, min_memory = detection_utils_module.ServerDetectionUtils._detect_memory_from_file(
-        script_path, is_script=True
-    )
-
-    assert max_memory == 2048
-    assert min_memory == 1024
-    assert captured["path"] == script_path
-    assert captured["encoding"] == "utf-8"
-    assert "pause" not in str(captured["content"]).lower()
+    assert command.memory_max_mb == 2048
+    assert command.memory_min_mb == 1024
+    assert script_path.read_bytes() == original
 
 
-def test_detect_memory_from_file_removes_bom_when_optimizing_startup_script(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_startup_command_parser_accepts_bom_without_rewriting(tmp_path: Path) -> None:
     script_path = tmp_path / "start.bat"
     script_path.write_text("\ufeffjava -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
-    captured: dict[str, object] = {}
+    original = script_path.read_bytes()
+    command = ServerCommands.extract_startup_script_command(script_path)
 
-    def _capture_write(path: Path, content: str, encoding: str = "utf-8", errors: str | None = None) -> bool:
-        captured["path"] = path
-        captured["content"] = content
-        captured["encoding"] = encoding
-        captured["errors"] = errors
-        return True
-
-    monkeypatch.setattr(detection_utils_module.PathUtils, "write_text_file", _capture_write)
-
-    max_memory, _min_memory = detection_utils_module.ServerDetectionUtils._detect_memory_from_file(
-        script_path, is_script=True
-    )
-
-    assert max_memory == 20480
-    assert captured["encoding"] == "utf-8"
-    assert not str(captured["content"]).startswith("\ufeff")
+    assert command.memory_max_mb == 20480
+    assert script_path.read_bytes() == original

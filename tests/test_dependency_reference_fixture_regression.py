@@ -46,6 +46,33 @@ def _serialize_resolved_dependency(result: Any) -> dict[str, Any]:
     }
 
 
+def _make_version_details_lookup(
+    call_stats: dict[str, int],
+    version_details_payload: dict[str, Any],
+):
+    def get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
+        call_stats["version_details"] += 1
+        payload = version_details_payload.get(version_id)
+        if not isinstance(payload, dict):
+            return ("", None)
+        project_id = str(payload.get("project_id", "") or "")
+        version_payload = payload.get("version")
+        if not isinstance(version_payload, dict):
+            return (project_id, None)
+        return (project_id, _build_online_mod_version(version_payload))
+
+    return get_mod_version_details
+
+
+def _make_project_name_lookup(call_stats: dict[str, int], project_names_payload: dict[str, Any]):
+    def fetch_project_name(project_id: str) -> str | None:
+        call_stats["project_name"] += 1
+        value = project_names_payload.get(project_id)
+        return str(value).strip() if value else None
+
+    return fetch_project_name
+
+
 def test_dependency_reference_regression_with_offline_fixture() -> None:
     raw = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
     cases: list[dict[str, Any]] = list(raw.get("cases", []) or [])
@@ -59,21 +86,8 @@ def test_dependency_reference_regression_with_offline_fixture() -> None:
         dependency_names = dict(case.get("dependency_names", {}) or {})
         version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] = {}
 
-        def _get_mod_version_details(version_id: str) -> tuple[str, OnlineModVersion | None]:
-            call_stats["version_details"] += 1
-            payload = version_details_payload.get(version_id)
-            if not isinstance(payload, dict):
-                return ("", None)
-            project_id = str(payload.get("project_id", "") or "")
-            version_payload = payload.get("version")
-            if not isinstance(version_payload, dict):
-                return (project_id, None)
-            return (project_id, _build_online_mod_version(version_payload))
-
-        def _fetch_project_name(project_id: str) -> str | None:
-            call_stats["project_name"] += 1
-            value = project_names_payload.get(project_id)
-            return str(value).strip() if value else None
+        get_mod_version_details = _make_version_details_lookup(call_stats, version_details_payload)
+        fetch_project_name = _make_project_name_lookup(call_stats, project_names_payload)
 
         repeat = max(1, int(case.get("repeat", 1) or 1))
         expected = dict(case.get("expected", {}) or {})
@@ -82,8 +96,8 @@ def test_dependency_reference_regression_with_offline_fixture() -> None:
                 dependency=dict(case.get("dependency", {}) or {}),
                 dependency_names=dependency_names,
                 version_details_cache=version_details_cache,
-                get_mod_version_details=_get_mod_version_details,
-                fetch_project_name=_fetch_project_name,
+                get_mod_version_details=get_mod_version_details,
+                fetch_project_name=fetch_project_name,
             )
             assert _serialize_resolved_dependency(resolved) == expected, case.get("name", "unknown")
 

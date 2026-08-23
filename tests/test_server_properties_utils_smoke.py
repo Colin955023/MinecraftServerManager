@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.core import ServerCRUD, ServerStartup
+import pytest
+
+from src.core import ServerCreationService, ServerCRUD, ServerImportService, ServerStartup
 from src.models import ServerConfig
 from src.utils import ServerPropertiesHelper, ServerPropertiesValidator
 
@@ -151,6 +153,11 @@ def test_load_server_properties_skips_config_write_when_properties_unchanged(tmp
 def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, monkeypatch) -> None:
     manager = ServerCRUD(str(tmp_path))
 
+    class _PlanOnlyLoader:
+        @staticmethod
+        def resolve_installer_artifact(*_args):
+            return None
+
     create_config = ServerConfig(
         name="../escape",
         minecraft_version="1.20.1",
@@ -159,7 +166,8 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, mo
         memory_max_mb=2048,
         path="",
     )
-    assert manager.create_server(create_config) is False
+    with pytest.raises(ValueError, match="路徑遍歷"):
+        ServerCreationService(manager, _PlanOnlyLoader()).plan(create_config)
     assert "../escape" not in manager.servers
 
     outside_path = tmp_path.parents[0] / "escape"
@@ -181,72 +189,27 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path, mo
 
     monkeypatch.setattr(manager, "write_servers_config", _track_write_servers_config)
 
-    assert manager.delete_server(delete_config.name) is False
+    assert manager.delete_server_result(delete_config.name).success is False
     assert manager.servers[delete_config.name] == delete_config
     assert write_calls == []
 
 
-def test_server_manager_rolls_back_when_launch_script_write_fails(tmp_path, monkeypatch) -> None:
-    manager = ServerCRUD(str(tmp_path))
-    server_dir = tmp_path / "demo"
-    config = ServerConfig(
-        name="demo",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=2048,
-        path="",
-    )
-
-    monkeypatch.setattr(manager, "create_launch_script", lambda *_args, **_kwargs: False)
-
-    result = manager.create_server_result(config)
-
-    assert result.failed is True
-    assert config.name not in manager.servers
-    assert not server_dir.exists()
-
-
-def test_server_manager_rolls_back_when_servers_config_write_fails(tmp_path, monkeypatch) -> None:
-    manager = ServerCRUD(str(tmp_path))
-    server_dir = tmp_path / "demo"
-    config = ServerConfig(
-        name="demo",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=2048,
-        path="",
-    )
-
-    monkeypatch.setattr(manager, "create_launch_script", lambda *_args, **_kwargs: True)
+def test_server_import_rolls_back_files_and_registration_when_config_write_fails(tmp_path, monkeypatch) -> None:
+    servers_root = tmp_path / "servers"
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "server.jar").write_bytes(b"jar")
+    manager = ServerCRUD(str(servers_root))
+    service = ServerImportService(manager)
+    inspection = service.inspect(source, "imported")
     monkeypatch.setattr(manager, "write_servers_config", lambda: False)
 
-    result = manager.create_server_result(config)
+    result = service.execute(inspection)
 
-    assert result.failed is True
-    assert config.name not in manager.servers
-    assert not server_dir.exists()
-
-
-def test_server_manager_rolls_back_when_add_server_write_fails(tmp_path, monkeypatch) -> None:
-    manager = ServerCRUD(str(tmp_path))
-    server_dir = tmp_path / "imported"
-    server_dir.mkdir()
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=2048,
-        path=str(server_dir),
-    )
-
-    monkeypatch.setattr(manager, "_prepare_imported_startup_scripts", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(manager, "write_servers_config", lambda: False)
-
-    assert manager.add_server(config) is False
-    assert config.name not in manager.servers
+    assert result.status == "failed"
+    assert "imported" not in manager.servers
+    assert not (servers_root / "imported").exists()
+    assert (source / "server.jar").is_file()
 
 
 def test_server_manager_rolls_back_when_delete_server_write_fails(tmp_path, monkeypatch) -> None:
@@ -265,7 +228,7 @@ def test_server_manager_rolls_back_when_delete_server_write_fails(tmp_path, monk
 
     monkeypatch.setattr(manager, "write_servers_config", lambda: False)
 
-    assert manager.delete_server(config.name) is False
+    assert manager.delete_server_result(config.name).success is False
     assert manager.servers[config.name] == config
     assert server_dir.exists()
 

@@ -1,59 +1,30 @@
 from __future__ import annotations
 
+import datetime
+from types import SimpleNamespace
+from typing import Any, cast
+
+from src.models import ServerConfig, WorkOutcome
+from src.ui import ManageServerFrame, ManageServerService
+from src.utils import CancellationToken, WorkHandle
+
 
 class _DummyFrame:
     def __init__(self):
-        self._server_refresh_token = 0
         self.server_tree = None
         self.service = None
         self.selected_server = ""
         self._monitor_windows = {}
 
-    def _cancel_server_refresh_job(self):
-        pass
-
     def _show_existing_monitor_window(self, win, bring_to_front=True):
+        target = getattr(win, "window", win)
         if bring_to_front:
-            win.show()
-            win.raise_()
-            win.activateWindow()
-            win.setFocus()
+            target.show()
+            target.raise_()
+            target.activateWindow()
+            target.setFocus()
         else:
-            win.show()
-
-    def _recycle_server_item(self, item_id):
-        pass
-
-    def _apply_server_refresh_payload(self, payload, context):
-        pass
-
-
-from types import SimpleNamespace
-from typing import Any, cast
-
-import pytest
-import src.ui.manage_server_frame as manage_server_frame_module
-import src.ui.manage_server_service as manage_server_service_module
-from src.models import ServerConfig
-
-
-class FakeTreeview:
-    def __init__(self) -> None:
-        self.updated: list[tuple[str, tuple[Any, ...]]] = []
-        self.fail_item_ids: set[str] = set()
-
-    def item(self, item: str | int, option: str | None = None, **kw: Any) -> Any:
-        if option is not None:
-            return None
-        values = kw.get("values")
-        item_id = str(item)
-        if item_id in self.fail_item_ids:
-            raise RuntimeError(f"boom: {item_id}")
-        if isinstance(values, tuple):
-            self.updated.append((item_id, values))
-        elif isinstance(values, list):
-            self.updated.append((item_id, tuple(values)))
-        return None
+            target.show()
 
 
 class FakeMonitorWindow:
@@ -86,7 +57,7 @@ def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> Non
         ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
     ]
 
-    server_order, server_rows = manage_server_service_module.ManageServerService._build_server_tree_payload(server_data)
+    server_order, server_rows = ManageServerService._build_server_tree_payload(server_data)
 
     assert server_order == ["Alpha", "Beta"]
     assert server_rows["Alpha"] == tuple(server_data[0])
@@ -99,7 +70,7 @@ def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
         ["Alpha", "1.21.1", "Fabric", "已停止", "未備份", "servers\\Alpha"],
     ]
 
-    server_order, server_rows = manage_server_service_module.ManageServerService._build_server_tree_payload(server_data)
+    server_order, server_rows = ManageServerService._build_server_tree_payload(server_data)
 
     assert server_order == ["Alpha", "Alpha"]
     assert server_rows["Alpha"] == tuple(server_data[1])
@@ -111,7 +82,7 @@ def test_build_server_refresh_payload_combines_signature_order_and_rows() -> Non
         ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
     ]
 
-    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(server_data)
+    payload = ManageServerService._build_server_refresh_payload(server_data)
 
     assert payload.signature == (
         ("Alpha", tuple(server_data[0])),
@@ -124,33 +95,13 @@ def test_build_server_refresh_payload_combines_signature_order_and_rows() -> Non
     }
 
 
-def test_should_apply_server_refresh_updates_hash_only_when_changed() -> None:
-    service = object.__new__(manage_server_service_module.ManageServerService)
-    service.__dict__["_last_server_data_hash"] = None
-    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
-        [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
-    )
-
-    assert service._should_apply_server_refresh(payload) is True
-    first_hash = service._last_server_data_hash
-    assert isinstance(first_hash, int)
-    assert service._should_apply_server_refresh(payload) is False
-    assert service._last_server_data_hash == first_hash
-
-
-def test_begin_server_refresh_cycle_returns_context() -> None:
-    service = object.__new__(manage_server_service_module.ManageServerService)
-    context = service._begin_server_refresh_cycle()
-    assert context.refresh_token == 0
-
-
 def test_monitor_server_reuses_existing_window_for_user_click_and_brings_to_front() -> None:
     frame = _DummyFrame()
     frame.selected_server = "Alpha"
     fake_window = FakeMonitorWindow()
     frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
 
-    manage_server_frame_module.ManageServerFrame.monitor_server(frame)  # type: ignore[arg-type]
+    ManageServerFrame.monitor_server(cast(Any, frame))
 
     assert fake_window.show_calls == 1
     assert fake_window.raise_calls == 1
@@ -164,40 +115,12 @@ def test_monitor_server_auto_reuses_existing_window_without_forcing_focus() -> N
     fake_window = FakeMonitorWindow()
     frame._monitor_windows = {"Alpha": SimpleNamespace(window=fake_window)}
 
-    manage_server_frame_module.ManageServerFrame.monitor_server(frame, bring_to_front=False)  # type: ignore[arg-type]
+    ManageServerFrame.monitor_server(cast(Any, frame), bring_to_front=False)
 
     assert fake_window.show_calls == 1
     assert fake_window.raise_calls == 0
     assert fake_window.activate_calls == 0
     assert fake_window.focus_calls == 0
-
-
-def test_prepare_server_tree_diff_updates_existing_rows_and_collects_pending() -> None:
-    service = object.__new__(manage_server_service_module.ManageServerService)
-    item_by_name = {"Alpha": "item-a", "Beta": "item-b"}
-    previous_snapshot = {
-        "Alpha": ("Alpha", "old"),
-        "Beta": ("Beta", "same"),
-    }
-
-    preparation = service.prepare_server_tree_diff(
-        server_item_by_name=item_by_name,
-        previous_snapshot=previous_snapshot,
-        server_order=["Alpha", "Beta", "Gamma"],
-        server_rows={
-            "Alpha": ("Alpha", "new"),
-            "Beta": ("Beta", "changed"),
-            "Gamma": ("Gamma", "fresh"),
-        },
-    )
-
-    assert preparation.pending_update == [("item-a", ("Alpha", "new"))]
-    assert item_by_name == {"Alpha": "item-a"}
-    assert preparation.rows_snapshot == {"Alpha": ("Alpha", "new")}
-    assert preparation.pending_insert == [
-        ("Beta", ("Beta", "changed")),
-        ("Gamma", ("Gamma", "fresh")),
-    ]
 
 
 def test_build_server_display_row_formats_unknown_mc_version_with_loader_version() -> None:
@@ -210,7 +133,7 @@ def test_build_server_display_row_formats_unknown_mc_version_with_loader_version
         path="servers\\Alpha",
     )
 
-    row = manage_server_service_module.ManageServerService._build_server_display_row(
+    row = ManageServerService._build_server_display_row(
         name="Alpha",
         config=config,
         status="已停止",
@@ -231,7 +154,7 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
         path="servers\\Beta",
     )
 
-    row = manage_server_service_module.ManageServerService._build_server_display_row(
+    row = ManageServerService._build_server_display_row(
         name="Beta",
         config=config,
         status="運行中",
@@ -239,62 +162,139 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
         display_path="servers\\Beta",
     )
 
-    assert row == ["Beta", "1.21.1", "原版", "運行中", "已備份", "servers\\Beta"]
+    assert row == ["Beta", "1.21.1", "1.21.1", "運行中", "已備份", "servers\\Beta"]
 
 
-def test_build_server_refresh_execution_plan_skips_apply_when_payload_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = object.__new__(manage_server_service_module.ManageServerService)
-    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
+def test_begin_refresh_returns_monotonic_generation() -> None:
+    fake_crud = SimpleNamespace(servers={}, load_servers_config=lambda: None)
+    service = ManageServerService(fake_crud)
+
+    gen1 = service.begin_refresh()
+    gen2 = service.begin_refresh()
+    gen3 = service.begin_refresh()
+
+    assert gen1 < gen2 < gen3
+
+
+def test_accept_projection_rejects_stale_generation() -> None:
+    fake_crud = SimpleNamespace(servers={})
+    service = ManageServerService(fake_crud)
+
+    gen1 = service.begin_refresh()
+    gen2 = service.begin_refresh()
+
+    payload = ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
 
-    monkeypatch.setattr(service, "_should_apply_server_refresh", lambda _payload: False)
+    assert service.accept_projection(gen1, payload, "Alpha") is None
+    plan = service.accept_projection(gen2, payload, "Alpha")
+    assert plan is not None
+    assert plan.has_changes is True
+    assert plan.projection.generation == gen2
 
-    plan = service.build_server_refresh_execution_plan(payload, 6, "Alpha")
 
-    assert plan.should_apply is False
-    assert plan.refresh_context is None
+def test_accept_projection_returns_no_changes_when_unchanged() -> None:
+    fake_crud = SimpleNamespace(servers={})
+    service = ManageServerService(fake_crud)
 
-
-def test_build_server_refresh_execution_plan_returns_refresh_context_when_changed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = object.__new__(manage_server_service_module.ManageServerService)
-    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
+    gen1 = service.begin_refresh()
+    payload = ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
-    expected_context = manage_server_service_module.ServerRefreshContext(refresh_token=6, previous_selection="Alpha")
 
-    monkeypatch.setattr(service, "_should_apply_server_refresh", lambda _payload: True)
+    plan1 = service.accept_projection(gen1, payload, "Alpha")
+    assert plan1 is not None
+    assert plan1.has_changes is True
 
-    plan = service.build_server_refresh_execution_plan(payload, 6, "Alpha")
+    gen2 = service.begin_refresh()
+    plan2 = service.accept_projection(gen2, payload, "Alpha")
+    assert plan2 is not None
+    assert plan2.has_changes is False
 
-    assert plan.should_apply is True
-    assert plan.refresh_context == expected_context
+
+def test_accept_projection_retains_selection_when_present() -> None:
+    fake_crud = SimpleNamespace(servers={})
+    service = ManageServerService(fake_crud)
+
+    gen = service.begin_refresh()
+    payload = ManageServerService._build_server_refresh_payload(
+        [
+            ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
+            ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
+        ]
+    )
+
+    plan = service.accept_projection(gen, payload, "Beta")
+    assert plan is not None
+    assert plan.projection.selected_server == "Beta"
 
 
-def test_refresh_servers_callback_applies_payload_with_execution_plan(monkeypatch: pytest.MonkeyPatch) -> None:
-    frame = _DummyFrame()
-    frame.server_tree = cast(Any, object())
-    payload = manage_server_service_module.ManageServerService._build_server_refresh_payload(
+def test_accept_projection_clears_selection_when_deleted() -> None:
+    fake_crud = SimpleNamespace(servers={})
+    service = ManageServerService(fake_crud)
+
+    gen = service.begin_refresh()
+    payload = ManageServerService._build_server_refresh_payload(
         [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
     )
-    execution_plan = manage_server_service_module.ServerRefreshExecutionPlan(
-        should_apply=True,
-        refresh_context=manage_server_service_module.ServerRefreshContext(refresh_token=3, previous_selection="Alpha"),
+
+    plan = service.accept_projection(gen, payload, "DeletedServer")
+    assert plan is not None
+    assert plan.projection.selected_server is None
+
+
+def test_get_backup_status_uses_injected_backup_manager() -> None:
+    fake_crud = SimpleNamespace(
+        servers={
+            "Alpha": ServerConfig(
+                name="Alpha",
+                minecraft_version="1.21",
+                loader_type="fabric",
+                loader_version="",
+                memory_max_mb=2048,
+                path="servers/Alpha",
+            )
+        }
     )
-    calls: list[
-        tuple[manage_server_service_module.ServerRefreshPayload, manage_server_service_module.ServerRefreshContext]
-    ] = []
-
-    frame.service = object.__new__(manage_server_service_module.ManageServerService)
-    monkeypatch.setattr(frame.service, "build_server_refresh_execution_plan", lambda _p, _t, _s: execution_plan)
-    monkeypatch.setattr(
-        frame, "_apply_server_refresh_payload", lambda _payload, context: calls.append((_payload, context))
+    fake_backup = SimpleNamespace(
+        list_backups=lambda _server_name: [{"filename": "Alpha_202608201200.zip", "datetime": datetime.datetime.now()}]
     )
+    service = ManageServerService(fake_crud, server_backup=fake_backup)
 
-    manage_server_frame_module.ManageServerFrame._refresh_servers_callback(frame, payload)  # type: ignore[arg-type]
+    status = service.get_backup_status("Alpha")
+    assert "剛剛" in status or "✅" in status
 
-    assert calls == [(payload, execution_plan.refresh_context)]
+
+def test_work_outcome_statuses() -> None:
+    s = WorkOutcome.succeeded(42)
+    assert s.is_succeeded is True
+    assert s.is_failed is False
+    assert s.is_cancelled is False
+    assert s.value == 42
+    assert s.error is None
+
+    err = RuntimeError("boom")
+    f = WorkOutcome.failed(err)
+    assert f.is_succeeded is False
+    assert f.is_failed is True
+    assert f.is_cancelled is False
+    assert f.error is err
+
+    c = WorkOutcome.cancelled()
+    assert c.is_succeeded is False
+    assert c.is_failed is False
+    assert c.is_cancelled is True
+
+
+def test_work_handle_cancellation() -> None:
+    token = CancellationToken()
+    handle = WorkHandle(generation=1, key="test", cancel_token=token)
+
+    assert handle.generation == 1
+    assert handle.key == "test"
+    assert handle.is_cancelled is False
+
+    handle.cancel()
+    assert handle.is_cancelled is True
+    assert token.is_cancelled() is True

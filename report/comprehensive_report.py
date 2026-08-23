@@ -29,9 +29,11 @@ import ast
 import functools
 import hashlib
 import html
+import logging
+import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 import tomllib
@@ -70,6 +72,7 @@ IGNORED_SCAN_DIRS = {
 PRIVACY_IGNORED_FILES = {HTML_REPORT_PATH}
 T = TypeVar("T")
 
+
 @dataclass(slots=True)
 class ToolSpec:
     name: str
@@ -77,6 +80,7 @@ class ToolSpec:
     args: list[str]
     module_name: str | None = None
     use_python_executable: bool = False
+
 
 @dataclass(slots=True)
 class ToolResult:
@@ -112,7 +116,9 @@ class FileContext:
     ast_tree: ast.Module | None
     parse_error: str | None = None
 
+
 FILE_CONTEXT_CACHE: dict[Path, FileContext] = {}
+
 
 def get_file_context(path: Path) -> FileContext:
     """取得檔案的快取解析內容，減少重複 I/O 與 AST 解析。"""
@@ -172,7 +178,7 @@ def format_duration(seconds: float) -> str:
 
 def log_verbose(message: str) -> None:
     if CLI_VERBOSE_LOGS:
-        print(message)
+        logging.info(message)
 
 
 def run_command(name: str, command: list[str]) -> ToolResult:
@@ -193,9 +199,10 @@ def run_command(name: str, command: list[str]) -> ToolResult:
 
     started = time.perf_counter()
     try:
-        completed = subprocess.run(
+        completed = subprocess.run(  # nosec B603
             command,
             cwd=REPO_ROOT,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -244,7 +251,7 @@ def run_command(name: str, command: list[str]) -> ToolResult:
     )
 
 
-def run_timed_operation(name: str, operation: Callable[[], T]) -> tuple[T, float]:
+def run_timed_operation[T](name: str, operation: Callable[[], T]) -> tuple[T, float]:
     log_verbose(f"  [Task:{name}] start")
     started = time.perf_counter()
     result: T = operation()
@@ -296,8 +303,16 @@ def get_ruff_config_summary() -> str:
 
 def render_category_overview() -> str:
     categories = [
-        ("程式碼品質", "ruff lint、mypy、pylint、bandit、vulture、import-linter、compileall", "依 pyproject/CI 執行靜態分析、型別、匯入邊界、安全、死代碼與語法檢查"),
-        ("API 命名", "內建 cross-file private callable scanner", "掃描 runtime code 中跨檔案呼叫的 callable 是否誤用前導底線（排除 tests）"),
+        (
+            "程式碼品質",
+            "ruff lint、mypy、pylint、bandit、vulture、import-linter、compileall",
+            "依 pyproject/CI 執行靜態分析、型別、匯入邊界、安全、死代碼與語法檢查",
+        ),
+        (
+            "API 命名",
+            "內建 cross-file private callable scanner",
+            "掃描 runtime code 中跨檔案呼叫的 callable 是否誤用前導底線（排除 tests）",
+        ),
         ("重複程式碼", "內建 duplicate scanner", "掃描 src 內高相似度且連續重複的程式碼區塊"),
         ("UI 硬編碼", "內建 ui hardcode scanner", "檢查色碼、尺寸與字型大小是否直接寫死"),
         ("註解整潔", "ruff ERA", "依 pyproject.toml 已啟用的 ERA 規則找出註解殘留舊程式碼"),
@@ -323,13 +338,13 @@ def collect_code_quality_results() -> list[ToolResult]:
             name="ruff",
             tool_name="ruff",
             module_name="ruff",
-            args=["check", "src", "tests"],
+            args=["check", "src", "tests", "scripts", "report"],
         ),
         ToolSpec(
             name="mypy",
             tool_name="mypy",
             module_name="mypy",
-            args=["src", "tests"],
+            args=[],
         ),
         ToolSpec(
             name="pylint",
@@ -337,17 +352,12 @@ def collect_code_quality_results() -> list[ToolResult]:
             module_name="pylint",
             args=["--disable=all", "--enable=cyclic-import", "src"],
         ),
-        ToolSpec(
-            name="bandit",
-            tool_name="bandit",
-            module_name="bandit",
-            args=["-r", "src"]
-        ),
+        ToolSpec(name="bandit", tool_name="bandit", module_name="bandit", args=["-r", "src", "scripts", "report"]),
         ToolSpec(
             name="vulture",
             tool_name="vulture",
             module_name="vulture",
-            args=["src", "--min-confidence=80"],
+            args=[],
         ),
         ToolSpec(
             name="import-linter",
@@ -363,7 +373,7 @@ def collect_code_quality_results() -> list[ToolResult]:
         ToolSpec(
             name="compileall",
             tool_name="python",
-            args=["-m", "compileall", "-q", "src", "tests", "scripts"],
+            args=["-m", "compileall", "-q", "src", "tests", "scripts", "report"],
             use_python_executable=True,
         ),
     ]
@@ -373,7 +383,8 @@ def collect_code_quality_results() -> list[ToolResult]:
 
 def gather_python_files(base_dir: Path) -> list[Path]:
     return sorted(
-        path for path in base_dir.rglob("*.py")
+        path
+        for path in base_dir.rglob("*.py")
         if path.is_file() and not any(part in IGNORED_SCAN_DIRS for part in path.parts)
     )
 
@@ -398,13 +409,11 @@ def normalize_code_line(line: str) -> str:
 
 def is_duplicate_noise_line(normalized: str) -> bool:
     lowered = normalized.lower()
-    if lowered.startswith("import ") or lowered.startswith("from "):
+    if lowered.startswith(("import ", "from ")):
         return True
     if lowered in {"try:", "except:", "except exception as e:", "else:", "finally:", "pass", "return", "return none"}:
         return True
-    if len(lowered) < 12:
-        return True
-    return False
+    return len(lowered) < 12
 
 
 def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
@@ -430,13 +439,15 @@ def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
             if len(chunk_str) < min_chars:
                 continue
 
-            chunk_hash = hashlib.md5(chunk_str.encode("utf-8")).hexdigest()
+            chunk_hash = hashlib.sha256(chunk_str.encode("utf-8")).hexdigest()
 
             substantive_count = sum(1 for _, normalized, _ in chunk if not is_duplicate_noise_line(normalized))
             if substantive_count < 4:
                 continue
 
-            sample_line = next((raw for _, normalized, raw in chunk if not is_duplicate_noise_line(normalized)), chunk[0][2])
+            sample_line = next(
+                (raw for _, normalized, raw in chunk if not is_duplicate_noise_line(normalized)), chunk[0][2]
+            )
             block_map.setdefault(chunk_hash, []).append((file_path, chunk[0][0], sample_line))
 
     findings: list[Finding] = []
@@ -457,14 +468,14 @@ def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
         location_lines = tuple(line for _, line, _ in representative)
         previous_lines = previous_locations.get(location_paths)
         previous_locations[location_paths] = location_lines
-        if previous_lines and all(current == previous + 1 for current, previous in zip(location_lines, previous_lines, strict=True)):
+        if previous_lines and all(
+            current == previous + 1 for current, previous in zip(location_lines, previous_lines, strict=True)
+        ):
             continue
 
         groups += 1
         first_file, first_line, sample = representative[0]
-        top_locations = [
-            f"{path.relative_to(REPO_ROOT)!s}:{line_no}" for path, line_no, _ in representative[:4]
-        ]
+        top_locations = [f"{path.relative_to(REPO_ROOT)!s}:{line_no}" for path, line_no, _ in representative[:4]]
         location_hint = ", ".join(top_locations)
         if len(representative) > 4:
             location_hint += f", ... (+{len(representative) - 4})"
@@ -492,7 +503,9 @@ def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
 
 def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
     color_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    size_pattern = re.compile(r"\b(width|height|padx|pady|wraplength|corner_radius|border_width)\s*=\s*(?!0\b|1\b)\d+\b")
+    size_pattern = re.compile(
+        r"\b(width|height|padx|pady|wraplength|corner_radius|border_width)\s*=\s*(?!0\b|1\b)\d+\b"
+    )
     font_size_pattern = re.compile(r"\bfont\s*=\s*\([^)]*,\s*\d+[^)]*\)")
 
     findings: list[Finding] = []
@@ -527,7 +540,7 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
                         file=str(file_path.relative_to(REPO_ROOT)),
                         line=idx,
                         category="hardcoded_color",
-                        message="Hardcoded color literal found. Consider using ui_utils.Colors token.",
+                        message="Hardcoded color literal found. Consider using ui_tokens.Colors token.",
                         sample=stripped,
                     )
                 )
@@ -538,12 +551,16 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
                         file=str(file_path.relative_to(REPO_ROOT)),
                         line=idx,
                         category="hardcoded_size",
-                        message="Hardcoded size literal found. Consider using ui_utils Sizes/Spacing/FontSize token.",
+                        message="Hardcoded size literal found. Consider using ui_tokens Sizes/Spacing/FontSize token.",
                         sample=stripped,
                     )
                 )
 
-    return SectionResult(name="ui_hardcode", findings=findings, meta={"scope": "src/**/*.py (except src/utils/ui_utils.py)"})
+    return SectionResult(
+        name="ui_hardcode",
+        findings=findings,
+        meta={"scope": "src/**/*.py (except src/utils/ui_support token/config modules)"},
+    )
 
 
 def _collect_imported_call_aliases(tree: ast.AST) -> tuple[set[str], dict[str, str]]:
@@ -720,7 +737,7 @@ def _is_property_like_method(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bo
 
 
 def _is_ctypes_structure_class(node: ast.ClassDef) -> bool:
-    base_names = { _get_dotted_name(base) for base in node.bases }
+    base_names = {_get_dotted_name(base) for base in node.bases}
     return bool(base_names.intersection(CTYPES_CLASS_BASE_NAMES))
 
 
@@ -765,7 +782,7 @@ def _get_callable_arguments(node: ast.FunctionDef | ast.AsyncFunctionDef, *, is_
         arguments.append(node.args.kwarg.arg)
 
     if is_method and arguments:
-        decorator_names = { _get_dotted_name(decorator) for decorator in node.decorator_list }
+        decorator_names = {_get_dotted_name(decorator) for decorator in node.decorator_list}
         if "staticmethod" not in decorator_names and arguments[0] in {"self", "cls"}:
             arguments = arguments[1:]
     return arguments
@@ -827,11 +844,18 @@ def _should_exempt_callable(node: ast.FunctionDef | ast.AsyncFunctionDef, *, _is
         return True
     if node.name in COMMON_EXEMPT_CALLABLE_NAMES:
         return True
-    return bool(any(node.name.startswith(prefix) for prefix in TRIVIAL_CALLABLE_PREFIXES) and _is_trivial_callable(node))
+    return bool(
+        any(node.name.startswith(prefix) for prefix in TRIVIAL_CALLABLE_PREFIXES) and _is_trivial_callable(node)
+    )
 
 
 def _collect_callable_findings(
-    node: ast.FunctionDef | ast.AsyncFunctionDef, file_path: Path, qualified_name: str, *, is_method: bool, owner_lines: list[str]
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    file_path: Path,
+    qualified_name: str,
+    *,
+    is_method: bool,
+    owner_lines: list[str],
 ) -> list[Finding]:
     if _should_exempt_callable(node, _is_method=is_method):
         return []
@@ -853,7 +877,9 @@ def _collect_callable_findings(
         )
         return findings
 
-    if _callable_requires_args(node, is_method=is_method) and not _docstring_has_section(docstring, {"args", "arguments", "parameters"}):
+    if _callable_requires_args(node, is_method=is_method) and not _docstring_has_section(
+        docstring, {"args", "arguments", "parameters"}
+    ):
         findings.append(
             Finding(
                 file=str(file_path.relative_to(REPO_ROOT)),
@@ -864,7 +890,9 @@ def _collect_callable_findings(
             )
         )
 
-    if _callable_requires_returns(node) and not _docstring_has_section(docstring, {"return", "returns", "yield", "yields"}):
+    if _callable_requires_returns(node) and not _docstring_has_section(
+        docstring, {"return", "returns", "yield", "yields"}
+    ):
         findings.append(
             Finding(
                 file=str(file_path.relative_to(REPO_ROOT)),
@@ -877,7 +905,9 @@ def _collect_callable_findings(
     return findings
 
 
-def _collect_class_findings(node: ast.ClassDef, file_path: Path, owner_names: list[str], owner_lines: list[str]) -> list[Finding]:
+def _collect_class_findings(
+    node: ast.ClassDef, file_path: Path, owner_names: list[str], owner_lines: list[str]
+) -> list[Finding]:
     if _is_ctypes_structure_class(node):
         return []
 
@@ -905,7 +935,9 @@ def _collect_class_findings(node: ast.ClassDef, file_path: Path, owner_names: li
             continue
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public_name(getattr(child, "name", "")):
             method_name = ".".join([*class_names, child.name])
-            findings.extend(_collect_callable_findings(child, file_path, method_name, is_method=True, owner_lines=owner_lines))
+            findings.extend(
+                _collect_callable_findings(child, file_path, method_name, is_method=True, owner_lines=owner_lines)
+            )
     return findings
 
 
@@ -952,9 +984,12 @@ def collect_docstring_section(src_dir: Path) -> SectionResult:
                     findings.extend(_collect_class_findings(node, file_path, [], owner_lines))
                 continue
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public_name(getattr(node, "name", "")):
-                findings.extend(_collect_callable_findings(node, file_path, node.name, is_method=False, owner_lines=owner_lines))
+                findings.extend(
+                    _collect_callable_findings(node, file_path, node.name, is_method=False, owner_lines=owner_lines)
+                )
 
     return SectionResult(name="docstrings", findings=findings, meta={"scope": "src/**/*.py (public API)"})
+
 
 # -------------------------------------------------------------------------
 
@@ -1118,9 +1153,7 @@ def collect_privacy_regex_findings(repo_root: Path) -> SectionResult:
         ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}\b")),
         (
             "generic_secret_assignment",
-            re.compile(
-                r"(?i)\b(api[_-]?key|token|secret|password|passwd)\b\s*[:=]\s*[\"'][^\"']{8,}[\"']"
-            ),
+            re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd)\b\s*[:=]\s*[\"'][^\"']{8,}[\"']"),
         ),
         (
             "private_key_block",
@@ -1164,7 +1197,6 @@ def summarize_tool_findings(results: list[ToolResult], section_name: str) -> Sec
     for result in results:
         issue_count = count_tool_reported_issues(result)
 
-        # detect-secrets 輸出為 JSON；若 results 有候選，應視為待處理問題。
         if result.name == "detect-secrets":
             parsed = parse_json_output(result.output)
             secret_count = count_detect_secrets_candidates(parsed)
@@ -1249,6 +1281,7 @@ def count_detect_secrets_candidates(parsed: Any | None) -> int:
             total += len(value)
     return total
 
+
 _ISSUE_COUNTERS: dict[str, Callable[[str], int]] = {
     "ruff": lambda o: len(re.findall(r"(?m)^.+?:\d+:\d+:\s", o)),
     "mypy": lambda o: int(m.group(1)) if (m := re.search(r"Found\s+(\d+)\s+errors?", o)) else 0,
@@ -1258,9 +1291,11 @@ _ISSUE_COUNTERS: dict[str, Callable[[str], int]] = {
     "ruff-era": lambda o: len(re.findall(r"(?m)^.+\.py:\d+:\d+:\s+ERA", o)),
 }
 
+
 def count_tool_reported_issues(result: ToolResult) -> int:
     counter = _ISSUE_COUNTERS.get(result.name)
     return counter(result.output) if counter and result.output else 0
+
 
 _HIGHLIGHT_MESSAGES = {
     "pylint": "pylint 偵測問題：",
@@ -1270,6 +1305,7 @@ _HIGHLIGHT_MESSAGES = {
     "bandit": "bandit 偵測問題：",
     "ruff-era": "ruff ERA 偵測可疑註解：",
 }
+
 
 def extract_tool_highlights(result: ToolResult) -> list[str]:
     highlights: list[str] = []
@@ -1305,7 +1341,6 @@ def extract_tool_highlights(result: ToolResult) -> list[str]:
     if result.return_code is not None:
         highlights.append(f"exit code: {result.return_code}")
 
-    # 去除重複並保序。
     deduped: list[str] = []
     seen: set[str] = set()
     for item in highlights:
@@ -1381,17 +1416,17 @@ def render_tool_output(output: str) -> str:
 
     if isinstance(parsed, dict):
         keys = list(parsed.keys())[:8]
-        key_tags = "".join(f"<span class=\"tag\">{html.escape(str(key))}</span>" for key in keys)
-        meta = f"<div class=\"json-meta\"><span>JSON object</span><span>keys: {len(parsed)}</span>{key_tags}</div>"
+        key_tags = "".join(f'<span class="tag">{html.escape(str(key))}</span>' for key in keys)
+        meta = f'<div class="json-meta"><span>JSON object</span><span>keys: {len(parsed)}</span>{key_tags}</div>'
     elif isinstance(parsed, list):
-        meta = f"<div class=\"json-meta\"><span>JSON array</span><span>items: {len(parsed)}</span></div>"
+        meta = f'<div class="json-meta"><span>JSON array</span><span>items: {len(parsed)}</span></div>'
     else:
-        meta = "<div class=\"json-meta\"><span>JSON scalar</span></div>"
+        meta = '<div class="json-meta"><span>JSON scalar</span></div>'
 
     return (
         "<details><summary>完整 JSON 輸出（已格式化）</summary>"
         + meta
-        + f"<pre class=\"json-pre\">{html.escape(pretty)}</pre>"
+        + f'<pre class="json-pre">{html.escape(pretty)}</pre>'
         + "</details>"
     )
 
@@ -1401,7 +1436,7 @@ def render_tool_detail(result: ToolResult) -> str:
     output_html = render_tool_output(result.output)
     return (
         "<details><summary>命令與輸出</summary>"
-        + f"<div class=\"tool-detail-meta\"><div><strong>命令</strong></div><code>{command_html}</code></div>"
+        + f'<div class="tool-detail-meta"><div><strong>命令</strong></div><code>{command_html}</code></div>'
         + output_html
         + "</details>"
     )
@@ -1414,7 +1449,7 @@ def render_tool_table(results: list[ToolResult]) -> str:
         highlight_html = ""
         if highlights:
             highlight_items = "".join(f"<li>{html.escape(item)}</li>" for item in highlights)
-            highlight_html = f"<div class=\"highlight-box\"><div class=\"highlight-title\">重點摘要</div><ul>{highlight_items}</ul></div>"
+            highlight_html = f'<div class="highlight-box"><div class="highlight-title">重點摘要</div><ul>{highlight_items}</ul></div>'
         else:
             highlight_html = '<div class="tool-summary-empty">此工具本輪沒有額外摘要。</div>'
         rows.append(
@@ -1441,7 +1476,7 @@ def render_tool_table(results: list[ToolResult]) -> str:
 def render_finding_detail(sample_text: str) -> str:
     """呈現 finding 的詳細內容，支援 JSON 自動轉換和多行展示"""
     if not sample_text or sample_text == "(no output)":
-        return "<span style=\"color: #94a3b8;\">無詳細內容</span>"
+        return '<span style="color: #94a3b8;">無詳細內容</span>'
 
     parsed = parse_json_output(sample_text)
 
@@ -1452,27 +1487,27 @@ def render_finding_detail(sample_text: str) -> str:
         preview = "<br/>".join(html.escape(line) for line in lines[:2])
         full = "<br/>".join(html.escape(line) for line in lines)
         return (
-            f"<details style=\"cursor: pointer;\">"
+            f'<details style="cursor: pointer;">'
             f"<summary><code>{preview}</code></summary>"
-            f"<pre style=\"margin: 8px 0 0; padding: 8px; background: #f8fbff; border: 1px solid #dbeafe; border-radius: 6px; font-size: 0.85rem; max-height: 320px; overflow: auto;\">"
+            f'<pre style="margin: 8px 0 0; padding: 8px; background: #f8fbff; border: 1px solid #dbeafe; border-radius: 6px; font-size: 0.85rem; max-height: 320px; overflow: auto;">'
             f"{html.escape(full)}</pre>"
             f"</details>"
         )
     pretty = orjson.dumps(parsed, option=orjson.OPT_INDENT_2).decode("utf-8")
     if isinstance(parsed, dict):
         keys = list(parsed.keys())[:6]
-        key_tags = "".join(f"<span class=\"tag\">{html.escape(str(k))}</span>" for k in keys)
-        meta = f"<div style=\"font-size: 0.8rem; color: #64748b; margin-bottom: 6px;\"><span>JSON object</span> • <span>keys: {len(parsed)}</span> {key_tags}</div>"
+        key_tags = "".join(f'<span class="tag">{html.escape(str(k))}</span>' for k in keys)
+        meta = f'<div style="font-size: 0.8rem; color: #64748b; margin-bottom: 6px;"><span>JSON object</span> • <span>keys: {len(parsed)}</span> {key_tags}</div>'
     elif isinstance(parsed, list):
-        meta = f"<div style=\"font-size: 0.8rem; color: #64748b; margin-bottom: 6px;\"><span>JSON array</span> • <span>items: {len(parsed)}</span></div>"
+        meta = f'<div style="font-size: 0.8rem; color: #64748b; margin-bottom: 6px;"><span>JSON array</span> • <span>items: {len(parsed)}</span></div>'
     else:
-        meta = "<div style=\"font-size: 0.8rem; color: #64748b; margin-bottom: 6px;\"><span>JSON scalar</span></div>"
+        meta = '<div style="font-size: 0.8rem; color: #64748b; margin-bottom: 6px;"><span>JSON scalar</span></div>'
 
     return (
-        f"<details style=\"cursor: pointer;\">"
-        f"<summary style=\"font-weight: 600; color: #0284c7;\">檢視 JSON 詳情</summary>"
+        f'<details style="cursor: pointer;">'
+        f'<summary style="font-weight: 600; color: #0284c7;">檢視 JSON 詳情</summary>'
         f"{meta}"
-        f"<pre class=\"json-pre\" style=\"margin: 0; padding: 8px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 0.8rem; max-height: 340px; overflow: auto; white-space: pre-wrap;\">"
+        f'<pre class="json-pre" style="margin: 0; padding: 8px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 0.8rem; max-height: 340px; overflow: auto; white-space: pre-wrap;">'
         f"{html.escape(pretty)}</pre>"
         f"</details>"
     )
@@ -1480,7 +1515,7 @@ def render_finding_detail(sample_text: str) -> str:
 
 def render_findings_table(findings: list[Finding], omitted_count: int) -> str:
     if not findings:
-        return "<p class=\"empty\">沒有發現問題。</p>"
+        return '<p class="empty">沒有發現問題。</p>'
 
     rows: list[str] = []
     for finding in findings:
@@ -1505,7 +1540,7 @@ def render_findings_table(findings: list[Finding], omitted_count: int) -> str:
 
     notice = ""
     if omitted_count > 0:
-        notice = f"<p class=\"omitted\">另有 {omitted_count} 筆未顯示（避免報告過長）。</p>"
+        notice = f'<p class="omitted">另有 {omitted_count} 筆未顯示（避免報告過長）。</p>'
 
     return (
         notice
@@ -1550,7 +1585,9 @@ def build_html_report(
     comment_visible, comment_omitted = truncate_findings(comment_result.findings, max_details)
     docstrings_visible, docstrings_omitted = truncate_findings(docstring_result.findings, max_details)
 
-    merged_privacy_findings = summarize_tool_findings(privacy_tool_results, "privacy_tools").findings + privacy_regex_result.findings
+    merged_privacy_findings = (
+        summarize_tool_findings(privacy_tool_results, "privacy_tools").findings + privacy_regex_result.findings
+    )
     privacy_visible, privacy_omitted = truncate_findings(merged_privacy_findings, max_details)
 
     summary_cards = [
@@ -1569,7 +1606,7 @@ def build_html_report(
     overall = overall_status_from_counts(summary_cards)
 
     cards_html = "\n".join(
-        "<div class=\"card {}\"><h3>{}</h3><p class=\"count\">{}</p><p class=\"card-note\">{}</p></div>".format(
+        '<div class="card {}"><h3>{}</h3><p class="count">{}</p><p class="card-note">{}</p></div>'.format(
             "is-ok" if count == 0 else "is-warning",
             html.escape(title),
             count,
@@ -1856,6 +1893,15 @@ def build_html_report(
 
 
 def main() -> int:
+    global CLI_VERBOSE_LOGS
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+    logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[logging.StreamHandler(sys.stdout)])
+    if "--verbose" in sys.argv or "-v" in sys.argv:
+        CLI_VERBOSE_LOGS = True
+
     max_details = MAX_DETAIL_ITEMS
     open_report = "--no-open" not in sys.argv
     generated_at = datetime.now().isoformat(timespec="seconds")
@@ -1863,16 +1909,17 @@ def main() -> int:
     started_at = time.perf_counter()
     step_index = 0
     total_steps = 9
+
     def begin_step(title: str) -> tuple[int, float]:
         nonlocal step_index
         step_index += 1
-        print(f"[Step {step_index}/{total_steps}] {title}...")
+        logging.info(f"[Step {step_index}/{total_steps}] {title}...")
         return step_index, time.perf_counter()
 
     def end_step(idx: int, started: float, detail: str = "") -> None:
         elapsed = time.perf_counter() - started
         suffix = f" | {detail}" if detail else ""
-        print(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
+        logging.info(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
 
     idx, started = begin_step("程式碼品質檢查 (ruff lint/mypy/pylint/bandit/vulture/import boundary/compileall)")
     code_quality_tools = collect_code_quality_results()
@@ -1886,15 +1933,11 @@ def main() -> int:
     end_step(idx, started, f"findings={len(cross_file_callable_result.findings)}")
 
     idx, started = begin_step("重複程式碼檢查 (src)")
-    duplicate_result, _ = run_timed_operation(
-        "duplicate-code-scan", lambda: collect_duplicate_code_findings(src_dir)
-    )
+    duplicate_result, _ = run_timed_operation("duplicate-code-scan", lambda: collect_duplicate_code_findings(src_dir))
     end_step(idx, started, f"findings={len(duplicate_result.findings)}")
 
     idx, started = begin_step("UI 硬編碼檢查")
-    hardcode_result, _ = run_timed_operation(
-        "ui-hardcode-scan", lambda: collect_ui_hardcode_findings(src_dir)
-    )
+    hardcode_result, _ = run_timed_operation("ui-hardcode-scan", lambda: collect_ui_hardcode_findings(src_dir))
     end_step(idx, started, f"findings={len(hardcode_result.findings)}")
 
     idx, started = begin_step("無用註解檢查 (ruff ERA)")
@@ -1943,9 +1986,9 @@ def main() -> int:
     end_step(idx, started, f"path={output_html_path}")
 
     total_elapsed = time.perf_counter() - started_at
-    print("== 綜合檢查完成 ==")
-    print(f"total_duration={format_duration(total_elapsed)}")
-    print(f"html={output_html_path}")
+    logging.info("== 綜合檢查完成 ==")
+    logging.info(f"total_duration={format_duration(total_elapsed)}")
+    logging.info(f"html={output_html_path}")
 
     if open_report:
         webbrowser.open(output_html_path.resolve().as_uri())

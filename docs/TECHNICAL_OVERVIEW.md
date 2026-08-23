@@ -6,13 +6,16 @@
 |------|----------------|
 | 語言 | Python 3.14 |
 | GUI | PySide6 / Qt Widgets / PySide6-Fluent-Widgets |
-| 打包 | Nuitka（可執行檔）、Inno Setup（安裝精靈） |
+| 打包 | Nuitka（單一執行檔） |
 | 網路 | httpx[http2]（集中 timeout / retry policy） |
+| 日誌 | loguru（非同步佇列寫入、檔案輪轉與 retention 保留策略） |
+| 系統監控 | psutil（行程管理、記憶體查詢與受管程序安全清理） |
+| 試算表處理 | openpyxl（Excel 報表與資料處理） |
 | 版本解析 | packaging |
 | XML 解析 | defusedxml（防止 XXE 攻擊） |
 | JSON 處理 | orjson（高效能序列化與反序列化） |
 | 測試 | pytest（smoke、integration） |
-| 靜態檢查 | ruff、mypy、bandit、pylint、import-linter、detect-secrets |
+| 靜態檢查 | ruff、vulture、pylint、mypy、bandit、import-linter、detect-secrets |
 
 ---
 
@@ -24,30 +27,42 @@ src/main.py
      ├── core/loader_manager.py   載入器核心管理與快取 (Vanilla/Fabric/Forge/Quilt/NeoForge)
      ├── core/server/             伺服器生命週期
      │   ├── server_crud.py       伺服器 CRUD 與設定檔管理
-     │   ├── server_creation.py   交易式伺服器建立流程
+     │   ├── server_creation.py   CreateServerJourney／交易式建立（plan→execute）
      │   ├── server_import.py     交易式匯入、批次探索與重新偵測
-     │   ├── server_startup.py    啟動／停止控制
+     │   ├── server_startup.py    啟動策略；runtime 委派 ServerInstance
      │   ├── server_backup.py     備份還原管理
-     │   └── server_instance.py   伺服器實例狀態與行程管理
+     │   └── server_instance.py   process／輸出緩衝 owner
      ├── core/mods/               模組協調與 Modrinth 搜尋服務層
      │   ├── mod_manager.py       模組 orchestration（委派掃描／安裝／provider 辨識）
      │   ├── local_mod_scanner.py 本地模組掃描、JAR metadata 解析與快取回填
      │   ├── mod_file_installer.py 模組下載、安裝、替換、回滾與刪除
-     │   ├── mod_provider_resolver.py provider metadata 與 Modrinth 身分解析
+     │   ├── provider_identity.py provider metadata、身分快取與持久化生命週期管理
+     │   ├── modrinth_provider_adapter.py Modrinth provider 適配器與 slug / project id 解析
      │   ├── modrinth_service.py  Modrinth API 搜尋與查詢服務
      │   ├── compatibility_analyzer.py Modrinth 模組相容性分析
      │   ├── dependency_planner_facade.py 模組依賴規劃門面
-     │   ├── revalidation_service.py 模組批次重新驗證服務
      │   └── mod_search_constants.py 模組搜尋與相容性常數定義
      ├── ui/core_frames/*         建立、管理、關於與設定主要框架
      ├── ui/dialogs/*             確認、JVM、屬性、還原、進度等對話框
-     ├── ui/mods/*                本地模組列表、Review、安裝清單與樹狀同步顯示
-     ├── ui/services/*            伺服器掃描計算與背景任務協調服務
+     ├── ui/mods/*                Session + HostBound ops、Review workflow／handoff
+     ├── ui/services/*            ApplicationShell、TaskCoordinator、UIWorkScope 協調
      ├── ui/windows/*             即時伺服器監控視窗
      └── utils/*                  日誌、網路、Java支援、UI主題、執行期工具等
 ```
 
-> 上圖為典型呼叫關係示意，非嚴格依賴方向規則。`models/` 為 core 與 ui 共用的資料結構層，未在上圖逐一標出所有引用點；完整的分層依賴方向與匯入邊界規則見第 3 節。
+> 上圖為典型呼叫關係示意，非嚴格依賴方向規則。
+
+### 2.1 現行架構要點
+
+| 主題 | 作法 |
+|------|------|
+| 背景工作 | UI 經 `UIWorkScope` 提交／投遞／取消 |
+| 模組管理 | `ModManagementSession` + HostBound ops（非 Frame 多重繼承） |
+| Review | 外部經 `ModReviewWorkflow` 與 `ReviewExecutionHandoff` |
+| 建立伺服器 | `CreateServerJourney`（plan → 確認 → execute） |
+| 主視窗服務 | `ApplicationShell` 綁定 CRUD／Startup／Import／Backup |
+| 執行中程序 | `ServerInstance` 擁有 process 與輸出緩衝 |
+`models/` 為 core 與 ui 共用的資料結構層，未在上圖逐一標出所有引用點；完整的分層依賴方向與匯入邊界規則見第 3 節。
 
 ---
 
@@ -95,29 +110,30 @@ ui → core → models → utils
 | `mods/mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
 | `mods/local_mod_scanner.py` | 本地模組掃描、JAR metadata 解析與快取回填 |
 | `mods/mod_file_installer.py` | 模組下載、安裝、替換、回滾與刪除 |
-| `mods/mod_provider_resolver.py` | provider metadata、slug / project id 正規化與搜尋 fallback |
+| `mods/provider_identity.py` | provider metadata、身分快取與持久化生命週期管理 |
+| `mods/modrinth_provider_adapter.py` | Modrinth provider 適配器與 slug / project id 解析 |
 | `mods/modrinth_service.py` | Modrinth API 搜尋與查詢服務 |
 | `mods/compatibility_analyzer.py` | Modrinth 模組相容性分析 |
 | `mods/dependency_planner_facade.py` | 模組依賴規劃門面與相依解析 |
-| `mods/revalidation_service.py` | 模組批次重新驗證服務 |
 | `mods/mod_search_constants.py` | 模組搜尋與相容性常數定義 |
 
 ### `src/ui/`
 
 | 子目錄 / 檔案 | 簡介 |
 |------|------|
-| `core_frames/main_window.py` | 主視窗框架、頁面切換、延遲排程 |
+| `core_frames/main_window.py` | 主視窗導航／theme；core 服務由 `ApplicationShell` 綁定 |
 | `core_frames/create_server_frame.py` | 建立伺服器精靈 |
 | `core_frames/manage_server_frame.py` | 伺服器清單與操作面板 |
 | `core_frames/about_preferences_frame.py` | 關於與視窗偏好設定整合頁面 |
 | `core_frames/page_router.py` | 頁面路由與導航控制 |
 | `dialogs/progress_dialog.py` | 進度對話框 |
 | `dialogs/server_properties_dialog.py` | 伺服器屬性對話框 |
-| `dialogs/jvm_args_dialog.py` | JVM 參數自訂與優化建議對話框 |
+| `dialogs/jvm_args_dialog.py` | JVM 參數自訂與最佳化建議對話框 |
 | `dialogs/server_creation_confirm_dialog.py` | 建立前參數與指令核對對話框 |
 | `dialogs/restore_backup_dialog.py` | 備份還原對話框 |
 | `dialogs/modal_msfluent_window.py` | 彈出視窗基底類別 |
 | `mods/` | 模組管理主介面、Presenter、Review 視窗、樹狀列表同步與安裝執行器 |
+| `services/application_shell.py` | 主視窗服務協調整合（綁定 CRUD、Startup、Import、Backup 等生命週期操作） |
 | `services/manage_server_service.py` | 伺服器本機偵測與狀態計算服務 |
 | `services/task_coordinator.py` | 跨頁面背景任務協調服務 |
 | `windows/server_monitor_window.py` | 即時監控視窗 |
@@ -126,16 +142,14 @@ ui → core → models → utils
 
 | 子目錄 | 簡介 |
 |--------|------|
-| `core_utils/` | `logger`、`path_utils`、`atomic_writer`、`exception_utils`、`hash_utils` |
-| `network_utils/` | `http_client` (集中 timeout/retry)、`request_retry_utils` |
-| `java_support/` | Java 自動偵測、winget 安裝支援 |
-| `ui_support/` | Fluent theme、window manager、DPI handling、dialog_utils、font_manager、icon_utils、qt_runtime、qt_widgets、task_utils、tree_utils、ui_config、ui_tokens、ui_utils、custom_dropdown |
-| `runtime_utils/` | 延遲匯出、版本資訊、環境檢查、OS 判斷、Python 版本檢查、app_info、background_task、runtime_paths、settings_manager、singleton、subprocess_utils、system_utils、version_info |
-| `mod_utils/` | 依賴規劃序列化、下載來源策略、本地模組 metadata 工具、Modrinth 查詢工具、Modrinth 版本查詢、模組依賴規劃、模組依賴參考工具、模組索引管理、模組 provider metadata、模組重新驗證批次工具、模組語意、模組版本過濾 |
-| `server_utils/` | 伺服器常數、伺服器偵測工具、伺服器偵測版本工具、伺服器記憶體工具、伺服器屬性工具、伺服器執行期工具 |
-| `update_utils/` | 更新檢查、更新解析、更新檢查適配器 |
-
-
+| `core_utils/` | `logger`（loguru 非同步分級日誌）、`path_utils`、`atomic_writer`、`exceptions`（共用領域例外階層）、`hash_utils`、`units_utils`、`version_utils` |
+| `network_utils/` | `http_client`（基於 httpx[http2] 集中管理 timeout、重試策略與連線池） |
+| `java_support/` | `java_downloader`、`java_utils` (Java 自動偵測與 winget 下載安裝支援) |
+| `ui_support/` | `font_manager`、`qt_runtime`、`status_button`、`ui_config`、`ui_state`、`ui_tokens`、`ui_utils`、`ui_work_scope` (Fluent theme、DPI handling、狀態管理與背景工作協調) |
+| `runtime_utils/` | `app_info`、`background_task`、`runtime_paths`、`settings_manager`、`subprocess_utils`、`system_utils`（psutil 行程管理、記憶體查詢與系統狀態） |
+| `mod_utils/` | `dependency_plan_serializer`、`download_source_policy`、`local_mod_metadata_utils`、`modrinth_query_utils`、`mod_dependency_planner`、`mod_index_manager`、`mod_semantics`、`mod_version_filtering` |
+| `server_utils/` | `server_detection_utils`、`server_memory_utils`、`server_properties_utils`、`server_runtime_utils` |
+| `update_utils/` | `update_checker`、`update_parsing` |
 
 ---
 
@@ -144,11 +158,11 @@ ui → core → models → utils
 主視窗與大多數對話框採 Qt 視窗生命週期，避免在元件尚未完成佈局時顯示：
 
 1. 建立 Qt widget 與 layout。
-2. 透過 `WindowManager` 計算螢幕、尺寸與置中位置。
+2. 透過 `ui_support/ui_config.py` 的 `center_window` 等工具計算螢幕與置中位置。
 3. 呼叫 `resize()`、`move()`、`setMinimumSize()` 套用視窗幾何。
 4. 元件完成後再呼叫 `show()`；需要最大化時延後呼叫 `showMaximized()`。
 
-視窗偏好（位置、大小與最大化狀態）由 `ui_support/window_manager.py` 持久化至設定檔。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `qt.Treeview` 支援雙擊欄位標題自動調整欄寬。
+視窗偏好（位置、大小與最大化狀態）由 `runtime_utils/settings_manager.py` 統一讀寫並持久化至設定檔（`MainWindowSettings` / `WindowPreferences`）。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `QTreeWidget` 支援雙擊欄位標題自動調整欄寬。
 
 高解析度顯示縮放交由 Qt 6 與 Windows 原生設定處理。Qt Widgets 使用 device-independent pixels，Qt 6 在 Windows 會自動套用使用者的顯示比例，因此專案內不再保存或套用額外的 UI 縮放倍率。
 
@@ -223,4 +237,5 @@ uv run report\comprehensive_report.py
 5. `src/core/loader_manager.py` — 載入器核心管理
 6. `src/core/mods/` — 模組協調與 Modrinth 線上搜尋／依賴規劃服務
 7. `src/ui/mods/` — 模組管理介面、Presenter 與 Review 視窗
-8. `src/utils/ui_support/window_manager.py` — 視窗管理慣例
+8. `src/utils/ui_support/ui_config.py` — UI 主題與視窗幾何配置慣例
+9. `src/utils/core_utils/logger.py` — 全域 loguru 日誌初始化與組件綁定機制
