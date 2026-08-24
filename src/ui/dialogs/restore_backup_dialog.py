@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
+from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, TreeWidget
 
 from src.models import WorkOutcome
@@ -44,8 +46,10 @@ class RestoreBackupDialog(ModalMSFluentWindow):
 
         self._load_backups()
 
-        self.cancelButton.clicked.disconnect()
-        self.yesButton.clicked.disconnect()
+        with suppress(Exception):
+            self.cancelButton.clicked.disconnect()
+        with suppress(Exception):
+            self.yesButton.clicked.disconnect()
 
         self.cancelButton.setText("取消")
         self.cancelButton.clicked.connect(self.reject)
@@ -70,7 +74,7 @@ class RestoreBackupDialog(ModalMSFluentWindow):
         backups = self.server_backup.list_backups(self.server_name)
         self.backup_list = backups
         for i, b in enumerate(backups):
-            item = QtWidgets.QTreeWidgetItem([b["readable_time"], b["filename"], f"{b['size_mb']:.2f}"])
+            item = QTreeWidgetItem([b["readable_time"], b["filename"], f"{b['size_mb']:.2f}"])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, i)
             self.tree.addTopLevelItem(item)
 

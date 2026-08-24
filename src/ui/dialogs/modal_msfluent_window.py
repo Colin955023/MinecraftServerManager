@@ -7,7 +7,7 @@ from typing import Any
 
 from PySide6.QtCore import QEventLoop, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QIcon
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, MSFluentWindow, PrimaryPushButton, PushButton, TitleLabel, qconfig
 
 from src.utils import Colors, FontManager, FontSize, Sizes, center_window, get_icon_path, resolve_color
@@ -55,7 +55,7 @@ class ModalMSFluentWindow(MSFluentWindow):
         self.viewLayout.setSpacing(12)
         self.windowLayout.addLayout(self.viewLayout, 1)
 
-        self.buttonGroup = QFrame(self.widget)
+        self.buttonGroup = QWidget(self.widget)
         self.buttonGroup.setObjectName("buttonGroup")
         self.buttonLayout = QHBoxLayout(self.buttonGroup)
         self.buttonLayout.setContentsMargins(24, 12, 24, 24)
@@ -96,11 +96,7 @@ class ModalMSFluentWindow(MSFluentWindow):
             )
         stacked = getattr(self, "stackedWidget", getattr(self, "stacked_widget", None))
         if stacked is not None:
-            stacked.setStyleSheet(
-                f"QStackedWidget {{ background-color: {background}; border: 0; }}\n"
-                f"QScrollArea {{ background-color: transparent; border: 0; }}\n"
-                f"QScrollArea > QWidget > QWidget {{ background-color: transparent; }}"
-            )
+            stacked.setStyleSheet(f"background-color: {background}; border: 0;")
 
     def accept(self) -> None:
         """接受操作，設定結果為 True 並關閉視窗"""
@@ -125,7 +121,10 @@ class ModalMSFluentWindow(MSFluentWindow):
         self.show()
         self._loop = QEventLoop()
         self.destroyed.connect(self._loop.quit)
-        self._loop.exec()
+        try:
+            self._loop.exec()
+        finally:
+            self._loop = None
         return self._result
 
     def closeEvent(self, e: QCloseEvent) -> None:
@@ -137,9 +136,9 @@ class ModalMSFluentWindow(MSFluentWindow):
         """
         with suppress(Exception):
             qconfig.themeChangedFinished.disconnect(self._apply_theme_styles)
-        super().closeEvent(e)
         if hasattr(self, "_loop") and self._loop and self._loop.isRunning():
             self._loop.quit()
+        super().closeEvent(e)
 
 
 class MessageDialog(ModalMSFluentWindow):

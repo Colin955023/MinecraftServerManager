@@ -2,7 +2,7 @@
 綜合檢查報告產生器。
 
 功能：
-1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import-linter + import boundary + compileall）。
+1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import-linter + import/public-facade boundary + compileall）。
 2. 重複程式碼檢查（僅掃描 src 目錄）。
 3. UI 硬編碼檢查（尺寸/顏色是否直接寫死，鼓勵使用 ui_utils token）。
 4. 隱私與安全檢查（detect-secrets + 內建規則）。
@@ -15,7 +15,7 @@
 - bandit: 安全性漏洞檢測
 - vulture: 死代碼（未使用的代碼）檢測
 - import-linter: 分層匯入契約檢查
-- check_import_boundaries.py: 專案自訂匯入邊界檢查
+- check_import_boundaries.py: 專案自訂匯入／lazy export 存在性與 consumer 邊界檢查
 - compileall: Python 語法檢查
 - detect-secrets: 秘密資訊洩漏檢測
 
@@ -1822,7 +1822,7 @@ def build_html_report(
         </section>
 
         <section id=\"code-quality\" class=\"tab-panel\">
-            <h2>程式碼品質（ruff lint / mypy / pylint / bandit / vulture / import boundary / compileall）</h2>
+            <h2>程式碼品質（ruff lint / mypy / pylint / bandit / vulture / import/public facade / compileall）</h2>
             <p class=\"section-lead\">先看偵測出的問題，再視需要展開個別工具的命令與完整輸出。</p>
             {render_findings_table(code_quality_visible, code_quality_omitted)}
             <h3>工具執行明細</h3>
@@ -1842,7 +1842,7 @@ def build_html_report(
         <section id=\"hardcode\" class=\"tab-panel\">
             <h2>UI 硬編碼檢查</h2>
             <p class=\"section-lead\">重點是找出直接寫死的尺寸、顏色或字體設定，優先收斂到共用 token。</p>
-            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_utils.py</code> 的 token。</p>
+            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_support/ui_utils.py</code> 的 token。</p>
             {render_findings_table(hardcode_visible, hardcode_omitted)}
         </section>
 
@@ -1921,7 +1921,7 @@ def main() -> int:
         suffix = f" | {detail}" if detail else ""
         logging.info(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
 
-    idx, started = begin_step("程式碼品質檢查 (ruff lint/mypy/pylint/bandit/vulture/import boundary/compileall)")
+    idx, started = begin_step("程式碼品質檢查 (ruff lint/mypy/pylint/bandit/vulture/import-public-facade/compileall)")
     code_quality_tools = collect_code_quality_results()
     code_quality_findings = summarize_tool_findings(code_quality_tools, "code_quality_tools")
     end_step(idx, started, f"issues={code_quality_findings.meta.get('issue_count', 0)}")

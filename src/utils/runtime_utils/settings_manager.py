@@ -408,4 +408,4 @@ def get_settings_manager() -> SettingsManager:
     return _settings_manager
 
 
-__all__ = ["SettingsManager", "get_settings_manager"]
+__all__ = ["get_settings_manager"]

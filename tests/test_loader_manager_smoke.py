@@ -8,7 +8,7 @@ from src.core import LoaderManager
 from src.utils import PathUtils
 
 
-def test_clear_cache_file_resets_preload_guard(tmp_path: Path) -> None:
+def test_clear_cache_file_removes_cache_files_and_memory_cache(tmp_path: Path) -> None:
     manager = LoaderManager.__new__(LoaderManager)
     manager._initialized = False
     manager.__init__()
@@ -20,22 +20,19 @@ def test_clear_cache_file_resets_preload_guard(tmp_path: Path) -> None:
     forge_cache.write_text("{}", encoding="utf-8")
 
     manager._version_cache = {"fabric_1.21": [object()]}
-    manager._preloaded_once = True
 
     manager.clear_cache_file()
 
     assert fabric_cache.exists() is False
     assert forge_cache.exists() is False
     assert manager._version_cache == {}
-    assert manager._preloaded_once is False
 
 
-def _build_manager_for_preload_tests(tmp_path: Path, *, preloaded_once: bool, calls: list[str]) -> LoaderManager:
+def _build_manager_for_preload_tests(tmp_path: Path, *, calls: list[str]) -> LoaderManager:
     manager = LoaderManager.__new__(LoaderManager)
     manager._initialized = False
     manager.__init__()
     manager.cache_dir = tmp_path
-    manager._preloaded_once = preloaded_once
 
     def mock_preload(spec):
         calls.append(spec.id)
@@ -44,16 +41,13 @@ def _build_manager_for_preload_tests(tmp_path: Path, *, preloaded_once: bool, ca
     return manager
 
 
-def test_preload_loader_versions_reloads_when_cache_missing_even_after_preloaded_once(
-    tmp_path: Path,
-) -> None:
+def test_preload_loader_versions_reloads_when_cache_missing(tmp_path: Path) -> None:
     calls: list[str] = []
-    manager = _build_manager_for_preload_tests(tmp_path, preloaded_once=True, calls=calls)
+    manager = _build_manager_for_preload_tests(tmp_path, calls=calls)
 
     manager.preload_loader_versions()
 
     assert set(calls) == {"fabric", "forge", "quilt", "neoforge", "vanilla"}
-    assert manager._preloaded_once is True
 
 
 def test_preload_loader_versions_skips_network_when_cache_fresh(
@@ -76,12 +70,11 @@ def test_preload_loader_versions_skips_network_when_cache_fresh(
     vanilla_cache.write_text("[]", encoding="utf-8")
 
     calls: list[str] = []
-    manager = _build_manager_for_preload_tests(tmp_path, preloaded_once=False, calls=calls)
+    manager = _build_manager_for_preload_tests(tmp_path, calls=calls)
 
     manager.preload_loader_versions()
 
     assert calls == []
-    assert manager._preloaded_once is True
 
 
 def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

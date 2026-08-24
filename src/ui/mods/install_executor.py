@@ -77,7 +77,7 @@ class ModManagementInstallExecutor(HostBound):
             if progress_dialog is not None:
                 percent = overall * 100.0
                 text = f"{step_label} ({step_index + 1}/{total_steps})"
-                self.ui_queue.put(lambda p=percent, t=text: progress_dialog.update_progress(p, t))
+                progress_dialog.update_progress(percent, text)
 
         return callback
 
@@ -185,9 +185,7 @@ class ModManagementInstallExecutor(HostBound):
         self.update_status_safe(status_text)
         if progress_dialog is not None:
             pct = (step_index / max(1, total_steps)) * 100.0
-            self.ui_queue.put(
-                lambda p=pct, t=f"{status_text} ({step_index + 1}/{total_steps})": progress_dialog.update_progress(p, t)
-            )
+            progress_dialog.update_progress(pct, f"{status_text} ({step_index + 1}/{total_steps})")
         local_mod = SimpleNamespace(
             file_path=step.local_file_path,
             filename=step.local_file_path,
@@ -258,13 +256,19 @@ class ModManagementInstallExecutor(HostBound):
         if handoff.mode != "online_install":
             raise ValueError("線上安裝 executor 收到非線上 Review handoff")
         if not handoff.root_count:
-            UIUtils.show_message("無法安裝", ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE, dialog, message_level="warning")
+            UIUtils.show_message("無法安裝", ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE, self.parent, message_level="warning")
             return
-        if not self._validate_review_handoff(handoff, parent=dialog):
+        if not self._validate_review_handoff(handoff, parent=self.parent):
             return
-        if not self._confirm_review_handoff(handoff, parent=dialog, action_label="安裝"):
+        if not self._confirm_review_handoff(handoff, parent=self.parent, action_label="安裝"):
             return
-        dialog.destroy()
+        if hasattr(dialog, "accept"):
+            dialog.accept()
+        elif hasattr(dialog, "close"):
+            dialog.close()
+        elif hasattr(dialog, "destroy"):
+            dialog.destroy()
+
         self.update_status_safe("正在啟動安裝清單執行...")
         session = self.mod_session
         install_scope = session.begin_install()
@@ -304,8 +308,11 @@ class ModManagementInstallExecutor(HostBound):
                         succeeded_root_keys.add(step.root_key) if step.kind == "online_root" else None
                     ),
                 ):
+                    self.ui_queue.put(_close_progress)
+                    self.ui_queue.put(self.local_mod_list_presenter.load_local_mods)
                     return
                 if not session.is_scope_current(install_scope):
+                    self.ui_queue.put(_close_progress)
                     return
                 session.remove_pending_review_keys(succeeded_root_keys)
                 retained = session.pending_online_installs
@@ -344,11 +351,15 @@ class ModManagementInstallExecutor(HostBound):
                 if not accept_effect():
                     return
                 self.ui_queue.put(_close_progress)
+                self.ui_queue.put(self.local_mod_list_presenter.load_local_mods)
                 logger.error("批次安裝線上模組失敗: %s\n%s", exc, traceback.format_exc())
                 self.update_status_safe(f"批次安裝失敗: {exc}")
                 self.ui_queue.put(
                     lambda msg=str(exc): UIUtils.show_message(
-                        "安裝失敗", f"無法完成安裝：{msg}", self.parent, message_level="error"
+                        "安裝失敗",
+                        f"無法完成安裝：{msg}",
+                        self.parent,
+                        message_level="error",
                     )
                 )
             finally:
@@ -371,13 +382,19 @@ class ModManagementInstallExecutor(HostBound):
             raise ValueError("本地更新 executor 收到非本地 Review handoff")
         if not handoff.root_count:
             message = "目前沒有已啟用的可更新項目" if handoff.disabled_count else "目前沒有可直接更新的模組"
-            UIUtils.show_message("沒有可更新項目", message, dialog, message_level="warning")
+            UIUtils.show_message("沒有可更新項目", message, self.parent, message_level="warning")
             return
-        if not self._validate_review_handoff(handoff, parent=dialog):
+        if not self._validate_review_handoff(handoff, parent=self.parent):
             return
-        if not self._confirm_review_handoff(handoff, parent=dialog, action_label="更新"):
+        if not self._confirm_review_handoff(handoff, parent=self.parent, action_label="更新"):
             return
-        dialog.destroy()
+        if hasattr(dialog, "accept"):
+            dialog.accept()
+        elif hasattr(dialog, "close"):
+            dialog.close()
+        elif hasattr(dialog, "destroy"):
+            dialog.destroy()
+
         session = self.mod_session
         install_scope = session.begin_install()
 
@@ -420,8 +437,11 @@ class ModManagementInstallExecutor(HostBound):
                     action_label="模組更新",
                     on_step_completed=record_completed_step,
                 ):
+                    self.ui_queue.put(_close_local_progress)
+                    self.ui_queue.put(self.local_mod_list_presenter.load_local_mods)
                     return
                 if not session.is_scope_current(install_scope):
+                    self.ui_queue.put(_close_local_progress)
                     return
                 self.update_progress_safe(1.0)
                 self.update_status_safe(f"已完成 {success_count} 個模組更新")
@@ -445,11 +465,15 @@ class ModManagementInstallExecutor(HostBound):
                 if not accept_effect():
                     return
                 self.ui_queue.put(_close_local_progress)
+                self.ui_queue.put(self.local_mod_list_presenter.load_local_mods)
                 logger.error("本地模組更新失敗: %s\n%s", exc, traceback.format_exc())
                 self.update_status_safe(f"本地模組更新失敗: {exc}")
                 self.ui_queue.put(
                     lambda msg=str(exc): UIUtils.show_message(
-                        "更新失敗", f"無法完成更新：{msg}", self.parent, message_level="error"
+                        "更新失敗",
+                        f"無法完成更新：{msg}",
+                        self.parent,
+                        message_level="error",
                     )
                 )
             finally:

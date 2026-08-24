@@ -73,7 +73,6 @@ class JvmArgsDialog(ModalMSFluentWindow):
 
         self.scroll_area = ScrollArea(self.widget)
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
         self.scroll_widget = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_widget)

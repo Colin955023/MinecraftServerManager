@@ -1,11 +1,11 @@
-"""原生 Qt 進度對話框"""
+"""基於 Fluent 的現代化進度對話框"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from PySide6 import QtWidgets
 from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtWidgets import QApplication
 from qfluentwidgets import ProgressBar, SubtitleLabel, TitleLabel
 
 from src.ui import ModalMSFluentWindow
@@ -24,7 +24,14 @@ class ProgressDialog(ModalMSFluentWindow):
     progress_requested = Signal(float, str)
 
     def __init__(self, parent: Any, title: str = "進度", show_cancel: bool = True) -> None:
-        super().__init__(parent)
+        super().__init__(parent, is_modal=False)
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        if hasattr(self, "titleBar"):
+            if hasattr(self.titleBar, "minBtn"):
+                self.titleBar.minBtn.hide()
+            if hasattr(self.titleBar, "maxBtn"):
+                self.titleBar.maxBtn.hide()
+
         self.setWindowTitle(title)
         self.custom_title = TitleLabel(title, self.widget)
         self.custom_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -69,7 +76,7 @@ class ProgressDialog(ModalMSFluentWindow):
         parent_window = parent.window() if parent is not None and hasattr(parent, "window") else parent
         screen = parent_window.screen() if parent_window is not None and hasattr(parent_window, "screen") else None
         if screen is None:
-            screen = QtWidgets.QApplication.primaryScreen()
+            screen = QApplication.primaryScreen()
         if screen is None:
             return
         geometry = screen.availableGeometry()
@@ -102,7 +109,19 @@ class ProgressDialog(ModalMSFluentWindow):
     def cancel(self) -> None:
         """取消並關閉對話框"""
         self.cancelled = True
-        self.close()
+        self.reject()
+
+    def closeEvent(self, event) -> None:
+        """
+        處理視窗關閉事件，確保在關閉時發送取消通知
+
+        Args:
+            event: 關閉事件物件
+        """
+        if not self.cancelled:
+            self.cancelled = True
+            self.rejected.emit()
+        super().closeEvent(event)
 
     @Slot(float, str)
     def _apply_progress_update(self, percent: float, status_text: str) -> None:

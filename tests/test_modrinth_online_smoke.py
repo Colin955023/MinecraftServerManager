@@ -50,22 +50,16 @@ def _test_provider_identity_resolver(local_mod: object, hash_project_id: str):
     if isinstance(existing, models_module.ProviderIdentitySnapshot):
         return existing
     project_id = str(getattr(local_mod, "platform_id", "") or "")
-    resolved_at = getattr(local_mod, "resolved_at_epoch_ms", "")
-    if project_id and not resolved_at:
-        resolved_at = str(int(time.time() * 1000))
-    return models_module.ProviderIdentitySnapshot.from_payload(
-        {
-            "schema_version": 2,
-            "provider": "modrinth",
-            "project_id": project_id,
-            "alias": getattr(local_mod, "platform_slug", ""),
-            "display_name": getattr(local_mod, "name", ""),
-            "provenance": getattr(local_mod, "resolution_source", "cached_provider"),
-            "lifecycle": getattr(local_mod, "provider_lifecycle_state", "fresh"),
-            "resolved_at_epoch_ms": resolved_at,
-            "failure_count": getattr(local_mod, "stale_revalidation_failures", 0),
-            "next_retry_not_before_epoch_ms": getattr(local_mod, "next_retry_not_before_epoch_ms", ""),
-        }
+    now_ms = int(time.time() * 1000)
+    return models_module.ProviderIdentitySnapshot(
+        provider="modrinth" if project_id else "local",
+        project_id=project_id,
+        alias=str(getattr(local_mod, "platform_slug", "") or ""),
+        display_name=str(getattr(local_mod, "name", "") or ""),
+        provenance="cached_provider" if project_id else "unresolved",
+        lifecycle="fresh" if project_id else "missing",
+        observed_at_epoch_ms=now_ms,
+        resolved_at_epoch_ms=now_ms if project_id else 0,
     )
 
 
@@ -499,10 +493,17 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
         hash_algorithm="",
         platform_id="AANobbMI",
         platform_slug="sodium",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-        provider_lifecycle_state="invalidated",
-        next_retry_not_before_epoch_ms=str(next_retry_epoch_ms),
+        provider_identity=models_module.ProviderIdentitySnapshot(
+            provider="modrinth",
+            project_id="AANobbMI",
+            alias="sodium",
+            display_name="Sodium",
+            provenance="scan_detect",
+            lifecycle="invalidated",
+            resolved_at_epoch_ms=stale_epoch_ms,
+            failure_count=3,
+            next_retry_not_before_epoch_ms=next_retry_epoch_ms,
+        ),
         name="Sodium",
         version="1.0.0",
     )
@@ -1781,8 +1782,15 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
         platform_slug="inventoryprofilesnext",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
+        provider_identity=models_module.ProviderIdentitySnapshot(
+            provider="modrinth",
+            project_id="inventoryprofilesnext",
+            alias="inventoryprofilesnext",
+            display_name="Inventory Profiles Next",
+            provenance="scan_detect",
+            lifecycle="stale",
+            resolved_at_epoch_ms=stale_epoch_ms,
+        ),
         name="Inventory Profiles Next",
         filename="inventory-profiles-next.jar",
         version="2.2.2",
@@ -1815,13 +1823,21 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
 
 def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_due(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
+    next_retry_epoch_ms = int(time.time() * 1000) + 60_000
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
         platform_slug="inventoryprofilesnext",
-        resolution_source="scan_detect",
-        resolved_at_epoch_ms=str(stale_epoch_ms),
-        provider_lifecycle_state="retrying",
-        next_retry_not_before_epoch_ms=str(int(time.time() * 1000) + 60_000),
+        provider_identity=models_module.ProviderIdentitySnapshot(
+            provider="modrinth",
+            project_id="inventoryprofilesnext",
+            alias="inventoryprofilesnext",
+            display_name="Inventory Profiles Next",
+            provenance="scan_detect",
+            lifecycle="retrying",
+            resolved_at_epoch_ms=stale_epoch_ms,
+            failure_count=1,
+            next_retry_not_before_epoch_ms=next_retry_epoch_ms,
+        ),
         name="Inventory Profiles Next",
         filename="inventory-profiles-next.jar",
         version="2.2.2",
@@ -2618,8 +2634,6 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         name="Sodium",
         platform_id="sodium",
         platform_slug="sodium",
-        resolution_source="",
-        resolved_at_epoch_ms=None,
         current_hash="",
         hash_algorithm="sha512",
         version="0.6.0",
@@ -2630,8 +2644,6 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         name="Mystery Mod",
         platform_id="",
         platform_slug="",
-        resolution_source="",
-        resolved_at_epoch_ms=None,
         current_hash="",
         hash_algorithm="sha512",
         version="1.0",

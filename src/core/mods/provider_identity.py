@@ -376,11 +376,6 @@ class ProviderIdentityService:
         target.provider_identity = snapshot
         target.platform_id = snapshot.project_id if snapshot.canonical else ""
         target.platform_slug = snapshot.alias
-        target.resolution_source = snapshot.provenance
-        target.resolved_at_epoch_ms = str(snapshot.resolved_at_epoch_ms or "")
-        target.provider_lifecycle_state = snapshot.lifecycle
-        target.stale_revalidation_failures = snapshot.failure_count
-        target.next_retry_not_before_epoch_ms = str(snapshot.next_retry_not_before_epoch_ms or "")
 
     def _persist(self, file_path: Path, snapshot: ProviderIdentitySnapshot) -> None:
         self._store.replace(file_path, snapshot.as_payload())

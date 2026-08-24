@@ -339,7 +339,6 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
     def monitor_loop(self) -> None:
         """監控主循環，定期觸發狀態更新與輸出讀取"""
-        self._monitor_loop_job = None
         if not self.is_monitoring:
             return
         try:
@@ -784,7 +783,6 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
     def _schedule_monitor_loop_tick(self, delay_ms: int = 100) -> None:
         if not self.is_monitoring or not self.window or not self.window.isVisible():
-            self._monitor_loop_job = None
             return
         UIUtils.schedule_debounce(
             self.window,

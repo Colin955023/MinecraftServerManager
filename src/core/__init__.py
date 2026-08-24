@@ -30,18 +30,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "MODRINTH_PROJECT_DETAIL_TIMEOUT_SECONDS",
     ),
     "MODRINTH_PROJECT_URL": (".mods.mod_search_constants", "MODRINTH_PROJECT_URL"),
-    "MODRINTH_REQUEST_THROTTLE_SECONDS": (
-        ".mods.mod_search_constants",
-        "MODRINTH_REQUEST_THROTTLE_SECONDS",
-    ),
-    "MODRINTH_RETRY_BACKOFF_BASE_SECONDS": (
-        ".mods.mod_search_constants",
-        "MODRINTH_RETRY_BACKOFF_BASE_SECONDS",
-    ),
-    "MODRINTH_RETRY_BACKOFF_MAX_SECONDS": (
-        ".mods.mod_search_constants",
-        "MODRINTH_RETRY_BACKOFF_MAX_SECONDS",
-    ),
     "MODRINTH_SEARCH_TIMEOUT_SECONDS": (
         ".mods.mod_search_constants",
         "MODRINTH_SEARCH_TIMEOUT_SECONDS",

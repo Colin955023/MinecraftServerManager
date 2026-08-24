@@ -36,7 +36,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "PageRouter": (".core_frames.page_router", "PageRouter"),
     "ProgressDialog": (".dialogs.progress_dialog", "ProgressDialog"),
     "RestoreBackupDialog": (".dialogs.restore_backup_dialog", "RestoreBackupDialog"),
-    "ReviewContextStamp": (".mods.review_contracts", "ReviewContextStamp"),
     "ReviewExecutionHandoff": (".mods.review_contracts", "ReviewExecutionHandoff"),
     "ReviewFormattingMixin": (".mods.review_formatting", "ReviewFormattingMixin"),
     "ReviewGroupingMixin": (".mods.review_grouping", "ReviewGroupingMixin"),

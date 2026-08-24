@@ -14,7 +14,6 @@ from typing import Any
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QTreeWidgetItem,
@@ -152,12 +151,12 @@ class ManageServerFrame(QWidget):
         Args:
             main_layout: 主版面配置
         """
-        control_frame = QFrame(self)
+        control_frame = QWidget(self)
         control_layout = QVBoxLayout(control_frame)
         control_layout.setContentsMargins(0, 0, 0, 0)
         control_layout.setSpacing(Spacing.SMALL_PLUS)
 
-        path_frame = QFrame(control_frame)
+        path_frame = QWidget(control_frame)
         path_layout = QHBoxLayout(path_frame)
         path_layout.setContentsMargins(0, 0, 0, 0)
         path_layout.setSpacing(Spacing.SMALL_PLUS)
@@ -171,7 +170,7 @@ class ManageServerFrame(QWidget):
 
         control_layout.addWidget(path_frame)
 
-        button_frame = QFrame(control_frame)
+        button_frame = QWidget(control_frame)
         button_layout = QHBoxLayout(button_frame)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(Spacing.TINY)
@@ -329,7 +328,7 @@ class ManageServerFrame(QWidget):
         Args:
             main_layout: 主版面配置
         """
-        action_frame = QFrame(self)
+        action_frame = QWidget(self)
         action_layout = QVBoxLayout(action_frame)
         action_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -338,7 +337,7 @@ class ManageServerFrame(QWidget):
         self.info_label = BodyLabel("選擇一個伺服器以查看詳細資訊", action_frame)
         action_layout.addWidget(self.info_label)
 
-        button_frame = QFrame(action_frame)
+        button_frame = QWidget(action_frame)
         button_layout = QHBoxLayout(button_frame)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(Spacing.SMALL)

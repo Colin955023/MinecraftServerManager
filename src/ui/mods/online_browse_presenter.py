@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView, QFrame, QHBoxLayout, QHeaderView, QVBoxLayout
+from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, PushButton, SearchLineEdit, TreeWidget, isDarkTheme
 
 from src.models import SearchFilter
@@ -42,7 +42,7 @@ class OnlineBrowsePresenter:
         if not self.frame.browse_tab:
             return
 
-        search_frame = QFrame(self.frame.browse_tab)
+        search_frame = QWidget(self.frame.browse_tab)
         search_layout = QHBoxLayout(search_frame)
         search_layout.setContentsMargins(Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM)
         search_layout.setSpacing(Spacing.SMALL_PLUS)
@@ -119,14 +119,14 @@ class OnlineBrowsePresenter:
         if not self.frame.browse_tab:
             return
 
-        list_frame = QFrame(self.frame.browse_tab)
+        list_frame = QWidget(self.frame.browse_tab)
         if self.frame.browse_tab.layout() is not None:
             self.frame.browse_tab.layout().addWidget(list_frame, stretch=1)
 
         list_layout = QVBoxLayout(list_frame)
         list_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
 
-        tree_container = QFrame(list_frame)
+        tree_container = QWidget(list_frame)
         list_layout.addWidget(tree_container, stretch=1)
 
         tree_layout = QVBoxLayout(tree_container)
@@ -201,7 +201,7 @@ class OnlineBrowsePresenter:
         border_color = resolve_color(Colors.BORDER, dark=is_dark)
         primary_color = resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)
         tree.setStyleSheet(
-            f"TreeWidget, QTreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}"
+            f"TreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}"
         )
 
     def show_browse_context_menu(self, event) -> None:

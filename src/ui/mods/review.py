@@ -99,7 +99,6 @@ class ModManagementReviewOps(HostBound):
             UIUtils.show_message("錯誤", "模組管理器未初始化", self.parent, message_level="error")
             return
         session = workflow.start_online_session(list(pending_installs))
-        self.mod_session.set_active_review(session)
         self._show_online_review_dialog(session)
 
     def _show_online_review_dialog(self, session: OnlineReviewSession) -> None:
@@ -154,11 +153,16 @@ class ModManagementReviewOps(HostBound):
             }
             self._remove_pending_online_installs(selected_roots, dialog)
 
+        def trigger_online_install() -> None:
+            handoff = session.build_handoff()
+            dialog.accept()
+            self._install_pending_online_install_queue(dialog, handoff)
+
         install_button = self._create_review_action_button(
             shell.button_frame,
             text=f"⬇️ 安裝 {snapshot.actionable_count} 個可安裝項目",
             fg_color=Colors.BUTTON_SUCCESS,
-            command=lambda: self._install_pending_online_install_queue(dialog, session.build_handoff()),
+            command=trigger_online_install,
             bold=True,
         )
         install_button.setEnabled(snapshot.actionable_count > 0)
@@ -265,7 +269,6 @@ class ModManagementReviewOps(HostBound):
                     ),
                     stage_progress_callback=on_stage_progress,
                 )
-                self.mod_session.set_latest_local_update_plan(update_plan)
                 self.update_progress_safe(1.0)
                 self.update_status_safe(
                     f"更新檢查完成：{update_plan.actionable_count} 個可更新，{len(update_plan.candidates)} 個需 Review"
@@ -373,7 +376,6 @@ class ModManagementReviewOps(HostBound):
             UIUtils.show_message("錯誤", "模組管理器未初始化", self.parent, message_level="error")
             return
         session = workflow.start_local_update_session(update_plan, scope_text)
-        self.mod_session.set_active_review(session)
         if session.empty:
             dialog_parent = self._get_dialog_parent()
             UIUtils.show_message("更新檢查", session.empty_message(), dialog_parent, message_level="info")
@@ -436,10 +438,15 @@ class ModManagementReviewOps(HostBound):
             root = snapshot.root(_selected_root_key(update_tree, snapshot))
             self._open_project_page(root.project_page_url if root else "", dialog)
 
+        def trigger_local_update() -> None:
+            handoff = session.build_handoff()
+            dialog.accept()
+            self._install_local_update_review_entries(dialog, handoff)
+
         update_button = self._create_review_action_button(
             shell.button_frame,
             text="",
-            command=lambda: self._install_local_update_review_entries(dialog, session.build_handoff()),
+            command=trigger_local_update,
             bold=True,
         )
         self._create_review_action_button(

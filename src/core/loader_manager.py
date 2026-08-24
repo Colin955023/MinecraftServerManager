@@ -56,7 +56,6 @@ class LoaderManager:
 
         self._version_cache: dict[str, list[LoaderVersion]] = {}
         self._preload_lock = threading.Lock()
-        self._preloaded_once = False
 
         self.LOADER_SPECS: dict[str, LoaderSpec] = {
             "vanilla": LoaderSpec(
@@ -288,14 +287,12 @@ class LoaderManager:
         """統一預抓五種 server 類型；API 差異由 LoaderSpec.api_kind 決定"""
         with self._preload_lock:
             if self._loader_cache_is_fresh():
-                self._preloaded_once = True
                 return
             for spec in self.LOADER_SPECS.values():
                 try:
                     self._preload_loader(spec)
                 except Exception as exc:
                     logger.exception(f"預抓 {spec.id} 版本失敗: {exc}")
-            self._preloaded_once = True
 
     def _preload_loader(self, spec: LoaderSpec):
         data: Any = None
@@ -874,7 +871,6 @@ class LoaderManager:
                     jar.unlink(missing_ok=True)
 
             self._version_cache.clear()
-            self._preloaded_once = False
             return OperationResult(True, "快取檔案已成功清除")
         except (PermissionError, OSError) as exc:
             logger.exception(f"清除 Loader 快取檔案失敗: {exc}")

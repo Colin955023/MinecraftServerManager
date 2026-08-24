@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from contextlib import suppress
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -76,6 +77,7 @@ class HTTPClient:
             return minimum
 
     @classmethod
+    @lru_cache(maxsize=16)
     def _make_timeout(cls, timeout: int) -> httpx.Timeout:
         timeout_value = float(timeout)
         return httpx.Timeout(
@@ -246,7 +248,8 @@ class HTTPClient:
             if not cls._is_valid_url(current_url):
                 raise NetworkSecurityError("拒絕非 HTTPS、本機/私有 IP 或含 credential 的 URL")
 
-            request = cls._get_client().build_request(
+            client = cls._get_client()
+            request = client.build_request(
                 method,
                 current_url,
                 headers=current_headers,
@@ -254,7 +257,7 @@ class HTTPClient:
                 json=json_body,
                 timeout=cls._make_timeout(timeout),
             )
-            response = cls._get_client().send(request, stream=True, follow_redirects=False)
+            response = client.send(request, stream=True, follow_redirects=False)
             if not response.is_redirect:
                 return response
 

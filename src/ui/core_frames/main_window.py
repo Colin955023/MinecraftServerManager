@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6.QtWidgets import QWidget
 from qfluentwidgets import (
     BodyLabel,
     FluentWindow,
@@ -61,7 +62,6 @@ from src.utils import (
     get_logger,
     get_settings_manager,
     initialize_ui_theme,
-    resolve_color,
     run_on_ui_thread,
 )
 
@@ -170,7 +170,6 @@ class MainWindow(FluentWindow):
         self.setProperty("_primary_window", True)
         self.page_router = PageRouter(self)
         self._console_queue: queue.Queue[Any] = queue.Queue()
-        self._startup_update_check_job = None
         self.settings = get_settings_manager()
         self.setup_window()
 
@@ -231,7 +230,7 @@ class MainWindow(FluentWindow):
                 self.root,
                 message_level="info",
             )
-            folder = QtWidgets.QFileDialog.getExistingDirectory(self.root, "選擇伺服器主資料夾")
+            folder = UIUtils.get_existing_directory(self.root, "選擇伺服器主資料夾")
             if not folder:
                 should_exit = UIUtils.ask_yes_no_cancel(
                     "結束程式", "未選擇資料夾，是否要結束程式？", self.root, show_cancel=False
@@ -397,24 +396,6 @@ class MainWindow(FluentWindow):
         elif hasattr(self, "settings") and self.settings.is_auto_center_enabled():
             center_window(self)
 
-        self.setup_theme_tokens()
-
-    def setup_theme_tokens(self) -> None:
-        """設定目前主題的色彩 token"""
-        self.colors = {
-            "primary": resolve_color(Colors.BUTTON_PRIMARY),
-            "secondary": resolve_color(Colors.TEXT_SECONDARY),
-            "success": resolve_color(Colors.BUTTON_SUCCESS),
-            "warning": resolve_color(Colors.TEXT_WARNING),
-            "danger": resolve_color(Colors.BUTTON_DANGER),
-            "background": resolve_color(Colors.BG_PRIMARY),
-            "surface": resolve_color((Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_DARK)),
-            "text": resolve_color(Colors.TEXT_PRIMARY),
-            "text_secondary": resolve_color(Colors.TEXT_SECONDARY),
-            "border": resolve_color(Colors.DROPDOWN_BUTTON),
-            "menu_bg": Colors.BG_PRIMARY,
-        }
-
     def create_widgets(self) -> None:
         """建立所有介面元件，包含標題和主要內容"""
         self.create_server_frame = CreateServerFrame(
@@ -478,7 +459,6 @@ class MainWindow(FluentWindow):
             UIUtils.open_external(str(folder_path))
         except Exception as e:
             logger.error(f"無法開啟路徑: {e}\n{traceback.format_exc()}")
-            UIUtils.show_message("錯誤", f"無法開啟路徑: {e}", self.root, message_level="error")
             UIUtils.show_message("錯誤", f"無法開啟路徑: {e}", self.root, message_level="error")
 
     def on_server_created(self, server_config: ServerConfig) -> None:
@@ -618,7 +598,7 @@ class MainWindow(FluentWindow):
 
     def _select_server_folder(self) -> Path | None:
         """選擇伺服器資料夾"""
-        folder_path = QtWidgets.QFileDialog.getExistingDirectory(
+        folder_path = UIUtils.get_existing_directory(
             self.root,
             "選擇伺服器資料夾",
             "",
@@ -629,7 +609,7 @@ class MainWindow(FluentWindow):
 
     def _select_server_archive(self) -> Path | None:
         """選擇伺服器壓縮檔"""
-        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+        file_path = UIUtils.get_open_file_name(
             parent=self.root,
             caption="選擇伺服器壓縮檔",
             dir="",
@@ -726,7 +706,7 @@ class MainWindow(FluentWindow):
 class ServerInitializationDialog(ModalMSFluentWindow):
     """伺服器初始化對話框"""
 
-    def __init__(self, parent: QtWidgets.QWidget, server_config: ServerConfig, completion_callback=None):
+    def __init__(self, parent: QWidget, server_config: ServerConfig, completion_callback=None):
         super().__init__(parent, is_modal=True, show_buttons=False)
         self.parent_widget = parent
         self.server_config = server_config
@@ -754,7 +734,7 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         self.console_text.setReadOnly(True)
         self.console_text.setFont(FontManager.get_font(family="Consolas", size=FontSize.TINY))
         self.console_text.setStyleSheet(
-            f"QTextEdit {{ background-color: {Colors.BG_CONSOLE}; color: {Colors.CONSOLE_TEXT}; border: 1px solid #333333; }}"
+            f"TextEdit {{ background-color: {Colors.BG_CONSOLE}; color: {Colors.CONSOLE_TEXT}; border: 1px solid #333333; }}"
         )
         self.viewLayout.addWidget(self.console_text, 1)
 

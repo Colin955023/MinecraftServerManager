@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import os
 import time
+import weakref
 import webbrowser
 import winsound
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -54,24 +56,33 @@ class UIUtils:
             button: 要套用樣式的按鈕元件
         """
 
-        def _apply():
-            if not is_qobject_alive(button):
+        button_ref = weakref.ref(button)
+
+        def _apply() -> None:
+            current = button_ref()
+            if current is None or not is_qobject_alive(current):
                 return
             bg_normal = resolve_color(Colors.BUTTON_DANGER)
             bg_hover = resolve_color(Colors.BUTTON_DANGER_HOVER)
             bg_disabled = resolve_color(Colors.BUTTON_LIGHT)
             color_disabled = resolve_color(Colors.TEXT_MUTED)
-            button.setStyleSheet(
-                f"QPushButton, PushButton, PrimaryPushButton {{ background-color: {bg_normal}; color: black; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 5px 10px; }}"
-                f"QPushButton:hover, PushButton:hover, PrimaryPushButton:hover {{ background-color: {bg_hover}; color: black; }}"
-                f"QPushButton:pressed, PushButton:pressed, PrimaryPushButton:pressed {{ background-color: {bg_normal}; color: black; }}"
-                f"QPushButton:disabled, PushButton:disabled, PrimaryPushButton:disabled {{ background-color: {bg_disabled}; color: {color_disabled}; border: 1px solid rgba(0, 0, 0, 0.05); }}"
+            current.setStyleSheet(
+                f"PushButton, PrimaryPushButton {{ background-color: {bg_normal}; color: black; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 5px; padding: 5px 10px; }}"
+                f"PushButton:hover, PrimaryPushButton:hover {{ background-color: {bg_hover}; color: black; }}"
+                f"PushButton:pressed, PrimaryPushButton:pressed {{ background-color: {bg_normal}; color: black; }}"
+                f"PushButton:disabled, PrimaryPushButton:disabled {{ background-color: {bg_disabled}; color: {color_disabled}; border: 1px solid rgba(0, 0, 0, 0.05); }}"
             )
 
         _apply()
 
         if not hasattr(button, "_msm_danger_connected"):
             qconfig.themeChangedFinished.connect(_apply)
+
+            def _disconnect(*_args: Any) -> None:
+                with suppress(TypeError, RuntimeError):
+                    qconfig.themeChangedFinished.disconnect(_apply)
+
+            button.destroyed.connect(_disconnect)
             button._msm_danger_connected = True
 
     @staticmethod
@@ -423,6 +434,85 @@ class UIUtils:
                 logger.exception(f"透過系統開啟外部資源失敗: {target_str} - {e}")
         except Exception as e:
             logger.exception(f"開啟外部資源失敗: {e}")
+
+    @staticmethod
+    def get_open_file_name(
+        parent: Any = None,
+        caption: str = "選擇檔案",
+        dir: str = "",
+        filter: str = "",
+    ) -> str:
+        """
+        顯示開啟檔案對話框
+
+        Args:
+            parent: 父視窗
+            caption: 對話框標題
+            dir: 起始目錄
+            filter: 檔案過濾器
+
+        Returns:
+            所選取的檔案絕對路徑字串，若取消則為空字串
+        """
+
+        def _open() -> str:
+            p = parent if parent is not None else QApplication.activeWindow()
+            file_path, _ = QtWidgets.QFileDialog.getOpenFileName(p, caption, dir, filter)
+            return file_path or ""
+
+        return UIUtils._dispatch_dialog(_open) or ""
+
+    @staticmethod
+    def get_existing_directory(
+        parent: Any = None,
+        caption: str = "選擇資料夾",
+        dir: str = "",
+    ) -> str:
+        """
+        顯示選擇資料夾對話框
+
+        Args:
+            parent: 父視窗
+            caption: 對話框標題
+            dir: 起始目錄
+
+        Returns:
+            所選取的資料夾絕對路徑字串，若取消則為空字串
+        """
+
+        def _get_dir() -> str:
+            p = parent if parent is not None else QApplication.activeWindow()
+            folder_path = QtWidgets.QFileDialog.getExistingDirectory(p, caption, dir)
+            return folder_path or ""
+
+        return UIUtils._dispatch_dialog(_get_dir) or ""
+
+    @staticmethod
+    def get_save_file_name(
+        parent: Any = None,
+        caption: str = "儲存檔案",
+        dir: str = "",
+        filter: str = "",
+    ) -> str:
+        """
+        顯示儲存檔案對話框
+
+        Args:
+            parent: 父視窗
+            caption: 對話框標題
+            dir: 起始目錄
+            filter: 檔案過濾器
+
+        Returns:
+            所選取的儲存路徑字串，若取消則為空字串
+        """
+
+        def _save() -> str:
+            p = parent if parent is not None else QApplication.activeWindow()
+            file_path, _ = QtWidgets.QFileDialog.getSaveFileName(p, caption, dir, filter)
+            return file_path or ""
+
+        return UIUtils._dispatch_dialog(_save) or ""
 
 
 class ScrollableComboBox(ComboBox):

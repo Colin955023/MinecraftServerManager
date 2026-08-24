@@ -27,9 +27,6 @@ class Colors:
     每個顏色定義為一個二元組，包含 (light_mode_color, dark_mode_color)
     """
 
-    # --- 基礎藍色系 (Primary / Info 共用) ---
-    BUTTON_PRIMARY: Final[tuple[str, str]] = ("#2563eb", "#1d4ed8")
-
     # --- 綠色系 (Success) ---
     BUTTON_SUCCESS: Final[tuple[str, str]] = ("#059669", "#047857")
     BUTTON_SUCCESS_HOVER: Final[tuple[str, str]] = ("#047857", "#065f46")
@@ -37,20 +34,15 @@ class Colors:
     # --- 灰色系 (Secondary) ---
     BUTTON_LIGHT: Final[tuple[str, str]] = ("#e2e8f0", "#d1d5db")
 
-    # --- 橘/黃色系 (Warning) ---
-    BUTTON_WARNING_HOVER: Final[tuple[str, str]] = ("#d97706", "#b45309")
-
     # --- 紅色系 (Danger) ---
     BUTTON_DANGER: Final[tuple[str, str]] = ("#dc2626", "#b91c1c")
     BUTTON_DANGER_HOVER: Final[tuple[str, str]] = ("#b91c1c", "#991b1b")
 
     # --- 文字色彩 ---
     TEXT_PRIMARY: Final[tuple[str, str]] = ("#1f2937", "#e5e7eb")
-    TEXT_HEADING: Final[tuple[str, str]] = ("#111827", "#f3f4f6")
     TEXT_SECONDARY: Final[tuple[str, str]] = ("#6b7280", "#9ca3af")
     TEXT_MUTED: Final[tuple[str, str]] = ("#4b5563", "#9ca3af")
     TEXT_TERTIARY: Final[tuple[str, str]] = ("#a0aec0", "#a0aec0")
-    TEXT_LINK: Final[tuple[str, str]] = ("blue", "#4dabf7")
     TEXT_ERROR: Final[tuple[str, str]] = ("#e53e3e", "#e53e3e")
     TEXT_WARNING: Final[tuple[str, str]] = ("#b45309", "#d97706")
 
@@ -61,13 +53,11 @@ class Colors:
     BG_LISTBOX_DARK: Final[str] = "#2b2b2b"
     BG_CARD_LIGHT: Final[str] = "#ffffff"
     BG_CARD_DARK: Final[str] = "#2b2b2b"
-    BG_CARD: Final[tuple[str, str]] = ("#ffffff", "#2b2b2b")
 
     # --- 邊框與其他元件 ---
     BORDER_LIGHT: Final[tuple[str, str]] = ("#d1d5db", "#374151")
     BORDER: Final[tuple[str, str]] = ("#d1d5db", "#374151")
     TABLE_HEADER_BORDER: Final[tuple[str, str]] = ("#d1d5db", "#475569")
-    DROPDOWN_BUTTON: Final[tuple[str, str]] = ("#e5e7eb", "#3f3f3f")
     CONSOLE_TEXT: Final[str] = "#00ff00"
 
 

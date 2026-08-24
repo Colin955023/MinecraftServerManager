@@ -219,8 +219,6 @@ def run_in_background(
 
 
 __all__ = [
-    "DEFAULT_WORKER_COUNT",
-    "BackgroundTaskManager",
     "CancellationToken",
     "get_shared_manager",
     "run_in_background",

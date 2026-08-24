@@ -6,6 +6,7 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import suppress
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,6 +23,7 @@ _dispatcher: _UiDispatcher | None = None
 _dispatcher_lock = threading.Lock()
 
 
+@lru_cache(maxsize=1)
 def get_icon_path() -> str:
     """
     自動偵測 icon.ico 絕對路徑，支援開發環境與打包後 (Nuitka) 的路徑
@@ -181,45 +183,6 @@ def cancel_timer(timer: Any) -> None:
         return
 
 
-class _OpenUrlClickFilter(QtCore.QObject):
-    """
-    把滑鼠點擊轉成開啟外部網址的 Qt event filter"""
-
-    def __init__(self, url: str, parent: QtCore.QObject | None = None) -> None:
-        super().__init__(parent)
-        self._url = str(url)
-
-    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        """
-        攔截 Qt 事件並依目前元件狀態處理
-
-        Args:
-            watched: 被監聽的 Qt 物件
-            event: 事件
-
-        Returns:
-            若事件已被處理則回傳 True
-        """
-        if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl(self._url))
-            return True
-        return super().eventFilter(watched, event)
-
-
-def install_open_url_click(widget: QtWidgets.QWidget, url: str) -> None:
-    """
-    讓 widget 被點擊時開啟指定外部網址
-
-    Args:
-        widget: 要安裝點擊處理器的 Qt widget
-        url: 點擊後要開啟的外部網址
-    """
-
-    click_filter = _OpenUrlClickFilter(url, widget)
-    widget.installEventFilter(click_filter)
-    cast(Any, widget)._msm_open_url_click_filter = click_filter
-
-
 class _UiDispatcher(QtCore.QObject):
     dispatched = QtCore.Signal(object)
 
@@ -325,7 +288,6 @@ __all__ = [
     "cancel_timer",
     "ensure_application",
     "get_icon_path",
-    "install_open_url_click",
     "invoke_later",
     "is_qobject_alive",
     "run_on_ui_thread",

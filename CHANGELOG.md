@@ -14,17 +14,18 @@
 - **UI 架構模組化與目錄分層**：重組 `src/ui/` 目錄為 `core_frames/`（主頁面框架）、`dialogs/`（對話框與彈窗）、`services/`（如 `application_shell.py`）、`windows/`（獨立監控視窗），並以 `HostBound` 委派模式解耦 View 與狀態操作。
 - **模組搜尋與相容性核心遷移**：將 Modrinth 搜尋服務與相容性分析模組（`modrinth_service.py`、`compatibility_analyzer.py`、`dependency_planner_facade.py` 等）由 UI 層遷入 `src/core/mods/`。
 - **底層工具、日誌與例外處理簡化**：以 `exceptions.py` 取代 `exception_utils.py`；全面改採 `loguru` 非同步分級日誌與 `psutil` 處理程序監控；全面移除舊版 `http_utils.py`、`task_utils.py`、`mod_provider_resolver.py`，並大幅精簡 `path_utils.py`、`system_utils.py` 與 `server_detection_utils.py`。
-- **QFluentWidgets 原生元件全面導入**：全面移除舊有相容層與手動 QSS 計算，改採 QFluentWidgets 原生元件與主題切換機制。
+- **QFluentWidgets 視覺元件全面導入**：可見控制項改採 QFluentWidgets 與主題切換機制；僅保留 Fluent 無等價物的 Qt 結構、事件與 model-view primitive，必要主題色樣式集中由 UI token 管理。
 
 ### 修正
 - 修正伺服器建立與匯入過程中的交易回滾機制與路徑安全驗證。
 - 修正模組依賴解析與 Provider 身分匹配中的快取一致性與型別轉換異常。
 - 修復背景執行緒與 UI 元件互動時可能產生的競爭條件與例外捕捉缺漏。
 - 修復元件升級後的相依性警告與未使用的匯入。
+- 強化伺服器備份完整性：改為同目錄暫存 ZIP 完整寫入後原子提交；任一檔案備份失敗即取消整份備份並清理暫存檔，避免殘缺 ZIP 被回報為成功。
 
 ### 重大變更
 - **架構分層與命名空間變更**：重構 `src/ui/` 與 `src/core/mods/` 命名空間，移除舊版 `mod_provider_resolver.py`、`http_utils.py` 與 `mod_management/review.py`，相關呼叫端需適配新的 Session 與 WorkScope 介面。
-- **UI 框架底層全面替換**：移除所有舊有 Tkinter 風格適配器與相容層，完全以 PySide6 與 QFluentWidgets 原生 API 開發。
+- **UI 框架底層全面替換**：移除所有舊有 Tkinter 風格適配器與相容層；可見介面採 QFluentWidgets，底層生命週期、layout 與 model-view 基礎設施使用必要的 PySide6 API。
 
 ## v1.7.2 - 2026-06-05
 

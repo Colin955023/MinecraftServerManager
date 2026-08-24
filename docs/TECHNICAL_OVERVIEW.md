@@ -30,7 +30,7 @@ src/main.py
      │   ├── server_creation.py   CreateServerJourney／交易式建立（plan→execute）
      │   ├── server_import.py     交易式匯入、批次探索與重新偵測
      │   ├── server_startup.py    啟動策略；runtime 委派 ServerInstance
-     │   ├── server_backup.py     備份還原管理
+     │   ├── server_backup.py     原子提交 ZIP 備份與安全覆寫還原
      │   └── server_instance.py   process／輸出緩衝 owner
      ├── core/mods/               模組協調與 Modrinth 搜尋服務層
      │   ├── mod_manager.py       模組 orchestration（委派掃描／安裝／provider 辨識）
@@ -45,9 +45,9 @@ src/main.py
      ├── ui/core_frames/*         建立、管理、關於與設定主要框架
      ├── ui/dialogs/*             確認、JVM、屬性、還原、進度等對話框
      ├── ui/mods/*                Session + HostBound ops、Review workflow／handoff
-     ├── ui/services/*            ApplicationShell、TaskCoordinator、UIWorkScope 協調
+     ├── ui/services/*            ApplicationShell、ManageServerService、TaskCoordinator 協調
      ├── ui/windows/*             即時伺服器監控視窗
-     └── utils/*                  日誌、網路、Java支援、UI主題、執行期工具等
+     └── utils/*                  日誌、網路、Java支援、UI主題 (UIWorkScope)、執行期工具等
 ```
 
 > 上圖為典型呼叫關係示意，非嚴格依賴方向規則。
@@ -56,7 +56,7 @@ src/main.py
 
 | 主題 | 作法 |
 |------|------|
-| 背景工作 | UI 經 `UIWorkScope` 提交／投遞／取消 |
+| 背景工作 | UI 經 `UIWorkScope`（`utils/ui_support/`）提交／投遞／取消 |
 | 模組管理 | `ModManagementSession` + HostBound ops（非 Frame 多重繼承） |
 | Review | 外部經 `ModReviewWorkflow` 與 `ReviewExecutionHandoff` |
 | 建立伺服器 | `CreateServerJourney`（plan → 確認 → execute） |
@@ -94,7 +94,7 @@ ui → core → models → utils
 
 | 檔案 | 簡介 |
 |------|------|
-| `models.py` | 核心資料結構：`ServerConfig`、`ModrinthVersionLookupResult`、`LoaderVersion`、`OnlineModVersion`、`ResolvedDependencyReference` |
+| `models.py` | 核心資料結構：<br>• **伺服器領域**：`ServerConfig`、`ServerCreationPlan`、`ServerCreationResult`、`ServerImportInspection`、`ServerImportResult`<br>• **載入器與相容性**：`LoaderVersion`、`ModrinthVersionLookupResult`、`ModStatus`<br>• **模組領域**：`OnlineModVersion`、`ModManagementSnapshot`、`LocalModUpdateCandidate`、`LocalModUpdatePlan`、`OnlineDependencyInstallPlan`、`ResolvedDependencyReference`<br>• **Review 互動**：`ReviewExecutionHandoff`、`ReviewContextStamp`、`ReviewViewSnapshot`、`ReviewTreeGroupNode`<br>• **Provider 身分**：`ProviderIdentitySnapshot`、`ProviderIdentityEvidence`<br>• **偏好與視窗**：`MainWindowSettings`、`WindowPreferences` |
 
 ### `src/core/`
 
@@ -105,7 +105,7 @@ ui → core → models → utils
 | `server/server_creation.py` | 以 staging、原子設定寫入與補償建立伺服器實例 |
 | `server/server_import.py` | 以唯讀候選、受管複本與逐項結果統一匯入、批次探索及重新偵測 |
 | `server/server_startup.py` | 伺服器啟動／停止控制 |
-| `server/server_backup.py` | 伺服器備份與還原管理 |
+| `server/server_backup.py` | 同目錄暫存 ZIP 完整成功後原子提交；還原採安全解壓覆寫，不刪除備份外既有檔案 |
 | `server/server_instance.py` | 伺服器實例狀態與行程管理 |
 | `mods/mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
 | `mods/local_mod_scanner.py` | 本地模組掃描、JAR metadata 解析與快取回填 |
@@ -121,22 +121,22 @@ ui → core → models → utils
 
 | 子目錄 / 檔案 | 簡介 |
 |------|------|
-| `core_frames/main_window.py` | 主視窗導航／theme；core 服務由 `ApplicationShell` 綁定 |
-| `core_frames/create_server_frame.py` | 建立伺服器精靈 |
+| `core_frames/main_window.py` | 主視窗導航／theme（FluentWindow）；core 服務由 `ApplicationShell` 綁定 |
+| `core_frames/create_server_frame.py` | 建立伺服器精靈（純 Fluent 標籤與 ScrollArea 佈局） |
 | `core_frames/manage_server_frame.py` | 伺服器清單與操作面板 |
 | `core_frames/about_preferences_frame.py` | 關於與視窗偏好設定整合頁面 |
 | `core_frames/page_router.py` | 頁面路由與導航控制 |
-| `dialogs/progress_dialog.py` | 進度對話框 |
-| `dialogs/server_properties_dialog.py` | 伺服器屬性對話框 |
-| `dialogs/jvm_args_dialog.py` | JVM 參數自訂與最佳化建議對話框 |
-| `dialogs/server_creation_confirm_dialog.py` | 建立前參數與指令核對對話框 |
-| `dialogs/restore_backup_dialog.py` | 備份還原對話框 |
-| `dialogs/modal_msfluent_window.py` | 彈出視窗基底類別 |
-| `mods/` | 模組管理主介面、Presenter、Review 視窗、樹狀列表同步與安裝執行器 |
+| `dialogs/progress_dialog.py` | 進度對話框（基於 `ModalMSFluentWindow`，WindowModal 模式與安全取消機制） |
+| `dialogs/server_properties_dialog.py` | 伺服器屬性對話框（基於 `ModalMSFluentWindow`，視覺化 Pivot 分頁） |
+| `dialogs/jvm_args_dialog.py` | JVM 參數自訂與最佳化建議對話框（基於 `ModalMSFluentWindow`） |
+| `dialogs/server_creation_confirm_dialog.py` | 建立前參數與指令核對對話框（基於 `ModalMSFluentWindow`） |
+| `dialogs/restore_backup_dialog.py` | 備份還原對話框（基於 `ModalMSFluentWindow`） |
+| `dialogs/modal_msfluent_window.py` | 模態 Fluent 視窗基底類別（乾淨事件循環退出與安全置中） |
+| `mods/` | 模組管理主介面、Presenter、Review 視窗、匯出對話框（`ExportModListDialog`）、樹狀列表同步與安裝執行器 |
 | `services/application_shell.py` | 主視窗服務協調整合（綁定 CRUD、Startup、Import、Backup 等生命週期操作） |
 | `services/manage_server_service.py` | 伺服器本機偵測與狀態計算服務 |
 | `services/task_coordinator.py` | 跨頁面背景任務協調服務 |
-| `windows/server_monitor_window.py` | 即時監控視窗 |
+| `windows/server_monitor_window.py` | 即時監控視窗（基於 `ModalMSFluentWindow`，雙緩衝控制台與 ANSI 解析） |
 
 ### `src/utils/`
 
@@ -155,14 +155,15 @@ ui → core → models → utils
 
 ## 5. 視窗生命週期
 
-主視窗與大多數對話框採 Qt 視窗生命週期，避免在元件尚未完成佈局時顯示：
+主視窗與所有對話框均基於 `FluentWindow` 與 `ModalMSFluentWindow` 構建；所有存在 Fluent 對應實作的可見控制項均採 Windows Fluent Design 元件體系：
 
-1. 建立 Qt widget 與 layout。
-2. 透過 `ui_support/ui_config.py` 的 `center_window` 等工具計算螢幕與置中位置。
+1. 可見標籤、輸入、按鈕、捲動區、樹狀清單與卡片均使用 `qfluentwidgets` 元件（`TitleLabel`、`BodyLabel`、`LineEdit`、`PushButton`、`ScrollArea`、`TreeWidget`、`CardWidget` 等），由 Fluent 主題系統管理互動與外觀。
+2. 透過 `ui_support/ui_config.py` 的 `center_window` 等工具依據作用中螢幕幾何動態計算精準置中位置。
 3. 呼叫 `resize()`、`move()`、`setMinimumSize()` 套用視窗幾何。
-4. 元件完成後再呼叫 `show()`；需要最大化時延後呼叫 `showMaximized()`。
+4. 元件完成後再呼叫 `show()` 或 `exec()`；需要最大化時延後呼叫 `showMaximized()`。
+5. 模態對話框在使用者確認或關閉時，乾淨退出內部事件循環並釋放資源，避免殘留背景程序與焦點衝突。
 
-視窗偏好（位置、大小與最大化狀態）由 `runtime_utils/settings_manager.py` 統一讀寫並持久化至設定檔（`MainWindowSettings` / `WindowPreferences`）。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `QTreeWidget` 支援雙擊欄位標題自動調整欄寬。
+視窗偏好（位置、大小與最大化狀態）由 `runtime_utils/settings_manager.py` 統一讀寫並持久化至設定檔（`MainWindowSettings` / `WindowPreferences`）。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `TreeWidget` 支援雙擊欄位標題自動調整欄寬。
 
 高解析度顯示縮放交由 Qt 6 與 Windows 原生設定處理。Qt Widgets 使用 device-independent pixels，Qt 6 在 Windows 會自動套用使用者的顯示比例，因此專案內不再保存或套用額外的 UI 縮放倍率。
 
@@ -173,7 +174,7 @@ ui → core → models → utils
 - **減少啟動網路請求**：loader 版本快取採 TTL（預設 12 小時），快取有效期間略過預抓。
 - **為何是 12 小時**：在「資料新鮮度」與「API 請求量」間折衷；Minecraft 伺服器管理情境通常是長時間運行、重啟頻率低，12 小時可避免每次啟動都重新查詢，同時仍能在每日維運節奏內更新版本資訊。
 - **快取失效自動重抓**：快取缺失或過期時 preload guard 自動解除，無需重啟程式。
-- **列表差異更新**：Treeview 只更新變動列，不整批重繪。
+- **列表差異更新**：Fluent `TreeWidget` 僅更新變動列，不整批重繪。
 - **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
 - **JVM 參數最佳化**：建立伺服器時動態依據所選記憶體大小、Minecraft 建議 Java 版本以及載入器類型，預載最適合的 JVM 參數（Java 21+ 使用 ZGC；舊版使用 G1GC Aikar's flags），確保出廠即具備優秀效能。
 
@@ -197,7 +198,7 @@ ui → core → models → utils
 ## 8. 資料與設定路徑
 
 - **設定**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
-- **日誌**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\log\`
+- **日誌**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Logs\`
 - **快取**：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\`
 
 設定由 `runtime_utils/settings_manager.py` 統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
@@ -239,3 +240,4 @@ uv run report\comprehensive_report.py
 7. `src/ui/mods/` — 模組管理介面、Presenter 與 Review 視窗
 8. `src/utils/ui_support/ui_config.py` — UI 主題與視窗幾何配置慣例
 9. `src/utils/core_utils/logger.py` — 全域 loguru 日誌初始化與組件綁定機制
+

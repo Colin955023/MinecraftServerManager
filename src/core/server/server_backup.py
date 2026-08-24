@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import tempfile
 import zipfile
 from collections.abc import Callable
 from contextlib import suppress
@@ -29,9 +30,8 @@ class ServerBackupManager:
         self, server_name: str, max_backups: int = 10, progress_callback: Callable[[float, str], None] | None = None
     ) -> bool:
         """
-        備份伺服器
-        使用 YYYYMMDDHHMM 格式
-        最多保留 max_backups 份
+        備份伺服器。先在備份目錄建立暫存 ZIP，完整成功後再原子替換最終檔案。
+        使用 YYYYMMDDHHMM 格式，最多保留 max_backups 份。
 
         Args:
             server_name: 伺服器名稱
@@ -41,6 +41,7 @@ class ServerBackupManager:
         Returns:
             備份成功回傳 True，失敗回傳 False
         """
+        temp_backup_file: Path | None = None
         try:
             config = self.server_crud.servers.get(server_name)
             if not config:
@@ -53,8 +54,7 @@ class ServerBackupManager:
                 return False
 
             backup_dir = self._get_backup_dir(config)
-            now = datetime.datetime.now()
-            timestamp = now.strftime("%Y%m%d%H%M")
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M")
             backup_filename = f"{server_name}_{timestamp}.zip"
             backup_file = backup_dir / backup_filename
 
@@ -64,7 +64,7 @@ class ServerBackupManager:
                 progress_callback(0, "正在掃描檔案...")
 
             excludes = {"logs", "crash-reports", "backups", ".git"}
-            files_to_backup = []
+            files_to_backup: list[tuple[Path, int]] = []
             total_size = 0
 
             for root, dirs, files in os.walk(server_path):
@@ -73,25 +73,35 @@ class ServerBackupManager:
                     file_path = Path(root) / file
                     if backup_dir in file_path.parents:
                         continue
-                    with suppress(Exception):
-                        total_size += file_path.stat().st_size
-                        files_to_backup.append(file_path)
+                    try:
+                        file_size = file_path.stat().st_size
+                    except OSError as exc:
+                        raise OSError(f"無法讀取備份來源檔案資訊: {file_path}") from exc
+                    files_to_backup.append((file_path, file_size))
+                    total_size += file_size
 
             if progress_callback:
                 progress_callback(5, f"準備備份 {len(files_to_backup)} 個檔案...")
 
+            fd, temp_name = tempfile.mkstemp(prefix=f".{backup_filename}.", suffix=".tmp", dir=backup_dir)
+            temp_backup_file = Path(temp_name)
+            os.close(fd)
+
             processed_size = 0
-            with zipfile.ZipFile(backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
-                for i, file_path in enumerate(files_to_backup):
+            with zipfile.ZipFile(temp_backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i, (file_path, file_size) in enumerate(files_to_backup):
+                    rel_path = file_path.relative_to(server_path)
+                    if progress_callback and i % 10 == 0:
+                        pct = 5 + (processed_size / total_size * 90 if total_size > 0 else 0)
+                        progress_callback(pct, f"正在壓縮: {rel_path.name}")
                     try:
-                        rel_path = file_path.relative_to(server_path)
-                        if progress_callback and i % 10 == 0:
-                            pct = 5 + (processed_size / total_size * 90 if total_size > 0 else 0)
-                            progress_callback(pct, f"正在壓縮: {rel_path.name}")
                         zf.write(file_path, arcname=str(rel_path))
-                        processed_size += file_path.stat().st_size
-                    except Exception as e:
-                        logger.warning(f"備份檔案 {file_path} 失敗: {e}")
+                    except Exception as exc:
+                        raise OSError(f"備份檔案失敗: {file_path}") from exc
+                    processed_size += file_size
+
+            Path.replace(temp_backup_file, backup_file)
+            temp_backup_file = None
 
             if progress_callback:
                 progress_callback(95, "正在清理舊備份...")
@@ -103,8 +113,9 @@ class ServerBackupManager:
                 progress_callback(100, "備份完成！")
             return True
         except Exception as e:
-            with suppress(Exception):
-                backup_file.unlink(missing_ok=True)
+            if temp_backup_file is not None:
+                with suppress(OSError):
+                    temp_backup_file.unlink(missing_ok=True)
             logger.exception(f"伺服器 {server_name} 備份時發生錯誤: {e}")
             return False
 

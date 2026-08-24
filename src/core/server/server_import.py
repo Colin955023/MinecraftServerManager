@@ -479,7 +479,6 @@ class ServerImportService:
             if content:
                 memory_max = MemoryUtils.parse_memory_setting(content, "Xmx") or memory_max
                 memory_min = MemoryUtils.parse_memory_setting(content, "Xms") or memory_min
-        missing = tuple(ServerDetectionUtils.get_missing_server_files(path))
         warnings = list(extra_warnings or [])
         if scratch.minecraft_version.lower() == "unknown":
             warnings.append("無法判斷 Minecraft 版本")
@@ -500,7 +499,6 @@ class ServerImportService:
             startup_scripts=tuple(script.name for script in scripts),
             startup_command=command,
             evidence=tuple(sorted((str(key), str(value)) for key, value in evidence.items())),
-            missing_files=missing,
             warnings=tuple(warnings),
             committable=committable,
             conflict_type=conflict_type,
@@ -606,13 +604,6 @@ class ServerImportService:
                         loader_ver = loader_match.group(1)
 
                 main_jar = jars[0] if jars else ""
-                missing = []
-                if not jars:
-                    missing.append("server.jar 或同等主程式 JAR")
-                if "eula.txt" not in [c.lower() for c in root_files]:
-                    missing.append("eula.txt")
-                if "server.properties" not in [c.lower() for c in root_files]:
-                    missing.append("server.properties")
 
                 if not jars and not startup_scripts:
                     warnings.append("找不到有效的伺服器檔案")
@@ -637,7 +628,6 @@ class ServerImportService:
                     startup_scripts=tuple(startup_scripts),
                     startup_command=command,
                     evidence=tuple(sorted((str(key), str(value)) for key, value in evidence.items())),
-                    missing_files=tuple(missing),
                     warnings=tuple(warnings),
                     committable=committable,
                     conflict_type=conflict_type,
@@ -686,7 +676,6 @@ class ServerImportService:
             startup_scripts=(),
             startup_command="",
             evidence=(),
-            missing_files=(),
             warnings=tuple(warnings),
             committable=committable,
             conflict_type=conflict_type,

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtWidgets import QFormLayout, QPlainTextEdit
-from qfluentwidgets import LineEdit, StrongBodyLabel, SubtitleLabel, TitleLabel
+from PySide6.QtWidgets import QFormLayout
+from qfluentwidgets import LineEdit, PlainTextEdit, StrongBodyLabel, SubtitleLabel, TitleLabel
 
 from src.ui import ModalMSFluentWindow
-from src.utils import Colors, FontManager, FontSize, JvmOptionPolicy, ServerDetectionUtils, resolve_color
+from src.utils import FontManager, FontSize, JvmOptionPolicy, ServerDetectionUtils
 
 
 class ServerCreationConfirmDialog(ModalMSFluentWindow):
@@ -80,7 +80,7 @@ class ServerCreationConfirmDialog(ModalMSFluentWindow):
         jvm_label.setFont(FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold"))
         self.viewLayout.addWidget(jvm_label)
 
-        self.jvm_text_edit = QPlainTextEdit(self.widget)
+        self.jvm_text_edit = PlainTextEdit(self.widget)
         self.jvm_text_edit.setReadOnly(True)
 
         mem_min = self.memory_min_mb
@@ -112,23 +112,6 @@ class ServerCreationConfirmDialog(ModalMSFluentWindow):
         self.viewLayout.addWidget(self.jvm_text_edit, 1)
 
         self.yesButton.setText("確認並建立")
-        self._apply_theme_styles()
-
-    def _apply_theme_styles(self) -> None:
-        """更新對話框內部元件之樣式以響應主題切換"""
-        super()._apply_theme_styles()
-        if not hasattr(self, "jvm_text_edit") or not self.jvm_text_edit:
-            return
-
-        border_color = resolve_color(Colors.BORDER_LIGHT)
-        text_color = resolve_color(Colors.TEXT_PRIMARY)
-        self.jvm_text_edit.setStyleSheet(
-            f"QPlainTextEdit {{ border: 1px solid {border_color}; border-radius: 4px; padding: 5px; background-color: transparent; color: {text_color}; }}"
-        )
-
-        if hasattr(self, "widget") and self.widget:
-            for le in self.widget.findChildren(LineEdit):
-                le.setStyleSheet(f"QLineEdit {{ background: transparent; border: none; color: {text_color}; }}")
 
 
 __all__ = ["ServerCreationConfirmDialog"]

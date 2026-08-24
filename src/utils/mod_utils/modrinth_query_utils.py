@@ -37,19 +37,6 @@ def clean_api_identifier(value: str | None) -> str:
     return str(value or "").strip()
 
 
-def canonical_lookup_key(value: str | None) -> str:
-    """
-    產生用於比對與去重的標準化 key
-
-    Args:
-        value: 原始字串
-
-    Returns:
-        只保留小寫英數字的 key
-    """
-    return re.sub("[^a-z0-9]+", "", str(value or "").strip().lower())
-
-
 def normalize_local_loader(loader: str | None) -> str:
     """
     將本地載入器名稱正規化為內部比較格式
@@ -141,50 +128,6 @@ def normalize_mod_search_query(raw_query: str) -> str:
     return re.sub("\\s+", " ", normalized).strip() or str(raw_query or "").strip()
 
 
-def build_local_mod_lookup_candidates(
-    filename: str, *, platform_id: str | None = None, platform_slug: str | None = None, local_name: str | None = None
-) -> tuple[list[str], list[str], set[str]]:
-    """
-    從本地模組資訊組合搜尋與比對候選字串
-
-    Args:
-        filename: 模組檔名
-        platform_id: 已知的 platform id
-        platform_slug: 已知的 platform slug
-        local_name: 本地顯示名稱
-
-    Returns:
-        (精確候選, 搜尋字串, 標準化比對 key) 三元組
-    """
-    filename_stem = filename.replace(".jar.disabled", "").replace(".jar", "")
-    raw_candidates = [
-        str(platform_id or "").strip(),
-        str(platform_slug or "").strip(),
-        str(local_name or "").strip(),
-        filename_stem.strip(),
-    ]
-    exact_identifiers: list[str] = []
-    search_terms: list[str] = []
-    candidate_keys: set[str] = set()
-    for raw_candidate in raw_candidates:
-        if not raw_candidate:
-            continue
-        clean_candidate = clean_api_identifier(raw_candidate)
-        if clean_candidate and clean_candidate not in exact_identifiers:
-            exact_identifiers.append(clean_candidate)
-        normalized_search = normalize_mod_search_query(raw_candidate)
-        if normalized_search and normalized_search not in search_terms:
-            search_terms.append(normalized_search)
-        slug_candidate = re.sub("[^a-z0-9]+", "-", normalized_search.lower()).strip("-") if normalized_search else ""
-        if slug_candidate and slug_candidate not in exact_identifiers:
-            exact_identifiers.append(slug_candidate)
-        for candidate_value in (raw_candidate, normalized_search, slug_candidate):
-            candidate_key = canonical_lookup_key(candidate_value)
-            if candidate_key:
-                candidate_keys.add(candidate_key)
-    return (exact_identifiers, search_terms, candidate_keys)
-
-
 def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:
     """
     將 Modrinth 版本 API payload 轉換為內部版本模型
@@ -250,8 +193,6 @@ def parse_modrinth_version_lookup_response(
 
 __all__ = [
     "apply_loader_specific_dependency_override",
-    "build_local_mod_lookup_candidates",
-    "canonical_lookup_key",
     "clean_api_identifier",
     "get_modrinth_loader_filters",
     "is_supported_modrinth_update_loader",

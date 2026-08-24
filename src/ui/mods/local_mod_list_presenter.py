@@ -10,7 +10,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import QAbstractItemView, QApplication, QFrame, QHBoxLayout, QHeaderView, QVBoxLayout
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import PushButton, SearchLineEdit, TreeWidget
 
 from src.core import get_modrinth_project_info
@@ -65,13 +65,13 @@ class LocalModListPresenter:
 
     def create_local_toolbar(self) -> None:
         """建立本地模組工具列"""
-        toolbar_frame = QFrame(self.frame.local_tab)
+        toolbar_frame = QWidget(self.frame.local_tab)
         toolbar_layout = QHBoxLayout(toolbar_frame)
         toolbar_layout.setContentsMargins(Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM)
         if self.frame.local_tab.layout():
             self.frame.local_tab.layout().addWidget(toolbar_frame)
 
-        left_frame = QFrame(toolbar_frame)
+        left_frame = QWidget(toolbar_frame)
         left_layout = QHBoxLayout(left_frame)
         left_layout.setContentsMargins(Spacing.SMALL, 0, 0, 0)
         left_layout.setSpacing(12)
@@ -110,7 +110,7 @@ class LocalModListPresenter:
 
         toolbar_layout.addStretch(1)
 
-        right_frame = QFrame(toolbar_frame)
+        right_frame = QWidget(toolbar_frame)
         right_layout = QVBoxLayout(right_frame)
         right_layout.setContentsMargins(0, 0, Spacing.LARGE, 0)
         right_layout.setSpacing(Spacing.SMALL_PLUS)
@@ -175,13 +175,13 @@ class LocalModListPresenter:
 
     def create_local_mod_list(self) -> None:
         """建立本地模組列表"""
-        list_frame = QFrame(self.frame.local_tab)
+        list_frame = QWidget(self.frame.local_tab)
         list_layout = QVBoxLayout(list_frame)
         list_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
         if self.frame.local_tab.layout():
             self.frame.local_tab.layout().addWidget(list_frame, stretch=1)
 
-        tree_container = QFrame(list_frame)
+        tree_container = QWidget(list_frame)
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
         list_layout.addWidget(tree_container, stretch=1)
@@ -231,7 +231,7 @@ class LocalModListPresenter:
         header_bg = resolve_color((Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_DARK), dark=is_dark)
         header_border = resolve_color(Colors.TABLE_HEADER_BORDER, dark=is_dark)
         tree.setStyleSheet(
-            f"TreeWidget, QTreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}\n"
+            f"TreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}\n"
             f"QHeaderView {{ background-color: transparent; border: none; }}\n"
             f"QHeaderView::section {{ background-color: {header_bg}; color: {primary_color}; border: {Sizes.TABLE_HEADER_BORDER_WIDTH}px solid {header_border}; padding: 4px 6px; }}"
         )
@@ -709,7 +709,6 @@ class LocalModListPresenter:
                 self.frame.batch_toggle_btn.setEnabled(enabled)
 
     def _run_debounced_local_filter_refresh(self) -> None:
-        self.frame._local_filter_job = None
         self.frame.refresh_local_list()
 
 

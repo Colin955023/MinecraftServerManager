@@ -326,15 +326,6 @@ class ModIndexManager:
                 self._save_index_if_due(force=True)
             return len(files_to_remove)
 
-    def clear_cache(self) -> None:
-        """清空整個索引快取"""
-        with self._index_lock:
-            self._index.clear()
-            self._dirty = False
-            if self.index_file.exists():
-                self.index_file.unlink()
-            logger.info("已清空模組索引快取")
-
     def flush(self) -> None:
         """立即儲存尚未落盤的索引內容"""
         self._save_index_if_due(force=True)

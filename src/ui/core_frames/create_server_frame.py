@@ -10,8 +10,27 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from PySide6 import QtCore, QtGui, QtWidgets
-from qfluentwidgets import LineEdit, PrimaryPushButton, PushButton, qconfig
+from PySide6 import QtCore, QtGui
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    CardWidget,
+    HyperlinkLabel,
+    LineEdit,
+    PrimaryPushButton,
+    PushButton,
+    ScrollArea,
+    StrongBodyLabel,
+    TitleLabel,
+    qconfig,
+)
 
 from src.core import CreateServerJourney, LoaderManager, ServerCRUD
 from src.models import ServerConfig, WorkOutcome
@@ -30,7 +49,6 @@ from src.utils import (
     UIWorkScope,
     ValueState,
     get_logger,
-    install_open_url_click,
     is_qobject_alive,
     resolve_color,
     run_on_ui_thread,
@@ -43,11 +61,7 @@ def _qt_font(font: Any) -> QtGui.QFont:
     return getattr(font, "font", font)
 
 
-def _set_layout_margins(layout: QtWidgets.QLayout, *margins: int) -> None:
-    layout.setContentsMargins(*(int(value) for value in margins))
-
-
-class CreateServerFrame(QtWidgets.QWidget):
+class CreateServerFrame(QWidget):
     """建立伺服器頁面"""
 
     def __init__(
@@ -65,14 +79,12 @@ class CreateServerFrame(QtWidgets.QWidget):
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
-        self._create_server_progress_job = None
         self._create_server_success_job = None
         self._create_server_error_job = None
         self.server_name_var = ValueState("")
         self.scope = UIWorkScope(self)
         self.jvm_args_customized = False
         self.selected_jvm_args: list[str] = []
-        self.custom_jvm_args_text = ""
         self.setObjectName("CreateServerFrame")
         self.create_widgets()
         self.preload_version_data()
@@ -166,7 +178,7 @@ class CreateServerFrame(QtWidgets.QWidget):
         parent.addWidget(java_path_entry, row, 1)
 
         def browse_java():
-            path, _selected_filter = QtWidgets.QFileDialog.getOpenFileName(
+            path = UIUtils.get_open_file_name(
                 self.window(), "選擇 javaw.exe", "", "Java 執行檔 (javaw.exe);;所有檔案 (*)"
             )
             if path:
@@ -206,58 +218,53 @@ class CreateServerFrame(QtWidgets.QWidget):
     def create_widgets(self) -> None:
         """建立介面元件"""
         self.setObjectName("CreateServerFrame")
-        main_layout = QtWidgets.QVBoxLayout(self)
-        _set_layout_margins(main_layout, 0, 0, 0, 0)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(11)
 
-        self.scroll_area = QtWidgets.QScrollArea(self)
+        self.scroll_area = ScrollArea(self)
         self.scroll_area.setObjectName("CreateServerScrollArea")
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.content_widget = QtWidgets.QWidget()
+        self.content_widget = QWidget()
         self.content_widget.setObjectName("CreateServerContent")
-        content_layout = QtWidgets.QVBoxLayout(self.content_widget)
-        _set_layout_margins(content_layout, 0, 0, 0, 0)
+        content_layout = QVBoxLayout(self.content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(11)
         self.scroll_area.setWidget(self.content_widget)
         main_layout.addWidget(self.scroll_area, 1)
 
-        title_label = QtWidgets.QLabel("建立新伺服器", self.content_widget)
+        title_label = TitleLabel("建立新伺服器", self.content_widget)
         self.title_label = title_label
         title_label.setFont(_qt_font(FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")))
-        title_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_HEADING)};")
         content_layout.addWidget(title_label)
 
-        eula_frame = QtWidgets.QFrame(self.content_widget)
+        eula_frame = CardWidget(self.content_widget)
         self.eula_frame = eula_frame
         eula_frame.setObjectName("EulaNotice")
-        eula_layout = QtWidgets.QHBoxLayout(eula_frame)
-        _set_layout_margins(eula_layout, 6, 5, 6, 5)
+        eula_layout = QHBoxLayout(eula_frame)
+        eula_layout.setContentsMargins(6, 5, 6, 5)
         eula_layout.setSpacing(8)
-        eula_icon = QtWidgets.QLabel("⚠️", eula_frame)
+        eula_icon = BodyLabel("⚠️", eula_frame)
         self.eula_icon = eula_icon
         eula_icon.setFont(_qt_font(FontManager.get_font(size=FontSize.LARGE, weight="bold")))
-        eula_icon.setStyleSheet(f"color: {resolve_color(Colors.BUTTON_WARNING_HOVER)};")
         eula_layout.addWidget(eula_icon, 0, QtCore.Qt.AlignmentFlag.AlignTop)
-        eula_link = QtWidgets.QLabel(
+        eula_link = HyperlinkLabel(
+            QtCore.QUrl("https://aka.ms/MinecraftEULA"),
             "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n"
             "點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任",
             eula_frame,
         )
         self.eula_link = eula_link
-        eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold", underline=True)))
-        eula_link.setStyleSheet(f"color: {resolve_color(Colors.TEXT_WARNING)};")
-        eula_link.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        install_open_url_click(eula_link, "https://aka.ms/MinecraftEULA")
+        self.eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
         eula_layout.addWidget(eula_link, 1)
         content_layout.addWidget(eula_frame)
 
-        self.form_panel = QtWidgets.QFrame(self.content_widget)
+        self.form_panel = QWidget(self.content_widget)
         self.form_panel.setObjectName("CreateFormPanel")
-        form_layout = QtWidgets.QGridLayout(self.form_panel)
-        _set_layout_margins(form_layout, 0, 3, 0, 0)
+        form_layout = QGridLayout(self.form_panel)
+        form_layout.setContentsMargins(0, 3, 0, 0)
         form_layout.setHorizontalSpacing(8)
         form_layout.setVerticalSpacing(8)
         form_layout.setColumnStretch(1, 1)
@@ -269,34 +276,14 @@ class CreateServerFrame(QtWidgets.QWidget):
     def apply_theme_styles(self) -> None:
         """重新套用目前主題到建立伺服器頁"""
         background = resolve_color(Colors.BG_PRIMARY)
-        text_primary = resolve_color(Colors.TEXT_PRIMARY)
-        text_muted = resolve_color(Colors.TEXT_MUTED)
         self.setStyleSheet(f"#CreateServerFrame {{ background-color: {background}; }}")
         if hasattr(self, "scroll_area"):
-            self.scroll_area.setStyleSheet(f"QScrollArea {{ background-color: {background}; border: 0; }}")
+            self.scroll_area.setStyleSheet(f"ScrollArea {{ background-color: {background}; border: 0; }}")
             self.scroll_area.viewport().setStyleSheet(f"background-color: {background};")
         if hasattr(self, "content_widget"):
-            self.content_widget.setStyleSheet(f"background-color: {background};\nQLabel {{ color: {text_primary}; }}")
-        if hasattr(self, "title_label"):
-            self.title_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_HEADING)};")
-        if hasattr(self, "eula_icon"):
-            self.eula_icon.setStyleSheet(f"color: {resolve_color(Colors.BUTTON_WARNING_HOVER)};")
-        if hasattr(self, "eula_link"):
-            self.eula_link.setStyleSheet(f"color: {resolve_color(Colors.TEXT_WARNING)};")
+            self.content_widget.setStyleSheet(f"background-color: {background};")
         if hasattr(self, "memory_warning_label"):
             self.memory_warning_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_ERROR)};")
-        if hasattr(self, "min_label") and is_qobject_alive(self.min_label):
-            self.min_label.setStyleSheet(f"color: {text_muted};")
-        if hasattr(self, "max_label") and is_qobject_alive(self.max_label):
-            self.max_label.setStyleSheet(f"color: {text_muted};")
-        if hasattr(self, "memory_tip") and is_qobject_alive(self.memory_tip):
-            self.memory_tip.setStyleSheet(f"color: {text_muted};")
-        if hasattr(self, "jvm_summary_label") and is_qobject_alive(self.jvm_summary_label):
-            self.jvm_summary_label.setStyleSheet(f"color: {text_primary};")
-        for label in getattr(self, "_form_labels", []):
-            if is_qobject_alive(label):
-                is_muted = bool(label.property("isMuted"))
-                label.setStyleSheet(f"color: {text_muted if is_muted else text_primary};")
 
     def create_form(self, parent) -> None:
         """
@@ -347,27 +334,26 @@ class CreateServerFrame(QtWidgets.QWidget):
 
         memory_title = self._make_label("記憶體設定 (MB):")
         content_frame.addWidget(memory_title, 5, 0)
-        memory_container = QtWidgets.QWidget(self.form_panel)
-        memory_layout = QtWidgets.QVBoxLayout(memory_container)
-        _set_layout_margins(memory_layout, 0, 0, 0, 0)
+        memory_container = QWidget(self.form_panel)
+        memory_layout = QVBoxLayout(memory_container)
+        memory_layout.setContentsMargins(0, 0, 0, 0)
         memory_layout.setSpacing(5)
-        memory_input_layout = QtWidgets.QGridLayout()
+        memory_input_layout = QGridLayout()
         memory_input_layout.setContentsMargins(0, 0, 0, 0)
         memory_input_layout.setHorizontalSpacing(8)
         memory_input_layout.setColumnStretch(0, 1)
         memory_input_layout.setColumnStretch(1, 1)
         self.min_memory_var = ValueState("1024")
-        min_memory_frame = QtWidgets.QWidget(memory_container)
-        min_layout = QtWidgets.QVBoxLayout(min_memory_frame)
-        _set_layout_margins(min_layout, 0, 0, 0, 0)
+        min_memory_frame = QWidget(memory_container)
+        min_layout = QVBoxLayout(min_memory_frame)
+        min_layout.setContentsMargins(0, 0, 0, 0)
         min_layout.setSpacing(3)
-        min_label = QtWidgets.QLabel("最小記憶體:", min_memory_frame)
+        min_label = CaptionLabel("最小記憶體:", min_memory_frame)
         self.min_label = min_label
         min_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
-        min_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_MUTED)};")
         min_layout.addWidget(min_label)
         self.min_memory_entry = LineEdit(min_memory_frame)
-        self.min_memory_entry.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.min_memory_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.min_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(self.min_memory_entry, self.min_memory_var)
         self._style_control(self.min_memory_entry)
@@ -375,17 +361,16 @@ class CreateServerFrame(QtWidgets.QWidget):
         memory_input_layout.addWidget(min_memory_frame, 0, 0)
 
         self.max_memory_var = ValueState("2048")
-        max_memory_frame = QtWidgets.QWidget(memory_container)
-        max_layout = QtWidgets.QVBoxLayout(max_memory_frame)
-        _set_layout_margins(max_layout, 0, 0, 0, 0)
+        max_memory_frame = QWidget(memory_container)
+        max_layout = QVBoxLayout(max_memory_frame)
+        max_layout.setContentsMargins(0, 0, 0, 0)
         max_layout.setSpacing(3)
-        max_label = QtWidgets.QLabel("最大記憶體:", max_memory_frame)
+        max_label = CaptionLabel("最大記憶體:", max_memory_frame)
         self.max_label = max_label
         max_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
-        max_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_MUTED)};")
         max_layout.addWidget(max_label)
         self.max_memory_entry = LineEdit(max_memory_frame)
-        self.max_memory_entry.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        self.max_memory_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.max_memory_entry.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         self._bind_entry(self.max_memory_entry, self.max_memory_var)
         self._style_control(self.max_memory_entry)
@@ -394,16 +379,15 @@ class CreateServerFrame(QtWidgets.QWidget):
         memory_layout.addLayout(memory_input_layout)
         self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
         self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-        memory_tip = QtWidgets.QLabel(
+        memory_tip = CaptionLabel(
             "最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
             memory_container,
         )
         self.memory_tip = memory_tip
         memory_tip.setFont(FontManager.get_font(size=FontSize.MEDIUM))
-        memory_tip.setStyleSheet(f"color: {resolve_color(Colors.TEXT_MUTED)};")
         memory_tip.setWordWrap(True)
         memory_layout.addWidget(memory_tip)
-        self.memory_warning_label = QtWidgets.QLabel("", memory_container)
+        self.memory_warning_label = CaptionLabel("", memory_container)
         self.memory_warning_label.setFont(FontManager.get_font(size=FontSize.SMALL_PLUS))
         self.memory_warning_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_ERROR)};")
         self.memory_warning_label.setWordWrap(True)
@@ -411,12 +395,12 @@ class CreateServerFrame(QtWidgets.QWidget):
         content_frame.addWidget(memory_container, 5, 1, 1, 2)
 
         content_frame.addWidget(self._make_label("JVM啟動參數:"), 6, 0)
-        jvm_container = QtWidgets.QWidget(self.form_panel)
-        jvm_layout = QtWidgets.QHBoxLayout(jvm_container)
-        _set_layout_margins(jvm_layout, 0, 0, 0, 0)
+        jvm_container = QWidget(self.form_panel)
+        jvm_layout = QHBoxLayout(jvm_container)
+        jvm_layout.setContentsMargins(0, 0, 0, 0)
         jvm_layout.setSpacing(10)
 
-        self.jvm_summary_label = QtWidgets.QLabel("載入中...", jvm_container)
+        self.jvm_summary_label = BodyLabel("載入中...", jvm_container)
         self.jvm_summary_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
 
         self.jvm_config_btn = PrimaryPushButton("JVM參數設定...", jvm_container)
@@ -600,7 +584,7 @@ class CreateServerFrame(QtWidgets.QWidget):
             var_name: 要建立的變數名稱前綴
 
         Returns:
-            (ValueState, QLineEdit) 元組
+            (ValueState, LineEdit) 元組
         """
         parent.addWidget(self._make_label(label_text), row, 0)
         var = ValueState(default_value)
@@ -620,10 +604,10 @@ class CreateServerFrame(QtWidgets.QWidget):
         Args:
             parent: 父容器
         """
-        self.actions_frame = QtWidgets.QFrame(self)
+        self.actions_frame = QWidget(self)
         self.actions_frame.setObjectName("CreateServerActions")
-        button_layout = QtWidgets.QHBoxLayout(self.actions_frame)
-        _set_layout_margins(button_layout, 0, 4, 0, 0)
+        button_layout = QHBoxLayout(self.actions_frame)
+        button_layout.setContentsMargins(0, 4, 0, 0)
         button_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         button_layout.addStretch(1)
         self.reset_button = StatusPushButton("重設表單", self)
@@ -666,7 +650,6 @@ class CreateServerFrame(QtWidgets.QWidget):
 
             self.jvm_args_customized = False
             self.selected_jvm_args = []
-            self.custom_jvm_args_text = ""
             self.update_default_jvm_args()
 
             UIUtils.show_message("重設完成", "表單已重設為預設值", self.window(), message_level="info")
@@ -1052,11 +1035,9 @@ class CreateServerFrame(QtWidgets.QWidget):
 
         self.memory_warning_label.setStyleSheet(f"color: {resolve_color(color)};")
 
-    def _make_label(self, text: str, *, muted: bool = False, bold: bool = True) -> QtWidgets.QLabel:
-        label = QtWidgets.QLabel(text)
-        label.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold" if bold else "normal"))
+    def _make_label(self, text: str, *, muted: bool = False, bold: bool = True) -> StrongBodyLabel | BodyLabel:
+        label = StrongBodyLabel(text) if bold else BodyLabel(text)
         label.setProperty("isMuted", muted)
-        label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_MUTED if muted else Colors.TEXT_PRIMARY)};")
         label.setMinimumWidth(143)
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
         if not hasattr(self, "_form_labels"):
@@ -1066,7 +1047,7 @@ class CreateServerFrame(QtWidgets.QWidget):
 
     def _style_control(self, widget, *, height: int = 32) -> None:
         widget.setMinimumHeight(height)
-        widget.setSizePolicy(QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         if isinstance(widget, LineEdit):
             widget.setMinimumWidth(Sizes.INPUT_WIDTH)
 

@@ -142,5 +142,4 @@ __all__ = [
     "atomic_write_bytes",
     "atomic_write_json",
     "atomic_write_text",
-    "best_effort_fsync",
 ]

@@ -3,7 +3,6 @@
     "ms-python.python",
     "ms-python.vscode-pylance",
     "ms-python.debugpy",
-    "ms-python.vscode-python-envs",
     "ms-python.mypy-type-checker",
     "charliermarsh.ruff"
   ]

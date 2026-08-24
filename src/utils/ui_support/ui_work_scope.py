@@ -21,7 +21,6 @@ class WorkHandle:
         self._generation = generation
         self._key = key
         self._cancel_token = cancel_token
-        self._is_done = False
         self._is_cancelled = False
 
     @property
@@ -86,7 +85,6 @@ class UIWorkScope(QtCore.QObject):
         self._key_generations: dict[str, int] = {}
         self._timers: dict[str, QtCore.QTimer] = {}
         self._draining: bool = False
-        self._critical_count: int = 0
 
         self._pool = QtCore.QThreadPool(self)
         self._pool.setMaxThreadCount(4)
@@ -138,9 +136,6 @@ class UIWorkScope(QtCore.QObject):
                         self._active_handles[prev_gen].cancel()
                 self._key_generations[key] = generation
 
-            if critical:
-                self._critical_count += 1
-
             cancel_token = CancellationToken()
             handle = WorkHandle(generation, key, cancel_token)
             self._active_handles[generation] = handle
@@ -167,20 +162,16 @@ class UIWorkScope(QtCore.QObject):
             if not callback_info:
                 return
 
-            on_done, critical, key = callback_info
+            on_done, _, key = callback_info
 
             if key is not None:
                 latest_gen = self._key_generations.get(key)
                 if latest_gen != generation:
                     logger.debug(f"Outcome for generation {generation} superseded by {latest_gen} for key {key}")
                     self._active_handles.pop(generation, None)
-                    if critical:
-                        self._critical_count -= 1
                     return
 
             self._active_handles.pop(generation, None)
-            if critical:
-                self._critical_count -= 1
 
         if on_done:
             on_done(outcome)

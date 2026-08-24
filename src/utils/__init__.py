@@ -9,18 +9,15 @@ from __future__ import annotations
 from src import lazy_exports
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    "APP_DESCRIPTION": (".runtime_utils.app_info", "APP_DESCRIPTION"),
     "APP_NAME": (".runtime_utils.app_info", "APP_NAME"),
     "APP_VERSION": (".runtime_utils.app_info", "APP_VERSION"),
     "AppException": (".core_utils.exceptions", "AppException"),
     "ArchiveSecurityError": (".core_utils.exceptions", "ArchiveSecurityError"),
-    "BackgroundTaskManager": (".runtime_utils.background_task", "BackgroundTaskManager"),
     "BoolState": (".ui_support.ui_state", "BoolState"),
     "CancellationToken": (".runtime_utils.background_task", "CancellationToken"),
     "Colors": (".ui_support.ui_tokens", "Colors"),
     "ConfigurationError": (".core_utils.exceptions", "ConfigurationError"),
     "CreationCancelledError": (".core_utils.exceptions", "CreationCancelledError"),
-    "DEFAULT_WORKER_COUNT": (".runtime_utils.background_task", "DEFAULT_WORKER_COUNT"),
     "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION": (
         ".mod_utils.dependency_plan_serializer",
         "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
@@ -131,7 +128,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "MemoryUtils": (".server_utils.server_memory_utils", "MemoryUtils"),
     "ModIndexManager": (".mod_utils.mod_index_manager", "ModIndexManager"),
     "NetworkSecurityError": (".core_utils.exceptions", "NetworkSecurityError"),
-    "OFFICIAL_DOWNLOAD_HOSTS": (".mod_utils.download_source_policy", "OFFICIAL_DOWNLOAD_HOSTS"),
     "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE": (
         ".mod_utils.mod_semantics",
         "ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE",
@@ -145,7 +141,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE",
     ),
     "ONLINE_REVIEW_PRECHECK_NOTE": (".mod_utils.mod_semantics", "ONLINE_REVIEW_PRECHECK_NOTE"),
-    "OperationCancelledError": (".core_utils.exceptions", "OperationCancelledError"),
     "PathUtils": (".core_utils.path_utils", "PathUtils"),
     "ProviderIdentityPersistenceError": (".core_utils.exceptions", "ProviderIdentityPersistenceError"),
     "RECOMMENDATION_CONFIDENCE_ADVISORY": (
@@ -202,7 +197,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerOperations": (".server_utils.server_runtime_utils", "ServerOperations"),
     "ServerPropertiesHelper": (".server_utils.server_properties_utils", "ServerPropertiesHelper"),
     "ServerPropertiesValidator": (".server_utils.server_properties_utils", "ServerPropertiesValidator"),
-    "SettingsManager": (".runtime_utils.settings_manager", "SettingsManager"),
     "Sizes": (".ui_support.ui_tokens", "Sizes"),
     "Spacing": (".ui_support.ui_tokens", "Spacing"),
     "StatusPushButton": (".ui_support.status_button", "StatusPushButton"),
@@ -228,11 +222,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "atomic_write_bytes": (".core_utils.atomic_writer", "atomic_write_bytes"),
     "atomic_write_json": (".core_utils.atomic_writer", "atomic_write_json"),
     "atomic_write_text": (".core_utils.atomic_writer", "atomic_write_text"),
-    "best_effort_fsync": (".core_utils.atomic_writer", "best_effort_fsync"),
-    "build_local_mod_lookup_candidates": (
-        ".mod_utils.modrinth_query_utils",
-        "build_local_mod_lookup_candidates",
-    ),
     "build_non_official_source_warning": (
         ".mod_utils.download_source_policy",
         "build_non_official_source_warning",
@@ -243,7 +232,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "bytes_to_mb": (".core_utils.units_utils", "bytes_to_mb"),
     "cancel_timer": (".ui_support.qt_runtime", "cancel_timer"),
-    "canonical_lookup_key": (".mod_utils.modrinth_query_utils", "canonical_lookup_key"),
     "center_window": (".ui_support.ui_config", "center_window"),
     "clean_api_identifier": (".mod_utils.modrinth_query_utils", "clean_api_identifier"),
     "collect_installed_mod_identifiers": (
@@ -281,11 +269,9 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_utils.download_source_policy",
         "get_non_official_download_host",
     ),
-    "get_official_download_hosts": (".mod_utils.download_source_policy", "get_official_download_hosts"),
     "get_settings_manager": (".runtime_utils.settings_manager", "get_settings_manager"),
     "get_shared_manager": (".runtime_utils.background_task", "get_shared_manager"),
     "initialize_ui_theme": (".ui_support.ui_config", "initialize_ui_theme"),
-    "install_open_url_click": (".ui_support.qt_runtime", "install_open_url_click"),
     "invoke_later": (".ui_support.qt_runtime", "invoke_later"),
     "is_allowed_version_type": (".mod_utils.mod_version_filtering", "is_allowed_version_type"),
     "is_qobject_alive": (".ui_support.qt_runtime", "is_qobject_alive"),
@@ -297,7 +283,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_utils.dependency_plan_serializer",
         "migrate_online_dependency_install_plan_payload",
     ),
-    "normalize_download_provider": (".mod_utils.download_source_policy", "normalize_download_provider"),
     "normalize_filename_stem": (".mod_utils.local_mod_metadata_utils", "normalize_filename_stem"),
     "normalize_hash_algorithm": (".mod_utils.mod_version_filtering", "normalize_hash_algorithm"),
     "normalize_identifier": (".mod_utils.modrinth_query_utils", "normalize_identifier"),

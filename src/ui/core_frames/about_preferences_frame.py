@@ -5,17 +5,20 @@ from __future__ import annotations
 import traceback
 from typing import Any, ClassVar, cast
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
+    CaptionLabel,
     CheckBox,
+    HyperlinkLabel,
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
     Theme,
     TitleLabel,
+    VerticalSeparator,
     setTheme,
 )
 
@@ -38,7 +41,7 @@ from src.utils import (
 logger = get_logger().bind(component="AboutPreferencesFrame")
 
 
-class AboutPreferencesFrame(QFrame):
+class AboutPreferencesFrame(QWidget):
     """整合關於程式與視窗偏好設定的左右分欄頁面"""
 
     THEME_LABELS: ClassVar[dict[str, str]] = {"system": "依照系統設定", "light": "淺色", "dark": "深色"}
@@ -81,7 +84,7 @@ class AboutPreferencesFrame(QFrame):
         main_layout.setSpacing(Spacing.LARGE)
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        about_content = QFrame(self)
+        about_content = QWidget(self)
         about_layout = QVBoxLayout(about_content)
         about_layout.setContentsMargins(Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM)
         about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -89,12 +92,10 @@ class AboutPreferencesFrame(QFrame):
         self._create_about_section(about_layout)
         main_layout.addWidget(about_content, 1)
 
-        self.vertical_separator = QFrame(self)
-        self.vertical_separator.setFixedWidth(2)
-        self.vertical_separator.setStyleSheet(f"background-color: {resolve_color(Colors.BORDER_LIGHT)};")
+        self.vertical_separator = VerticalSeparator(self)
         main_layout.addWidget(self.vertical_separator)
 
-        prefs_content = QFrame(self)
+        prefs_content = QWidget(self)
         prefs_layout = QVBoxLayout(prefs_content)
         prefs_layout.setContentsMargins(Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM, Spacing.MEDIUM)
         prefs_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -119,8 +120,8 @@ class AboutPreferencesFrame(QFrame):
 
         dev_info = BodyLabel(
             "• 開發者: Minecraft Server Manager Team\n"
-            "• 技術棧: Python 3.14+, PySide6\n"
-            "• Java 管理: 自動偵測/下載 Minecraft 官方 JDK\n"
+            "• 技術棧: Python 3.14, PySide6 + QFluentWidgets\n"
+            "• Java 管理: 自動偵測 Java，支援 winget 自動下載與手動指定\n"
             "• 架構: 模組化設計, 事件驅動\n"
             "• 參考專案: PrismLauncher",
             self,
@@ -130,9 +131,11 @@ class AboutPreferencesFrame(QFrame):
         layout.addSpacing(Spacing.MEDIUM)
 
         self.github_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
-        self.github_lbl = BodyLabel("", self)
-        self.github_lbl.setOpenExternalLinks(True)
-        self._update_github_link()
+        self.github_lbl = HyperlinkLabel(
+            QtCore.QUrl(self.github_url),
+            "GitHub - MinecraftServerManager",
+            self,
+        )
         layout.addWidget(self.github_lbl)
 
         layout.addSpacing(Spacing.LARGE)
@@ -177,21 +180,12 @@ class AboutPreferencesFrame(QFrame):
         self.settings.set_auto_update_enabled(enabled)
         self.manual_check_btn.setVisible(not enabled)
 
-    def _update_github_link(self) -> None:
-        if hasattr(self, "github_lbl") and hasattr(self, "github_url"):
-            self.github_lbl.setText(
-                f"<a href='{self.github_url}' style='color: {resolve_color(Colors.TEXT_LINK)}; text-decoration: none;'>GitHub-MinecraftServerManager</a>"
-            )
-
     def apply_theme_styles(self) -> None:
         """套用主題樣式"""
-        self._update_github_link()
         if hasattr(self, "vertical_separator") and self.vertical_separator:
             self.vertical_separator.setStyleSheet(f"background-color: {resolve_color(Colors.BORDER_LIGHT)};")
         if hasattr(self, "version_lbl") and self.version_lbl:
             self.version_lbl.setStyleSheet(f"color: {resolve_color(Colors.TEXT_TERTIARY)};")
-        if hasattr(self, "dpi_lbl") and self.dpi_lbl:
-            self.dpi_lbl.setStyleSheet(f"color: {resolve_color(Colors.TEXT_SECONDARY)};")
 
     def _create_preferences_section(self, layout: QVBoxLayout) -> None:
         title = TitleLabel("🖥️ 視窗偏好設定", self)
@@ -254,8 +248,7 @@ class AboutPreferencesFrame(QFrame):
         theme_layout.addStretch(1)
         layout.addLayout(theme_layout)
 
-        self.dpi_lbl = BodyLabel("介面縮放會跟隨 Windows 顯示比例與 Qt 高 DPI 設定", self)
-        self.dpi_lbl.setStyleSheet(f"color: {resolve_color(Colors.TEXT_SECONDARY)};")
+        self.dpi_lbl = CaptionLabel("介面縮放會跟隨 Windows 顯示比例與 Qt 高 DPI 設定", self)
         layout.addWidget(self.dpi_lbl)
 
         layout.addSpacing(Spacing.LARGE)
@@ -313,14 +306,14 @@ class AboutPreferencesFrame(QFrame):
             },
         }
 
-    def _restore_window_geometry(self, win: QtWidgets.QWidget | None, defaults: dict[str, Any]) -> None:
+    def _restore_window_geometry(self, win: QWidget | None, defaults: dict[str, Any]) -> None:
         """重設主視窗大小與位置至螢幕中央"""
         if not win:
             return
         if win.isMaximized():
             win.showNormal()
-        QtWidgets.QApplication.processEvents()
-        screen = win.screen() if hasattr(win, "screen") and win.screen() else QtWidgets.QApplication.primaryScreen()
+        QApplication.processEvents()
+        screen = win.screen() if hasattr(win, "screen") and win.screen() else QApplication.primaryScreen()
         available = screen.availableGeometry() if screen else QtCore.QRect(0, 0, defaults["width"], defaults["height"])
         target_w = min(defaults["width"], available.width())
         target_h = min(defaults["height"], available.height())
@@ -339,7 +332,7 @@ class AboutPreferencesFrame(QFrame):
         win.update()
         win.repaint()
 
-    def _apply_theme_to_sub_frames(self, win: QtWidgets.QWidget | None) -> None:
+    def _apply_theme_to_sub_frames(self, win: QWidget | None) -> None:
         """通知主視窗下所有子頁面重新套用主題樣式"""
         if not win:
             return

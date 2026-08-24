@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, SubtitleLabel, TextEdit, TreeWidget
 
 from src.ui import ModalMSFluentWindow
@@ -32,7 +32,7 @@ class ReviewDialog(ModalMSFluentWindow):
         self.overview_label.setWordWrap(True)
         self.viewLayout.addWidget(self.overview_label)
 
-        self.tree_container = QFrame()
+        self.tree_container = QWidget()
         self.tree_layout = QVBoxLayout(self.tree_container)
         self.tree_layout.setContentsMargins(0, 0, 0, 0)
         self.viewLayout.addWidget(self.tree_container, 1)
@@ -41,7 +41,7 @@ class ReviewDialog(ModalMSFluentWindow):
         self.summary_box.setReadOnly(True)
         self.viewLayout.addWidget(self.summary_box)
 
-        self.button_frame = QFrame(self.widget)
+        self.button_frame = QWidget(self.widget)
         self.button_layout = QHBoxLayout(self.button_frame)
         self.button_layout.setContentsMargins(0, 0, 0, 0)
         self.viewLayout.addWidget(self.button_frame)
@@ -62,9 +62,9 @@ class ReviewDialogShell:
     main_frame: QWidget
     subtitle: BodyLabel
     overview_label: BodyLabel
-    tree_container: QFrame
+    tree_container: QWidget
     summary_box: TextEdit
-    button_frame: QFrame
+    button_frame: QWidget
 
 
 class InstallReviewDialogBuilder:
@@ -112,7 +112,7 @@ class InstallReviewDialogBuilder:
 
     def create_review_tree(
         self,
-        tree_container: QFrame,
+        tree_container: QWidget,
         *,
         tree_heading: str,
         column_specs: list[tuple[str, str, int, int, bool, str]],

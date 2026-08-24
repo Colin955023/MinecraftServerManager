@@ -14,20 +14,17 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QCursor
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
-    QFileDialog,
-    QFrame,
     QHBoxLayout,
-    QScrollBar,
     QSizePolicy,
-    QStackedWidget,
-    QTreeWidget,
     QVBoxLayout,
+    QWidget,
 )
 from qfluentwidgets import (
     Action,
     BodyLabel,
+    CardWidget,
     Pivot,
+    PopUpAniStackedWidget,
     PrimaryPushButton,
     ProgressBar,
     PushButton,
@@ -36,6 +33,7 @@ from qfluentwidgets import (
     SubtitleLabel,
     TextEdit,
     TitleLabel,
+    TreeWidget,
 )
 
 from src.core import LoaderManager, ModManager
@@ -46,6 +44,7 @@ from src.models import (
 from src.ui import (
     HostBound,
     LocalModListPresenter,
+    ModalMSFluentWindow,
     ModManagementInstallExecutor,
     ModManagementQueueOps,
     ModManagementReviewOps,
@@ -66,6 +65,7 @@ from src.utils import (
     UIUtils,
     UIWorkScope,
     apply_table_header_style,
+    atomic_write_bytes,
     resolve_color,
 )
 
@@ -106,6 +106,140 @@ class _ModManagementSignals(QObject):
         self._drain_callback()
 
 
+class ExportModListDialog(ModalMSFluentWindow):
+    """匯出模組列表對話框"""
+
+    def __init__(self, parent: Any, mod_manager: ModManager, server: ServerConfig):
+        super().__init__(parent, is_modal=True, show_buttons=False)
+        self.mod_manager = mod_manager
+        self.server = server
+        self.setWindowTitle("匯出模組列表")
+        self.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
+        self.setMinimumSize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
+
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        title_label = TitleLabel("匯出模組列表", self.widget)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.viewLayout.addWidget(title_label)
+
+        fmt_frame = QWidget(self.widget)
+        fmt_layout = QHBoxLayout(fmt_frame)
+        fmt_layout.setContentsMargins(0, Spacing.MEDIUM, 0, Spacing.MEDIUM)
+
+        lbl = SubtitleLabel("選擇匯出格式:", fmt_frame)
+        fmt_layout.addWidget(lbl)
+
+        self.fmt_var = TextState(value="text")
+
+        text_radio = RadioButton("純文字", fmt_frame)
+        text_radio.setChecked(True)
+        text_radio.toggled.connect(lambda c: self.fmt_var.set("text") if c else None)
+        fmt_layout.addWidget(text_radio)
+
+        json_radio = RadioButton("JSON", fmt_frame)
+        json_radio.toggled.connect(lambda c: self.fmt_var.set("json") if c else None)
+        fmt_layout.addWidget(json_radio)
+
+        html_radio = RadioButton("HTML", fmt_frame)
+        html_radio.toggled.connect(lambda c: self.fmt_var.set("html") if c else None)
+        fmt_layout.addWidget(html_radio)
+
+        csv_radio = RadioButton("Excel (.xlsx)", fmt_frame)
+        csv_radio.toggled.connect(lambda c: self.fmt_var.set("xlsx") if c else None)
+        fmt_layout.addWidget(csv_radio)
+        fmt_layout.addStretch(1)
+
+        self.viewLayout.addWidget(fmt_frame)
+
+        preview_label = SubtitleLabel("預覽:", self.widget)
+        self.viewLayout.addWidget(preview_label)
+
+        text_widget = TextEdit(self.widget)
+        text_widget.setMinimumHeight(Sizes.PREVIEW_TEXTBOX_HEIGHT)
+        self.viewLayout.addWidget(text_widget, 1)
+
+        def update_preview(*_):
+            if self.mod_manager is None:
+                text_widget.clear()
+                text_widget.setPlainText("模組管理器尚未初始化，無法匯出列表")
+                return
+            export_text = self.mod_manager.export_mod_list(self.fmt_var.get())
+            text_widget.clear()
+            if isinstance(export_text, bytes):
+                text_widget.setPlainText(f"這是二進位 Excel 檔案，無法在此預覽。檔案大小：{len(export_text)} 位元組")
+            else:
+                text_widget.setPlainText(export_text)
+
+        self.fmt_var.trace_add("write", update_preview)
+        update_preview()
+
+        btn_frame = QWidget(self.widget)
+        btn_layout = QHBoxLayout(btn_frame)
+        btn_layout.setContentsMargins(0, Spacing.MEDIUM, 0, 0)
+
+        def do_save():
+            if self.mod_manager is None:
+                UIUtils.show_message("錯誤", "模組管理器未初始化", self, message_level="error")
+                return
+            fmt = self.fmt_var.get()
+            ext = {"text": "txt", "json": "json", "html": "html", "xlsx": "xlsx"}[fmt]
+            server_name = getattr(self.server, "name", "server")
+            default_name = f"{server_name}_模組列表.{ext}"
+            server_path = Path(self.server.path) if self.server and getattr(self.server, "path", None) else Path.home()
+            initial_path = str(server_path / default_name)
+            file_path = UIUtils.get_save_file_name(
+                self,
+                "儲存模組列表",
+                initial_path,
+                "所有檔案 (*.*);;純文字 (*.txt);;JSON (*.json);;HTML (*.html);;Excel 試算表 (*.xlsx)",
+            )
+            if file_path:
+                try:
+                    export_text = self.mod_manager.export_mod_list(fmt)
+                    if isinstance(export_text, bytes):
+                        if not atomic_write_bytes(file_path, export_text):
+                            UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
+                            return
+                    else:
+                        if not PathUtils.write_text_file(Path(file_path), export_text):
+                            UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
+                            return
+                except Exception as e:
+                    logger.error(f"匯出模組列表失敗: {e}\n{traceback.format_exc()}")
+                    UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {e}", self, message_level="error")
+                    return
+
+                try:
+                    result = UIUtils.ask_yes_no_cancel(
+                        "匯出成功",
+                        f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？",
+                        parent=self,
+                        show_cancel=False,
+                    )
+                    if result:
+                        UIUtils.open_external(file_path)
+                except Exception as e:
+                    logger.error(f"開啟檔案失敗: {e}\n{traceback.format_exc()}")
+                    UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=self, message_level="error")
+
+        save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
+        save_btn.clicked.connect(do_save)
+        save_btn.setMinimumWidth(Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
+        save_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
+        btn_layout.addWidget(save_btn)
+
+        close_btn = PushButton("關閉", btn_frame)
+        close_btn.clicked.connect(self.close)
+        close_btn.setMinimumWidth(Sizes.MOD_EXPORT_CLOSE_BUTTON_WIDTH)
+        close_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
+        btn_layout.addWidget(close_btn)
+        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.viewLayout.addWidget(btn_frame)
+
+
 class ModManagementFrame:
     """模組管理主畫面"""
 
@@ -126,22 +260,19 @@ class ModManagementFrame:
         self.release_versions: list = []
         self.all_selected = False
         self.VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
-        self.main_frame: QFrame | None = None
+        self.main_frame: QWidget | None = None
         self.main_layout: QVBoxLayout | None = None
-        self.notebook: QStackedWidget | None = None
+        self.notebook: PopUpAniStackedWidget | None = None
         self.pivot: Pivot | None = None
-        self.local_tab: QFrame | None = None
-        self.browse_tab: QFrame | None = None
-        self.browse_tree: QTreeWidget | None = None
+        self.local_tab: QWidget | None = None
+        self.browse_tab: QWidget | None = None
+        self.browse_tree: TreeWidget | None = None
         self.browse_filter_label: SubtitleLabel | None = None
         self.browse_results_label: SubtitleLabel | None = None
-        self.local_tree: QTreeWidget | None = None
-        self.local_v_scrollbar: QScrollBar | None = None
-        self.local_h_scrollbar: QScrollBar | None = None
+        self.local_tree: TreeWidget | None = None
         self._local_filter_job: Any | None = None
         self.local_mod_list_presenter = LocalModListPresenter(self)
         self.online_browse_presenter = OnlineBrowsePresenter(self)
-        self._online_mod_by_row_key: dict[str, Any] = {}
         self._status_update_job = None
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
 
@@ -248,7 +379,7 @@ class ModManagementFrame:
 
     def create_widgets(self) -> None:
         """建立模組管理頁面的所有 UI 元件"""
-        self.main_frame = QFrame(self.parent)
+        self.main_frame = QWidget(self.parent)
         self.main_layout = QVBoxLayout(self.main_frame)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -266,13 +397,13 @@ class ModManagementFrame:
         """建立伺服器選擇下拉選單與重新整理按鈕"""
         if not self.main_layout:
             return
-        server_frame = QFrame(self.main_frame)
+        server_frame = QWidget(self.main_frame)
         self.main_layout.addWidget(server_frame)
 
         server_layout = QHBoxLayout(server_frame)
         server_layout.setContentsMargins(Spacing.XL, 0, Spacing.XL, Spacing.SMALL_PLUS)
 
-        inner_frame = QFrame(server_frame)
+        inner_frame = QWidget(server_frame)
         inner_layout = QHBoxLayout(inner_frame)
         inner_layout.setContentsMargins(Spacing.LARGE, Spacing.SMALL_PLUS, Spacing.LARGE, Spacing.SMALL_PLUS)
         server_layout.addWidget(inner_frame)
@@ -302,7 +433,7 @@ class ModManagementFrame:
         """建立頁面頂部的標題與描述區域"""
         if not self.main_layout:
             return
-        header_frame = QFrame(self.main_frame)
+        header_frame = QWidget(self.main_frame)
         self.main_layout.addWidget(header_frame)
 
         header_layout = QHBoxLayout(header_frame)
@@ -319,7 +450,7 @@ class ModManagementFrame:
         """建立本地模組管理分頁"""
         if not self.notebook or not self.pivot:
             return
-        self.local_tab = QFrame()
+        self.local_tab = QWidget()
         tab_layout = QVBoxLayout(self.local_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         self.notebook.addWidget(self.local_tab)
@@ -336,7 +467,7 @@ class ModManagementFrame:
         """建立線上瀏覽模組分頁"""
         if not self.notebook or not self.pivot:
             return
-        self.browse_tab = QFrame()
+        self.browse_tab = QWidget()
         tab_layout = QVBoxLayout(self.browse_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         self.notebook.addWidget(self.browse_tab)
@@ -356,7 +487,7 @@ class ModManagementFrame:
         self.pivot = Pivot(self.main_frame)
         self.main_layout.addWidget(self.pivot, 0, Qt.AlignmentFlag.AlignLeft)
 
-        self.notebook = QStackedWidget(self.main_frame)
+        self.notebook = PopUpAniStackedWidget(self.main_frame)
         self.main_layout.addWidget(self.notebook, 1)
 
         self.create_local_mods_tab()
@@ -369,8 +500,6 @@ class ModManagementFrame:
 
     def apply_theme_styles(self) -> None:
         """套用 Fluent 主題樣式至模組管理介面"""
-        if hasattr(self, "status_frame") and self.status_frame:
-            self._apply_status_bar_style()
         for tree in (getattr(self, "local_tree", None), getattr(self, "browse_tree", None)):
             if tree:
                 apply_table_header_style(tree)
@@ -405,171 +534,18 @@ class ModManagementFrame:
         if not self.mod_manager or not self.mod_session.server:
             UIUtils.show_message("錯誤", "請先選擇伺服器以匯出模組列表", self.parent, message_level="error")
             return
-        try:
-            dialog = QDialog(self.parent)
-            dialog.setWindowTitle("匯出模組列表")
-            dialog.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-            dialog.setMinimumSize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-            bg_color = resolve_color(Colors.BG_PRIMARY)
-            dialog.setStyleSheet(f"QDialog {{ background-color: {bg_color}; }}")
-
-            dialog_layout = QVBoxLayout(dialog)
-            dialog_layout.setContentsMargins(0, 0, 0, 0)
-
-            main_frame = QFrame(dialog)
-            main_frame.setStyleSheet(f"QFrame {{ background-color: {bg_color}; }}")
-            dialog_layout.addWidget(main_frame)
-            main_layout = QVBoxLayout(main_frame)
-            main_layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
-
-            title_label = TitleLabel("匯出模組列表", main_frame)
-            title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            main_layout.addWidget(title_label)
-
-            fmt_frame = QFrame(main_frame)
-            main_layout.addWidget(fmt_frame)
-            fmt_layout = QHBoxLayout(fmt_frame)
-
-            fmt_inner = QFrame(fmt_frame)
-            fmt_layout.addWidget(fmt_inner)
-            inner_layout = QHBoxLayout(fmt_inner)
-
-            lbl = SubtitleLabel("選擇匯出格式:", fmt_inner)
-            inner_layout.addWidget(lbl)
-
-            self.fmt_var = TextState(value="text")
-
-            text_radio = RadioButton("純文字", fmt_inner)
-            text_radio.setChecked(True)
-            text_radio.toggled.connect(lambda c: self.fmt_var.set("text") if c else None)
-            inner_layout.addWidget(text_radio)
-
-            json_radio = RadioButton("JSON", fmt_inner)
-            json_radio.toggled.connect(lambda c: self.fmt_var.set("json") if c else None)
-            inner_layout.addWidget(json_radio)
-
-            html_radio = RadioButton("HTML", fmt_inner)
-            html_radio.toggled.connect(lambda c: self.fmt_var.set("html") if c else None)
-            inner_layout.addWidget(html_radio)
-
-            csv_radio = RadioButton("Excel (.xlsx)", fmt_inner)
-            csv_radio.toggled.connect(lambda c: self.fmt_var.set("xlsx") if c else None)
-            inner_layout.addWidget(csv_radio)
-            inner_layout.addStretch(1)
-
-            preview_frame = QFrame(main_frame)
-            main_layout.addWidget(preview_frame, 1)
-            preview_layout = QVBoxLayout(preview_frame)
-
-            preview_label = SubtitleLabel("預覽:", preview_frame)
-            preview_layout.addWidget(preview_label)
-
-            text_widget = TextEdit(preview_frame)
-            text_widget.setMinimumHeight(Sizes.PREVIEW_TEXTBOX_HEIGHT)
-            preview_layout.addWidget(text_widget, 1)
-
-            def update_preview(*_):
-                manager = self.mod_manager
-                if manager is None:
-                    text_widget.clear()
-                    text_widget.setPlainText("模組管理器尚未初始化，無法匯出列表")
-                    return
-                export_text = manager.export_mod_list(self.fmt_var.get())
-                text_widget.clear()
-                if isinstance(export_text, bytes):
-                    text_widget.setPlainText(
-                        f"這是二進位 Excel 檔案，無法在此預覽。檔案大小：{len(export_text)} 位元組"
-                    )
-                else:
-                    text_widget.setPlainText(export_text)
-
-            self.fmt_var.trace_add("write", update_preview)
-            update_preview()
-
-            btn_frame = QFrame(main_frame)
-            main_layout.addWidget(btn_frame)
-            btn_layout = QHBoxLayout(btn_frame)
-
-            def do_save():
-                manager = self.mod_manager
-                if manager is None:
-                    UIUtils.show_message("錯誤", "模組管理器未初始化", dialog, message_level="error")
-                    return
-                fmt = self.fmt_var.get()
-                ext = {"text": "txt", "json": "json", "html": "html", "xlsx": "xlsx"}[fmt]
-                server_name = getattr(self.mod_session.server, "name", "server")
-                default_name = f"{server_name}_模組列表.{ext}"
-                server_path = (
-                    Path(self.mod_session.server.path)
-                    if self.mod_session.server and getattr(self.mod_session.server, "path", None)
-                    else Path.home()
-                )
-                initial_path = str(server_path / default_name)
-                file_path, _ = QFileDialog.getSaveFileName(
-                    dialog,
-                    "儲存模組列表",
-                    initial_path,
-                    "所有檔案 (*.*);;純文字 (*.txt);;JSON (*.json);;HTML (*.html);;Excel 試算表 (*.xlsx)",
-                )
-                if file_path:
-                    try:
-                        export_text = manager.export_mod_list(fmt)
-                        if isinstance(export_text, bytes):
-                            Path(file_path).write_bytes(export_text)
-                        else:
-                            if not PathUtils.write_text_file(Path(file_path), export_text):
-                                UIUtils.show_message(
-                                    "儲存失敗", f"無法寫入檔案: {file_path}", dialog, message_level="error"
-                                )
-                                return
-                    except Exception as e:
-                        logger.error(f"匯出模組列表失敗: {e}\n{traceback.format_exc()}")
-                        UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {e}", dialog, message_level="error")
-                        return
-
-                    try:
-                        result = UIUtils.ask_yes_no_cancel(
-                            "匯出成功",
-                            f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？",
-                            parent=dialog,
-                            show_cancel=False,
-                        )
-                        if result:
-                            UIUtils.open_external(file_path)
-                    except Exception as e:
-                        logger.error(f"開啟檔案失敗: {e}\n{traceback.format_exc()}")
-                        UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=dialog, message_level="error")
-
-            save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
-            save_btn.clicked.connect(do_save)
-            save_btn.setMinimumWidth(Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
-            save_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-            btn_layout.addWidget(save_btn)
-
-            close_btn = PushButton("關閉", btn_frame)
-            close_btn.clicked.connect(dialog.close)
-            close_btn.setMinimumWidth(Sizes.MOD_EXPORT_CLOSE_BUTTON_WIDTH)
-            close_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-            btn_layout.addWidget(close_btn)
-            btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-            dialog.show()
-
-        except Exception as e:
-            logger.error(f"匯出對話框錯誤: {e}\n{traceback.format_exc()}")
-            UIUtils.show_message("匯出對話框錯誤", str(e), self.parent, message_level="error")
+        dlg = ExportModListDialog(self.parent, self.mod_manager, self.mod_session.server)
+        dlg.show()
 
     def create_status_bar(self) -> None:
         """建立頁面底部的狀態列與進度條"""
         if not self.main_layout:
             return
-        self.status_frame = QFrame(self.main_frame)
+        self.status_frame = CardWidget(self.main_frame)
         self.main_layout.addWidget(self.status_frame)
 
         status_layout = QHBoxLayout(self.status_frame)
         status_layout.setContentsMargins(Spacing.XL, 0, Spacing.XL, Spacing.XL)
-
-        self._apply_status_bar_style()
 
         self.status_label = SubtitleLabel("請選擇伺服器開始管理模組", self.status_frame)
         status_layout.addWidget(self.status_label)
@@ -704,9 +680,7 @@ class ModManagementFrame:
         if not self.mod_session.server:
             UIUtils.show_message("警告", "請先選擇伺服器", self.main_frame, message_level="warning")
             return
-        filename, _ = QFileDialog.getOpenFileName(
-            self.main_frame, "選擇模組檔案", "", "JAR files (*.jar);;All files (*.*)"
-        )
+        filename = UIUtils.get_open_file_name(self.main_frame, "選擇模組檔案", "", "JAR files (*.jar);;All files (*.*)")
         if filename:
             if not self.mod_manager:
                 UIUtils.show_message("錯誤", "模組管理器未初始化", self.main_frame, message_level="error")
@@ -904,14 +878,13 @@ class ModManagementFrame:
                 return getattr(op, name)
         raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
-    def get_frame(self) -> QFrame | None:
+    def get_frame(self) -> QWidget | None:
         if hasattr(self, "main_frame") and self.main_frame:
             return self.main_frame
         logger.debug("主框架未初始化")
         return None
 
     def _apply_status_label_update(self) -> None:
-        self._status_update_job = None
         if hasattr(self, "status_label") and self.status_label and _is_alive(self.status_label):
             self.status_label.setText(self.mod_session.snapshot().status_message)
 
@@ -933,7 +906,7 @@ class ModManagementFrame:
     def _apply_local_toggle_success(
         self,
         *,
-        tree: QTreeWidget | None,
+        tree: TreeWidget | None,
         item_id: str,
         _mod_id: str,
         mod_obj: Any,
@@ -975,19 +948,6 @@ class ModManagementFrame:
                             item.setForeground(col, brush)
         except Exception as e:
             logger.error(f"Failed to update table item: {e}")
-
-    def _apply_status_bar_style(self) -> None:
-        if not getattr(self, "status_frame", None):
-            return
-        bg = resolve_color((Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_DARK))
-        fg = resolve_color(Colors.TEXT_PRIMARY)
-        border = resolve_color(Colors.BORDER_LIGHT)
-        stylesheet = (
-            f"QFrame {{background: {bg}; color: {fg}; border: 1px solid {border}; border-radius: 3px; }} "
-            f"QLabel {{color: {fg}; background: transparent; border: 0; }} "
-        )
-        if self.status_frame.styleSheet() != stylesheet:
-            self.status_frame.setStyleSheet(stylesheet)
 
 
 __all__ = ["ModManagementFrame"]

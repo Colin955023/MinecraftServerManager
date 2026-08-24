@@ -22,7 +22,6 @@ from src.utils import (
 )
 
 MODRINTH_HASH_ALGORITHM = "sha512"
-MODRINTH_SEARCH_URL = "https://api.modrinth.com/v2/search"
 
 type JSONValue = dict[str, Any] | list[Any]
 
@@ -146,7 +145,6 @@ class LoaderVersion:
     """模組載入器版本資訊的資料結構，支援 Forge 和 Fabric 載入器"""
 
     version: str
-    build: str | None = None
     url: str | None = None
     stable: bool | None = None
     mc_version: str | None = None
@@ -201,11 +199,6 @@ class LocalModInfo:
     file_mtime: float = 0.0
     current_hash: str = ""
     hash_algorithm: str = ""
-    resolution_source: str = ""
-    resolved_at_epoch_ms: str = ""
-    provider_lifecycle_state: str = ""
-    stale_revalidation_failures: int = 0
-    next_retry_not_before_epoch_ms: str = ""
     provider_identity: Any | None = None
 
     def __post_init__(self) -> None:
@@ -306,10 +299,6 @@ class LocalUpdateReviewEntry(AbstractReviewEntry):
     candidate: Any
     dependency_plan: Any
 
-    @property
-    def candidate_actionable(self) -> bool:
-        return bool(getattr(self.candidate, "actionable", False))
-
 
 @dataclass(slots=True)
 class ReviewTaskNode:
@@ -346,7 +335,6 @@ class OnlineModInfo:
     description: str = ""
     latest_version: str = ""
     download_count: int = 0
-    icon_url: str = ""
     homepage_url: str = ""
     url: str = ""
     categories: list[str] = field(default_factory=list)
@@ -386,10 +374,6 @@ class LocalMetadataEnsureSummary:
     resolved_by_lookup: int = 0
     unresolved: int = 0
     notes: list[str] = field(default_factory=list)
-
-    @property
-    def resolved_count(self) -> int:
-        return self.resolved_by_hash + self.resolved_by_cached_project + self.resolved_by_lookup
 
 
 @dataclass(slots=True)
@@ -447,23 +431,11 @@ class LocalModUpdatePlan:
     candidates: list[LocalModUpdateCandidate] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     metadata_summary: LocalMetadataEnsureSummary = field(default_factory=LocalMetadataEnsureSummary)
-    _has_candidates: bool = field(default=False, init=False, repr=False)
     _actionable_count: int = field(default=0, init=False, repr=False)
 
     def finalize_summary(self) -> None:
         """彙總候選項目並更新可執行數量"""
-        actionable_count = 0
-        has_candidates = False
-        for candidate in self.candidates:
-            has_candidates = True
-            if candidate.actionable:
-                actionable_count += 1
-        self._has_candidates = has_candidates
-        self._actionable_count = actionable_count
-
-    @property
-    def has_candidates(self) -> bool:
-        return self._has_candidates
+        self._actionable_count = sum(1 for candidate in self.candidates if candidate.actionable)
 
     @property
     def actionable_count(self) -> int:
@@ -491,7 +463,6 @@ class OperationResult:
     success: bool
     message: str = ""
     error: Exception | None = None
-    extra: dict = field(default_factory=dict)
 
 
 # ----------------------------------------------------------------------
@@ -562,13 +533,6 @@ class ProviderIdentityEvidence:
     jar_aliases: tuple[str, ...] = ()
     search_terms: tuple[str, ...] = ()
     hash_project_id: str = ""
-    file_hash: str = ""
-    jar_metadata_id: str = ""
-    jar_metadata_name: str = ""
-    fallback_filename: str = ""
-    cached_project_id: str = ""
-    lookup_project_id: str = ""
-    lookup_slug: str = ""
 
 
 PROVIDER_IDENTITY_SCHEMA_VERSION = 2
@@ -599,8 +563,6 @@ class ProviderIdentitySnapshot:
     resolved_at_epoch_ms: int = 0
     failure_count: int = 0
     next_retry_not_before_epoch_ms: int = 0
-    source_hash: str = ""
-    evidence: ProviderIdentityEvidence | None = None
 
     @property
     def canonical(self) -> bool:
@@ -802,7 +764,6 @@ class ServerImportInspection:
     startup_scripts: tuple[str, ...]
     startup_command: str
     evidence: tuple[tuple[str, str], ...]
-    missing_files: tuple[str, ...]
     warnings: tuple[str, ...]
     committable: bool
     conflict_type: ConflictType = "none"
@@ -1178,9 +1139,6 @@ class ModManagementSnapshot:
     pending_online_installs: tuple[PendingOnlineInstall, ...]
     selected_mod_ids: frozenset[str]
     status_message: str
-    local_generation: int
-    online_generation: int
-    install_generation: int
     latest_online_request: OnlineBrowseRequest | None
 
 

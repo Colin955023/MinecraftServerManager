@@ -13,7 +13,7 @@ from typing import Any
 from PySide6 import QtGui
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtWidgets import QWidget
 from qfluentwidgets import ComboBox, MSFluentWindow, Theme, isDarkTheme, setTheme, setThemeColor
 
 from src.utils import Colors, Sizes, ensure_application, is_qobject_alive
@@ -142,7 +142,7 @@ class _DialogCenteringFilter(QObject):
             event.type() == QEvent.Type.Show
             and isinstance(watched, QWidget)
             and watched.isWindow()
-            and isinstance(watched, (QDialog, MSFluentWindow))
+            and isinstance(watched, MSFluentWindow)
             and not bool(watched.property("_primary_window"))
         ):
             center_window(watched, watched.parentWidget())

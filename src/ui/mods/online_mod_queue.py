@@ -12,10 +12,10 @@ from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QTreeWidgetItem,
+    QWidget,
 )
 from qfluentwidgets import (
     Action,
@@ -495,12 +495,6 @@ class ModManagementQueueOps(HostBound):
                 )
                 if not session.accept_online_results(scope, request, mods):
                     return
-                online_mod_by_row_key: dict[str, Any] = {}
-                for mod in mods:
-                    row_key = self._build_online_browse_key(mod)
-                    if row_key:
-                        online_mod_by_row_key[row_key] = mod
-                self._online_mod_by_row_key = online_mod_by_row_key
                 self.ui_queue.put(self.refresh_browse_list)
                 self.update_status_safe(f"找到 {len(mods)} 個線上模組")
             except AppException as e:
@@ -588,7 +582,7 @@ class ModManagementQueueOps(HostBound):
         summary_box.setFixedHeight(Sizes.SERVER_TREE_COL_LOADER)
         dialog.viewLayout.addWidget(summary_box)
 
-        button_frame = QFrame(dialog.widget)
+        button_frame = QWidget(dialog.widget)
         button_layout = QHBoxLayout(button_frame)
         button_layout.setContentsMargins(0, 0, 0, 0)
         dialog.viewLayout.addWidget(button_frame)

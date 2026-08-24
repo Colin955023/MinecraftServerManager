@@ -44,8 +44,6 @@ class ModManagementSession:
         self._last_mods_dir: str | None = None
         self._last_mods_dir_mtime: float | None = None
         self._last_mods_dir_signature: tuple[tuple[str, int, int], ...] | None = None
-        self._active_review: object | None = None
-        self._latest_local_update_plan: object | None = None
 
     @staticmethod
     def _build_server_identity(server: ServerConfig | None) -> str:
@@ -118,9 +116,6 @@ class ModManagementSession:
                 pending_online_installs=tuple(self._pending_online_installs),
                 selected_mod_ids=frozenset(self._selected_mod_ids),
                 status_message=self._status_message,
-                local_generation=self._local_generation,
-                online_generation=self._online_generation,
-                install_generation=self._install_generation,
                 latest_online_request=self._latest_online_request,
             )
 
@@ -133,7 +128,6 @@ class ModManagementSession:
             self._install_generation += 1
             self._version_generation += 1
             self._pending_online_installs.clear()
-            self._active_review = None
 
     def begin_local_scan(self) -> ModOperationScope:
         """
@@ -455,26 +449,6 @@ class ModManagementSession:
         """
         with self._lock:
             return self._last_mods_dir, self._last_mods_dir_mtime, self._last_mods_dir_signature
-
-    def set_active_review(self, review: object | None) -> None:
-        """
-        設定目前由工作階段持有的 Review session
-
-        Args:
-            review: 新 Review session；清除時傳入 None
-        """
-        with self._lock:
-            self._active_review = review
-
-    def set_latest_local_update_plan(self, plan: object | None) -> None:
-        """
-        保存最近一次本地更新規劃供後續 Review 使用
-
-        Args:
-            plan: 最新更新計畫；清除時傳入 None
-        """
-        with self._lock:
-            self._latest_local_update_plan = plan
 
 
 __all__ = ["ModManagementSession"]

@@ -9,12 +9,13 @@ from contextlib import suppress
 from typing import Any, ClassVar
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CheckBox,
     LineEdit,
     Pivot,
+    PopUpAniStackedWidget,
     PrimaryPushButton,
     PushButton,
     ScrollArea,
@@ -109,7 +110,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         """建立對話框的所有 UI 元件，包含分頁導航、內容區域與底部操作按鈕"""
         self.pivot = Pivot(self)
         self.viewLayout.addWidget(self.pivot, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.stacked_widget = QStackedWidget(self)
+        self.stacked_widget = PopUpAniStackedWidget(self)
         self.viewLayout.addWidget(self.stacked_widget, 1)
 
         self.create_property_tabs()
@@ -305,7 +306,6 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
     def _add_tab(self, tab_name: str, properties: list[str]) -> None:
         scroll_area = ScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
@@ -348,7 +348,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         return var
 
     def _create_property_control(self, layout: QVBoxLayout, prop_name: str, parent_widget: QWidget) -> None:
-        prop_frame = QFrame(parent_widget)
+        prop_frame = QWidget(parent_widget)
         description = self.properties_helper.get_property_description(prop_name)
         prop_frame.setToolTip(description)
         h_layout = QHBoxLayout(prop_frame)

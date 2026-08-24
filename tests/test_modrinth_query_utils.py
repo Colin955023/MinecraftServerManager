@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import src.utils.mod_utils.modrinth_query_utils as query_utils
 from src.utils import (
     apply_loader_specific_dependency_override,
     clean_api_identifier,
@@ -33,29 +32,3 @@ def test_get_modrinth_loader_filters() -> None:
 def test_loader_specific_dependency_override_no_longer_applied() -> None:
     assert apply_loader_specific_dependency_override("qvIfYCYJ") == "qvIfYCYJ"
     assert apply_loader_specific_dependency_override("other") == "other"
-
-
-def test_build_local_mod_lookup_candidates_collects_search_and_keys() -> None:
-    exact_identifiers, search_terms, candidate_keys = query_utils.build_local_mod_lookup_candidates(
-        "CoolMod-1.20.1.jar",
-        platform_id="  P7dR8mSH  ",
-        platform_slug="cool-mod",
-        local_name="Cool Mod",
-    )
-
-    assert exact_identifiers[0] == "P7dR8mSH"
-    assert "p7d-r8m-sh" in exact_identifiers
-    assert "cool-mod" in exact_identifiers
-    assert "Cool Mod" in exact_identifiers
-    assert "CoolMod-1.20.1" in exact_identifiers
-    assert any(term.lower() == "cool mod" for term in search_terms)
-    assert query_utils.canonical_lookup_key("P7dR8mSH") in candidate_keys
-    assert query_utils.canonical_lookup_key("cool-mod") in candidate_keys
-    assert query_utils.canonical_lookup_key("Cool Mod") in candidate_keys
-    assert query_utils.canonical_lookup_key("CoolMod-1.20.1") in candidate_keys
-    assert candidate_keys == {
-        query_utils.canonical_lookup_key("P7dR8mSH"),
-        query_utils.canonical_lookup_key("cool-mod"),
-        query_utils.canonical_lookup_key("Cool Mod"),
-        query_utils.canonical_lookup_key("CoolMod-1.20.1"),
-    }

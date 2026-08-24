@@ -125,11 +125,8 @@ def build_non_official_source_warning_message(
 
 
 __all__ = [
-    "OFFICIAL_DOWNLOAD_HOSTS",
     "build_non_official_source_warning",
     "build_non_official_source_warning_message",
     "extract_download_host",
     "get_non_official_download_host",
-    "get_official_download_hosts",
-    "normalize_download_provider",
 ]
