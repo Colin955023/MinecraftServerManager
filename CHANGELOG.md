@@ -1,31 +1,37 @@
 # Changelog
 
-## v1.8.0 - 2026-08-23
+## v1.8.0 - 2026-08-26
 
 ### 新增
-- **交易式伺服器建立與匯入流程**：新增 `server_creation.py`（`CreateServerJourney`）與 `server_import.py`，支援 Plan-Execute 兩階段建立、伺服器批次探索、重新偵測以及建立前參數與指令核對對話框（`server_creation_confirm_dialog.py`）。
-- **模組狀態機與審查工作流程體系**：新增 `ModManagementSession` 作為本地、線上與佇列狀態的單一資料來源，並將模組安裝審查流程拆分為模組化工作流程（`review_workflow.py`、`review_contracts.py`、`review_grouping.py`、`review_dependency.py` 等）。
-- **Provider Metadata 與身分快取管理**：新增 `provider_identity.py` 與 `modrinth_provider_adapter.py`，統一管理模組提供者身分解析、雜湊對應與生命週期快取。
-- **集中化網路客戶端與背景協調**：新增 `http_client.py` 整合逾時、重試與連線集區管理；新增 `UIWorkScope` 統一控管 UI 背景非同步任務生命週期；新增 `status_button.py` 狀態按鈕元件。
-- **JVM 參數自訂與最佳化對話框**：新增獨立的 `jvm_args_dialog.py`，提供 JVM 參數自訂、記憶體配置建議與語法驗證。
-- **擴充自動化測試**：新增交易式建立與匯入、模組 Session 與 Review 工作流程、Provider 身分解析、HTTP Client 下載以及 UI 回歸等測試套件。
+- **伺服器建立確認與交易機制**：新增 `CreateServerJourney` 支援 Plan-Confirm-Execute 兩階段建立流程；建立前顯示已驗證的伺服器名稱、版本、載入器、記憶體、安全警告與完整 JVM 啟動指令，確認後才執行。
+- **JVM 參數與記憶體視覺化設定**：新增獨立設定對話框，支援自訂 JVM 參數、記憶體配置語法驗證，並依 Java 版本提供 ZGC／G1GC 最佳化建議。
+- **模組清單匯出**：新增 Excel（XLSX）匯出格式支援，並保留純文字、JSON 與 HTML 格式。
+- **模組依賴規劃介面與快取**：新增 `mod_planning_ports.py` 與 `modrinth_planning_adapter.py`，定義依賴解析標準窄 Port 並整合 Modrinth 身分快取機制。
+- **統一 UI 背景任務排程與狀態元件**：新增 `UIWorkScope` 統一管理 UI 非同步生命週期，並新增 `status_button.py` 提供即時操作狀態回饋。
 
 ### 調整
-- **UI 架構模組化與目錄分層**：重組 `src/ui/` 目錄為 `core_frames/`（主頁面框架）、`dialogs/`（對話框與彈窗）、`services/`（如 `application_shell.py`）、`windows/`（獨立監控視窗），並以 `HostBound` 委派模式解耦 View 與狀態操作。
-- **模組搜尋與相容性核心遷移**：將 Modrinth 搜尋服務與相容性分析模組（`modrinth_service.py`、`compatibility_analyzer.py`、`dependency_planner_facade.py` 等）由 UI 層遷入 `src/core/mods/`。
-- **底層工具、日誌與例外處理簡化**：以 `exceptions.py` 取代 `exception_utils.py`；全面改採 `loguru` 非同步分級日誌與 `psutil` 處理程序監控；全面移除舊版 `http_utils.py`、`task_utils.py`、`mod_provider_resolver.py`，並大幅精簡 `path_utils.py`、`system_utils.py` 與 `server_detection_utils.py`。
-- **QFluentWidgets 視覺元件全面導入**：可見控制項改採 QFluentWidgets 與主題切換機制；僅保留 Fluent 無等價物的 Qt 結構、事件與 model-view primitive，必要主題色樣式集中由 UI token 管理。
+- **使用者介面全面升級**：主視窗、伺服器建立與管理、模組管理、設定及各類對話框全面改用原生 QFluentWidgets 控制項，統一深淺色主題與現代化視覺語彙。
+- **伺服器核心職責解耦**：移除舊版單一管理類別，拆分為 `server_inspector`（唯讀狀態）、`server_runtime`（處理程序與輸出）、`server_properties`（設定檔）、`server_creation`（建立）、`server_import`（匯入）、`server_backup`（備份）與 `server_crud`（註冊表維護）。
+- **模組審查與狀態管理重構**：將 Modrinth 搜尋與相容性分析遷入 `src/core/mods/`；導入 `ModManagementSession` 作為狀態單一來源，並將安裝審查拆解為模組化工作流程（`review_workflow.py`、`review_contracts.py` 等）。
+- **模組身分辨識機制**：本地模組改以檔案雜湊、檔名與 Metadata 證據解析 Modrinth 身分，無法可靠辨識時不套用未驗證之專案 ID。
+- **伺服器設定與衝突檢查**：視覺化編輯器保留未知與空白屬性，並在儲存 `server.properties` 前檢查外部檔案修改，防止覆寫最新變更。
+- **伺服器備份與還原安全性**：備份改為暫存 ZIP 完整寫入後原子提交，並自動保留最新 10 份；還原時安全覆寫檔案且不刪除備份外既有檔案。
+- **工具層精簡與分工**：解耦舊版 `path_utils.py`，拆分為專責之 `filesystem_utils.py`、`archive_utils.py` 與 `json_utils.py`。
+- **單一執行檔自動更新**：下載單一安裝檔並校驗 SHA256，確認後於背景替換目前版本並自動重啟。
+- **監控視窗與大型日誌最佳化**：大型伺服器主控台日誌僅載入最新內容，降低記憶體佔用與介面卡頓。
 
 ### 修正
-- 修正伺服器建立與匯入過程中的交易回滾機制與路徑安全驗證。
-- 修正模組依賴解析與 Provider 身分匹配中的快取一致性與型別轉換異常。
-- 修復背景執行緒與 UI 元件互動時可能產生的競爭條件與例外捕捉缺漏。
-- 修復元件升級後的相依性警告與未使用的匯入。
-- 強化伺服器備份完整性：改為同目錄暫存 ZIP 完整寫入後原子提交；任一檔案備份失敗即取消整份備份並清理暫存檔，避免殘缺 ZIP 被回報為成功。
+- 修正伺服器建立或匯入失敗時殘留暫存目錄、未完成註冊資料或路徑穿越安全問題。
+- 修正模組依賴遞迴、版本 ID 大小寫比對、載入器與平台相容性過濾不一致的問題。
+- 修正模組審查（Review）選取狀態、可選依賴與過期結果可能被誤執行的問題。
+- 修正伺服器備份失敗留下不完整 ZIP 檔案，以及解壓縮路徑檢查漏洞。
+- 修正伺服器子處理程序、PID、主控台串流輸出、停止狀態與玩家清單更新不同步的問題。
+- 修正網路下載逾時、磁碟空間不足或無效連結時錯誤處理不明確的問題。
+- 修正 Java 版本判定政策、啟動參數生成與設定檔寫入失敗時可能造成的不一致。
 
 ### 重大變更
-- **架構分層與命名空間變更**：重構 `src/ui/` 與 `src/core/mods/` 命名空間，移除舊版 `mod_provider_resolver.py`、`http_utils.py` 與 `mod_management/review.py`，相關呼叫端需適配新的 Session 與 WorkScope 介面。
-- **UI 框架底層全面替換**：移除所有舊有 Tkinter 風格適配器與相容層；可見介面採 QFluentWidgets，底層生命週期、layout 與 model-view 基礎設施使用必要的 PySide6 API。
+- **核心架構與命名空間更迭**：廢棄舊有 `server_manager.py`、`server_instance.py`、`server_startup.py` 與 `path_utils.py`，全數由新版專責模組與 facade 取代。
+- **UI 底層全面遷移**：徹底移除 Tkinter 風格適配器與舊版相容層，全面採用 QFluentWidgets 體系與 `UIWorkScope` 排程。
 
 ## v1.7.2 - 2026-06-05
 
@@ -164,7 +170,7 @@
 - `SubprocessUtils` 強制 `shell=False`，降低命令注入風險。
 - `UpdateChecker` 會自動刪除損壞下載檔案。
 - `RuntimePaths`、`SubprocessUtils`、`UpdateChecker` 重構為類別。
-- 新增 `call_on_ui()`、`run_async()`、`reveal_in_explorer()`，並改善視窗狀態管理。
+- 新增 `call_on_ui()`、`reveal_in_explorer()`，並改善視窗狀態管理。
 
 ### 修正
 - 無

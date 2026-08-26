@@ -23,21 +23,7 @@ def normalize_download_provider(provider: str | None) -> str:
     return str(provider or "").strip().lower() or "unknown"
 
 
-def get_official_download_hosts(provider: str | None) -> frozenset[str]:
-    """
-    回傳 provider 對應的官方下載網域集合
-
-    Args:
-        provider: 原始 provider 名稱
-
-    Returns:
-        對應 provider 的官方下載網域集合
-    """
-
-    return OFFICIAL_DOWNLOAD_HOSTS.get(normalize_download_provider(provider), frozenset())
-
-
-def extract_download_host(download_url: str | None) -> str:
+def _extract_download_host(download_url: str | None) -> str:
     """
     從下載網址擷取 host
 
@@ -67,8 +53,8 @@ def get_non_official_download_host(download_url: str | None, provider: str | Non
         非官方來源的 host；若為官方來源則回傳空字串
     """
 
-    host = extract_download_host(download_url)
-    if not host or host in get_official_download_hosts(provider):
+    host = _extract_download_host(download_url)
+    if not host or host in OFFICIAL_DOWNLOAD_HOSTS.get(normalize_download_provider(provider), frozenset()):
         return ""
     return host
 
@@ -127,6 +113,5 @@ def build_non_official_source_warning_message(
 __all__ = [
     "build_non_official_source_warning",
     "build_non_official_source_warning_message",
-    "extract_download_host",
     "get_non_official_download_host",
 ]

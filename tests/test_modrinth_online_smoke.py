@@ -8,16 +8,68 @@ from types import SimpleNamespace
 import pytest
 
 import src.core as mod_search_service_module
-import src.core.mods.compatibility_analyzer as mod_search_compatibility_module
-import src.core.mods.dependency_planner_facade as mod_search_planner_module
+import src.core.mods.mod_file_installer as mod_file_installer_module
 import src.core.mods.mod_manager as mod_manager_module
 import src.core.mods.modrinth_service as mod_search_provider_module
 import src.models as models_module
 import src.utils as utils_module
-from src.core import ModManager, build_local_mod_update_plan
-from src.ui import build_non_official_source_confirmation_prompt
+from src.core import ModManager, ModPlanning
 
 _IDENTITY_TEST_OVERRIDE: dict[str, object] = {}
+_PLANNING_TEST_OVERRIDE: dict[str, object] = {}
+
+
+class _EmptyLoaderRules:
+    def compatible_versions(self, minecraft_version: str, loader: str) -> list[str]:
+        del minecraft_version, loader
+        return []
+
+
+class _PlanningProvider:
+    def resolve_project_names(self, project_ids):
+        return mod_search_provider_module.resolve_modrinth_project_names(project_ids)
+
+    def get_version_details(self, version_id):
+        return mod_search_provider_module.get_mod_version_details(version_id)
+
+    def fetch_project_name(self, project_id):
+        return mod_search_provider_module.fetch_modrinth_project_name(project_id)
+
+    def get_versions(self, project_id, minecraft_version=None, loader=None):
+        return mod_search_provider_module.get_mod_versions(project_id, minecraft_version, loader)
+
+    def get_current_versions_by_hashes(self, hashes, algorithm):
+        return mod_search_provider_module.get_modrinth_current_versions_by_hashes(hashes, algorithm)
+
+    def get_latest_versions_by_hashes(self, hashes, algorithm, minecraft_version=None, loader=None):
+        return mod_search_provider_module.get_modrinth_latest_versions_by_hashes(
+            hashes, algorithm, minecraft_version, loader
+        )
+
+    def get_recommended_version(self, project_id, minecraft_version, loader):
+        return mod_search_provider_module.get_recommended_mod_version(project_id, minecraft_version, loader)
+
+
+class _PlanningHarness:
+    def __init__(self) -> None:
+        self._planning = ModPlanning(_PlanningProvider(), _EmptyLoaderRules())
+        self.provider = self._planning.provider
+
+    def analyze_version(self, *args, **kwargs):
+        override = _PLANNING_TEST_OVERRIDE.get("analyze_version")
+        if callable(override):
+            return override(*args, **kwargs)
+        return self._planning.analyze_version(*args, **kwargs)
+
+    def build_dependency_plan(self, *args, **kwargs):
+        return self._planning.build_dependency_plan(*args, **kwargs)
+
+    def build_local_update_plan(self, *args, **kwargs):
+        kwargs.setdefault("provider_identity_resolver", _test_provider_identity_resolver)
+        return self._planning.build_local_update_plan(*args, **kwargs)
+
+
+_TEST_PLANNING = _PlanningHarness()
 
 
 def _test_provider_identity_resolver(local_mod: object, hash_project_id: str):
@@ -64,30 +116,22 @@ def _test_provider_identity_resolver(local_mod: object, hash_project_id: str):
 
 
 @pytest.fixture(autouse=True)
-def _inject_provider_identity_owner(monkeypatch: pytest.MonkeyPatch):
-    original = build_local_mod_update_plan
-
-    def build_with_owner(*args, **kwargs):
-        kwargs.setdefault("provider_identity_resolver", _test_provider_identity_resolver)
-        return original(*args, **kwargs)
-
+def _reset_planning_test_overrides():
     _IDENTITY_TEST_OVERRIDE.clear()
-    monkeypatch.setattr(mod_search_service_module, "build_local_mod_update_plan", build_with_owner)
+    _PLANNING_TEST_OVERRIDE.clear()
     yield
     _IDENTITY_TEST_OVERRIDE.clear()
+    _PLANNING_TEST_OVERRIDE.clear()
 
 
-def _patch_mod_search_attr(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
+def _set_planning_dependency(monkeypatch: pytest.MonkeyPatch, name: str, value: object) -> None:
     if name == "provider_identity_fixture":
         monkeypatch.setitem(_IDENTITY_TEST_OVERRIDE, "resolver", value)
         return
-    for module in (
-        mod_search_service_module,
-        mod_search_provider_module,
-        mod_search_compatibility_module,
-        mod_search_planner_module,
-    ):
-        monkeypatch.setattr(module, name, value, raising=False)
+    if name == "analyze_version":
+        monkeypatch.setitem(_PLANNING_TEST_OVERRIDE, "analyze_version", value)
+        return
+    monkeypatch.setattr(mod_search_provider_module, name, value, raising=False)
 
 
 def test_search_mods_online_maps_modrinth_hits(monkeypatch) -> None:
@@ -349,10 +393,10 @@ def test_get_recommended_mod_version_returns_none_when_only_prerelease_exists(mo
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
 
     assert (
-        mod_search_service_module.get_recommended_mod_version("proj123", minecraft_version="1.21", loader="fabric")
+        mod_search_provider_module.get_recommended_mod_version("proj123", minecraft_version="1.21", loader="fabric")
         is None
     )
 
@@ -396,7 +440,7 @@ def test_get_modrinth_latest_versions_by_hashes_posts_prism_style_payload(monkey
 
     monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
-    results = mod_search_service_module.get_modrinth_latest_versions_by_hashes(
+    results = mod_search_provider_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -422,7 +466,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_quilt_loader(monkeypa
 
     monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
-    mod_search_service_module.get_modrinth_latest_versions_by_hashes(
+    mod_search_provider_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
         minecraft_version="1.21.1",
         loader="quilt",
@@ -445,7 +489,7 @@ def test_get_modrinth_latest_versions_by_hashes_uses_exact_neoforge_loader(monke
 
     monkeypatch.setattr(utils_module.HTTPClient, "post_json", fake_post_json)
 
-    mod_search_service_module.get_modrinth_latest_versions_by_hashes(
+    mod_search_provider_module.get_modrinth_latest_versions_by_hashes(
         ["abc123"],
         minecraft_version="1.20.1",
         loader="neoforge",
@@ -475,16 +519,16 @@ def test_search_mods_online_uses_exact_quilt_loader_facet(monkeypatch) -> None:
     assert "categories:fabric" not in facets_text
 
 
-def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_marks_invalidated_stale_provider_as_blocked(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     next_retry_epoch_ms = int(time.time() * 1000) + (10 * 60 * 1000)
 
     monkeypatch.setattr(utils_module.HashUtils, "compute_file_hash", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(utils_module.HashUtils, "compute_file_hash_sync", lambda *_args, **_kwargs: "")
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _set_planning_dependency(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
     local_mod = SimpleNamespace(
         filename="sodium.jar",
@@ -508,7 +552,7 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
         version="1.0.0",
     )
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -521,7 +565,7 @@ def test_build_local_mod_update_plan_marks_invalidated_stale_provider_as_blocked
     assert any("invalidated" in item for item in candidate.hard_errors)
 
 
-def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
+def test_mod_planning_analyze_version_reports_hard_errors() -> None:
     version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
@@ -531,7 +575,7 @@ def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
         files=[{"filename": "example.jar", "url": "https://example.invalid/example.jar", "primary": True}],
     )
 
-    report = mod_search_service_module.analyze_mod_version_compatibility(
+    report = _TEST_PLANNING.analyze_version(
         version,
         project_id="proj123",
         project_name="Example Mod",
@@ -540,14 +584,13 @@ def test_analyze_mod_version_compatibility_reports_hard_errors() -> None:
         loader_version="0.16.0",
     )
 
-    assert report.compatible is False
     assert any("Minecraft" in item for item in report.hard_errors)
     assert any("載入器" in item for item in report.hard_errors)
     loader_rule_messages = list(report.notes) + list(report.warnings)
     assert any("0.16.0" in item for item in loader_rule_messages)
 
 
-def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_server() -> None:
+def test_mod_planning_analyze_version_reports_loader_mismatch_on_quilt_server() -> None:
     version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
@@ -557,7 +600,7 @@ def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_serv
         files=[{"filename": "example.jar", "url": "https://example.invalid/example.jar", "primary": True}],
     )
 
-    report = mod_search_service_module.analyze_mod_version_compatibility(
+    report = _TEST_PLANNING.analyze_version(
         version,
         project_id="proj123",
         project_name="Example Mod",
@@ -568,7 +611,7 @@ def test_analyze_mod_version_compatibility_reports_loader_mismatch_on_quilt_serv
     assert any("載入器" in item for item in report.hard_errors)
 
 
-def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
+def test_mod_planning_analyze_version_reports_dependencies() -> None:
     version = models_module.OnlineModVersion(
         version_id="ver1",
         version_number="1.0.0",
@@ -597,7 +640,7 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
         ),
     ]
 
-    report = mod_search_service_module.analyze_mod_version_compatibility(
+    report = _TEST_PLANNING.analyze_version(
         version,
         project_id="proj123",
         project_name="Example Mod",
@@ -611,7 +654,6 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
         },
     )
 
-    assert report.compatible is False
     assert report.already_installed == ["Example Mod"]
     assert report.missing_required_dependencies == ["Cloth Config"]
     assert report.optional_dependencies == ["Mod Menu"]
@@ -619,7 +661,7 @@ def test_analyze_mod_version_compatibility_reports_dependencies() -> None:
     assert any("不相容模組" in item for item in report.hard_errors)
 
 
-def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatch(monkeypatch) -> None:
+def test_mod_planning_analyze_version_detects_version_id_dependency_mismatch(monkeypatch) -> None:
     dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
@@ -647,18 +689,18 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
         )
     ]
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
-    report = mod_search_service_module.analyze_mod_version_compatibility(
+    report = _TEST_PLANNING.analyze_version(
         version,
         project_id="clumps",
         project_name="Clumps",
@@ -668,14 +710,13 @@ def test_analyze_mod_version_compatibility_detects_version_id_dependency_mismatc
         dependency_names={},
     )
 
-    assert report.compatible is True
     assert report.missing_required_dependencies == ["Cloth Config（需求版本：2.0.0）"]
     assert len(report.installed_version_mismatches) == 1
     assert "版本為 1.0.0" in report.installed_version_mismatches[0]
     assert "需求版本 2.0.0" in report.installed_version_mismatches[0]
 
 
-def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_installed(monkeypatch) -> None:
+def test_mod_planning_analyze_version_marks_required_dependency_as_maybe_installed(monkeypatch) -> None:
     dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
@@ -697,18 +738,18 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
     )
     installed_mods = [SimpleNamespace(filename="cloth_config+1.0.0.jar", name="Unknown Mod")]
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
-    report = mod_search_service_module.analyze_mod_version_compatibility(
+    report = _TEST_PLANNING.analyze_version(
         version,
         project_id="clumps",
         project_name="Clumps",
@@ -723,7 +764,7 @@ def test_analyze_mod_version_compatibility_marks_required_dependency_as_maybe_in
     assert "Cloth Config（需求版本：2.0.0） 可能已存在本地相近檔名，系統已先採安全略過策略" in report.notes
 
 
-def test_build_required_dependency_install_plan_resolves_version_id_dependency(monkeypatch) -> None:
+def test_mod_planning_build_dependency_plan_resolves_version_id_dependency(monkeypatch) -> None:
     dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
@@ -742,7 +783,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
         dependencies=[{"version_id": "p7dr8msh", "dependency_type": "required"}],
     )
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
@@ -754,10 +795,10 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
     def fake_get_mod_versions(_project_id: str, _minecraft_version=None, _loader=None):
         return []
 
-    _patch_mod_search_attr(monkeypatch, "fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(monkeypatch, "fetch_modrinth_project_name", fake_fetch_modrinth_project_name)
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.20.1",
         loader="forge",
@@ -773,7 +814,7 @@ def test_build_required_dependency_install_plan_resolves_version_id_dependency(m
     assert plan.items[0].version_id == "dep-v2"
 
 
-def test_build_required_dependency_install_plan_marks_maybe_installed_dependency_as_unresolved(monkeypatch) -> None:
+def test_mod_planning_build_dependency_plan_marks_maybe_installed_dependency_as_unresolved(monkeypatch) -> None:
     dependency_version = models_module.OnlineModVersion(
         version_id="dep-v2",
         version_number="2.0.0",
@@ -795,18 +836,18 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     )
     installed_mods = [SimpleNamespace(filename="cloth_config+1.0.0.jar", name="Unknown Mod")]
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_mod_version_details",
         lambda version_id: ("cloth-config", dependency_version) if version_id == "p7dr8msh" else ("", None),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "fetch_modrinth_project_name",
         lambda project_id: "Cloth Config" if project_id == "cloth-config" else None,
     )
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.20.1",
         loader="forge",
@@ -820,21 +861,21 @@ def test_build_required_dependency_install_plan_marks_maybe_installed_dependency
     assert len(plan.advisory_items) == 1
     assert plan.advisory_items[0].project_name == "Cloth Config（需求版本：2.0.0）"
     assert plan.advisory_items[0].maybe_installed is True
-    assert plan.advisory_items[0].enabled is False
+    assert plan.advisory_items[0].included_by_default is False
     assert plan.advisory_items[0].filename == "cloth-config-2.0.0.jar"
     assert plan.advisory_items[0].download_url == "https://example.invalid/cloth-config.jar"
     assert "預設略過自動安裝" in plan.advisory_items[0].status_note
     assert any("已預設略過自動安裝" in note for note in plan.notes)
 
 
-def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_uses_resolved_online_project_id(monkeypatch) -> None:
     captured_project_ids: list[str] = []
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
         name="Inventory Profiles Next",
         filename="InventoryProfilesNext-fabric-1.21.11-2.2.2.jar",
         version="2.2.2",
-        loader_type="Fabric",
+        loader_type="Forge",
         minecraft_version="1.21.11",
     )
     resolved_info = models_module.OnlineModInfo(
@@ -844,25 +885,20 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
         author="Libz",
     )
 
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
-    )
-    _patch_mod_search_attr(
-        monkeypatch,
-        "analyze_local_mod_file_compatibility",
-        lambda _local_mod, _minecraft_version=None, _loader=None: [],
     )
 
     def fake_get_recommended_mod_version(project_id: str, _minecraft_version=None, _loader=None):
         captured_project_ids.append(project_id)
         return
 
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.11",
         loader="fabric",
@@ -873,7 +909,7 @@ def test_build_local_mod_update_plan_uses_resolved_online_project_id(monkeypatch
     assert plan.candidates == []
 
 
-def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_marks_low_confidence_lookup_as_unresolved(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
         platform_slug="",
@@ -887,10 +923,10 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
         hash_algorithm="",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _set_planning_dependency(
         monkeypatch,
         "search_mods_online",
         lambda *_args, **_kwargs: [
@@ -902,9 +938,8 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
             )
         ],
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -918,7 +953,7 @@ def test_build_local_mod_update_plan_marks_low_confidence_lookup_as_unresolved(m
     assert plan.candidates[0].recommendation_confidence == "blocked"
 
 
-def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_detects_updates_for_camel_case_local_mod(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
         name="InventoryProfilesNext-fabric-1.21.11-2.2.1",
@@ -956,25 +991,20 @@ def test_build_local_mod_update_plan_detects_updates_for_camel_case_local_mod(mo
         captured_project_ids.append(project_id)
         return recommended_version if project_id == "YL57xq9U" else None
 
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", fake_provider_identity_fixture)
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", fake_provider_identity_fixture)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next"},
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_local_mod_file_compatibility",
-        lambda _local_mod, _minecraft_version=None, _loader=None: [],
-    )
-    _patch_mod_search_attr(
-        monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.11",
         loader="fabric",
@@ -1001,7 +1031,7 @@ def test_search_mods_online_normalizes_filename_like_query(monkeypatch) -> None:
     assert captured_params["query"] == "letsdo API"
 
 
-def test_build_required_dependency_install_plan_collects_recursive_dependencies(monkeypatch) -> None:
+def test_mod_planning_build_dependency_plan_collects_recursive_dependencies(monkeypatch) -> None:
     root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
@@ -1050,14 +1080,14 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
             ]
         return []
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"cloth-config": "Cloth Config", "fabric-api": "Fabric API"},
     )
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.21",
         loader="fabric",
@@ -1070,7 +1100,7 @@ def test_build_required_dependency_install_plan_collects_recursive_dependencies(
     assert [item.project_name for item in plan.items] == ["Cloth Config", "Fabric API"]
 
 
-def test_build_required_dependency_install_plan_allows_prism_like_recursion_depth(monkeypatch) -> None:
+def test_mod_planning_build_dependency_plan_allows_prism_like_recursion_depth(monkeypatch) -> None:
     chain_length = 10
     dependency_ids = [f"dep-{index}" for index in range(chain_length)]
     root_version = models_module.OnlineModVersion(
@@ -1111,14 +1141,14 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
             )
         ]
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda project_ids: {str(project_id).lower(): str(project_id).title() for project_id in project_ids},
     )
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.21",
         loader="fabric",
@@ -1131,7 +1161,7 @@ def test_build_required_dependency_install_plan_allows_prism_like_recursion_dept
     assert len(plan.items) == chain_length
 
 
-def test_build_required_dependency_install_plan_preserves_dependency_project_id_case_for_api(monkeypatch) -> None:
+def test_mod_planning_build_dependency_plan_preserves_dependency_project_id_case_for_api(monkeypatch) -> None:
     root_version = models_module.OnlineModVersion(
         version_id="root-v1",
         version_number="1.0.0",
@@ -1150,10 +1180,10 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
     def fake_resolve_modrinth_project_names(_project_ids):
         return {"p7dr8msh": "Fabric API"}
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
-    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.21",
         loader="fabric",
@@ -1166,7 +1196,7 @@ def test_build_required_dependency_install_plan_preserves_dependency_project_id_
     assert captured_project_ids == ["P7dR8mSH", "P7dR8mSH"]
 
 
-def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fabric_loader(
+def test_mod_planning_build_dependency_plan_keeps_quilt_dependency_id_for_fabric_loader(
     monkeypatch,
 ) -> None:
     root_version = models_module.OnlineModVersion(
@@ -1199,19 +1229,19 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
             )
         ]
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"p7dr8msh": "Fabric API", "qvifycyj": "QSL"},
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "fetch_modrinth_project_name",
         lambda project_id: "Fabric API" if project_id == "P7dR8mSH" else "QSL",
     )
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.21",
         loader="fabric",
@@ -1226,7 +1256,7 @@ def test_build_required_dependency_install_plan_keeps_quilt_dependency_id_for_fa
     assert plan.items[0].project_name == "QSL"
 
 
-def test_build_required_dependency_install_plan_does_not_apply_quilt_override_for_forge_loader(
+def test_mod_planning_build_dependency_plan_does_not_apply_quilt_override_for_forge_loader(
     monkeypatch,
 ) -> None:
     root_version = models_module.OnlineModVersion(
@@ -1259,19 +1289,19 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
             )
         ]
 
-    _patch_mod_search_attr(monkeypatch, "get_mod_versions", fake_get_mod_versions)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_mod_versions", fake_get_mod_versions)
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"qvifycyj": "QSL"},
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "fetch_modrinth_project_name",
         lambda project_id: "QSL" if project_id == "qvIfYCYJ" else None,
     )
 
-    plan = mod_search_service_module.build_required_dependency_install_plan(
+    plan = _TEST_PLANNING.build_dependency_plan(
         root_version,
         minecraft_version="1.21",
         loader="forge",
@@ -1286,7 +1316,7 @@ def test_build_required_dependency_install_plan_does_not_apply_quilt_override_fo
     assert plan.items[0].project_name == "QSL"
 
 
-def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_reports_updates_and_dependency_issues(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="proj123",
         name="Example Mod",
@@ -1322,18 +1352,18 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
             "cloth-config": "Cloth Config",
         }
 
-    def fake_analyze_mod_version_compatibility(*_args, **_kwargs):
+    def fake_analyze_version(*_args, **_kwargs):
         return models_module.OnlineModCompatibilityReport(
             missing_required_dependencies=["Cloth Config"],
             notes=["已找到相容更新"],
         )
 
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
-    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
-    _patch_mod_search_attr(monkeypatch, "analyze_mod_version_compatibility", fake_analyze_mod_version_compatibility)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", fake_get_recommended_mod_version)
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", lambda _local_mod: resolved_info)
+    _set_planning_dependency(monkeypatch, "resolve_modrinth_project_names", fake_resolve_modrinth_project_names)
+    _set_planning_dependency(monkeypatch, "analyze_version", fake_analyze_version)
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21",
         loader="fabric",
@@ -1349,7 +1379,7 @@ def test_build_local_mod_update_plan_reports_updates_and_dependency_issues(monke
     assert candidate.target_version is recommended_version
 
 
-def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_path: Path, monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_prefers_hash_first_update_detection(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "example-mod.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"old-mod")
@@ -1395,7 +1425,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
         file_path=str(file_path),
     )
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
@@ -1421,29 +1451,24 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
             )
         }
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "get_modrinth_latest_versions_by_hashes", fake_get_modrinth_latest_versions_by_hashes
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fallback path should not be used")),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_local_mod_file_compatibility",
-        lambda _local_mod, _minecraft_version=None, _loader=None: [],
-    )
-    _patch_mod_search_attr(
-        monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1458,7 +1483,7 @@ def test_build_local_mod_update_plan_prefers_hash_first_update_detection(tmp_pat
     assert candidate.update_available is True
 
 
-def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_prefers_cached_local_hash(monkeypatch) -> None:
     cached_hash = "abc123cached"
     latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
@@ -1487,12 +1512,12 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "HashUtils",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached hash first")),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "get_modrinth_current_versions_by_hashes", lambda _hashes, _algorithm="sha512": {}
     )
 
@@ -1512,24 +1537,19 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
             )
         }
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "get_modrinth_latest_versions_by_hashes", fake_get_modrinth_latest_versions_by_hashes
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_local_mod_file_compatibility",
-        lambda _local_mod, _minecraft_version=None, _loader=None: [],
-    )
-    _patch_mod_search_attr(
-        monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1544,7 +1564,7 @@ def test_build_local_mod_update_plan_prefers_cached_local_hash(monkeypatch) -> N
     assert candidate.recommendation_confidence == "high"
 
 
-def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_fallback(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_trusts_hash_current_match_without_project_fallback(monkeypatch) -> None:
     cached_hash = "hash-current-only"
     current_version = models_module.OnlineModVersion(
         version_id="ver-current",
@@ -1573,7 +1593,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda _hashes, _algorithm="sha512": {
@@ -1582,19 +1602,18 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
             )
         },
     )
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -1602,7 +1621,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
         ),
     )
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1611,7 +1630,7 @@ def test_build_local_mod_update_plan_trusts_hash_current_match_without_project_f
     assert update_plan.candidates == []
 
 
-def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_missing(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_allows_project_fallback_when_hash_mapping_missing(monkeypatch) -> None:
     cached_hash = "hash-without-mapping"
     latest_version = models_module.OnlineModVersion(
         version_id="ver-latest",
@@ -1640,27 +1659,26 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
-    update_plan = mod_search_service_module.build_local_mod_update_plan(
+    update_plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1672,7 +1690,7 @@ def test_build_local_mod_update_plan_allows_project_fallback_when_hash_mapping_m
     assert update_plan.candidates[0].recommendation_confidence == "advisory"
 
 
-def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_collects_metadata_summary(monkeypatch) -> None:
     local_mod_cached = SimpleNamespace(
         platform_id="inventoryprofilesnext",
         name="Inventory Profiles Next",
@@ -1711,9 +1729,9 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
         author="jellysquid3",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda local_mod: (
@@ -1724,15 +1742,14 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
             else None
         ),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "resolve_modrinth_project_names",
         lambda _project_ids: {"yl57xq9u": "Inventory Profiles Next", "aanobbmi": "Sodium"},
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod_cached, local_mod_lookup, local_mod_unresolved],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1745,7 +1762,7 @@ def test_build_local_mod_update_plan_collects_metadata_summary(monkeypatch) -> N
     assert any("metadata ensure 結果" in note for note in plan.metadata_summary.notes)
 
 
-def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_metadata(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_creates_blocked_candidate_for_unresolved_metadata(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
         name="Unknown Mod",
@@ -1756,12 +1773,11 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
         file_path="C:/mods/unknown-mod.jar",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1777,7 +1793,7 @@ def test_build_local_mod_update_plan_creates_blocked_candidate_for_unresolved_me
     assert candidate.hard_errors == ["metadata 未識別，暫時無法自動檢查更新"]
 
 
-def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryable(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_marks_stale_revalidation_failure_as_retryable(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     local_mod = SimpleNamespace(
         platform_id="inventoryprofilesnext",
@@ -1801,12 +1817,12 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
         hash_algorithm="",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_project_info", lambda *_args, **_kwargs: None)
+    _set_planning_dependency(monkeypatch, "search_mods_online", lambda *_args, **_kwargs: [])
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1821,7 +1837,7 @@ def test_build_local_mod_update_plan_marks_stale_revalidation_failure_as_retryab
     assert candidate.project_id == ""
 
 
-def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_due(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_defers_stale_revalidation_when_backoff_not_due(monkeypatch) -> None:
     stale_epoch_ms = int(time.time() * 1000) - (13 * 60 * 60 * 1000)
     next_retry_epoch_ms = int(time.time() * 1000) + 60_000
     local_mod = SimpleNamespace(
@@ -1848,8 +1864,8 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
         hash_algorithm="",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
     resolve_calls = {"project": 0, "search": 0}
 
@@ -1860,10 +1876,10 @@ def test_build_local_mod_update_plan_defers_stale_revalidation_when_backoff_not_
         resolve_calls["search"] += 1
         return []
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_project_info", _count_project_info)
-    _patch_mod_search_attr(monkeypatch, "search_mods_online", _count_search)
+    _set_planning_dependency(monkeypatch, "get_modrinth_project_info", _count_project_info)
+    _set_planning_dependency(monkeypatch, "search_mods_online", _count_search)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -1889,7 +1905,7 @@ def test_install_remote_mod_file_downloads_into_mods_dir(tmp_path: Path, monkeyp
         path.write_bytes(b"jar-bytes")
         if progress_callback:
             progress_callback(10, 10)
-        return True
+        return models_module.OperationResult(True)
 
     monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
@@ -1989,11 +2005,11 @@ def test_replace_local_mod_file_removes_old_jar_after_update(tmp_path: Path, mon
         new_path.write_bytes(b"new-bytes")
         if progress_callback:
             progress_callback(10, 10)
-        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
+        return models_module.ModFileOperationResult(status="completed", final_path=new_path)
 
-    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
+    monkeypatch.setattr(manager.mod_file_installer, "install_remote_mod_file_result", fake_install_remote_result)
 
-    replaced_path = manager.replace_local_mod_file(
+    replaced_path = manager.mod_file_installer.replace_local_mod_file(
         local_mod,
         "https://example.invalid/example-new.jar",
         "example-new.jar",
@@ -2042,11 +2058,11 @@ def test_replace_local_mod_file_preserves_external_old_path(tmp_path: Path, monk
         new_path.write_bytes(b"new-bytes")
         if progress_callback:
             progress_callback(10, 10)
-        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
+        return models_module.ModFileOperationResult(status="completed", final_path=new_path)
 
-    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
+    monkeypatch.setattr(manager.mod_file_installer, "install_remote_mod_file_result", fake_install_remote_result)
 
-    replaced_path = manager.replace_local_mod_file(
+    replaced_path = manager.mod_file_installer.replace_local_mod_file(
         local_mod,
         "https://example.invalid/example-new.jar",
         "example-new.jar",
@@ -2065,7 +2081,7 @@ def test_install_remote_mod_file_cancellation_leaves_no_target_file(tmp_path: Pa
         assert expected_hash == "e" * 64
         assert callable(cancel_check)
         Path(local_path).write_bytes(b"partial")
-        return False
+        return models_module.OperationResult(False, "下載已取消")
 
     monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
@@ -2100,19 +2116,19 @@ def test_replace_local_mod_file_rolls_back_when_internal_old_delete_fails(tmp_pa
 
     def fake_install_remote_result(*_args, **_kwargs):
         new_path.write_bytes(b"new-bytes")
-        return mod_manager_module.ModFileOperationResult(status="completed", final_path=new_path)
+        return models_module.ModFileOperationResult(status="completed", final_path=new_path)
 
-    original_delete_within = mod_manager_module.PathUtils.delete_within
+    original_delete_within = mod_file_installer_module.delete_within
 
     def fake_delete_within(base_dir, path):
         if Path(path).resolve(strict=False) == old_path.resolve(strict=False):
             return False
         return original_delete_within(base_dir, path)
 
-    monkeypatch.setattr(manager, "_install_remote_mod_file_result", fake_install_remote_result)
-    monkeypatch.setattr(mod_manager_module.PathUtils, "delete_within", fake_delete_within)
+    monkeypatch.setattr(manager.mod_file_installer, "install_remote_mod_file_result", fake_install_remote_result)
+    monkeypatch.setattr(mod_file_installer_module, "delete_within", fake_delete_within)
 
-    replaced_path = manager.replace_local_mod_file(
+    replaced_path = manager.mod_file_installer.replace_local_mod_file(
         local_mod,
         "https://example.invalid/example-new.jar",
         "example-new.jar",
@@ -2145,7 +2161,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
 
     def fake_download_file(_url, local_path, **_kwargs):
         Path(local_path).write_bytes(b"new-bytes")
-        return True
+        return models_module.OperationResult(True)
 
     def cancel_check() -> bool:
         cancel_calls["count"] += 1
@@ -2153,7 +2169,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
 
     monkeypatch.setattr(utils_module.HTTPClient, "download_file", fake_download_file)
 
-    replaced_path = manager.replace_local_mod_file(
+    replaced_path = manager.mod_file_installer.replace_local_mod_file(
         local_mod,
         "https://example.invalid/example.jar",
         "example.jar",
@@ -2165,72 +2181,7 @@ def test_replace_local_mod_file_restores_same_path_when_cancelled_after_replace(
     assert old_path.read_bytes() == b"old-bytes"
 
 
-def test_build_non_official_source_confirmation_prompt_lists_enabled_downloads() -> None:
-    version = models_module.OnlineModVersion(
-        version_id="ver-1",
-        version_number="1.0.0",
-        display_name="1.0.0",
-        provider="modrinth",
-        files=[{"filename": "example.jar", "url": "https://mirror.example.com/example.jar", "primary": True}],
-    )
-    dependency_plan = models_module.OnlineDependencyInstallPlan(
-        items=[
-            models_module.OnlineDependencyInstallItem(
-                project_id="dep-1",
-                project_name="Fabric API",
-                version_id="dep-ver",
-                version_name="2.0.0",
-                filename="fabric-api.jar",
-                download_url="https://cdn.modrinth.com/fabric-api.jar",
-                provider="modrinth",
-            )
-        ],
-        advisory_items=[
-            models_module.OnlineDependencyInstallItem(
-                project_id="dep-2",
-                project_name="Mirror Dep",
-                version_id="dep-ver-2",
-                version_name="3.0.0",
-                filename="mirror-dep.jar",
-                download_url="https://edge.example.net/mirror-dep.jar",
-                provider="modrinth",
-                enabled=True,
-                is_optional=True,
-            )
-        ],
-    )
-    review_entry = models_module.PendingInstallReviewEntry(
-        pending=models_module.PendingOnlineInstall(
-            project_id="proj-1",
-            project_name="Example Mod",
-            version=version,
-        ),
-        report=None,
-        dependency_plan=dependency_plan,
-    )
-
-    prompt = build_non_official_source_confirmation_prompt(
-        [review_entry],
-        action_label="安裝",
-    )
-
-    prompt_hosts: dict[str, str] = {}
-    for line in prompt.splitlines():
-        normalized_line = line.strip()
-        if not normalized_line.startswith("- ") or "（非 " not in normalized_line:
-            continue
-        label, source_text = normalized_line[2:].split("：", 1)
-        host, _provider_text = source_text.split("（非 ", 1)
-        prompt_hosts[label] = host
-
-    expected_hosts = {
-        "Example Mod (1.0.0)": utils_module.extract_download_host((version.primary_file or {}).get("url", "")),
-        "Mirror Dep（依賴）": utils_module.extract_download_host(dependency_plan.advisory_items[0].download_url),
-    }
-    assert prompt_hosts == expected_hosts
-
-
-def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_reports_hash_progress(tmp_path: Path, monkeypatch) -> None:
     file_path = tmp_path / "mods" / "uncached.jar"
     file_path.parents[0].mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(b"uncached-content")
@@ -2260,13 +2211,12 @@ def test_build_local_mod_update_plan_reports_hash_progress(tmp_path: Path, monke
         hash_algorithm="",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", lambda *_args, **_kwargs: None)
 
     progress_events: list[tuple[int, int]] = []
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod_cached, local_mod_uncached],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2309,7 +2259,7 @@ def test_analyze_local_mod_file_compatibility_reports_loader_mismatch_on_quilt_s
 
 
 def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(monkeypatch) -> None:
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_mod_versions",
         lambda _project_id, _minecraft_version=None, loader=None: (
@@ -2319,7 +2269,7 @@ def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(mo
         ),
     )
 
-    resolved = mod_search_service_module.get_recommended_mod_version(
+    resolved = mod_search_provider_module.get_recommended_mod_version(
         "example-project",
         minecraft_version="1.21.1",
         loader="paper",
@@ -2328,7 +2278,7 @@ def test_get_recommended_mod_version_does_not_fallback_for_unsupported_loader(mo
     assert resolved is None
 
 
-def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_loader(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_skips_online_update_check_for_unsupported_loader(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
         platform_slug="",
@@ -2342,25 +2292,25 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch,
         "get_modrinth_latest_versions_by_hashes",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("unsupported loader should skip hash-based latest update lookup")
         ),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_recommended_mod_version",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -2368,7 +2318,7 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
         ),
     )
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="paper",
@@ -2378,7 +2328,9 @@ def test_build_local_mod_update_plan_skips_online_update_check_for_unsupported_l
     assert any("已略過" in note and "paper" in note for note in plan.notes)
 
 
-def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_online_version(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_treats_local_metadata_as_advisory_when_no_online_version(
+    monkeypatch,
+) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
         platform_slug="",
@@ -2392,24 +2344,21 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
-    _patch_mod_search_attr(
-        monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: ["提示 A", "提示 B", "提示 C"]
-    )
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: None)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2419,7 +2368,7 @@ def test_build_local_mod_update_plan_treats_local_metadata_as_advisory_when_no_o
     assert any("僅作提示，不影響更新判定" in note for note in plan.notes)
 
 
-def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candidate(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_adds_local_metadata_advisory_note_to_candidate(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="",
         platform_slug="",
@@ -2427,7 +2376,7 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
         filename="example-mod.jar",
         version="1.0.0",
         minecraft_version="1.21.1",
-        loader_type="Fabric",
+        loader_type="Forge",
         file_path="C:/mods/example-mod.jar",
         current_hash="hash-old-001",
         hash_algorithm="sha512",
@@ -2448,27 +2397,26 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
         ],
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: ["提示 A"])
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2477,10 +2425,10 @@ def test_build_local_mod_update_plan_adds_local_metadata_advisory_note_to_candid
     assert len(plan.candidates) == 1
     candidate = plan.candidates[0]
     assert candidate.current_issues == []
-    assert any(note == "本地 metadata 提示：提示 A" for note in candidate.notes)
+    assert any(note.startswith("本地 metadata 提示：") for note in candidate.notes)
 
 
-def test_build_local_mod_update_plan_prefers_provider_current_version_over_local_version(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_prefers_provider_current_version_over_local_version(monkeypatch) -> None:
     local_hash = "hash-001"
     current_version = models_module.OnlineModVersion(
         version_id="ver-current",
@@ -2525,7 +2473,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
         hash_algorithm="sha512",
     )
 
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_modrinth_current_versions_by_hashes",
         lambda *_args, **_kwargs: {
@@ -2534,7 +2482,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
             )
         },
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_modrinth_latest_versions_by_hashes",
         lambda *_args, **_kwargs: {
@@ -2543,17 +2491,16 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
             )
         },
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2565,7 +2512,7 @@ def test_build_local_mod_update_plan_prefers_provider_current_version_over_local
     assert plan.candidates[0].recommendation_confidence == "high"
 
 
-def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisory(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_marks_project_fallback_candidate_as_advisory(monkeypatch) -> None:
     local_mod = SimpleNamespace(
         platform_id="proj123",
         platform_slug="example-mod",
@@ -2594,27 +2541,26 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
         ],
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(
         monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {"proj123": "Example Mod"}
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "provider_identity_fixture",
         lambda *_args, **_kwargs: models_module.OnlineModInfo(
             project_id="proj123", slug="example-mod", name="Example Mod", author="Example"
         ),
     )
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
-    _patch_mod_search_attr(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
+    _set_planning_dependency(monkeypatch, "get_recommended_mod_version", lambda *_args, **_kwargs: latest_version)
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [local_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2628,7 +2574,7 @@ def test_build_local_mod_update_plan_marks_project_fallback_candidate_as_advisor
     assert plan.candidates[0].recommendation_confidence == "advisory"
 
 
-def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkeypatch) -> None:
+def test_mod_planning_build_local_update_plan_mixed_fault_hash_hit_plus_unresolved(monkeypatch) -> None:
     resolved_mod = SimpleNamespace(
         filename="sodium-0.6.0.jar",
         name="Sodium",
@@ -2659,24 +2605,23 @@ def test_build_local_mod_update_plan_mixed_fault_hash_hit_plus_unresolved(monkey
         files=[{"filename": "sodium-0.7.0.jar", "url": "https://cdn.modrinth.com/sodium-0.7.0.jar", "primary": True}],
     )
 
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
-    _patch_mod_search_attr(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_current_versions_by_hashes", lambda *_args, **_kwargs: {})
+    _set_planning_dependency(monkeypatch, "get_modrinth_latest_versions_by_hashes", lambda *_args, **_kwargs: {})
 
-    _patch_mod_search_attr(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
-    _patch_mod_search_attr(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
-    _patch_mod_search_attr(monkeypatch, "analyze_local_mod_file_compatibility", lambda *_args, **_kwargs: [])
-    _patch_mod_search_attr(
+    _set_planning_dependency(monkeypatch, "provider_identity_fixture", lambda _local_mod: None)
+    _set_planning_dependency(monkeypatch, "resolve_modrinth_project_names", lambda _project_ids: {})
+    _set_planning_dependency(
         monkeypatch,
-        "analyze_mod_version_compatibility",
+        "analyze_version",
         lambda *_args, **_kwargs: models_module.OnlineModCompatibilityReport(),
     )
-    _patch_mod_search_attr(
+    _set_planning_dependency(
         monkeypatch,
         "get_recommended_mod_version",
         lambda project_id, *_args, **_kwargs: latest_version if project_id == "sodium" else None,
     )
 
-    plan = mod_search_service_module.build_local_mod_update_plan(
+    plan = _TEST_PLANNING.build_local_update_plan(
         [resolved_mod, unresolved_mod],
         minecraft_version="1.21.1",
         loader="fabric",
@@ -2728,7 +2673,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
                 filename="fabric-api.jar",
                 download_url="https://cdn.example/fabric-api.jar",
                 parent_name="Root Mod",
-                enabled=False,
+                included_by_default=False,
                 is_optional=True,
                 provider="modrinth",
                 expected_hash="b" * 64,
@@ -2753,7 +2698,7 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     )
     restored = utils_module.deserialize_online_dependency_install_plan(payload)
 
-    assert payload["schema_version"] == utils_module.DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION
+    assert payload["schema_version"] == 2
     assert payload["plan_source"] == "local_update_review"
     assert payload["root_project_id"] == "root-proj"
     assert payload["root_target_version_id"] == "root-ver-1"

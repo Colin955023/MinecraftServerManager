@@ -6,16 +6,43 @@
 from __future__ import annotations
 
 import threading
-import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.core import ServerStartup
-from src.models import ServerConfig, ServerProjection, ServerRefreshPayload, ServerRenderPlan
-from src.utils import ServerDetectionUtils, get_logger
+from src.core import ServerInspector, ServerRuntime
+from src.models import ServerConfig, ServerInspectionIntent
+from src.utils import get_logger
 
 logger = get_logger().bind(component="ManageServerService")
+
+
+@dataclass(frozen=True)
+class ServerRefreshPayload:
+    """背景刷新完成後交給 UI callback 的列表資料"""
+
+    signature: tuple[tuple[str, tuple[Any, ...]], ...]
+    server_order: list[str]
+    server_rows: dict[str, tuple[Any, ...]]
+
+
+@dataclass(frozen=True)
+class ServerProjection:
+    """單輪伺服器狀態的不可變投影"""
+
+    generation: int
+    server_order: tuple[str, ...]
+    server_rows: dict[str, tuple[Any, ...]]
+    selected_server: str | None
+
+
+@dataclass(frozen=True)
+class ServerRenderPlan:
+    """管理頁依可觀察差異產生的 render 指令"""
+
+    projection: ServerProjection
+    has_changes: bool
 
 
 class ManageServerService:
@@ -27,23 +54,21 @@ class ManageServerService:
     def __init__(
         self,
         server_crud: Any,
-        server_startup: ServerStartup | None = None,
-        server_backup: Any = None,
-    ):
+        server_runtime: ServerRuntime,
+        server_backup: Any,
+        server_inspector: ServerInspector,
+    ) -> None:
         self.server_crud = server_crud
-        self.server_startup = server_startup
+        self.server_runtime = server_runtime
         self.server_backup = server_backup
+        self.server_inspector = server_inspector
 
         self._last_accepted_projection: ServerProjection | None = None
         self._current_generation: int = 0
         self._generation_lock = threading.Lock()
 
-        self._jar_search_cache: dict[str, tuple[bool, float]] = {}
-        self._jar_cache_timeout = 60
-
     def clear_cache(self) -> None:
-        """清除內部 JAR 搜尋快取與伺服器資料雜湊"""
-        self._jar_search_cache.clear()
+        """清除最後接受的伺服器列表投影"""
         self._last_accepted_projection = None
 
     def begin_refresh(self, *, reload_config: bool = False) -> int:
@@ -239,49 +264,29 @@ class ManageServerService:
         Returns:
             伺服器狀態文字
         """
-        is_running = self.server_startup.is_server_running(name) if self.server_startup is not None else False
+        is_running = self.server_runtime.observe(name).is_running
         if is_running:
             return "🟢 執行中"
-        current_time = time.time()
-        cache_key = config.path
-        if cache_key in self._jar_search_cache:
-            cached_result, cache_time = self._jar_search_cache[cache_key]
-            if current_time - cache_time < self._jar_cache_timeout:
-                server_jar_exists = cached_result
-            else:
-                server_jar_exists = self._check_server_jar_exists(config.path, config.loader_type)
-                self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
-        else:
-            server_jar_exists = self._check_server_jar_exists(config.path, config.loader_type)
-            self._jar_search_cache[cache_key] = (server_jar_exists, current_time)
-
-        eula_exists = (Path(config.path) / "eula.txt").exists()
-        eula_accepted = getattr(config, "eula_accepted", False)
-        if server_jar_exists and eula_exists and eula_accepted:
+        inspection = self.server_inspector.inspect(
+            config.path,
+            ServerInspectionIntent(
+                purpose="status",
+                expected_loader_type=config.loader_type,
+                expected_minecraft_version=config.minecraft_version,
+                expected_loader_version=config.loader_version,
+            ),
+        )
+        if inspection.status_ready:
             return "✅ 已就緒"
-        if server_jar_exists and eula_exists and (not eula_accepted):
+        if inspection.launchable and inspection.eula_state == "rejected":
             return "⚠️ 需要接受 EULA"
-        if server_jar_exists:
+        if inspection.launchable and inspection.eula_state == "missing":
             return "❌ 缺少 EULA"
-
-        missing = ServerDetectionUtils.get_missing_server_files(Path(config.path))
-        if missing:
-            return f"❌ 未就緒 (缺少: {', '.join(missing)})"
+        if inspection.missing_files:
+            return f"❌ 未就緒 (缺少: {', '.join(inspection.missing_files)})"
+        if inspection.error:
+            return f"❌ 未就緒 ({inspection.error})"
         return "❌ 未就緒"
-
-    def _check_server_jar_exists(self, server_path: str, loader_type: str = "vanilla") -> bool:
-        """檢查伺服器 JAR 檔案是否存在"""
-        try:
-            server_path_obj = Path(server_path)
-            result = ServerDetectionUtils.find_main_jar(server_path_obj, loader_type or "vanilla")
-            if result.startswith("@"):
-                args_file_path = result[1:]
-                return (server_path_obj / args_file_path).exists()
-            jar_path = server_path_obj / result
-            return jar_path.exists()
-        except Exception as e:
-            logger.debug(f"檢查 JAR 檔案存在失敗: {e}")
-            return (Path(server_path) / "server.jar").exists()
 
     def _format_server_path_for_display(self, raw_path: str) -> str:
         """將絕對路徑轉為易讀的 servers 子路徑形式"""

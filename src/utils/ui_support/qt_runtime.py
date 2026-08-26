@@ -12,6 +12,8 @@ from typing import Any, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from src.utils import RuntimePaths
+
 shiboken_is_valid: Callable[[Any], bool] | None
 
 try:
@@ -31,13 +33,7 @@ def get_icon_path() -> str:
     Returns:
         icon.ico 的絕對路徑，若找不到則回傳空字串
     """
-    if hasattr(sys, "_MEIPASS"):
-        with suppress(Exception):
-            candidate = Path(sys._MEIPASS) / "assets" / "icon.ico"
-            if candidate.exists():
-                return str(candidate)
-
-    if getattr(sys, "frozen", False) or hasattr(sys, "executable"):
+    if RuntimePaths.is_packaged():
         with suppress(Exception):
             base_dir = Path(sys.executable).resolve().parent
             candidate = base_dir / "assets" / "icon.ico"

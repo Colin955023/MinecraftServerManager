@@ -2,29 +2,36 @@
 
 from __future__ import annotations
 
-from src.models import LocalUpdateReviewEntry, PendingInstallReviewEntry
-from src.ui import (
-    append_dependency_review_sections,
-    append_plan_note_section,
-    append_review_section,
+from .mod_presentation import (
     build_client_install_reminder_line,
-    build_online_review_root_status_text,
-    build_review_root_status_text,
-    count_dependency_plan_items,
-    dedupe_review_messages,
-    format_metadata_source_label,
     format_online_version_report,
     format_provider_label,
     format_published_at,
+    summarize_text,
+)
+from .review_dependency import (
+    append_dependency_review_sections,
+    build_dependency_review_key,
+    count_dependency_plan_items,
+    is_optional_dependency_item,
+)
+from .review_formatting import (
+    append_plan_note_section,
+    append_review_section,
+    dedupe_review_messages,
+    format_metadata_source_label,
     format_recommendation_confidence_label,
     format_recommendation_source_label,
+)
+from .review_grouping import (
+    build_online_review_root_status_text,
+    build_review_root_status_text,
     get_local_update_group_status_label,
     get_local_update_review_group_key,
     get_online_install_group_status_label,
     get_online_install_review_group_key,
-    is_optional_dependency_item,
-    summarize_changelog,
 )
+from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
 
 
 def build_pending_install_summary_lines(review_entry: PendingInstallReviewEntry) -> list[str]:
@@ -43,12 +50,13 @@ def build_pending_install_summary_lines(review_entry: PendingInstallReviewEntry)
     if auto_count:
         lines.append(f"- 將自動補裝 {auto_count} 個必要依賴")
     if optional_count:
-        enabled_optional = sum(
+        selected_optional = sum(
             1
             for item in list(getattr(dependency_plan, "advisory_items", []) or [])
-            if is_optional_dependency_item(item) and bool(getattr(item, "enabled", False))
+            if is_optional_dependency_item(item)
+            and build_dependency_review_key(item) in review_entry.selected_dependency_keys
         )
-        lines.append(f"- 可選依賴 {optional_count} 項（已選 {enabled_optional} 項）")
+        lines.append(f"- 可選依賴 {optional_count} 項（已選 {selected_optional} 項）")
     if review_entry.blocking_reasons:
         lines.append(f"- 目前有 {len(dedupe_review_messages(review_entry.blocking_reasons))} 個阻擋原因需先處理")
     elif review_entry.warning_messages:
@@ -74,11 +82,16 @@ def format_pending_install_review_text(review_entry: PendingInstallReviewEntry) 
     lines.extend(
         [
             "",
-            f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}",
+            f"執行狀態：{('已選取' if review_entry.selected else '未選取')}",
             "處理等級：" + get_online_install_group_status_label(get_online_install_review_group_key(review_entry)),
         ]
     )
-    append_dependency_review_sections(lines, review_entry.dependency_plan, "將自動安裝的必要依賴：")
+    append_dependency_review_sections(
+        lines,
+        review_entry.dependency_plan,
+        review_entry.selected_dependency_keys,
+        "將自動安裝的必要依賴：",
+    )
     if review_entry.blocking_reasons:
         append_review_section(lines, "需先處理：", review_entry.blocking_reasons, max_items=3)
     elif review_entry.warning_messages:
@@ -121,7 +134,7 @@ def format_local_update_review_text(review_entry: LocalUpdateReviewEntry) -> str
         lines.append(reminder)
     lines.extend(
         [
-            f"執行狀態：{('已啟用' if review_entry.enabled else '已停用')}",
+            f"執行狀態：{('已選取' if review_entry.selected else '未選取')}",
             "處理等級："
             + build_review_root_status_text(
                 review_entry,
@@ -132,7 +145,12 @@ def format_local_update_review_text(review_entry: LocalUpdateReviewEntry) -> str
     )
     if review_entry.blocking_reasons:
         append_review_section(lines, "需先處理：", review_entry.blocking_reasons, max_items=3)
-    append_dependency_review_sections(lines, review_entry.dependency_plan, "更新時將一併安裝的必要依賴：")
+    append_dependency_review_sections(
+        lines,
+        review_entry.dependency_plan,
+        review_entry.selected_dependency_keys,
+        "更新時將一併安裝的必要依賴：",
+    )
     if review_entry.warning_messages:
         append_review_section(lines, "執行前提醒：", review_entry.warning_messages, max_items=3)
     warnings = list(getattr(getattr(candidate, "report", None), "warnings", []) or [])
@@ -141,7 +159,7 @@ def format_local_update_review_text(review_entry: LocalUpdateReviewEntry) -> str
     notes = list(getattr(candidate, "notes", []) or [])
     if notes:
         append_review_section(lines, "補充說明：", notes, max_items=2)
-    changelog = summarize_changelog(review_entry.changelog)
+    changelog = summarize_text(review_entry.changelog, 420)
     if changelog:
         lines.extend(["", "更新內容：", changelog])
     append_plan_note_section(lines, review_entry.dependency_plan)

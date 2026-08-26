@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import queue
-import re
 import traceback
 from collections.abc import Callable
 from contextlib import suppress
@@ -11,40 +10,32 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QBrush, QColor, QCursor
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QApplication,
     QHBoxLayout,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 from qfluentwidgets import (
-    Action,
     BodyLabel,
     CardWidget,
     Pivot,
     PopUpAniStackedWidget,
-    PrimaryPushButton,
     ProgressBar,
     PushButton,
-    RadioButton,
-    RoundMenu,
     SubtitleLabel,
-    TextEdit,
     TitleLabel,
     TreeWidget,
 )
 
-from src.core import LoaderManager, ModManager
+from src.core import LoaderManager, ModManager, ModPlanning
 from src.models import (
     ModStatus,
     ServerConfig,
 )
 from src.ui import (
-    HostBound,
     LocalModListPresenter,
-    ModalMSFluentWindow,
     ModManagementInstallExecutor,
     ModManagementQueueOps,
     ModManagementReviewOps,
@@ -57,7 +48,6 @@ from src.utils import (
     AppException,
     Colors,
     FloatState,
-    PathUtils,
     ScrollableComboBox,
     Sizes,
     Spacing,
@@ -65,7 +55,6 @@ from src.utils import (
     UIUtils,
     UIWorkScope,
     apply_table_header_style,
-    atomic_write_bytes,
     resolve_color,
 )
 
@@ -106,140 +95,6 @@ class _ModManagementSignals(QObject):
         self._drain_callback()
 
 
-class ExportModListDialog(ModalMSFluentWindow):
-    """匯出模組列表對話框"""
-
-    def __init__(self, parent: Any, mod_manager: ModManager, server: ServerConfig):
-        super().__init__(parent, is_modal=True, show_buttons=False)
-        self.mod_manager = mod_manager
-        self.server = server
-        self.setWindowTitle("匯出模組列表")
-        self.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-        self.setMinimumSize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        title_label = TitleLabel("匯出模組列表", self.widget)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(title_label)
-
-        fmt_frame = QWidget(self.widget)
-        fmt_layout = QHBoxLayout(fmt_frame)
-        fmt_layout.setContentsMargins(0, Spacing.MEDIUM, 0, Spacing.MEDIUM)
-
-        lbl = SubtitleLabel("選擇匯出格式:", fmt_frame)
-        fmt_layout.addWidget(lbl)
-
-        self.fmt_var = TextState(value="text")
-
-        text_radio = RadioButton("純文字", fmt_frame)
-        text_radio.setChecked(True)
-        text_radio.toggled.connect(lambda c: self.fmt_var.set("text") if c else None)
-        fmt_layout.addWidget(text_radio)
-
-        json_radio = RadioButton("JSON", fmt_frame)
-        json_radio.toggled.connect(lambda c: self.fmt_var.set("json") if c else None)
-        fmt_layout.addWidget(json_radio)
-
-        html_radio = RadioButton("HTML", fmt_frame)
-        html_radio.toggled.connect(lambda c: self.fmt_var.set("html") if c else None)
-        fmt_layout.addWidget(html_radio)
-
-        csv_radio = RadioButton("Excel (.xlsx)", fmt_frame)
-        csv_radio.toggled.connect(lambda c: self.fmt_var.set("xlsx") if c else None)
-        fmt_layout.addWidget(csv_radio)
-        fmt_layout.addStretch(1)
-
-        self.viewLayout.addWidget(fmt_frame)
-
-        preview_label = SubtitleLabel("預覽:", self.widget)
-        self.viewLayout.addWidget(preview_label)
-
-        text_widget = TextEdit(self.widget)
-        text_widget.setMinimumHeight(Sizes.PREVIEW_TEXTBOX_HEIGHT)
-        self.viewLayout.addWidget(text_widget, 1)
-
-        def update_preview(*_):
-            if self.mod_manager is None:
-                text_widget.clear()
-                text_widget.setPlainText("模組管理器尚未初始化，無法匯出列表")
-                return
-            export_text = self.mod_manager.export_mod_list(self.fmt_var.get())
-            text_widget.clear()
-            if isinstance(export_text, bytes):
-                text_widget.setPlainText(f"這是二進位 Excel 檔案，無法在此預覽。檔案大小：{len(export_text)} 位元組")
-            else:
-                text_widget.setPlainText(export_text)
-
-        self.fmt_var.trace_add("write", update_preview)
-        update_preview()
-
-        btn_frame = QWidget(self.widget)
-        btn_layout = QHBoxLayout(btn_frame)
-        btn_layout.setContentsMargins(0, Spacing.MEDIUM, 0, 0)
-
-        def do_save():
-            if self.mod_manager is None:
-                UIUtils.show_message("錯誤", "模組管理器未初始化", self, message_level="error")
-                return
-            fmt = self.fmt_var.get()
-            ext = {"text": "txt", "json": "json", "html": "html", "xlsx": "xlsx"}[fmt]
-            server_name = getattr(self.server, "name", "server")
-            default_name = f"{server_name}_模組列表.{ext}"
-            server_path = Path(self.server.path) if self.server and getattr(self.server, "path", None) else Path.home()
-            initial_path = str(server_path / default_name)
-            file_path = UIUtils.get_save_file_name(
-                self,
-                "儲存模組列表",
-                initial_path,
-                "所有檔案 (*.*);;純文字 (*.txt);;JSON (*.json);;HTML (*.html);;Excel 試算表 (*.xlsx)",
-            )
-            if file_path:
-                try:
-                    export_text = self.mod_manager.export_mod_list(fmt)
-                    if isinstance(export_text, bytes):
-                        if not atomic_write_bytes(file_path, export_text):
-                            UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
-                            return
-                    else:
-                        if not PathUtils.write_text_file(Path(file_path), export_text):
-                            UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
-                            return
-                except Exception as e:
-                    logger.error(f"匯出模組列表失敗: {e}\n{traceback.format_exc()}")
-                    UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {e}", self, message_level="error")
-                    return
-
-                try:
-                    result = UIUtils.ask_yes_no_cancel(
-                        "匯出成功",
-                        f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？",
-                        parent=self,
-                        show_cancel=False,
-                    )
-                    if result:
-                        UIUtils.open_external(file_path)
-                except Exception as e:
-                    logger.error(f"開啟檔案失敗: {e}\n{traceback.format_exc()}")
-                    UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=self, message_level="error")
-
-        save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
-        save_btn.clicked.connect(do_save)
-        save_btn.setMinimumWidth(Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
-        save_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-        btn_layout.addWidget(save_btn)
-
-        close_btn = PushButton("關閉", btn_frame)
-        close_btn.clicked.connect(self.close)
-        close_btn.setMinimumWidth(Sizes.MOD_EXPORT_CLOSE_BUTTON_WIDTH)
-        close_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-        btn_layout.addWidget(close_btn)
-        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.viewLayout.addWidget(btn_frame)
-
-
 class ModManagementFrame:
     """模組管理主畫面"""
 
@@ -247,34 +102,32 @@ class ModManagementFrame:
         self,
         parent,
         server_manager,
+        mod_planning: ModPlanning,
         on_server_selected_callback: Callable | None = None,
         loader_manager: LoaderManager = None,
     ):
         self.parent = parent
         self.server_manager = server_manager
+        self.mod_planning = mod_planning
         self.on_server_selected = on_server_selected_callback
         self.loader_manager = loader_manager
         self.mod_session = ModManagementSession()
         self.mod_manager: ModManager | None = None
         self.versions: list = []
         self.release_versions: list = []
-        self.all_selected = False
-        self.VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
         self.main_frame: QWidget | None = None
         self.main_layout: QVBoxLayout | None = None
         self.notebook: PopUpAniStackedWidget | None = None
         self.pivot: Pivot | None = None
         self.local_tab: QWidget | None = None
         self.browse_tab: QWidget | None = None
-        self.browse_tree: TreeWidget | None = None
-        self.browse_filter_label: SubtitleLabel | None = None
-        self.browse_results_label: SubtitleLabel | None = None
-        self.local_tree: TreeWidget | None = None
-        self._local_filter_job: Any | None = None
         self.local_mod_list_presenter = LocalModListPresenter(self)
         self.online_browse_presenter = OnlineBrowsePresenter(self)
-        self._status_update_job = None
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
+        self.queue_ops = ModManagementQueueOps(self)
+        self.review_ops = ModManagementReviewOps(self)
+        self.install_executor = ModManagementInstallExecutor(self)
+        self.tree_sync = ModManagementTreeSyncOps(self)
 
         self.create_widgets()
 
@@ -288,12 +141,6 @@ class ModManagementFrame:
             self.main_frame if isinstance(self.main_frame, QObject) and _is_alive(self.main_frame) else self._signals
         )
         self.scope = UIWorkScope(scope_parent)
-        self._ops = (
-            ModManagementQueueOps(self),
-            ModManagementReviewOps(self),
-            ModManagementInstallExecutor(self),
-            ModManagementTreeSyncOps(self),
-        )
         self.load_servers()
         if self.mod_session.server and self.mod_manager:
             self.local_mod_list_presenter.refresh_mod_list_force()
@@ -329,7 +176,7 @@ class ModManagementFrame:
             if current_tab == 0:
                 self.local_mod_list_presenter.load_local_mods()
             elif current_tab == 1:
-                self.refresh_browse_list()
+                self.tree_sync.refresh_browse_list()
 
     def update_status(self, message: str) -> None:
         """
@@ -500,14 +347,18 @@ class ModManagementFrame:
 
     def apply_theme_styles(self) -> None:
         """套用 Fluent 主題樣式至模組管理介面"""
-        for tree in (getattr(self, "local_tree", None), getattr(self, "browse_tree", None)):
+        trees = (
+            self.local_mod_list_presenter.local_tree,
+            self.online_browse_presenter.browse_tree,
+        )
+        for tree in trees:
             if tree:
                 apply_table_header_style(tree)
                 if hasattr(tree, "apply_theme_style"):
                     tree.apply_theme_style()
-        if getattr(self, "local_tree", None):
+        if self.local_mod_list_presenter.local_tree:
             self.local_mod_list_presenter.apply_local_tree_theme()
-        if getattr(self, "browse_tree", None):
+        if self.online_browse_presenter.browse_tree:
             self.online_browse_presenter.apply_browse_tree_theme()
 
     def on_tab_changed(self, _event=None) -> None:
@@ -522,20 +373,12 @@ class ModManagementFrame:
                 return
             current_tab = self.notebook.currentIndex()
             if current_tab == 0:
-                self.refresh_local_list()
+                self.tree_sync.refresh_local_list()
             elif current_tab == 1:
-                self._refresh_online_filter_hint()
-                self._load_online_mods(show_warning=False)
+                self.queue_ops._refresh_online_filter_hint()
+                self.queue_ops._load_online_mods(show_warning=False)
         except Exception as e:
             logger.error(f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}")
-
-    def export_mod_list_dialog(self) -> None:
-        """開啟模組列表匯出對話框"""
-        if not self.mod_manager or not self.mod_session.server:
-            UIUtils.show_message("錯誤", "請先選擇伺服器以匯出模組列表", self.parent, message_level="error")
-            return
-        dlg = ExportModListDialog(self.parent, self.mod_manager, self.mod_session.server)
-        dlg.show()
 
     def create_status_bar(self) -> None:
         """建立頁面底部的狀態列與進度條"""
@@ -578,9 +421,9 @@ class ModManagementFrame:
                 self.mod_session.invalidate()
                 self.mod_session = ModManagementSession()
                 self.mod_manager = None
-                self.refresh_local_list()
-                self._refresh_online_queue_button()
-                self._refresh_online_filter_hint()
+                self.tree_sync.refresh_local_list()
+                self.queue_ops._refresh_online_queue_button()
+                self.queue_ops._refresh_online_filter_hint()
             else:
                 target_server = prev_selected if prev_selected in server_names else server_names[0]
                 self.server_combo.blockSignals(True)
@@ -620,11 +463,11 @@ class ModManagementFrame:
                 self.mod_session.invalidate()
                 self.mod_session = ModManagementSession(selected_server)
             self.mod_manager = ModManager(selected_server.path, selected_server)
-            self._refresh_online_filter_hint()
-            self._refresh_online_queue_button()
+            self.queue_ops._refresh_online_filter_hint()
+            self.queue_ops._refresh_online_queue_button()
             self.local_mod_list_presenter.load_local_mods()
-            if hasattr(self, "_is_browse_tab_active") and self._is_browse_tab_active():
-                self._load_online_mods(force=True, show_warning=False)
+            if self.queue_ops._is_browse_tab_active():
+                self.queue_ops._load_online_mods(force=True, show_warning=False)
             if self.on_server_selected and getattr(self, "_last_notified_server", None) != server_name:
                 self._last_notified_server = server_name
                 self.on_server_selected(server_name)
@@ -633,250 +476,6 @@ class ModManagementFrame:
             UIUtils.show_message("錯誤", f"切換伺服器失敗: {e}", self.parent, message_level="error")
         finally:
             self._is_changing_server = False
-
-    def show_local_context_menu(self, event) -> None:
-        """
-        在本地模組列表上顯示右鍵上下文選單
-
-        Args:
-            event: 觸發選單的事件物件 (QPoint)
-        """
-        if not self.local_tree:
-            return
-        if hasattr(event, "x") and self.local_tree is not None:
-            item = self.local_tree.itemAt(event)
-            if item is not None:
-                self.local_tree.setCurrentItem(item)
-                item.setSelected(True)
-
-        selected_items = self.local_tree.selectedItems()
-        if not selected_items:
-            return
-
-        menu = RoundMenu(parent=self.local_tree)
-
-        action_toggle = Action("🔄 切換啟用狀態", menu)
-        action_toggle.triggered.connect(self.local_mod_list_presenter.toggle_local_mod)
-        menu.addAction(action_toggle)
-        menu.addSeparator()
-
-        action_copy = Action("📋 複製模組資訊", menu)
-        action_copy.triggered.connect(self.copy_mod_info)
-        menu.addAction(action_copy)
-
-        action_show = Action("📁 在檔案總管中顯示", menu)
-        action_show.triggered.connect(self.show_in_explorer)
-        menu.addAction(action_show)
-        menu.addSeparator()
-
-        action_delete = Action("🗑️ 刪除模組", menu)
-        action_delete.triggered.connect(self.delete_local_mod)
-        menu.addAction(action_delete)
-
-        menu.exec(QCursor.pos())
-
-    def import_mod_file(self) -> None:
-        """開啟檔案選擇對話框以匯入新的模組 JAR 檔"""
-        if not self.mod_session.server:
-            UIUtils.show_message("警告", "請先選擇伺服器", self.main_frame, message_level="warning")
-            return
-        filename = UIUtils.get_open_file_name(self.main_frame, "選擇模組檔案", "", "JAR files (*.jar);;All files (*.*)")
-        if filename:
-            if not self.mod_manager:
-                UIUtils.show_message("錯誤", "模組管理器未初始化", self.main_frame, message_level="error")
-                return
-            result = self.mod_manager.import_local_mod_file_result(filename)
-            if result.completed:
-                UIUtils.show_message(
-                    "成功",
-                    result.message or f"模組已匯入: {Path(filename).name}",
-                    self.main_frame,
-                    message_level="info",
-                )
-                self.local_mod_list_presenter.load_local_mods()
-            else:
-                UIUtils.show_message(
-                    result.title or "錯誤", result.message or "匯入模組失敗", self.main_frame, message_level="error"
-                )
-
-    def open_mods_folder(self) -> None:
-        """在檔案總管中開啟目前伺服器的 mods 資料夾"""
-        if not self.mod_session.server:
-            UIUtils.show_message("警告", "請先選擇伺服器", self.parent, message_level="warning")
-            return
-        mods_dir = Path(self.mod_session.server.path) / "mods"
-        if mods_dir.exists():
-            try:
-                UIUtils.open_external(mods_dir)
-            except Exception as e:
-                logger.error(f"開啟模組資料夾失敗: {e}")
-        else:
-            UIUtils.show_message("警告", "模組資料夾不存在", self.parent, message_level="warning")
-
-    def copy_mod_info(self) -> None:
-        """將選中模組的詳細資訊複製到剪貼簿"""
-        if not self.local_tree:
-            return
-        tree = self.local_tree
-
-        selection = tree.selectedItems()
-        if not selection:
-            return
-        try:
-            item = selection[0]
-            status = item.text(0).strip()
-            name_text = item.text(1).strip()
-            version = item.text(2).strip()
-            author = item.text(3).strip()
-            loader = item.text(4).strip()
-            size = item.text(5).strip()
-            mtime = item.text(6).strip()
-            desc = item.text(7).strip()
-
-            lines = [f"模組名稱: {name_text}"]
-            if version:
-                lines.append(f"版本: {version}")
-            if status:
-                lines.append(f"狀態: {status}")
-            if author:
-                lines.append(f"作者: {author}")
-            if loader:
-                lines.append(f"載入器: {loader}")
-            if size:
-                lines.append(f"檔案大小: {size}")
-            if mtime:
-                lines.append(f"修改時間: {mtime}")
-            if desc:
-                lines.append(f"描述: {desc}")
-
-            info = "\n".join(lines)
-            QApplication.clipboard().setText(info)
-            if hasattr(self, "status_label") and _is_alive(self.status_label):
-                self.update_status("模組詳細資訊已複製到剪貼簿")
-        except Exception as e:
-            logger.error(f"複製模組資訊失敗: {e}\n{traceback.format_exc()}")
-
-    def show_in_explorer(self) -> None:
-        """在檔案總管中定位並選中目前選中的模組檔案"""
-        if not self.local_tree:
-            return
-        tree = self.local_tree
-        selection = tree.selectedItems()
-        if not selection or not self.mod_session.server:
-            return
-        item = selection[0]
-        mod_filename = item.data(0, Qt.ItemDataRole.UserRole)
-
-        if mod_filename:
-            if not self.mod_session.server:
-                if hasattr(self, "status_label") and _is_alive(self.status_label):
-                    self.status_label.setText("未選擇伺服器，無法定位模組檔案")
-                return
-            try:
-                mods_dir = Path(self.mod_session.server.path) / "mods"
-                mod_file = None
-                for ext in [".jar", ".jar.disabled"]:
-                    potential_file = mods_dir / (mod_filename + ext)
-                    if potential_file.exists():
-                        mod_file = potential_file
-                        break
-                if mod_file and mod_file.exists():
-                    try:
-                        UIUtils.reveal_in_explorer(mod_file)
-                    except Exception as e:
-                        logger.error(f"無法打開檔案總管顯示檔案: {e}")
-                    if hasattr(self, "status_label") and _is_alive(self.status_label):
-                        self.status_label.setText(f"已在檔案總管中顯示: {mod_file.name}")
-                elif hasattr(self, "status_label") and _is_alive(self.status_label):
-                    self.status_label.setText("找不到要顯示的模組檔案")
-            except Exception as e:
-                logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
-                if hasattr(self, "status_label") and _is_alive(self.status_label):
-                    self.status_label.setText(f"開啟檔案總管失敗: {e}")
-
-    def delete_local_mod(self) -> None:
-        """刪除選中的本地模組檔案"""
-        if not self.local_tree:
-            return
-        tree = self.local_tree
-        selected_mods = []
-        seen_mod_ids = set()
-        selection = tree.selectedItems()
-        if not selection or not self.mod_session.server:
-            return
-        for item in selection:
-            mod_id = item.data(0, Qt.ItemDataRole.UserRole)
-            if not mod_id:
-                continue
-
-            mod_name = item.text(1) or str(mod_id)
-
-            if mod_id in seen_mod_ids:
-                continue
-            seen_mod_ids.add(mod_id)
-            selected_mods.append((mod_id, mod_name))
-
-        if not selected_mods:
-            return
-        mod_count = len(selected_mods)
-        mod_label = selected_mods[0][1] if mod_count == 1 else f"這 {mod_count} 個模組"
-        confirm = UIUtils.ask_yes_no_cancel(
-            "確認刪除", f"確定要刪除 {mod_label} 嗎？\n此操作無法復原", parent=self.parent, show_cancel=False
-        )
-        if not confirm:
-            return
-        if not self.mod_manager:
-            UIUtils.show_message("錯誤", "模組管理器未初始化", self.parent, message_level="error")
-            return
-        mod_name_by_id = dict(selected_mods)
-        result = self.mod_manager.delete_local_mods_result([mod_id for mod_id, _ in selected_mods])
-        deleted_count = result.affected_count
-        missing_names = [mod_name_by_id.get(mod_id, mod_id) for mod_id in result.missing_ids]
-        if deleted_count > 0:
-            self.local_mod_list_presenter.load_local_mods()
-            if hasattr(self, "status_label") and _is_alive(self.status_label):
-                self.status_label.setText(f"已刪除 {deleted_count} 個模組")
-            if result.completed and len(selected_mods) == 1:
-                UIUtils.show_message("成功", f"模組 '{selected_mods[0][1]}' 已刪除", self.parent, message_level="info")
-            else:
-                summary = result.message or f"已刪除 {deleted_count} 個模組"
-                if missing_names:
-                    summary += f"\n找不到檔案：{', '.join(missing_names)}"
-                if result.partial:
-                    UIUtils.show_message(result.title or "部分成功", summary, self.parent, message_level="warning")
-                else:
-                    UIUtils.show_message("成功", summary, self.parent, message_level="info")
-        else:
-            if hasattr(self, "status_label") and _is_alive(self.status_label):
-                self.status_label.setText(result.message or "刪除失敗")
-            UIUtils.show_message(
-                result.title or "提示", result.message or "沒有成功刪除任何模組", self.parent, message_level="warning"
-            )
-
-    def _ensure_ops(self) -> tuple[Any, ...]:
-        """確保 host-bound ops 已綁定"""
-        ops = object.__getattribute__(self, "__dict__").get("_ops")
-        if ops:
-            return ops
-        ops = (
-            ModManagementQueueOps(self),
-            ModManagementReviewOps(self),
-            ModManagementInstallExecutor(self),
-            ModManagementTreeSyncOps(self),
-        )
-        object.__setattr__(self, "_ops", ops)
-        return ops
-
-    def __getattr__(self, name: str) -> Any:
-        """委派至 host-bound ops"""
-        ops = self._ensure_ops()
-        for op in ops:
-            typ = type(op)
-            if name in HostBound.__dict__:
-                continue
-            if any(name in b.__dict__ for b in typ.__mro__ if b not in (object, HostBound)):
-                return getattr(op, name)
-        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def get_frame(self) -> QWidget | None:
         if hasattr(self, "main_frame") and self.main_frame:

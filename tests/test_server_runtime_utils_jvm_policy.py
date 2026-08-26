@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 import src.utils.server_utils.server_runtime_utils as runtime_utils_module
-from src.core import ServerCRUD, ServerImportService, ServerStartup
-from src.models import ServerConfig
-from src.utils import JvmOptionPolicy, ServerCommands, ServerDetectionUtils
+from src.core import ServerCRUD, ServerImportService, ServerInspector
+from src.models import ServerConfig, ServerInspectionIntent
+from src.utils import JvmOptionPolicy, ServerCommands
 
 
 def test_jvm_policy_recommends_g1gc_for_memory_above_4gb() -> None:
@@ -102,13 +102,8 @@ def test_build_java_command_uses_args_file_for_neoforge(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         runtime_utils_module.JavaUtils, "get_best_java_path", staticmethod(lambda *_args, **_kwargs: None)
     )
-    monkeypatch.setattr(
-        ServerDetectionUtils,
-        "find_main_jar",
-        staticmethod(lambda *_args, **_kwargs: "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt"),
-    )
-
-    command = ServerCommands.build_java_command(config, return_list=True)
+    target = "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt"
+    command = ServerCommands.build_java_command(config, return_list=True, launch_target=target)
 
     assert command[0] == "java"
     assert "@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt" in command
@@ -256,9 +251,9 @@ def test_find_startup_script_prefers_generated_script_over_imported_leftover(tmp
     (tmp_path / "start.bat").write_text("java -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
     (tmp_path / "start_server.bat").write_text("java -Xmx2G -jar server.jar\n", encoding="utf-8")
 
-    script_path = ServerDetectionUtils.find_startup_script(tmp_path)
+    inspection = ServerInspector().inspect(tmp_path, ServerInspectionIntent("launch"))
 
-    assert script_path == tmp_path / "start_server.bat"
+    assert inspection.launch_target.value == "start_server.bat"
 
 
 def test_import_inspection_reads_memory_without_rewriting_scripts(tmp_path: Path) -> None:
@@ -272,78 +267,8 @@ def test_import_inspection_reads_memory_without_rewriting_scripts(tmp_path: Path
 
     inspection = ServerImportService(ServerCRUD(str(servers_root))).inspect(source, "imported")
 
-    assert inspection.memory_max_mb == 20480
+    assert inspection.server.memory_max_mb == 20480
     assert script.read_text(encoding="utf-8") == original
-
-
-def test_resolve_startup_script_for_run_repairs_existing_script_without_creating_generated(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    servers_root = tmp_path / "servers"
-    server_path = servers_root / "imported"
-    server_path.mkdir(parents=True)
-    script_path = server_path / "start.bat"
-    script_path.write_text("java -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
-    javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
-    javaw.parent.mkdir(parents=True)
-    javaw.write_bytes(b"")
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="1.21",
-        loader_type="fabric",
-        loader_version="0.16.10",
-        memory_max_mb=20480,
-        path=str(server_path),
-    )
-    monkeypatch.setattr(
-        runtime_utils_module.JavaUtils,
-        "get_best_java_path",
-        staticmethod(lambda *_args, **_kwargs: str(javaw)),
-    )
-    startup = ServerStartup(str(servers_root))
-
-    selected_script = startup._resolve_startup_script_for_run(config, server_path)
-
-    assert selected_script == script_path
-    assert not (server_path / "start_server.bat").exists()
-    assert f'"{javaw.with_name("java.exe")}" -Xmx20G -jar fabric-server-launch.jar' in script_path.read_text(
-        encoding="utf-8-sig"
-    )
-
-
-def test_resolve_startup_script_for_run_prefers_generated_script_over_imported_leftover(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    servers_root = tmp_path / "servers"
-    server_path = servers_root / "imported"
-    server_path.mkdir(parents=True)
-    imported_script = server_path / "start.bat"
-    generated_script = server_path / "start_server.bat"
-    imported_script.write_text("java -Xmx20G -jar fabric-server-launch.jar\n", encoding="utf-8")
-    generated_script.write_text("java -Xmx2G -jar server.jar\n", encoding="utf-8")
-    javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
-    javaw.parent.mkdir(parents=True)
-    javaw.write_bytes(b"")
-    config = ServerConfig(
-        name="imported",
-        minecraft_version="1.21",
-        loader_type="fabric",
-        loader_version="0.16.10",
-        memory_max_mb=20480,
-        path=str(server_path),
-    )
-    monkeypatch.setattr(
-        runtime_utils_module.JavaUtils,
-        "get_best_java_path",
-        staticmethod(lambda *_args, **_kwargs: str(javaw)),
-    )
-    startup = ServerStartup(str(servers_root))
-
-    selected_script = startup._resolve_startup_script_for_run(config, server_path)
-
-    assert selected_script == generated_script
-    assert f'"{javaw.with_name("java.exe")}" -Xmx2G -jar server.jar' in generated_script.read_text(encoding="utf-8-sig")
-    assert "java -Xmx20G -jar fabric-server-launch.jar" in imported_script.read_text(encoding="utf-8")
 
 
 def test_create_launch_script_rewrites_existing_bom_script_without_bom(

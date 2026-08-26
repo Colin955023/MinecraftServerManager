@@ -45,7 +45,7 @@ def extract_primary_file_hash(version: Any | None, algorithm: str = MODRINTH_PRE
     return str(hashes.get(normalize_hash_algorithm(algorithm), "") or "").strip().lower()
 
 
-def version_type_priority(version_type: str) -> int:
+def _version_type_priority(version_type: str) -> int:
     """
     回傳版本類型的排序優先權
 
@@ -105,7 +105,7 @@ def select_best_mod_version(versions: list[Any]) -> Any | None:
         versions,
         key=lambda version: (
             1 if getattr(version, "primary_file", None) else 0,
-            version_type_priority(str(getattr(version, "version_type", "") or "")),
+            _version_type_priority(str(getattr(version, "version_type", "") or "")),
             str(getattr(version, "date_published", "") or ""),
             str(getattr(version, "version_number", "") or ""),
         ),
@@ -118,5 +118,4 @@ __all__ = [
     "is_allowed_version_type",
     "normalize_hash_algorithm",
     "select_best_mod_version",
-    "version_type_priority",
 ]

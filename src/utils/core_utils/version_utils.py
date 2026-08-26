@@ -1,11 +1,6 @@
 """
 版本字串安全解析工具
 統一 packaging.version.Version 的防呆包裝，供 core / utils 各模組共用
-
-取代：
-  - LoaderManager.parse_version_safe       (core/loader_manager.py)
-  - ServerDetectionVersionUtils._parse_packaging_version  (utils/server_utils/server_detection_utils.py)
-  - UpdateParsing.parse_version body       (utils/update_utils/update_parsing.py)
 """
 
 from __future__ import annotations

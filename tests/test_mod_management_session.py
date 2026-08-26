@@ -3,9 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, cast
 
-from src.models import OnlineBrowseRequest, PendingOnlineInstall, ServerConfig
-from src.ui import ModManagementSession
-from src.ui.mods.mod_management_session import ModListRow
+from src.models import PendingOnlineInstall, ServerConfig
+from src.ui import ModListRow, ModManagementSession, OnlineBrowseRequest
 
 
 def _server(name: str) -> ServerConfig:

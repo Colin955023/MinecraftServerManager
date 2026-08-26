@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from src.models import ReviewTaskNode
+from .review_state import ReviewTaskNode
 
 
 def build_dependency_review_key(dependency_item: Any) -> tuple[str, str]:
@@ -22,19 +22,6 @@ def build_dependency_review_key(dependency_item: Any) -> tuple[str, str]:
         str(getattr(dependency_item, "project_id", "") or "").strip(),
         str(getattr(dependency_item, "version_id", "") or getattr(dependency_item, "version_name", "") or "").strip(),
     )
-
-
-def build_dependency_key(dependency_item: Any) -> tuple[str, str]:
-    """
-    建立依賴項目用於彙整的識別鍵
-
-    Args:
-        dependency_item: 要轉換為識別鍵的依賴項目
-
-    Returns:
-        與 build_dependency_review_key 相同的專案及版本鍵
-    """
-    return build_dependency_review_key(dependency_item)
 
 
 def is_optional_dependency_item(dependency_item: Any) -> bool:
@@ -74,23 +61,26 @@ def get_sorted_dependency_review_items(dependency_plan: Any) -> list[Any]:
     return items
 
 
-def get_enabled_dependency_install_items(dependency_plan: Any) -> list[Any]:
+def get_selected_dependency_install_items(
+    dependency_plan: Any, selected_dependency_keys: set[tuple[str, str]]
+) -> list[Any]:
     """
-    取得依賴計畫中已啟用的依賴安裝項目清單
+    取得 Review session 已選取的依賴安裝項目清單
 
     Args:
-        dependency_plan: 提供 items 與 advisory_items 屬性的依賴計畫
+        dependency_plan: 提供 items 與 advisory_items 屬性的不可變規劃結果
+        selected_dependency_keys: Review session 持有的 stable selected keys
 
     Returns:
-        已啟用的依賴安裝項目清單
+        已選取的依賴安裝項目清單
     """
     return [
-        *list(getattr(dependency_plan, "items", []) or []),
-        *[
-            item
-            for item in list(getattr(dependency_plan, "advisory_items", []) or [])
-            if bool(getattr(item, "enabled", False))
-        ],
+        item
+        for item in [
+            *list(getattr(dependency_plan, "items", []) or []),
+            *list(getattr(dependency_plan, "advisory_items", []) or []),
+        ]
+        if build_dependency_review_key(item) in selected_dependency_keys
     ]
 
 
@@ -101,7 +91,7 @@ def collect_dependency_required_by(
     收集每個依賴項目被哪些根項目要求
 
     Args:
-        review_entries: 要檢查的 Review 項目，僅處理已啟用且可執行的項目
+        review_entries: 要檢查的 Review 項目，僅處理已選取且可執行的項目
         parent_name_getter: 從 Review 項目取得顯示名稱的函式
 
     Returns:
@@ -109,13 +99,15 @@ def collect_dependency_required_by(
     """
     required_by: dict[tuple[str, str], list[str]] = {}
     for entry in review_entries:
-        if not bool(getattr(entry, "enabled", False)) or not bool(getattr(entry, "runnable", False)):
+        if not bool(getattr(entry, "selected", False)) or not bool(getattr(entry, "runnable", False)):
             continue
         parent_name = parent_name_getter(entry)
         if not parent_name:
             continue
-        for dependency_item in get_sorted_dependency_review_items(entry.dependency_plan):
-            required_by.setdefault(build_dependency_key(dependency_item), []).append(parent_name)
+        for dependency_item in get_selected_dependency_install_items(
+            entry.dependency_plan, entry.selected_dependency_keys
+        ):
+            required_by.setdefault(build_dependency_review_key(dependency_item), []).append(parent_name)
     return required_by
 
 
@@ -151,7 +143,7 @@ def count_review_nodes(nodes: list[ReviewTaskNode], node_kind: str) -> int:
 
 
 def build_dependency_status_text(
-    dependency_item: Any, parent_name: str, required_by_text: str, is_advisory: bool, is_enabled: bool
+    dependency_item: Any, parent_name: str, required_by_text: str, is_advisory: bool, is_selected: bool
 ) -> str:
     """
     組合依賴項目的來源、可信度與處理狀態文字
@@ -161,7 +153,7 @@ def build_dependency_status_text(
         parent_name: 主要要求此依賴的項目名稱
         required_by_text: 已整理的要求者文字，空白時使用 parent_name
         is_advisory: 是否為可選依賴
-        is_enabled: 是否已啟用此依賴的安裝
+        is_selected: 是否已選取此依賴的安裝
 
     Returns:
         顯示 required-by、解析來源、可信度與處理方式的狀態文字
@@ -170,16 +162,15 @@ def build_dependency_status_text(
     source = str(getattr(dependency_item, "resolution_source", "project_id") or "").strip().lower()
     source_label = {
         "version_detail": "版本詳情回補",
-        "loader_override": "loader 覆寫",
         "version_id": "version id 線索",
     }.get(source, "project id 直連")
     confidence = str(getattr(dependency_item, "resolution_confidence", "direct") or "").strip().lower()
     confidence_label = "需確認" if confidence in {"heuristic", "manual"} else "中" if confidence == "fallback" else "高"
-    if is_advisory and is_enabled:
-        action = "可選依賴，已啟用安裝"
+    if is_advisory and is_selected:
+        action = "可選依賴，已選取安裝"
     elif is_advisory:
         action = "可選依賴，預設略過"
-    elif bool(getattr(dependency_item, "maybe_installed", False)) and is_enabled:
+    elif bool(getattr(dependency_item, "maybe_installed", False)) and is_selected:
         action = "疑似已安裝，已改為安裝"
     elif bool(getattr(dependency_item, "maybe_installed", False)):
         action = "疑似已安裝，預設略過"
@@ -188,13 +179,19 @@ def build_dependency_status_text(
     return f"required-by：{resolved_required_by}｜解析：{source_label}（{confidence_label}）｜處理：{action}"
 
 
-def append_dependency_review_sections(lines: list[str], dependency_plan: Any, required_heading: str) -> None:
+def append_dependency_review_sections(
+    lines: list[str],
+    dependency_plan: Any,
+    selected_dependency_keys: set[tuple[str, str]],
+    required_heading: str,
+) -> None:
     """
     將依賴計畫的必要、可選與疑似已安裝項目追加到文字清單
 
     Args:
         lines: 要追加顯示內容的文字清單
         dependency_plan: 提供 items 與 advisory_items 的依賴計畫
+        selected_dependency_keys: Review session 持有的 stable selected keys
         required_heading: 必要依賴區段的標題
     """
     dependency_items = list(getattr(dependency_plan, "items", []) or [])
@@ -210,9 +207,9 @@ def append_dependency_review_sections(lines: list[str], dependency_plan: Any, re
         maybe_installed_items = [item for item in advisory_items if not is_optional_dependency_item(item)]
         if optional_items:
             lines.append("")
-            lines.append("可選依賴（可啟用後一同安裝）：")
+            lines.append("可選依賴（可選取後一同安裝）：")
             lines.extend(
-                f"- {item.project_name}{('（已啟用）' if getattr(item, 'enabled', False) else '（預設略過）')}"
+                f"- {item.project_name}{('（已選取）' if build_dependency_review_key(item) in selected_dependency_keys else '（預設略過）')}"
                 for item in optional_items[:2]
             )
             if len(optional_items) > 2:
@@ -221,7 +218,7 @@ def append_dependency_review_sections(lines: list[str], dependency_plan: Any, re
             lines.append("")
             lines.append("疑似已安裝、預設略過的必要依賴：")
             lines.extend(
-                f"- {item.project_name}{('（已改為安裝）' if getattr(item, 'enabled', False) else '')}"
+                f"- {item.project_name}{('（已改為安裝）' if build_dependency_review_key(item) in selected_dependency_keys else '')}"
                 for item in maybe_installed_items[:2]
             )
             if len(maybe_installed_items) > 2:
@@ -254,18 +251,22 @@ def build_installed_mod_simulation_item(project_id: str, project_name: str, file
     )
 
 
-def append_enabled_dependency_simulations(
-    simulated_installed_mods: list[Any], dependency_plan: Any, simulation_item_builder: Callable[..., Any]
+def append_selected_dependency_simulations(
+    simulated_installed_mods: list[Any],
+    dependency_plan: Any,
+    selected_dependency_keys: set[tuple[str, str]],
+    simulation_item_builder: Callable[..., Any],
 ) -> None:
     """
-    將已啟用的依賴加入模擬安裝清單
+    將已選取的依賴加入模擬安裝清單
 
     Args:
         simulated_installed_mods: 要追加模擬模組的清單
         dependency_plan: 提供必要與可選依賴項目的依賴計畫
+        selected_dependency_keys: Review session 持有的 stable selected keys
         simulation_item_builder: 建立模擬模組物件的函式
     """
-    for dependency_item in get_enabled_dependency_install_items(dependency_plan):
+    for dependency_item in get_selected_dependency_install_items(dependency_plan, selected_dependency_keys):
         simulated_installed_mods.append(
             simulation_item_builder(
                 getattr(dependency_item, "project_id", ""),
@@ -278,15 +279,14 @@ def append_enabled_dependency_simulations(
 
 __all__ = [
     "append_dependency_review_sections",
-    "append_enabled_dependency_simulations",
-    "build_dependency_key",
+    "append_selected_dependency_simulations",
     "build_dependency_review_key",
     "build_dependency_status_text",
     "build_installed_mod_simulation_item",
     "collect_dependency_required_by",
     "count_dependency_plan_items",
     "count_review_nodes",
-    "get_enabled_dependency_install_items",
+    "get_selected_dependency_install_items",
     "get_sorted_dependency_review_items",
     "is_optional_dependency_item",
 ]

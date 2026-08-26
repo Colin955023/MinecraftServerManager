@@ -2,7 +2,7 @@
 
 import json
 
-from src.utils import atomic_write_bytes, atomic_write_json, atomic_write_text
+from src.utils import atomic_replace_file_within, atomic_write_bytes, atomic_write_json, atomic_write_text
 
 
 def test_atomic_write_json_creates_file(tmp_path):
@@ -39,3 +39,28 @@ def test_atomic_write_bytes_overwrite(tmp_path):
     assert atomic_write_bytes(target, b"first") is True
     assert atomic_write_bytes(target, b"second") is True
     assert target.read_bytes() == b"second"
+
+
+def test_atomic_replace_file_within_replaces_target(tmp_path):
+    source = tmp_path / "staging" / "server.jar"
+    target = tmp_path / "mods" / "server.jar"
+    source.parent.mkdir()
+    source.write_bytes(b"new")
+    target.parent.mkdir()
+    target.write_bytes(b"old")
+
+    assert atomic_replace_file_within(tmp_path, source, target) is True
+    assert not source.exists()
+    assert target.read_bytes() == b"new"
+
+
+def test_atomic_replace_file_within_rejects_target_outside_base(tmp_path):
+    base_dir = tmp_path / "server"
+    source = base_dir / "staging" / "server.jar"
+    target = tmp_path / "outside.jar"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"new")
+
+    assert atomic_replace_file_within(base_dir, source, target) is False
+    assert source.read_bytes() == b"new"
+    assert not target.exists()

@@ -5,19 +5,16 @@ from __future__ import annotations
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
-from src.core import build_local_mod_update_plan
 from src.models import LocalModUpdatePlan
 from src.ui import (
-    HostBound,
     InstallReviewDialogBuilder,
     LocalReviewSession,
-    LocalReviewSnapshotStore,
     ModReviewWorkflow,
     OnlineReviewSession,
     ReviewViewSnapshot,
@@ -28,7 +25,6 @@ from src.utils import (
     Sizes,
     Spacing,
     UIUtils,
-    UIWorkScope,
 )
 
 
@@ -50,37 +46,36 @@ def _selected_root_key(tree: Any, snapshot: ReviewViewSnapshot) -> str:
     return ""
 
 
-class ModManagementReviewOps(HostBound):
+if TYPE_CHECKING:
+    from src.ui import ModManagementFrame
+
+
+class ModManagementReviewOps:
     """將 workflow snapshot 呈現在 Qt，並把 UI command 送回 session"""
 
-    mod_manager: Any
-    mod_session: Any
-    parent: Any
-    ui_queue: Any
-    scope: UIWorkScope
-    update_status_safe: Callable[..., Any]
-    update_progress_safe: Callable[..., Any]
-    _refresh_online_queue_button: Callable[..., Any]
-    _capture_selected_mod_ids: Callable[..., set[str]]
-    _get_current_modrinth_context: Callable[..., tuple[str | None, str | None, str | None]]
-    _install_pending_online_install_queue: Callable[..., Any]
-    _install_local_update_review_entries: Callable[..., Any]
+    def __init__(self, controller: ModManagementFrame) -> None:
+        self.controller = controller
+        self._dependency_snapshot_migration_totals = {
+            "checked": 0,
+            "migrated": 0,
+            "replayed": 0,
+            "fallback_rebuild": 0,
+        }
+        self.install_review_dialog_builder: InstallReviewDialogBuilder | None = None
 
     def _create_review_workflow(self) -> ModReviewWorkflow | None:
-        manager = self.mod_manager
-        current_server = self.mod_session.server
+        manager = self.controller.mod_manager
+        current_server = self.controller.mod_session.server
         if not current_server or not manager:
             return None
         installed_mods = manager.get_mod_list()
-        telemetry = getattr(self, "_dependency_snapshot_migration_totals", None)
-        if not isinstance(telemetry, dict):
-            telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
-            self._dependency_snapshot_migration_totals = telemetry
+        telemetry = self._dependency_snapshot_migration_totals
         return ModReviewWorkflow(
+            mod_planning=self.controller.mod_planning,
             server=current_server,
             installed_mods=installed_mods,
             telemetry=telemetry,
-            snapshot_store=LocalReviewSnapshotStore(manager, telemetry),
+            mod_manager=manager,
         )
 
     def show_online_install_queue(self, _event=None) -> None:
@@ -90,13 +85,13 @@ class ModManagementReviewOps(HostBound):
         Args:
             _event: Qt signal 傳入但不使用的事件值
         """
-        pending_installs = self.mod_session.pending_online_installs
+        pending_installs = self.controller.mod_session.pending_online_installs
         if not pending_installs:
-            UIUtils.show_message("安裝清單", "目前安裝清單是空的", self.parent, message_level="info")
+            UIUtils.show_message("安裝清單", "目前安裝清單是空的", self.controller.parent, message_level="info")
             return
         workflow = self._create_review_workflow()
         if workflow is None:
-            UIUtils.show_message("錯誤", "模組管理器未初始化", self.parent, message_level="error")
+            UIUtils.show_message("錯誤", "模組管理器未初始化", self.controller.parent, message_level="error")
             return
         session = workflow.start_online_session(list(pending_installs))
         self._show_online_review_dialog(session)
@@ -156,7 +151,7 @@ class ModManagementReviewOps(HostBound):
         def trigger_online_install() -> None:
             handoff = session.build_handoff()
             dialog.accept()
-            self._install_pending_online_install_queue(dialog, handoff)
+            self.controller.install_executor.execute_online_review(dialog, handoff)
 
         install_button = self._create_review_action_button(
             shell.button_frame,
@@ -181,39 +176,37 @@ class ModManagementReviewOps(HostBound):
         if not selected_root_keys:
             UIUtils.show_message("提示", "請先選擇要移除的模組項目", dialog, message_level="warning")
             return
-        removed_count = self.mod_session.remove_pending_review_keys(selected_root_keys)
+        removed_count = self.controller.mod_session.remove_pending_review_keys(selected_root_keys)
         if removed_count <= 0:
             UIUtils.show_message("提示", "目前選取項目不可移除", dialog, message_level="warning")
             return
-        self._refresh_online_queue_button()
+        self.controller.queue_ops._refresh_online_queue_button()
         dialog.destroy()
-        if self.mod_session.pending_online_installs:
+        if self.controller.mod_session.pending_online_installs:
             self.show_online_install_queue()
 
     def _clear_pending_online_installs(self, dialog: Any) -> None:
-        self.mod_session.clear_pending_installs()
-        self._refresh_online_queue_button()
+        self.controller.mod_session.clear_pending_installs()
+        self.controller.queue_ops._refresh_online_queue_button()
         dialog.destroy()
 
     def _get_dialog_parent(self) -> Any:
         """安全取得 Qt 頂層視窗或 QWidget 父元件"""
-        host = getattr(self, "_host", getattr(self, "host", None))
-        if host is not None:
-            main_frame = getattr(host, "main_frame", None)
-            if main_frame is not None and hasattr(main_frame, "window"):
-                return main_frame.window()
-            parent = getattr(host, "parent", None)
-            if parent is not None:
-                if hasattr(parent, "window"):
-                    return parent.window()
-                return parent
+        main_frame = self.controller.main_frame
+        if main_frame is not None:
+            return main_frame.window()
+        parent = self.controller.parent
+        if parent is not None:
+            if hasattr(parent, "window"):
+                return parent.window()
+            return parent
         return None
 
     def check_local_mod_updates(self) -> None:
         """分析本地 Mod 更新並在結果仍屬於目前 session 時開啟 Review"""
-        manager = self.mod_manager
+        manager = self.controller.mod_manager
         dialog_parent = self._get_dialog_parent()
-        if not self.mod_session.server or not manager:
+        if not self.controller.mod_session.server or not manager:
             UIUtils.show_message("警告", "請先選擇伺服器後再檢查模組更新", dialog_parent, message_level="warning")
             return
         installed_mods = manager.get_mod_list()
@@ -221,7 +214,7 @@ class ModManagementReviewOps(HostBound):
             UIUtils.show_message("提示", "目前伺服器尚未安裝任何模組", dialog_parent, message_level="info")
             return
 
-        selected_mod_ids = self._capture_selected_mod_ids()
+        selected_mod_ids = self.controller.tree_sync._capture_selected_mod_ids()
         if not selected_mod_ids:
             target_mods = installed_mods
             scope_text = f"全部 {len(target_mods)} 個模組"
@@ -233,12 +226,12 @@ class ModManagementReviewOps(HostBound):
             ]
             scope_text = f"已選取的 {len(target_mods)} 個模組"
 
-        minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
+        minecraft_version, loader_type, loader_version = self.controller.queue_ops._get_current_modrinth_context()
 
         def check_task() -> None:
             try:
-                self.update_status_safe(f"正在掃描本地模組更新與相容性 ({scope_text})...")
-                self.update_progress_safe(0.0)
+                self.controller.update_status_safe(f"正在掃描本地模組更新與相容性 ({scope_text})...")
+                self.controller.update_progress_safe(0.0)
                 last_hash_progress_percent = -1
 
                 def on_hash_progress(completed: int, total: int) -> None:
@@ -250,14 +243,14 @@ class ModManagementReviewOps(HostBound):
                     if progress_percent == last_hash_progress_percent:
                         return
                     last_hash_progress_percent = progress_percent
-                    self.update_progress_safe(fraction)
-                    self.update_status_safe(f"正在計算本地模組雜湊... {completed}/{total}")
+                    self.controller.update_progress_safe(fraction)
+                    self.controller.update_status_safe(f"正在計算本地模組雜湊... {completed}/{total}")
 
                 def on_stage_progress(fraction: float, status_text: str) -> None:
-                    self.update_progress_safe(fraction)
-                    self.update_status_safe(status_text)
+                    self.controller.update_progress_safe(fraction)
+                    self.controller.update_status_safe(status_text)
 
-                update_plan = build_local_mod_update_plan(
+                update_plan = self.controller.mod_planning.build_local_update_plan(
                     target_mods,
                     minecraft_version=minecraft_version,
                     loader=loader_type,
@@ -269,24 +262,27 @@ class ModManagementReviewOps(HostBound):
                     ),
                     stage_progress_callback=on_stage_progress,
                 )
-                self.update_progress_safe(1.0)
-                self.update_status_safe(
+                self.controller.update_progress_safe(1.0)
+                self.controller.update_status_safe(
                     f"更新檢查完成：{update_plan.actionable_count} 個可更新，{len(update_plan.candidates)} 個需 Review"
                 )
-                self.ui_queue.put(lambda: self._show_local_update_review_dialog(update_plan, scope_text))
+                self.controller.ui_queue.put(lambda: self._show_local_update_review_dialog(update_plan, scope_text))
             except Exception as exc:
                 logger.error("檢查本地模組更新失敗: %s\n%s", exc, traceback.format_exc())
-                self.update_progress_safe(0)
-                self.update_status_safe(f"檢查本地模組更新失敗: {exc}")
+                self.controller.update_progress_safe(0)
+                self.controller.update_status_safe(f"檢查本地模組更新失敗: {exc}")
                 parent = self._get_dialog_parent()
-                self.ui_queue.put(
-                    lambda msg=str(exc): UIUtils.show_message("更新檢查失敗", msg, parent, message_level="error")
-                )
+                message = str(exc)
 
-        self.scope.submit(check_task, key="local_update_check", replace=True)
+                def show_error() -> None:
+                    UIUtils.show_message("更新檢查失敗", message, parent, message_level="error")
+
+                self.controller.ui_queue.put(show_error)
+
+        self.controller.scope.submit(check_task, key="local_update_check", replace=True)
 
     def _get_install_review_dialog_builder(self) -> InstallReviewDialogBuilder:
-        builder = getattr(self, "install_review_dialog_builder", None)
+        builder = self.install_review_dialog_builder
         if builder is None:
             dialog_parent = self._get_dialog_parent()
             builder = InstallReviewDialogBuilder(dialog_parent)
@@ -373,7 +369,7 @@ class ModManagementReviewOps(HostBound):
     def _show_local_update_review_dialog(self, update_plan: LocalModUpdatePlan, scope_text: str) -> None:
         workflow = self._create_review_workflow()
         if workflow is None:
-            UIUtils.show_message("錯誤", "模組管理器未初始化", self.parent, message_level="error")
+            UIUtils.show_message("錯誤", "模組管理器未初始化", self.controller.parent, message_level="error")
             return
         session = workflow.start_local_update_session(update_plan, scope_text)
         if session.empty:
@@ -413,8 +409,8 @@ class ModManagementReviewOps(HostBound):
                 shell.summary_box.setPlainText(root.summary)
 
         def refresh_action_button() -> None:
-            update_button.setText(f"⬇️ 更新 {snapshot.enabled_count} 個已啟用項目")
-            update_button.setEnabled(snapshot.enabled_count > 0)
+            update_button.setText(f"⬇️ 更新 {snapshot.selected_count} 個已選取項目")
+            update_button.setEnabled(snapshot.selected_count > 0)
 
         def refresh_project_button(_event=None) -> None:
             root = snapshot.root(_selected_root_key(update_tree, snapshot))
@@ -430,8 +426,8 @@ class ModManagementReviewOps(HostBound):
             refresh_action_button()
             refresh_project_button()
 
-        def toggle_selection(enabled: bool) -> None:
-            if session.apply_selection(_selected_node_ids(update_tree), enabled):
+        def toggle_selection(selected: bool) -> None:
+            if session.apply_selection(_selected_node_ids(update_tree), selected):
                 refresh_all()
 
         def open_project_page() -> None:
@@ -441,7 +437,7 @@ class ModManagementReviewOps(HostBound):
         def trigger_local_update() -> None:
             handoff = session.build_handoff()
             dialog.accept()
-            self._install_local_update_review_entries(dialog, handoff)
+            self.controller.install_executor.execute_local_review(dialog, handoff)
 
         update_button = self._create_review_action_button(
             shell.button_frame,
@@ -450,10 +446,10 @@ class ModManagementReviewOps(HostBound):
             bold=True,
         )
         self._create_review_action_button(
-            shell.button_frame, text="啟用選取項目", command=lambda: toggle_selection(True)
+            shell.button_frame, text="納入選取項目", command=lambda: toggle_selection(True)
         )
         self._create_review_action_button(
-            shell.button_frame, text="停用選取項目", command=lambda: toggle_selection(False)
+            shell.button_frame, text="排除選取項目", command=lambda: toggle_selection(False)
         )
         project_button = self._append_project_and_close_actions(shell, dialog, open_project_page)
         update_tree.itemSelectionChanged.connect(refresh_summary)

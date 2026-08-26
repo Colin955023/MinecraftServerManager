@@ -32,13 +32,14 @@ def test_download_file_without_expected_hash_skips_hashing(tmp_path, monkeypatch
 
     monkeypatch.setattr(http_client_module.hashlib, "new", _unexpected_hash)
 
-    assert HTTPClient.download_file("https://example.com/server.jar", str(target)) is True
+    result = HTTPClient.download_file("https://example.com/server.jar", str(target))
+    assert result.success is True
+    assert result.message == ""
     assert target.read_bytes() == b"new-bytes"
 
 
 def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
-    failure_messages: list[str] = []
     monkeypatch.setattr(
         HTTPClient,
         "_open_stream",
@@ -50,52 +51,31 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
         lambda _path: SimpleNamespace(total=10, used=9, free=1),
     )
 
-    assert (
-        HTTPClient.download_file(
-            "https://example.com/server.jar",
-            str(target),
-            failure_message_callback=failure_messages.append,
-        )
-        is False
-    )
-    assert failure_messages and "磁碟空間不足" in failure_messages[0]
+    result = HTTPClient.download_file("https://example.com/server.jar", str(target))
+    assert result.success is False
+    assert "磁碟空間不足" in result.message
     assert not target.exists()
     assert list(tmp_path.glob("*.part")) == []
 
 
 def test_download_file_reports_timeout_reason(tmp_path, monkeypatch) -> None:
     target = tmp_path / "server.jar"
-    failure_messages: list[str] = []
 
     def _timeout(*_args, **_kwargs):
         raise httpx.ReadTimeout("timed out")
 
     monkeypatch.setattr(HTTPClient, "_open_stream", classmethod(lambda _cls, *a, **kw: _timeout(*a, **kw)))
 
-    assert (
-        HTTPClient.download_file(
-            "https://example.com/server.jar",
-            str(target),
-            failure_message_callback=failure_messages.append,
-        )
-        is False
-    )
-    assert failure_messages and "逾時" in failure_messages[0]
+    result = HTTPClient.download_file("https://example.com/server.jar", str(target))
+    assert result.success is False
+    assert "逾時" in result.message
 
 
 def test_download_file_reports_invalid_url_reason(tmp_path) -> None:
     target = tmp_path / "server.jar"
-    failure_messages: list[str] = []
-
-    assert (
-        HTTPClient.download_file(
-            "not-a-url",
-            str(target),
-            failure_message_callback=failure_messages.append,
-        )
-        is False
-    )
-    assert failure_messages == ["URL 參數無效或不符合 HTTPS 安全策略"]
+    result = HTTPClient.download_file("not-a-url", str(target))
+    assert result.success is False
+    assert result.message == "URL 參數無效或不符合 HTTPS 安全策略"
 
 
 def test_download_file_keeps_existing_target_when_replace_fails(tmp_path, monkeypatch) -> None:
@@ -112,7 +92,8 @@ def test_download_file_keeps_existing_target_when_replace_fails(tmp_path, monkey
 
     monkeypatch.setattr(Path, "replace", _fail_replace)
 
-    assert HTTPClient.download_file("https://example.com/server.jar", str(target)) is False
+    result = HTTPClient.download_file("https://example.com/server.jar", str(target))
+    assert result.success is False
     assert target.read_bytes() == b"old-bytes"
 
 

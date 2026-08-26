@@ -23,12 +23,6 @@ class _Combo:
         self.selected = ""
         self.enabled = True
 
-    def configure(self, **kwargs) -> None:
-        if "values" in kwargs:
-            self.values = list(kwargs["values"])
-        if "state" in kwargs:
-            self.state = str(kwargs["state"])
-
     def set(self, value: str) -> None:
         self.selected = value
 

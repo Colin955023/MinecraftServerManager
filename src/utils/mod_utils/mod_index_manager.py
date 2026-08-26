@@ -11,7 +11,7 @@ from typing import Any
 
 import orjson
 
-from src.utils import HashUtils, PathUtils, atomic_write_json, get_logger
+from src.utils import HashUtils, atomic_write_json, atomic_write_text, get_logger
 
 logger = get_logger().bind(component="ModIndexManager")
 DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
@@ -39,7 +39,7 @@ class ModIndexManager:
                     "這個目錄由 Minecraft Server Manager 用於快取模組索引與檔案雜湊\n"
                     "可安全刪除，程式會在下次掃描/啟動時重建索引，但刪除會造成下次掃描較慢\n"
                 )
-                PathUtils.write_text_file(readme, readme_content, encoding="utf-8")
+                atomic_write_text(readme, readme_content, encoding="utf-8")
             if os.name == "nt":
                 try:
                     FILE_ATTRIBUTE_HIDDEN = 0x02
@@ -85,7 +85,7 @@ class ModIndexManager:
                 if provider_metadata is not None and (not isinstance(provider_metadata, dict)):
                     normalized_entry.pop("provider_metadata", None)
                     repaired_count += 1
-                for namespace in ("provider_identity", "review_metadata"):
+                for namespace in ("provider_identity", "review_metadata", "issue"):
                     value = normalized_entry.get(namespace)
                     if value is not None and not isinstance(value, dict):
                         normalized_entry.pop(namespace, None)
@@ -202,19 +202,43 @@ class ModIndexManager:
             return ""
         return str(hashes.get(normalized_algorithm, "") or "").strip().lower()
 
-    def cache_metadata(self, file_path: Path, metadata: dict[str, Any]) -> None:
+    def cache_metadata(self, file_path: Path, metadata: dict[str, Any], *, clear_issue: bool = False) -> None:
         """
         快取模組中繼資料
 
         Args:
             file_path: JAR 檔案路徑
             metadata: 模組中繼資料
+            clear_issue: 是否清除既有的檔案問題標記
         """
         try:
-            self._update_entry(file_path, metadata=dict(metadata or {}))
+            updates: dict[str, Any] = {"metadata": dict(metadata or {})}
+            if clear_issue:
+                updates["issue"] = {}
+            self._update_entry(file_path, **updates)
             logger.debug(f"已快取中繼資料: {file_path.name}")
         except Exception as e:
             logger.warning(f"無法快取模組中繼資料: {e}")
+
+    def mark_issue(self, file_path: Path, reason: str) -> bool:
+        """
+        在模組索引中記錄檔案解析問題，不移動原始檔案
+
+        Args:
+            file_path: 發生問題的模組檔案
+            reason: 穩定的問題原因代碼
+
+        Returns:
+            問題資料成功寫入索引時回傳 True
+        """
+        normalized_reason = str(reason or "unknown_error").strip() or "unknown_error"
+        if not self._update_entry(
+            file_path,
+            issue={"reason": normalized_reason, "detected_at": time.time()},
+        ):
+            return False
+        self._save_index_if_due(force=True)
+        return True
 
     def replace_provider_identity(self, file_path: Path, provider_identity: dict[str, Any]) -> bool:
         """
@@ -413,7 +437,7 @@ class ModIndexManager:
                 return cached
             return None
 
-    def _update_entry(self, file_path: Path, **updates: Any) -> None:
+    def _update_entry(self, file_path: Path, **updates: Any) -> bool:
         file_name = file_path.name
         with self._index_lock:
             try:
@@ -425,8 +449,10 @@ class ModIndexManager:
                 self._index[file_name] = entry
                 self._dirty = True
                 self._save_index_if_due()
+                return True
             except Exception as e:
                 logger.warning(f"無法更新模組索引項目 {file_name}: {e}")
+                return False
 
     def clear_index(self) -> None:
         """清空所有快取項目並將空索引寫入磁碟"""

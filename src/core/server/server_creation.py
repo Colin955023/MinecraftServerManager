@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import shutil
 import time
 import uuid
@@ -9,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from src.core import LoaderManager, ServerCRUD
+from src.core import LoaderManager, ServerCRUD, ServerInspector, ServerPropertiesStore
 from src.models import (
     ServerConfig,
     ServerCreationPlan,
@@ -18,11 +19,13 @@ from src.models import (
 )
 from src.utils import (
     CreationCancelledError,
-    PathUtils,
+    PropertiesSchema,
     ServerCommands,
     SystemUtils,
     atomic_write_json,
+    delete_within,
     get_logger,
+    is_path_within,
 )
 
 logger = get_logger().bind(component="ServerCreation")
@@ -32,24 +35,29 @@ CancelCheck = Callable[[], bool]
 _CreationCancelled = CreationCancelledError
 
 
-class ServerCreationService:
-    """伺服器建立 journey 的唯一 owner"""
+class CreateServerJourney:
+    """伺服器建立流程與交易提交的唯一外部介面"""
 
     _MARKER_NAME = ".msm-server-creation.json"
     _STAGING_GLOB = ".msm-create-*.staging"
 
-    def __init__(self, server_crud: ServerCRUD, loader_manager: LoaderManager) -> None:
+    def __init__(
+        self,
+        server_crud: ServerCRUD,
+        loader_manager: LoaderManager,
+        server_properties: ServerPropertiesStore | None = None,
+    ) -> None:
         self.server_crud = server_crud
         self.loader_manager = loader_manager
+        self.server_properties = server_properties or ServerPropertiesStore(server_crud)
         self._root = server_crud.servers_root.resolve()
         self._lock = server_crud.operation_lock
-        self.recover_orphans()
+        self._recover_orphans()
 
     def plan(
         self,
         config: ServerConfig,
         *,
-        properties: dict[str, str] | None = None,
         user_java_path: str | None = None,
     ) -> ServerCreationPlan:
         """
@@ -57,7 +65,6 @@ class ServerCreationService:
 
         Args:
             config: 使用者選定的伺服器設定
-            properties: 選用的 server.properties；省略時使用預設值
             user_java_path: 選用的 Java 執行檔路徑
 
         Returns:
@@ -68,7 +75,7 @@ class ServerCreationService:
             raise ValueError("伺服器名稱不可為空白或包含前後空白")
         root = self._root
         final_path = (root / name).resolve(strict=False)
-        if final_path.parent != root or not PathUtils.is_path_within(root, final_path, strict=False):
+        if final_path.parent != root or not is_path_within(root, final_path, strict=False):
             raise ValueError("無效的伺服器名稱（路徑遍歷偵測）")
         if name in self.server_crud.servers or final_path.exists():
             raise FileExistsError("同名伺服器已存在")
@@ -82,8 +89,8 @@ class ServerCreationService:
             raise ValueError("Minecraft 版本不可為空或 unknown")
         if loader_type != "vanilla" and (not loader_version or loader_version == "unknown"):
             raise ValueError("此 Loader 必須指定版本")
-        if int(config.memory_max_mb) <= 0:
-            raise ValueError("最大記憶體必須大於 0")
+        if int(config.memory_max_mb) < 1024:
+            raise ValueError("最大記憶體不可低於 1024 MB")
         if config.memory_min_mb is not None and not 0 < int(config.memory_min_mb) <= int(config.memory_max_mb):
             raise ValueError("最小記憶體必須大於 0 且不可超過最大記憶體")
 
@@ -104,8 +111,16 @@ class ServerCreationService:
                     f"{loader_type} installer 找不到可用的 SHA-1 / SHA-256 / SHA-512 驗證資訊",
                 )
             )
+        total_memory_mb = SystemUtils.get_total_memory_mb()
+        if total_memory_mb > 0 and int(config.memory_max_mb) >= total_memory_mb:
+            warnings.append(
+                ServerCreationWarning(
+                    "memory_exceeds_system",
+                    f"最大記憶體 {int(config.memory_max_mb)} MB 已達或超過系統總記憶體 {total_memory_mb} MB",
+                )
+            )
         transaction_id = uuid.uuid4().hex
-        resolved_properties = self.server_crud.get_default_server_properties() if properties is None else properties
+        resolved_properties = PropertiesSchema.default_values()
         return ServerCreationPlan(
             transaction_id=transaction_id,
             name=name,
@@ -177,7 +192,10 @@ class ServerCreationService:
             self._emit(progress_callback, 5, "正在準備交易暫存目錄...")
             plan.staging_path.mkdir()
             self._write_marker(plan.staging_path, plan, "staging")
-            self.server_crud.prepare_server_files(config, dict(plan.properties))
+            self.server_crud.prepare_server_files(config)
+            initial_properties = dict(plan.properties)
+            initial_properties["motd"] = f"Minecraft 伺服器 - {config.name}"
+            self.server_properties.write_initial(plan.staging_path, initial_properties)
             self._check_cancel(cancel_check)
 
             phase = "artifact"
@@ -214,8 +232,12 @@ class ServerCreationService:
             phase = "launch_script"
             current_progress = max(current_progress, 82)
             self._emit(progress_callback, current_progress, "正在建立啟動腳本...")
-            if not self.server_crud.create_launch_script(config):
+            staged_config = copy.deepcopy(config)
+            staged_config.path = str(plan.staging_path)
+            detected_target = ServerInspector.find_main_jar(plan.staging_path, config.loader_type, staged_config)
+            if not self.server_crud.create_launch_script(staged_config, launch_target=detected_target):
                 raise RuntimeError("建立啟動腳本失敗")
+            ServerCommands.cleanup_redundant_startup_scripts(plan.staging_path)
             self._validate_staged_instance(plan)
             self._check_cancel(cancel_check)
             self._write_marker(plan.staging_path, plan, "prepared")
@@ -226,6 +248,9 @@ class ServerCreationService:
             plan.staging_path.replace(plan.final_path)
             moved_to_final = True
             config.path = str(plan.final_path)
+            ServerCommands.cleanup_redundant_startup_scripts(plan.final_path)
+            if (plan.final_path / "user_jvm_args.txt").is_file():
+                ServerCommands.update_forge_user_jvm_args(plan.final_path, config)
             self._write_marker(plan.final_path, plan, "moved")
             self.server_crud.servers[plan.name] = config
             registered = True
@@ -258,7 +283,7 @@ class ServerCreationService:
                 cleanup_complete=cleanup_complete,
             )
 
-    def recover_orphans(self) -> None:
+    def _recover_orphans(self) -> None:
         """清除 crash 後的 staging 與未註冊 final instance"""
         root = self._root
         with self._lock:
@@ -316,9 +341,9 @@ class ServerCreationService:
         ]
         if plan.loader_type in {"vanilla", "fabric", "quilt"}:
             required.append(plan.staging_path / "server.jar")
-        if plan.loader_type in {"forge", "neoforge"}:
-            required.append(plan.staging_path / "run.bat")
         missing = [path.name for path in required if not path.is_file()]
+        if plan.loader_type in {"forge", "neoforge"} and not (plan.staging_path / "libraries").is_dir():
+            missing.append("libraries 資料夾")
         if missing:
             raise RuntimeError(f"伺服器建立內容不完整：{', '.join(missing)}")
 
@@ -345,7 +370,7 @@ class ServerCreationService:
             SystemUtils.kill_java_processes_in_path(path)
         except Exception as exc:
             logger.warning(f"清理建立交易時無法終止 Java process: {exc}")
-        return PathUtils.delete_within(self._root, path)
+        return delete_within(self._root, path)
 
     def _record_diagnostic(self, plan: ServerCreationPlan, phase: str, error: Any) -> str:
         diagnostic_id = f"server-create-{plan.transaction_id[:12]}"
@@ -373,56 +398,4 @@ class ServerCreationService:
         return diagnostic_id
 
 
-class CreateServerJourney:
-    """建立伺服器實例的 deep module 入口"""
-
-    def __init__(self, server_crud: ServerCRUD, loader_manager: LoaderManager) -> None:
-        self._service = ServerCreationService(server_crud, loader_manager)
-
-    def plan(
-        self,
-        config: ServerConfig,
-        *,
-        user_java_path: str | None = None,
-    ) -> ServerCreationPlan:
-        """
-        產生不可變建立計畫
-
-        Args:
-            config: 使用者選定的伺服器設定
-            user_java_path: 選用的 Java 執行檔路徑
-
-        Returns:
-            不可變的建立計畫
-        """
-        return self._service.plan(config, user_java_path=user_java_path)
-
-    def execute(
-        self,
-        plan: ServerCreationPlan,
-        *,
-        allow_unverified_installer: bool = False,
-        progress_callback: ProgressCallback | None = None,
-        cancel_check: CancelCheck | None = None,
-    ) -> ServerCreationResult:
-        """
-        執行計畫至單一 commit point；失敗時補償
-
-        Args:
-            plan: 已完成驗證的建立計畫
-            allow_unverified_installer: 是否接受缺少 checksum 的安裝器
-            progress_callback: 接收進度百分比與文字的回呼
-            cancel_check: 回傳是否要求取消的檢查函式
-
-        Returns:
-            建立結果
-        """
-        return self._service.execute(
-            plan,
-            allow_unverified_installer=allow_unverified_installer,
-            progress_callback=progress_callback,
-            cancel_check=cancel_check,
-        )
-
-
-__all__ = ["CreateServerJourney", "ServerCreationService"]
+__all__ = ["CreateServerJourney"]

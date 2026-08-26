@@ -11,16 +11,17 @@ import time
 import traceback
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
+from typing import Any, cast
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QKeyEvent
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     LineEdit,
     ListWidget,
+    MSFluentWindow,
     PrimaryPushButton,
     PushButton,
     SubtitleLabel,
@@ -28,7 +29,6 @@ from qfluentwidgets import (
     TitleLabel,
 )
 
-from src.ui import ModalMSFluentWindow
 from src.utils import (
     Colors,
     FontSize,
@@ -45,7 +45,7 @@ from src.utils import (
 logger = get_logger().bind(component="ServerMonitorWindow")
 
 
-class ServerMonitorWindow(ModalMSFluentWindow):
+class ServerMonitorWindow(MSFluentWindow):
     """伺服器監控視窗"""
 
     _ansi_escape_pattern = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
@@ -68,37 +68,46 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         height = min(max(current_height, min_height), available_height)
         return min_width, min_height, width, height
 
-    def __init__(self, parent, server_manager, server_name: str, server_crud=None):
-        super().__init__(None, is_modal=False, show_buttons=False)
+    def __init__(self, parent, server_runtime, server_name: str, server_crud=None, server_properties=None):
+        super().__init__()
         self.parent = parent
-        self.server_manager = server_manager
+        self.server_runtime = server_runtime
         self.server_crud = server_crud
+        self.server_properties = server_properties
         self.server_name = server_name
-        self.window = self
-        self.setParent(None)
-        self.setWindowFlags(
-            Qt.WindowType.Window | Qt.WindowType.WindowMinMaxButtonsHint | Qt.WindowType.WindowCloseButtonHint
-        )
+        self.setMicaEffectEnabled(False)
+        self.setCustomBackgroundColor(*Colors.BG_PRIMARY)
+        self.navigationInterface.hide()
+        self.stackedWidget.setStyleSheet("background-color: transparent; border: none;")
+
+        self.widget = QWidget(self)
+        self.widget.setObjectName("MonitorMainWidget")
+        self.stackedWidget.addWidget(self.widget)
+        self.stackedWidget.setCurrentWidget(self.widget)
+        self.viewLayout = QVBoxLayout(self.widget)
+        self.viewLayout.setContentsMargins(20, 20, 20, 20)
+        self.viewLayout.setSpacing(12)
+
         self._auto_refresh_id: int | None = None
         self.is_monitoring = False
         self._last_player_count: int | None = None
         self._last_max_players: int | None = None
         self._last_player_names: tuple[str, ...] | None = None
-        self._server_ready_notified = False
+        self._server_ready_notified = True
         self._last_ui_state: dict[str, str] = {}
         self._console_buffer: list[str] = []
-        self._console_flush_job = None
         self._console_flush_interval_ms = 100
         self._refresh_log_max_lines = 2500
         self._refresh_log_max_bytes = 2 * 1024 * 1024
         self._command_history: list[str] = []
-        self._monitor_loop_job = None
-        self._delayed_player_list_job = None
+        self._history_index: int = -1
+        self._current_typed: str = ""
         self._last_monitor_status_update = 0.0
         self._last_monitor_output_check = 0.0
         self._last_log_mtime = 0.0
         self._log_file_offset: int = 0
         self._recent_lines_cache: set[str] = set()
+        self._runtime_sequence = 0
         self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
         self._ui_queue_timer = QTimer(self)
         self._ui_queue_timer.timeout.connect(self._drain_ui_queue)
@@ -124,11 +133,15 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         idx = clean.find("There are ")
         if idx != -1:
             clean = clean[idx:]
-        match = re.search(r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online:?\s*(.*)$", clean)
+        match = re.search(
+            r"There are\s+(\d+)(?:\s+(?:of a max(?: of)?|/)\s+(\d+))?\s+players online:?\s*(.*)$",
+            clean,
+            re.IGNORECASE,
+        )
         if not match:
             return None
         current_players = int(match.group(1))
-        max_players = int(match.group(2))
+        max_players = int(match.group(2)) if match.group(2) else current_players
         players_str = (match.group(3) or "").strip()
         player_names = tuple(name.strip() for name in players_str.split(",") if name and name.strip())
         return (current_players, max_players, player_names)
@@ -137,12 +150,20 @@ class ServerMonitorWindow(ModalMSFluentWindow):
     def _parse_player_presence_event(cls, line: str) -> tuple[str, bool] | None:
         clean = cls._clean_text(line)
         message = clean.rsplit("]:", 1)[-1].strip() if "]:" in clean else clean
-        match = re.search(r"\b([A-Za-z0-9_]{1,16}) joined the game\b", message)
-        if match:
-            return (match.group(1), True)
-        match = re.search(r"\b([A-Za-z0-9_]{1,16}) left the game\b", message)
-        if match:
-            return (match.group(1), False)
+        match_join = re.search(
+            r"\b([A-Za-z0-9_]{1,16})\s+(?:joined the game|logged in with entity id)\b",
+            message,
+            re.IGNORECASE,
+        )
+        if match_join:
+            return (match_join.group(1), True)
+        match_leave = re.search(
+            r"\b([A-Za-z0-9_]{1,16})\s+(?:left the game|lost connection)\b",
+            message,
+            re.IGNORECASE,
+        )
+        if match_leave:
+            return (match_leave.group(1), False)
         return None
 
     def start_auto_refresh(self) -> None:
@@ -153,8 +174,8 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
     def stop_auto_refresh(self) -> None:
         """停止伺服器狀態的自動刷新機制"""
-        if self.window and self.window.isVisible():
-            UIUtils.cancel_scheduled_job(self.window, "_auto_refresh_id", owner=self)
+        if self.isVisible():
+            UIUtils.cancel_scheduled_job(self, "_auto_refresh_id", owner=self)
         else:
             self._auto_refresh_id = None
 
@@ -175,13 +196,13 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         self.create_console_panel(self.viewLayout)
 
         try:
-            current_width = self.window.width()
-            current_height = self.window.height()
+            current_width = self.width()
+            current_height = self.height()
             _, _, final_width, final_height = self._fit_initial_size(
                 current_width, current_height, available_width, available_height
             )
 
-            self.window.resize(final_width, final_height)
+            self.resize(final_width, final_height)
             self.update_status()
         except Exception as e:
             logger.error(f"視窗置中失敗: {e}\n{traceback.format_exc()}")
@@ -193,17 +214,22 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         Args:
             parent_layout: 父層佈局，控制面板將加入此佈局中
         """
-        control_frame = CardWidget(self.window)
+        control_frame = CardWidget(self)
+        control_frame.setStyleSheet(
+            "CardWidget { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }"
+        )
         c_layout = QVBoxLayout(control_frame)
         c_layout.setContentsMargins(Spacing.LARGE, Spacing.LARGE, Spacing.LARGE, Spacing.LARGE)
 
         h1 = QHBoxLayout()
-        h1.addWidget(SubtitleLabel("🎮 伺服器控制", control_frame))
+        lbl_control = SubtitleLabel("🎮 伺服器控制", control_frame)
+        lbl_control.setStyleSheet("background: transparent;")
+        h1.addWidget(lbl_control)
 
         status_text, status_color = ServerOperations.get_status_text(False)
         self.status_label = TitleLabel(status_text, control_frame)
         self.status_label.setStyleSheet(
-            f"color: {status_color if status_color != 'red' else resolve_color(Colors.TEXT_ERROR)};"
+            f"color: {status_color if status_color != 'red' else resolve_color(Colors.TEXT_ERROR)}; background: transparent;"
         )
         h1.addWidget(self.status_label)
 
@@ -229,7 +255,9 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
         c_layout.addLayout(h1)
 
-        c_layout.addWidget(SubtitleLabel("📈 系統資源", control_frame))
+        lbl_resource = SubtitleLabel("📈 系統資源", control_frame)
+        lbl_resource.setStyleSheet("background: transparent;")
+        c_layout.addWidget(lbl_resource)
 
         h2 = QHBoxLayout()
         v_left = QVBoxLayout()
@@ -237,16 +265,21 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         v_right = QVBoxLayout()
 
         self.pid_label = BodyLabel("🆔 PID: N/A", control_frame)
+        self.pid_label.setStyleSheet("background: transparent;")
         self.memory_label = BodyLabel("🧠 記憶體使用: 0 MB", control_frame)
+        self.memory_label.setStyleSheet("background: transparent;")
         v_left.addWidget(self.pid_label)
         v_left.addWidget(self.memory_label)
 
         self.uptime_label = BodyLabel("⏱️ 執行時間: 00:00:00", control_frame)
+        self.uptime_label.setStyleSheet("background: transparent;")
         self.players_label = BodyLabel("👥 玩家數量: 0/20", control_frame)
+        self.players_label.setStyleSheet("background: transparent;")
         v_mid.addWidget(self.uptime_label)
         v_mid.addWidget(self.players_label)
 
         self.version_label = BodyLabel("📦 版本: N/A", control_frame)
+        self.version_label.setStyleSheet("background: transparent;")
         v_right.addWidget(self.version_label)
         v_right.addStretch(1)
 
@@ -257,11 +290,19 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
         parent_layout.addWidget(control_frame)
 
-        players_frame = CardWidget(self.window)
+        players_frame = CardWidget(self)
+        players_frame.setStyleSheet(
+            "CardWidget { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }"
+        )
         p_layout = QVBoxLayout(players_frame)
-        p_layout.addWidget(SubtitleLabel("👥 線上玩家", players_frame))
+        lbl_players = SubtitleLabel("👥 線上玩家", players_frame)
+        lbl_players.setStyleSheet("background: transparent;")
+        p_layout.addWidget(lbl_players)
 
         self.players_listbox = ListWidget(players_frame)
+        self.players_listbox.setStyleSheet(
+            f"ListWidget {{ background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.06); color: {resolve_color(Colors.TEXT_PRIMARY)}; }}"
+        )
         self.players_listbox.addItem("無玩家在線")
         self.players_listbox.itemClicked.connect(self._on_player_click)
         p_layout.addWidget(self.players_listbox)
@@ -275,14 +316,22 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         Args:
             parent_layout: 父層佈局，控制台面板將加入此佈局中
         """
-        console_frame = CardWidget(self.window)
+        console_frame = CardWidget(self)
+        console_frame.setStyleSheet(
+            "CardWidget { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }"
+        )
         c_layout = QVBoxLayout(console_frame)
         c_layout.setContentsMargins(Spacing.LARGE, Spacing.LARGE, Spacing.LARGE, Spacing.LARGE)
 
-        c_layout.addWidget(SubtitleLabel("📜 控制台輸出", console_frame))
+        lbl_console = SubtitleLabel("📜 控制台輸出", console_frame)
+        lbl_console.setStyleSheet("background: transparent;")
+        c_layout.addWidget(lbl_console)
 
         self.console_text = TextEdit(console_frame)
         self.console_text.setReadOnly(True)
+        self.console_text.setStyleSheet(
+            f"TextEdit {{ background-color: transparent; color: {resolve_color(Colors.TEXT_PRIMARY)}; border: 1px solid rgba(255, 255, 255, 0.08); }}"
+        )
 
         font = self.console_text.font()
         font.setFamily("Consolas")
@@ -292,7 +341,9 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         c_layout.addWidget(self.console_text, 1)
 
         h_cmd = QHBoxLayout()
-        h_cmd.addWidget(BodyLabel("指令:", console_frame))
+        lbl_cmd = BodyLabel("指令:", console_frame)
+        lbl_cmd.setStyleSheet("background: transparent;")
+        h_cmd.addWidget(lbl_cmd)
 
         self.command_entry = LineEdit(console_frame)
         self.command_entry.setPlaceholderText("輸入指令...")
@@ -300,6 +351,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         font.setFamily("Consolas")
         self.command_entry.setFont(font)
         self.command_entry.returnPressed.connect(self.send_command)
+        self.command_entry.installEventFilter(self)
 
         h_cmd.addWidget(self.command_entry, 1)
 
@@ -312,9 +364,9 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
         parent_layout.addWidget(console_frame, 1)
 
-    def start_console_flusher(self) -> None:
-        """啟動控制台緩衝區的定期刷新機制"""
-        self._schedule_console_flush(force=True)
+        c_layout.addLayout(h_cmd)
+
+        parent_layout.addWidget(console_frame, 1)
 
     def start_monitoring(self) -> None:
         """啟動伺服器監控循環，開始追蹤狀態、輸出與玩家資訊"""
@@ -331,10 +383,9 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         """停止所有監控活動並取消相關的排程工作"""
         self.is_monitoring = False
         self.stop_auto_refresh()
-        if self.window:
-            UIUtils.cancel_scheduled_job(self.window, "_console_flush_job", owner=self)
-            UIUtils.cancel_scheduled_job(self.window, "_monitor_loop_job", owner=self)
-            UIUtils.cancel_scheduled_job(self.window, "_delayed_player_list_job", owner=self)
+        UIUtils.cancel_scheduled_job(self, "_console_flush_job", owner=self)
+        UIUtils.cancel_scheduled_job(self, "_monitor_loop_job", owner=self)
+        UIUtils.cancel_scheduled_job(self, "_delayed_player_list_job", owner=self)
         self._cancel_window_jobs()
 
     def monitor_loop(self) -> None:
@@ -344,14 +395,14 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         try:
             current_time = time.monotonic()
             if current_time - self._last_monitor_status_update >= 1.5:
-                if self.window and self.window.isVisible():
+                if self.isVisible():
                     self.ui_queue.put(self.update_status)
                 self._last_monitor_status_update = current_time
             if current_time - self._last_monitor_output_check >= 0.1:
                 with suppress(Exception):
                     self.read_server_output()
                 with suppress(Exception):
-                    log_file = self.server_manager.get_server_log_file(self.server_name)
+                    log_file = self.server_crud.get_server_log_file(self.server_name) if self.server_crud else None
                     if log_file and log_file.exists():
                         current_mtime = log_file.stat().st_mtime
                         if current_mtime > self._last_log_mtime:
@@ -368,12 +419,14 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         try:
             raw_lines: list[str] = []
 
-            if hasattr(self.server_manager, "read_server_output"):
-                proc_lines = self.server_manager.read_server_output(self.server_name)
-                if proc_lines:
-                    raw_lines.extend(proc_lines)
+            snapshot = self.server_runtime.observe(
+                self.server_name,
+                after_sequence=self._runtime_sequence,
+            )
+            self._runtime_sequence = snapshot.sequence
+            raw_lines.extend(snapshot.output_lines)
 
-            log_file = self.server_manager.get_server_log_file(self.server_name)
+            log_file = self.server_crud.get_server_log_file(self.server_name) if self.server_crud else None
             if log_file and log_file.exists():
                 try:
                     file_size = log_file.stat().st_size
@@ -409,9 +462,13 @@ class ServerMonitorWindow(ModalMSFluentWindow):
                 self.add_console_message(clean_line)
 
                 if (
-                    ("Done (" in clean_line and "For help, type" in clean_line)
-                    or "Done (" in clean_line
-                    or "Server started" in clean_line
+                    (
+                        ("Done (" in clean_line and "For help, type" in clean_line)
+                        or "Done (" in clean_line
+                        or "Server started" in clean_line
+                    )
+                    and self.server_runtime.observe(self.server_name).is_running
+                    and not self._server_ready_notified
                 ):
                     self.ui_queue.put(self.handle_server_ready)
 
@@ -430,10 +487,10 @@ class ServerMonitorWindow(ModalMSFluentWindow):
     def update_player_count(self) -> None:
         """向伺服器發送 'list' 指令以更新目前的線上玩家數量"""
         try:
-            success = self.server_manager.send_command(self.server_name, "list")
-            if success and self.window and self.window.isVisible():
+            success = self.server_runtime.send_command(self.server_name, "list")
+            if success and self.isVisible():
                 UIUtils.schedule_debounce(
-                    self.window,
+                    self,
                     "_delayed_player_list_job",
                     800,
                     self.read_player_list,
@@ -450,7 +507,10 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             line: 可選的單行輸出，若為 None 則讀取伺服器最新輸出
         """
         try:
-            lines = [line] if line is not None else self.server_manager.read_server_output(self.server_name)
+            if line is None:
+                self.read_server_output()
+                return
+            lines = [line]
             for line in lines:
                 snapshot = self._parse_player_list_line(line)
                 if snapshot:
@@ -484,11 +544,23 @@ class ServerMonitorWindow(ModalMSFluentWindow):
     def update_status(self) -> None:
         """取得伺服器最新資訊並更新 UI 狀態標籤"""
         try:
-            if not self.window:
-                return
-            info = self.server_manager.get_server_info(self.server_name)
-            if not info:
-                return
+            runtime_snapshot = self.server_runtime.observe(self.server_name)
+            config = self.server_crud.servers.get(self.server_name) if self.server_crud else None
+            properties_snapshot = self.server_properties.read(self.server_name) if self.server_properties else None
+            properties = properties_snapshot.properties if properties_snapshot and properties_snapshot.readable else {}
+            max_players = int(properties.get("max-players", 0) or 0)
+            version = "N/A"
+            if config is not None:
+                version = f"{config.minecraft_version}({config.loader_type})"
+            info = {
+                "is_running": runtime_snapshot.is_running,
+                "pid": runtime_snapshot.pid,
+                "memory": runtime_snapshot.memory_mb,
+                "uptime": runtime_snapshot.uptime,
+                "players": self._last_player_count or 0,
+                "max_players": max_players,
+                "version": version,
+            }
             self._update_ui(info)
         except Exception as e:
             logger.error(f"更新狀態失敗: {e}\n{traceback.format_exc()}")
@@ -498,14 +570,14 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         self.console_text.clear()
         self._server_ready_notified = False
         self._recent_lines_cache.clear()
-        log_file = self.server_manager.get_server_log_file(self.server_name)
+        log_file = self.server_crud.get_server_log_file(self.server_name) if self.server_crud else None
         if log_file and log_file.exists():
             with suppress(Exception):
                 self._log_file_offset = log_file.stat().st_size
         else:
             self._log_file_offset = 0
 
-        start_result = self.server_manager.start_server_result(self.server_name)
+        start_result = self.server_runtime.start(self.server_name)
         if start_result.success:
             self.add_console_message(f"✅ 伺服器 {self.server_name} 啟動中...")
             self._schedule_window_job("_start_status_job", 500, self.update_status)
@@ -516,13 +588,13 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             UIUtils.show_message(
                 start_result.title or "啟動失敗",
                 start_result.message or f"啟動伺服器 {self.server_name} 失敗",
-                self.window,
+                self,
                 message_level="error",
             )
 
     def stop_server(self) -> None:
         """執行伺服器停止操作（優雅停止）"""
-        success = ServerOperations.graceful_stop_server(self.server_manager, self.server_name)
+        success = self.server_runtime.stop(self.server_name)
         if success:
             self.add_console_message(f"⏹️ 伺服器 {self.server_name} 停止指令已發送")
             self._schedule_window_job("_stop_refresh_after_job", 2000, self.refresh_after_stop)
@@ -532,7 +604,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
 
     def refresh_after_stop(self) -> None:
         """在停止伺服器後定期檢查直到伺服器完全關閉，然後刷新狀態"""
-        if self.server_manager.is_server_running(self.server_name):
+        if self.server_runtime.observe(self.server_name).is_running:
             self._schedule_window_job("_stop_refresh_after_job", 500, self.refresh_after_stop)
         else:
             self.refresh_status()
@@ -546,7 +618,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         self._recent_lines_cache.clear()
         last_player_line = None
         try:
-            log_file = self.server_manager.get_server_log_file(self.server_name)
+            log_file = self.server_crud.get_server_log_file(self.server_name) if self.server_crud else None
             if log_file and log_file.exists():
                 with suppress(Exception):
                     self._log_file_offset = log_file.stat().st_size
@@ -562,7 +634,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
                 if last_player_line:
                     self.read_player_list(line=last_player_line)
                 else:
-                    if self.server_manager.is_server_running(self.server_name):
+                    if self.server_runtime.observe(self.server_name).is_running:
                         self.update_player_count()
                     else:
                         self.update_player_list([])
@@ -586,15 +658,51 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             return
         if not self._command_history or self._command_history[-1] != command:
             self._command_history.append(command)
+        self._history_index = -1
+        self._current_typed = ""
         self.command_entry.clear()
         self.add_console_message(f"> {command}")
-        success = self.server_manager.send_command(self.server_name, command)
+        success = self.server_runtime.send_command(self.server_name, command)
         if success:
             self.add_console_message(f"✅ 指令已發送: {command}")
             if command.lower() in ["stop", "end", "exit"]:
                 self._schedule_window_job("_command_status_job", 1000, self.update_status)
         else:
             self.add_console_message(f"❌ 指令發送失敗: {command}")
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """
+        過濾指令輸入框事件以支援方向鍵切換歷史指令
+
+        Args:
+            watched: 被監視的 QObject 元件
+            event: 傳遞的事件物件
+
+        Returns:
+            若已攔截並處理該事件則傳回 True，否則傳回 False
+        """
+        if watched == getattr(self, "command_entry", None) and event.type() == QEvent.Type.KeyPress:
+            key_event = cast(QKeyEvent, event)
+            key = key_event.key()
+            if key == Qt.Key.Key_Up:
+                if self._command_history:
+                    if self._history_index == -1:
+                        self._current_typed = self.command_entry.text()
+                        self._history_index = len(self._command_history) - 1
+                    elif self._history_index > 0:
+                        self._history_index -= 1
+                    self.command_entry.setText(self._command_history[self._history_index])
+                return True
+            if key == Qt.Key.Key_Down:
+                if self._command_history and self._history_index != -1:
+                    if self._history_index < len(self._command_history) - 1:
+                        self._history_index += 1
+                        self.command_entry.setText(self._command_history[self._history_index])
+                    else:
+                        self._history_index = -1
+                        self.command_entry.setText(self._current_typed)
+                return True
+        return super().eventFilter(watched, event)
 
     def add_console_message(self, message: str) -> None:
         """
@@ -606,10 +714,6 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         self._console_buffer.append(message + "\n")
         self._schedule_console_flush()
 
-    def on_closing(self) -> None:
-        """處理視窗關閉事件，停止所有監控活動"""
-        self.stop_monitoring()
-
     def closeEvent(self, event) -> None:
         """
         視窗關閉事件處理，確保在關閉時停止監控
@@ -617,7 +721,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         Args:
             event: QCloseEvent 事件物件
         """
-        self.on_closing()
+        self.stop_monitoring()
         self._ui_queue_timer.stop()
         super().closeEvent(event)
 
@@ -626,11 +730,11 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         if getattr(self, "_is_created", False) is False:
             self.create_window()
             self._is_created = True
-        center_window(self, self.parentWidget())
+        center_window(self, self.parent if isinstance(self.parent, QWidget) else None)
         super().show()
         if self.isVisible() and not self.is_monitoring:
             self.start_monitoring()
-            self.start_console_flusher()
+            self._schedule_console_flush()
             self._ui_queue_timer.start(50)
 
     def handle_server_ready(self):
@@ -639,42 +743,39 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             if self._server_ready_notified:
                 return
             self._server_ready_notified = True
-            properties = (
-                self.server_crud.load_server_properties(self.server_name)
-                if hasattr(self.server_crud, "load_server_properties")
-                else {}
-            )
+            properties_snapshot = self.server_properties.read(self.server_name) if self.server_properties else None
+            properties = properties_snapshot.properties if properties_snapshot and properties_snapshot.readable else {}
             server_ip = str(properties.get("server-ip", "") or "").strip()
             server_port = str(properties.get("server-port", "") or "").strip()
             if not server_port:
                 server_port = "25565"
             if server_ip:
-                msg = f"伺服器 {self.server_name} 啟動完成！\n已在 {server_ip}:{server_port} 開啟服務。"
+                msg = f"伺服器 {self.server_name} 啟動完成！\n已在 {server_ip}:{server_port} 開啟服務"
             else:
-                msg = f"伺服器 {self.server_name} 啟動完成！\n已在連接埠 {server_port} 開啟服務。"
-            UIUtils.show_message("伺服器啟動成功", msg, self.window, message_level="info")
+                msg = f"伺服器 {self.server_name} 啟動完成！\n已在連接埠 {server_port} 開啟服務"
+            UIUtils.show_message("伺服器啟動成功", msg, self, message_level="info")
         except Exception as e:
             logger.error(f"handle_server_ready 執行錯誤: {e}\n{traceback.format_exc()}")
 
     def _schedule_auto_refresh_tick(self, delay_ms: int = 1000) -> None:
-        if not self.window or not self.window.isVisible():
+        if not self.isVisible():
             self._auto_refresh_id = None
             return
 
         def _refresh_once() -> None:
             self._auto_refresh_id = None
-            if not self.window or not self.window.isVisible():
+            if not self.isVisible():
                 return
             self.update_status()
             self._schedule_auto_refresh_tick(delay_ms=1000)
 
-        UIUtils.schedule_debounce(self.window, "_auto_refresh_id", max(1, int(delay_ms)), _refresh_once, owner=self)
+        UIUtils.schedule_debounce(self, "_auto_refresh_id", max(1, int(delay_ms)), _refresh_once, owner=self)
 
     def _schedule_window_job(self, job_attr: str, delay_ms: int, callback: Callable[[], Any]) -> None:
-        if not self.window or not self.window.isVisible():
+        if not self.isVisible():
             setattr(self, job_attr, None)
             return
-        UIUtils.schedule_debounce(self.window, job_attr, max(0, int(delay_ms)), callback, owner=self)
+        UIUtils.schedule_debounce(self, job_attr, max(0, int(delay_ms)), callback, owner=self)
 
     def _cancel_window_jobs(self) -> None:
         job_attrs = (
@@ -684,12 +785,12 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             "_stop_refresh_after_job",
             "_command_status_job",
         )
-        if not self.window or not self.window.isVisible():
+        if not self.isVisible():
             for job_attr in job_attrs:
                 setattr(self, job_attr, None)
             return
         for job_attr in job_attrs:
-            UIUtils.cancel_scheduled_job(self.window, job_attr, owner=self)
+            UIUtils.cancel_scheduled_job(self, job_attr, owner=self)
 
     def _on_player_click(self, item) -> None:
         try:
@@ -754,7 +855,7 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         if not self._console_buffer:
             return
         try:
-            if self.window and self.window.isVisible() and hasattr(self, "console_text"):
+            if self.isVisible() and hasattr(self, "console_text"):
                 text = "".join(self._console_buffer)
                 self._console_buffer = []
                 self.console_text.append(text.strip())
@@ -765,14 +866,14 @@ class ServerMonitorWindow(ModalMSFluentWindow):
             logger.error(f"刷新控制台失敗: {e}\n{traceback.format_exc()}")
 
     def _schedule_console_flush(self, *, force: bool = False) -> None:
-        if not self.window or not self.window.isVisible():
+        if not self.isVisible():
             return
         interval = max(1, int(getattr(self, "_console_flush_interval_ms", 100)))
         if force:
-            UIUtils.schedule_debounce(self.window, "_console_flush_job", 0, self._flush_console_buffer, owner=self)
+            UIUtils.schedule_debounce(self, "_console_flush_job", 0, self._flush_console_buffer, owner=self)
             return
         UIUtils.schedule_throttle(
-            self.window,
+            self,
             "_console_flush_job",
             interval,
             self._flush_console_buffer,
@@ -782,10 +883,10 @@ class ServerMonitorWindow(ModalMSFluentWindow):
         )
 
     def _schedule_monitor_loop_tick(self, delay_ms: int = 100) -> None:
-        if not self.is_monitoring or not self.window or not self.window.isVisible():
+        if not self.is_monitoring or not self.isVisible():
             return
         UIUtils.schedule_debounce(
-            self.window,
+            self,
             "_monitor_loop_job",
             max(1, int(delay_ms)),
             self.monitor_loop,

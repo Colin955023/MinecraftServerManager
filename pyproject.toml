@@ -13,7 +13,6 @@ dependencies = [
   "defusedxml>=0.7.1",
   "packaging>=26.3",
   "loguru>=0.7.3",
-  "openpyxl>=3.1.5",
   "orjson>=3.12.0",
   "psutil>=7.2.2"
 ]
@@ -36,7 +35,6 @@ lint = [
 
 typecheck = [
   "mypy>=2.3.1",
-  "types-openpyxl>=3.1.5.20260807",
   "types-psutil>=7.2.2.20260518",
 ]
 
@@ -44,10 +42,6 @@ security = [
   "bandit>=1.9.4",
   "bandit-sarif-formatter>=1.1.1",
   "detect-secrets>=1.5.0",
-]
-
-tools = [
-  "py-spy>=0.4.2",
 ]
 
 [project.scripts]
@@ -118,21 +112,18 @@ known-first-party = ["src"]
 
 [tool.vulture]
 paths = ["src", "tests", "scripts", "report"]
-min_confidence = 80
+min_confidence = 60
 sort_by_size = true
 ignore_names = [
-  "test_*",
-  "Test*",
-  "changeEvent",
-  "closeEvent",
-  "eventFilter",
-  "resizeEvent",
-  "showEvent",
-  "wheelEvent",
+  "APP_DESCRIPTION",
+  "adaptive_sizing",
+  "auto_center",
+  "dwFlags",
+  "remember_size_position",
+  "return_value",
+  "wShowWindow",
 ]
 ignore_decorators = [
-  "@QtCore.Slot",
-  "@Slot",
   "@pytest.fixture",
 ]
 

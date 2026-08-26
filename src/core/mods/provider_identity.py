@@ -16,14 +16,8 @@ from src.models import (
     ProviderIdentitySnapshot,
     ProviderLifecycle,
 )
-from src.utils import (
-    ProviderIdentityPersistenceError,
-    get_logger,
-)
+from src.utils import ProviderIdentityPersistenceError, clean_api_identifier
 
-logger = get_logger().bind(component="ProviderIdentity")
-
-PROVIDER_IDENTITY_SCHEMA_VERSION = 2
 PROVIDER_IDENTITY_TTL_SECONDS = 12 * 60 * 60
 PROVIDER_IDENTITY_MAX_FAILURES = 3
 PROVIDER_IDENTITY_RETRY_BASE_SECONDS = 5 * 60
@@ -183,7 +177,7 @@ class ProviderIdentityService:
         ):
             return existing
         if evidence.hash_project_id:
-            hash_project_id = _clean(evidence.hash_project_id)
+            hash_project_id = clean_api_identifier(evidence.hash_project_id)
             return self.commit_found(
                 evidence.file_path,
                 ProviderCatalogOutcome(
@@ -261,7 +255,7 @@ class ProviderIdentityService:
                 alias_hint=str(getattr(local_mod, "platform_slug", "") or "").strip(),
                 display_name=str(getattr(local_mod, "name", "") or "").strip(),
                 search_terms=(filename, str(getattr(local_mod, "name", "") or "")),
-                hash_project_id=_clean(hash_project_id),
+                hash_project_id=clean_api_identifier(hash_project_id),
             )
         )
 
@@ -289,11 +283,11 @@ class ProviderIdentityService:
             raise ValueError("canonical provider identity requires project_id")
         now_ms = int(now_epoch_ms if now_epoch_ms is not None else time.time() * 1000)
         snapshot = ProviderIdentitySnapshot(
-            provider=_clean(outcome.provider).lower() or "modrinth",
-            project_id=_clean(outcome.project_id),
-            alias=_clean(outcome.alias),
-            display_name=_clean(outcome.display_name),
-            provenance=_clean(provenance) or "catalog",
+            provider=clean_api_identifier(outcome.provider).lower() or "modrinth",
+            project_id=clean_api_identifier(outcome.project_id),
+            alias=clean_api_identifier(outcome.alias),
+            display_name=clean_api_identifier(outcome.display_name),
+            provenance=clean_api_identifier(provenance) or "catalog",
             lifecycle="fresh",
             observed_at_epoch_ms=now_ms,
             resolved_at_epoch_ms=now_ms,
@@ -353,9 +347,9 @@ class ProviderIdentityService:
         snapshot = replace(
             existing,
             provider=existing.provider if existing.provider != "local" else "modrinth" if has_evidence else "local",
-            project_id=existing.project_id or _clean(evidence.project_id_hint),
-            alias=existing.alias or _clean(evidence.alias_hint) or next(iter(evidence.jar_aliases), ""),
-            display_name=existing.display_name or _clean(evidence.display_name),
+            project_id=existing.project_id or clean_api_identifier(evidence.project_id_hint),
+            alias=existing.alias or clean_api_identifier(evidence.alias_hint) or next(iter(evidence.jar_aliases), ""),
+            display_name=existing.display_name or clean_api_identifier(evidence.display_name),
             provenance=f"catalog_{failure_kinds[-1]}" if attempted else "unresolved",
             lifecycle=lifecycle,
             observed_at_epoch_ms=now_ms,
@@ -418,16 +412,12 @@ class ProviderIdentityService:
             return True
 
 
-def _clean(value: Any) -> str:
-    return str(value or "").strip()
-
-
 def _dedupe(values: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(cleaned for value in values if (cleaned := _clean(value))))
+    return tuple(dict.fromkeys(cleaned for value in values if (cleaned := clean_api_identifier(value))))
 
 
 def _provider_cache_key(provider: str, identifier: str) -> str:
-    return f"{_clean(provider).lower()}:{_clean(identifier).lower()}"
+    return f"{clean_api_identifier(provider).lower()}:{clean_api_identifier(identifier).lower()}"
 
 
 __all__ = [

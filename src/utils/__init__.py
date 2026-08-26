@@ -18,10 +18,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "Colors": (".ui_support.ui_tokens", "Colors"),
     "ConfigurationError": (".core_utils.exceptions", "ConfigurationError"),
     "CreationCancelledError": (".core_utils.exceptions", "CreationCancelledError"),
-    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION": (
-        ".mod_utils.dependency_plan_serializer",
-        "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
-    ),
     "FloatState": (".ui_support.ui_state", "FloatState"),
     "FontManager": (".ui_support.font_manager", "FontManager"),
     "FontSize": (".ui_support.ui_tokens", "FontSize"),
@@ -34,10 +30,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "JavaInstallError": (".core_utils.exceptions", "JavaInstallError"),
     "JavaUtils": (".java_support.java_utils", "JavaUtils"),
     "JvmOptionPolicy": (".server_utils.server_runtime_utils", "JvmOptionPolicy"),
-    "MANAGED_STARTUP_SCRIPT_NAME": (
-        ".server_utils.server_detection_utils",
-        "MANAGED_STARTUP_SCRIPT_NAME",
-    ),
     "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED": (
         ".mod_utils.mod_semantics",
         "LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED",
@@ -141,7 +133,15 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "ONLINE_INSTALL_PROMPT_BLOCKED_LINE_TEMPLATE",
     ),
     "ONLINE_REVIEW_PRECHECK_NOTE": (".mod_utils.mod_semantics", "ONLINE_REVIEW_PRECHECK_NOTE"),
-    "PathUtils": (".core_utils.path_utils", "PathUtils"),
+    "copy_dir": (".core_utils.filesystem_utils", "copy_dir"),
+    "copy_file": (".core_utils.filesystem_utils", "copy_file"),
+    "delete_within": (".core_utils.filesystem_utils", "delete_within"),
+    "is_path_within": (".core_utils.filesystem_utils", "is_path_within"),
+    "move_within": (".core_utils.filesystem_utils", "move_within"),
+    "read_json": (".core_utils.json_utils", "read_json"),
+    "read_text_file": (".core_utils.filesystem_utils", "read_text_file"),
+    "safe_extract_zip": (".core_utils.archive_utils", "safe_extract_zip"),
+    "serialize_json": (".core_utils.json_utils", "serialize_json"),
     "ProviderIdentityPersistenceError": (".core_utils.exceptions", "ProviderIdentityPersistenceError"),
     "RECOMMENDATION_CONFIDENCE_ADVISORY": (
         ".mod_utils.mod_semantics",
@@ -183,20 +183,11 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "ResponseTooLargeError": (".core_utils.exceptions", "ResponseTooLargeError"),
     "RuntimePaths": (".runtime_utils.runtime_paths", "RuntimePaths"),
-    "STARTUP_SCRIPT_CANDIDATES": (
-        ".server_utils.server_detection_utils",
-        "STARTUP_SCRIPT_CANDIDATES",
-    ),
     "ScrollableComboBox": (".ui_support.ui_utils", "ScrollableComboBox"),
     "ServerCommands": (".server_utils.server_runtime_utils", "ServerCommands"),
-    "ServerDetectionUtils": (".server_utils.server_detection_utils", "ServerDetectionUtils"),
-    "ServerDetectionVersionUtils": (
-        ".server_utils.server_detection_utils",
-        "ServerDetectionVersionUtils",
-    ),
     "ServerOperations": (".server_utils.server_runtime_utils", "ServerOperations"),
-    "ServerPropertiesHelper": (".server_utils.server_properties_utils", "ServerPropertiesHelper"),
-    "ServerPropertiesValidator": (".server_utils.server_properties_utils", "ServerPropertiesValidator"),
+    "PropertiesSchema": (".server_utils.server_properties_utils", "PropertiesSchema"),
+    "PropertiesDocumentCodec": (".server_utils.server_properties_utils", "PropertiesDocumentCodec"),
     "Sizes": (".ui_support.ui_tokens", "Sizes"),
     "Spacing": (".ui_support.ui_tokens", "Spacing"),
     "StatusPushButton": (".ui_support.status_button", "StatusPushButton"),
@@ -205,20 +196,17 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "TextState": (".ui_support.ui_state", "TextState"),
     "UIUtils": (".ui_support.ui_utils", "UIUtils"),
     "UIWorkScope": (".ui_support.ui_work_scope", "UIWorkScope"),
+    "WorkOutcome": (".ui_support.ui_work_scope", "WorkOutcome"),
     "UpdateChecker": (".update_utils.update_checker", "UpdateChecker"),
     "UpdateParsing": (".update_utils.update_parsing", "UpdateParsing"),
     "ValueState": (".ui_support.qt_runtime", "ValueState"),
-    "Variable": (".ui_support.ui_state", "Variable"),
-    "WorkHandle": (".ui_support.ui_work_scope", "WorkHandle"),
-    "apply_loader_specific_dependency_override": (
-        ".mod_utils.modrinth_query_utils",
-        "apply_loader_specific_dependency_override",
-    ),
     "SUPPORTED_MODRINTH_UPDATE_LOADERS": (
         ".mod_utils.modrinth_query_utils",
         "SUPPORTED_MODRINTH_UPDATE_LOADERS",
     ),
     "apply_table_header_style": (".ui_support.ui_config", "apply_table_header_style"),
+    "atomic_replace_file": (".core_utils.atomic_writer", "atomic_replace_file"),
+    "atomic_replace_file_within": (".core_utils.atomic_writer", "atomic_replace_file_within"),
     "atomic_write_bytes": (".core_utils.atomic_writer", "atomic_write_bytes"),
     "atomic_write_json": (".core_utils.atomic_writer", "atomic_write_json"),
     "atomic_write_text": (".core_utils.atomic_writer", "atomic_write_text"),
@@ -234,6 +222,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "cancel_timer": (".ui_support.qt_runtime", "cancel_timer"),
     "center_window": (".ui_support.ui_config", "center_window"),
     "clean_api_identifier": (".mod_utils.modrinth_query_utils", "clean_api_identifier"),
+    "clean_mod_version": (".server_utils.server_version_semantics", "clean_mod_version"),
     "collect_installed_mod_identifiers": (
         ".mod_utils.local_mod_metadata_utils",
         "collect_installed_mod_identifiers",
@@ -242,25 +231,22 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_utils.local_mod_metadata_utils",
         "collect_installed_mod_versions",
     ),
-    "dependency_candidate_filenames": (
-        ".mod_utils.local_mod_metadata_utils",
-        "dependency_candidate_filenames",
-    ),
     "dependency_maybe_installed_by_filename": (
         ".mod_utils.local_mod_metadata_utils",
         "dependency_maybe_installed_by_filename",
     ),
+    "detect_loader_from_text": (".server_utils.server_version_semantics", "detect_loader_from_text"),
     "deserialize_online_dependency_install_plan": (
         ".mod_utils.dependency_plan_serializer",
         "deserialize_online_dependency_install_plan",
     ),
     "ensure_application": (".ui_support.qt_runtime", "ensure_application"),
-    "expand_required_dependency_install_plan": (
-        ".mod_utils.mod_dependency_planner",
-        "expand_required_dependency_install_plan",
-    ),
-    "extract_download_host": (".mod_utils.download_source_policy", "extract_download_host"),
     "extract_primary_file_hash": (".mod_utils.mod_version_filtering", "extract_primary_file_hash"),
+    "extract_forge_versions": (".server_utils.server_version_semantics", "extract_forge_versions"),
+    "extract_minecraft_version_from_text": (
+        ".server_utils.server_version_semantics",
+        "extract_minecraft_version_from_text",
+    ),
     "format_bytes": (".core_utils.units_utils", "format_bytes"),
     "get_icon_path": (".ui_support.qt_runtime", "get_icon_path"),
     "get_logger": (".core_utils.logger", "get_logger"),
@@ -275,6 +261,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "invoke_later": (".ui_support.qt_runtime", "invoke_later"),
     "is_allowed_version_type": (".mod_utils.mod_version_filtering", "is_allowed_version_type"),
     "is_qobject_alive": (".ui_support.qt_runtime", "is_qobject_alive"),
+    "is_fabric_compatible_version": (
+        ".server_utils.server_version_semantics",
+        "is_fabric_compatible_version",
+    ),
     "is_supported_modrinth_update_loader": (
         ".mod_utils.modrinth_query_utils",
         "is_supported_modrinth_update_loader",
@@ -283,11 +273,13 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_utils.dependency_plan_serializer",
         "migrate_online_dependency_install_plan_payload",
     ),
-    "normalize_filename_stem": (".mod_utils.local_mod_metadata_utils", "normalize_filename_stem"),
     "normalize_hash_algorithm": (".mod_utils.mod_version_filtering", "normalize_hash_algorithm"),
     "normalize_identifier": (".mod_utils.modrinth_query_utils", "normalize_identifier"),
-    "normalize_lax_filename": (".mod_utils.local_mod_metadata_utils", "normalize_lax_filename"),
     "normalize_local_loader": (".mod_utils.modrinth_query_utils", "normalize_local_loader"),
+    "normalize_minecraft_version": (
+        ".server_utils.server_version_semantics",
+        "normalize_minecraft_version",
+    ),
     "normalize_mod_search_query": (".mod_utils.modrinth_query_utils", "normalize_mod_search_query"),
     "parse_modrinth_version": (".mod_utils.modrinth_query_utils", "parse_modrinth_version"),
     "parse_modrinth_version_lookup_response": (
@@ -296,13 +288,12 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "parse_version_safe": (".core_utils.version_utils", "parse_version_safe"),
     "resolve_color": (".ui_support.ui_config", "resolve_color"),
-    "resolve_dependency_reference": (
-        ".mod_utils.mod_dependency_planner",
-        "resolve_dependency_reference",
-    ),
-    "run_in_background": (".runtime_utils.background_task", "run_in_background"),
     "run_on_ui_thread": (".ui_support.qt_runtime", "run_on_ui_thread"),
     "select_best_mod_version": (".mod_utils.mod_version_filtering", "select_best_mod_version"),
+    "standardize_loader_type": (
+        ".server_utils.server_version_semantics",
+        "standardize_loader_type",
+    ),
     "serialize_online_dependency_install_plan": (
         ".mod_utils.dependency_plan_serializer",
         "serialize_online_dependency_install_plan",
@@ -312,7 +303,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mod_utils.dependency_plan_serializer",
         "validate_online_dependency_install_plan_payload",
     ),
-    "version_type_priority": (".mod_utils.mod_version_filtering", "version_type_priority"),
 }
 
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

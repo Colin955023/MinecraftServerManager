@@ -4,49 +4,49 @@ import zipfile
 
 import pytest
 
-import src.utils.core_utils.path_utils as path_utils_module
-from src.utils import PathUtils
+import src.utils.core_utils.atomic_writer as atomic_writer_module
+from src.utils import atomic_write_json, copy_dir, delete_within, read_json, safe_extract_zip
 
 
-def test_save_json_roundtrip_immediate(tmp_path) -> None:
+def test_atomic_write_json_roundtrip_immediate(tmp_path) -> None:
     target = tmp_path / "state.json"
     payload = {"server": "alpha", "ports": [25565, 25566], "enabled": True}
 
-    assert PathUtils.save_json_internal(target, payload) is True
-    assert PathUtils.load_json(target) == payload
+    assert atomic_write_json(target, payload) is True
+    assert read_json(target) == payload
 
 
-def test_save_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypatch) -> None:
+def test_atomic_write_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypatch) -> None:
     target = tmp_path / "state.json"
     replace_call_count = 0
-    original_replace = path_utils_module.os.replace
+    original_replace = atomic_writer_module.os.replace
 
     def _counting_replace(src, dst):
         nonlocal replace_call_count
         replace_call_count += 1
         return original_replace(src, dst)
 
-    monkeypatch.setattr(path_utils_module.os, "replace", _counting_replace)
+    monkeypatch.setattr(atomic_writer_module.os, "replace", _counting_replace)
 
-    assert PathUtils.save_json_internal(target, {"value": 1}, skip_if_unchanged=True) is True
+    assert atomic_write_json(target, {"value": 1}, skip_if_unchanged=True) is True
     assert replace_call_count == 1
 
     count_before_no_change = replace_call_count
-    assert PathUtils.save_json_internal(target, {"value": 1}, skip_if_unchanged=True) is True
+    assert atomic_write_json(target, {"value": 1}, skip_if_unchanged=True) is True
     assert replace_call_count == count_before_no_change
 
     count_before_change = replace_call_count
-    assert PathUtils.save_json_internal(target, {"value": 2}, skip_if_unchanged=True) is True
+    assert atomic_write_json(target, {"value": 2}, skip_if_unchanged=True) is True
     assert replace_call_count == count_before_change + 1
 
 
-def test_save_json_keeps_existing_file_when_new_payload_not_serializable(tmp_path) -> None:
+def test_atomic_write_json_keeps_existing_file_when_new_payload_not_serializable(tmp_path) -> None:
     target = tmp_path / "state.json"
     original = {"ok": True}
 
-    assert PathUtils.save_json_internal(target, original) is True
-    assert PathUtils.save_json_internal(target, {"bad": {1, 2, 3}}) is False
-    assert PathUtils.load_json(target) == original
+    assert atomic_write_json(target, original) is True
+    assert atomic_write_json(target, {"bad": {1, 2, 3}}) is False
+    assert read_json(target) == original
 
 
 def test_safe_extract_zip_reports_progress(tmp_path) -> None:
@@ -64,7 +64,7 @@ def test_safe_extract_zip_reports_progress(tmp_path) -> None:
     def _on_progress(done: int, total: int) -> None:
         progress_events.append((done, total))
 
-    PathUtils.safe_extract_zip(zip_path, extract_dir, progress_callback=_on_progress)
+    safe_extract_zip(zip_path, extract_dir, progress_callback=_on_progress)
 
     expected_total = len(data_a) + len(data_b)
     assert (extract_dir / "mods" / "mod_a.jar").read_bytes() == data_a
@@ -89,7 +89,7 @@ def test_safe_extract_zip_rejects_excessive_uncompressed_size(tmp_path) -> None:
         zf.writestr("mods/huge.jar", b"x" * 2048)
 
     with pytest.raises(ValueError, match="大小超過安全上限"):
-        PathUtils.safe_extract_zip(zip_path, extract_dir, max_total_uncompressed_bytes=1024)
+        safe_extract_zip(zip_path, extract_dir, max_total_uncompressed_bytes=1024)
 
     assert not (extract_dir / "mods" / "huge.jar").exists()
 
@@ -106,7 +106,7 @@ def test_safe_extract_zip_rejects_unsafe_member_names(tmp_path, member_name: str
         zf.writestr(member_name, b"evil")
 
     with pytest.raises(ValueError):
-        PathUtils.safe_extract_zip(zip_path, extract_dir)
+        safe_extract_zip(zip_path, extract_dir)
 
     assert not (tmp_path / "evil.txt").exists()
 
@@ -121,7 +121,7 @@ def test_safe_extract_zip_rejects_symlink_entry(tmp_path) -> None:
         zf.writestr(info, "../../../etc/passwd")
 
     with pytest.raises(ValueError):
-        PathUtils.safe_extract_zip(zip_path, extract_dir)
+        safe_extract_zip(zip_path, extract_dir)
 
     assert not (extract_dir / "mods").exists()
 
@@ -134,7 +134,7 @@ def test_safe_extract_zip_rejects_oversized_single_member(tmp_path) -> None:
         zf.writestr("mods/big.jar", b"x" * 1000)
 
     with pytest.raises(ValueError, match="過大"):
-        PathUtils.safe_extract_zip(
+        safe_extract_zip(
             zip_path,
             extract_dir,
             max_member_uncompressed_bytes=100,
@@ -151,7 +151,7 @@ def test_safe_extract_zip_rejects_excessive_compression_ratio(tmp_path) -> None:
         zf.writestr("mods/bomb.jar", b"A" * (2 * 1024 * 1024))
 
     with pytest.raises(ValueError, match="壓縮比例"):
-        PathUtils.safe_extract_zip(
+        safe_extract_zip(
             zip_path,
             extract_dir,
             max_member_uncompressed_bytes=None,
@@ -173,7 +173,7 @@ def test_copy_dir_reports_progress(tmp_path) -> None:
     def _on_progress(done: int, total: int) -> None:
         progress_events.append((done, total))
 
-    assert PathUtils.copy_dir(source_dir, target_dir, progress_callback=_on_progress) is True
+    assert copy_dir(source_dir, target_dir, progress_callback=_on_progress) is True
     assert (target_dir / "mods" / "a.jar").read_bytes() == b"a"
     assert (target_dir / "config" / "b.cfg").read_bytes() == b"b"
     assert progress_events[0] == (0, 2)
@@ -190,7 +190,15 @@ def test_delete_within_blocks_paths_outside_base(tmp_path) -> None:
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir(parents=True, exist_ok=True)
 
-    assert PathUtils.delete_within(base_dir, inside_dir) is True
+    assert delete_within(base_dir, inside_dir) is True
     assert inside_dir.exists() is False
-    assert PathUtils.delete_within(base_dir, outside_dir) is False
+    assert delete_within(base_dir, outside_dir) is False
     assert outside_dir.exists() is True
+
+
+def test_delete_within_blocks_base_directory_itself(tmp_path) -> None:
+    base_dir = tmp_path / "servers_root"
+    base_dir.mkdir()
+
+    assert delete_within(base_dir, base_dir) is False
+    assert base_dir.is_dir()

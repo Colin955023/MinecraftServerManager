@@ -6,8 +6,6 @@ Minecraft 伺服器管理器的主要使用者介面
 
 from __future__ import annotations
 
-import queue
-import re
 import sys
 import traceback
 from contextlib import suppress
@@ -30,10 +28,21 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from src.models import ServerConfig, WorkOutcome
+from src.core import (
+    LoaderManager,
+    LoaderManagerRulesAdapter,
+    ModPlanning,
+    ModrinthPlanningAdapter,
+    ServerBackupManager,
+    ServerCRUD,
+    ServerImportService,
+    ServerInspector,
+    ServerPropertiesStore,
+    ServerRuntime,
+)
+from src.models import ServerConfig
 from src.ui import (
     AboutPreferencesFrame,
-    ApplicationShell,
     CreateServerFrame,
     ManageServerFrame,
     ModalMSFluentWindow,
@@ -47,16 +56,11 @@ from src.utils import (
     ConfigurationError,
     FontManager,
     FontSize,
-    PathUtils,
-    ServerCommands,
-    ServerDetectionUtils,
-    ServerPropertiesHelper,
     Sizes,
     StatusPushButton,
-    SubprocessUtils,
-    SystemUtils,
     UIUtils,
     UIWorkScope,
+    WorkOutcome,
     center_window,
     ensure_application,
     get_logger,
@@ -169,7 +173,6 @@ class MainWindow(FluentWindow):
         self.scope = UIWorkScope(self)
         self.setProperty("_primary_window", True)
         self.page_router = PageRouter(self)
-        self._console_queue: queue.Queue[Any] = queue.Queue()
         self.settings = get_settings_manager()
         self.setup_window()
 
@@ -188,14 +191,41 @@ class MainWindow(FluentWindow):
         if stored_root:
             try:
                 path_obj = self.settings.get_validated_servers_root_path(create=True)
-                self.servers_root = str(path_obj)
-                ApplicationShell.create(self.servers_root).bind_to(self)
+                self._compose_services(str(path_obj))
                 self.create_widgets()
                 self._widgets_initialized = True
             except Exception as e:
                 logger.warning(f"啟動時預先建立介面未完成，將延後至 deferred_init 處理: {e}\n{traceback.format_exc()}")
 
         QtCore.QTimer.singleShot(0, self._deferred_init)
+
+    def _compose_services(self, servers_root: str) -> None:
+        """建立 MainWindow 唯一使用的 production service graph
+
+        Args:
+            servers_root: 已驗證的伺服器根目錄
+        """
+        server_crud = ServerCRUD(servers_root=servers_root)
+        loader_manager = LoaderManager()
+        server_inspector = ServerInspector()
+        mod_planning = ModPlanning(
+            ModrinthPlanningAdapter(),
+            LoaderManagerRulesAdapter(loader_manager),
+        )
+        server_import = ServerImportService(server_crud, server_inspector)
+        server_properties = ServerPropertiesStore(server_crud)
+        server_runtime = ServerRuntime(server_crud, server_inspector=server_inspector)
+        server_backup = ServerBackupManager(server_crud)
+
+        self.servers_root = servers_root
+        self.loader_manager = loader_manager
+        self.mod_planning = mod_planning
+        self.server_crud = server_crud
+        self.server_inspector = server_inspector
+        self.server_import = server_import
+        self.server_properties = server_properties
+        self.server_runtime = server_runtime
+        self.server_backup = server_backup
 
     def _on_page_changed(self, index: int) -> None:
         widget = self.stackedWidget.widget(index)
@@ -296,6 +326,8 @@ class MainWindow(FluentWindow):
             FontManager.clear_cache()
             if getattr(self, "server_crud", None) is not None:
                 self.server_crud.write_servers_config()
+            if getattr(self, "server_runtime", None) is not None:
+                self.server_runtime.shutdown()
 
             if hasattr(self, "manage_server_frame") and self.manage_server_frame:
                 with suppress(Exception):
@@ -399,7 +431,11 @@ class MainWindow(FluentWindow):
     def create_widgets(self) -> None:
         """建立所有介面元件，包含標題和主要內容"""
         self.create_server_frame = CreateServerFrame(
-            self, self.loader_manager, self.on_server_created, self.server_crud
+            self,
+            self.loader_manager,
+            self.initialize_server,
+            self.server_crud,
+            self.server_properties,
         )
         self.create_server_frame.setObjectName("CreateServerInterface")
         self.manage_server_frame = None
@@ -461,15 +497,6 @@ class MainWindow(FluentWindow):
             logger.error(f"無法開啟路徑: {e}\n{traceback.format_exc()}")
             UIUtils.show_message("錯誤", f"無法開啟路徑: {e}", self.root, message_level="error")
 
-    def on_server_created(self, server_config: ServerConfig) -> None:
-        """
-        伺服器建立完成的回調
-
-        Args:
-            server_config: 新建立的伺服器設定
-        """
-        self.initialize_server(server_config)
-
     def initialize_server(self, server_config: ServerConfig) -> None:
         """
         啟動伺服器初始化流程
@@ -477,7 +504,12 @@ class MainWindow(FluentWindow):
         Args:
             server_config: 要初始化的伺服器設定
         """
-        dialog = ServerInitializationDialog(self.root, server_config, self.complete_initialization)
+        dialog = ServerInitializationDialog(
+            self.root,
+            self.server_runtime,
+            server_config,
+            self.complete_initialization,
+        )
         dialog.start_initialization()
 
     def on_server_selected(self, server_name: str) -> None:
@@ -502,14 +534,6 @@ class MainWindow(FluentWindow):
         """
         init_dialog.reject()
         init_dialog.deleteLater()
-        server_path = Path(server_config.path)
-        properties_file = server_path / "server.properties"
-        try:
-            if properties_file.exists():
-                properties = ServerPropertiesHelper.load_properties(properties_file)
-                server_config.properties = properties
-        except Exception as e:
-            logger.error(f"初始化後讀取 server.properties 失敗: {e}\n{traceback.format_exc()}")
         self.page_router.show_manage_server(auto_select=server_config.name)
         QtCore.QTimer.singleShot(
             0,
@@ -529,7 +553,10 @@ class MainWindow(FluentWindow):
                 if not self.servers_root:
                     logger.warning("未選取伺服器目錄，中止延遲初始化")
                     return
-                ApplicationShell.create(self.servers_root).bind_to(self)
+                previous_runtime = getattr(self, "server_runtime", None)
+                if previous_runtime is not None:
+                    previous_runtime.shutdown()
+                self._compose_services(self.servers_root)
                 self.create_widgets()
                 self._widgets_initialized = True
 
@@ -555,7 +582,8 @@ class MainWindow(FluentWindow):
         manage_server_frame = ManageServerFrame(
             self,
             self.server_crud,
-            self.server_startup,
+            self.server_runtime,
+            self.server_properties,
             self.server_backup,
             self.server_import,
             self.on_server_selected,
@@ -568,7 +596,13 @@ class MainWindow(FluentWindow):
         """確保模組管理頁面已建立並放置於內容堆疊層"""
         if getattr(self, "mod_frame", None) is not None:
             return
-        mod_controller = ModManagementFrame(self, self.server_crud, self.on_server_selected, self.loader_manager)
+        mod_controller = ModManagementFrame(
+            self,
+            self.server_crud,
+            self.mod_planning,
+            self.on_server_selected,
+            self.loader_manager,
+        )
         self.mod_frame_controller = mod_controller
         try:
             frame = mod_controller.get_frame()
@@ -706,16 +740,15 @@ class MainWindow(FluentWindow):
 class ServerInitializationDialog(ModalMSFluentWindow):
     """伺服器初始化對話框"""
 
-    def __init__(self, parent: QWidget, server_config: ServerConfig, completion_callback=None):
+    def __init__(self, parent: QWidget, server_runtime: Any, server_config: ServerConfig, completion_callback=None):
         super().__init__(parent, is_modal=True, show_buttons=False)
         self.parent_widget = parent
+        self.server_runtime = server_runtime
         self.server_config = server_config
-        self.server_path = Path(server_config.path)
         self.completion_callback = completion_callback
         self._completion_scheduled = False
-        self.server_process: Any | None = None
-        self.server_process_pid: int = 0
         self.done_detected = False
+        self._runtime_sequence = 0
 
         self.setWindowTitle(f"初始化伺服器 - {self.server_config.name}")
         self.setMinimumSize(600, 450)
@@ -745,69 +778,72 @@ class ServerInitializationDialog(ModalMSFluentWindow):
 
         self.close_button = StatusPushButton("取消初始化", self.widget)
         self.close_button.set_status("danger")
-        self.close_button.clicked.connect(self._close_init_server)
+        self.close_button.clicked.connect(self._close_initialization)
 
         self.cancelButton.hide()
         self.yesButton.hide()
         self.buttonLayout.insertWidget(3, self.close_button)
         self.buttonGroup.show()
 
-        self._console_queue: queue.Queue[str] = queue.Queue()
-        self._console_timer = QtCore.QTimer(self)
-        self._console_timer.timeout.connect(self._tick_console)
-        self._process_output_buffer = ""
-        self._stop_sent = False
-
         self._timeout_timer = QtCore.QTimer(self)
         self._timeout_timer.timeout.connect(self._timeout_force_close)
+        self._runtime_timer = QtCore.QTimer(self)
+        self._runtime_timer.timeout.connect(self._poll_runtime)
 
     def start_initialization(self) -> None:
         """啟動初始化對話框流程"""
-        self._console_timer.start(50)
         self._timeout_timer.start(120000)
+        self._runtime_timer.start(100)
         center_window(self, self.parentWidget())
         self.show()
-        self._start_server_thread()
+        self._start_initialization()
 
-    def _enqueue_console(self, text: str) -> None:
-        try:
-            self._console_queue.put_nowait(text)
-        except Exception as e:
-            logger.exception(f"加入 console queue 失敗: {e}")
+    def _start_initialization(self) -> None:
+        """透過唯一 ServerRuntime 啟動初始化流程"""
+        self.progress_label.setText("狀態: 正在啟動伺服器...")
+        self._update_console("正在啟動 Minecraft 伺服器...\n")
+        result = self.server_runtime.start(self.server_config.name, intent="initialize")
+        if result.failed:
+            self._handle_server_error(result.message)
 
-    def _tick_console(self) -> None:
-        chunks = []
-        remaining_chars = 20000
-        for _ in range(200):
-            try:
-                part = self._console_queue.get_nowait()
-            except queue.Empty:
-                break
-            chunks.append(part)
-            remaining_chars -= len(part)
-            if remaining_chars <= 0:
-                break
-        if chunks:
-            self._update_console("".join(chunks))
+    def _poll_runtime(self) -> None:
+        """讀取 runtime 快照並將事件投影到初始化 UI"""
+        snapshot = self.server_runtime.observe(
+            self.server_config.name,
+            after_sequence=self._runtime_sequence,
+        )
+        self._runtime_sequence = snapshot.sequence
+        for event in snapshot.events:
+            if event.kind == "output":
+                self._update_console(f"{event.message}\n")
+                self._process_server_output(event.message)
+            elif event.kind == "ready":
+                self.done_detected = True
+                self.progress_label.setText("狀態: 伺服器完全啟動，正在關閉...")
+                self._update_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
+            elif event.kind == "failed":
+                self._handle_server_error(event.message)
+        if snapshot.state in {"stopped", "failed"}:
+            self._runtime_timer.stop()
+            if snapshot.state == "stopped":
+                self._handle_server_completion()
 
-    def _start_server_thread(self) -> None:
-        """使用 QProcess 啟動伺服器"""
-        self._run_server()
-
-    def _close_init_server(self) -> None:
+    def _close_initialization(self) -> None:
         """關閉初始化伺服器"""
+        if hasattr(self, "_countdown_timer"):
+            self._countdown_timer.stop()
         if self.done_detected:
-            self._console_timer.stop()
             self._timeout_timer.stop()
+            self._runtime_timer.stop()
             if self.completion_callback and not self._completion_scheduled:
                 self._completion_scheduled = True
                 self.completion_callback(self.server_config, self)
             else:
                 self.reject()
         else:
-            self._terminate_server_process()
-            self._console_timer.stop()
+            self._stop_initialization()
             self._timeout_timer.stop()
+            self._runtime_timer.stop()
             UIUtils.show_message(
                 "強制關閉",
                 "伺服器初始化未完成，已強制關閉請檢查伺服器日誌",
@@ -816,23 +852,17 @@ class ServerInitializationDialog(ModalMSFluentWindow):
             )
             self.reject()
 
-    def _terminate_server_process(self) -> None:
-        """終止伺服器程式"""
+    def _stop_initialization(self) -> None:
+        """要求 runtime 終止初始化伺服器"""
         try:
-            if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
-                self.server_process.terminate()
-                if not self.server_process.waitForFinished(5000):
-                    self.server_process.kill()
-            if self.server_process is not None:
-                with suppress(Exception):
-                    SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
+            self.server_runtime.stop(self.server_config.name)
         except Exception as e:
             logger.exception(f"終止伺服器程式失敗: {e}")
 
     def _timeout_force_close(self) -> None:
         """超時強制關閉"""
         if not self.done_detected:
-            self._close_init_server()
+            self._close_initialization()
 
     def _update_console(self, text: str) -> None:
         """更新控制台輸出"""
@@ -844,115 +874,6 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         except Exception:
             logger.exception("更新控制台輸出失敗")
 
-    def _run_server(self) -> None:
-        """以 QProcess 啟動伺服器並接上 signal"""
-        try:
-            self.progress_label.setText("狀態: 正在啟動伺服器...")
-            self._enqueue_console("正在啟動 Minecraft 伺服器...\n")
-            java_cmd = self._build_java_command()
-            process = SubprocessUtils.create_qprocess_checked(
-                java_cmd,
-                cwd=str(self.server_path),
-            )
-            self.server_process = process
-            process.started.connect(self._on_server_process_started)
-            process.readyReadStandardOutput.connect(self._on_server_process_output)
-            process.finished.connect(self._on_server_process_finished)
-            process.errorOccurred.connect(self._on_server_process_error)
-            process.start()
-        except Exception as e:
-            logger.error(f"伺服器啟動失敗: {e}\n{traceback.format_exc()}")
-            self._handle_server_error(str(e))
-
-    @QtCore.Slot()
-    def _on_server_process_started(self) -> None:
-        if self.server_process is None:
-            return
-        self.server_process_pid = int(self.server_process.processId())
-        SystemUtils.register_managed_process(self.server_path, self.server_process_pid)
-
-    @QtCore.Slot()
-    def _on_server_process_output(self) -> None:
-        if self.server_process is None:
-            return
-        try:
-            chunk = bytes(self.server_process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        except Exception as exc:
-            logger.exception(f"讀取 QProcess 輸出失敗: {exc}")
-            return
-        if not chunk:
-            return
-        self._enqueue_console(chunk)
-        self._process_output_buffer += chunk
-        lines = self._process_output_buffer.splitlines()
-        if self._process_output_buffer and not self._process_output_buffer.endswith(("\n", "\r")):
-            self._process_output_buffer = lines.pop() if lines else self._process_output_buffer
-        else:
-            self._process_output_buffer = ""
-        for line in lines:
-            self._process_server_output(line)
-            if self.done_detected and not self._stop_sent:
-                self._handle_server_ready(line)
-
-    @QtCore.Slot(int, QtCore.QProcess.ExitStatus)
-    def _on_server_process_finished(self, _exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
-        if self._process_output_buffer:
-            line = self._process_output_buffer
-            self._process_output_buffer = ""
-            self._process_server_output(line)
-            if self.done_detected and not self._stop_sent:
-                self._handle_server_ready(line)
-        with suppress(Exception):
-            SystemUtils.unregister_managed_process(self.server_path, self.server_process_pid)
-        self._handle_server_completion()
-
-    @QtCore.Slot(QtCore.QProcess.ProcessError)
-    def _on_server_process_error(self, _error: QtCore.QProcess.ProcessError) -> None:
-        if self.server_process is None:
-            return
-        self._handle_server_error(self.server_process.errorString())
-
-    def _build_java_command(self) -> list[str]:
-        """建立 Java 命令"""
-        loader_type = str(self.server_config.loader_type or "").lower()
-        if loader_type == "forge":
-            return self._build_forge_command()
-        java_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
-        self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
-        return java_cmd
-
-    def _build_forge_command(self) -> list[str]:
-        """建立 Forge 伺服器命令"""
-        user_args = Path(self.server_path) / "user_jvm_args.txt"
-
-        if user_args.exists():
-            ServerDetectionUtils.update_forge_user_jvm_args(self.server_path, self.server_config)
-        start_bat = Path(self.server_path) / "start_server.bat"
-        java_cmd = None
-        if user_args.exists() and start_bat.exists():
-            java_cmd = self._extract_java_command_from_bat(start_bat)
-        if not java_cmd:
-            java_cmd = ServerCommands.build_java_command(self.server_config, return_list=True)
-            self._enqueue_console(f"執行命令: {' '.join(java_cmd)}\n\n")
-        return java_cmd
-
-    def _extract_java_command_from_bat(self, start_bat: Path) -> list[str] | None:
-        """從 bat 檔案提取 Java 命令"""
-        try:
-            content = PathUtils.read_text_file(start_bat, errors="ignore")
-            if content:
-                for line in content.splitlines():
-                    if re.search("\\bjavaw?(?:\\.exe)?\\b.*@user_jvm_args\\.txt\\b", line, re.IGNORECASE):
-                        cleaned = re.sub("\\s*[%$]\\*?$", "", line.strip())
-                        if cleaned.lower().startswith("call "):
-                            cleaned = cleaned[5:].lstrip()
-                        java_cmd = ServerCommands.split_windows_command_line(cleaned)
-                        logger.debug(f"forge_java_command: {java_cmd}")
-                        return java_cmd
-        except Exception as e:
-            logger.exception(f"提取 Java 命令失敗: {e}")
-        return None
-
     def _process_server_output(self, output: str) -> None:
         """處理伺服器輸出"""
         if not self.isVisible():
@@ -963,26 +884,6 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         elif "Preparing level" in output:
             with suppress(Exception):
                 self.progress_label.setText("狀態: 載入世界...")
-        elif "Done (" in output and 'For help, type "help"' in output and (not self.done_detected):
-            self.done_detected = True
-            if self.close_button:
-                self.close_button.setText("完成初始化")
-                self.close_button.set_status("success")
-
-    def _handle_server_ready(self, output: str) -> None:
-        """處理伺服器就緒狀態"""
-        if "ERROR" in output.upper() or "WARN" in output.upper():
-            self._enqueue_console(f"[注意] {output}")
-
-        def update_closing_status():
-            if self.progress_label:
-                self.progress_label.setText("狀態: 伺服器完全啟動，正在關閉...")
-                self._enqueue_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
-
-        update_closing_status()
-        if self.server_process and self.server_process.state() != QtCore.QProcess.ProcessState.NotRunning:
-            self._stop_sent = True
-            self.server_process.write(b"stop\n")
 
     def _handle_server_completion(self) -> None:
         """處理伺服器完成狀態"""
@@ -1002,13 +903,34 @@ class ServerInitializationDialog(ModalMSFluentWindow):
                 self.progress_label.setText("狀態: 啟動異常")
 
     def _handle_server_error(self, err_msg: str) -> None:
-        """處理伺服器錯誤"""
+        """處理伺服器錯誤並啟動倒數計時強制終止"""
         if not self.isVisible():
             return
 
         self._update_console(f"[錯誤] 啟動失敗: {err_msg}\n")
+        self._start_failure_countdown(60)
+
+    def _start_failure_countdown(self, seconds: int = 60) -> None:
+        """啟動失敗倒數計時"""
+        self._failure_countdown = seconds
+        self._update_failure_countdown_ui()
+        if not hasattr(self, "_countdown_timer"):
+            self._countdown_timer = QtCore.QTimer(self)
+            self._countdown_timer.timeout.connect(self._on_countdown_tick)
+        self._countdown_timer.start(1000)
+
+    def _update_failure_countdown_ui(self) -> None:
         if self.progress_label:
-            self.progress_label.setText("狀態: 啟動失敗")
+            self.progress_label.setText(f"狀態: 啟動失敗\n將於 {self._failure_countdown} 秒後強制終止")
+
+    def _on_countdown_tick(self) -> None:
+        self._failure_countdown -= 1
+        if self._failure_countdown <= 0:
+            if hasattr(self, "_countdown_timer"):
+                self._countdown_timer.stop()
+            self._close_initialization()
+        else:
+            self._update_failure_countdown_ui()
 
 
 def run_application():

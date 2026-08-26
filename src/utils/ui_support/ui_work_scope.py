@@ -4,17 +4,80 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from PySide6 import QtCore
 
-from src.models import WorkOutcome
 from src.utils import CancellationToken, get_logger, is_qobject_alive
 
 logger = get_logger().bind(component="UIWorkScope")
 
 
-class WorkHandle:
+class WorkStatus(Enum):
+    """UI 背景工作的完成狀態"""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True)
+class WorkOutcome:
+    """由 UIWorkScope 投遞的不可變工作結果"""
+
+    status: WorkStatus
+    value: Any = None
+    error: BaseException | None = None
+
+    @staticmethod
+    def succeeded(value: Any = None) -> WorkOutcome:
+        """建立成功結果
+
+        Args:
+            value: 工作完成後攜帶的結果值
+
+        Returns:
+            狀態為成功的工作結果
+        """
+        return WorkOutcome(status=WorkStatus.SUCCEEDED, value=value)
+
+    @staticmethod
+    def failed(error: BaseException) -> WorkOutcome:
+        """建立含例外的失敗結果
+
+        Args:
+            error: 導致工作失敗的例外
+
+        Returns:
+            狀態為失敗且含原始例外的工作結果
+        """
+        return WorkOutcome(status=WorkStatus.FAILED, error=error)
+
+    @staticmethod
+    def cancelled() -> WorkOutcome:
+        """建立取消結果
+
+        Returns:
+            狀態為已取消的工作結果
+        """
+        return WorkOutcome(status=WorkStatus.CANCELLED)
+
+    @property
+    def is_succeeded(self) -> bool:
+        return self.status == WorkStatus.SUCCEEDED
+
+    @property
+    def is_failed(self) -> bool:
+        return self.status == WorkStatus.FAILED
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.status == WorkStatus.CANCELLED
+
+
+class _WorkHandle:
     """工作句柄，用於取消與追蹤工作"""
 
     def __init__(self, generation: int, key: str | None, cancel_token: CancellationToken):
@@ -81,7 +144,7 @@ class UIWorkScope(QtCore.QObject):
         super().__init__(parent)
         self._generation: int = 0
         self._gen_lock = threading.Lock()
-        self._active_handles: dict[int, WorkHandle] = {}
+        self._active_handles: dict[int, _WorkHandle] = {}
         self._key_generations: dict[str, int] = {}
         self._timers: dict[str, QtCore.QTimer] = {}
         self._draining: bool = False
@@ -102,7 +165,7 @@ class UIWorkScope(QtCore.QObject):
         key: str | None = None,
         replace: bool = False,
         critical: bool = False,
-    ) -> WorkHandle:
+    ) -> _WorkHandle:
         """
         提交一個背景工作，並在完成時透過 on_done 回呼通知結果
 
@@ -118,7 +181,7 @@ class UIWorkScope(QtCore.QObject):
         """
         if self._draining:
             logger.warning("UIWorkScope is draining, rejecting new work")
-            handle = WorkHandle(-1, key, CancellationToken())
+            handle = _WorkHandle(-1, key, CancellationToken())
             handle.cancel()
             if on_done:
                 on_done(WorkOutcome.cancelled())
@@ -137,7 +200,7 @@ class UIWorkScope(QtCore.QObject):
                 self._key_generations[key] = generation
 
             cancel_token = CancellationToken()
-            handle = WorkHandle(generation, key, cancel_token)
+            handle = _WorkHandle(generation, key, cancel_token)
             self._active_handles[generation] = handle
             self._callbacks[generation] = (on_done, critical, key)
 
@@ -235,4 +298,4 @@ class UIWorkScope(QtCore.QObject):
         self.drain()
 
 
-__all__ = ["UIWorkScope", "WorkHandle"]
+__all__ = ["UIWorkScope"]

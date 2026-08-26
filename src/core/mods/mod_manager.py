@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from html import escape
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from src.core import (
     LocalModScanner,
@@ -20,17 +22,91 @@ from src.core import (
 )
 from src.models import (
     LocalModInfo,
-    LocalModMutationResult,
-    ModFileOperationResult,
     ModStatus,
 )
 from src.utils import (
     ModIndexManager,
-    PathUtils,
     get_logger,
+    serialize_json,
 )
 
 logger = get_logger().bind(component="ModManager")
+
+_XLSX_INVALID_XML_CHARS = dict.fromkeys((*range(0x09), 0x0B, 0x0C, *range(0x0E, 0x20)))
+_XLSX_INVALID_SHEET_NAME_CHARS = str.maketrans(dict.fromkeys("[]:*?/\\", "_"))
+
+
+def _normalize_xlsx_sheet_name(sheet_name: str) -> str:
+    """清理 Excel 工作表名稱與 XML 1.0 不允許的字元"""
+    normalized = str(sheet_name or "Sheet1").translate(_XLSX_INVALID_XML_CHARS)
+    normalized = normalized.translate(_XLSX_INVALID_SHEET_NAME_CHARS).strip("'")[:31]
+    return normalized or "Sheet1"
+
+
+def _build_xlsx(rows: list[list[object]], *, sheet_name: str = "Sheet1") -> bytes:
+    """使用標準庫建立單工作表 XLSX"""
+    sheet_rows: list[str] = []
+    for row_index, row in enumerate(rows, start=1):
+        cells: list[str] = []
+        for column_index, value in enumerate(row, start=1):
+            column_name = ""
+            number = column_index
+            while number:
+                number, remainder = divmod(number - 1, 26)
+                column_name = chr(65 + remainder) + column_name
+            text = ("" if value is None else str(value)).translate(_XLSX_INVALID_XML_CHARS)
+            cells.append(
+                f'<c r="{column_name}{row_index}" t="inlineStr"><is><t xml:space="preserve">'
+                f"{escape(text, quote=False)}</t></is></c>"
+            )
+        sheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
+
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<sheetData>{''.join(sheet_rows)}</sheetData></worksheet>"
+    )
+    safe_sheet_name = escape(_normalize_xlsx_sheet_name(sheet_name), quote=True)
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        f'<sheets><sheet name="{safe_sheet_name}" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        "</Types>"
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/></Relationships>'
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/></Relationships>'
+    )
+
+    output = BytesIO()
+    with ZipFile(output, "w", compression=ZIP_DEFLATED, compresslevel=9) as workbook:
+        workbook.writestr("[Content_Types].xml", content_types)
+        workbook.writestr("_rels/.rels", root_rels)
+        workbook.writestr("xl/workbook.xml", workbook_xml)
+        workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        workbook.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return output.getvalue()
 
 
 class ModManager:
@@ -52,78 +128,24 @@ class ModManager:
         self.mods_path.mkdir(parents=True, exist_ok=True)
         self.download_staging_root.mkdir(parents=True, exist_ok=True)
         self.index_manager: ModIndexManager = ModIndexManager(server_path)
-        self._provider_identity_service = ProviderIdentityService(
+        self.provider_identity_service = ProviderIdentityService(
             store=ModIndexProviderIdentityStore(self.index_manager),
             catalog=provider_catalog or ModrinthProviderAdapter(),
         )
-        self.on_mod_list_changed: Callable | None = None
-        self._local_mod_scanner: LocalModScanner | None = None
-        self._mod_file_installer: ModFileInstaller | None = None
-
-    def scan_mods(self) -> list[LocalModInfo]:
-        """
-        掃描 mods 目錄中的模組檔案並建立模組資訊列表
-
-        Returns:
-            掃描後的模組資訊清單
-        """
-        return self._get_local_mod_scanner().scan_mods()
-
-    def create_mod_info_from_file(self, file_path: Path) -> LocalModInfo | None:
-        """
-        從模組檔案建立 LocalModInfo
-
-        Args:
-            file_path: 要解析的模組 JAR 檔案路徑
-
-        Returns:
-            解析成功時回傳 LocalModInfo，失敗時回傳 None
-        """
-        return self._get_local_mod_scanner().create_mod_info_from_file(file_path)
-
-    @property
-    def provider_identity_service(self) -> ProviderIdentityService:
-        return self._provider_identity_service
-
-    def set_mod_state_result(self, mod_id: str, enable: bool, notify_change: bool = True) -> LocalModMutationResult:
-        """
-        設定模組啟用或停用狀態
-
-        Args:
-            mod_id: 模組的識別名稱（不含副檔名）
-            enable: 是否啟用模組，True 表示啟用，False 表示停用
-            notify_change: 是否在狀態變更後觸發 on_mod_list_changed 回呼，預設為 True
-
-        Returns:
-            本地模組異動結果
-        """
-        return self._get_mod_file_installer().set_mod_state_result(mod_id, enable, notify_change)
-
-    def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
-        """
-        匯入本地模組檔案到目前伺服器的 mods 目錄
-
-        Args:
-            source_path: 要匯入的本地模組檔案路徑
-
-        Returns:
-            匯入流程結果，供 UI 或呼叫端判斷成功與失敗原因
-        """
-
-        return self._get_mod_file_installer().import_local_mod_file_result(source_path)
-
-    def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
-        """
-        刪除一或多個本地模組檔案
-
-        Args:
-            mod_ids: 要刪除的模組識別值列表
-
-        Returns:
-            刪除流程結果，包含成功數量與缺失模組資訊
-        """
-
-        return self._get_mod_file_installer().delete_local_mods_result(mod_ids)
+        self.local_mod_scanner = LocalModScanner(
+            index_manager=self.index_manager,
+            mods_path=self.mods_path,
+            server_config=self.server_config,
+            provider_identity_service=self.provider_identity_service,
+            quarantine_file=self._quarantine_file,
+        )
+        self.mod_file_installer = ModFileInstaller(
+            server_path=self.server_path,
+            mods_path=self.mods_path,
+            download_staging_root=self.download_staging_root,
+            on_mod_list_changed=None,
+            logger=logger,
+        )
 
     def get_mod_list(self, include_disabled: bool = True) -> list[LocalModInfo]:
         """
@@ -135,7 +157,7 @@ class ModManager:
         Returns:
             模組資訊列表，依檔名排序
         """
-        mods = self.scan_mods()
+        mods = self.local_mod_scanner.scan_mods()
         if include_disabled:
             return mods
         return [mod for mod in mods if mod.status == ModStatus.ENABLED]
@@ -164,7 +186,7 @@ class ModManager:
         Returns:
             安裝成功時回傳目標檔案路徑，失敗時回傳 None
         """
-        result = self._install_remote_mod_file_result(
+        result = self.mod_file_installer.install_remote_mod_file_result(
             download_url=download_url,
             filename=filename,
             progress_callback=progress_callback,
@@ -173,43 +195,6 @@ class ModManager:
             cancel_check=cancel_check,
         )
         return result.final_path if result.completed else None
-
-    def replace_local_mod_file(
-        self,
-        local_mod: LocalModInfo,
-        download_url: str,
-        filename: str,
-        progress_callback: Callable[[int, int], None] | None = None,
-        expected_hash: str | None = None,
-        *,
-        provider: str | None = "modrinth",
-        cancel_check: Callable[[], bool] | None = None,
-    ) -> Path | None:
-        """
-        以遠端版本覆蓋本地模組，並盡量保留原本啟用/停用狀態
-
-        Args:
-            local_mod: 目前本地模組資訊
-            download_url: 遠端檔案下載網址
-            filename: 新版本檔名
-            progress_callback: 可選的下載進度回呼
-            expected_hash: 預期檔案雜湊，需為 SHA-256 或 SHA-512；若缺少則拒絕下載
-            provider: 提供者名稱，預設為 "modrinth"
-            cancel_check: 可選的取消檢查回呼，若回傳 True 則中止下載
-
-        Returns:
-            更新成功時回傳最終檔案路徑，失敗時回傳 None
-        """
-        return self._get_mod_file_installer().replace_local_mod_file(
-            local_mod=local_mod,
-            download_url=download_url,
-            filename=filename,
-            install_remote_mod_file_result=self._install_remote_mod_file_result,
-            progress_callback=progress_callback,
-            expected_hash=expected_hash,
-            provider=provider,
-            cancel_check=cancel_check,
-        )
 
     def export_mod_list(self, format_type: str = "text") -> str | bytes:
         """
@@ -245,7 +230,7 @@ class ModManager:
                         "id": mod.id,
                     }
                 )
-            return PathUtils.to_json_str(export_data, indent=2)
+            return serialize_json(export_data, indent=2)
         if format_type == "html":
 
             def _html(value: object) -> str:
@@ -276,87 +261,26 @@ class ModManager:
             html.append("</table></body></html>")
             return "\n".join(html)
         if format_type == "xlsx":
-            import io
-
-            from openpyxl import Workbook
-            from openpyxl.worksheet.worksheet import Worksheet
-
-            wb = Workbook()
-            ws = wb.active
-            if isinstance(ws, Worksheet):
-                ws.title = "模組列表"
-                ws.append(["啟用狀態", "模組名稱", "版本", "作者", "檔案名稱", "模組ID", "描述"])
-                for mod in mods:
-                    ws.append(
-                        [
-                            "是" if mod.status == ModStatus.ENABLED else "否",
-                            mod.name or "",
-                            mod.version or "",
-                            mod.author or "",
-                            mod.filename or "",
-                            mod.id or "",
-                            mod.description or "",
-                        ]
-                    )
-            output = io.BytesIO()
-            wb.save(output)
-            return output.getvalue()
+            rows: list[list[object]] = [["啟用狀態", "模組名稱", "版本", "作者", "檔案名稱", "模組ID", "描述"]]
+            rows.extend(
+                [
+                    "是" if mod.status == ModStatus.ENABLED else "否",
+                    mod.name or "",
+                    mod.version or "",
+                    mod.author or "",
+                    mod.filename or "",
+                    mod.id or "",
+                    mod.description or "",
+                ]
+                for mod in mods
+            )
+            return _build_xlsx(rows, sheet_name="模組列表")
         return ""
-
-    def _get_local_mod_scanner(self) -> LocalModScanner:
-        """延後建立本地模組掃描器，讓 ModManager 保持 orchestration 角色"""
-        scanner = getattr(self, "_local_mod_scanner", None)
-        if scanner is None:
-            scanner = LocalModScanner(
-                index_manager=self.index_manager,
-                mods_path=self.mods_path,
-                server_config=self.server_config,
-                provider_identity_service=self.provider_identity_service,
-                quarantine_file=self._quarantine_file,
-            )
-            self._local_mod_scanner = scanner
-        return scanner
-
-    def _get_mod_file_installer(self) -> ModFileInstaller:
-        """延後建立檔案安裝器，並同步最新的 UI 通知回呼"""
-        installer = getattr(self, "_mod_file_installer", None)
-        if installer is None:
-            installer = ModFileInstaller(
-                server_path=self.server_path,
-                mods_path=self.mods_path,
-                download_staging_root=self.download_staging_root,
-                on_mod_list_changed=self.on_mod_list_changed,
-                logger=logger,
-            )
-            self._mod_file_installer = installer
-        installer.on_mod_list_changed = self.on_mod_list_changed
-        return installer
-
-    def _install_remote_mod_file_result(
-        self,
-        download_url: str,
-        filename: str,
-        progress_callback: Callable[[int, int], None] | None = None,
-        expected_hash: str | None = None,
-        *,
-        provider: str | None = "modrinth",
-        cancel_check: Callable[[], bool] | None = None,
-        notify_change: bool = True,
-    ) -> ModFileOperationResult:
-        return self._get_mod_file_installer().install_remote_mod_file_result(
-            download_url=download_url,
-            filename=filename,
-            progress_callback=progress_callback,
-            expected_hash=expected_hash,
-            provider=provider,
-            cancel_check=cancel_check,
-            notify_change=notify_change,
-        )
 
     def _quarantine_file(self, file_path: Path, reason: str) -> None:
         """標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動"""
         try:
-            marked = PathUtils.mark_issue(file_path, reason)
+            marked = self.index_manager.mark_issue(file_path, reason)
             if marked:
                 logger.info(f"已標記檔案為有問題: {file_path} ({reason})")
             else:

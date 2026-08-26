@@ -1,260 +1,236 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Any
 
-import src.utils as utils_module
-from src.models import (
-    DependencyPlanHooks,
-    OnlineDependencyInstallItem,
-    OnlineDependencyInstallPlan,
-    OnlineModVersion,
-    ResolvedDependencyReference,
-)
+import src.core.mods.modrinth_planning_adapter as planning_adapter_module
+from src.core import LoaderManagerRulesAdapter, ModPlanning, ModrinthPlanningAdapter
+from src.models import ModrinthVersionLookupResult, OnlineModVersion
+from src.utils import normalize_identifier
 
 
-def _make_version(
+@dataclass(slots=True)
+class _PlanningProviderStub:
+    project_names: dict[str, str] = field(default_factory=dict)
+    version_details: dict[str, tuple[str, OnlineModVersion | None]] = field(default_factory=dict)
+    versions: dict[tuple[str, str, str], list[OnlineModVersion]] = field(default_factory=dict)
+
+    def resolve_project_names(self, project_ids: Iterable[str]) -> dict[str, str]:
+        return {
+            normalize_identifier(project_id): self.project_names[normalize_identifier(project_id)]
+            for project_id in project_ids
+            if normalize_identifier(project_id) in self.project_names
+        }
+
+    def get_version_details(self, version_id: str) -> tuple[str, OnlineModVersion | None]:
+        return self.version_details.get(version_id, ("", None))
+
+    def fetch_project_name(self, project_id: str) -> str | None:
+        return self.project_names.get(normalize_identifier(project_id))
+
+    def get_versions(
+        self,
+        project_id: str,
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+    ) -> list[OnlineModVersion]:
+        key = (normalize_identifier(project_id), str(minecraft_version or ""), normalize_identifier(loader))
+        return list(self.versions.get(key, self.versions.get((key[0], "", ""), [])))
+
+    def get_current_versions_by_hashes(
+        self, hashes: list[str], algorithm: str
+    ) -> dict[str, ModrinthVersionLookupResult]:
+        del hashes, algorithm
+        return {}
+
+    def get_latest_versions_by_hashes(
+        self,
+        hashes: list[str],
+        algorithm: str,
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+    ) -> dict[str, ModrinthVersionLookupResult]:
+        del hashes, algorithm, minecraft_version, loader
+        return {}
+
+    def get_recommended_version(
+        self,
+        project_id: str,
+        minecraft_version: str | None,
+        loader: str | None,
+    ) -> OnlineModVersion | None:
+        del project_id, minecraft_version, loader
+        return None
+
+
+class _LoaderRulesStub:
+    def compatible_versions(self, minecraft_version: str, loader: str) -> list[str]:
+        del minecraft_version, loader
+        return []
+
+
+def _version(
     version_id: str,
     display_name: str,
     *,
     dependencies: list[dict[str, Any]] | None = None,
-    files: list[dict[str, Any]] | None = None,
+    filename: str = "",
 ) -> OnlineModVersion:
+    files = [{"url": f"https://example.com/{filename}", "filename": filename, "primary": True}] if filename else []
     return OnlineModVersion(
         version_id=version_id,
         version_number=display_name,
         display_name=display_name,
         dependencies=list(dependencies or []),
-        files=list(files or []),
+        files=files,
     )
 
 
-def _make_install_item(
-    resolved_dependency: ResolvedDependencyReference,
-    dependency_label: str,
-    best_version: OnlineModVersion,
-    download_url: str,
-    filename: str,
-    parent_name: str,
-    *,
-    maybe_installed: bool,
-    status_note: str,
-    enabled: bool,
-    is_optional: bool,
-    decision_source: str,
-    graph_depth: int,
-    edge_kind: str,
-    edge_source: str,
-) -> OnlineDependencyInstallItem:
-    return OnlineDependencyInstallItem(
-        project_id=resolved_dependency.project_id,
-        project_name=dependency_label,
-        version_id=best_version.version_id,
-        version_name=best_version.display_name,
-        filename=filename,
-        download_url=download_url,
-        parent_name=parent_name,
-        maybe_installed=maybe_installed,
-        status_note=status_note,
-        resolution_source=resolved_dependency.resolution_source,
-        resolution_confidence=resolved_dependency.resolution_confidence,
-        enabled=enabled,
-        is_optional=is_optional,
-        provider="modrinth",
-        required_by=[parent_name] if parent_name else [],
-        decision_source=decision_source,
-        graph_depth=graph_depth,
-        edge_kind=edge_kind,
-        edge_source=edge_source,
-    )
+def _planning(provider: _PlanningProviderStub) -> ModPlanning:
+    return ModPlanning(provider, _LoaderRulesStub())
 
 
-def test_expand_required_dependency_install_plan_splits_required_and_optional() -> None:
-    root_version = _make_version(
+def test_mod_planning_splits_required_and_optional_dependencies() -> None:
+    root = _version(
         "root-v",
         "1.0.0",
         dependencies=[
-            {"project_id": "dep-required", "dependency_type": "required"},
-            {"project_id": "dep-optional", "dependency_type": "optional"},
+            {"project_id": "DepRequired", "dependency_type": "required"},
+            {"project_id": "DepOptional", "dependency_type": "optional"},
         ],
     )
-    required_version = _make_version(
-        "dep-required-v",
-        "2.0.0",
-        files=[{"url": "https://example.com/required.jar", "filename": "required.jar", "primary": True}],
-    )
-    optional_version = _make_version(
-        "dep-optional-v",
-        "3.0.0",
-        files=[{"url": "https://example.com/optional.jar", "filename": "optional.jar", "primary": True}],
+    provider = _PlanningProviderStub(
+        project_names={"deprequired": "Required Dep", "depoptional": "Optional Dep"},
+        versions={
+            ("deprequired", "", ""): [_version("required-v", "2.0.0", filename="required.jar")],
+            ("depoptional", "", ""): [_version("optional-v", "3.0.0", filename="optional.jar")],
+        },
     )
 
-    def _resolve_project_names(_: set[str]) -> dict[str, str]:
-        return {"dep-required": "Required Dep", "dep-optional": "Optional Dep"}
+    plan = _planning(provider).build_dependency_plan(root, root_project_name="Root")
 
-    def _resolve_dependency_entry(
-        dependency: dict[str, Any], dependency_names: dict[str, str]
-    ) -> ResolvedDependencyReference:
-        project_id = str(dependency.get("project_id", "") or "")
-        project_key = project_id.strip().lower()
-        return ResolvedDependencyReference(
-            project_id=project_id,
-            project_name=dependency_names.get(project_key, project_id),
-        )
-
-    def _select_dependency_best_version(
-        resolved_dependency: ResolvedDependencyReference, _: bool
-    ) -> OnlineModVersion | None:
-        if resolved_dependency.project_id == "dep-required":
-            return required_version
-        if resolved_dependency.project_id == "dep-optional":
-            return optional_version
-        return None
-
-    def _analyze_dependency_best_version(
-        best_version: OnlineModVersion,
-        resolved_dependency: ResolvedDependencyReference,
-        dependency_label: str,
-        dependency_names: dict[str, str],
-    ) -> Any:
-        _ = (best_version, resolved_dependency, dependency_label, dependency_names)
-        return SimpleNamespace(hard_errors=[])
-
-    def _extract_dependency_download_target(best_version: OnlineModVersion) -> tuple[str, str] | None:
-        primary_file = best_version.primary_file
-        if not primary_file:
-            return None
-        return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
-
-    plan = OnlineDependencyInstallPlan()
-    utils_module.expand_required_dependency_install_plan(
-        root_version=root_version,
-        plan=plan,
-        hooks=DependencyPlanHooks(
-            resolve_project_names=_resolve_project_names,
-            resolve_dependency_entry=_resolve_dependency_entry,
-            select_dependency_best_version=_select_dependency_best_version,
-            analyze_dependency_best_version=_analyze_dependency_best_version,
-            extract_dependency_download_target=_extract_dependency_download_target,
-            make_dependency_install_item=_make_install_item,
-            maybe_installed_checker=lambda *_: False,
-        ),
-        installed_project_ids=set(),
-        installed_versions_by_project={},
-        installed_mods=[],
-        root_project_name="Root",
-    )
-
-    assert len(plan.items) == 1
-    assert len(plan.advisory_items) == 1
-    assert plan.items[0].project_name == "Required Dep"
-    assert plan.items[0].decision_source == "required:auto"
-    assert plan.advisory_items[0].project_name == "Optional Dep"
-    assert plan.advisory_items[0].enabled is False
-    assert plan.advisory_items[0].is_optional is True
+    assert [(item.project_name, item.decision_source) for item in plan.items] == [("Required Dep", "required:auto")]
+    assert [(item.project_name, item.included_by_default, item.is_optional) for item in plan.advisory_items] == [
+        ("Optional Dep", False, True)
+    ]
 
 
-def test_expand_required_dependency_install_plan_marks_installed_version_mismatch() -> None:
-    root_version = _make_version(
+def test_mod_planning_resolves_dependency_references_with_per_operation_caches() -> None:
+    version = _version("resolved-v", "1.0.0")
+
+    class _CountingProvider(_PlanningProviderStub):
+        def __init__(self) -> None:
+            super().__init__(
+                project_names={"project-a": "Project Alpha"},
+                version_details={"version-lookup-1": ("Project-A", version)},
+            )
+            self.version_detail_calls = 0
+            self.project_name_calls = 0
+
+        def get_version_details(self, version_id: str) -> tuple[str, OnlineModVersion | None]:
+            self.version_detail_calls += 1
+            return super().get_version_details(version_id)
+
+        def fetch_project_name(self, project_id: str) -> str | None:
+            self.project_name_calls += 1
+            return super().fetch_project_name(project_id)
+
+    provider = _CountingProvider()
+    root = _version(
         "root-v",
         "1.0.0",
-        dependencies=[{"project_id": "dep-required", "dependency_type": "required"}],
+        dependencies=[
+            {"version_id": "version-lookup-1", "dependency_type": "required"},
+            {"version_id": "version-lookup-1", "dependency_type": "required"},
+            {"project_id": "Cached-Project", "dependency_type": "optional"},
+            {"file_name": "optional-lib.jar", "dependency_type": "optional"},
+        ],
     )
-    required_bound_version = _make_version("dep-required-v", "2.0.0")
 
-    def _resolve_dependency_entry(
-        dependency: dict[str, Any], dependency_names: dict[str, str]
-    ) -> ResolvedDependencyReference:
-        _ = dependency_names
-        return ResolvedDependencyReference(
-            project_id=str(dependency.get("project_id", "") or ""),
-            project_name="Required Dep",
-            version=required_bound_version,
-            version_name="2.0.0",
-            resolution_source="version_detail",
-            resolution_confidence="fallback",
-        )
-
-    def _unexpected_select(_: ResolvedDependencyReference, __: bool) -> OnlineModVersion | None:
-        raise AssertionError("installed mismatch path should not select remote versions")
-
-    plan = OnlineDependencyInstallPlan()
-    utils_module.expand_required_dependency_install_plan(
-        root_version=root_version,
-        plan=plan,
-        hooks=DependencyPlanHooks(
-            resolve_project_names=lambda _: {"dep-required": "Required Dep"},
-            resolve_dependency_entry=_resolve_dependency_entry,
-            select_dependency_best_version=_unexpected_select,
-            analyze_dependency_best_version=lambda *_: SimpleNamespace(hard_errors=[]),
-            extract_dependency_download_target=lambda *_: None,
-            make_dependency_install_item=_make_install_item,
-            maybe_installed_checker=lambda *_: False,
-        ),
-        installed_project_ids={"dep-required"},
-        installed_versions_by_project={"dep-required": {"1.0.0"}},
-        installed_mods=[],
-        root_project_name="Root",
+    report = _planning(provider).analyze_version(
+        root,
+        dependency_names={"cached-project": "Cached Project"},
     )
+
+    assert provider.version_detail_calls == 1
+    assert provider.project_name_calls == 1
+    assert any(message.startswith("Project Alpha") for message in report.missing_required_dependencies)
+    assert "Cached Project" in report.optional_dependencies
+    assert "optional-lib.jar" in report.optional_dependencies
+
+
+def test_mod_planning_marks_installed_version_mismatch() -> None:
+    root = _version(
+        "root-v",
+        "1.0.0",
+        dependencies=[{"version_id": "required-v", "dependency_type": "required"}],
+    )
+    required = _version("required-v", "2.0.0")
+    provider = _PlanningProviderStub(
+        project_names={"deprequired": "Required Dep"},
+        version_details={"required-v": ("DepRequired", required)},
+    )
+    installed = [type("Installed", (), {"platform_id": "DepRequired", "version": "1.0.0"})()]
+
+    plan = _planning(provider).build_dependency_plan(root, installed_mods=installed, root_project_name="Root")
 
     assert not plan.items
-    assert not plan.advisory_items
     assert any("已安裝版本不符" in message for message in plan.unresolved_required)
 
 
-def test_expand_required_dependency_install_plan_respects_max_depth() -> None:
-    root_version = _make_version(
+def test_mod_planning_respects_max_depth() -> None:
+    root = _version(
         "root-v",
         "1.0.0",
-        dependencies=[{"project_id": "dep-a", "dependency_type": "required"}],
+        dependencies=[{"project_id": "DepA", "dependency_type": "required"}],
     )
-    dep_a_version = _make_version(
+    dependency_a = _version(
         "dep-a-v",
         "2.0.0",
-        dependencies=[{"project_id": "dep-b", "dependency_type": "required"}],
-        files=[{"url": "https://example.com/dep-a.jar", "filename": "dep-a.jar", "primary": True}],
+        dependencies=[{"project_id": "DepB", "dependency_type": "required"}],
+        filename="dep-a.jar",
+    )
+    provider = _PlanningProviderStub(
+        project_names={"depa": "Dependency A", "depb": "Dependency B"},
+        versions={("depa", "", ""): [dependency_a]},
     )
 
-    def _resolve_dependency_entry(
-        dependency: dict[str, Any], dependency_names: dict[str, str]
-    ) -> ResolvedDependencyReference:
-        project_id = str(dependency.get("project_id", "") or "")
-        return ResolvedDependencyReference(
-            project_id=project_id, project_name=dependency_names.get(project_id, project_id)
-        )
-
-    def _select_dependency_best_version(
-        resolved_dependency: ResolvedDependencyReference, _: bool
-    ) -> OnlineModVersion | None:
-        if resolved_dependency.project_id == "dep-a":
-            return dep_a_version
-        return None
-
-    def _extract_dependency_download_target(best_version: OnlineModVersion) -> tuple[str, str] | None:
-        primary_file = best_version.primary_file
-        if not primary_file:
-            return None
-        return (str(primary_file.get("url", "") or ""), str(primary_file.get("filename", "") or ""))
-
-    plan = OnlineDependencyInstallPlan()
-    utils_module.expand_required_dependency_install_plan(
-        root_version=root_version,
-        plan=plan,
-        hooks=DependencyPlanHooks(
-            resolve_project_names=lambda _: {"dep-a": "Dependency A", "dep-b": "Dependency B"},
-            resolve_dependency_entry=_resolve_dependency_entry,
-            select_dependency_best_version=_select_dependency_best_version,
-            analyze_dependency_best_version=lambda *_: SimpleNamespace(hard_errors=[]),
-            extract_dependency_download_target=_extract_dependency_download_target,
-            make_dependency_install_item=_make_install_item,
-            maybe_installed_checker=lambda *_: False,
-        ),
-        installed_project_ids=set(),
-        installed_versions_by_project={},
-        installed_mods=[],
-        root_project_name="Root",
-        max_depth=0,
-    )
+    plan = _planning(provider).build_dependency_plan(root, root_project_name="Root", max_depth=0)
 
     assert len(plan.items) == 1
     assert any("依賴深度超過上限" in message for message in plan.unresolved_required)
+
+
+def test_modrinth_planning_adapter_preserves_provider_project_id_case(monkeypatch) -> None:
+    calls: list[str] = []
+    expected = _version("VersionABC", "1.0.0")
+
+    def get_versions(project_id: str, *_args: Any) -> list[OnlineModVersion]:
+        calls.append(project_id)
+        return [expected]
+
+    monkeypatch.setattr(
+        planning_adapter_module,
+        "get_mod_versions",
+        get_versions,
+    )
+
+    versions = ModrinthPlanningAdapter().get_versions("ProjectABC", "1.21.1", "fabric")
+
+    assert versions == [expected]
+    assert calls == ["ProjectABC"]
+
+
+def test_loader_rules_adapter_uses_injected_loader_manager() -> None:
+    manager = type(
+        "RulesManager",
+        (),
+        {
+            "get_compatible_loader_versions": lambda _self, minecraft_version, loader: [
+                type("LoaderVersion", (), {"version": f"{minecraft_version}-{loader}"})()
+            ]
+        },
+    )()
+
+    assert LoaderManagerRulesAdapter(manager).compatible_versions("1.21.1", "fabric") == ["1.21.1-fabric"]

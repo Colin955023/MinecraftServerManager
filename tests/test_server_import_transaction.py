@@ -48,11 +48,11 @@ def test_zip_import_flattens_single_wrapper_without_modifying_archive(tmp_path: 
 
     inspection = service.inspect(archive, "zip-server")
     assert inspection.source_kind == "archive"
-    assert inspection.loader_type == "fabric"
-    assert inspection.minecraft_version == "1.21.1"
-    assert inspection.loader_version == "0.16.0"
-    assert inspection.memory_max_mb == 4096
-    assert inspection.eula_accepted is True
+    assert inspection.server.loader_type == "fabric"
+    assert inspection.server.minecraft_version == "1.21.1"
+    assert inspection.server.loader_version == "0.16.0"
+    assert inspection.server.memory_max_mb == 4096
+    assert inspection.server.eula_state == "accepted"
     assert inspection.committable is True
     assert inspection.conflict_type == "none"
 

@@ -6,6 +6,7 @@ UI 工具函式
 from __future__ import annotations
 
 import os
+import shutil
 import time
 import weakref
 import webbrowser
@@ -25,7 +26,6 @@ from qfluentwidgets import (
 from src.ui import MessageDialog
 from src.utils import (
     Colors,
-    PathUtils,
     SubprocessUtils,
     cancel_timer,
     get_logger,
@@ -373,9 +373,7 @@ class UIUtils:
             if os.name == "nt" and not UIUtils._is_safe_windows_path_argument(target_str):
                 logger.error("在檔案總管中顯示失敗：路徑包含不安全字元")
                 return
-            explorer = PathUtils.find_executable("explorer") or str(
-                Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
-            )
+            explorer = shutil.which("explorer") or str(Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe")
             try:
                 SubprocessUtils.run_checked([explorer, "/select,", target_str], check=False)
                 return
@@ -422,7 +420,7 @@ class UIUtils:
             except Exception as e:
                 logger.debug(f"os.startfile 失敗，嘗試 subprocess: {e}")
             try:
-                explorer = PathUtils.find_executable("explorer") or str(
+                explorer = shutil.which("explorer") or str(
                     Path(os.environ.get("WINDIR", "C:\\Windows")) / "explorer.exe"
                 )
                 try:

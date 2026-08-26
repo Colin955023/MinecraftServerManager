@@ -6,50 +6,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
-from src.core import (
-    analyze_mod_version_compatibility,
-    build_required_dependency_install_plan,
-    resolve_modrinth_project_names,
-)
-from src.models import LocalModUpdatePlan, LocalUpdateReviewEntry, PendingInstallReviewEntry, PendingOnlineInstall
-from src.ui import (
-    LocalReviewSnapshotStore,
-    ReviewExecutionHandoff,
-    ReviewFormattingMixin,
-    ReviewGroupingMixin,
-    ReviewInstallStep,
-    ReviewRootView,
-    ReviewTaskView,
-    ReviewViewSnapshot,
-    append_enabled_dependency_simulations,
-    build_dependency_review_key,
-    build_installed_mod_simulation_item,
-    build_local_update_execution_prompt,
-    build_local_update_review_key,
-    build_local_update_review_subtitle,
-    build_non_official_source_confirmation_prompt,
-    build_online_install_execution_prompt,
-    build_online_install_review_subtitle,
-    build_pending_install_review_key,
-    build_review_context_stamp,
-    build_server_install_blocking_reason,
-    build_server_install_warning_line,
-    collect_non_official_source_warning_messages,
-    collect_review_entry_enabled_overrides,
-    count_enabled_runnable_entries,
-    count_local_update_review_groups,
-    count_online_install_review_groups,
-    dedupe_review_messages,
-    format_completion_notes,
-    format_local_update_review_text,
-    format_pending_install_review_text,
-    format_review_overview_text,
-    get_enabled_dependency_install_items,
-    get_review_group_specs,
-    normalize_status_value,
-    resolve_local_update_review_project_page_url,
-    resolve_pending_install_review_project_page_url,
-    set_review_entries_enabled,
+from src.core import ModPlanning
+from src.models import (
+    LocalModUpdatePlan,
+    PendingOnlineInstall,
 )
 from src.utils import (
     LOCAL_UPDATE_SKIPPED_BLOCKED_TEMPLATE,
@@ -57,6 +17,55 @@ from src.utils import (
     LOCAL_UPDATE_SKIPPED_UNKNOWN_TEMPLATE,
     extract_primary_file_hash,
 )
+
+from .mod_presentation import build_server_install_blocking_reason, build_server_install_warning_line
+from .review_contracts import (
+    ReviewExecutionHandoff,
+    ReviewInstallStep,
+    ReviewRootView,
+    ReviewTaskView,
+    ReviewViewSnapshot,
+    build_review_context_stamp,
+    describe_context_mismatch,
+    normalize_status_value,
+)
+from .review_dependency import (
+    append_selected_dependency_simulations,
+    build_dependency_review_key,
+    build_installed_mod_simulation_item,
+    get_selected_dependency_install_items,
+)
+from .review_details import format_local_update_review_text, format_pending_install_review_text
+from .review_formatting import (
+    ReviewFormattingMixin,
+    build_review_subtitle,
+    dedupe_review_messages,
+    format_completion_notes,
+    format_review_overview_text,
+    resolve_local_update_review_project_page_url,
+    resolve_pending_install_review_project_page_url,
+)
+from .review_grouping import (
+    ReviewGroupingMixin,
+    build_local_update_review_key,
+    build_pending_install_review_key,
+    count_local_update_review_groups,
+    count_online_install_review_groups,
+    get_review_group_specs,
+)
+from .review_prompts import (
+    build_local_update_execution_prompt,
+    build_non_official_source_confirmation_prompt,
+    build_online_install_execution_prompt,
+    collect_non_official_source_warning_messages,
+)
+from .review_selection import (
+    collect_review_entry_selected_overrides,
+    count_selected_runnable_entries,
+    set_review_entries_selected,
+)
+from .review_snapshot_store import LocalReviewSnapshotStore
+from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
 
 
 class _ReviewPresentation(ReviewGroupingMixin, ReviewFormattingMixin):
@@ -92,25 +101,60 @@ def _dependency_step(item: Any, root_key: str) -> ReviewInstallStep:
     )
 
 
+def _default_dependency_selected_keys(dependency_plan: Any) -> set[tuple[str, str]]:
+    return {
+        build_dependency_review_key(item)
+        for item in [
+            *list(getattr(dependency_plan, "items", []) or []),
+            *list(getattr(dependency_plan, "advisory_items", []) or []),
+        ]
+        if bool(getattr(item, "included_by_default", True))
+    }
+
+
 class ModReviewWorkflow:
     """建立 Review session、view snapshot 與 immutable execution handoff"""
 
     def __init__(
         self,
         *,
+        mod_planning: ModPlanning,
         server: Any,
         installed_mods: list[Any],
         telemetry: dict[str, int] | None = None,
-        snapshot_store: LocalReviewSnapshotStore | None = None,
+        mod_manager: Any | None = None,
     ) -> None:
         self.context_stamp = build_review_context_stamp(server, installed_mods)
+        self._mod_planning = mod_planning
         self._server = server
         self._installed_mods = deepcopy(installed_mods)
         self._telemetry = (
             telemetry if telemetry is not None else {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
         )
-        self._snapshot_store = snapshot_store
+        self._snapshot_store = (
+            LocalReviewSnapshotStore(mod_manager, self._telemetry) if mod_manager is not None else None
+        )
         self._presentation = _ReviewPresentation(self._telemetry)
+
+    @staticmethod
+    def validate_handoff_context(
+        handoff: ReviewExecutionHandoff,
+        server: Any,
+        installed_mods: list[Any],
+    ) -> str:
+        """
+        比對 handoff 與目前伺服器內容
+
+        Args:
+            handoff: Review session 產生的不可變執行契約
+            server: 執行前重新取得的目標伺服器
+            installed_mods: 執行前重新掃描的已安裝 Mod
+
+        Returns:
+            最先出現的失效原因；context 相符時為空字串
+        """
+        actual = build_review_context_stamp(server, installed_mods)
+        return describe_context_mismatch(handoff.context_stamp, actual)
 
     @property
     def _context(self) -> tuple[str, str, str]:
@@ -153,13 +197,7 @@ class ModReviewWorkflow:
         simulated_installed_mods = deepcopy(self._installed_mods)
         entries: list[PendingInstallReviewEntry] = []
         for pending in pending_items:
-            dependency_project_ids = {
-                str(dependency.get("project_id", "") or "").strip()
-                for dependency in getattr(pending.version, "dependencies", []) or []
-                if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
-            }
-            dependency_names = resolve_modrinth_project_names(dependency_project_ids)
-            report = analyze_mod_version_compatibility(
+            report = self._mod_planning.analyze_version(
                 pending.version,
                 project_id=pending.project_id,
                 project_name=pending.project_name,
@@ -167,9 +205,8 @@ class ModReviewWorkflow:
                 loader=loader_type,
                 loader_version=loader_version,
                 installed_mods=simulated_installed_mods,
-                dependency_names=dependency_names,
             )
-            dependency_plan = build_required_dependency_install_plan(
+            dependency_plan = self._mod_planning.build_dependency_plan(
                 pending.version,
                 minecraft_version=minecraft_version,
                 loader=loader_type,
@@ -195,20 +232,22 @@ class ModReviewWorkflow:
                 dependency_plan=dependency_plan,
                 blocking_reasons=blocking_reasons,
                 warning_messages=warnings,
-                enabled=not blocking_reasons,
+                selected=not blocking_reasons,
+                selected_dependency_keys=_default_dependency_selected_keys(dependency_plan),
                 provider=str(getattr(pending.version, "provider", "modrinth") or "modrinth"),
                 version_type=str(getattr(pending.version, "version_type", "") or ""),
                 date_published=str(getattr(pending.version, "date_published", "") or ""),
                 changelog=str(getattr(pending.version, "changelog", "") or ""),
             )
             entry.warning_messages = dedupe_review_messages(
-                [*warnings, *collect_non_official_source_warning_messages(entry, enabled_only=True)]
+                [*warnings, *collect_non_official_source_warning_messages(entry, selected_only=True)]
             )
             entries.append(entry)
             if entry.actionable:
-                append_enabled_dependency_simulations(
+                append_selected_dependency_simulations(
                     simulated_installed_mods,
                     dependency_plan,
+                    entry.selected_dependency_keys,
                     build_installed_mod_simulation_item,
                 )
                 primary_file = getattr(pending.version, "primary_file", None) or {}
@@ -228,8 +267,8 @@ class ModReviewWorkflow:
     def _prepare_local_entries(
         self,
         update_plan: LocalModUpdatePlan,
-        root_enabled_overrides: dict[str, bool] | None = None,
-        advisory_enabled_overrides: dict[tuple[str, tuple[str, str]], bool] | None = None,
+        root_selected_overrides: dict[str, bool] | None = None,
+        dependency_selected_overrides: dict[tuple[str, tuple[str, str]], bool] | None = None,
     ) -> list[LocalUpdateReviewEntry]:
         minecraft_version, loader_type, loader_version = self._context
         simulated_installed_mods = deepcopy(self._installed_mods)
@@ -245,12 +284,14 @@ class ModReviewWorkflow:
                 ]
             )
             target_version = getattr(candidate, "target_version", None)
-            cached_root_enabled: bool | None = None
+            cached_plan: Any | None = None
+            cached_root_selected: bool | None = None
+            cached_dependency_selected_keys: set[tuple[str, str]] | None = None
             if getattr(candidate, "update_available", False) and target_version is not None:
-                cached_plan, cached_root_enabled = (
-                    self._snapshot_store.load(candidate) if self._snapshot_store else (None, None)
+                cached_plan, cached_root_selected, cached_dependency_selected_keys = (
+                    self._snapshot_store.load(candidate) if self._snapshot_store else (None, None, None)
                 )
-                dependency_plan = cached_plan or build_required_dependency_install_plan(
+                dependency_plan = cached_plan or self._mod_planning.build_dependency_plan(
                     target_version,
                     minecraft_version=minecraft_version,
                     loader=loader_type,
@@ -259,28 +300,36 @@ class ModReviewWorkflow:
                     root_project_id=candidate.project_id,
                     root_project_name=candidate.project_name,
                 )
-                if cached_plan is None and self._snapshot_store:
-                    self._snapshot_store.save(
-                        candidate,
-                        dependency_plan,
-                        root_enabled=bool(getattr(candidate, "actionable", False)) and not blocking_reasons,
-                    )
-                for item in list(getattr(dependency_plan, "advisory_items", []) or []):
+                dependency_selected_keys = (
+                    set(cached_dependency_selected_keys)
+                    if cached_plan is not None and cached_dependency_selected_keys is not None
+                    else _default_dependency_selected_keys(dependency_plan)
+                )
+                for item in [
+                    *list(getattr(dependency_plan, "items", []) or []),
+                    *list(getattr(dependency_plan, "advisory_items", []) or []),
+                ]:
                     override_key = (root_key, build_dependency_review_key(item))
-                    if advisory_enabled_overrides and override_key in advisory_enabled_overrides:
-                        item.enabled = advisory_enabled_overrides[override_key]
+                    if dependency_selected_overrides and override_key in dependency_selected_overrides:
+                        if dependency_selected_overrides[override_key]:
+                            dependency_selected_keys.add(override_key[1])
+                        else:
+                            dependency_selected_keys.discard(override_key[1])
                 blocking_reasons.extend(list(getattr(dependency_plan, "unresolved_required", []) or []))
-            default_enabled = bool(getattr(candidate, "actionable", False)) and not blocking_reasons
-            if not blocking_reasons and root_enabled_overrides is None and cached_root_enabled is not None:
-                default_enabled = cached_root_enabled
-            enabled = (
-                root_enabled_overrides.get(root_key, default_enabled) if root_enabled_overrides else default_enabled
+            else:
+                dependency_selected_keys = set()
+            default_selected = bool(getattr(candidate, "actionable", False)) and not blocking_reasons
+            if not blocking_reasons and root_selected_overrides is None and cached_root_selected is not None:
+                default_selected = cached_root_selected
+            selected = (
+                root_selected_overrides.get(root_key, default_selected) if root_selected_overrides else default_selected
             )
             entry = LocalUpdateReviewEntry(
                 candidate=candidate,
                 dependency_plan=dependency_plan,
                 blocking_reasons=blocking_reasons,
-                enabled=enabled,
+                selected=selected,
+                selected_dependency_keys=dependency_selected_keys,
                 provider=str(getattr(target_version, "provider", "modrinth") or "modrinth")
                 if target_version
                 else "modrinth",
@@ -288,14 +337,22 @@ class ModReviewWorkflow:
                 date_published=str(getattr(target_version, "date_published", "") or "") if target_version else "",
                 changelog=str(getattr(target_version, "changelog", "") or "") if target_version else "",
             )
-            entry.warning_messages = collect_non_official_source_warning_messages(entry, enabled_only=True)
+            entry.warning_messages = collect_non_official_source_warning_messages(entry, selected_only=True)
             entries.append(entry)
+            if cached_plan is None and self._snapshot_store:
+                self._snapshot_store.save(
+                    candidate,
+                    dependency_plan,
+                    root_selected=selected,
+                    selected_dependency_keys=dependency_selected_keys,
+                )
             if warnings:
                 candidate.notes = dedupe_review_messages([*warnings, *list(getattr(candidate, "notes", []) or [])])
             if entry.actionable:
-                append_enabled_dependency_simulations(
+                append_selected_dependency_simulations(
                     simulated_installed_mods,
                     dependency_plan,
+                    entry.selected_dependency_keys,
                     build_installed_mod_simulation_item,
                 )
                 simulated_installed_mods.append(
@@ -332,11 +389,13 @@ class OnlineReviewSession:
         notes = presentation._collect_online_review_global_notes(entries)
         return ReviewViewSnapshot(
             mode="online_install",
-            subtitle=build_online_install_review_subtitle(
-                actionable_count,
-                counts.get("blocked", 0),
-                advisory_count=counts.get("advisory", 0),
+            subtitle=build_review_subtitle(
+                prefix_segments=["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"],
+                count_segments=((counts.get("advisory", 0), "建議確認"),),
+                blocked_count=counts.get("blocked", 0),
+                blocked_label="待處理",
                 migrated_snapshot_count=self._workflow._telemetry.get("migrated", 0),
+                migrated_snapshot_label="快照自動遷移",
             ),
             overview=format_review_overview_text(
                 entries,
@@ -358,7 +417,7 @@ class OnlineReviewSession:
             ),
             group_specs=get_review_group_specs(),
             action_label="安裝",
-            enabled_count=actionable_count,
+            selected_count=actionable_count,
             actionable_count=actionable_count,
             blocked_count=counts.get("blocked", 0),
         )
@@ -381,7 +440,7 @@ class OnlineReviewSession:
             root_key = build_pending_install_review_key(
                 entry.pending.project_id, getattr(entry.pending.version, "version_id", "")
             )
-            for item in get_enabled_dependency_install_items(entry.dependency_plan):
+            for item in get_selected_dependency_install_items(entry.dependency_plan, entry.selected_dependency_keys):
                 key = _dependency_key(item)
                 if key in unique_dependencies:
                     duplicate_count += 1
@@ -404,8 +463,8 @@ class OnlineReviewSession:
                 )
             )
         skipped = []
-        if counts.get("disabled", 0):
-            skipped.append(f"已停用 {counts['disabled']} 項")
+        if counts.get("unselected", 0):
+            skipped.append(f"未選取 {counts['unselected']} 項")
         if counts.get("blocked", 0):
             skipped.append(f"需先處理 {counts['blocked']} 項")
         completion_notes = format_completion_notes(
@@ -428,7 +487,7 @@ class OnlineReviewSession:
             source_confirmation_prompt=build_non_official_source_confirmation_prompt(actionable, action_label="安裝"),
             skipped_text="\n略過項目：\n- " + "\n- ".join(skipped) if skipped else "",
             completion_notes=completion_notes,
-            disabled_count=counts.get("disabled", 0),
+            unselected_count=counts.get("unselected", 0),
             dependency_count=len(unique_dependencies),
             duplicate_dependency_count=duplicate_count,
         )
@@ -474,17 +533,19 @@ class LocalReviewSession:
         entries = list(self._entries)
         nodes = presentation._build_local_update_task_nodes(entries)
         counts = count_local_update_review_groups(entries)
-        enabled_count = count_enabled_runnable_entries(entries)
+        selected_count = count_selected_runnable_entries(entries)
         notes = presentation._collect_local_update_global_notes(self._update_plan, entries)
         return ReviewViewSnapshot(
             mode="local_update",
-            subtitle=build_local_update_review_subtitle(
-                self._scope_text,
-                enabled_count,
-                counts["blocked"],
-                advisory_count=counts["advisory"],
-                retryable_count=counts["retryable"],
-                unknown_count=counts["unknown"],
+            subtitle=build_review_subtitle(
+                prefix_segments=[f"範圍：{self._scope_text}", f"已選取更新 {selected_count} 項"],
+                count_segments=(
+                    (counts["advisory"], "建議確認"),
+                    (counts["retryable"], "可重試"),
+                    (counts["unknown"], "待識別"),
+                ),
+                blocked_count=counts["blocked"],
+                blocked_label="阻擋",
                 migrated_snapshot_count=self._workflow._telemetry.get("migrated", 0),
             ),
             overview=format_review_overview_text(entries, nodes, action_label="更新", global_notes=notes),
@@ -499,57 +560,65 @@ class LocalReviewSession:
             ),
             group_specs=get_review_group_specs(),
             action_label="更新",
-            enabled_count=enabled_count,
+            selected_count=selected_count,
             actionable_count=sum(entry.actionable for entry in entries),
             blocked_count=counts["blocked"],
         )
 
-    def apply_selection(self, selected_node_ids: set[str], enabled: bool) -> bool:
+    def apply_selection(self, selected_node_ids: set[str], selected: bool) -> bool:
         """
-        套用 root 或可選依賴節點的啟用狀態
+        套用 root 或可選依賴節點的選取狀態
 
         Args:
             selected_node_ids: 使用者選取的任務樹節點 ID
-            enabled: 要套用的新啟用狀態
+            selected: 要套用的新選取狀態
 
         Returns:
             狀態有變更並完成重新規劃時為 True
         """
         if not selected_node_ids:
             return False
-        changed = self._apply_advisory_selection(selected_node_ids, enabled)
+        changed = self._apply_dependency_selection(selected_node_ids, selected)
         if not changed:
             entry_map = {build_local_update_review_key(entry.candidate): entry for entry in self._entries}
-            changed = set_review_entries_enabled(entry_map, selected_node_ids, enabled)
+            changed = set_review_entries_selected(entry_map, selected_node_ids, selected)
         if not changed:
             return False
         if self._workflow._snapshot_store:
             self._workflow._snapshot_store.save_entries(self._entries)
         root_keys = [build_local_update_review_key(entry.candidate) for entry in self._entries]
-        root_overrides = collect_review_entry_enabled_overrides(list(self._entries), root_keys)
-        advisory_overrides = {
-            (root_key, build_dependency_review_key(item)): bool(getattr(item, "enabled", False))
+        root_overrides = collect_review_entry_selected_overrides(list(self._entries), root_keys)
+        dependency_overrides = {
+            (root_key, build_dependency_review_key(item)): build_dependency_review_key(item)
+            in entry.selected_dependency_keys
             for root_key, entry in zip(root_keys, self._entries, strict=False)
-            for item in list(getattr(entry.dependency_plan, "advisory_items", []) or [])
+            for item in [
+                *list(getattr(entry.dependency_plan, "items", []) or []),
+                *list(getattr(entry.dependency_plan, "advisory_items", []) or []),
+            ]
         }
         self._entries = tuple(
             self._workflow._prepare_local_entries(
                 self._update_plan,
-                root_enabled_overrides=root_overrides,
-                advisory_enabled_overrides=advisory_overrides,
+                root_selected_overrides=root_overrides,
+                dependency_selected_overrides=dependency_overrides,
             )
         )
         return True
 
-    def _apply_advisory_selection(self, selected_node_ids: set[str], enabled: bool) -> bool:
+    def _apply_dependency_selection(self, selected_node_ids: set[str], selected: bool) -> bool:
         changed = False
         entry_map = {build_local_update_review_key(entry.candidate): entry for entry in self._entries}
         for root_key, entry in entry_map.items():
             advisory_items = list(getattr(entry.dependency_plan, "advisory_items", []) or [])
             if f"{root_key}::optional-dependencies" in selected_node_ids:
                 for item in advisory_items:
-                    if bool(getattr(item, "enabled", False)) != enabled:
-                        item.enabled = enabled
+                    dependency_key = build_dependency_review_key(item)
+                    if (dependency_key in entry.selected_dependency_keys) != selected:
+                        if selected:
+                            entry.selected_dependency_keys.add(dependency_key)
+                        else:
+                            entry.selected_dependency_keys.discard(dependency_key)
                         changed = True
             dependency_items = [
                 *((item, False) for item in list(getattr(entry.dependency_plan, "items", []) or [])),
@@ -564,28 +633,32 @@ class LocalReviewSession:
             for index, (item, is_advisory) in enumerate(dependency_items):
                 if not is_advisory or f"{root_key}::dependency::{index}" not in selected_node_ids:
                     continue
-                if bool(getattr(item, "enabled", False)) != enabled:
-                    item.enabled = enabled
+                dependency_key = build_dependency_review_key(item)
+                if (dependency_key in entry.selected_dependency_keys) != selected:
+                    if selected:
+                        entry.selected_dependency_keys.add(dependency_key)
+                    else:
+                        entry.selected_dependency_keys.discard(dependency_key)
                     changed = True
         return changed
 
     def build_handoff(self) -> ReviewExecutionHandoff:
         """
-        將已啟用且可執行的更新項目轉為 handoff
+        將已選取且可執行的更新項目轉為 handoff
 
         Returns:
             含更新與依賴步驟、context stamp 及提示文字的執行契約
         """
         entries = list(self._entries)
         actionable = [entry for entry in entries if entry.actionable]
-        disabled = [entry for entry in entries if entry.runnable and not entry.enabled]
+        unselected = [entry for entry in entries if entry.runnable and not entry.selected]
         counts = count_local_update_review_groups(entries)
         steps: list[ReviewInstallStep] = []
         root_keys: list[str] = []
         dependency_count = 0
         for entry in actionable:
             root_key = build_local_update_review_key(entry.candidate)
-            for item in get_enabled_dependency_install_items(entry.dependency_plan):
+            for item in get_selected_dependency_install_items(entry.dependency_plan, entry.selected_dependency_keys):
                 steps.append(_dependency_step(item, root_key))
                 dependency_count += 1
             candidate = entry.candidate
@@ -638,7 +711,7 @@ class LocalReviewSession:
             source_confirmation_prompt=build_non_official_source_confirmation_prompt(actionable, action_label="更新"),
             skipped_text="\n略過項目：\n- " + "\n- ".join(skipped) if skipped else "",
             completion_notes=completion_notes,
-            disabled_count=len(disabled),
+            unselected_count=len(unselected),
             dependency_count=dependency_count,
             duplicate_dependency_count=0,
         )
@@ -657,7 +730,7 @@ def _collect_dependency_keys(entries: list[Any]) -> tuple[set[tuple[str, str, st
     keys: set[tuple[str, str, str, str]] = set()
     duplicate_count = 0
     for entry in entries:
-        for item in get_enabled_dependency_install_items(entry.dependency_plan):
+        for item in get_selected_dependency_install_items(entry.dependency_plan, entry.selected_dependency_keys):
             key = _dependency_key(item)
             if key in keys:
                 duplicate_count += 1

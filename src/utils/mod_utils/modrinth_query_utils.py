@@ -87,19 +87,6 @@ def get_modrinth_loader_filters(loader: str | None) -> list[str]:
     return [normalized_loader]
 
 
-def apply_loader_specific_dependency_override(project_id: str | None) -> str:
-    """
-    回傳原始 project id，不再進行載入器特定的轉換
-
-    Args:
-        project_id: 原始 project id
-
-    Returns:
-        原始 project id
-    """
-    return clean_api_identifier(project_id)
-
-
 def _split_camel_case_words(value: str | None) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -192,7 +179,6 @@ def parse_modrinth_version_lookup_response(
 
 
 __all__ = [
-    "apply_loader_specific_dependency_override",
     "clean_api_identifier",
     "get_modrinth_loader_filters",
     "is_supported_modrinth_update_loader",

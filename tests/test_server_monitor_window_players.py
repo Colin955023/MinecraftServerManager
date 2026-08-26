@@ -6,14 +6,6 @@ from typing import Any, cast
 from src.ui import ServerMonitorWindow
 
 
-class _FakeServerCRUD:
-    def __init__(self, output_lines: list[str] | None = None) -> None:
-        self.output_lines = output_lines or []
-
-    def read_server_output(self, *_args: Any, **_kwargs: Any) -> list[str]:
-        return self.output_lines
-
-
 class _FakeLabel:
     def __init__(self) -> None:
         self._text = ""
@@ -22,25 +14,15 @@ class _FakeLabel:
     def text(self) -> str:
         return self._text
 
-    def text_val(self) -> str:
-        return self._text
-
     def is_alive(self) -> bool:
         return True
-
-    def configure(self, **kwargs: str) -> None:
-        self._text = kwargs.get("text", self._text)
 
     def setText(self, text: str) -> None:
         self._text = text
 
-    def text_func(self) -> str:
-        return self._text
 
-
-def _make_monitor(output_lines: list[str] | None = None) -> ServerMonitorWindow:
+def _make_monitor() -> ServerMonitorWindow:
     monitor = ServerMonitorWindow.__new__(ServerMonitorWindow)
-    monitor.server_manager = _FakeServerCRUD(output_lines)
     monitor.server_name = "minecraft_server"
     monitor.ui_queue = queue.Queue()
     monitor_any = cast(Any, monitor)
@@ -71,12 +53,12 @@ def test_parse_player_presence_event_extracts_join_and_left() -> None:
 
 
 def test_read_player_list_without_response_preserves_current_list() -> None:
-    monitor = _make_monitor(["[15:45:52] [Server thread/INFO]: unrelated output"])
+    monitor = _make_monitor()
     captured: list[list[str]] = []
     monitor._last_player_names = ("Andy",)
     cast(Any, monitor).update_player_list = captured.append
 
-    monitor.read_player_list()
+    monitor.read_player_list("[15:45:52] [Server thread/INFO]: unrelated output")
 
     assert captured == []
     assert monitor.ui_queue.empty()

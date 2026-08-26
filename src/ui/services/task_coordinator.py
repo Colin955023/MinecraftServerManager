@@ -71,10 +71,6 @@ class TaskCoordinator:
             if show_msg:
                 UIUtils.show_message("更新檢查失敗", f"無法檢查更新：{e}", self.main_window.root, message_level="error")
 
-    def manual_check_updates(self) -> None:
-        """手動觸發更新檢查，並始終顯示結果訊息"""
-        self.check_for_updates(show_msg=True)
-
     def _schedule_startup_update_check(self, *, delay_ms: int = 600, show_msg: bool = False) -> None:
         """延遲啟動更新檢查，避開 modal 對話框剛關閉時的 UI 卡頓"""
 
@@ -97,7 +93,7 @@ class TaskCoordinator:
 
         UIUtils.show_message(
             title="歡迎使用 Minecraft 伺服器管理器",
-            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n您可於「關於」視窗中隨時關閉此功能。",
+            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n您可於「關於」視窗中隨時關閉此功能",
             parent=self.main_window.root,
             message_level="info",
         )

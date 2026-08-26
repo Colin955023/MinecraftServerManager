@@ -82,7 +82,7 @@ def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: P
     )
     manager.index_manager.cache_file_hash(file_path, "sha512", "deadbeef")
 
-    mod_info = manager.create_mod_info_from_file(file_path)
+    mod_info = manager.local_mod_scanner.create_mod_info_from_file(file_path)
 
     assert mod_info is not None
     assert mod_info.platform == ModPlatform.MODRINTH

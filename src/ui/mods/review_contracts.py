@@ -3,17 +3,109 @@
 from __future__ import annotations
 
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from src.models import (
-    ReviewContextStamp,
-    ReviewExecutionHandoff,
-    ReviewInstallStep,
-    ReviewRootView,
-    ReviewTaskView,
-    ReviewViewSnapshot,
-)
+ReviewMode = Literal["online_install", "local_update"]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewContextStamp:
+    """拒絕過期 Review 執行所需的伺服器與本地 Mod revision"""
+
+    server_identity: str
+    minecraft_version: str
+    loader_type: str
+    loader_version: str
+    installed_mod_revision: tuple[tuple[str, str, str, str, int, int], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewTaskView:
+    """Review 任務樹單一節點的不可變呈現資料"""
+
+    node_id: str
+    root_key: str
+    group_key: str
+    title: str
+    values: tuple[str, ...]
+    node_kind: str
+    parent_id: str | None
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewRootView:
+    """Review root 的摘要與專案頁面資料"""
+
+    root_key: str
+    summary: str
+    project_page_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewViewSnapshot:
+    """Qt adapter 繪製完整 Review 所需的不可變快照"""
+
+    mode: ReviewMode
+    subtitle: str
+    overview: str
+    task_nodes: tuple[ReviewTaskView, ...]
+    roots: tuple[ReviewRootView, ...]
+    group_specs: tuple[tuple[str, str], ...]
+    action_label: str
+    selected_count: int
+    actionable_count: int
+    blocked_count: int
+
+    def root(self, root_key: str) -> ReviewRootView | None:
+        """依 stable root key 取得摘要資料
+
+        Args:
+            root_key: Review root 的穩定識別碼
+
+        Returns:
+            相符的 root view；不存在時為 None
+        """
+        return next((root for root in self.roots if root.root_key == root_key), None)
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewInstallStep:
+    """Executor 可直接執行的下載、安裝或更新步驟"""
+
+    kind: Literal["dependency", "online_root", "local_root"]
+    root_key: str
+    project_name: str
+    version_name: str
+    download_url: str
+    filename: str
+    expected_hash: str
+    provider: str
+    local_file_path: str = ""
+    local_status: str = "enabled"
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewExecutionHandoff:
+    """Review session 驗證後交給 executor 的不可變執行契約"""
+
+    mode: ReviewMode
+    context_stamp: ReviewContextStamp
+    steps: tuple[ReviewInstallStep, ...]
+    root_keys: tuple[str, ...]
+    confirmation_prompt: str
+    source_confirmation_prompt: str
+    skipped_text: str = ""
+    completion_notes: str = ""
+    unselected_count: int = 0
+    dependency_count: int = 0
+    duplicate_dependency_count: int = 0
+
+    @property
+    def root_count(self) -> int:
+        return len(self.root_keys)
 
 
 def normalize_status_value(value: Any) -> str:
@@ -96,9 +188,9 @@ def describe_context_mismatch(expected: ReviewContextStamp, actual: ReviewContex
 
 
 __all__ = [
-    "ReviewContextStamp",
     "ReviewExecutionHandoff",
     "ReviewInstallStep",
+    "ReviewMode",
     "ReviewRootView",
     "ReviewTaskView",
     "ReviewViewSnapshot",

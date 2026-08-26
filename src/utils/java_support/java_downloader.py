@@ -19,7 +19,15 @@ class JavaDownloader:
         確認 winget 是否可用，並詳細記錄失敗原因以利 Debug
         """
         try:
-            process = SubprocessUtils.query_winget(["--version"], check=True)
+            process = SubprocessUtils.run_checked(
+                ["winget", "--version"],
+                capture_output=True,
+                text=True,
+                check=True,
+                encoding="utf-8",
+                stdin=SubprocessUtils.DEVNULL,
+                creationflags=SubprocessUtils.CREATE_NO_WINDOW,
+            )
             logger.info(f"偵測到 winget，版本: {process.stdout.strip()}")
             return True
 
@@ -45,11 +53,11 @@ class JavaDownloader:
 
         if not JavaDownloader._is_winget_available():
             raise JavaInstallError(
-                "無法呼叫 winget 工具。這可能是因為：\n"
+                "無法呼叫 winget 工具這\n可能是因為：\n"
                 "1. 系統未安裝「應用程式安裝員 (App Installer)」\n"
                 "2. 您的 Windows 版本過舊\n"
                 "3. 環境變數中缺少 %LocalAppData%\\Microsoft\\WindowsApps\n"
-                "請檢查程式日誌以取得詳細錯誤代碼。"
+                "請檢查程式日誌以取得詳細錯誤代碼"
             )
 
         if major == 8:

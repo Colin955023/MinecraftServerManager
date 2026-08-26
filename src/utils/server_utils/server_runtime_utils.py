@@ -8,21 +8,32 @@ from __future__ import annotations
 import re
 import shlex
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
-from src.models import StartupScriptCommand
 from src.utils import (
-    MANAGED_STARTUP_SCRIPT_NAME,
-    STARTUP_SCRIPT_CANDIDATES,
     JavaUtils,
     MemoryUtils,
-    PathUtils,
-    ServerDetectionUtils,
+    atomic_write_text,
     get_logger,
+    read_text_file,
 )
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
+
+
+@dataclass(slots=True)
+class StartupScriptCommand:
+    """從既有啟動腳本擷取出的 Java 啟動指令"""
+
+    command_line: str = ""
+    memory_max_mb: int | None = None
+    memory_min_mb: int | None = None
+
+    @property
+    def has_java_command(self) -> bool:
+        return bool(self.command_line)
 
 
 class ServerOperations:
@@ -40,25 +51,6 @@ class ServerOperations:
             狀態文字和顏色的元組，格式為 (文字, 顏色)
         """
         return ("🟢 狀態: 執行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
-
-    @staticmethod
-    def graceful_stop_server(server_manager, server_name: str) -> bool:
-        """
-        停止伺服器（先嘗試 stop 指令，失敗則強制停止）
-
-        Args:
-            server_manager: 伺服器管理器實例
-            server_name: 目標伺服器名稱
-
-        Returns:
-            成功停止時回傳 True
-        """
-        try:
-            command_success = server_manager.send_command(server_name, "stop")
-            return command_success or server_manager.stop_server(server_name)
-        except Exception as e:
-            logger.exception(f"停止伺服器失敗: {e}")
-            return False
 
 
 class JvmOptionPolicy:
@@ -200,8 +192,71 @@ class JvmOptionPolicy:
 class ServerCommands:
     """伺服器指令工具類別"""
 
-    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = MANAGED_STARTUP_SCRIPT_NAME
-    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = STARTUP_SCRIPT_CANDIDATES
+    MANAGED_STARTUP_SCRIPT_NAME: ClassVar[str] = "start_server.bat"
+    STARTUP_SCRIPT_CANDIDATES: ClassVar[tuple[str, ...]] = (
+        MANAGED_STARTUP_SCRIPT_NAME,
+        "run.bat",
+        "start.bat",
+        "server.bat",
+    )
+
+    @staticmethod
+    def expected_main_target(loader_type: str, minecraft_version: str | None = None) -> str:
+        """
+        取得尚未建立檔案時的預期啟動目標
+
+        Args:
+            loader_type: 目標載入器類型
+            minecraft_version: 目標 Minecraft 版本
+
+        Returns:
+            建立預覽使用的 JAR 或 args 參照
+        """
+        normalized_loader = str(loader_type or "").lower()
+        if normalized_loader == "forge":
+            if minecraft_version and any(
+                minecraft_version.startswith(v)
+                for v in ("1.7", "1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16")
+            ):
+                return "forge-server.jar"
+            return "@libraries/net/minecraftforge/forge/win_args.txt"
+        if normalized_loader == "neoforge":
+            return "@libraries/net/neoforged/neoforge/win_args.txt"
+        if normalized_loader == "fabric":
+            return "fabric-server-launch.jar"
+        if normalized_loader == "quilt":
+            return "quilt-server-launch.jar"
+        return "server.jar"
+
+    @staticmethod
+    def update_forge_user_jvm_args(server_path: Path, config: Any) -> None:
+        """
+        更新 Forge user_jvm_args.txt 的 JVM 與記憶體參數
+
+        Args:
+            server_path: 伺服器資料夾
+            config: 伺服器設定
+        """
+        lines: list[str] = []
+        custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(config, "jvm_args", []))
+        java_major = getattr(config, "java_major", None) or getattr(config, "java_major_version", None)
+        lines.extend(
+            f"{arg}\n"
+            for arg in JvmOptionPolicy.recommend_gc_args(
+                memory_max_mb=int(config.memory_max_mb or 0),
+                java_major=int(java_major) if java_major else None,
+                loader_type=str(getattr(config, "loader_type", "") or ""),
+                existing_args=custom_jvm_args,
+            )
+        )
+        lines.extend(f"{arg}\n" for arg in custom_jvm_args)
+        if config.memory_min_mb:
+            lines.append(f"-Xms{config.memory_min_mb}M\n")
+        if config.memory_max_mb:
+            lines.append(f"-Xmx{config.memory_max_mb}M\n")
+        user_jvm_args_path = server_path / "user_jvm_args.txt"
+        if not atomic_write_text(user_jvm_args_path, "".join(lines)):
+            logger.error(f"無法更新 {user_jvm_args_path} 檔案，請檢查權限或磁碟空間")
 
     @staticmethod
     def _quote_windows_arg(arg: str) -> str:
@@ -333,7 +388,7 @@ class ServerCommands:
         Returns:
             擷取到的 Java 啟動指令與記憶體設定；找不到時回傳空指令
         """
-        content = PathUtils.read_text_file(script_path, encoding="utf-8", errors="replace") or ""
+        content = read_text_file(script_path, encoding="utf-8", errors="replace") or ""
         startup_command = StartupScriptCommand()
         if content.startswith("\ufeff"):
             content = content.removeprefix("\ufeff")
@@ -406,7 +461,7 @@ class ServerCommands:
     @staticmethod
     def cleanup_redundant_startup_scripts(path: Path) -> list[str]:
         """
-        在伺服器目錄中只保留標準 start_server.bat，清理其他多餘的 .bat 啟動腳本
+        在伺服器目錄中只保留標準 start_server.bat，清理其他多餘的 .bat、.ps1 與 .sh 啟動腳本
 
         Args:
             path: 伺服器資料夾路徑
@@ -418,12 +473,14 @@ class ServerCommands:
         if not path.is_dir():
             return removed
         managed = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
-        for bat_file in path.glob("*.bat"):
-            if bat_file.name.lower() == managed:
-                continue
-            with suppress(Exception):
-                bat_file.unlink()
-                removed.append(bat_file.name)
+        patterns = ("*.bat", "*.cmd", "*.ps1", "*.sh")
+        for pattern in patterns:
+            for script_file in path.glob(pattern):
+                if script_file.name.lower() == managed:
+                    continue
+                with suppress(Exception):
+                    script_file.unlink()
+                    removed.append(script_file.name)
         return removed
 
     @staticmethod
@@ -462,7 +519,7 @@ class ServerCommands:
                 f"找不到符合 {getattr(server_config, 'minecraft_version', '')} 的完整 Java 路徑，略過修補 {script_path.name}"
             )
             return False
-        content = PathUtils.read_text_file(script_path, encoding="utf-8", errors="replace")
+        content = read_text_file(script_path, encoding="utf-8", errors="replace")
         if not content:
             return False
         changed = content.startswith("\ufeff")
@@ -475,25 +532,30 @@ class ServerCommands:
             new_lines.append(new_line)
         if not changed:
             return False
-        if not PathUtils.write_text_file(script_path, "".join(new_lines), encoding="utf-8", errors="replace"):
+        if not atomic_write_text(script_path, "".join(new_lines), encoding="utf-8", errors="replace"):
             logger.error(f"無法寫入修補後的啟動腳本: {script_path}")
             return False
         logger.info(f"已修補啟動腳本 Java 路徑: {script_path}")
         return True
 
     @staticmethod
-    def build_java_command(server_config, return_list: bool = False) -> list[str] | str:
+    def build_java_command(
+        server_config,
+        return_list: bool = False,
+        *,
+        launch_target: str | None = None,
+    ) -> list[str] | str:
         """
         建構 Java 啟動指令，根據伺服器設定自動偵測主要 JAR 和載入器類型
 
         Args:
             server_config: 伺服器設定物件
             return_list: 是否回傳指令列清單
+            launch_target: 完整檢查選出的 JAR 或 args 目標；建立預覽可省略
 
         Returns:
             Java 啟動指令字串或指令列清單
         """
-        server_path = Path(server_config.path)
         loader_type = str(server_config.loader_type or "").lower()
         memory_min = server_config.memory_min_mb if server_config.memory_min_mb else None
         memory_max = server_config.memory_max_mb if server_config.memory_max_mb else 2048
@@ -509,10 +571,24 @@ class ServerCommands:
         )
         jvm_args = [*recommended_jvm_args, *custom_jvm_args]
         java_exe = ServerCommands.resolve_java_executable(server_config)
-        main_jar = ServerDetectionUtils.find_main_jar(server_path, loader_type, server_config)
+        main_jar = launch_target or ServerCommands.expected_main_target(
+            loader_type, str(getattr(server_config, "minecraft_version", "") or "")
+        )
+        if loader_type in ("forge", "neoforge") and main_jar.lower() == "@user_jvm_args.txt":
+            main_jar = ServerCommands.expected_main_target(
+                loader_type, str(getattr(server_config, "minecraft_version", "") or "")
+            )
         if loader_type in ("forge", "neoforge") and main_jar.startswith("@"):
-            cmd_list = [java_exe, *jvm_args, main_jar, "nogui"]
-            result_cmd = " ".join([ServerCommands._quote_windows_arg(java_exe), *jvm_args, main_jar, "nogui"])
+            server_path_str = getattr(server_config, "path", "")
+            server_path = Path(server_path_str) if server_path_str else None
+            if server_path is not None and (server_path / "user_jvm_args.txt").is_file():
+                ServerCommands.update_forge_user_jvm_args(server_path, server_config)
+            mem_args = [f"-Xms{memory_min}M"] if memory_min else []
+            mem_args.append(f"-Xmx{memory_max}M")
+            cmd_list = [java_exe, *jvm_args, *mem_args, main_jar, "nogui"]
+            result_cmd = " ".join(
+                [ServerCommands._quote_windows_arg(java_exe), *jvm_args, *mem_args, main_jar, "nogui"]
+            )
         else:
             cmd_list = [java_exe, *jvm_args]
             if memory_min:

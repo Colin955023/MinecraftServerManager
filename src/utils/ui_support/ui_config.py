@@ -113,7 +113,11 @@ def center_window(window: QWidget, parent: QWidget | None = None) -> None:
     try:
         window.adjustSize()
         raw_anchor = parent or window.parentWidget()
-        anchor = raw_anchor.window() if raw_anchor is not None and hasattr(raw_anchor, "window") else raw_anchor
+        if raw_anchor is not None:
+            win_attr = getattr(raw_anchor, "window", None)
+            anchor = win_attr() if callable(win_attr) else raw_anchor
+        else:
+            anchor = None
         screen = anchor.screen() if anchor is not None else window.screen()
         if screen is None:
             screen = ensure_application().primaryScreen()

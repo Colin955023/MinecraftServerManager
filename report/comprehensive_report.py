@@ -1,12 +1,12 @@
 """
-綜合檢查報告產生器。
+綜合檢查報告產生器
 
 功能：
-1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import-linter + import/public-facade boundary + compileall）。
-2. 重複程式碼檢查（僅掃描 src 目錄）。
-3. UI 硬編碼檢查（尺寸/顏色是否直接寫死，鼓勵使用 ui_utils token）。
-4. 隱私與安全檢查（detect-secrets + 內建規則）。
-5. 跨檔案 private callable 命名檢查（公開呼叫點不得使用前導底線）。
+1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import-linter + import/public-facade boundary + compileall）
+2. 重複程式碼檢查（僅掃描 src 目錄）
+3. UI 硬編碼檢查（尺寸/顏色是否直接寫死，鼓勵使用 ui_utils token）
+4. 隱私與安全檢查（detect-secrets + 內建規則）
+5. 跨檔案 private callable 命名檢查（公開呼叫點不得使用前導底線）
 
 工具說明：
 - ruff: 依 pyproject.toml 執行 lint
@@ -43,7 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import orjson
 
@@ -70,7 +70,6 @@ IGNORED_SCAN_DIRS = {
     ".pytest_cache",
 }
 PRIVACY_IGNORED_FILES = {HTML_REPORT_PATH}
-T = TypeVar("T")
 
 
 @dataclass(slots=True)
@@ -121,19 +120,21 @@ FILE_CONTEXT_CACHE: dict[Path, FileContext] = {}
 
 
 def get_file_context(path: Path) -> FileContext:
-    """取得檔案的快取解析內容，減少重複 I/O 與 AST 解析。"""
-    if path in FILE_CONTEXT_CACHE:
-        return FILE_CONTEXT_CACHE[path]
+    """取得檔案的快取解析內容，減少重複 I/O 與 AST 解析"""
+    if cached := FILE_CONTEXT_CACHE.get(path):
+        return cached
 
-    parse_err = None
     try:
         content = path.read_text(encoding="utf-8", errors="replace")
         lines = content.splitlines()
+        parse_err: str | None
         try:
             tree = ast.parse(content, filename=str(path))
         except SyntaxError as exc:
             tree = None
             parse_err = f"語法解析失敗：{exc.msg} (Line {exc.lineno})"
+        else:
+            parse_err = None
         ctx = FileContext(path=path, content=content, lines=lines, ast_tree=tree, parse_error=parse_err)
     except OSError as exc:
         ctx = FileContext(path=path, content="", lines=[], ast_tree=None, parse_error=f"讀取失敗：{exc}")
@@ -142,12 +143,8 @@ def get_file_context(path: Path) -> FileContext:
 
 
 def sanitize_tool_output(text: str) -> str:
-    """清理工具輸出中的安裝雜訊，保留關鍵結果。"""
-    if not text:
-        return text
-    lines = text.splitlines()
-    filtered = [line for line in lines if not line.strip().startswith("Installed ")]
-    return "\n".join(filtered).strip()
+    """清理工具輸出中的安裝雜訊，保留關鍵結果"""
+    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("Installed ")).strip()
 
 
 @functools.lru_cache(maxsize=128)
@@ -260,12 +257,8 @@ def run_timed_operation[T](name: str, operation: Callable[[], T]) -> tuple[T, fl
     return result, elapsed
 
 
-def run_project_tool(name: str, tool_name: str, args: list[str], module_name: str | None = None) -> ToolResult:
-    return run_command(name, resolve_tool_command(tool_name, args, module_name=module_name))
-
-
 def run_tool_specs(specs: list[ToolSpec]) -> list[ToolResult]:
-    """以平行方式執行一組工具規格。"""
+    """以平行方式執行一組工具規格"""
 
     if not specs:
         return []
@@ -273,14 +266,15 @@ def run_tool_specs(specs: list[ToolSpec]) -> list[ToolResult]:
     def execute_spec(spec: ToolSpec) -> ToolResult:
         if spec.use_python_executable:
             return run_command(spec.name, [str(PYTHON_EXECUTABLE), *spec.args])
-        return run_project_tool(spec.name, spec.tool_name, spec.args, module_name=spec.module_name)
+        command = resolve_tool_command(spec.tool_name, spec.args, module_name=spec.module_name)
+        return run_command(spec.name, command)
 
     with ThreadPoolExecutor() as executor:
         return list(executor.map(execute_spec, specs))
 
 
 def load_pyproject_config() -> dict[str, Any]:
-    """讀取 pyproject.toml，讓報告顯示與實際工具設定保持一致。"""
+    """讀取 pyproject.toml，讓報告顯示與實際工具設定保持一致"""
     pyproject_path = REPO_ROOT / "pyproject.toml"
     try:
         with pyproject_path.open("rb") as file_obj:
@@ -291,7 +285,7 @@ def load_pyproject_config() -> dict[str, Any]:
 
 
 def get_ruff_config_summary() -> str:
-    """從 pyproject.toml 產生 Ruff 規則摘要。"""
+    """從 pyproject.toml 產生 Ruff 規則摘要"""
     config = load_pyproject_config().get("tool", {}).get("ruff", {})
     lint = config.get("lint", {}) if isinstance(config, dict) else {}
     selected = lint.get("select", []) if isinstance(lint, dict) else []
@@ -656,7 +650,7 @@ def collect_cross_file_private_callable_findings(repo_root: Path) -> SectionResu
                     file=str(file_path.relative_to(REPO_ROOT)),
                     line=line_no,
                     category="cross_file_private_callable",
-                    message=f"跨檔案呼叫的 callable `{callable_name}` 不應以底線開頭。",
+                    message=f"跨檔案呼叫的 callable `{callable_name}` 不應以底線開頭",
                     sample=sample,
                 )
             )
@@ -686,18 +680,15 @@ COMMON_EXEMPT_CALLABLE_NAMES = {
     "cancel",
     "lazy_exports",
     "get_logger",
-    "get_default_headers",
     "get_hidden_windows_kwargs",
-    "get_timeout_retry_policy",
-    "get_json_async",
-    "post_json_async",
-    "download_file_async",
     "main",
-    "run_async",
-    "run_async_in_background",
-    "run_in_background",
     "show_message",
     "total_count",
+    "eventFilter",
+    "closeEvent",
+    "paintEvent",
+    "showEvent",
+    "resizeEvent",
 }
 
 CTYPES_CLASS_BASE_NAMES = {"ctypes.Structure", "ctypes.Union", "Structure", "Union"}
@@ -871,7 +862,7 @@ def _collect_callable_findings(
                 file=str(file_path.relative_to(REPO_ROOT)),
                 line=lineno,
                 category="docstring",
-                message=f"公開 callable '{qualified_name}' 缺少 docstring。",
+                message=f"公開 callable '{qualified_name}' 缺少 docstring",
                 sample=sample,
             )
         )
@@ -885,7 +876,7 @@ def _collect_callable_findings(
                 file=str(file_path.relative_to(REPO_ROOT)),
                 line=lineno,
                 category="docstring_args",
-                message=f"公開 callable '{qualified_name}' 的 docstring 缺少 Args 區段。",
+                message=f"公開 callable '{qualified_name}' 的 docstring 缺少 Args 區段",
                 sample=sample,
             )
         )
@@ -898,7 +889,7 @@ def _collect_callable_findings(
                 file=str(file_path.relative_to(REPO_ROOT)),
                 line=lineno,
                 category="docstring_returns",
-                message=f"公開 callable '{qualified_name}' 的 docstring 缺少 Returns 區段。",
+                message=f"公開 callable '{qualified_name}' 的 docstring 缺少 Returns 區段",
                 sample=sample,
             )
         )
@@ -923,7 +914,7 @@ def _collect_class_findings(
                 file=str(file_path.relative_to(REPO_ROOT)),
                 line=lineno,
                 category="docstring_class",
-                message=f"公開 class '{qualified_name}' 缺少 docstring。",
+                message=f"公開 class '{qualified_name}' 缺少 docstring",
                 sample=sample,
             )
         )
@@ -973,7 +964,7 @@ def collect_docstring_section(src_dir: Path) -> SectionResult:
                     file=str(file_path.relative_to(REPO_ROOT)),
                     line=1,
                     category="docstring_module",
-                    message=f"公開 module '{file_path.relative_to(REPO_ROOT)!s}' 缺少 docstring。",
+                    message=f"公開 module '{file_path.relative_to(REPO_ROOT)!s}' 缺少 docstring",
                     sample="",
                 )
             )
@@ -995,7 +986,7 @@ def collect_docstring_section(src_dir: Path) -> SectionResult:
 
 
 def collect_comment_tool_results(code_quality_tools: list[ToolResult]) -> list[ToolResult]:
-    """重用主 Ruff 執行結果，擷取 ERA 註解整潔問題。"""
+    """重用主 Ruff 執行結果，擷取 ERA 註解整潔問題"""
     ruff_result = next((result for result in code_quality_tools if result.name == "ruff"), None)
     if ruff_result is None:
         return []
@@ -1275,11 +1266,7 @@ def count_detect_secrets_candidates(parsed: Any | None) -> int:
     results_obj = parsed.get("results")
     if not isinstance(results_obj, dict):
         return 0
-    total = 0
-    for value in results_obj.values():
-        if isinstance(value, list):
-            total += len(value)
-    return total
+    return sum(len(value) for value in results_obj.values() if isinstance(value, list))
 
 
 _ISSUE_COUNTERS: dict[str, Callable[[str], int]] = {
@@ -1341,57 +1328,40 @@ def extract_tool_highlights(result: ToolResult) -> list[str]:
     if result.return_code is not None:
         highlights.append(f"exit code: {result.return_code}")
 
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for item in highlights:
-        if item in seen:
-            continue
-        seen.add(item)
-        deduped.append(item)
-    return deduped
+    return list(dict.fromkeys(highlights))
 
 
 def build_quality_action_items(
     code_quality_tools: list[ToolResult], duplicate_result: SectionResult, cross_file_callable_result: SectionResult
 ) -> list[str]:
     actions: list[str] = []
-
-    ruff_result = next((item for item in code_quality_tools if item.name == "ruff"), None)
-    if ruff_result is not None and _ISSUE_COUNTERS["ruff"](ruff_result.output) > 0:
-        actions.append("優先處理 ruff 回報：涵蓋語法、可讀性與常見錯誤模式。")
-
-    mypy_result = next((item for item in code_quality_tools if item.name == "mypy"), None)
-    if mypy_result is not None and _ISSUE_COUNTERS["mypy"](mypy_result.output) > 0:
-        actions.append("優先處理 mypy 型別錯誤：可有效降低執行期錯誤風險。")
-
-    pylint_result = next((item for item in code_quality_tools if item.name == "pylint"), None)
-    if pylint_result is not None and _ISSUE_COUNTERS["pylint"](pylint_result.output) > 0:
-        actions.append("優先處理 pylint 循環引用警告：先降低模組耦合與匯入風險。")
-
-    bandit_result = next((item for item in code_quality_tools if item.name == "bandit"), None)
-    if bandit_result is not None and _ISSUE_COUNTERS["bandit"](bandit_result.output) > 0:
-        actions.append("優先處理 bandit 安全警示：先修正高風險項目。")
-
-    vulture_result = next((item for item in code_quality_tools if item.name == "vulture"), None)
-    if vulture_result is not None and _ISSUE_COUNTERS["vulture"](vulture_result.output) > 0:
-        actions.append("處理 vulture 未使用代碼：可降低維護成本與誤判噪音。")
+    tools_by_name = {item.name: item for item in code_quality_tools}
+    issue_actions = (
+        ("ruff", "優先處理 ruff 回報：涵蓋語法、可讀性與常見錯誤模式"),
+        ("mypy", "優先處理 mypy 型別錯誤：可有效降低執行期錯誤風險"),
+        ("pylint", "優先處理 pylint 循環引用警告：先降低模組耦合與匯入風險"),
+        ("bandit", "優先處理 bandit 安全警示：先修正高風險項目"),
+        ("vulture", "處理 vulture 未使用代碼：可降低維護成本與誤判噪音"),
+    )
+    for tool_name, message in issue_actions:
+        if (result := tools_by_name.get(tool_name)) and _ISSUE_COUNTERS[tool_name](result.output) > 0:
+            actions.append(message)
 
     for tool_name in ("import-linter", "import-boundaries"):
-        import_result = next((item for item in code_quality_tools if item.name == tool_name), None)
-        if import_result is not None and import_result.status == "failed":
-            actions.append("修正匯入邊界違規：保持 src.ui → src.core → src.models → src.utils 的分層方向。")
+        if (result := tools_by_name.get(tool_name)) and result.status == "failed":
+            actions.append("修正匯入邊界違規：保持 src.ui → src.core → src.models → src.utils 的分層方向")
             break
 
     if duplicate_result.findings:
-        actions.append(f"重複碼群組 {len(duplicate_result.findings)} 組：抽出共用 helper 函式可快速下降。")
+        actions.append(f"重複碼群組 {len(duplicate_result.findings)} 組：抽出共用 helper 函式可快速下降")
 
     if cross_file_callable_result.findings:
         actions.append(
-            f"跨檔 private callable {len(cross_file_callable_result.findings)} 筆：先改成公開命名，再回頭整理模組邊界。"
+            f"跨檔 private callable {len(cross_file_callable_result.findings)} 筆：先改成公開命名，再回頭整理模組邊界"
         )
 
     if not actions:
-        actions.append("目前未偵測到需要優先處理的品質問題。")
+        actions.append("目前未偵測到需要優先處理的品質問題")
     return actions
 
 
@@ -1451,7 +1421,7 @@ def render_tool_table(results: list[ToolResult]) -> str:
             highlight_items = "".join(f"<li>{html.escape(item)}</li>" for item in highlights)
             highlight_html = f'<div class="highlight-box"><div class="highlight-title">重點摘要</div><ul>{highlight_items}</ul></div>'
         else:
-            highlight_html = '<div class="tool-summary-empty">此工具本輪沒有額外摘要。</div>'
+            highlight_html = '<div class="tool-summary-empty">此工具本輪沒有額外摘要</div>'
         rows.append(
             """
             <tr>
@@ -1515,7 +1485,7 @@ def render_finding_detail(sample_text: str) -> str:
 
 def render_findings_table(findings: list[Finding], omitted_count: int) -> str:
     if not findings:
-        return '<p class="empty">沒有發現問題。</p>'
+        return '<p class="empty">沒有發現問題</p>'
 
     rows: list[str] = []
     for finding in findings:
@@ -1540,7 +1510,7 @@ def render_findings_table(findings: list[Finding], omitted_count: int) -> str:
 
     notice = ""
     if omitted_count > 0:
-        notice = f'<p class="omitted">另有 {omitted_count} 筆未顯示（避免報告過長）。</p>'
+        notice = f'<p class="omitted">另有 {omitted_count} 筆未顯示（避免報告過長）</p>'
 
     return (
         notice
@@ -1555,12 +1525,6 @@ def render_findings_table(findings: list[Finding], omitted_count: int) -> str:
         </table>
         """.format(rows="\n".join(rows))
     )
-
-
-def overall_status_from_counts(summary_cards: list[tuple[str, int]]) -> str:
-    if any(count > 0 for _, count in summary_cards):
-        return "warning"
-    return "passed"
 
 
 def build_html_report(
@@ -1585,9 +1549,8 @@ def build_html_report(
     comment_visible, comment_omitted = truncate_findings(comment_result.findings, max_details)
     docstrings_visible, docstrings_omitted = truncate_findings(docstring_result.findings, max_details)
 
-    merged_privacy_findings = (
-        summarize_tool_findings(privacy_tool_results, "privacy_tools").findings + privacy_regex_result.findings
-    )
+    privacy_tool_summary = summarize_tool_findings(privacy_tool_results, "privacy_tools")
+    merged_privacy_findings = privacy_tool_summary.findings + privacy_regex_result.findings
     privacy_visible, privacy_omitted = truncate_findings(merged_privacy_findings, max_details)
 
     summary_cards = [
@@ -1599,11 +1562,10 @@ def build_html_report(
         ("Docstring 稽核", len(docstring_result.findings)),
         (
             "隱私資訊",
-            int(summarize_tool_findings(privacy_tool_results, "privacy_tools").meta.get("issue_count", 0))
-            + len(privacy_regex_result.findings),
+            int(privacy_tool_summary.meta.get("issue_count", 0)) + len(privacy_regex_result.findings),
         ),
     ]
-    overall = overall_status_from_counts(summary_cards)
+    overall = "warning" if any(count > 0 for _, count in summary_cards) else "passed"
 
     cards_html = "\n".join(
         '<div class="card {}"><h3>{}</h3><p class="count">{}</p><p class="card-note">{}</p></div>'.format(
@@ -1632,7 +1594,7 @@ def build_html_report(
         ]
     )
 
-    duplicate_rule = f"偵測規則：連續 {duplicate_result.meta.get('window_size', 8)} 行、正規化後最少 {duplicate_result.meta.get('min_chars', 220)} 字元。"
+    duplicate_rule = f"偵測規則：連續 {duplicate_result.meta.get('window_size', 8)} 行、正規化後最少 {duplicate_result.meta.get('min_chars', 220)} 字元"
 
     return f"""<!DOCTYPE html>
 <html lang=\"zh-Hant\">
@@ -1808,7 +1770,7 @@ def build_html_report(
             <div class=\"summary-layout\">
                 <div>
                     <div class=\"cards\">{cards_html}</div>
-                    <div class=\"hint\">快速判讀：數字越大代表該項目需要處理的內容越多。先看程式碼品質與隱私資訊，再看其餘項目。</div>
+                    <div class=\"hint\">快速判讀：數字越大代表該項目需要處理的內容越多先看程式碼品質與隱私資訊，再看其餘項目</div>
                     {category_overview_html}
                 </div>
                 <div class=\"summary-sidebar\">
@@ -1823,7 +1785,7 @@ def build_html_report(
 
         <section id=\"code-quality\" class=\"tab-panel\">
             <h2>程式碼品質（ruff lint / mypy / pylint / bandit / vulture / import/public facade / compileall）</h2>
-            <p class=\"section-lead\">先看偵測出的問題，再視需要展開個別工具的命令與完整輸出。</p>
+            <p class=\"section-lead\">先看偵測出的問題，再視需要展開個別工具的命令與完整輸出</p>
             {render_findings_table(code_quality_visible, code_quality_omitted)}
             <h3>工具執行明細</h3>
             <div class=\"table-wrap\"><table>
@@ -1834,22 +1796,22 @@ def build_html_report(
 
         <section id=\"duplicate\" class=\"tab-panel\">
             <h2>重複程式碼（src）</h2>
-            <p class=\"section-lead\">只保留需要處理的重複片段，避免整頁被長片段淹沒。</p>
+            <p class=\"section-lead\">只保留需要處理的重複片段，避免整頁被長片段淹沒</p>
             <p>{html.escape(duplicate_rule)}</p>
             {render_findings_table(duplicate_visible, duplicate_omitted)}
         </section>
 
         <section id=\"hardcode\" class=\"tab-panel\">
             <h2>UI 硬編碼檢查</h2>
-            <p class=\"section-lead\">重點是找出直接寫死的尺寸、顏色或字體設定，優先收斂到共用 token。</p>
-            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_support/ui_utils.py</code> 的 token。</p>
+            <p class=\"section-lead\">重點是找出直接寫死的尺寸、顏色或字體設定，優先收斂到共用 token</p>
+            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_support/ui_utils.py</code> 的 token</p>
             {render_findings_table(hardcode_visible, hardcode_omitted)}
         </section>
 
         <section id=\"comment\" class=\"tab-panel\">
             <h2>無用註解檢查</h2>
-            <p class=\"section-lead\">只保留值得處理的殘留註解與被註解掉的舊程式碼，細節放在展開區。</p>
-            <p>依 pyproject.toml 使用 Ruff ERA 規則檢查註解殘留程式碼。</p>
+            <p class=\"section-lead\">只保留值得處理的殘留註解與被註解掉的舊程式碼，細節放在展開區</p>
+            <p>依 pyproject.toml 使用 Ruff ERA 規則檢查註解殘留程式碼</p>
             {render_findings_table(comment_visible, comment_omitted)}
             <h3>工具執行明細</h3>
             <div class=\"table-wrap\"><table>
@@ -1860,13 +1822,13 @@ def build_html_report(
 
         <section id=\"docstrings\" class=\"tab-panel\">
             <h2>Docstring 檢查（公開 API docstrings）</h2>
-            <p class=\"section-lead\">檢查公開 module / class / function 是否包含 docstring，並驗證 Args / Returns 欄位。</p>
+            <p class=\"section-lead\">檢查公開 module / class / function 是否包含 docstring，並驗證 Args / Returns 欄位</p>
             {render_findings_table(docstrings_visible, docstrings_omitted)}
         </section>
 
         <section id=\"privacy\" class=\"tab-panel\">
             <h2>隱私與安全檢查（detect-secrets）</h2>
-            <p class=\"section-lead\">優先看候選 secrets 與 regex 掃描結論，只有需要追查時再展開原始輸出。</p>
+            <p class=\"section-lead\">優先看候選 secrets 與 regex 掃描結論，只有需要追查時再展開原始輸出</p>
             {render_findings_table(privacy_visible, privacy_omitted)}
             <h3>工具執行明細</h3>
             <div class=\"table-wrap\"><table>

@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from src.ui import MODRINTH_PROJECT_PAGE_BASE_URL
+from src.utils import normalize_identifier
 
 
 def format_provider_label(provider: str | None) -> str:
@@ -36,16 +37,16 @@ def format_published_at(value: str | None) -> str:
     return raw_value.replace("T", " ").replace("Z", "")[:16] if raw_value else ""
 
 
-def summarize_changelog(value: str | None, max_length: int = 420) -> str:
+def summarize_text(value: str | None, max_length: int) -> str:
     """
-    壓縮 changelog 空白並限制顯示長度
+    壓縮文字空白並限制顯示長度
 
     Args:
-        value: 原始 changelog
-        max_length: 顯示字元上限
+        value: 原始文字
+        max_length: 最大顯示長度
 
     Returns:
-        單行且必要時帶省略號的摘要
+        壓縮後的文字
     """
     normalized = re.sub(r"\s+", " ", str(value or "").strip())
     if len(normalized) <= max_length:
@@ -179,22 +180,6 @@ def resolve_project_page_url(*, urls: Any = (), identifiers: Any = ()) -> str:
     return ""
 
 
-def resolve_online_mod_project_page_url(mod: Any) -> str:
-    """
-    從線上 Mod 模型解析最合適的專案頁面
-
-    Args:
-        mod: 含網址、slug 或 project ID 的線上 Mod
-
-    Returns:
-        可開啟的專案網址；無法解析時回傳空字串
-    """
-    return resolve_project_page_url(
-        urls=(getattr(mod, "homepage_url", ""), getattr(mod, "url", "")),
-        identifiers=(getattr(mod, "slug", ""), getattr(mod, "project_id", "")),
-    )
-
-
 def format_online_version_report(version: Any, report: Any | None) -> str:
     """
     組合版本 metadata 與相容性分析的詳細文字
@@ -216,7 +201,7 @@ def format_online_version_report(version: Any, report: Any | None) -> str:
         lines.append(f"版本類型：{version_type}")
     if published_text := format_published_at(getattr(version, "date_published", "")):
         lines.append(f"發布時間：{published_text}")
-    if changelog_text := summarize_changelog(getattr(version, "changelog", "")):
+    if changelog_text := summarize_text(getattr(version, "changelog", ""), 420):
         lines.extend(["", "更新內容：", changelog_text])
     if report is None:
         return "\n".join(lines)
@@ -237,19 +222,6 @@ def format_online_version_report(version: Any, report: Any | None) -> str:
     return "\n".join(lines)
 
 
-def normalize_side_support(value: Any) -> str:
-    """
-    正規化 client/server side support 值
-
-    Args:
-        value: Provider 回傳的 side support 值
-
-    Returns:
-        去除空白並轉為小寫的字串
-    """
-    return str(value or "").strip().lower()
-
-
 def build_client_install_reminder_line(server_side: Any, client_side: Any) -> str | None:
     """
     依雙端支援狀態建立玩家端安裝提醒
@@ -262,7 +234,7 @@ def build_client_install_reminder_line(server_side: Any, client_side: Any) -> st
         需要雙端安裝時的提醒；否則回傳 None
     """
     supported = {"required", "optional"}
-    if normalize_side_support(server_side) in supported and normalize_side_support(client_side) in supported:
+    if normalize_identifier(server_side) in supported and normalize_identifier(client_side) in supported:
         return "提醒：此模組同時支援 client 端，請提醒玩家端也安裝相同模組版本，以避免連線或功能不一致問題"
     return None
 
@@ -277,7 +249,7 @@ def build_server_install_blocking_reason(server_side: Any) -> str | None:
     Returns:
         阻擋原因；可安裝或未知時回傳 None
     """
-    if normalize_side_support(server_side) == "unsupported":
+    if normalize_identifier(server_side) == "unsupported":
         return "此模組標記為僅 client 端（server_side=unsupported），不可安裝到伺服器"
     return None
 
@@ -292,7 +264,7 @@ def build_server_install_warning_line(server_side: Any) -> str | None:
     Returns:
         需要再次確認時的警告；狀態明確時回傳 None
     """
-    if normalize_side_support(server_side) in {"", "unknown"}:
+    if normalize_identifier(server_side) in {"", "unknown"}:
         return "提醒：此模組未明確標示 server 端支援，建議安裝前再次確認"
     return None
 
@@ -305,8 +277,7 @@ __all__ = [
     "format_provider_label",
     "format_published_at",
     "get_online_version_status_text",
-    "resolve_online_mod_project_page_url",
     "resolve_project_page_url",
     "sort_online_versions_for_server",
-    "summarize_changelog",
+    "summarize_text",
 ]

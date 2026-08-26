@@ -1,12 +1,13 @@
 """
-匯入與公開 facade 邊界檢查。
+匯入與公開 facade 邊界檢查
 
 強制規則：
-1. `src/` 內禁止繞過頂層套件 facade 的深層匯入。
-2. 禁止在 `src/<頂層>/<子資料夾>/` 建立 `__init__.py`。
-3. `src/{core,models,ui,utils}/__init__.py` 的 lazy export 目標必須真實存在。
-4. 每個 lazy export 必須在 production、tests、scripts 或 report 中有實際 consumer，
-   避免累積沒有呼叫端的公開 API。
+1. `src/` 跨 package 匯入只能使用頂層 facade；同 feature implementation 只能用單層相對匯入
+2. 禁止在 `src/<頂層>/<子資料夾>/` 建立 `__init__.py`
+3. `src/{core,models,ui,utils}/__init__.py` 的 lazy export 目標必須真實存在
+4. 每個 lazy export 必須在 `src/` runtime code 中有實際 consumer
+
+只掃描 `src/`；測試可直接匯入實作模組，以驗證 `src/` 的真實行為。
 
 執行：uv run scripts/check_import_boundaries.py
 """
@@ -25,7 +26,6 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 TOP_LEVEL = frozenset({"core", "models", "ui", "utils"})
 FACADE_MODULES = tuple(f"src.{name}" for name in sorted(TOP_LEVEL))
-CONSUMER_ROOTS = tuple(REPO_ROOT / name for name in ("src", "tests", "scripts", "report"))
 
 
 def _parse_source(path: pathlib.Path) -> ast.Module:
@@ -41,8 +41,8 @@ def _parse_source(path: pathlib.Path) -> ast.Module:
         return ast.parse(source, filename=str(path))
 
 
-def _python_files(roots: Iterable[pathlib.Path]) -> list[pathlib.Path]:
-    return sorted(path for root in roots if root.exists() for path in root.rglob("*.py"))
+def _python_files() -> list[pathlib.Path]:
+    return sorted(SRC_ROOT.rglob("*.py"))
 
 
 def _check_import_file(path: pathlib.Path) -> list[str]:
@@ -53,6 +53,14 @@ def _check_import_file(path: pathlib.Path) -> list[str]:
     tree = _parse_source(path)
     violations: list[str] = []
     for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.level:
+            if node.level != 1 or not node.module:
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}：相對匯入不得跨越目前 feature 目錄")
+                continue
+            target = path.parent.joinpath(*node.module.split(".")).with_suffix(".py")
+            if not target.is_file():
+                violations.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}：相對匯入目標不存在：`.{node.module}`")
+            continue
         modules: tuple[str, ...]
         if isinstance(node, ast.ImportFrom) and node.module:
             modules = (node.module,)
@@ -91,16 +99,6 @@ def _load_exports(init_path: pathlib.Path) -> dict[str, tuple[str, str]]:
             if isinstance(value, dict):
                 return value
     return {}
-
-
-def _module_path(module_name: str) -> pathlib.Path:
-    return REPO_ROOT.joinpath(*module_name.split(".")).with_suffix(".py")
-
-
-def _resolve_export_module(facade: str, module_name: str) -> str:
-    if module_name.startswith("."):
-        return facade + module_name
-    return module_name
 
 
 def _top_level_symbols(tree: ast.Module) -> set[str]:
@@ -188,8 +186,13 @@ def _check_lazy_exports(consumer_files: list[pathlib.Path]) -> list[str]:
                 violations.append(f"{init_path.relative_to(REPO_ROOT)}：`{export_name}` lazy export 格式無效")
                 continue
             module_name, attr_name = target
-            resolved_module = _resolve_export_module(facade, module_name)
-            target_path = _module_path(resolved_module)
+            resolved_module = facade + module_name if module_name.startswith(".") else module_name
+            if not resolved_module.startswith(f"{facade}."):
+                violations.append(
+                    f"{init_path.relative_to(REPO_ROOT)}：`{export_name}` 跨頂層 package 匯出 `{resolved_module}`"
+                )
+                continue
+            target_path = REPO_ROOT.joinpath(*resolved_module.split(".")).with_suffix(".py")
             if not target_path.exists():
                 violations.append(
                     f"{init_path.relative_to(REPO_ROOT)}：`{export_name}` 指向不存在模組 `{resolved_module}`"
@@ -203,7 +206,7 @@ def _check_lazy_exports(consumer_files: list[pathlib.Path]) -> list[str]:
                 )
             if export_name not in consumers.get(facade, set()):
                 violations.append(
-                    f"{init_path.relative_to(REPO_ROOT)}：lazy export `{export_name}` 沒有 production/test/script/report consumer"
+                    f"{init_path.relative_to(REPO_ROOT)}：lazy export `{export_name}` 沒有 src runtime consumer"
                 )
     return violations
 
@@ -215,10 +218,9 @@ def main() -> int:
             reconfigure(encoding="utf-8", errors="replace")
     logging.basicConfig(level=logging.INFO, format="%(message)s", handlers=[logging.StreamHandler(sys.stdout)])
 
-    src_files = _python_files((SRC_ROOT,))
-    consumer_files = _python_files(CONSUMER_ROOTS)
+    src_files = _python_files()
     violations = [violation for path in src_files for violation in _check_import_file(path)]
-    violations.extend(_check_lazy_exports(consumer_files))
+    violations.extend(_check_lazy_exports(src_files))
     if violations:
         logging.error("❌ 匯入／公開 facade 邊界檢查失敗：\n" + "\n".join(violations))
         return 1

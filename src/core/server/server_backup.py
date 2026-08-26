@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from src.models import ServerConfig
-from src.utils import PathUtils, bytes_to_mb, get_logger
+from src.utils import bytes_to_mb, get_logger, safe_extract_zip
 
 logger = get_logger().bind(component="ServerBackup")
 
@@ -30,8 +30,9 @@ class ServerBackupManager:
         self, server_name: str, max_backups: int = 10, progress_callback: Callable[[float, str], None] | None = None
     ) -> bool:
         """
-        備份伺服器。先在備份目錄建立暫存 ZIP，完整成功後再原子替換最終檔案。
-        使用 YYYYMMDDHHMM 格式，最多保留 max_backups 份。
+        備份伺服器
+        先在備份目錄建立暫存 ZIP，完整成功後再原子替換最終檔案
+        使用 YYYYMMDDHHMM 格式，最多保留 max_backups 份
 
         Args:
             server_name: 伺服器名稱
@@ -207,7 +208,7 @@ class ServerBackupManager:
                 pct = 5 + (extracted_bytes / total_bytes * 90 if total_bytes > 0 else 90)
                 progress_callback(pct, f"解壓縮中... {extracted_bytes}/{total_bytes} bytes")
 
-            PathUtils.safe_extract_zip(backup_file, server_path, progress_callback=_on_extract_progress)
+            safe_extract_zip(backup_file, server_path, progress_callback=_on_extract_progress)
 
             if progress_callback:
                 progress_callback(100, "還原完成！")

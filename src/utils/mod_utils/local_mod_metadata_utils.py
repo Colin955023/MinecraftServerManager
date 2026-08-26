@@ -8,7 +8,7 @@ from typing import Any
 from src.utils import normalize_identifier
 
 
-def normalize_filename_stem(value: str | None) -> str:
+def _normalize_filename_stem(value: str | None) -> str:
     """
     將檔名正規化為可比對的 stem
 
@@ -27,7 +27,7 @@ def normalize_filename_stem(value: str | None) -> str:
     return filename
 
 
-def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -> str:
+def _normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -> str:
     """
     將檔名正規化為較寬鬆的比對格式
 
@@ -39,7 +39,7 @@ def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -
         已簡化並壓縮空白的字串
     """
 
-    normalized = normalize_filename_stem(value)
+    normalized = _normalize_filename_stem(value)
     if not normalized:
         return ""
     allowed_pattern = "[-+._0-9]" if exclude_digits else "[-+._]"
@@ -47,7 +47,7 @@ def normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -
     return re.sub("\\s+", " ", normalized).strip()
 
 
-def dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
+def _dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
     """
     從依賴資訊組出可能的檔名候選
 
@@ -79,14 +79,14 @@ def dependency_maybe_installed_by_filename(resolved_dependency: Any, installed_m
     """
 
     dependency_names = {
-        normalize_lax_filename(candidate, exclude_digits=True)
-        for candidate in dependency_candidate_filenames(resolved_dependency)
-        if normalize_lax_filename(candidate, exclude_digits=True)
+        _normalize_lax_filename(candidate, exclude_digits=True)
+        for candidate in _dependency_candidate_filenames(resolved_dependency)
+        if _normalize_lax_filename(candidate, exclude_digits=True)
     }
     if not dependency_names:
         return False
     for mod in installed_mods or []:
-        installed_name = normalize_lax_filename(getattr(mod, "filename", ""), exclude_digits=True)
+        installed_name = _normalize_lax_filename(getattr(mod, "filename", ""), exclude_digits=True)
         if installed_name and installed_name in dependency_names:
             return True
     return False
@@ -114,7 +114,7 @@ def collect_installed_mod_identifiers(installed_mods: list[Any] | None) -> tuple
             normalized_value = normalize_identifier(raw_value)
             if normalized_value:
                 installed_identifiers.add(normalized_value)
-        stem = normalize_filename_stem(getattr(mod, "filename", ""))
+        stem = _normalize_filename_stem(getattr(mod, "filename", ""))
         if stem:
             installed_identifiers.add(stem)
     return (installed_project_ids, installed_identifiers)
@@ -144,8 +144,5 @@ def collect_installed_mod_versions(installed_mods: list[Any] | None) -> dict[str
 __all__ = [
     "collect_installed_mod_identifiers",
     "collect_installed_mod_versions",
-    "dependency_candidate_filenames",
     "dependency_maybe_installed_by_filename",
-    "normalize_filename_stem",
-    "normalize_lax_filename",
 ]

@@ -23,9 +23,11 @@ from src.models import (
 from src.utils import (
     ModIndexManager,
     ProviderIdentityPersistenceError,
-    ServerDetectionVersionUtils,
+    clean_mod_version,
+    detect_loader_from_text,
     get_logger,
     get_shared_manager,
+    normalize_minecraft_version,
 )
 
 TomlDecodeError = tomllib.TOMLDecodeError
@@ -210,7 +212,7 @@ class LocalModScanner:
             for index, part in enumerate(parts):
                 if any(char.isdigit() for char in part):
                     version = "-".join(parts[index:])
-                    return ServerDetectionVersionUtils.clean_version(version)
+                    return clean_mod_version(version)
         return "未知"
 
     @staticmethod
@@ -304,7 +306,7 @@ class LocalModScanner:
             if cached_metadata:
                 mod_data.update(cached_metadata)
             else:
-                self.extract_metadata_from_jar(file_path, mod_data)
+                archive_readable = self.extract_metadata_from_jar(file_path, mod_data)
                 self.apply_fallback_logic(base_name, mod_data)
                 self.index_manager.cache_metadata(
                     file_path,
@@ -315,6 +317,7 @@ class LocalModScanner:
                         "loader_type": mod_data["loader_type"],
                         "mc_version": mod_data["mc_version"],
                     },
+                    clear_issue=archive_readable,
                 )
             self.apply_server_config_overrides(mod_data)
             try:
@@ -421,13 +424,16 @@ class LocalModScanner:
             logger.exception(f"讀取 MANIFEST.MF 版本資訊失敗（IO/ZIP）: {exc}")
         return None
 
-    def extract_metadata_from_jar(self, file_path: Path, mod_data: dict[str, str]) -> None:
+    def extract_metadata_from_jar(self, file_path: Path, mod_data: dict[str, str]) -> bool:
         """
         嘗試從 JAR 檔案中提取模組元資料，優先考慮 fabric.mod.json、META-INF/mods.toml 和 mcmod.info
 
         Args:
             file_path: JAR 檔案的路徑
             mod_data: 用於存儲提取的元資料的字典，會被直接修改以填充相關資訊
+
+        Returns:
+            JAR 可正常開啟並完成檢查時回傳 True，檔案損毀或讀取失敗時回傳 False
         """
         try:
             with zipfile.ZipFile(file_path, "r") as jar:
@@ -445,14 +451,17 @@ class LocalModScanner:
                         continue
                     except Exception as exc:
                         logger.exception(f"讀取 {metadata_file} 時發生未預期錯誤: {exc}")
+            return True
         except (zipfile.BadZipFile, OSError) as exc:
             logger.exception(f"提取模組元資料失敗: {file_path}\n{exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "io_or_bad_zip_extract")
+            return False
         except Exception as exc:
             logger.exception(f"提取模組元資料時發生未預期錯誤: {file_path}\n{exc}")
             with suppress(Exception):
                 self._quarantine_file(file_path, "unexpected_extract_error")
+            return False
 
     def extract_fabric_metadata(self, jar: Any, mod_data: dict[str, str]) -> None:
         """
@@ -476,7 +485,7 @@ class LocalModScanner:
             depends = meta.get("depends", {})
             if isinstance(depends, dict):
                 mc_version = depends.get("minecraft", mod_data["mc_version"])
-                mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
+                mod_data["mc_version"] = normalize_minecraft_version(mc_version)
         except (TypeError, ValueError) as exc:
             logger.exception(f"無法從 JAR 檔案提取 Fabric 元資料: {exc}")
 
@@ -513,7 +522,7 @@ class LocalModScanner:
                         for dependency in dependency_group:
                             if isinstance(dependency, dict) and dependency.get("modId") == "minecraft":
                                 mc_version = dependency.get("versionRange", mod_data["mc_version"])
-                                mod_data["mc_version"] = ServerDetectionVersionUtils.normalize_mc_version(mc_version)
+                                mod_data["mc_version"] = normalize_minecraft_version(mc_version)
                                 break
         except Exception as exc:
             logger.exception(f"解析 Forge 元資料時發生未預期錯誤: {exc}")
@@ -581,7 +590,7 @@ class LocalModScanner:
         if not mod_data["mc_version"] or str(mod_data["mc_version"]).strip() in {"", "未知"}:
             mod_data["mc_version"] = self.extract_mc_version_from_filename(base_name)
         if mod_data["loader_type"] == "未知":
-            mod_data["loader_type"] = ServerDetectionVersionUtils.detect_loader_from_text(base_name)
+            mod_data["loader_type"] = detect_loader_from_text(base_name)
 
     def apply_server_config_overrides(self, mod_data: dict[str, str]) -> None:
         """

@@ -33,23 +33,25 @@ from qfluentwidgets import (
     TreeWidget,
 )
 
-from src.core import ServerCRUD, ServerImportService, ServerStartup
-from src.models import ServerConfig, ServerImportBatchResult, ServerRenderPlan, WorkOutcome
+from src.core import ServerCRUD, ServerImportService, ServerPropertiesStore, ServerRuntime
+from src.models import ServerConfig, ServerImportBatchResult
 from src.ui import (
     ManageServerService,
     ProgressDialog,
     RestoreBackupDialog,
+    ServerMemoryDialog,
     ServerMonitorWindow,
     ServerPropertiesDialog,
+    ServerRenderPlan,
 )
 from src.utils import (
     MemoryUtils,
-    ServerOperations,
     Sizes,
     Spacing,
     StatusPushButton,
     UIUtils,
     UIWorkScope,
+    WorkOutcome,
     apply_table_header_style,
     get_logger,
     is_qobject_alive,
@@ -65,7 +67,8 @@ class ManageServerFrame(QWidget):
         self,
         parent,
         server_crud: ServerCRUD,
-        server_startup: ServerStartup,
+        server_runtime: ServerRuntime,
+        server_properties: ServerPropertiesStore,
         server_backup: Any,
         server_import: ServerImportService,
         callback: Callable,
@@ -74,19 +77,23 @@ class ManageServerFrame(QWidget):
         super().__init__(parent)
         self.setObjectName("ManageServerFrame")
         self.server_crud = server_crud
-        self.server_startup = server_startup
+        self.server_runtime = server_runtime
+        self.server_properties = server_properties
         self.server_backup = server_backup
         self.server_import = server_import
         self.callback = callback
         self.on_navigate_callback = on_navigate_callback
         self.selected_server: str | None = None
-        self.service = ManageServerService(server_crud, server_startup, server_backup)
+        self.service = ManageServerService(
+            server_crud,
+            server_runtime,
+            server_backup,
+            server_inspector=server_import.server_inspector,
+        )
         self.scope = UIWorkScope(self)
         self._widgets_created = False
         self.server_tree: TreeWidget | None = None
         self.action_buttons: dict[str, Any] = {}
-        self._post_action_immediate_job = None
-        self._post_action_delayed_job = None
 
         self._auto_refresh_enabled = True
         self._auto_refresh_interval_ms = 10000
@@ -242,6 +249,10 @@ class ManageServerFrame(QWidget):
 
         menu = RoundMenu(parent=self)
 
+        edit_memory_action = Action("🧠 修改記憶體設定")
+        edit_memory_action.triggered.connect(self.edit_server_memory)
+        menu.addAction(edit_memory_action)
+
         recheck_action = Action("🔄 重新檢測伺服器")
         recheck_action.triggered.connect(self.recheck_selected_server)
         menu.addAction(recheck_action)
@@ -253,6 +264,16 @@ class ManageServerFrame(QWidget):
         menu.addAction(open_backup_action)
 
         menu.exec(self.server_tree.mapToGlobal(pos))
+
+    def edit_server_memory(self) -> None:
+        """開啟選中伺服器的記憶體設定對話框"""
+        config = self._get_selected_server_config()
+        if not config:
+            return
+
+        dialog = ServerMemoryDialog(config, self.server_crud, parent=self.window())
+        if dialog.exec():
+            self.refresh_servers()
 
     def recheck_selected_server(self) -> None:
         """重新檢測選中伺服器"""
@@ -348,7 +369,7 @@ class ManageServerFrame(QWidget):
             ("📊", "監控", self.monitor_server, "monitor"),
             ("⚙️", "設定", self.configure_server, "configure"),
             ("📂", "開啟資料夾", self.open_server_folder, "open_folder"),
-            ("💾", "備份地圖檔", self.backup_server, "backup"),
+            ("💾", "備份伺服器", self.backup_server, "backup"),
             ("⏪", "還原備份", self.show_restore_dialog, "restore"),
             ("🗑️", "刪除", self.delete_server, "delete"),
         ]
@@ -475,7 +496,7 @@ class ManageServerFrame(QWidget):
 
         has_selection = self.selected_server is not None
         if has_selection and self.selected_server:
-            is_running = self.server_startup.is_server_running(self.selected_server)
+            is_running = self.server_runtime.observe(self.selected_server).is_running
             start_stop_key = "start_stop"
             if is_running:
                 if start_stop_key in self.action_buttons:
@@ -496,7 +517,7 @@ class ManageServerFrame(QWidget):
 
         if has_selection and self.selected_server and self.selected_server in self.server_crud.servers:
             config = self.server_crud.servers[self.selected_server]
-            is_running = self.server_startup.is_server_running(self.selected_server)
+            is_running = self.server_runtime.observe(self.selected_server).is_running
             status_emoji = "🟢" if is_running else "🔴"
             status_text = "執行中" if is_running else "已停止"
             memory_info = ""
@@ -530,9 +551,9 @@ class ManageServerFrame(QWidget):
         """啟動/停止伺服器"""
         if not self.selected_server:
             return
-        is_running = self.server_startup.is_server_running(self.selected_server)
+        is_running = self.server_runtime.observe(self.selected_server).is_running
         if is_running:
-            success = ServerOperations.graceful_stop_server(self.server_startup, self.selected_server)
+            success = self.server_runtime.stop(self.selected_server)
             if success:
                 UIUtils.show_message(
                     "成功", f"伺服器 {self.selected_server} 停止命令已發送", self.window(), message_level="info"
@@ -543,7 +564,7 @@ class ManageServerFrame(QWidget):
                 )
             self._schedule_post_action_updates(100, 2000)
         else:
-            start_result = self.server_startup.start_server_result(self.selected_server)
+            start_result = self.server_runtime.start(self.selected_server)
             if start_result.success:
                 self.monitor_server(bring_to_front=False)
             else:
@@ -574,7 +595,13 @@ class ManageServerFrame(QWidget):
                 self._show_existing_monitor_window(old_win, bring_to_front=bring_to_front)
                 return
 
-        monitor_window = ServerMonitorWindow(self.window(), self.server_startup, self.selected_server, self.server_crud)
+        monitor_window = ServerMonitorWindow(
+            self.window(),
+            self.server_runtime,
+            self.selected_server,
+            self.server_crud,
+            self.server_properties,
+        )
         self._monitor_windows[self.selected_server] = monitor_window
         monitor_window.show()
 
@@ -586,9 +613,8 @@ class ManageServerFrame(QWidget):
         if config is None:
             UIUtils.show_message("錯誤", "找不到選取的伺服器設定", self.window(), message_level="error")
             return
-        dialog = ServerPropertiesDialog(self.window(), config, self.server_crud)
+        dialog = ServerPropertiesDialog(self.window(), config, self.server_properties)
         if dialog.exec():
-            self.server_crud.write_servers_config()
             self.refresh_servers()
 
     def open_server_folder(self) -> None:

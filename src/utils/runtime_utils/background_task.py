@@ -182,45 +182,8 @@ def shutdown_shared_manager(wait: bool = True) -> None:
         manager.shutdown(wait=wait)
 
 
-def run_in_background(
-    fn: Callable[..., Any], *args, callback: Callable[[Any], None] | None = None, **kwargs
-) -> concurrent.futures.Future[Any] | None:
-    """
-    使用共享 BackgroundTaskManager 的便利函式
-
-    若無法使用共享 manager，會同步完成一個 Future 以保持錯誤可觀測
-
-    Args:
-        fn: 要執行的函式
-        *args: 傳入函式的位置參數
-        callback: 任務完成後的回呼，會在背景執行緒被呼叫
-        **kwargs: 傳入函式的關鍵字參數
-
-    Returns:
-        提交到執行器後的 Future，若無法使用共享 manager 則回傳 None
-    """
-    try:
-        return get_shared_manager().run(fn, *args, callback=callback, **kwargs)
-    except Exception as exc:
-        logger.warning(f"Shared BackgroundTaskManager unavailable, running fallback Future synchronously: {exc}")
-        future: concurrent.futures.Future[Any] = concurrent.futures.Future()
-        try:
-            result = fn(*args, **kwargs)
-        except Exception as e:
-            future.set_exception(e)
-            logger.exception(f"背景任務執行失敗: {e}")
-            if callback:
-                callback(None)
-        else:
-            future.set_result(result)
-            if callback:
-                callback(result)
-        return future
-
-
 __all__ = [
     "CancellationToken",
     "get_shared_manager",
-    "run_in_background",
     "shutdown_shared_manager",
 ]

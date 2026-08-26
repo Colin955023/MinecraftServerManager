@@ -13,7 +13,17 @@ from contextlib import suppress
 from pathlib import Path
 from typing import ClassVar
 
-from src.utils import HTTPClient, JavaDownloader, PathUtils, RuntimePaths, SubprocessUtils, UIUtils, get_logger
+from src.utils import (
+    HTTPClient,
+    JavaDownloader,
+    RuntimePaths,
+    SubprocessUtils,
+    UIUtils,
+    atomic_write_json,
+    get_logger,
+    read_json,
+    serialize_json,
+)
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -80,12 +90,12 @@ class JavaUtils:
 
     @staticmethod
     def _get_java_cache_path() -> Path:
-        return RuntimePaths.ensure_dir(RuntimePaths.get_version_cache_dir()) / JavaUtils.JAVA_CACHE_FILE_NAME
+        return RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_CACHE_FILE_NAME
 
     @staticmethod
     def _load_java_candidates_from_cache() -> list[tuple[str, int]] | None:
         cache_path = JavaUtils._get_java_cache_path()
-        cache_data = PathUtils.load_json(cache_path)
+        cache_data = read_json(cache_path)
         if not isinstance(cache_data, dict):
             return None
         candidates: list[tuple[str, int]] = []
@@ -165,7 +175,7 @@ class JavaUtils:
             cached_items: list[dict[str, object]] = []
             for java_path_str, major in final_results:
                 cached_items.append({"path": java_path_str, "major": major})
-            PathUtils.save_json_internal(cache_path, {"candidates": cached_items}, skip_if_unchanged=True)
+            atomic_write_json(cache_path, {"candidates": cached_items}, skip_if_unchanged=True)
         else:
             with suppress(OSError):
                 if cache_path.exists():
@@ -202,7 +212,7 @@ class JavaUtils:
         try:
             data = HTTPClient.fetch_json(manifest_url, timeout=10)
             if data and isinstance(data, dict) and "versions" in data:
-                PathUtils.save_json_internal(cache_path, data["versions"])
+                atomic_write_json(cache_path, data["versions"])
                 return
         except Exception as e:
             logger.debug(f"無法自動下載 Mojang manifest: {e}")
@@ -224,7 +234,7 @@ class JavaUtils:
             raise ValueError("mc_version 必須為非空字串")
         cache_path = RuntimePaths.get_version_cache_dir() / "mc_versions_cache.json"
         JavaUtils._ensure_cache_exists(cache_path)
-        data = PathUtils.load_json(cache_path)
+        data = read_json(cache_path)
         if data is None:
             raise ValueError(f"無法解析 {cache_path} 內容")
         if isinstance(data, dict):
@@ -240,7 +250,7 @@ class JavaUtils:
                     java_info2 = ver_json.get("java_version")
                     if java_info2 and "major" in java_info2:
                         return int(java_info2["major"])
-                    json_str = PathUtils.to_json_str(ver_json)
+                    json_str = serialize_json(ver_json)
                     m = re.search('"major(?:Version)?"\\s*:\\s*(\\d+)', json_str)
                     if m:
                         return int(m.group(1))
@@ -298,9 +308,9 @@ class JavaUtils:
             res = UIUtils.ask_yes_no_cancel(
                 "Java 未找到",
                 (
-                    f"未找到合適的 Java {required_major}。是否由程式自動安裝 {vendor}？\n\n"
+                    f"未找到合適的 Java {required_major}是否由程式自動安裝 {vendor}？\n\n"
                     "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑。"
+                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
                 ),
                 show_cancel=False,
             )

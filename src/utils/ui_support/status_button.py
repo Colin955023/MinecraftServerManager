@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from qfluentwidgets import PushButton, qconfig
+from qfluentwidgets import PushButton, isDarkTheme, qconfig
 
 from src.utils import Colors, resolve_color
 
@@ -48,7 +48,9 @@ class StatusPushButton(PushButton):
             self.setStyleSheet("")
             return
 
-        bg_disabled = resolve_color(Colors.BUTTON_LIGHT)
+        is_dark = isDarkTheme()
+        bg_disabled = "rgba(255, 255, 255, 0.06)" if is_dark else "rgba(0, 0, 0, 0.03)"
+        border_disabled = "rgba(255, 255, 255, 0.04)" if is_dark else "rgba(0, 0, 0, 0.05)"
         color_disabled = resolve_color(Colors.TEXT_MUTED)
 
         self.setStyleSheet(
@@ -71,7 +73,7 @@ class StatusPushButton(PushButton):
             StatusPushButton:disabled {{
                 background-color: {bg_disabled};
                 color: {color_disabled};
-                border: 1px solid rgba(0, 0, 0, 0.05);
+                border: 1px solid {border_disabled};
             }}
             """
         )

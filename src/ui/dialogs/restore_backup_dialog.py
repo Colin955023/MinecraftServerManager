@@ -12,9 +12,8 @@ from PySide6 import QtCore
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, TreeWidget
 
-from src.models import WorkOutcome
 from src.ui import ModalMSFluentWindow, ProgressDialog
-from src.utils import UIUtils, UIWorkScope, apply_table_header_style
+from src.utils import UIUtils, UIWorkScope, WorkOutcome, apply_table_header_style
 
 
 class RestoreBackupDialog(ModalMSFluentWindow):

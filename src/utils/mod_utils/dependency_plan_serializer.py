@@ -11,7 +11,7 @@ from src.utils import get_logger
 
 logger = get_logger().bind(component="DependencyPlanSerializer")
 
-DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 1
+_DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 2
 
 
 def _get_source_value(source: Any, key: str, default: Any = None) -> Any:
@@ -116,7 +116,7 @@ def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
         "resolution_source": _normalize_text_value(item, "resolution_source", "project_id"),
         "resolution_confidence": _normalize_text_value(item, "resolution_confidence", "direct"),
         "decision_source": _normalize_text_value(item, "decision_source") or "required:auto",
-        "enabled": bool(_get_source_value(item, "enabled", True)),
+        "included_by_default": bool(_get_source_value(item, "included_by_default", True)),
         "is_optional": bool(_get_source_value(item, "is_optional", False)),
         "graph_depth": graph_depth,
         "edge_kind": edge_kind,
@@ -131,7 +131,8 @@ def serialize_online_dependency_install_plan(
     root_project_name: str = "",
     root_target_version_id: str = "",
     root_target_version_name: str = "",
-    root_enabled: bool | None = None,
+    root_selected: bool | None = None,
+    selected_dependency_keys: set[tuple[str, str]] | None = None,
     plan_source: str = "review",
 ) -> dict[str, Any]:
     """
@@ -143,7 +144,8 @@ def serialize_online_dependency_install_plan(
         root_project_name: 根專案名稱
         root_target_version_id: 根目標版本 ID
         root_target_version_name: 根目標版本名稱
-        root_enabled: 根專案是否啟用
+        root_selected: 根專案是否納入本次變更
+        selected_dependency_keys: Review 已選取的 dependency stable keys
         plan_source: 計畫來源標記
 
     Returns:
@@ -160,7 +162,7 @@ def serialize_online_dependency_install_plan(
         for item_payload in [*serialized_items, *serialized_advisory_items]
     ]
     payload: dict[str, Any] = {
-        "schema_version": DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION,
+        "schema_version": _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION,
         "plan_source": str(plan_source or "review").strip() or "review",
         "root_project_id": str(root_project_id or "").strip(),
         "root_project_name": str(root_project_name or "").strip(),
@@ -171,9 +173,10 @@ def serialize_online_dependency_install_plan(
         "graph_edges": graph_edges,
         "unresolved_required": _normalize_string_list(getattr(plan, "unresolved_required", [])),
         "notes": _normalize_string_list(getattr(plan, "notes", [])),
+        "selected_dependency_keys": [list(key) for key in sorted(selected_dependency_keys or set())],
     }
-    if root_enabled is not None:
-        payload["root_enabled"] = bool(root_enabled)
+    if root_selected is not None:
+        payload["root_selected"] = bool(root_selected)
     return payload
 
 
@@ -190,7 +193,7 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
     if not isinstance(raw, dict):
         return (False, "payload-not-dict")
     schema_version = raw.get("schema_version")
-    if schema_version != DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION:
+    if schema_version != _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION:
         return (False, "schema-mismatch")
     graph_edges = raw.get("graph_edges")
     if not isinstance(graph_edges, list):
@@ -234,6 +237,16 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
                 return (False, "missing-item-edge-kind")
             if not item_edge_source:
                 return (False, "missing-item-edge-source")
+            if not isinstance(item_payload.get("included_by_default"), bool):
+                return (False, "invalid-included-by-default")
+    selected_dependency_keys = raw.get("selected_dependency_keys", [])
+    if not isinstance(selected_dependency_keys, list) or any(
+        not isinstance(key, list) or len(key) != 2 or not all(isinstance(value, str) for value in key)
+        for key in selected_dependency_keys
+    ):
+        return (False, "invalid-selected-dependency-keys")
+    if "root_selected" in raw and not isinstance(raw["root_selected"], bool):
+        return (False, "invalid-root-selected")
     return (True, "ok")
 
 
@@ -250,7 +263,7 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
     if not isinstance(raw, dict):
         return (None, "payload-not-dict")
     schema_version = raw.get("schema_version")
-    if schema_version != DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION:
+    if schema_version not in {1, _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION}:
         return (None, "schema-mismatch")
     migrated_payload: dict[str, Any] = dict(raw)
     migrated = False
@@ -266,6 +279,14 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
             if not isinstance(entry, dict):
                 return None
             normalized_entry = dict(entry)
+            legacy_enabled = normalized_entry.pop("enabled", None)
+            if "included_by_default" not in normalized_entry:
+                normalized_entry["included_by_default"] = (
+                    legacy_enabled if isinstance(legacy_enabled, bool) else not optional_default
+                )
+                migrated = True
+            elif legacy_enabled is not None:
+                migrated = True
             if not _normalize_text_value(normalized_entry, "edge_kind"):
                 normalized_entry["edge_kind"] = "optional" if optional_default else "required"
                 migrated = True
@@ -291,6 +312,25 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
         return (None, "invalid-item-collection")
     migrated_payload["items"] = normalized_items
     migrated_payload["advisory_items"] = normalized_advisory_items
+    if schema_version == 1:
+        migrated_payload["schema_version"] = _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION
+        migrated = True
+    if "root_enabled" in migrated_payload:
+        legacy_root_selected = migrated_payload.pop("root_enabled")
+        if isinstance(legacy_root_selected, bool):
+            migrated_payload["root_selected"] = legacy_root_selected
+        migrated = True
+    if "selected_dependency_keys" not in migrated_payload:
+        migrated_payload["selected_dependency_keys"] = [
+            [
+                _normalize_text_value(item_payload, "project_id"),
+                _normalize_text_value(item_payload, "version_id")
+                or _normalize_text_value(item_payload, "version_name"),
+            ]
+            for item_payload in [*normalized_items, *normalized_advisory_items]
+            if bool(item_payload.get("included_by_default", True))
+        ]
+        migrated = True
     graph_edges = migrated_payload.get("graph_edges")
     if not isinstance(graph_edges, list):
         migrated_payload["graph_edges"] = [
@@ -300,7 +340,7 @@ def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -
         migrated = True
     if migrated:
         notes = _normalize_string_list(migrated_payload.get("notes", []))
-        migration_note = "已套用 dependency snapshot v1 遷移：補齊 graph_edges 與舊欄位預設值"
+        migration_note = "已遷移 dependency snapshot：分離 planner 預設與 Review 選取狀態"
         if migration_note not in notes:
             notes.append(migration_note)
         migrated_payload["notes"] = notes
@@ -336,7 +376,6 @@ def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> On
 
 
 __all__ = [
-    "DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION",
     "deserialize_online_dependency_install_plan",
     "migrate_online_dependency_install_plan_payload",
     "serialize_online_dependency_install_plan",

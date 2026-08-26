@@ -2,31 +2,33 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import isDarkTheme
 
-from src.models import ModListRow, ModStatus
-from src.ui import HostBound
+from src.models import ModStatus
+from src.ui import ModListRow
 from src.ui import mod_management_logger as logger
 from src.utils import Colors, resolve_color
 
+if TYPE_CHECKING:
+    from src.ui import ModManagementFrame
 
-class ModManagementTreeSyncOps(HostBound):
+
+class ModManagementTreeSyncOps:
     """維護本地與線上模組列表的同步與刷新"""
 
-    mod_session: Any
-    local_mod_list_presenter: Any
-    ui_queue: Any
-    _refresh_online_results_summary: Callable[..., Any]
-    _format_online_result_description: Callable[..., str]
+    VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
+
+    def __init__(self, controller: ModManagementFrame) -> None:
+        self.controller = controller
 
     @staticmethod
     def _build_online_browse_key(mod: Any) -> str:
@@ -45,7 +47,7 @@ class ModManagementTreeSyncOps(HostBound):
         server_side = str(getattr(mod, "server_side", "") or "").strip()
         client_side = str(getattr(mod, "client_side", "") or "").strip()
         if client_side and server_side:
-            return "相容（客戶端/伺服器）"
+            return "兼容（客戶端/伺服器）"
         if client_side:
             return "僅客戶端"
         if server_side:
@@ -54,12 +56,12 @@ class ModManagementTreeSyncOps(HostBound):
 
     def refresh_browse_list(self) -> None:
         """重新整理線上模組列表"""
-        self._refresh_online_results_summary()
-        tree = getattr(self, "browse_tree", None)
+        self.controller.queue_ops._refresh_online_results_summary()
+        tree = self.controller.online_browse_presenter.browse_tree
         if not tree:
             return
 
-        online_mods = self.mod_session.online_mods
+        online_mods = self.controller.mod_session.online_mods
         logger.debug(f"重新整理線上模組列表: result_count={len(online_mods)}")
 
         projections: list[ModListRow] = []
@@ -78,12 +80,12 @@ class ModManagementTreeSyncOps(HostBound):
             projections.append(ModListRow(row_key, tuple(str(value) for value in values), row_tags))
             seen_row_keys.add(row_key)
 
-        self.mod_session.replace_online_rows(projections)
+        self.controller.mod_session.replace_online_rows(projections)
 
         tree.clear()
 
         items = []
-        for row in self.mod_session.snapshot().online_rows:
+        for row in self.controller.mod_session.snapshot().online_rows:
             item = QTreeWidgetItem(list(row.values))
             item.setData(0, Qt.ItemDataRole.UserRole, row.data)
             items.append(item)
@@ -93,38 +95,22 @@ class ModManagementTreeSyncOps(HostBound):
 
     def refresh_local_list(self) -> None:
         """重新整理本地模組列表"""
-        tree = getattr(self, "local_tree", None)
+        presenter = self.controller.local_mod_list_presenter
+        tree = presenter.local_tree
         if not tree:
             return
 
         selected_mod_ids = self._capture_selected_mod_ids()
 
-        search_text = ""
-        if hasattr(self, "local_search_var"):
-            search_var = self.local_search_var
-            search_text = (
-                search_var.get()
-                if hasattr(search_var, "get")
-                else (search_var.text() if hasattr(search_var, "text") else str(search_var))
-            )
-
-        search_filter = getattr(self, "local_search_filter", None)
-
-        filter_status = "所有"
-        if hasattr(self, "local_filter_var"):
-            filter_var = self.local_filter_var
-            filter_status = (
-                filter_var.get()
-                if hasattr(filter_var, "get")
-                else (filter_var.text() if hasattr(filter_var, "text") else str(filter_var))
-            )
-
-        version_pattern = getattr(self, "VERSION_PATTERN", None)
+        search_var = presenter.local_search_var
+        search_text = search_var.get()
+        search_filter = presenter.local_search_filter
+        filter_status = presenter.local_filter_var.get()
 
         projections: list[ModListRow] = []
         seen_mod_ids: set[str] = set()
 
-        for mod in self.mod_session.local_mods:
+        for mod in self.controller.mod_session.local_mods:
             mod_name = str(getattr(mod, "name", "") or "")
             search_candidate = (
                 mod_name,
@@ -133,9 +119,7 @@ class ModManagementTreeSyncOps(HostBound):
                 getattr(mod, "author", ""),
             )
 
-            if search_text and search_filter is not None and not search_filter.matches(search_candidate, search_text):
-                continue
-            if search_text and search_filter is None and str(search_text).lower() not in mod_name.lower():
+            if search_text and not search_filter.matches(search_candidate, search_text):
                 continue
             if filter_status != "所有" and (
                 (filter_status == "啟用" and mod.status != ModStatus.ENABLED)
@@ -143,12 +127,11 @@ class ModManagementTreeSyncOps(HostBound):
             ):
                 continue
 
-            enhanced = self.mod_session.get_provider_cache(mod.filename)
+            enhanced = self.controller.mod_session.get_provider_cache(mod.filename)
             parsed_version = "未知"
-            if version_pattern:
-                m = version_pattern.search(mod.filename)
-                if m:
-                    parsed_version = m.group(1)
+            match = self.VERSION_PATTERN.search(mod.filename)
+            if match:
+                parsed_version = match.group(1)
 
             display_name = self._resolve_local_display_name(mod, enhanced)
             display_author = self._get_enhanced_attr(enhanced, "author", mod.author or "Unknown")
@@ -176,10 +159,7 @@ class ModManagementTreeSyncOps(HostBound):
                 display_version = "未知"
 
             raw_desc = self._get_enhanced_attr(enhanced, "description", mod.description or "")
-            if hasattr(self, "_format_single_line_text"):
-                display_description = self._format_single_line_text(raw_desc)
-            else:
-                display_description = str(raw_desc)
+            display_description = self.controller.queue_ops._format_single_line_text(raw_desc)
 
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
             mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
@@ -220,7 +200,7 @@ class ModManagementTreeSyncOps(HostBound):
             )
             projections.append(ModListRow(mod_base_name, tuple(str(value) for value in values), mod_base_name))
 
-        self.mod_session.replace_local_rows(projections)
+        self.controller.mod_session.replace_local_rows(projections)
 
         tree.clear()
 
@@ -229,7 +209,7 @@ class ModManagementTreeSyncOps(HostBound):
         primary_brush = QBrush(QColor(resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)))
         muted_brush = QBrush(QColor(resolve_color(Colors.TEXT_MUTED, dark=is_dark)))
 
-        for row in self.mod_session.snapshot().local_rows:
+        for row in self.controller.mod_session.snapshot().local_rows:
             item = QTreeWidgetItem(list(row.values))
             item.setData(0, Qt.ItemDataRole.UserRole, row.data)
             if row.key in selected_mod_ids:
@@ -242,7 +222,7 @@ class ModManagementTreeSyncOps(HostBound):
         if items:
             tree.addTopLevelItems(items)
 
-        self.local_mod_list_presenter.on_tree_selection_changed()
+        self.controller.local_mod_list_presenter.on_tree_selection_changed()
 
     def _build_online_browse_row(self, mod: Any) -> tuple[str, str, str, str, str, str]:
         """建立線上瀏覽列表單列顯示內容"""
@@ -253,14 +233,14 @@ class ModManagementTreeSyncOps(HostBound):
             f"{downloads:,}" if downloads > 0 else "N/A",
             str(getattr(mod, "source", "modrinth") or "modrinth").title(),
             self._format_online_environment_text(mod),
-            self._format_online_result_description(mod),
+            self.controller.queue_ops._format_online_result_description(mod),
         )
 
     def _clear_online_mods(self) -> None:
         """清空目前線上模組瀏覽結果"""
-        self.mod_session.clear_online_results()
-        self.ui_queue.put(self._refresh_online_results_summary)
-        self.ui_queue.put(self.refresh_browse_list)
+        self.controller.mod_session.clear_online_results()
+        self.controller.ui_queue.put(self.controller.queue_ops._refresh_online_results_summary)
+        self.controller.ui_queue.put(self.refresh_browse_list)
 
     def _get_enhanced_attr(self, enhanced, attr: str, fallback):
         """屬性值或後備值"""
@@ -289,7 +269,7 @@ class ModManagementTreeSyncOps(HostBound):
 
     def _capture_selected_mod_ids(self) -> set[str]:
         """擷取目前選取列對應的 mod id（從 UserData 中取得）"""
-        tree = getattr(self, "local_tree", None)
+        tree = self.controller.local_mod_list_presenter.local_tree
         if not tree:
             return set()
 

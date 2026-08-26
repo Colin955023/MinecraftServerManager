@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess  # nosec B404
 from collections.abc import Iterable
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import Any
 
 from PySide6 import QtCore
 
-from src.utils import PathUtils, get_logger
+from src.utils import get_logger
 
 logger = get_logger().bind(component="SubprocessUtils")
 
@@ -65,7 +66,7 @@ class SubprocessUtils:
             if not p.exists():
                 raise FileNotFoundError(f"執行檔路徑不存在: {exe}")
             return cmd_list
-        which = PathUtils.find_executable(exe)
+        which = shutil.which(exe)
         if which is None and os.name == "nt" and exe.lower() == "winget":
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if local_app_data:
@@ -124,28 +125,6 @@ class SubprocessUtils:
         cmd_list = SubprocessUtils._validate_cmd(cmd)
         # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False
         return subprocess.Popen(cmd_list, **kwargs)  # nosec B603
-
-    @staticmethod
-    def query_winget(args: list[str], check: bool = False) -> subprocess.CompletedProcess:
-        """
-        執行 winget 指令並回傳結果。自動包含必要的環境與編碼設定
-
-        Args:
-            args: winget 的參數列表
-            check: 是否在回傳碼非零時拋出 CalledProcessError
-
-        Returns:
-            subprocess.CompletedProcess 物件
-        """
-        return SubprocessUtils.run_checked(
-            ["winget", *args],
-            capture_output=True,
-            text=True,
-            check=check,
-            encoding="utf-8",
-            stdin=SubprocessUtils.DEVNULL,
-            creationflags=SubprocessUtils.CREATE_NO_WINDOW,
-        )
 
     @staticmethod
     def create_console_process(

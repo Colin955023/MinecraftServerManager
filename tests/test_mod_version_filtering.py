@@ -8,7 +8,6 @@ from src.utils import (
     is_allowed_version_type,
     normalize_hash_algorithm,
     select_best_mod_version,
-    version_type_priority,
 )
 
 
@@ -28,9 +27,7 @@ def test_extract_primary_file_hash_uses_selected_algorithm() -> None:
     assert extract_primary_file_hash(SimpleNamespace(primary_file={"hashes": "bad"})) == ""
 
 
-def test_version_type_priority_and_allow_rules() -> None:
-    assert version_type_priority("release") > version_type_priority("beta")
-    assert version_type_priority("beta") > version_type_priority("alpha")
+def test_version_type_allow_rules() -> None:
     assert is_allowed_version_type("release") is True
     assert is_allowed_version_type("stable") is True
     assert is_allowed_version_type("beta") is True

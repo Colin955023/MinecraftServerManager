@@ -4,18 +4,60 @@ from __future__ import annotations
 
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from src.models import (
-    ModListRow,
-    ModManagementSnapshot,
-    ModOperationScope,
-    OnlineBrowseRequest,
-    OperationKind,
-    PendingOnlineInstall,
-    ServerConfig,
-)
+from src.models import PendingOnlineInstall, ServerConfig
+
+OperationKind = Literal["local_scan", "online_search", "install", "version_load"]
+
+
+@dataclass(frozen=True, slots=True)
+class OnlineBrowseRequest:
+    """線上模組瀏覽與搜尋請求"""
+
+    query: str
+    minecraft_version: str | None
+    loader_type: str
+    sort_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModOperationScope:
+    """綁定至特定 Mod 管理 session 與 generation 的操作範圍"""
+
+    session_id: str
+    server_identity: str
+    kind: OperationKind
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModListRow:
+    """Mod 管理 session 持有的不可變列表列"""
+
+    key: str
+    values: tuple[str, ...]
+    data: Any
+
+
+@dataclass(frozen=True, slots=True)
+class ModManagementSnapshot:
+    """Presenter 唯讀消費的完整 Mod 管理 session 快照"""
+
+    session_id: str
+    active: bool
+    server: ServerConfig | None
+    server_identity: str
+    local_mods: tuple[Any, ...]
+    online_mods: tuple[Any, ...]
+    local_rows: tuple[ModListRow, ...]
+    online_rows: tuple[ModListRow, ...]
+    pending_online_installs: tuple[PendingOnlineInstall, ...]
+    selected_mod_ids: frozenset[str]
+    status_message: str
+    latest_online_request: OnlineBrowseRequest | None
 
 
 class ModManagementSession:
@@ -90,11 +132,6 @@ class ModManagementSession:
     def pending_online_installs(self) -> tuple[PendingOnlineInstall, ...]:
         with self._lock:
             return tuple(self._pending_online_installs)
-
-    @property
-    def selected_mod_ids(self) -> frozenset[str]:
-        with self._lock:
-            return frozenset(self._selected_mod_ids)
 
     def snapshot(self) -> ModManagementSnapshot:
         """

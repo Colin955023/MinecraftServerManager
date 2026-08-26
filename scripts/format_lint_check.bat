@@ -46,25 +46,15 @@ uv run scripts/check_import_boundaries.py
 if errorlevel 1 exit /b 1
 echo.
 
-choice /c YN /m "Run secret scan? (Y/N)" /t 5 /d N
-if errorlevel 2 (
-    echo Skipping secret scan.
-) else (
-    echo === Secret Scan ===
-    uv run detect-secrets scan --only-verified --all-files --exclude-files "(\.git|\.venv|\.pytest_cache|__pycache__|\.mypy_cache|\.ruff_cache|\.import_linter_cache|build|dist)" > secrets_report.json
-    uv run python -c "import json,sys; data=json.load(open('secrets_report.json', encoding='utf-8')); sys.exit(1 if data.get('results') else 0)"
-    if errorlevel 1 (
-        type secrets_report.json
-        echo.
-        echo [WARNING] Detected potential secrets! Please check before pushing.
-        del secrets_report.json
-        exit /b 1
-    ) else (
-        echo No secrets detected.
-        del secrets_report.json
-    )
+echo === Secret Scan ===
+powershell -NoProfile -Command "$files = git ls-files; uv run detect-secrets-hook --baseline scripts/.secrets.baseline --exclude-files 'scripts[\\/]\.secrets\.baseline' -- $files; exit $LASTEXITCODE"
+if errorlevel 1 (
+    echo.
+    echo [WARNING] Detected a potential secret. Please inspect the output above.
+    exit /b 1
 )
-
+echo No new secrets detected.
+echo.
 echo === Compile Check ===
 uv run python -m compileall -q src
 if errorlevel 1 exit /b 1

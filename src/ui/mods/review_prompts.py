@@ -5,15 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from src.models import LocalUpdateReviewEntry, PendingInstallReviewEntry
-from src.ui import (
-    count_local_update_review_groups,
-    count_online_install_review_groups,
-    dedupe_review_messages,
-    format_provider_label,
-    get_enabled_dependency_install_items,
-    get_sorted_dependency_review_items,
-)
 from src.utils import (
     LOCAL_UPDATE_PROMPT_ADVISORY_LINE_TEMPLATE,
     LOCAL_UPDATE_PROMPT_BLOCKED_LINE_TEMPLATE,
@@ -25,14 +16,23 @@ from src.utils import (
     get_non_official_download_host,
 )
 
+from .mod_presentation import format_provider_label
+from .review_dependency import get_selected_dependency_install_items, get_sorted_dependency_review_items
+from .review_formatting import dedupe_review_messages
+from .review_grouping import (
+    count_local_update_review_groups,
+    count_online_install_review_groups,
+)
+from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
 
-def iter_review_download_source_records(review_entry: Any, *, enabled_only: bool) -> list[tuple[str, str, str]]:
+
+def iter_review_download_source_records(review_entry: Any, *, selected_only: bool) -> list[tuple[str, str, str]]:
     """
     列出 Review 項目本身與依賴項目的下載來源紀錄
 
     Args:
         review_entry: 線上安裝或本機更新 Review 項目
-        enabled_only: 是否只保留已啟用的依賴項目
+        selected_only: 是否只保留已選取的依賴項目
 
     Returns:
         由顯示名稱、下載網址與 provider 組成的紀錄清單
@@ -63,7 +63,11 @@ def iter_review_download_source_records(review_entry: Any, *, enabled_only: bool
             )
         )
     plan = getattr(review_entry, "dependency_plan", None)
-    items = get_enabled_dependency_install_items(plan) if enabled_only else get_sorted_dependency_review_items(plan)
+    items = (
+        get_selected_dependency_install_items(plan, review_entry.selected_dependency_keys)
+        if selected_only
+        else get_sorted_dependency_review_items(plan)
+    )
     for item in items:
         provider = str(getattr(item, "provider", "") or review_entry.provider or "modrinth").strip()
         label = str(getattr(item, "project_name", "") or "未知依賴").strip() or "未知依賴"
@@ -71,20 +75,20 @@ def iter_review_download_source_records(review_entry: Any, *, enabled_only: bool
     return records
 
 
-def collect_non_official_source_warning_messages(review_entry: Any, *, enabled_only: bool) -> list[str]:
+def collect_non_official_source_warning_messages(review_entry: Any, *, selected_only: bool) -> list[str]:
     """
     收集 Review 項目中非官方下載來源的警告訊息
 
     Args:
         review_entry: 要檢查下載來源的 Review 項目
-        enabled_only: 是否只檢查已啟用的依賴項目
+        selected_only: 是否只檢查已選取的依賴項目
 
     Returns:
         去重後的非官方來源警告訊息清單
     """
     warnings = [
         build_non_official_source_warning_message(label, url, provider, provider_label=format_provider_label(provider))
-        for label, url, provider in iter_review_download_source_records(review_entry, enabled_only=enabled_only)
+        for label, url, provider in iter_review_download_source_records(review_entry, selected_only=selected_only)
     ]
     return dedupe_review_messages([warning for warning in warnings if warning])
 
@@ -102,7 +106,7 @@ def build_non_official_source_confirmation_prompt(review_entries: list[Any], *, 
     """
     lines = []
     for entry in review_entries:
-        for label, url, provider in iter_review_download_source_records(entry, enabled_only=True):
+        for label, url, provider in iter_review_download_source_records(entry, selected_only=True):
             host = get_non_official_download_host(url, provider)
             if host:
                 lines.append(f"- {label}：{host}（非 {format_provider_label(provider)} 官方網域）")

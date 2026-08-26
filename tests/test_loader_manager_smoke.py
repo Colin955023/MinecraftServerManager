@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.core import LoaderManager
-from src.utils import PathUtils
+from src.utils import read_json
 
 
 def test_clear_cache_file_removes_cache_files_and_memory_cache(tmp_path: Path) -> None:
@@ -104,7 +104,7 @@ def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, m
     spec = manager.LOADER_SPECS["forge"]
     manager._preload_loader(spec)
 
-    cache = PathUtils.load_json(forge_cache)
+    cache = read_json(forge_cache)
     assert isinstance(cache, dict)
     assert cache.get("1.21.1", [])[:3] == ["1.21.1-54.0.10", "1.21.1-54.0.9", "1.21.1-54.0.2"]
 

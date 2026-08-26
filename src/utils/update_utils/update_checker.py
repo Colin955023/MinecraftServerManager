@@ -12,7 +12,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import TypeVar
 
 from PySide6 import QtWidgets
 
@@ -27,12 +26,10 @@ from src.utils import (
     get_logger,
     invoke_later,
     is_qobject_alive,
-    run_in_background,
     run_on_ui_thread,
 )
 
 logger = get_logger().bind(component="UpdateChecker")
-_UpdateResultT = TypeVar("_UpdateResultT")
 
 
 class UpdateChecker:
@@ -159,7 +156,7 @@ del "%~f0"
         """將遠端 Markdown 轉為純文字，避免引入 HTML 渲染面"""
         if not text:
             return ""
-        safe_text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+        safe_text = re.sub(r"`.*?`", "", text, flags=re.DOTALL)
         safe_text = re.sub(r"`([^`]*)`", r"\1", safe_text)
         safe_text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", safe_text)
         safe_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe_text)
@@ -178,7 +175,8 @@ del "%~f0"
         repo: str,
         show_up_to_date_message: bool = True,
         parent=None,
-        work_scope=None,
+        *,
+        work_scope,
     ) -> None:
         """
         檢查最新版本並在需要時提示使用者進行更新
@@ -189,7 +187,7 @@ del "%~f0"
             repo: GitHub repository 名稱
             show_up_to_date_message: 是否在已是最新版本時顯示提示
             parent: 父視窗物件
-            work_scope: 可選的 UIWorkScope；提供時由此提交背景工作
+            work_scope: 負責提交與追蹤更新工作的 UIWorkScope
         """
 
         def _work() -> None:
@@ -299,9 +297,6 @@ del "%~f0"
                         UIUtils.open_external(html_url)
                     return
 
-                def _parse_asset_digest(asset_dict: dict) -> tuple[str, str] | None:
-                    return UpdateParsing.parse_asset_digest(asset_dict)
-
                 def _fetch_checksum_for_asset(release: dict) -> tuple[str, str] | None:
                     """
                     只從 GitHub release asset digest 取得 checksum
@@ -311,7 +306,7 @@ del "%~f0"
                     try:
                         asset_obj = release.get("_selected_asset") or {}
                         if asset_obj:
-                            digest = _parse_asset_digest(asset_obj)
+                            digest = UpdateParsing.parse_asset_digest(asset_obj)
                             if digest:
                                 logger.info(
                                     f"[digest 查詢成功] 已從 GitHub asset digest 取得 checksum（{digest[0]}），無需額外下載"
@@ -363,17 +358,8 @@ del "%~f0"
                     temp_path = tmp.name
                 dest = Path(temp_path)
                 temp_files_to_cleanup.append(dest)
-                download_failure_reason = ""
-
-                def _capture_download_failure(message: str) -> None:
-                    nonlocal download_failure_reason
-                    download_failure_reason = message
-
-                if HTTPClient.download_file(
-                    download_url,
-                    str(dest),
-                    failure_message_callback=_capture_download_failure,
-                ):
+                download_result = HTTPClient.download_file(download_url, str(dest))
+                if download_result.success:
                     logger.info(f"[驗證階段] 正在計算並驗證下載檔案的 {alg.upper()}...")
                     logger.info(f"[驗證階段] 預期 {alg.upper()}: {expected_checksum}")
                     ok = _verify_file_checksum(dest, alg, expected_checksum)
@@ -409,7 +395,7 @@ del "%~f0"
                     time.sleep(2)
                     logger.info("準備關閉當前程式以完成更新")
                 else:
-                    failure_message = download_failure_reason or "無法下載安裝程式"
+                    failure_message = download_result.message or "無法下載安裝程式"
                     logger.warning(f"[下載失敗] {failure_message}")
                     run_on_ui_thread(
                         lambda: UIUtils.show_message("下載失敗", failure_message, parent=parent, message_level="error"),
@@ -427,10 +413,7 @@ del "%~f0"
                 )
                 _cleanup_temp_files(temp_files_to_cleanup)
 
-        if work_scope is not None:
-            work_scope.submit(_work, key="app_update_check", replace=True)
-        else:
-            run_in_background(_work)
+        work_scope.submit(_work, key="app_update_check", replace=True)
 
 
 __all__ = ["UpdateChecker"]

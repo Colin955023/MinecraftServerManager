@@ -5,19 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from src.models import LocalUpdateReviewEntry, PendingInstallReviewEntry, ReviewTaskNode
-from src.ui import (
-    build_dependency_key,
-    build_dependency_status_text,
-    collect_dependency_required_by,
-    count_dependency_plan_items,
-    dedupe_review_messages,
-    format_local_update_source_text,
-    format_provider_label,
-    format_required_by_list,
-    is_optional_dependency_item,
-    mask_redundant_review_values,
-)
 from src.utils import (
     METADATA_SOURCE_STALE_PROVIDER,
     METADATA_SOURCE_UNRESOLVED,
@@ -26,6 +13,22 @@ from src.utils import (
     RECOMMENDATION_SOURCE_METADATA_UNRESOLVED,
     RECOMMENDATION_SOURCE_STALE_METADATA,
 )
+
+from .mod_presentation import format_provider_label
+from .review_dependency import (
+    build_dependency_review_key,
+    build_dependency_status_text,
+    collect_dependency_required_by,
+    count_dependency_plan_items,
+    is_optional_dependency_item,
+)
+from .review_formatting import (
+    dedupe_review_messages,
+    format_local_update_source_text,
+    format_required_by_list,
+    mask_redundant_review_values,
+)
+from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry, ReviewTaskNode
 
 
 def build_pending_install_review_key(project_id: str, version_id: str) -> str:
@@ -50,15 +53,15 @@ def get_online_install_review_group_key(entry: PendingInstallReviewEntry) -> str
         entry: 要分類的線上安裝 Review 項目
 
     Returns:
-        enabled、advisory、disabled 或 blocked 群組鍵
+        selected、advisory、unselected 或 blocked 群組鍵
     """
     if not bool(getattr(entry, "runnable", False)):
         return "blocked"
-    if not bool(getattr(entry, "enabled", False)):
-        return "disabled"
+    if not bool(getattr(entry, "selected", False)):
+        return "unselected"
     if list(getattr(entry, "warning_messages", []) or []):
         return "advisory"
-    return "enabled"
+    return "selected"
 
 
 def get_local_update_review_group_key(entry: LocalUpdateReviewEntry) -> str:
@@ -69,7 +72,7 @@ def get_local_update_review_group_key(entry: LocalUpdateReviewEntry) -> str:
         entry: 要分類的本機更新 Review 項目
 
     Returns:
-        enabled、advisory、disabled、retryable、unknown 或 blocked 群組鍵
+        selected、advisory、unselected、retryable、unknown 或 blocked 群組鍵
     """
     candidate = getattr(entry, "candidate", None)
     confidence = str(getattr(candidate, "recommendation_confidence", "") or "").strip().lower()
@@ -85,9 +88,9 @@ def get_local_update_review_group_key(entry: LocalUpdateReviewEntry) -> str:
         if source == RECOMMENDATION_SOURCE_METADATA_UNRESOLVED or metadata == METADATA_SOURCE_UNRESOLVED:
             return "unknown"
         return "blocked"
-    if not bool(getattr(entry, "enabled", False)):
-        return "disabled"
-    return "advisory" if confidence == RECOMMENDATION_CONFIDENCE_ADVISORY else "enabled"
+    if not bool(getattr(entry, "selected", False)):
+        return "unselected"
+    return "advisory" if confidence == RECOMMENDATION_CONFIDENCE_ADVISORY else "selected"
 
 
 def get_review_group_specs() -> tuple[tuple[str, str], ...]:
@@ -98,9 +101,9 @@ def get_review_group_specs() -> tuple[tuple[str, str], ...]:
         群組鍵與顯示標籤的對應清單
     """
     return (
-        ("enabled", "已啟用項目"),
+        ("selected", "已選取項目"),
         ("advisory", "建議確認項目"),
-        ("disabled", "已停用項目"),
+        ("unselected", "未選取項目"),
         ("retryable", "可重試項目"),
         ("unknown", "待識別項目"),
         ("blocked", "需先處理項目"),
@@ -140,7 +143,7 @@ def count_local_update_review_groups(entries: list[LocalUpdateReviewEntry]) -> d
     """
     return count_review_groups(
         entries,
-        supported_group_keys=("enabled", "advisory", "disabled", "retryable", "unknown", "blocked"),
+        supported_group_keys=("selected", "advisory", "unselected", "retryable", "unknown", "blocked"),
         group_key_getter=get_local_update_review_group_key,
     )
 
@@ -157,7 +160,7 @@ def count_online_install_review_groups(entries: list[PendingInstallReviewEntry])
     """
     return count_review_groups(
         entries,
-        supported_group_keys=("enabled", "advisory", "disabled", "blocked"),
+        supported_group_keys=("selected", "advisory", "unselected", "blocked"),
         group_key_getter=get_online_install_review_group_key,
     )
 
@@ -190,9 +193,9 @@ def get_local_update_group_status_label(group_key: str) -> str:
     return get_review_group_label(
         group_key,
         {
-            "enabled": "可更新",
+            "selected": "可更新",
             "advisory": "建議確認",
-            "disabled": "已停用",
+            "unselected": "未選取",
             "retryable": "可重試",
             "unknown": "需先識別",
             "blocked": "需先處理",
@@ -211,7 +214,8 @@ def get_online_install_group_status_label(group_key: str) -> str:
         對應的顯示標籤
     """
     return get_review_group_label(
-        group_key, {"enabled": "可安裝", "advisory": "建議確認", "disabled": "已停用", "blocked": "需先處理"}
+        group_key,
+        {"selected": "可安裝", "advisory": "建議確認", "unselected": "未選取", "blocked": "需先處理"},
     )
 
 
@@ -321,6 +325,7 @@ class ReviewGroupingMixin:
         optional_group_values: tuple[str, ...],
         parent_name: str,
         dependency_plan: Any,
+        selected_dependency_keys: set[tuple[str, str]],
         required_by_map: dict[tuple[str, str], list[str]],
         node_builder: Callable[[int, Any, str, bool, bool, str], ReviewTaskNode],
     ) -> list[ReviewTaskNode]:
@@ -341,18 +346,18 @@ class ReviewGroupingMixin:
             bool(getattr(item, "is_optional", is_advisory)) for item, is_advisory in dependency_entries
         )
         for index, (dependency_item, is_advisory) in enumerate(dependency_entries):
-            dependency_key = build_dependency_key(dependency_item)
+            dependency_key = build_dependency_review_key(dependency_item)
             required_by_text = format_required_by_list(required_by_map.get(dependency_key, [parent_name]))
             is_optional = bool(getattr(dependency_item, "is_optional", is_advisory))
-            is_enabled = bool(getattr(dependency_item, "enabled", not is_optional))
+            is_selected = dependency_key in selected_dependency_keys
             dependency_status = build_dependency_status_text(
-                dependency_item, parent_name, required_by_text, is_optional, is_enabled
+                dependency_item, parent_name, required_by_text, is_optional, is_selected
             )
             parent_id = root_key
             if is_optional:
                 if not optional_group_added:
                     optional_group_added = True
-                    group_status = f"共 {optional_count} 項，可啟用後一同安裝"
+                    group_status = f"共 {optional_count} 項，可選取後一同安裝"
                     nodes.append(
                         ReviewTaskNode(
                             node_id=optional_group_id,
@@ -366,7 +371,7 @@ class ReviewGroupingMixin:
                         )
                     )
                 parent_id = optional_group_id
-            nodes.append(node_builder(index, dependency_item, dependency_status, is_optional, is_enabled, parent_id))
+            nodes.append(node_builder(index, dependency_item, dependency_status, is_optional, is_selected, parent_id))
         return nodes
 
     def _build_online_dependency_task_node(
@@ -379,11 +384,11 @@ class ReviewGroupingMixin:
         dependency_item: Any,
         dependency_status: str,
         is_advisory: bool,
-        is_enabled: bool,
+        is_selected: bool,
         parent_id: str,
     ) -> ReviewTaskNode:
         child_values = (
-            "自動" if is_enabled else "略過" if is_advisory else "自動",
+            "自動" if is_selected else "略過" if is_advisory else "自動",
             "Modrinth",
             dependency_item.project_name,
             dependency_item.version_name,
@@ -436,7 +441,7 @@ class ReviewGroupingMixin:
             pending = getattr(entry, "pending", None)
             version = getattr(pending, "version", None)
             return (
-                {"blocked": 0, "advisory": 1, "disabled": 2, "enabled": 3}.get(
+                {"blocked": 0, "advisory": 1, "unselected": 2, "selected": 3}.get(
                     get_online_install_review_group_key(entry), 99
                 ),
                 str(getattr(pending, "project_name", "") or "").casefold(),
@@ -458,7 +463,7 @@ class ReviewGroupingMixin:
             lambda entry: str(getattr(getattr(entry, "pending", None), "project_name", "") or "模組"),
             build_online_review_root_status_text,
             lambda entry, status: (
-                "是" if entry.enabled else "否",
+                "是" if entry.selected else "否",
                 format_provider_label(entry.provider),
                 str(getattr(getattr(entry, "pending", None), "project_name", "") or "未知模組"),
                 str(
@@ -488,7 +493,7 @@ class ReviewGroupingMixin:
                 item: Any,
                 status: str,
                 optional: bool,
-                enabled: bool,
+                selected: bool,
                 parent_id: str,
                 bound_root: ReviewTaskNode = root,
             ) -> ReviewTaskNode:
@@ -500,7 +505,7 @@ class ReviewGroupingMixin:
                     dependency_item=item,
                     dependency_status=status,
                     is_advisory=optional,
-                    is_enabled=enabled,
+                    is_selected=selected,
                     parent_id=parent_id,
                 )
 
@@ -511,6 +516,7 @@ class ReviewGroupingMixin:
                     optional_group_values=root.values,
                     parent_name=str(getattr(pending, "project_name", "") or "模組"),
                     dependency_plan=getattr(entry, "dependency_plan", None),
+                    selected_dependency_keys=entry.selected_dependency_keys,
                     required_by_map=required_by,
                     node_builder=build_node,
                 )
@@ -521,7 +527,7 @@ class ReviewGroupingMixin:
         return self._build_flat_review_task_nodes(
             review_entries,
             lambda entry: (
-                {"blocked": 0, "advisory": 1, "retryable": 2, "unknown": 3, "disabled": 4, "enabled": 5}.get(
+                {"blocked": 0, "advisory": 1, "retryable": 2, "unknown": 3, "unselected": 4, "selected": 5}.get(
                     get_local_update_review_group_key(entry), 99
                 ),
                 str(getattr(getattr(entry, "candidate", None), "project_name", "") or "").casefold(),
@@ -535,7 +541,7 @@ class ReviewGroupingMixin:
                 group_status_getter=get_local_update_group_status_label,
             ),
             lambda entry, status: (
-                "是" if entry.enabled else "否",
+                "是" if entry.selected else "否",
                 str(getattr(getattr(entry, "candidate", None), "current_version", "") or "未知"),
                 str(getattr(getattr(entry, "candidate", None), "target_version_name", "") or "-"),
                 format_local_update_source_text(entry),

@@ -21,9 +21,9 @@ def test_run_checked_resolves_path_entry_and_forces_shell_false(monkeypatch, tmp
         return SimpleNamespace(returncode=0, args=cmd)
 
     monkeypatch.setattr(
-        subprocess_utils_module.PathUtils,
-        "find_executable",
-        staticmethod(lambda name: str(resolved_executable) if name == "java" else None),
+        subprocess_utils_module.shutil,
+        "which",
+        lambda name: str(resolved_executable) if name == "java" else None,
     )
     monkeypatch.setattr(subprocess_utils_module.subprocess, "run", fake_run)
 
@@ -89,9 +89,9 @@ def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_
     resolved_executable.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(
-        subprocess_utils_module.PathUtils,
-        "find_executable",
-        staticmethod(lambda name: str(resolved_executable) if name == "java" else None),
+        subprocess_utils_module.shutil,
+        "which",
+        lambda name: str(resolved_executable) if name == "java" else None,
     )
 
     method = getattr(SubprocessUtils, method_name)

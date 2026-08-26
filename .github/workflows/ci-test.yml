@@ -73,22 +73,11 @@ jobs:
           uv-groups: '--group security'
 
       - name: Run detect-secrets privacy scan
-        run: |
-          EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.mypy_cache|\.ruff_cache|\.import_linter_cache|build|dist|\.tox)'
-          if [ -f .secrets.baseline ]; then
-            uv run detect-secrets scan --baseline .secrets.baseline --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
-          else
-            uv run detect-secrets scan --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
-          fi
-          uv run python -c "import json,sys; data=json.load(open('detect-secrets-results.json', encoding='utf-8')); sys.exit(1 if data.get('results') else 0)"
-
-      - name: Upload detect-secrets report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: detect_secrets_report
-          path: detect-secrets-results.json
-          retention-days: 2
+        run: >-
+          git ls-files -z
+          | xargs -0 uv run detect-secrets-hook
+          --baseline scripts/.secrets.baseline
+          --exclude-files 'scripts[\\/]\.secrets\.baseline'
 
   lint:
     name: CI-Tests / lint

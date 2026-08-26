@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from src.utils import (
-    apply_loader_specific_dependency_override,
     clean_api_identifier,
     get_modrinth_loader_filters,
     is_supported_modrinth_update_loader,
@@ -27,8 +26,3 @@ def test_get_modrinth_loader_filters() -> None:
     assert get_modrinth_loader_filters("neoforge") == ["neoforge"]
     assert get_modrinth_loader_filters("fabric") == ["fabric"]
     assert get_modrinth_loader_filters("forge") == ["forge"]
-
-
-def test_loader_specific_dependency_override_no_longer_applied() -> None:
-    assert apply_loader_specific_dependency_override("qvIfYCYJ") == "qvIfYCYJ"
-    assert apply_loader_specific_dependency_override("other") == "other"

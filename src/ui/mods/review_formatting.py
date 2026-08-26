@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from typing import Any
 
-from src.models import LocalModUpdatePlan, LocalUpdateReviewEntry, PendingInstallReviewEntry
-from src.ui import (
-    count_enabled_runnable_entries,
-    count_review_nodes,
-    format_provider_label,
-    resolve_project_page_url,
-)
+from src.models import LocalModUpdatePlan
 from src.utils import (
     LOCAL_UPDATE_REVIEW_PRECHECK_NOTE,
     METADATA_SOURCE_LABELS,
@@ -22,6 +15,11 @@ from src.utils import (
     RECOMMENDATION_SOURCE_LABELS,
     RECOMMENDATION_SOURCE_SHORT_LABELS,
 )
+
+from .mod_presentation import format_provider_label, resolve_project_page_url, summarize_text
+from .review_dependency import count_review_nodes
+from .review_selection import count_selected_runnable_entries
+from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
 
 
 def mask_redundant_review_values(parent_values: tuple[str, ...], child_values: tuple[str, ...]) -> tuple[str, ...]:
@@ -85,17 +83,17 @@ def format_review_overview_text(
         deduped_dependency_count: 已合併的重複依賴數量
 
     Returns:
-        顯示根任務、依賴、問題、提醒與停用項目的摘要文字
+        顯示根任務、依賴、問題、提醒與未選取項目的摘要文字
     """
     root_count = len(entries)
     dependency_count = count_review_nodes(nodes, "dependency")
     issue_count = count_review_nodes(nodes, "issue")
     warning_count = count_review_nodes(nodes, "warning")
-    enabled_count = count_enabled_runnable_entries(entries)
-    disabled_count = sum(
-        1 for entry in entries if getattr(entry, "runnable", False) and not getattr(entry, "enabled", False)
+    selected_count = count_selected_runnable_entries(entries)
+    unselected_count = sum(
+        1 for entry in entries if getattr(entry, "runnable", False) and not getattr(entry, "selected", False)
     )
-    segments = [f"Task graph：{root_count} 個根任務", f"目前將{action_label} {enabled_count} 個根項目"]
+    segments = [f"Task graph：{root_count} 個根任務", f"目前將{action_label} {selected_count} 個根項目"]
     if dependency_count:
         segments.append(f"{dependency_count} 個依賴")
     if issue_count:
@@ -104,11 +102,11 @@ def format_review_overview_text(
         segments.append(f"{warning_count} 個提醒")
     if deduped_dependency_count:
         segments.append(f"已合併 {deduped_dependency_count} 個重複依賴")
-    if disabled_count:
-        segments.append(f"另有 {disabled_count} 個已停用項目")
+    if unselected_count:
+        segments.append(f"另有 {unselected_count} 個未選取項目")
     notes = dedupe_review_messages(list(global_notes or []))
     if notes:
-        segments.append("預檢：" + summarize_review_note(notes[0], max_length=40))
+        segments.append("預檢：" + summarize_text(notes[0], 40))
     return "｜".join(segments)
 
 
@@ -223,23 +221,6 @@ def format_recommendation_confidence_label(confidence: str | None) -> str:
     return RECOMMENDATION_CONFIDENCE_LABELS.get(str(confidence or "").strip().lower(), "未知")
 
 
-def summarize_review_note(value: str | None, max_length: int = 140) -> str:
-    """
-    清理並限制 Review 提示文字長度
-
-    Args:
-        value: 原始提示文字，可為 None
-        max_length: 提示允許的最大字元數
-
-    Returns:
-        壓縮空白後的提示文字，超過長度時以省略號結尾
-    """
-    normalized = re.sub(r"\s+", " ", str(value or "").strip())
-    if len(normalized) <= max_length:
-        return normalized
-    return normalized[: max(0, max_length - 3)].rstrip() + "..."
-
-
 def dedupe_review_messages(messages: list[str] | tuple[str, ...]) -> list[str]:
     """
     移除空白與重複的 Review 訊息並保留原順序
@@ -348,65 +329,6 @@ def build_review_subtitle(
     return "｜".join(segments)
 
 
-def build_online_install_review_subtitle(
-    actionable_count: int, blocked_count: int, *, advisory_count: int = 0, migrated_snapshot_count: int = 0
-) -> str:
-    """
-    建立線上安裝 Review 子標題
-
-    Args:
-        actionable_count: 可安裝項目數量
-        blocked_count: 待處理項目數量
-        advisory_count: 建議確認項目數量
-        migrated_snapshot_count: 自快照遷移的項目數量
-
-    Returns:
-        線上安裝流程的摘要子標題
-    """
-    return build_review_subtitle(
-        prefix_segments=["已重驗證可安裝性與必要依賴", f"可安裝 {actionable_count} 項"],
-        count_segments=((advisory_count, "建議確認"),),
-        blocked_count=blocked_count,
-        blocked_label="待處理",
-        migrated_snapshot_count=migrated_snapshot_count,
-        migrated_snapshot_label="快照自動遷移",
-    )
-
-
-def build_local_update_review_subtitle(
-    scope_text: str,
-    enabled_count: int,
-    blocked_count: int,
-    *,
-    advisory_count: int = 0,
-    retryable_count: int = 0,
-    unknown_count: int = 0,
-    migrated_snapshot_count: int = 0,
-) -> str:
-    """
-    建立本機更新 Review 子標題
-
-    Args:
-        scope_text: 更新範圍的顯示文字
-        enabled_count: 可執行更新項目數量
-        blocked_count: 阻擋項目數量
-        advisory_count: 建議確認項目數量
-        retryable_count: 可重試項目數量
-        unknown_count: 待識別項目數量
-        migrated_snapshot_count: 自快照遷移的項目數量
-
-    Returns:
-        本機更新流程的摘要子標題
-    """
-    return build_review_subtitle(
-        prefix_segments=[f"範圍：{scope_text}", f"可執行更新 {enabled_count} 項"],
-        count_segments=((advisory_count, "建議確認"), (retryable_count, "可重試"), (unknown_count, "待識別")),
-        blocked_count=blocked_count,
-        blocked_label="阻擋",
-        migrated_snapshot_count=migrated_snapshot_count,
-    )
-
-
 def append_review_section(lines: list[str], title: str, messages: list[str], *, max_items: int) -> None:
     """
     將整理後的 Review 訊息區段追加到文字清單
@@ -494,8 +416,6 @@ __all__ = [
     "ReviewFormattingMixin",
     "append_plan_note_section",
     "append_review_section",
-    "build_local_update_review_subtitle",
-    "build_online_install_review_subtitle",
     "dedupe_review_messages",
     "format_completion_notes",
     "format_local_update_source_text",

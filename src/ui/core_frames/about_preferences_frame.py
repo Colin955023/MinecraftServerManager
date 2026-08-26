@@ -167,7 +167,7 @@ class AboutPreferencesFrame(QWidget):
 
         def _do_check():
             if hasattr(self.window(), "task_coordinator"):
-                cast(Any, self.window()).task_coordinator.manual_check_updates()
+                cast(Any, self.window()).task_coordinator.check_for_updates(show_msg=True)
             else:
                 logger.warning("找不到 task_coordinator，無法手動檢查更新")
 

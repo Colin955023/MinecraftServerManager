@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, cast
 
 from src.utils import (
     MODRINTH_PREFERRED_HASH_ALGORITHM,
@@ -33,19 +32,6 @@ class HTTPJSONResponse:
     status_code: int | None
     payload: JSONValue | None = None
     error_kind: str = ""
-
-
-@dataclass(slots=True)
-class DependencyPlanHooks:
-    """必要依賴安裝計畫展開所需的 callback 集合"""
-
-    resolve_project_names: Callable[[set[str]], dict[str, str]]
-    resolve_dependency_entry: Callable[[dict[str, Any], dict[str, str]], ResolvedDependencyReference]
-    select_dependency_best_version: Callable[[ResolvedDependencyReference, bool], OnlineModVersion | None]
-    analyze_dependency_best_version: Callable[[OnlineModVersion, ResolvedDependencyReference, str, dict[str, str]], Any]
-    extract_dependency_download_target: Callable[[OnlineModVersion], tuple[str, str] | None]
-    make_dependency_install_item: Callable[..., Any]
-    maybe_installed_checker: Callable[[ResolvedDependencyReference, list[Any] | None], bool]
 
 
 class ModStatus(Enum):
@@ -162,8 +148,6 @@ class ServerConfig:
     memory_max_mb: int
     memory_min_mb: int | None = None
     path: str = ""
-    eula_accepted: bool = False
-    properties: dict[str, str] | None = None
     jvm_args: list[str] = field(default_factory=list)
 
     @property
@@ -262,68 +246,6 @@ class PendingOnlineInstall:
     client_side: str = ""
 
 
-@dataclass(slots=True, kw_only=True)
-class AbstractReviewEntry:
-    """Review 項目共用屬性與狀態判斷"""
-
-    blocking_reasons: list[str] = field(default_factory=list)
-    warning_messages: list[str] = field(default_factory=list)
-    enabled: bool = True
-    provider: str = "modrinth"
-    version_type: str = ""
-    date_published: str = ""
-    changelog: str = ""
-
-    @property
-    def actionable(self) -> bool:
-        return self.enabled and (not self.blocking_reasons)
-
-    @property
-    def runnable(self) -> bool:
-        return not self.blocking_reasons
-
-
-@dataclass(slots=True, kw_only=True)
-class PendingInstallReviewEntry(AbstractReviewEntry):
-    """待安裝項目的最終驗證結果"""
-
-    pending: PendingOnlineInstall
-    report: Any | None
-    dependency_plan: Any
-
-
-@dataclass(slots=True, kw_only=True)
-class LocalUpdateReviewEntry(AbstractReviewEntry):
-    """本地模組更新 review 項目"""
-
-    candidate: Any
-    dependency_plan: Any
-
-
-@dataclass(slots=True)
-class ReviewTaskNode:
-    """Review 對話框中的共用 task 節點"""
-
-    node_id: str
-    root_key: str
-    group_key: str
-    title: str
-    values: tuple[str, ...]
-    node_kind: str
-    parent_id: str | None = None
-    detail: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class OnlineBrowseRequest:
-    """線上模組瀏覽/搜尋請求"""
-
-    query: str
-    minecraft_version: str | None
-    loader_type: str
-    sort_by: str
-
-
 @dataclass(slots=True)
 class OnlineModInfo:
     """線上模組資訊"""
@@ -358,10 +280,6 @@ class OnlineModCompatibilityReport:
     installed_version_mismatches: list[str] = field(default_factory=list)
     embedded_dependencies: list[str] = field(default_factory=list)
     already_installed: list[str] = field(default_factory=list)
-
-    @property
-    def compatible(self) -> bool:
-        return not self.hard_errors
 
 
 @dataclass(slots=True)
@@ -456,7 +374,76 @@ class ServerOperationResult:
         return not self.success
 
 
-@dataclass
+ServerRuntimeState = Literal["starting", "running", "ready", "stopping", "stopped", "failed"]
+ServerRuntimeEventKind = Literal["started", "output", "ready", "stopping", "stopped", "failed"]
+
+
+@dataclass(frozen=True, slots=True)
+class ServerRuntimeEvent:
+    """伺服器 runtime 對外發布的不可變事件"""
+
+    sequence: int
+    kind: ServerRuntimeEventKind
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ServerRuntimeSnapshot:
+    """單一伺服器在查詢時刻的不可變 runtime 快照"""
+
+    server_name: str
+    state: ServerRuntimeState = "stopped"
+    pid: int | None = None
+    memory_mb: float = 0.0
+    uptime: str = "00:00:00"
+    sequence: int = 0
+    events: tuple[ServerRuntimeEvent, ...] = ()
+
+    @property
+    def is_running(self) -> bool:
+        return self.state in {"starting", "running", "ready", "stopping"}
+
+    @property
+    def output_lines(self) -> tuple[str, ...]:
+        return tuple(event.message for event in self.events if event.kind == "output")
+
+
+ServerPropertiesReadStatus = Literal["ok", "missing", "empty", "invalid", "unreadable"]
+ServerPropertiesUpdateError = Literal[
+    "", "missing_server", "unsafe_path", "read_failed", "conflict", "invalid", "write_failed"
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ServerPropertiesSnapshot:
+    """server.properties 的不可變內容與內容 revision"""
+
+    server_name: str
+    status: ServerPropertiesReadStatus
+    revision: str
+    entries: tuple[tuple[str, str], ...] = ()
+    message: str = ""
+
+    @property
+    def properties(self) -> dict[str, str]:
+        return dict(self.entries)
+
+    @property
+    def readable(self) -> bool:
+        return self.status in {"ok", "empty", "missing"}
+
+
+@dataclass(frozen=True, slots=True)
+class ServerPropertiesUpdateResult:
+    """屬性 patch 提交結果；衝突與驗證失敗不改變原檔"""
+
+    success: bool
+    snapshot: ServerPropertiesSnapshot
+    error_kind: ServerPropertiesUpdateError = ""
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class OperationResult:
     """通用操作結果類別，用於統一表示方法執行的成功與失敗狀態，以及相關訊息和錯誤資訊"""
 
@@ -704,8 +691,6 @@ class ServerCreationPlan:
             memory_max_mb=self.memory_max_mb,
             memory_min_mb=self.memory_min_mb,
             path=str(path),
-            eula_accepted=True,
-            properties=dict(self.properties),
             jvm_args=list(self.jvm_args),
         )
 
@@ -729,19 +714,57 @@ class ServerCreationResult:
 # 伺服器匯入與檢測相關模型 (Server Import & Detection Models)
 # ----------------------------------------------------------------------
 
-ImportMode = Literal["direct_folder", "zip_archive", "in_place_recheck"]
+ImportMode = Literal["import", "redetect"]
 ImportSourceKind = Literal["archive", "directory", "in_place"]
 ImportStatus = Literal["completed", "skipped", "cancelled", "failed"]
 ConflictType = Literal["none", "disk", "config", "both"]
+InspectionPurpose = Literal["import", "redetect", "status", "launch"]
+EulaState = Literal["missing", "accepted", "rejected", "unreadable"]
+LaunchTargetKind = Literal["script", "jar", "args", "none"]
 
 
-@dataclass(slots=True)
-class ServerDetectionScratch:
-    """伺服器版本與載入器偵測過程的暫存結構"""
+@dataclass(frozen=True, slots=True)
+class ServerInspectionIntent:
+    """完整檢查的用途與既有身分期待值"""
 
+    purpose: InspectionPurpose
+    expected_loader_type: str = ""
+    expected_minecraft_version: str = ""
+    expected_loader_version: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ServerLaunchTarget:
+    """由完整檢查選出的唯一啟動目標"""
+
+    kind: LaunchTargetKind
+    value: str = ""
+    command: str = ""
+    candidates: tuple[str, ...] = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ServerInspection:
+    """單次磁碟 revision 的不可變伺服器內容快照"""
+
+    path: Path
+    revision: str
+    is_candidate: bool
+    error: str
     loader_type: str = "unknown"
     minecraft_version: str = "unknown"
     loader_version: str = "unknown"
+    evidence: tuple[tuple[str, str], ...] = ()
+    conflicts: tuple[str, ...] = ()
+    launch_target: ServerLaunchTarget = field(default_factory=lambda: ServerLaunchTarget("none"))
+    memory_max_mb: int = 2048
+    memory_min_mb: int | None = None
+    eula_state: EulaState = "missing"
+    missing_files: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    status_ready: bool = False
+    launchable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -754,16 +777,7 @@ class ServerImportInspection:
     source_path: Path
     name: str
     final_path: Path
-    loader_type: str
-    minecraft_version: str
-    loader_version: str
-    memory_max_mb: int
-    memory_min_mb: int | None
-    eula_accepted: bool
-    main_jar: str
-    startup_scripts: tuple[str, ...]
-    startup_command: str
-    evidence: tuple[tuple[str, str], ...]
+    server: ServerInspection
     warnings: tuple[str, ...]
     committable: bool
     conflict_type: ConflictType = "none"
@@ -774,7 +788,7 @@ class ServerImportInspection:
 
         Args:
             path: 設定應指向的受管實例路徑
-            previous: 重新偵測時要保留屬性與 JVM 參數的舊設定
+            previous: 重新偵測時要保留 JVM 參數的舊設定
 
         Returns:
             僅供交易提交使用的新 ServerConfig
@@ -782,13 +796,11 @@ class ServerImportInspection:
         return ServerConfig(
             name=self.name,
             path=str(path),
-            minecraft_version=self.minecraft_version,
-            loader_type=self.loader_type,
-            loader_version=self.loader_version,
-            memory_max_mb=self.memory_max_mb,
-            memory_min_mb=self.memory_min_mb,
-            eula_accepted=self.eula_accepted,
-            properties=dict(previous.properties) if previous and previous.properties else None,
+            minecraft_version=self.server.minecraft_version,
+            loader_type=self.server.loader_type,
+            loader_version=self.server.loader_version,
+            memory_max_mb=self.server.memory_max_mb,
+            memory_min_mb=self.server.memory_min_mb,
             jvm_args=list(previous.jvm_args) if previous else [],
         )
 
@@ -850,7 +862,7 @@ class OnlineDependencyInstallItem:
     status_note: str = ""
     resolution_source: str = "project_id"
     resolution_confidence: str = "direct"
-    enabled: bool = True
+    included_by_default: bool = True
     is_optional: bool = False
     provider: str = "modrinth"
     expected_hash: str = ""
@@ -863,13 +875,13 @@ class OnlineDependencyInstallItem:
     @classmethod
     def from_dict(cls, payload: Any) -> OnlineDependencyInstallItem | None:
         """
-        從字典還原線上依賴安裝項目。
+        從字典還原線上依賴安裝項目
 
         Args:
-            payload: 待解析的字典資料。
+            payload: 待解析的字典資料
 
         Returns:
-            解析成功時回傳安裝項目；資料格式不符時回傳 None。
+            解析成功時回傳安裝項目；資料格式不符時回傳 None
         """
         if not isinstance(payload, dict):
             return None
@@ -903,7 +915,7 @@ class OnlineDependencyInstallItem:
             status_note=_get_str("status_note"),
             resolution_source=_get_str("resolution_source", "project_id"),
             resolution_confidence=_get_str("resolution_confidence", "direct"),
-            enabled=bool(payload.get("enabled", True)),
+            included_by_default=bool(payload.get("included_by_default", True)),
             is_optional=bool(payload.get("is_optional", False)),
             provider=_get_str("provider", "modrinth") or "modrinth",
             expected_hash=_get_str("expected_hash"),
@@ -928,337 +940,3 @@ class OnlineDependencyInstallPlan:
     def auto_install_count(self) -> int:
         """取得可自動安裝的項目數量"""
         return len(self.items)
-
-
-# ----------------------------------------------------------------------
-# 執行期腳本與命令模型 (Runtime Command Models)
-# ----------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class StartupScriptCommand:
-    """從既有啟動腳本擷取出的 Java 啟動指令"""
-
-    command_line: str = ""
-    memory_max_mb: int | None = None
-    memory_min_mb: int | None = None
-
-    @property
-    def has_java_command(self) -> bool:
-        return bool(self.command_line)
-
-
-# ----------------------------------------------------------------------
-# UI / 狀態 / 工作排程模型 (UI, State & Work Scope Models)
-# ----------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class SearchFilter:
-    """搜尋元件共用的文字篩選器"""
-
-    case_sensitive: bool = False
-    normalize_whitespace: bool = True
-    require_all_terms: bool = True
-
-    def normalize(self, value: Any) -> str:
-        """
-        正規化搜尋文字。
-
-        Args:
-            value: 待正規化的任意值。
-
-        Returns:
-            套用空白與大小寫規則後的搜尋文字。
-        """
-        text = str(value or "").strip()
-        if self.normalize_whitespace:
-            text = re.sub(r"\s+", " ", text)
-        return text if self.case_sensitive else text.lower()
-
-    def matches(self, candidate: Any, query: Any) -> bool:
-        """
-        判斷候選文字是否符合查詢字串
-
-        Args:
-            candidate: 被比對的候選值；可為字串、序列或 dict
-            query: 使用者輸入的查詢值
-
-        Returns:
-            候選值符合查詢時回傳 True
-        """
-        normalized_query = self.normalize(query)
-        if not normalized_query:
-            return True
-        candidate_text = " ".join(self.normalize(value) for value in self._candidate_values(candidate))
-        if not candidate_text:
-            return False
-        if not self.require_all_terms:
-            return normalized_query in candidate_text
-        return all(term in candidate_text for term in normalized_query.split())
-
-    def _candidate_values(self, candidate: Any) -> list[Any]:
-        if isinstance(candidate, Mapping):
-            return list(candidate.values())
-        if isinstance(candidate, (list, tuple, set, frozenset)):
-            return list(candidate)
-        return [candidate]
-
-
-class WorkStatus(Enum):
-    """工作狀態枚舉"""
-
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-@dataclass(frozen=True)
-class WorkOutcome:
-    """工作結果封裝"""
-
-    status: WorkStatus
-    value: Any = None
-    error: BaseException | None = None
-
-    @staticmethod
-    def succeeded(value: Any = None) -> WorkOutcome:
-        """
-        建立成功的工作結果。
-
-        Args:
-            value: 工作完成後要攜帶的結果值。
-
-        Returns:
-            狀態為成功的工作結果。
-        """
-        return WorkOutcome(status=WorkStatus.SUCCEEDED, value=value)
-
-    @staticmethod
-    def failed(error: BaseException) -> WorkOutcome:
-        """
-        建立失敗的工作結果。
-
-        Args:
-            error: 導致工作失敗的例外。
-
-        Returns:
-            狀態為失敗並包含例外的工作結果。
-        """
-        return WorkOutcome(status=WorkStatus.FAILED, error=error)
-
-    @staticmethod
-    def cancelled() -> WorkOutcome:
-        """
-        建立已取消的工作結果。
-
-        Returns:
-            狀態為已取消的工作結果。
-        """
-        return WorkOutcome(status=WorkStatus.CANCELLED)
-
-    @property
-    def is_succeeded(self) -> bool:
-        return self.status == WorkStatus.SUCCEEDED
-
-    @property
-    def is_failed(self) -> bool:
-        return self.status == WorkStatus.FAILED
-
-    @property
-    def is_cancelled(self) -> bool:
-        return self.status == WorkStatus.CANCELLED
-
-
-# ----------------------------------------------------------------------
-# UI / 服務層模型 (UI & Service Models)
-# ----------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ServerRefreshPayload:
-    """背景刷新完成後交給 UI callback 的列表資料載體"""
-
-    signature: tuple[tuple[str, tuple[Any, ...]], ...]
-    server_order: list[str]
-    server_rows: dict[str, tuple[Any, ...]]
-
-
-@dataclass(frozen=True)
-class ServerProjection:
-    """單輪伺服器狀態的不可變投影"""
-
-    generation: int
-    server_order: tuple[str, ...]
-    server_rows: dict[str, tuple[Any, ...]]
-    selected_server: str | None
-
-
-@dataclass(frozen=True)
-class ServerRenderPlan:
-    """render 指令，只有有可觀察差異時才產生"""
-
-    projection: ServerProjection
-    has_changes: bool
-
-
-OperationKind = Literal["local_scan", "online_search", "install", "version_load"]
-
-
-@dataclass(frozen=True, slots=True)
-class ModOperationScope:
-    """將非同步操作綁定到特定工作階段、伺服器與世代"""
-
-    session_id: str
-    server_identity: str
-    kind: OperationKind
-    generation: int
-
-
-@dataclass(frozen=True, slots=True)
-class ModListRow:
-    """工作階段持有的不可變列表列資料"""
-
-    key: str
-    values: tuple[str, ...]
-    data: Any
-
-
-@dataclass(frozen=True, slots=True)
-class ModManagementSnapshot:
-    """供 Presenter 唯讀消費的完整 Mod 管理狀態快照"""
-
-    session_id: str
-    active: bool
-    server: ServerConfig | None
-    server_identity: str
-    local_mods: tuple[Any, ...]
-    online_mods: tuple[Any, ...]
-    local_rows: tuple[ModListRow, ...]
-    online_rows: tuple[ModListRow, ...]
-    pending_online_installs: tuple[PendingOnlineInstall, ...]
-    selected_mod_ids: frozenset[str]
-    status_message: str
-    latest_online_request: OnlineBrowseRequest | None
-
-
-ReviewMode = Literal["online_install", "local_update"]
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewContextStamp:
-    """用於拒絕過期執行的伺服器與本地 Mod revision 快照"""
-
-    server_identity: str
-    minecraft_version: str
-    loader_type: str
-    loader_version: str
-    installed_mod_revision: tuple[tuple[str, str, str, str, int, int], ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewTaskView:
-    """Review 任務樹中單一節點的不可變呈現資料"""
-
-    node_id: str
-    root_key: str
-    group_key: str
-    title: str
-    values: tuple[str, ...]
-    node_kind: str
-    parent_id: str | None
-    detail: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewRootView:
-    """Review root 的摘要與專案頁面資料"""
-
-    root_key: str
-    summary: str
-    project_page_url: str
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewViewSnapshot:
-    """UI 繪製完整 Review 對話框所需的不可變快照"""
-
-    mode: ReviewMode
-    subtitle: str
-    overview: str
-    task_nodes: tuple[ReviewTaskView, ...]
-    roots: tuple[ReviewRootView, ...]
-    group_specs: tuple[tuple[str, str], ...]
-    action_label: str
-    enabled_count: int
-    actionable_count: int
-    blocked_count: int
-
-    def root(self, root_key: str) -> ReviewRootView | None:
-        """
-        依 root key 尋找摘要資料
-
-        Args:
-            root_key: Review root 的穩定識別碼
-
-        Returns:
-            相符的 root；不存在時回傳 None
-        """
-        return next((root for root in self.roots if root.root_key == root_key), None)
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewInstallStep:
-    """Executor 可直接執行的單一下載、安裝或更新步驟"""
-
-    kind: Literal["dependency", "online_root", "local_root"]
-    root_key: str
-    project_name: str
-    version_name: str
-    download_url: str
-    filename: str
-    expected_hash: str
-    provider: str
-    local_file_path: str = ""
-    local_status: str = "enabled"
-
-
-@dataclass(frozen=True, slots=True)
-class ReviewExecutionHandoff:
-    """Review session 驗證後交給 executor 的不可變執行契約"""
-
-    mode: ReviewMode
-    context_stamp: ReviewContextStamp
-    steps: tuple[ReviewInstallStep, ...]
-    root_keys: tuple[str, ...]
-    confirmation_prompt: str
-    source_confirmation_prompt: str
-    skipped_text: str = ""
-    completion_notes: str = ""
-    disabled_count: int = 0
-    dependency_count: int = 0
-    duplicate_dependency_count: int = 0
-
-    @property
-    def root_count(self) -> int:
-        return len(self.root_keys)
-
-
-class MainWindowSettings(TypedDict, total=False):
-    """主視窗位置大小設定 Dictionary 型別"""
-
-    width: int
-    height: int
-    x: int | None
-    y: int | None
-    maximized: bool
-
-
-class WindowPreferences(TypedDict, total=False):
-    """全域視窗偏好設定 Dictionary 型別"""
-
-    remember_size_position: bool
-    auto_center: bool
-    adaptive_sizing: bool
-    theme_mode: str
-    main_window: MainWindowSettings

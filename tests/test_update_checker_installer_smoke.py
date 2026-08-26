@@ -10,7 +10,7 @@ class ImmediateUpdateInteraction:
         self.info_messages: list[tuple[str, str]] = []
         self.error_messages: list[tuple[str, str]] = []
 
-    def run_sync(self, work) -> None:
+    def submit(self, work, **_kwargs) -> None:
         work()
 
     def call_on_ui(self, callback: Any, *args: Any, **kwargs: Any) -> Any:
@@ -44,7 +44,6 @@ def test_check_and_prompt_update_uses_injected_interaction(monkeypatch) -> None:
         staticmethod(lambda *_args, **_kwargs: {"tag_name": "v1.0.0", "name": "v1.0.0", "assets": []}),
     )
 
-    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
     monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
@@ -57,6 +56,7 @@ def test_check_and_prompt_update_uses_injected_interaction(monkeypatch) -> None:
         "repo",
         show_up_to_date_message=True,
         parent=None,
+        work_scope=interaction,
     )
 
     assert interaction.info_messages
@@ -68,7 +68,6 @@ def test_apply_update_returns_false_when_user_cancels(tmp_path, monkeypatch) -> 
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=False)
-    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
     monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)
@@ -90,7 +89,6 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     new_exe_path = tmp_path / "MinecraftServerManager.exe"
     new_exe_path.write_bytes(b"stub")
     interaction = ImmediateUpdateInteraction(ask_result=True)
-    monkeypatch.setattr(update_checker_module, "run_in_background", interaction.run_sync)
     monkeypatch.setattr(update_checker_module, "run_on_ui_thread", interaction.call_on_ui)
     monkeypatch.setattr(update_checker_module.UIUtils, "ask_yes_no_cancel", interaction.ask_yes_no_cancel)
     monkeypatch.setattr(update_checker_module.UIUtils, "show_message", interaction.show_message)

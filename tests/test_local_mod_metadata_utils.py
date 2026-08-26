@@ -7,27 +7,8 @@ from src.core import LocalModScanner
 from src.utils import (
     collect_installed_mod_identifiers,
     collect_installed_mod_versions,
-    dependency_candidate_filenames,
     dependency_maybe_installed_by_filename,
-    normalize_filename_stem,
-    normalize_lax_filename,
 )
-
-
-def test_normalize_filename_helpers_handle_jar_variants() -> None:
-    assert normalize_filename_stem("CoolMod.jar") == "coolmod"
-    assert normalize_filename_stem("CoolMod.jar.disabled") == "coolmod"
-    assert normalize_lax_filename("Cool-Mod 1.2.3.jar", exclude_digits=True) == "cool mod"
-    assert normalize_lax_filename("Cool-Mod 1.2.3.jar") == "cool mod 1 2 3"
-
-
-def test_dependency_candidate_filenames_uses_dependency_file_name_and_primary_file() -> None:
-    dependency = SimpleNamespace(
-        file_name="coolmod.jar",
-        version=SimpleNamespace(primary_file={"filename": "coolmod-1.2.3.jar"}),
-    )
-
-    assert dependency_candidate_filenames(dependency) == ["coolmod.jar", "coolmod-1.2.3.jar"]
 
 
 def test_dependency_maybe_installed_by_filename_matches_normalized_names() -> None:

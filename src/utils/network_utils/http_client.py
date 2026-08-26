@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 import httpx
 import orjson
 
-from src.models import HTTPJSONResponse
+from src.models import HTTPJSONResponse, OperationResult
 from src.utils import (
     APP_NAME,
     APP_VERSION,
@@ -29,8 +29,8 @@ from src.utils import (
     GITHUB_REPO,
     HashUtils,
     NetworkSecurityError,
-    PathUtils,
     ResponseTooLargeError,
+    atomic_replace_file,
     format_bytes,
     get_logger,
 )
@@ -349,27 +349,22 @@ class HTTPClient:
                 temp_path.unlink()
 
     @classmethod
-    def _report_download_failure(
+    def _download_failure(
         cls,
         *,
         url: str,
         local_path: str,
         message: str,
-        failure_message_callback: Callable[[str], None] | None = None,
         exc: Exception | None = None,
         log_message: str | None = None,
-    ) -> None:
-        if failure_message_callback:
-            try:
-                failure_message_callback(message)
-            except Exception:
-                logger.exception("下載失敗訊息 callback 執行失敗")
+    ) -> OperationResult:
         safe_url = cls._safe_url_for_log(url)
         final_log_message = log_message or f"檔案下載失敗 ({safe_url} -> {local_path}): {message}"
         if exc is None:
             logger.error(final_log_message)
         else:
             logger.exception(final_log_message)
+        return OperationResult(False, message, exc)
 
     @staticmethod
     def _resolve_expected_hash_algorithm(expected_hash: str, algorithm: str | None = None) -> str:
@@ -677,42 +672,36 @@ class HTTPClient:
         expected_sha256: str | None = None,
         expected_hash: str | None = None,
         expected_hash_algorithm: str | None = None,
-        failure_message_callback: Callable[[str], None] | None = None,
-    ) -> bool:
+    ) -> OperationResult:
         """
-        下載檔案到指定路徑，支援進度回呼、取消檢查與雜湊驗證
+        下載檔案，並以單一結果物件回傳成功狀態與失敗原因
 
         Args:
-            url: 要下載的檔案 URL
-            local_path: 本地儲存路徑
-            progress_callback: 進度回呼函式
+            url: 下載來源 URL
+            local_path: 下載目的地路徑
+            progress_callback: 下載進度回呼函式，接收已下載位元組數與總位元組數
             timeout: 下載逾時秒數
-            chunk_size: 下載區塊大小
-            cancel_check: 取消檢查函式
-            expected_sha256: 預期的 SHA256 雜湊值
-            expected_hash: 預期的雜湊值
-            expected_hash_algorithm: 預期的雜湊演算法
-            failure_message_callback: 失敗訊息回呼函式
+            chunk_size: 下載分塊大小
+            cancel_check: 取消檢查回呼函式，回傳 True 表示取消下載
+            expected_sha256: 預期的 SHA256 雜湊值（hexadecimal string）
+            expected_hash: 預期的雜湊值（hexadecimal string）
+            expected_hash_algorithm: 預期的雜湊演算法名稱（如 "sha256"、"sha1"）
 
         Returns:
-            下載成功回傳 True，失敗回傳 False
+            下載結果
         """
         if not url or not isinstance(url, str) or not cls._is_valid_url(url):
-            cls._report_download_failure(
+            return cls._download_failure(
                 url=str(url),
                 local_path=str(local_path),
                 message="URL 參數無效或不符合 HTTPS 安全策略",
-                failure_message_callback=failure_message_callback,
             )
-            return False
         if not local_path or not isinstance(local_path, str):
-            cls._report_download_failure(
+            return cls._download_failure(
                 url=url,
                 local_path=str(local_path),
                 message="本地路徑參數無效",
-                failure_message_callback=failure_message_callback,
             )
-            return False
 
         timeout = cls._normalize_positive_int(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
         chunk_size = cls._normalize_positive_int(chunk_size, cls.MIN_CHUNK_SIZE)
@@ -725,13 +714,11 @@ class HTTPClient:
             expected_hash_algorithm,
         )
         if normalized_expected_hash and not resolved_hash_algorithm:
-            cls._report_download_failure(
+            return cls._download_failure(
                 url=url,
                 local_path=local_path,
                 message=f"預期雜湊演算法無效 (len={len(normalized_expected_hash)})",
-                failure_message_callback=failure_message_callback,
             )
-            return False
 
         if (
             normalized_expected_hash
@@ -743,7 +730,7 @@ class HTTPClient:
                 progress_callback=progress_callback,
             )
         ):
-            return True
+            return OperationResult(True)
 
         temp_path_obj: Path | None = None
         try:
@@ -775,28 +762,26 @@ class HTTPClient:
                                 f"磁碟空間不足：目的地 {local_path_obj.parent} 需要至少 {format_bytes(total_size)}，"
                                 f"目前剩餘 {format_bytes(free_space)}"
                             )
-                            cls._report_download_failure(
+                            result = cls._download_failure(
                                 url=url,
                                 local_path=local_path,
                                 message=failure_message,
-                                failure_message_callback=failure_message_callback,
                             )
                             cls._cleanup_temp_file(temp_path_obj)
-                            return False
+                            return result
 
                 downloaded = 0
                 hasher = hashlib.new(resolved_hash_algorithm) if normalized_expected_hash else None
                 with temp_path_obj.open("wb") as file_obj:
                     for chunk in response.iter_bytes(chunk_size=chunk_size):
                         if cancel_check and cancel_check():
-                            cls._report_download_failure(
+                            result = cls._download_failure(
                                 url=url,
                                 local_path=local_path,
                                 message="下載已取消",
-                                failure_message_callback=failure_message_callback,
                             )
                             cls._cleanup_temp_file(temp_path_obj)
-                            return False
+                            return result
                         if not chunk:
                             continue
                         file_obj.write(chunk)
@@ -809,52 +794,48 @@ class HTTPClient:
                 if normalized_expected_hash and hasher is not None:
                     computed = hasher.hexdigest().lower()
                     if not hmac.compare_digest(computed, normalized_expected_hash):
-                        cls._report_download_failure(
+                        result = cls._download_failure(
                             url=url,
                             local_path=local_path,
                             message=f"下載檔案雜湊驗證失敗：預期 {resolved_hash_algorithm.upper()} 不符",
-                            failure_message_callback=failure_message_callback,
                             log_message=(
                                 f"下載檔案的雜湊不符: algorithm={resolved_hash_algorithm} "
                                 f"expected={normalized_expected_hash} computed={computed}"
                             ),
                         )
                         cls._cleanup_temp_file(temp_path_obj)
-                        return False
+                        return result
 
-                temp_path_obj.replace(local_path_obj)
-                PathUtils.best_effort_sync_dir(local_path_obj.parent)
-                return True
+                if not atomic_replace_file(temp_path_obj, local_path_obj):
+                    raise OSError(f"無法原子提交下載檔案: {local_path_obj}")
+                return OperationResult(True)
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 if attempt >= cls.RETRY_TOTAL:
-                    cls._report_download_failure(
+                    result = cls._download_failure(
                         url=url,
                         local_path=local_path,
                         message=cls._describe_request_failure(exc),
-                        failure_message_callback=failure_message_callback,
                         exc=exc,
                     )
                     cls._cleanup_temp_file(temp_path_obj)
-                    return False
+                    return result
                 delay = cls._retry_delay_seconds(None, attempt)
                 time.sleep(delay)
-                continue
             except (httpx.HTTPError, NetworkSecurityError, ResponseTooLargeError, OSError, ValueError) as exc:
-                cls._report_download_failure(
+                result = cls._download_failure(
                     url=url,
                     local_path=local_path,
                     message=cls._describe_request_failure(exc),
-                    failure_message_callback=failure_message_callback,
                     exc=exc,
                 )
                 cls._cleanup_temp_file(temp_path_obj)
-                return False
+                return result
             finally:
                 if response is not None:
                     response.close()
 
         cls._cleanup_temp_file(temp_path_obj)
-        return False
+        return OperationResult(False, "download_incomplete")
 
 
 __all__ = ["HTTPClient"]

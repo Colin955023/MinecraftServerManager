@@ -6,12 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from src.ui import (
-    ReviewExecutionHandoff,
-    ReviewInstallStep,
-    build_review_context_stamp,
-    describe_context_mismatch,
-)
+from src.ui import ModReviewWorkflow, ReviewExecutionHandoff, ReviewInstallStep
 
 
 def _server(**overrides: str) -> SimpleNamespace:
@@ -26,10 +21,15 @@ def _server(**overrides: str) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
-def _handoff() -> ReviewExecutionHandoff:
+def _handoff(context_stamp: Any | None = None) -> ReviewExecutionHandoff:
     return ReviewExecutionHandoff(
         mode="online_install",
-        context_stamp=build_review_context_stamp(_server(), []),
+        context_stamp=context_stamp
+        or ModReviewWorkflow(
+            mod_planning=cast(Any, object()),
+            server=_server(),
+            installed_mods=[],
+        ).context_stamp,
         steps=(
             ReviewInstallStep(
                 kind="online_root",
@@ -47,7 +47,7 @@ def _handoff() -> ReviewExecutionHandoff:
         source_confirmation_prompt="",
         skipped_text="",
         completion_notes="",
-        disabled_count=0,
+        unselected_count=0,
         dependency_count=0,
         duplicate_dependency_count=0,
     )
@@ -63,10 +63,9 @@ def test_execution_handoff_and_steps_are_immutable() -> None:
 
 
 def test_context_stamp_rejects_changed_loader_context() -> None:
-    expected = build_review_context_stamp(_server(), [])
-    actual = build_review_context_stamp(_server(loader_version="0.17.0"), [])
+    mismatch = ModReviewWorkflow.validate_handoff_context(_handoff(), _server(loader_version="0.17.0"), [])
 
-    assert describe_context_mismatch(expected, actual) == "Loader context 已變更"
+    assert mismatch == "Loader context 已變更"
 
 
 def test_context_stamp_rejects_changed_installed_mod_revision(tmp_path) -> None:
@@ -80,8 +79,12 @@ def test_context_stamp_rejects_changed_installed_mod_revision(tmp_path) -> None:
         status="enabled",
         file_size=5,
     )
-    expected = build_review_context_stamp(_server(), [mod])
+    context_stamp = ModReviewWorkflow(
+        mod_planning=cast(Any, object()),
+        server=_server(),
+        installed_mods=[mod],
+    ).context_stamp
     mod.current_hash = "second-hash"
-    actual = build_review_context_stamp(_server(), [mod])
+    mismatch = ModReviewWorkflow.validate_handoff_context(_handoff(context_stamp), _server(), [mod])
 
-    assert describe_context_mismatch(expected, actual) == "本機 Mod 清單已變更"
+    assert mismatch == "本機 Mod 清單已變更"

@@ -9,12 +9,31 @@ import copy
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
-from src.models import MainWindowSettings, WindowPreferences
-from src.utils import ConfigurationError, PathUtils, RuntimePaths, atomic_write_json, get_logger
+from src.utils import ConfigurationError, RuntimePaths, atomic_write_json, get_logger, read_json
 
 logger = get_logger().bind(component="SettingsManager")
+
+
+class MainWindowSettings(TypedDict, total=False):
+    """主視窗位置與大小的持久化 schema"""
+
+    width: int
+    height: int
+    x: int | None
+    y: int | None
+    maximized: bool
+
+
+class WindowPreferences(TypedDict, total=False):
+    """視窗偏好設定的持久化 schema"""
+
+    remember_size_position: bool
+    main_window: MainWindowSettings
+    auto_center: bool
+    adaptive_sizing: bool
+    theme_mode: str
 
 
 DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
@@ -25,11 +44,6 @@ DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
     "theme_mode": "system",
 }
 _BOOL_SETTINGS = {"auto_update_enabled": True, "first_run_completed": False}
-_WINDOW_BOOL_PREFS: dict[str, bool] = {
-    "remember_size_position": True,
-    "auto_center": True,
-    "adaptive_sizing": True,
-}
 _THEME_MODES = {"system", "light", "dark"}
 
 
@@ -354,7 +368,7 @@ class SettingsManager:
                 default_settings = _get_default_settings()
                 self._save_settings(default_settings)
                 return default_settings
-            settings = PathUtils.load_json(self.settings_path)
+            settings = read_json(self.settings_path)
             if not settings or not isinstance(settings, dict):
                 return _get_default_settings()
             return self._normalize_settings(settings)
@@ -364,7 +378,7 @@ class SettingsManager:
             settings_snapshot = cast(dict[str, Any], _clone_settings_payload(settings))
             try:
                 if self.settings_path.exists():
-                    current = PathUtils.load_json(self.settings_path)
+                    current = read_json(self.settings_path)
                     if isinstance(current, dict) and current == settings_snapshot:
                         self._no_change_skip_count += 1
                         now_monotonic = time.monotonic()

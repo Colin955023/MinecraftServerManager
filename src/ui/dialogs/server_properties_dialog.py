@@ -23,14 +23,14 @@ from qfluentwidgets import (
     SubtitleLabel,
 )
 
-from src.core import ServerCRUD
+from src.core import ServerPropertiesStore
 from src.models import ServerConfig
 from src.ui import ModalMSFluentWindow
 from src.utils import (
     Colors,
+    PropertiesDocumentCodec,
+    PropertiesSchema,
     ScrollableComboBox,
-    ServerPropertiesHelper,
-    ServerPropertiesValidator,
     Sizes,
     Spacing,
     TextState,
@@ -80,12 +80,15 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         "text-filtering-version": (0, 1),
     }
 
-    def __init__(self, parent, server_config: ServerConfig, server_crud: ServerCRUD):
+    def __init__(self, parent, server_config: ServerConfig, server_properties: ServerPropertiesStore):
         super().__init__(parent)
         self.server_config = server_config
-        self.server_crud = server_crud
-        self.properties_helper = ServerPropertiesHelper()
+        self.server_properties = server_properties
         self._default_properties: dict[str, str] = self._load_default_properties()
+        self._snapshot = self.server_properties.read(self.server_config.name)
+        current_properties = self._snapshot.properties if self._snapshot.readable else {}
+        self._property_value_cache = {**self._default_properties, **current_properties}
+        self._initial_values = dict(self._property_value_cache)
 
         self.setWindowTitle(f"🛠️ {self.server_config.name} - server.properties")
         self.title_label = SubtitleLabel(f"🛠️ {self.server_config.name} - server.properties", self.widget)
@@ -95,8 +98,6 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         self.cancelButton.hide()
 
         self.property_vars: dict[str, Any] = {}
-        self._property_value_cache: dict[str, str] = {}
-
         self.setup_dialog()
         self.create_widgets()
         self.load_properties()
@@ -138,13 +139,11 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
     def create_property_tabs(self) -> None:
         """根據屬性類別建立對應的分頁，並在每個分頁中生成屬性控制元件"""
-        categories = self.properties_helper.get_property_categories()
+        categories = PropertiesDocumentCodec.get_property_categories()
         categorized_keys: set[str] = set()
         for props in categories.values():
             categorized_keys.update(props)
-        all_properties = dict(self._default_properties)
-        all_properties.update(self.server_config.properties or {})
-        all_keys = set(all_properties.keys())
+        all_keys = set(self._property_value_cache)
 
         for category_name, properties in categories.items():
             visible_properties = [prop for prop in properties if prop in all_keys]
@@ -248,12 +247,6 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
     def load_properties(self) -> None:
         """從伺服器設定檔載入目前的屬性值並同步至 UI 變數"""
-        current_properties = self.server_crud.load_server_properties(self.server_config.name)
-        if not current_properties:
-            current_properties = dict(self.server_config.properties or {})
-        default_properties = self.server_crud.get_default_server_properties()
-        all_properties = {**default_properties, **current_properties}
-        self._property_value_cache = {prop: str(value) for prop, value in all_properties.items()}
         for prop_name, value in self._property_value_cache.items():
             if prop_name in self.property_vars:
                 self.property_vars[prop_name].set(value)
@@ -262,13 +255,18 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         """驗證目前所有屬性值，若通過則儲存至伺服器設定檔"""
         try:
             properties = self._collect_property_values()
-            is_valid, errors = ServerPropertiesValidator.validate_properties(properties)
+            is_valid, errors = PropertiesSchema.validate_properties(properties)
             if not is_valid:
                 error_message = "以下屬性值無效：\n\n" + "\n".join(errors)
                 UIUtils.show_message("驗證失敗", error_message, self, message_level="error")
                 return
-            success = self.server_crud.update_server_properties(self.server_config.name, properties)
-            if success:
+            patch = {key: value for key, value in properties.items() if self._initial_values.get(key) != value}
+            result = self.server_properties.update(
+                self.server_config.name,
+                patch,
+                expected_revision=self._snapshot.revision,
+            )
+            if result.success:
                 UIUtils.show_message(
                     "成功",
                     "伺服器屬性已儲存\n若伺服器正在執行，建議執行指令：/reload 或是重新啟動伺服器",
@@ -277,14 +275,15 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
                 )
                 self.accept()
             else:
-                UIUtils.show_message("錯誤", "儲存伺服器屬性失敗", self, message_level="error")
+                title = "檔案已變更" if result.error_kind == "conflict" else "錯誤"
+                UIUtils.show_message(title, result.message or "儲存伺服器屬性失敗", self, message_level="error")
         except Exception as e:
             UIUtils.show_message("錯誤", f"儲存時發生錯誤: {e}", self, message_level="error")
 
     def reset_properties(self) -> None:
         """將所有屬性值重設為預設值"""
         if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self, show_cancel=False):
-            default_properties = self.server_crud.get_default_server_properties()
+            default_properties = PropertiesSchema.default_values()
             for prop_name, value in default_properties.items():
                 value_str = str(value)
                 self._property_value_cache[prop_name] = value_str
@@ -292,10 +291,8 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
                     self.property_vars[prop_name].set(value_str)
 
     def _load_default_properties(self) -> dict[str, str]:
-        if not hasattr(self.server_crud, "get_default_server_properties"):
-            return {}
         try:
-            defaults = self.server_crud.get_default_server_properties()
+            defaults = PropertiesSchema.default_values()
         except Exception as e:
             logger.exception(f"讀取預設 server.properties 失敗: {e}")
             return {}
@@ -325,7 +322,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         return normalized in {"true", "false"}
 
     def _should_use_checkbox(self, prop_name: str, value: Any) -> bool:
-        if ServerPropertiesValidator.is_boolean_property(prop_name):
+        if PropertiesSchema.is_boolean_property(prop_name):
             return True
         if self._is_boolean_string(value):
             return True
@@ -349,7 +346,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
     def _create_property_control(self, layout: QVBoxLayout, prop_name: str, parent_widget: QWidget) -> None:
         prop_frame = QWidget(parent_widget)
-        description = self.properties_helper.get_property_description(prop_name)
+        description = PropertiesDocumentCodec.get_property_descriptions().get(prop_name, f"未知屬性: {prop_name}")
         prop_frame.setToolTip(description)
         h_layout = QHBoxLayout(prop_frame)
         h_layout.setContentsMargins(0, 0, 0, 0)

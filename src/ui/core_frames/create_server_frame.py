@@ -32,8 +32,8 @@ from qfluentwidgets import (
     qconfig,
 )
 
-from src.core import CreateServerJourney, LoaderManager, ServerCRUD
-from src.models import ServerConfig, WorkOutcome
+from src.core import CreateServerJourney, LoaderManager, ServerCRUD, ServerPropertiesStore
+from src.models import ServerConfig
 from src.ui import JvmArgsDialog, ProgressDialog, ServerCreationConfirmDialog
 from src.utils import (
     Colors,
@@ -48,6 +48,7 @@ from src.utils import (
     UIUtils,
     UIWorkScope,
     ValueState,
+    WorkOutcome,
     get_logger,
     is_qobject_alive,
     resolve_color,
@@ -70,17 +71,16 @@ class CreateServerFrame(QWidget):
         loader_manager: LoaderManager,
         callback: Callable,
         server_crud: ServerCRUD,
+        server_properties: ServerPropertiesStore,
     ):
         super().__init__(parent)
         self.loader_manager = loader_manager
         self.callback = callback
         self.server_crud = server_crud
-        self.server_creation = CreateServerJourney(server_crud, loader_manager)
+        self.server_creation = CreateServerJourney(server_crud, loader_manager, server_properties)
         self.versions: list = []
         self.release_versions: list = []
         self._loading_key: str | None = None
-        self._create_server_success_job = None
-        self._create_server_error_job = None
         self.server_name_var = ValueState("")
         self.scope = UIWorkScope(self)
         self.jvm_args_customized = False
@@ -244,10 +244,11 @@ class CreateServerFrame(QWidget):
         self.eula_frame = eula_frame
         eula_frame.setObjectName("EulaNotice")
         eula_layout = QHBoxLayout(eula_frame)
-        eula_layout.setContentsMargins(6, 5, 6, 5)
+        eula_layout.setContentsMargins(8, 6, 8, 6)
         eula_layout.setSpacing(8)
         eula_icon = BodyLabel("⚠️", eula_frame)
         self.eula_icon = eula_icon
+        eula_icon.setStyleSheet("background: transparent;")
         eula_icon.setFont(_qt_font(FontManager.get_font(size=FontSize.LARGE, weight="bold")))
         eula_layout.addWidget(eula_icon, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         eula_link = HyperlinkLabel(
@@ -258,7 +259,7 @@ class CreateServerFrame(QWidget):
         )
         self.eula_link = eula_link
         self.eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
-        eula_layout.addWidget(eula_link, 1)
+        eula_layout.addWidget(eula_link, 1, QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
         content_layout.addWidget(eula_frame)
 
         self.form_panel = QWidget(self.content_widget)
@@ -282,8 +283,18 @@ class CreateServerFrame(QWidget):
             self.scroll_area.viewport().setStyleSheet(f"background-color: {background};")
         if hasattr(self, "content_widget"):
             self.content_widget.setStyleSheet(f"background-color: {background};")
+        if hasattr(self, "actions_frame"):
+            self.actions_frame.setStyleSheet(f"background-color: {background};")
+        if hasattr(self, "eula_frame"):
+            self.eula_frame.setStyleSheet(
+                "CardWidget#EulaNotice { background-color: transparent; border: 1px solid rgba(128, 128, 128, 0.2); border-radius: 6px; }"
+            )
+        if hasattr(self, "eula_icon"):
+            self.eula_icon.setStyleSheet("background: transparent;")
         if hasattr(self, "memory_warning_label"):
-            self.memory_warning_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_ERROR)};")
+            self.memory_warning_label.setStyleSheet(
+                f"color: {resolve_color(Colors.TEXT_ERROR)}; background: transparent;"
+            )
 
     def create_form(self, parent) -> None:
         """
@@ -606,18 +617,23 @@ class CreateServerFrame(QWidget):
         """
         self.actions_frame = QWidget(self)
         self.actions_frame.setObjectName("CreateServerActions")
+        self.actions_frame.setStyleSheet(
+            f"#CreateServerActions {{ background-color: {resolve_color(Colors.BG_PRIMARY)}; }}"
+        )
         button_layout = QHBoxLayout(self.actions_frame)
         button_layout.setContentsMargins(0, 4, 0, 0)
         button_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         button_layout.addStretch(1)
-        self.reset_button = StatusPushButton("重設表單", self)
+        self.reset_button = StatusPushButton("重設表單", self.actions_frame)
         self.reset_button.clicked.connect(self.reset_form)
         self.reset_button.set_status("danger")
         self.reset_button.setMinimumWidth(Sizes.BUTTON_WIDTH_SECONDARY)
         self.reset_button.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
         button_layout.addWidget(self.reset_button)
         button_layout.addSpacing(8)
-        self.create_button = self._make_button("建立伺服器", self.create_server, kind="primary")
+        self.create_button = self._make_button(
+            "建立伺服器", self.create_server, kind="primary", parent=self.actions_frame
+        )
         self.create_button.setMinimumWidth(Sizes.BUTTON_WIDTH_PRIMARY)
         self.create_button.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
         button_layout.addWidget(self.create_button)
@@ -817,127 +833,137 @@ class CreateServerFrame(QWidget):
 
             run_on_ui_thread(handle_error)
 
-    def validate_form(self) -> bool:
-        """
-        驗證表單
-
-        Returns:
-            若表單內容通過驗證則回傳 True，否則回傳 False
-        """
-        server_name = self.server_name_var.get().strip()
-        if not server_name:
+    def _capture_creation_request(self) -> tuple[ServerConfig, str | None] | None:
+        """一次擷取表單；UI 執行即時完整驗證，不符規範時立即中斷並提示使用者"""
+        name = self.server_name_var.get().strip()
+        if not name:
             UIUtils.show_message("錯誤", "請輸入伺服器名稱", self.window(), message_level="error")
-            return False
-        servers_root = self.server_crud.servers_root
-        if (servers_root / server_name).exists():
+            return None
+        if len(name) > 100:
+            UIUtils.show_message("錯誤", "伺服器名稱過長（上限 100 字元）", self.window(), message_level="error")
+            return None
+
+        if any(c in name for c in '<>:"/\\|?*') or name.endswith((".", " ")):
             UIUtils.show_message(
-                "名稱重複",
-                f"伺服器名稱 '{server_name}' 已存在於伺服器資料夾，請換一個名稱",
-                self.window(),
-                message_level="error",
+                "錯誤", "伺服器名稱包含 Windows 不允許的特殊字元或結尾為空格/點", self.window(), message_level="error"
             )
-            return False
-        if self.server_crud.server_exists(server_name) and (
-            not UIUtils.ask_yes_no_cancel(
-                "名稱衝突",
-                f"伺服器名稱 '{server_name}' 已存在於設定是否覆蓋?",
-                self.window(),
-                show_cancel=False,
+            return None
+        if name in {".", ".."} or Path(name).name != name:
+            UIUtils.show_message("錯誤", "無效的伺服器名稱", self.window(), message_level="error")
+            return None
+
+        minecraft_version = self.mc_version_var.get().strip()
+        invalid_versions = {"載入中...", "載入失敗", "無可用版本", "unknown", "Unknown", ""}
+        if not minecraft_version or minecraft_version in invalid_versions:
+            UIUtils.show_message("錯誤", "請選擇有效的 Minecraft 版本", self.window(), message_level="error")
+            return None
+
+        loader_type = self.loader_type_var.get().strip()
+        if not loader_type:
+            loader_type = "Vanilla"
+
+        if name == "我的伺服器":
+            name = self._compose_server_name(loader_type, minecraft_version)
+            self.server_name_var.set(name)
+
+        if name in self.server_crud.servers or (self.server_crud.servers_root / name).exists():
+            UIUtils.show_message(
+                "錯誤", f"同名伺服器「{name}」已存在，請使用其他名稱", self.window(), message_level="error"
             )
-        ):
-            return False
-        if not self.mc_version_var.get():
-            UIUtils.show_message("錯誤", "請選擇 Minecraft 版本", self.window(), message_level="error")
-            return False
-        max_memory = self.max_memory_var.get().strip()
-        if not max_memory:
-            UIUtils.show_message("錯誤", "請輸入最大記憶體", self.window(), message_level="error")
-            return False
+            return None
+
+        loader_version = (
+            self.loader_version_var.get().strip() if loader_type.lower() != "vanilla" else minecraft_version
+        )
+        invalid_loader_versions = {"載入中...", "載入失敗", "無可用版本", "無", "unknown", "Unknown", ""}
+        if loader_type.lower() != "vanilla" and (not loader_version or loader_version in invalid_loader_versions):
+            UIUtils.show_message(
+                "錯誤", f"請選擇有效的 {loader_type} 模組載入器版本", self.window(), message_level="error"
+            )
+            return None
+
+        max_memory_text = self.max_memory_var.get().strip()
+        min_memory_text = self.min_memory_var.get().strip()
         try:
-            max_mem_int = int(max_memory)
-            if max_mem_int < 1024:
-                UIUtils.show_message("錯誤", "最大記憶體不能少於 1024MB", self.window(), message_level="error")
-                return False
-            system_memory = self.get_system_memory_mb()
-            if max_mem_int >= system_memory:
-                UIUtils.show_message(
-                    "記憶體超出限制",
-                    f"最大記憶體 ({max_mem_int}MB) 不能等於或超過系統記憶體容量 ({system_memory}MB)\n已自動調整為 {system_memory - 1}MB",
-                    self.window(),
-                    message_level="error",
-                )
-                self.max_memory_var.set(str(system_memory - 1))
-                return False
+            memory_max_mb = int(max_memory_text)
         except ValueError:
             UIUtils.show_message("錯誤", "最大記憶體必須是數字", self.window(), message_level="error")
-            return False
-        min_memory = self.min_memory_var.get().strip()
-        if min_memory:
+            return None
+        if memory_max_mb < 1024:
+            UIUtils.show_message("錯誤", "最大記憶體不可低於 1024 MB", self.window(), message_level="error")
+            return None
+
+        total_memory_mb = SystemUtils.get_total_memory_mb()
+        if total_memory_mb > 0 and memory_max_mb > total_memory_mb:
+            memory_max_mb = total_memory_mb
+            self.max_memory_var.set(str(total_memory_mb))
+            UIUtils.show_message(
+                "記憶體調整",
+                f"最大記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。",
+                self.window(),
+                message_level="warning",
+            )
+
+        memory_min_mb: int | None = None
+        if min_memory_text:
             try:
-                min_mem_int = int(min_memory)
-                if min_mem_int >= max_mem_int:
-                    UIUtils.show_message("錯誤", "最小記憶體必須小於最大記憶體", self.window(), message_level="error")
-                    return False
+                memory_min_mb = int(min_memory_text)
             except ValueError:
                 UIUtils.show_message("錯誤", "最小記憶體必須是數字", self.window(), message_level="error")
-                return False
-        return True
+                return None
+            if memory_min_mb <= 0:
+                UIUtils.show_message("錯誤", "最小記憶體必須大於 0", self.window(), message_level="error")
+                return None
+            if total_memory_mb > 0 and memory_min_mb > total_memory_mb:
+                memory_min_mb = total_memory_mb
+                self.min_memory_var.set(str(total_memory_mb))
+                UIUtils.show_message(
+                    "記憶體調整",
+                    f"最小記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。",
+                    self.window(),
+                    message_level="warning",
+                )
+            if memory_min_mb > memory_max_mb:
+                UIUtils.show_message("錯誤", "最小記憶體不可大於最大記憶體", self.window(), message_level="error")
+                return None
 
-    def create_server(self):
-        """建立伺服器"""
-        if not self.validate_form():
-            return
-        min_memory = self.min_memory_var.get().strip()
-        max_memory = self.max_memory_var.get().strip()
-        name = self.server_name_var.get().strip()
-        loader_type = self.loader_type_var.get()
-        mc_version = self.mc_version_var.get()
-        if name in ["", "我的伺服器"]:
-            if loader_type == "Vanilla":
-                name = f"{mc_version}"
-            elif loader_type == "Fabric":
-                name = f"Fabric {mc_version}"
-            elif loader_type == "Forge":
-                name = f"Forge {mc_version}"
-            elif loader_type == "Quilt":
-                name = f"Quilt {mc_version}"
-            elif loader_type == "NeoForge":
-                name = f"NeoForge {mc_version}"
-            self.server_name_var.set(name)
+        user_java_path = self.java_path_var.get().strip() or None
+        if user_java_path:
+            java_file = Path(user_java_path)
+            if not java_file.is_file():
+                UIUtils.show_message(
+                    "錯誤", f"指定的 Java 執行檔不存在：{user_java_path}", self.window(), message_level="error"
+                )
+                return None
 
         if not self.selected_jvm_args and not self.jvm_args_customized:
             self.update_default_jvm_args()
 
-        final_jvm_args = self.selected_jvm_args.copy()
-
-        confirm_dialog = ServerCreationConfirmDialog(
-            server_name=name,
-            mc_version=mc_version,
-            loader_type=loader_type,
-            loader_version=self.loader_version_var.get() if loader_type != "Vanilla" else mc_version,
-            memory_max_mb=int(max_memory),
-            memory_min_mb=int(min_memory) if min_memory else None,
-            jvm_args=final_jvm_args,
-            parent=self.window(),
-        )
-
-        if not confirm_dialog.exec():
-            return
-
         config = ServerConfig(
             name=name,
-            minecraft_version=mc_version,
+            minecraft_version=minecraft_version,
             loader_type=loader_type,
-            loader_version=self.loader_version_var.get() if loader_type != "Vanilla" else mc_version,
-            memory_max_mb=int(max_memory),
-            memory_min_mb=int(min_memory) if min_memory else None,
-            jvm_args=final_jvm_args,
+            loader_version=loader_version,
+            memory_max_mb=memory_max_mb,
+            memory_min_mb=memory_min_mb,
+            jvm_args=self.selected_jvm_args.copy(),
             path="",
-            eula_accepted=True,
         )
-        self.scope.submit(lambda: self.create_server_async(config), key="create_server", critical=True)
+        return config, user_java_path
 
-    def create_server_async(self, config: ServerConfig) -> None:
+    def create_server(self):
+        """建立伺服器"""
+        request = self._capture_creation_request()
+        if request is None:
+            return
+        config, user_java_path = request
+        self.scope.submit(
+            lambda: self.create_server_async(config, user_java_path),
+            key="create_server",
+            critical=True,
+        )
+
+    def create_server_async(self, config: ServerConfig, user_java_path: str | None) -> None:
         """
         非同步建立伺服器
 
@@ -948,41 +974,36 @@ class CreateServerFrame(QWidget):
         progress_dialog = None
         try:
 
-            def _create_dlg():
-                dlg = ProgressDialog(parent_window, "正在建立伺服器")
+            def _create_progress_dialog(title: str):
+                dlg = ProgressDialog(parent_window, title)
                 dlg.show()
                 return dlg
 
-            progress_dialog = run_on_ui_thread(_create_dlg, timeout=10)
+            progress_dialog = run_on_ui_thread(lambda: _create_progress_dialog("正在規劃伺服器"), timeout=10)
             if progress_dialog is None:
                 raise Exception("建立進度對話框失敗")
 
             progress_dialog.update_progress(2, "正在產生並驗證建立計畫...")
             plan = self.server_creation.plan(
                 config,
-                user_java_path=self.java_path_var.get().strip() or None,
+                user_java_path=user_java_path,
             )
-            allow_unverified_installer = False
-            if plan.requires_unverified_installer_confirmation:
-                allow_unverified_installer = (
-                    run_on_ui_thread(
-                        lambda: UIUtils.ask_yes_no_cancel(
-                            "缺少驗證資訊",
-                            f"{config.loader_type} 安裝器目前找不到可用的 SHA-1 / SHA-256 / SHA-512 驗證資訊\n仍要繼續建立伺服器嗎？",
-                            parent=parent_window,
-                            show_cancel=False,
-                        ),
-                        timeout=120,
-                    )
-                    is True
-                )
-                if not allow_unverified_installer:
-                    run_on_ui_thread(progress_dialog.close)
-                    return
+            run_on_ui_thread(progress_dialog.close)
+            progress_dialog = None
+            confirmed = run_on_ui_thread(
+                lambda: ServerCreationConfirmDialog(plan, parent=parent_window).exec(),
+                timeout=300,
+            )
+            if confirmed is not True:
+                return
+
+            progress_dialog = run_on_ui_thread(lambda: _create_progress_dialog("正在建立伺服器"), timeout=10)
+            if progress_dialog is None:
+                raise Exception("建立進度對話框失敗")
 
             result = self.server_creation.execute(
                 plan,
-                allow_unverified_installer=allow_unverified_installer,
+                allow_unverified_installer=plan.requires_unverified_installer_confirmation,
                 progress_callback=lambda percent, message: progress_dialog.update_progress(percent, message),
                 cancel_check=lambda: bool(progress_dialog.cancelled),
             )
@@ -1004,20 +1025,14 @@ class CreateServerFrame(QWidget):
         except Exception as e:
             logger.error(f"建立伺服器時發生錯誤: {e}\n{traceback.format_exc()}")
 
-            error_str = str(e)
-            if "下載" in error_str or "下載失敗" in error_str:
+            def on_error(error=e):
                 if progress_dialog:
-                    run_on_ui_thread(progress_dialog.close)
-            else:
+                    progress_dialog.close()
+                UIUtils.show_message(
+                    "建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window, message_level="error"
+                )
 
-                def on_error(error=e):
-                    if progress_dialog:
-                        run_on_ui_thread(progress_dialog.close)
-                    UIUtils.show_message(
-                        "建立失敗", f"建立伺服器時發生錯誤：\n{error}", parent_window, message_level="error"
-                    )
-
-                self._schedule_ui_job("_create_server_error_job", 0, on_error)
+            self._schedule_ui_job("_create_server_error_job", 0, on_error)
 
     def destroy(self, destroyWindow: bool = True, destroySubWindows: bool = True) -> None:
         """
@@ -1052,9 +1067,10 @@ class CreateServerFrame(QWidget):
             widget.setMinimumWidth(Sizes.INPUT_WIDTH)
 
     def _make_button(
-        self, text: str, command: Callable[[], Any], *, kind: str = "secondary"
+        self, text: str, command: Callable[[], Any], *, kind: str = "secondary", parent: QWidget | None = None
     ) -> PushButton | PrimaryPushButton:
-        button = PrimaryPushButton(text, self) if kind == "primary" else PushButton(text, self)
+        btn_parent = parent or self
+        button = PrimaryPushButton(text, btn_parent) if kind == "primary" else PushButton(text, btn_parent)
         button.setProperty("msm_button_kind", kind)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))

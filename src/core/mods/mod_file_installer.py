@@ -10,7 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from src.models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
-from src.utils import HashUtils, HTTPClient, PathUtils, build_non_official_source_warning
+from src.utils import (
+    HashUtils,
+    HTTPClient,
+    atomic_replace_file_within,
+    build_non_official_source_warning,
+    copy_file,
+    delete_within,
+    is_path_within,
+)
 
 
 class ModFileInstaller:
@@ -143,7 +151,7 @@ class ModFileInstaller:
 
         if original_path is None or backup_path is None or not backup_path.exists():
             return False
-        restored = PathUtils.replace_within(self.server_path, backup_path, original_path)
+        restored = atomic_replace_file_within(self.server_path, backup_path, original_path)
         if not restored:
             self.logger.warning(f"回滾失敗：無法還原備份檔案到 {original_path}")
         return restored
@@ -177,7 +185,7 @@ class ModFileInstaller:
         for candidate_path in (final_path, installed_path):
             if candidate_path is None or not candidate_path.exists():
                 continue
-            if PathUtils.delete_within(self.server_path, candidate_path):
+            if delete_within(self.server_path, candidate_path):
                 rollback_performed = True
         if self.restore_backup_to_path(old_path, backup_path):
             rollback_performed = True
@@ -257,37 +265,30 @@ class ModFileInstaller:
             self.logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}")
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename
-                download_failure_reason = ""
-
-                def _capture_download_failure(message: str) -> None:
-                    nonlocal download_failure_reason
-                    download_failure_reason = message
-
                 download_kwargs: dict[str, Any] = {
                     "progress_callback": progress_callback,
-                    "failure_message_callback": _capture_download_failure,
                 }
                 if normalized_expected_hash:
                     download_kwargs["expected_hash"] = normalized_expected_hash
                 if cancel_check is not None:
                     download_kwargs["cancel_check"] = cancel_check
-                downloaded = HTTPClient.download_file(normalized_url, str(staging_path), **download_kwargs)
-                if not downloaded:
+                download_result = HTTPClient.download_file(normalized_url, str(staging_path), **download_kwargs)
+                if not download_result.success:
                     if self.is_operation_cancelled(cancel_check):
                         self.logger.info(f"遠端模組下載已取消: {safe_filename}")
                         return ModFileOperationResult(status="cancelled", message="cancelled_during_download")
-                    failure_message = download_failure_reason or "download_incomplete"
+                    failure_message = download_result.message or "download_incomplete"
                     self.logger.warning(f"遠端模組下載未完成: {safe_filename} | {failure_message}")
                     return ModFileOperationResult(status="failed", message=failure_message)
                 if self.is_operation_cancelled(cancel_check):
-                    PathUtils.delete_within(self.server_path, staging_path)
+                    delete_within(self.server_path, staging_path)
                     self.logger.info(f"遠端模組安裝在寫入前已取消: {safe_filename}")
                     return ModFileOperationResult(status="cancelled", message="cancelled_before_replace")
-                if not PathUtils.replace_within(self.server_path, staging_path, target_path):
+                if not atomic_replace_file_within(self.server_path, staging_path, target_path):
                     self.logger.warning(f"遠端模組無法原子寫入目標路徑: {safe_filename}")
                     return ModFileOperationResult(status="failed", message="replace_failed")
             if self.is_operation_cancelled(cancel_check):
-                rolled_back = PathUtils.delete_within(self.server_path, target_path)
+                rolled_back = delete_within(self.server_path, target_path)
                 self.logger.info(f"遠端模組安裝在寫入後已取消，已回滾: {safe_filename}")
                 return ModFileOperationResult(
                     status="cancelled",
@@ -307,11 +308,9 @@ class ModFileInstaller:
 
     def replace_local_mod_file(
         self,
-        *,
         local_mod: LocalModInfo,
         download_url: str,
         filename: str,
-        install_remote_mod_file_result: Callable[..., ModFileOperationResult],
         progress_callback: Callable[[int, int], None] | None = None,
         expected_hash: str | None = None,
         provider: str | None = "modrinth",
@@ -324,7 +323,6 @@ class ModFileInstaller:
             local_mod: 既有本地模組資訊
             download_url: 新版本下載網址
             filename: 新版本檔名
-            install_remote_mod_file_result: 實際執行遠端安裝的回呼
             progress_callback: 可選的下載進度回呼
             expected_hash: 預期檔案雜湊，需為 SHA-256 或 SHA-512
             provider: 下載來源 provider 名稱
@@ -340,7 +338,7 @@ class ModFileInstaller:
         old_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
         old_path = Path(old_path_raw).resolve(strict=False) if old_path_raw else None
         old_path_is_internal = bool(
-            old_path and old_path.exists() and PathUtils.is_path_within(self.server_path, old_path, strict=False)
+            old_path and old_path.exists() and is_path_within(self.server_path, old_path, strict=False)
         )
         backup_context: tempfile.TemporaryDirectory[str] | None = None
         backup_path: Path | None = None
@@ -370,11 +368,11 @@ class ModFileInstaller:
                     dir=self.download_staging_root,
                 )
                 backup_path = Path(backup_context.name) / old_path.name
-                if not PathUtils.copy_file(old_path, backup_path):
+                if not copy_file(old_path, backup_path):
                     self.logger.error(f"更新本地模組失敗：無法建立回滾備份 {old_path}")
                     backup_context.cleanup()
                     return None
-            install_result = install_remote_mod_file_result(
+            install_result = self.install_remote_mod_file_result(
                 download_url=download_url,
                 filename=filename,
                 progress_callback=progress_callback,
@@ -389,15 +387,15 @@ class ModFileInstaller:
             final_path = install_result.final_path
             if getattr(local_mod, "status", None) == ModStatus.DISABLED and final_path.suffix == ".jar":
                 disabled_path = final_path.with_name(final_path.name + ".disabled")
-                PathUtils.delete_within(self.server_path, disabled_path)
+                delete_within(self.server_path, disabled_path)
                 final_path.rename(disabled_path)
                 final_path = disabled_path
             if self.is_operation_cancelled(cancel_check):
                 rollback_and_stop(cancelled=True, final_path=final_path)
                 return None
             if old_path and old_path != final_path.resolve(strict=False) and old_path.exists():
-                if PathUtils.is_path_within(self.server_path, old_path, strict=False):
-                    if not PathUtils.delete_within(self.server_path, old_path):
+                if is_path_within(self.server_path, old_path, strict=False):
+                    if not delete_within(self.server_path, old_path):
                         rollback_and_stop(cancelled=False, final_path=final_path)
                         return None
                 else:
@@ -441,7 +439,7 @@ class ModFileInstaller:
             mod_id = safe_mod_id
             enabled_file = self.mods_path / f"{mod_id}.jar"
             disabled_file = self.mods_path / f"{mod_id}.jar.disabled"
-            if not PathUtils.is_path_within(self.mods_path, enabled_file, strict=False):
+            if not is_path_within(self.mods_path, enabled_file, strict=False):
                 self.logger.error(f"模組路徑不在 mods 目錄內: {enabled_file}")
                 return self.failure_mutation_result(f"{action}失敗", f"模組路徑不在 mods 目錄內: {enabled_file}")
             if enable:
@@ -524,9 +522,9 @@ class ModFileInstaller:
             target_path = self.mods_path / safe_filename
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename
-                if not PathUtils.copy_file(normalized_source, staging_path):
+                if not copy_file(normalized_source, staging_path):
                     return self.failure_mutation_result("匯入失敗", f"無法複製模組檔案: {normalized_source}")
-                if not PathUtils.replace_within(self.server_path, staging_path, target_path):
+                if not atomic_replace_file_within(self.server_path, staging_path, target_path):
                     return self.failure_mutation_result("匯入失敗", f"無法寫入目標模組檔案: {target_path}")
             self.notify_mod_list_changed()
             return self.success_mutation_result(
@@ -568,7 +566,7 @@ class ModFileInstaller:
                     target_path = self.mods_path / f"{mod_id}{ext}"
                     if not target_path.exists():
                         continue
-                    if not PathUtils.delete_within(self.server_path, target_path):
+                    if not delete_within(self.server_path, target_path):
                         return self.failure_mutation_result("刪除失敗", f"無法刪除模組檔案: {target_path}")
                     deleted = True
                     deleted_count += 1

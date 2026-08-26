@@ -30,7 +30,6 @@ from src.models import ModrinthVersionLookupResult, OnlineModInfo, OnlineModVers
 from src.utils import (
     MODRINTH_PREFERRED_HASH_ALGORITHM,
     HTTPClient,
-    PathUtils,
     clean_api_identifier,
     get_modrinth_loader_filters,
     is_allowed_version_type,
@@ -41,6 +40,7 @@ from src.utils import (
     parse_modrinth_version,
     parse_modrinth_version_lookup_response,
     select_best_mod_version,
+    serialize_json,
 )
 
 
@@ -273,7 +273,7 @@ def resolve_modrinth_project_names(project_ids: list[str] | set[str] | tuple[str
     def _request_chunk(id_chunk: list[str]) -> dict[str, Any] | None:
         response = HTTPClient.fetch_json(
             url=MODRINTH_PROJECT_BATCH_URL,
-            params={"ids": PathUtils.to_json_str(id_chunk)},
+            params={"ids": serialize_json(id_chunk)},
             timeout=MODRINTH_PROJECT_BATCH_TIMEOUT_SECONDS,
         )
         if not isinstance(response, list):
@@ -383,7 +383,7 @@ def search_mods_online(
             facets.append(category_facets)
     params = {
         "limit": max(1, min(int(limit), 50)),
-        "facets": PathUtils.to_json_str(facets),
+        "facets": serialize_json(facets),
         "index": _normalize_sort(sort_by),
     }
     if normalized_query:

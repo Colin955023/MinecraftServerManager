@@ -4,9 +4,9 @@ import datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
-from src.models import ServerConfig, WorkOutcome
+from src.models import ServerConfig
 from src.ui import ManageServerFrame, ManageServerService
-from src.utils import CancellationToken, WorkHandle
+from src.utils import WorkOutcome
 
 
 class _DummyFrame:
@@ -48,6 +48,18 @@ class FakeMonitorWindow:
 
     def setFocus(self) -> None:
         self.focus_calls += 1
+
+
+def _manage_service(server_crud: Any, *, server_backup: Any | None = None) -> ManageServerService:
+    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    backup = server_backup or SimpleNamespace(list_backups=lambda _name: [])
+    inspector = SimpleNamespace(inspect=lambda *_args, **_kwargs: None)
+    return ManageServerService(
+        server_crud,
+        cast(Any, runtime),
+        backup,
+        cast(Any, inspector),
+    )
 
 
 def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> None:
@@ -167,7 +179,7 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
 
 def test_begin_refresh_returns_monotonic_generation() -> None:
     fake_crud = SimpleNamespace(servers={}, load_servers_config=lambda: None)
-    service = ManageServerService(fake_crud)
+    service = _manage_service(fake_crud)
 
     gen1 = service.begin_refresh()
     gen2 = service.begin_refresh()
@@ -178,7 +190,7 @@ def test_begin_refresh_returns_monotonic_generation() -> None:
 
 def test_accept_projection_rejects_stale_generation() -> None:
     fake_crud = SimpleNamespace(servers={})
-    service = ManageServerService(fake_crud)
+    service = _manage_service(fake_crud)
 
     gen1 = service.begin_refresh()
     gen2 = service.begin_refresh()
@@ -196,7 +208,7 @@ def test_accept_projection_rejects_stale_generation() -> None:
 
 def test_accept_projection_returns_no_changes_when_unchanged() -> None:
     fake_crud = SimpleNamespace(servers={})
-    service = ManageServerService(fake_crud)
+    service = _manage_service(fake_crud)
 
     gen1 = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
@@ -215,7 +227,7 @@ def test_accept_projection_returns_no_changes_when_unchanged() -> None:
 
 def test_accept_projection_retains_selection_when_present() -> None:
     fake_crud = SimpleNamespace(servers={})
-    service = ManageServerService(fake_crud)
+    service = _manage_service(fake_crud)
 
     gen = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
@@ -232,7 +244,7 @@ def test_accept_projection_retains_selection_when_present() -> None:
 
 def test_accept_projection_clears_selection_when_deleted() -> None:
     fake_crud = SimpleNamespace(servers={})
-    service = ManageServerService(fake_crud)
+    service = _manage_service(fake_crud)
 
     gen = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
@@ -260,7 +272,7 @@ def test_get_backup_status_uses_injected_backup_manager() -> None:
     fake_backup = SimpleNamespace(
         list_backups=lambda _server_name: [{"filename": "Alpha_202608201200.zip", "datetime": datetime.datetime.now()}]
     )
-    service = ManageServerService(fake_crud, server_backup=fake_backup)
+    service = _manage_service(fake_crud, server_backup=fake_backup)
 
     status = service.get_backup_status("Alpha")
     assert "剛剛" in status or "✅" in status
@@ -285,16 +297,3 @@ def test_work_outcome_statuses() -> None:
     assert c.is_succeeded is False
     assert c.is_failed is False
     assert c.is_cancelled is True
-
-
-def test_work_handle_cancellation() -> None:
-    token = CancellationToken()
-    handle = WorkHandle(generation=1, key="test", cancel_token=token)
-
-    assert handle.generation == 1
-    assert handle.key == "test"
-    assert handle.is_cancelled is False
-
-    handle.cancel()
-    assert handle.is_cancelled is True
-    assert token.is_cancelled() is True

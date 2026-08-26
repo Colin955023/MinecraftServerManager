@@ -155,8 +155,7 @@ class SystemUtils:
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
         """
-        獲取進程實體記憶體使用量 Working Set / RSS（bytes）
-        與 Windows 工作管理員的記憶體欄位數值完全一致
+        獲取進程實體記憶體使用量（bytes）
 
         Args:
             pid: 進程 ID
@@ -166,6 +165,11 @@ class SystemUtils:
         """
         try:
             proc = psutil.Process(pid)
+            if hasattr(proc, "memory_full_info"):
+                with suppress(Exception):
+                    full_info = proc.memory_full_info()
+                    if hasattr(full_info, "uss") and full_info.uss > 0:
+                        return int(full_info.uss)
             mem_info = proc.memory_info()
             return int(mem_info.rss)
         except Exception:

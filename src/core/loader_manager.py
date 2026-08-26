@@ -20,14 +20,15 @@ from src.utils import (
     CancellationToken,
     HTTPClient,
     JavaUtils,
-    PathUtils,
     RuntimePaths,
-    ServerDetectionVersionUtils,
     SubprocessUtils,
     SystemUtils,
     atomic_write_json,
     get_logger,
+    is_fabric_compatible_version,
     parse_version_safe,
+    read_json,
+    standardize_loader_type,
 )
 
 logger = get_logger().bind(component="LoaderManager")
@@ -276,9 +277,6 @@ class LoaderManager:
             return False
         return True
 
-    def _read_json_cache(self, cache_file: str | Path):
-        return PathUtils.load_json(Path(cache_file))
-
     # ------------------------------------------------------------------
     # 載入器：共用 API -> 篩選 -> 排序 -> 快取
     # ------------------------------------------------------------------
@@ -305,7 +303,7 @@ class LoaderManager:
             if not content:
                 return
             if spec.api_kind == "json":
-                data = self._filter_loader_json(spec, self._decode_json(content))
+                data = self._filter_loader_json(spec, orjson.loads(content))
             elif spec.api_kind == "maven_xml":
                 data = self._build_loader_version_dict_from_metadata(content, allow_prerelease=not spec.stable_only)
                 self._sort_version_dict(data, parse_fallback_full_version=spec.parse_fallback_full_version)
@@ -314,14 +312,10 @@ class LoaderManager:
         if data:
             self._write_cache(self._cache_path(spec.id), data, spec.id)
 
-    @staticmethod
-    def _decode_json(content: bytes) -> Any:
-        return orjson.loads(content)
-
     def _fetch_minecraft_versions(self, spec: LoaderSpec) -> list[dict]:
-        manifest = self._decode_json(HTTPClient.fetch_bytes(spec.api_url, timeout=30) or b"{}")
+        manifest = orjson.loads(HTTPClient.fetch_bytes(spec.api_url, timeout=30) or b"{}")
         versions = []
-        cached = self._read_json_cache(self._cache_path(spec.id)) or []
+        cached = read_json(Path(self._cache_path(spec.id))) or []
         cache_map = {v["id"]: v for v in cached if isinstance(v, dict) and v.get("id")}
 
         entries_to_fetch = []
@@ -408,16 +402,16 @@ class LoaderManager:
         Returns:
             相容的載入器版本列表
         """
-        loader_id = self._standardize_loader_id(loader_type)
+        loader_id = standardize_loader_type(loader_type)
         spec = self.LOADER_SPECS.get(loader_id)
         if not spec:
             return []
-        if loader_id == "fabric" and not ServerDetectionVersionUtils.is_fabric_compatible_version(mc_version):
+        if loader_id == "fabric" and not is_fabric_compatible_version(mc_version):
             return []
         cache_key = f"{loader_id}_{mc_version}"
         if cache_key in self._version_cache:
             return self._version_cache[cache_key]
-        cache = self._read_json_cache(self._cache_path(loader_id))
+        cache = read_json(Path(self._cache_path(loader_id)))
         if not cache:
             return []
         try:
@@ -425,9 +419,7 @@ class LoaderManager:
                 result = (
                     [LoaderVersion(version=mc_version)]
                     if any(
-                        v.get("id") == mc_version and self._has_valid_server_url(v)
-                        for v in cache
-                        if isinstance(v, dict)
+                        v.get("id") == mc_version and bool(v.get("server_url")) for v in cache if isinstance(v, dict)
                     )
                     else []
                 )
@@ -457,10 +449,6 @@ class LoaderManager:
     # 版本 / 快取：Vanilla 也完全由 LoaderSpec 管理
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _has_valid_server_url(version: dict) -> bool:
-        return bool(version.get("server_url"))
-
     def get_versions(self, force_fetch: bool = False) -> list[dict]:
         """
         取得快取的 Minecraft 版本資訊，若快取不存在或過期則重新抓取
@@ -475,8 +463,8 @@ class LoaderManager:
         try:
             if force_fetch or not Path(self._cache_path(spec.id)).exists():
                 self._preload_loader(spec)
-            versions = self._read_json_cache(self._cache_path(spec.id)) or []
-            return [v for v in versions if isinstance(v, dict) and self._has_valid_server_url(v)]
+            versions = read_json(Path(self._cache_path(spec.id))) or []
+            return [v for v in versions if isinstance(v, dict) and bool(v.get("server_url"))]
         except Exception as exc:
             logger.exception(f"取得 Minecraft 版本失敗: {exc}")
             return []
@@ -493,13 +481,15 @@ class LoaderManager:
         if not url:
             self._fail(progress_callback, f"找不到 {minecraft_version} 的 Vanilla 伺服器下載位址")
             return False
-        return HTTPClient.download_file(
+        result = HTTPClient.download_file(
             url,
             download_path,
             progress_callback=progress_callback,
             cancel_check=lambda: self._is_cancel_requested(cancel_flag),
-            failure_message_callback=progress_callback if callable(progress_callback) else None,
         )
+        if not result.success:
+            return self._fail(progress_callback, result.message)
+        return True
 
     # ------------------------------------------------------------------
     # 下載 / installer：五種載入器共用同一條流程
@@ -531,7 +521,7 @@ class LoaderManager:
         Returns:
             下載結果
         """
-        loader_id = self._standardize_loader_id(loader_type, loader_version)
+        loader_id = standardize_loader_type(loader_type, loader_version)
         spec = self.LOADER_SPECS.get(loader_id)
         if not spec:
             return self._fail(progress_callback, f"不支援或無法識別的載入器類型: {loader_type}")
@@ -541,13 +531,13 @@ class LoaderManager:
             url = self.get_server_download_url(minecraft_version)
             if not url:
                 return self._fail(progress_callback, f"找不到 {minecraft_version} 的 Vanilla 伺服器下載位址")
-            return HTTPClient.download_file(
+            result = HTTPClient.download_file(
                 url=url,
                 local_path=str(download_path),
                 progress_callback=None,
                 cancel_check=lambda: self._is_cancel_requested(cancel_flag),
-                failure_message_callback=progress_callback,
             )
+            return True if result.success else self._fail(progress_callback, result.message)
 
         java_path = (
             user_java_path
@@ -606,7 +596,7 @@ class LoaderManager:
         Returns:
             需要安裝器時回傳下載資訊；直接下載型載入器回傳 None
         """
-        loader_id = self._standardize_loader_id(loader_type, loader_version)
+        loader_id = standardize_loader_type(loader_type, loader_version)
         spec = self.LOADER_SPECS.get(loader_id)
         if spec is None:
             raise ValueError(f"不支援或無法識別的載入器類型: {loader_type}")
@@ -671,17 +661,18 @@ class LoaderManager:
         if progress_callback:
             progress_callback(f"正在下載 {loader_type} 安裝器...")
 
-        if not HTTPClient.download_file(
+        download_result = HTTPClient.download_file(
             installer_url,
             installer_path,
             progress_callback=progress_callback,
             cancel_check=lambda: self._is_cancel_requested(cancel_flag),
             expected_hash=expected_hash,
             expected_hash_algorithm=hash_algorithm,
-        ):
+        )
+        if not download_result.success:
             return self._fail(
                 progress_callback,
-                f"下載 {loader_type} 安裝器失敗或被取消",
+                download_result.message or f"下載 {loader_type} 安裝器失敗或被取消",
             )
 
         if self._is_cancel_requested(cancel_flag):
@@ -882,11 +873,8 @@ class LoaderManager:
             return str(self.cache_dir / cache_name)
         return str(self.version_cache_dir / cache_name)
 
-    def _loader_cache_files_exist(self) -> bool:
-        return all(Path(self._cache_path(loader_id)).exists() for loader_id in self.LOADER_SPECS)
-
     def _loader_cache_is_fresh(self) -> bool:
-        if not self._loader_cache_files_exist():
+        if not all(Path(self._cache_path(loader_id)).exists() for loader_id in self.LOADER_SPECS):
             return False
         now = time.time()
         ttl = max(1, int(self.LOADER_CACHE_TTL_SECONDS))
@@ -896,9 +884,6 @@ class LoaderManager:
             )
         except OSError:
             return False
-
-    def _standardize_loader_id(self, loader_type: str, loader_version: str = "") -> str:
-        return ServerDetectionVersionUtils.standardize_loader_type(loader_type, loader_version)
 
     @staticmethod
     def _build_neoforge_mc_version_candidates(mc_version: str) -> list[str]:

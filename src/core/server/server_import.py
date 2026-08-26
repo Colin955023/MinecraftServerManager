@@ -2,42 +2,47 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import time
 import uuid
 import zipfile
 from collections.abc import Callable, Iterable
-from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
-from src.core import ServerCRUD
+from src.core import ServerCRUD, ServerInspector
 from src.models import (
     ConflictType,
     ImportMode,
     ImportSourceKind,
     ServerConfig,
-    ServerDetectionScratch,
     ServerImportBatchResult,
     ServerImportInspection,
     ServerImportResult,
+    ServerInspection,
+    ServerInspectionIntent,
 )
 from src.utils import (
     ImportCancelledError,
-    MemoryUtils,
-    PathUtils,
     ServerCommands,
-    ServerDetectionUtils,
     atomic_write_bytes,
     atomic_write_json,
+    copy_dir,
+    delete_within,
     get_logger,
+    is_path_within,
+    move_within,
+    read_json,
+    safe_extract_zip,
 )
 
 logger = get_logger().bind(component="ServerImport")
 
 ProgressCallback = Callable[[int, str], None]
 CancelCheck = Callable[[], bool]
-_DetectionScratch = ServerDetectionScratch
 _ImportCancelled = ImportCancelledError
 
 
@@ -48,8 +53,9 @@ class ServerImportService:
     _BACKUP_NAME = ".msm-start-server.backup"
     _STAGING_GLOB = ".msm-import-*.staging"
 
-    def __init__(self, server_crud: ServerCRUD) -> None:
+    def __init__(self, server_crud: ServerCRUD, server_inspector: ServerInspector | None = None) -> None:
         self.server_crud = server_crud
+        self.server_inspector = server_inspector or ServerInspector()
         self._root = server_crud.servers_root.resolve()
         self._lock = server_crud.operation_lock
         self.recover_orphans()
@@ -117,7 +123,7 @@ class ServerImportService:
                     conflict = False
 
         if kind == "directory":
-            if source == self._root or PathUtils.is_path_within(source, final_path, strict=False):
+            if source == self._root or is_path_within(source, final_path, strict=False):
                 raise ValueError("來源不可等於伺服器根目錄或包含匯入目標")
             symlink = self._first_symlink(source)
             if symlink is not None:
@@ -132,7 +138,7 @@ class ServerImportService:
             warnings.append("同名伺服器已註冊於設定中")
 
         if kind == "archive":
-            return self._inspect_zip(
+            return self._inspect_archive(
                 source,
                 normalized_name,
                 final_path,
@@ -152,6 +158,7 @@ class ServerImportService:
             conflict_type=conflict_type,
             extra_warnings=warnings,
             committable=not conflict,
+            previous=previous,
         )
 
     def inspect_registered(self, name: str) -> ServerImportInspection:
@@ -180,10 +187,10 @@ class ServerImportService:
         for child in sorted(self._root.iterdir(), key=lambda path: path.name.lower()):
             if not child.is_dir() or child.name.startswith(".msm-"):
                 continue
-            if not ServerDetectionUtils.is_valid_server_folder(child):
-                continue
             mode: ImportMode = "redetect" if child.name in self.server_crud.servers else "import"
-            inspections.append(self.inspect(child, child.name, mode=mode))
+            inspection = self.inspect(child, child.name, mode=mode)
+            if inspection.server.is_candidate:
+                inspections.append(inspection)
         return tuple(inspections)
 
     def execute(
@@ -259,7 +266,7 @@ class ServerImportService:
                 staging.mkdir(exist_ok=False)
                 self._write_marker(staging, inspection, "materializing")
                 if inspection.source_kind == "archive":
-                    PathUtils.safe_extract_zip(
+                    safe_extract_zip(
                         inspection.source_path,
                         staging,
                         progress_callback=lambda done, total: self._emit_units(
@@ -267,7 +274,7 @@ class ServerImportService:
                         ),
                     )
                     self._flatten_single_wrapper(staging)
-                elif not PathUtils.copy_dir(
+                elif not copy_dir(
                     inspection.source_path,
                     staging,
                     progress_callback=lambda done, total: self._emit_units(
@@ -283,6 +290,7 @@ class ServerImportService:
                     inspection.source_kind,
                     inspection.mode,
                     transaction_id=inspection.transaction_id,
+                    previous=previous,
                 )
                 if not active.committable:
                     raise RuntimeError("staging 內容不是有效的 Minecraft 伺服器")
@@ -302,12 +310,16 @@ class ServerImportService:
                 self._write_marker(work_path, inspection, "script_preparing")
             override = (
                 ServerCommands.ensure_nogui_in_command(
-                    ServerCommands.replace_startup_command_java_path(active.startup_command, config)
+                    ServerCommands.replace_startup_command_java_path(active.server.launch_target.command, config)
                 )
-                if active.startup_command
+                if active.server.launch_target.command
                 else None
             )
-            if not self.server_crud.create_launch_script(config, java_command_override=override):
+            if not self.server_crud.create_launch_script(
+                config,
+                java_command_override=override,
+                launch_target=active.server.launch_target.value,
+            ):
                 raise RuntimeError("建立受管啟動腳本失敗")
             script_changed = True
             self._write_marker(work_path, inspection, "prepared")
@@ -337,7 +349,7 @@ class ServerImportService:
                 inspection.name,
                 config=config,
                 warnings=active.warnings,
-                evidence=active.evidence,
+                evidence=active.server.evidence,
             )
         except _ImportCancelled:
             cleanup = self._compensate(
@@ -389,7 +401,7 @@ class ServerImportService:
         with self._lock:
             for staging in self._root.glob(self._STAGING_GLOB):
                 if staging.is_dir():
-                    PathUtils.delete_within(self._root, staging)
+                    delete_within(self._root, staging)
             for candidate in self._root.iterdir():
                 marker = candidate / self._MARKER_NAME
                 if not candidate.is_dir() or not marker.is_file():
@@ -397,7 +409,7 @@ class ServerImportService:
                 state = ""
                 payload: dict[str, Any] = {}
                 try:
-                    loaded = PathUtils.load_json(marker, {}) or {}
+                    loaded = read_json(marker, {}) or {}
                     if isinstance(loaded, dict):
                         payload = loaded
                     state = str(payload.get("state", ""))
@@ -413,7 +425,7 @@ class ServerImportService:
                         self._restore_script(candidate, True, (candidate / self._BACKUP_NAME).read_bytes())
                     self._remove_transaction_files(candidate)
                 elif not registered:
-                    PathUtils.delete_within(self._root, candidate)
+                    delete_within(self._root, candidate)
                 else:
                     self._remove_transaction_files(candidate)
 
@@ -426,7 +438,7 @@ class ServerImportService:
         if any(char in normalized for char in '<>:"/\\|?*') or normalized.endswith((".", " ")):
             raise ValueError("伺服器名稱包含 Windows 不允許的字元")
         final_path = (self._root / normalized).resolve(strict=False)
-        if final_path.parent != self._root or not PathUtils.is_path_within(self._root, final_path, strict=False):
+        if final_path.parent != self._root or not is_path_within(self._root, final_path, strict=False):
             raise ValueError("無效的伺服器名稱（路徑遍歷偵測）")
         return normalized, final_path
 
@@ -442,46 +454,11 @@ class ServerImportService:
         conflict_type: ConflictType = "none",
         extra_warnings: list[str] | None = None,
         committable: bool = True,
+        previous: ServerConfig | None = None,
     ) -> ServerImportInspection:
-        if not ServerDetectionUtils.is_valid_server_folder(path):
-            return self._empty_inspection(
-                path,
-                name,
-                final_path,
-                kind,
-                mode,
-                [*(extra_warnings or []), "找不到有效的伺服器檔案"],
-                False,
-                transaction_id=transaction_id,
-                conflict_type=conflict_type,
-            )
-        jars = [jar.name for jar in path.glob("*.jar")]
-        loader = ServerDetectionUtils.detect_loader_type(path, jars)
-        scratch = _DetectionScratch(loader_type=loader)
-        evidence: dict[str, str] = {"loader_type": self._loader_evidence(path, loader, jars)}
-        ServerDetectionUtils.detect_loader_and_version_from_sources(path, scratch, loader, evidence)
-        scripts = self._startup_scripts(path)
-        command = ""
-        memory_max = 2048
-        memory_min: int | None = None
-        for script in scripts:
-            detected = ServerCommands.extract_startup_script_command(script)
-            if detected.has_java_command and not command:
-                command = detected.command_line
-            memory_max = detected.memory_max_mb or memory_max
-            memory_min = detected.memory_min_mb if detected.memory_min_mb is not None else memory_min
-            if command and detected.memory_max_mb is not None:
-                break
-        for args_name in ("user_jvm_args.txt", "jvm.args"):
-            content = (
-                PathUtils.read_text_file(path / args_name, errors="ignore") if (path / args_name).is_file() else ""
-            )
-            if content:
-                memory_max = MemoryUtils.parse_memory_setting(content, "Xmx") or memory_max
-                memory_min = MemoryUtils.parse_memory_setting(content, "Xms") or memory_min
-        warnings = list(extra_warnings or [])
-        if scratch.minecraft_version.lower() == "unknown":
-            warnings.append("無法判斷 Minecraft 版本")
+        intent = self._inspection_intent(mode, previous)
+        server = self.server_inspector.inspect(path, intent)
+        warnings = [*(extra_warnings or []), *server.warnings]
         return ServerImportInspection(
             transaction_id=transaction_id,
             mode=mode,
@@ -489,22 +466,13 @@ class ServerImportService:
             source_path=path,
             name=name,
             final_path=final_path,
-            loader_type=scratch.loader_type.lower(),
-            minecraft_version=scratch.minecraft_version,
-            loader_version=scratch.loader_version,
-            memory_max_mb=memory_max,
-            memory_min_mb=memory_min,
-            eula_accepted=ServerDetectionUtils.detect_eula_acceptance(path),
-            main_jar=ServerDetectionUtils.find_main_jar(path, scratch.loader_type, scratch),
-            startup_scripts=tuple(script.name for script in scripts),
-            startup_command=command,
-            evidence=tuple(sorted((str(key), str(value)) for key, value in evidence.items())),
-            warnings=tuple(warnings),
-            committable=committable,
+            server=server,
+            warnings=tuple(dict.fromkeys(warnings)),
+            committable=committable and server.is_candidate,
             conflict_type=conflict_type,
         )
 
-    def _inspect_zip(
+    def _inspect_archive(
         self,
         archive_path: Path,
         name: str,
@@ -516,122 +484,29 @@ class ServerImportService:
         extra_warnings: list[str] | None = None,
         committable: bool = True,
     ) -> ServerImportInspection:
-        import re
-
         warnings = list(extra_warnings or [])
         try:
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                namelist = zf.namelist()
-                top_levels = {p.split("/")[0] for p in namelist if "/" in p}
-                single_wrapper = ""
-                if len(top_levels) == 1:
-                    wrapper_cand = next(iter(top_levels))
-                    if all(p.startswith(f"{wrapper_cand}/") or p == wrapper_cand for p in namelist):
-                        single_wrapper = f"{wrapper_cand}/"
-
-                def clean_name(p: str) -> str:
-                    return p[len(single_wrapper) :] if single_wrapper and p.startswith(single_wrapper) else p
-
-                cleaned_files = [clean_name(p) for p in namelist if not p.endswith("/")]
-                root_files = [f for f in cleaned_files if "/" not in f]
-                jars = [f for f in root_files if f.lower().endswith(".jar")]
-
-                loader = "vanilla"
-                for jar in jars:
-                    jar_lower = jar.lower().replace("-", "")
-                    if "fabric" in jar_lower:
-                        loader = "fabric"
-                        break
-                    if "neoforge" in jar_lower:
-                        loader = "neoforge"
-                        break
-                    if "forge" in jar_lower:
-                        loader = "forge"
-                        break
-                    if "quilt" in jar_lower:
-                        loader = "quilt"
-                        break
-
-                evidence: dict[str, str] = {"loader_type": f"ZIP {loader}" if loader != "vanilla" else "ZIP"}
-                mc_version = "unknown"
-                loader_ver = "unknown"
-                eula_accepted = False
-                memory_max = 2048
-                memory_min: int | None = None
-                startup_scripts: list[str] = []
-                command = ""
-
-                for member in namelist:
-                    c_name = clean_name(member)
-                    c_lower = c_name.lower()
-                    if c_lower == "eula.txt":
-                        with suppress(Exception):
-                            content = zf.read(member).decode("utf-8", errors="ignore")
-                            if "eula=true" in content.lower().replace(" ", ""):
-                                eula_accepted = True
-                    elif c_lower in ("user_jvm_args.txt", "jvm.args"):
-                        with suppress(Exception):
-                            content = zf.read(member).decode("utf-8", errors="ignore")
-                            memory_max = MemoryUtils.parse_memory_setting(content, "Xmx") or memory_max
-                            memory_min = MemoryUtils.parse_memory_setting(content, "Xms") or memory_min
-                    elif c_lower.endswith(".bat") and "/" not in c_name:
-                        startup_scripts.append(c_name)
-                        with suppress(Exception):
-                            script_content = zf.read(member).decode("utf-8", errors="ignore")
-                            if not command and "java" in script_content.lower():
-                                for line in script_content.splitlines():
-                                    line_strip = line.strip()
-                                    if line_strip.lower().startswith("java ") or " java " in line_strip.lower():
-                                        command = line_strip
-                                        break
-                            mem_mx = MemoryUtils.parse_memory_setting(script_content, "Xmx")
-                            if mem_mx:
-                                memory_max = mem_mx
-                            mem_ms = MemoryUtils.parse_memory_setting(script_content, "Xms")
-                            if mem_ms:
-                                memory_min = mem_ms
-
-                for jar in jars:
-                    mc_match = re.search(r"(?:mc\.?|minecraft[-_]?|[-_])(1\.\d+(?:\.\d+)?)", jar, re.IGNORECASE)
-                    if mc_match and mc_version == "unknown":
-                        mc_version = mc_match.group(1)
-                    loader_match = re.search(
-                        r"(?:loader[-_.]?|forge[-_]?|fabric[-_]?|neoforge[-_]?)(\d+\.\d+(?:\.\d+)?)",
-                        jar,
-                        re.IGNORECASE,
-                    )
-                    if loader_match and loader_ver == "unknown":
-                        loader_ver = loader_match.group(1)
-
-                main_jar = jars[0] if jars else ""
-
-                if not jars and not startup_scripts:
-                    warnings.append("找不到有效的伺服器檔案")
-                    committable = False
-                if mc_version == "unknown":
-                    warnings.append("無法判斷 Minecraft 版本")
-
-                return ServerImportInspection(
+            with TemporaryDirectory(prefix="msm-inspect-") as temporary:
+                extracted = Path(temporary)
+                safe_extract_zip(archive_path, extracted)
+                self._flatten_single_wrapper(extracted)
+                inspected = self._inspect_directory(
+                    extracted,
+                    name,
+                    final_path,
+                    "archive",
+                    mode,
                     transaction_id=transaction_id,
-                    mode=mode,
-                    source_kind="archive",
-                    source_path=archive_path,
-                    name=name,
-                    final_path=final_path,
-                    loader_type=loader,
-                    minecraft_version=mc_version,
-                    loader_version=loader_ver,
-                    memory_max_mb=memory_max,
-                    memory_min_mb=memory_min,
-                    eula_accepted=eula_accepted,
-                    main_jar=main_jar,
-                    startup_scripts=tuple(startup_scripts),
-                    startup_command=command,
-                    evidence=tuple(sorted((str(key), str(value)) for key, value in evidence.items())),
-                    warnings=tuple(warnings),
-                    committable=committable,
                     conflict_type=conflict_type,
+                    extra_warnings=warnings,
+                    committable=committable,
                 )
+                server = replace(
+                    inspected.server,
+                    path=archive_path,
+                    revision=self._archive_revision(archive_path),
+                )
+                return replace(inspected, source_path=archive_path, server=server)
         except Exception as exc:
             warnings.append(f"無法讀取 ZIP 壓縮檔：{exc}")
             return self._empty_inspection(
@@ -646,6 +521,23 @@ class ServerImportService:
                 conflict_type=conflict_type,
             )
 
+    @staticmethod
+    def _inspection_intent(mode: ImportMode, previous: ServerConfig | None) -> ServerInspectionIntent:
+        return ServerInspectionIntent(
+            purpose=mode,
+            expected_loader_type=previous.loader_type if previous else "",
+            expected_minecraft_version=previous.minecraft_version if previous else "",
+            expected_loader_version=previous.loader_version if previous else "",
+        )
+
+    @staticmethod
+    def _archive_revision(archive_path: Path) -> str:
+        digest = hashlib.sha256()
+        with archive_path.open("rb") as archive:
+            while chunk := archive.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
+
     def _empty_inspection(
         self,
         source: Path,
@@ -659,6 +551,13 @@ class ServerImportService:
         transaction_id: str | None = None,
         conflict_type: ConflictType = "none",
     ) -> ServerImportInspection:
+        server = ServerInspection(
+            path=source,
+            revision="",
+            is_candidate=False,
+            error=warnings[-1] if warnings else "無法檢查伺服器",
+            warnings=tuple(warnings),
+        )
         return ServerImportInspection(
             transaction_id=transaction_id or uuid.uuid4().hex,
             mode=mode,
@@ -666,16 +565,7 @@ class ServerImportService:
             source_path=source,
             name=name,
             final_path=final_path,
-            loader_type="unknown",
-            minecraft_version="unknown",
-            loader_version="unknown",
-            memory_max_mb=2048,
-            memory_min_mb=None,
-            eula_accepted=False,
-            main_jar="",
-            startup_scripts=(),
-            startup_command="",
-            evidence=(),
+            server=server,
             warnings=tuple(warnings),
             committable=committable,
             conflict_type=conflict_type,
@@ -696,40 +586,16 @@ class ServerImportService:
             raise FileExistsError("同名伺服器已存在")
         if not inspection.source_path.exists():
             raise FileNotFoundError("匯入來源已不存在")
-
-    @staticmethod
-    def _loader_evidence(path: Path, loader: str, jars: list[str]) -> str:
-        library_paths = {
-            "fabric": "libraries/net/fabricmc",
-            "quilt": "libraries/org/quiltmc",
-            "forge": "libraries/net/minecraftforge/forge",
-            "neoforge": "libraries/net/neoforged/neoforge",
-        }
-        library = library_paths.get(loader)
-        if library and (path / library).exists():
-            return f"目錄 {library}"
-        match = next((jar for jar in jars if loader in jar.lower().replace("-", "")), "")
-        return f"JAR {match}" if match else loader
-
-    @staticmethod
-    def _startup_scripts(path: Path) -> tuple[Path, ...]:
-        managed = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
-        ordered: list[Path] = []
-        seen: set[Path] = set()
-        for name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
-            candidate = path / name
-            if name.lower() != managed and candidate.is_file():
-                ordered.append(candidate)
-                seen.add(candidate.resolve())
-        for candidate in sorted(path.glob("*.bat")):
-            if candidate.name.lower() == managed or candidate.resolve() in seen:
-                continue
-            if ServerCommands.extract_startup_script_command(candidate).has_java_command:
-                ordered.append(candidate)
-        managed_path = path / ServerCommands.MANAGED_STARTUP_SCRIPT_NAME
-        if not ordered and managed_path.is_file():
-            ordered.append(managed_path)
-        return tuple(ordered)
+        current_revision = (
+            self._archive_revision(inspection.source_path)
+            if inspection.source_kind == "archive"
+            else self.server_inspector.inspect(
+                inspection.source_path,
+                self._inspection_intent(inspection.mode, previous),
+            ).revision
+        )
+        if current_revision != inspection.server.revision:
+            raise ValueError("匯入來源已在檢查後變更，請重新檢查候選")
 
     @staticmethod
     def _first_symlink(source: Path) -> Path | None:
@@ -753,7 +619,7 @@ class ServerImportService:
         wrapper = items[0]
         for item in wrapper.iterdir():
             destination = staging / item.name
-            if destination.exists() or not PathUtils.move_within(staging, item, destination):
+            if destination.exists() or not move_within(staging, item, destination):
                 raise RuntimeError(f"攤平 ZIP 單層目錄失敗：{item.name}")
         wrapper.rmdir()
 
@@ -766,12 +632,11 @@ class ServerImportService:
                 "name": inspection.name,
                 "state": state,
                 "target_config": {
-                    "minecraft_version": inspection.minecraft_version,
-                    "loader_type": inspection.loader_type,
-                    "loader_version": inspection.loader_version,
-                    "memory_max_mb": inspection.memory_max_mb,
-                    "memory_min_mb": inspection.memory_min_mb,
-                    "eula_accepted": inspection.eula_accepted,
+                    "minecraft_version": inspection.server.minecraft_version,
+                    "loader_type": inspection.server.loader_type,
+                    "loader_version": inspection.server.loader_version,
+                    "memory_max_mb": inspection.server.memory_max_mb,
+                    "memory_min_mb": inspection.server.memory_min_mb,
                 },
             },
         ):
@@ -789,7 +654,6 @@ class ServerImportService:
                 "loader_version",
                 "memory_max_mb",
                 "memory_min_mb",
-                "eula_accepted",
             )
         )
 
@@ -818,7 +682,7 @@ class ServerImportService:
         else:
             target = inspection.final_path if moved_to_final else staging
             if target.exists():
-                clean = PathUtils.delete_within(self._root, target) and clean
+                clean = delete_within(self._root, target) and clean
         return clean
 
     @staticmethod
