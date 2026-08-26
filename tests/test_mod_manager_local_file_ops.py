@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from io import BytesIO
 from pathlib import Path
-from xml.etree import ElementTree
 from zipfile import ZipFile
+
+from defusedxml import ElementTree
 
 from src.core import ModManager
 from src.models import LocalModInfo, ModStatus

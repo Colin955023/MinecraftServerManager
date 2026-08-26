@@ -94,7 +94,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
-          uv-groups: '--group lint --group typecheck'
+          uv-groups: '--group lint --group typecheck --group test'
 
       - name: Run Ruff (Lint & Format)
         run: uv run ruff check src tests scripts report && uv run ruff format --check src tests scripts report

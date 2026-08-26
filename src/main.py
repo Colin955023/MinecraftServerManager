@@ -22,21 +22,27 @@ from src.utils import HTTPClient, get_logger, shutdown_shared_manager
 logger = get_logger().bind(component="Main")
 
 
-def main():
-    """應用程式入口點，處理啟動過程中的例外"""
+def main() -> int:
+    """
+    應用程式入口點，處理啟動過程中的例外
+
+    Returns:
+        正常結束回傳 0；啟動或執行失敗回傳 1
+    """
 
     mutex_name = "MinecraftServerManagerMutex"
     try:
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateMutexW(None, False, mutex_name)
         run_application()
-    except Exception as e:
-        logger.critical(f"應用程式啟動失敗: {e}\n{traceback.format_exc()}")
+    except Exception as exc:
+        logger.critical(f"應用程式啟動失敗: {exc}\n{traceback.format_exc()}")
+        return 1
     finally:
         shutdown_shared_manager(wait=False)
         HTTPClient.close()
-        sys.exit(0)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

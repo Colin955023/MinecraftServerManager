@@ -417,6 +417,7 @@ class ServerImportService:
                     logger.warning(f"無法解析匯入交易 marker {marker}: {exc}")
                 config = self.server_crud.servers.get(candidate.name)
                 registered = config is not None and Path(config.path).resolve(strict=False) == candidate.resolve()
+                source_kind = str(payload.get("source_kind", ""))
                 if state == "committed" and registered:
                     self._remove_transaction_files(candidate)
                 elif (candidate / self._BACKUP_NAME).is_file():
@@ -425,7 +426,12 @@ class ServerImportService:
                         self._restore_script(candidate, True, (candidate / self._BACKUP_NAME).read_bytes())
                     self._remove_transaction_files(candidate)
                 elif not registered:
-                    delete_within(self._root, candidate)
+                    if source_kind in {"archive", "directory"}:
+                        delete_within(self._root, candidate)
+                    else:
+                        if source_kind == "in_place" and state in {"script_preparing", "prepared"}:
+                            self._restore_script(candidate, False, None)
+                        self._remove_transaction_files(candidate)
                 else:
                     self._remove_transaction_files(candidate)
 
@@ -631,6 +637,7 @@ class ServerImportService:
                 "transaction_id": inspection.transaction_id,
                 "name": inspection.name,
                 "state": state,
+                "source_kind": inspection.source_kind,
                 "target_config": {
                     "minecraft_version": inspection.server.minecraft_version,
                     "loader_type": inspection.server.loader_type,

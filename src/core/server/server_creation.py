@@ -170,7 +170,6 @@ class CreateServerJourney:
         progress_callback: ProgressCallback | None,
         cancel_check: CancelCheck,
     ) -> ServerCreationResult:
-        phase = "validate"
         config = plan.build_config(plan.staging_path)
         moved_to_final = False
         registered = False

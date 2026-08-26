@@ -224,3 +224,38 @@ def test_orphan_recovery_restores_script_when_redetect_config_was_not_committed(
     assert managed.read_bytes() == b"old-script"
     assert not (server_path / service._MARKER_NAME).exists()
     assert not (server_path / service._BACKUP_NAME).exists()
+
+
+def test_orphan_recovery_preserves_unregistered_in_place_server(tmp_path: Path) -> None:
+    root = tmp_path / "servers"
+    server_path = root / "existing"
+    _write_server(server_path)
+    manager = ServerCRUD(str(root))
+    service = ServerImportService(manager)
+    inspection = service.inspect(server_path, "existing")
+    managed = server_path / "start_server.bat"
+    service._write_marker(server_path, inspection, "script_preparing")
+    managed.write_bytes(b"transaction-generated-script")
+
+    ServerImportService(ServerCRUD(str(root)))
+
+    assert (server_path / "server.jar").is_file()
+    assert (server_path / "eula.txt").is_file()
+    assert not managed.exists()
+    assert not (server_path / service._MARKER_NAME).exists()
+
+
+def test_orphan_recovery_removes_unregistered_moved_import(tmp_path: Path) -> None:
+    root = tmp_path / "servers"
+    source = tmp_path / "external"
+    _write_server(source)
+    manager = ServerCRUD(str(root))
+    service = ServerImportService(manager)
+    inspection = service.inspect(source, "copied")
+    candidate = root / "copied"
+    _write_server(candidate)
+    service._write_marker(candidate, inspection, "moved")
+
+    ServerImportService(ServerCRUD(str(root)))
+
+    assert not candidate.exists()
