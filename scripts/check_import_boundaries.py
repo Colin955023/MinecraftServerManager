@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import logging
 import pathlib
-import re
 import sys
 from collections import defaultdict
 from collections.abc import Iterable
@@ -28,17 +27,26 @@ TOP_LEVEL = frozenset({"core", "models", "ui", "utils"})
 FACADE_MODULES = tuple(f"src.{name}" for name in sorted(TOP_LEVEL))
 
 
+def _normalize_except_clauses(source: str) -> str:
+    transformed_lines: list[str] = []
+    for line in source.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith("except ") and stripped.endswith(":") and "," in stripped and "(" not in stripped:
+            indent = line[: len(line) - len(line.lstrip())]
+            ending = line[len(line.rstrip()) :]
+            expr = stripped.removeprefix("except ").removesuffix(":").strip()
+            transformed_lines.append(f"{indent}except ({expr}):{ending}")
+        else:
+            transformed_lines.append(line)
+    return "".join(transformed_lines)
+
+
 def _parse_source(path: pathlib.Path) -> ast.Module:
     source = path.read_text(encoding="utf-8")
     try:
         return ast.parse(source, filename=str(path))
     except SyntaxError:
-        source = re.sub(
-            r"(?m)^(\s*)except\s+([^(),:\n]+(?:\s*,\s*[^(),:\n]+)+):$",
-            lambda match: f"{match.group(1)}except ({match.group(2)}):",
-            source,
-        )
-        return ast.parse(source, filename=str(path))
+        return ast.parse(_normalize_except_clauses(source), filename=str(path))
 
 
 def _python_files() -> list[pathlib.Path]:
