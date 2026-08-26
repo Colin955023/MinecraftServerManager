@@ -4,6 +4,7 @@ import datetime
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import src.core.server.server_backup as backup_module
 
@@ -16,7 +17,7 @@ class _FixedDateTime(datetime.datetime):
 
 def _manager(server_dir: Path) -> backup_module.ServerBackupManager:
     crud = SimpleNamespace(servers={"TestServer": SimpleNamespace(path=str(server_dir))})
-    return backup_module.ServerBackupManager(crud)
+    return backup_module.ServerBackupManager(cast(Any, crud))
 
 
 def test_backup_is_committed_atomically_and_excludes_runtime_directories(tmp_path, monkeypatch) -> None:
@@ -64,3 +65,39 @@ def test_backup_failure_keeps_existing_final_backup_and_removes_temp_file(tmp_pa
     assert manager.backup_server("TestServer") is False
     assert backup_file.read_bytes() == b"existing-backup"
     assert not list(backup_dir.glob("*.tmp"))
+
+
+def test_restore_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
+    backup_dir = server_dir / "backups"
+    backup_dir.mkdir()
+    backup_file = backup_dir / "test_backup.zip"
+    with zipfile.ZipFile(backup_file, "w") as zf:
+        zf.writestr("server.properties", "motd=restored\n")
+
+    crud = SimpleNamespace(servers={"TestServer": SimpleNamespace(path=str(server_dir))})
+    running_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
+    manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, running_runtime))
+
+    assert manager.restore_backup("TestServer", str(backup_file)) is False
+    assert (server_dir / "server.properties").read_text(encoding="utf-8") == "motd=old\n"
+
+
+def test_restore_backup_succeeds_when_server_not_running(tmp_path: Path) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
+    backup_dir = server_dir / "backups"
+    backup_dir.mkdir()
+    backup_file = backup_dir / "test_backup.zip"
+    with zipfile.ZipFile(backup_file, "w") as zf:
+        zf.writestr("server.properties", "motd=restored\n")
+
+    crud = SimpleNamespace(servers={"TestServer": SimpleNamespace(path=str(server_dir))})
+    stopped_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, stopped_runtime))
+
+    assert manager.restore_backup("TestServer", str(backup_file)) is True
+    assert (server_dir / "server.properties").read_text(encoding="utf-8") == "motd=restored\n"

@@ -11,10 +11,14 @@ from src.utils import WorkOutcome
 
 class _DummyFrame:
     def __init__(self):
-        self.server_tree = None
-        self.service = None
-        self.selected_server = ""
-        self._monitor_windows = {}
+        self.server_tree: Any = None
+        self.service: Any = None
+        self.selected_server: str = ""
+        self._monitor_windows: dict[str, Any] = {}
+        self.server_crud: Any = None
+        self.server_runtime: Any = None
+        self.action_buttons: dict[str, Any] = {}
+        self.info_label: Any = None
 
     def _show_existing_monitor_window(self, win, bring_to_front=True):
         target = getattr(win, "window", win)
@@ -297,3 +301,55 @@ def test_work_outcome_statuses() -> None:
     assert c.is_succeeded is False
     assert c.is_failed is False
     assert c.is_cancelled is True
+
+
+def test_manage_server_frame_update_selection_disables_restore_when_running() -> None:
+    class _FakeBtn:
+        def __init__(self) -> None:
+            self.enabled = False
+            self.text = ""
+
+        def setEnabled(self, val: bool) -> None:
+            self.enabled = val
+
+        def setText(self, val: str) -> None:
+            self.text = val
+
+    start_stop_btn = _FakeBtn()
+    restore_btn = _FakeBtn()
+    backup_btn = _FakeBtn()
+
+    frame = _DummyFrame()
+    frame.selected_server = "Alpha"
+    frame.server_crud = SimpleNamespace(
+        servers={
+            "Alpha": ServerConfig(
+                name="Alpha",
+                minecraft_version="1.21.1",
+                loader_type="fabric",
+                loader_version="0.16.0",
+                memory_max_mb=2048,
+                path="servers/Alpha",
+            )
+        }
+    )
+    frame.action_buttons = {
+        "start_stop": start_stop_btn,
+        "restore": restore_btn,
+        "backup": backup_btn,
+    }
+    frame.info_label = SimpleNamespace(setText=lambda _: None)
+
+    frame.server_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
+    ManageServerFrame.update_selection(cast(Any, frame))
+    assert restore_btn.enabled is False
+    assert backup_btn.enabled is True
+    assert start_stop_btn.enabled is True
+    assert start_stop_btn.text == "🛑 停止"
+
+    frame.server_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    ManageServerFrame.update_selection(cast(Any, frame))
+    assert restore_btn.enabled is True
+    assert backup_btn.enabled is True
+    assert start_stop_btn.enabled is True
+    assert start_stop_btn.text == "🚀 啟動"

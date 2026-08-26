@@ -459,9 +459,67 @@ class ServerCommands:
         return raw
 
     @staticmethod
+    def is_server_startup_script_file(script_file: Path) -> bool:
+        """
+        判斷檔案是否為伺服器啟動腳本（而非一般維護或備份等輔助腳本）
+
+        Args:
+            script_file: 腳本檔案路徑
+
+        Returns:
+            若為伺服器啟動腳本則回傳 True
+        """
+        stem_lower = script_file.stem.lower()
+
+        known_startup_stems = {
+            "start",
+            "run",
+            "server",
+            "launch",
+            "startserver",
+            "serverstart",
+            "start_server",
+            "minecraft_server",
+            "play",
+        }
+        if stem_lower in known_startup_stems:
+            return True
+
+        try:
+            content = read_text_file(script_file, encoding="utf-8", errors="replace") or ""
+        except OSError:
+            return False
+
+        if not content.strip():
+            return False
+
+        content_lower = content.lower()
+        has_java = bool(re.search(r"(?i)\bjava(?:\.exe)?\b", content_lower))
+        has_server_markers = any(
+            marker in content_lower
+            for marker in (
+                "server.jar",
+                "forge",
+                "neoforge",
+                "fabric",
+                "quilt",
+                "paper",
+                "spigot",
+                "purpur",
+                "nogui",
+                "user_jvm_args.txt",
+                "win_args.txt",
+                "unix_args.txt",
+                "net.minecraft",
+            )
+        )
+        return has_java and (has_server_markers or "-jar" in content_lower or "-xmx" in content_lower)
+
+    @staticmethod
     def cleanup_redundant_startup_scripts(path: Path) -> list[str]:
         """
         在伺服器目錄中只保留標準 start_server.bat，清理其他多餘的 .bat、.ps1 與 .sh 啟動腳本
+        保留與啟動無關的使用者輔助腳本（例如 backup.ps1, maintenance.sh 等）
 
         Args:
             path: 伺服器資料夾路徑
@@ -477,6 +535,8 @@ class ServerCommands:
         for pattern in patterns:
             for script_file in path.glob(pattern):
                 if script_file.name.lower() == managed:
+                    continue
+                if not ServerCommands.is_server_startup_script_file(script_file):
                     continue
                 with suppress(Exception):
                     script_file.unlink()

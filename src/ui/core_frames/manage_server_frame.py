@@ -507,7 +507,10 @@ class ManageServerFrame(QWidget):
                 self.action_buttons[start_stop_key].setEnabled(True)
             for key, btn in self.action_buttons.items():
                 if key != start_stop_key:
-                    btn.setEnabled(True)
+                    if key == "restore" and is_running:
+                        btn.setEnabled(False)
+                    else:
+                        btn.setEnabled(True)
         else:
             for btn in self.action_buttons.values():
                 btn.setEnabled(False)
@@ -682,6 +685,14 @@ class ManageServerFrame(QWidget):
     def show_restore_dialog(self) -> None:
         """顯示還原備份對話框"""
         if not self.selected_server:
+            return
+        if self.server_runtime.observe(self.selected_server).is_running:
+            UIUtils.show_message(
+                "警告",
+                f"伺服器「{self.selected_server}」正在執行中，無法還原備份。請先停止伺服器。",
+                self.window(),
+                message_level="warning",
+            )
             return
         dialog = RestoreBackupDialog(self.window(), self.selected_server, self.server_backup, self.server_crud)
         dialog.exec_dialog()

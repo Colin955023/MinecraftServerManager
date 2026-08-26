@@ -34,7 +34,7 @@ def _parse_source(path: pathlib.Path) -> ast.Module:
         return ast.parse(source, filename=str(path))
     except SyntaxError:
         source = re.sub(
-            r"(?m)^(\s*)except\s+([^():\n]+(?:,\s*[^():\n]+)+):$",
+            r"(?m)^(\s*)except\s+([^(),:\n]+(?:\s*,\s*[^(),:\n]+)+):$",
             lambda match: f"{match.group(1)}except ({match.group(2)}):",
             source,
         )

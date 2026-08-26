@@ -208,7 +208,7 @@ def test_main_window_composition_builds_one_shared_service_graph(tmp_path: Path,
     monkeypatch.setattr(
         main_window_module,
         "ServerBackupManager",
-        lambda crud: SimpleNamespace(crud=crud),
+        lambda crud, *, server_runtime=None: SimpleNamespace(crud=crud, runtime=server_runtime),
     )
 
     window: Any = MainWindow.__new__(MainWindow)
@@ -222,6 +222,7 @@ def test_main_window_composition_builds_one_shared_service_graph(tmp_path: Path,
     assert window.server_runtime.crud is window.server_crud
     assert window.server_runtime.inspector is window.server_inspector
     assert window.server_backup.crud is window.server_crud
+    assert window.server_backup.runtime is window.server_runtime
     assert window.mod_planning.loader_rules.loader_manager is window.loader_manager
 
 
@@ -451,14 +452,18 @@ def test_cleanup_redundant_startup_scripts(tmp_path: Path) -> None:
     (tmp_path / "start_server.bat").write_text("keep", encoding="utf-8")
     (tmp_path / "run.bat").write_text("delete", encoding="utf-8")
     (tmp_path / "run.sh").write_text("delete", encoding="utf-8")
-    (tmp_path / "extra.ps1").write_text("delete", encoding="utf-8")
+    (tmp_path / "custom_launch.ps1").write_text("java -Xmx4G -jar server.jar nogui", encoding="utf-8")
+    (tmp_path / "backup.ps1").write_text("Compress-Archive -Path . -DestinationPath backup.zip", encoding="utf-8")
+    (tmp_path / "maintenance.sh").write_text("echo 'performing maintenance'", encoding="utf-8")
 
     removed = ServerCommands.cleanup_redundant_startup_scripts(tmp_path)
-    assert set(removed) == {"run.bat", "run.sh", "extra.ps1"}
+    assert set(removed) == {"run.bat", "run.sh", "custom_launch.ps1"}
     assert (tmp_path / "start_server.bat").exists()
     assert not (tmp_path / "run.bat").exists()
     assert not (tmp_path / "run.sh").exists()
-    assert not (tmp_path / "extra.ps1").exists()
+    assert not (tmp_path / "custom_launch.ps1").exists()
+    assert (tmp_path / "backup.ps1").exists()
+    assert (tmp_path / "maintenance.sh").exists()
 
 
 def test_find_loader_args_from_run_bat(tmp_path: Path) -> None:

@@ -12,10 +12,14 @@ import zipfile
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from src.models import ServerConfig
 from src.utils import bytes_to_mb, get_logger, safe_extract_zip
+
+if TYPE_CHECKING:
+    from .server_crud import ServerCRUD
+    from .server_runtime import ServerRuntime
 
 logger = get_logger().bind(component="ServerBackup")
 
@@ -23,8 +27,9 @@ logger = get_logger().bind(component="ServerBackup")
 class ServerBackupManager:
     """伺服器備份管理器"""
 
-    def __init__(self, server_crud):
+    def __init__(self, server_crud: ServerCRUD, server_runtime: ServerRuntime | None = None):
         self.server_crud = server_crud
+        self.server_runtime = server_runtime
 
     def backup_server(
         self, server_name: str, max_backups: int = 10, progress_callback: Callable[[float, str], None] | None = None
@@ -185,6 +190,10 @@ class ServerBackupManager:
             還原成功回傳 True，失敗回傳 False
         """
         try:
+            if self.server_runtime and self.server_runtime.observe(server_name).is_running:
+                logger.error(f"還原失敗：伺服器 {server_name} 正在執行中，無法還原")
+                return False
+
             config = self.server_crud.servers.get(server_name)
             if not config:
                 logger.error(f"還原失敗：找不到伺服器 {server_name}")

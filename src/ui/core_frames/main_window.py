@@ -215,7 +215,7 @@ class MainWindow(FluentWindow):
         server_import = ServerImportService(server_crud, server_inspector)
         server_properties = ServerPropertiesStore(server_crud)
         server_runtime = ServerRuntime(server_crud, server_inspector=server_inspector)
-        server_backup = ServerBackupManager(server_crud)
+        server_backup = ServerBackupManager(server_crud, server_runtime=server_runtime)
 
         self.servers_root = servers_root
         self.loader_manager = loader_manager
