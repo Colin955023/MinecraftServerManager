@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
@@ -181,14 +181,14 @@ class ModManagementReviewOps:
             UIUtils.show_message("提示", "目前選取項目不可移除", dialog, message_level="warning")
             return
         self.controller.queue_ops._refresh_online_queue_button()
-        dialog.destroy()
+        dialog.close()
         if self.controller.mod_session.pending_online_installs:
-            self.show_online_install_queue()
+            QTimer.singleShot(0, self.show_online_install_queue)
 
     def _clear_pending_online_installs(self, dialog: Any) -> None:
         self.controller.mod_session.clear_pending_installs()
         self.controller.queue_ops._refresh_online_queue_button()
-        dialog.destroy()
+        dialog.close()
 
     def _get_dialog_parent(self) -> Any:
         """安全取得 Qt 頂層視窗或 QWidget 父元件"""

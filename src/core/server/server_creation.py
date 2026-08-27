@@ -289,6 +289,12 @@ class CreateServerJourney:
             for staging_path in root.glob(self._STAGING_GLOB):
                 if staging_path.is_dir():
                     self._cleanup_path(staging_path)
+            for delete_tombstone in root.glob(".msm-delete-*"):
+                if delete_tombstone.is_dir():
+                    self._cleanup_path(delete_tombstone)
+            for restore_staging in root.glob(".*.restore-*"):
+                if restore_staging.is_dir():
+                    self._cleanup_path(restore_staging)
             for candidate in root.iterdir():
                 if not candidate.is_dir() or not (candidate / self._MARKER_NAME).is_file():
                     continue

@@ -364,10 +364,6 @@ class ServerMonitorWindow(MSFluentWindow):
 
         parent_layout.addWidget(console_frame, 1)
 
-        c_layout.addLayout(h_cmd)
-
-        parent_layout.addWidget(console_frame, 1)
-
     def start_monitoring(self) -> None:
         """啟動伺服器監控循環，開始追蹤狀態、輸出與玩家資訊"""
         if not self.is_monitoring:
@@ -804,7 +800,6 @@ class ServerMonitorWindow(MSFluentWindow):
                 clipboard = QGuiApplication.clipboard()
                 if clipboard:
                     clipboard.setText(name)
-                    app.processEvents()
             logger.info(f"已複製玩家名稱: {name}")
         except Exception as e:
             logger.error(f"複製玩家名稱失敗: {e}")

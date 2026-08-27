@@ -51,7 +51,6 @@ class ServerCRUD:
         else:
             self.servers = {}
             ServerCRUD._shared_servers[key] = self.servers
-        self._config_lock = threading.Lock()
         self.load_servers_config()
         if not self.config_file.exists():
             self.write_servers_config()
@@ -220,15 +219,17 @@ class ServerCRUD:
 
     def load_servers_config(self) -> None:
         """載入伺服器設定"""
-        with self._config_lock:
+        with self.operation_lock:
             try:
                 data = read_json(self.config_file)
                 if data is not None:
-                    self.servers.clear()
                     valid_keys = {f.name for f in fields(ServerConfig)}
+                    new_servers: dict[str, ServerConfig] = {}
                     for name, config_data in data.items():
                         filtered_data = {k: v for k, v in config_data.items() if k in valid_keys}
-                        self.servers[name] = ServerConfig(**filtered_data)
+                        new_servers[name] = ServerConfig(**filtered_data)
+                    self.servers.clear()
+                    self.servers.update(new_servers)
                 else:
                     logger.warning("伺服器設定檔為空或無法解析")
             except Exception as exc:
@@ -241,10 +242,10 @@ class ServerCRUD:
         Returns:
             成功寫入時回傳 True，失敗時回傳 False
         """
-        with self._config_lock:
+        with self.operation_lock:
             try:
                 data: dict[str, dict[str, Any]] = {}
-                for name, config in self.servers.items():
+                for name, config in list(self.servers.items()):
                     if is_dataclass(config) and not isinstance(config, type):
                         raw_dict = asdict(config)
 

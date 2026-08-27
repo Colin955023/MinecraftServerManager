@@ -41,6 +41,7 @@ class _FakeProcess:
 
     def __init__(self) -> None:
         self.return_code: int | None = None
+        self.hang_on_stop: bool = False
         self.stdout = io.StringIO()
         self.stdin = _Input(self)
         self.readyReadStandardOutput = _Signal()
@@ -53,13 +54,14 @@ class _FakeProcess:
     def poll(self) -> int | None:
         return self.return_code
 
-    def wait(self, timeout: float) -> int:
-        if self.return_code is None:
+    def wait(self, timeout: float = 0.0) -> int:
+        if self.hang_on_stop or self.return_code is None:
             raise subprocess.TimeoutExpired("fake-server", timeout)
         return self.return_code
 
     def terminate(self) -> None:
-        self.return_code = 0
+        if not self.hang_on_stop:
+            self.return_code = 0
 
     def kill(self) -> None:
         self.return_code = -9
@@ -141,3 +143,23 @@ def test_runtime_rejects_server_path_outside_root(tmp_path: Path) -> None:
 
     assert result.failed
     assert result.title == "伺服器路徑無效"
+
+
+def test_runtime_force_stop_invokes_kill_process_tree(tmp_path: Path, monkeypatch: Any) -> None:
+    killed_pids: list[int] = []
+    monkeypatch.setattr(runtime_module.SystemUtils, "kill_process_tree", lambda pid: killed_pids.append(pid))
+    runtime, process = _make_runtime(tmp_path, monkeypatch)
+
+    assert runtime.start("demo").success
+    process.hang_on_stop = True
+    assert runtime.stop("demo")
+    assert process.pid in killed_pids
+
+
+def test_runtime_start_prevents_concurrent_duplicate_start(tmp_path: Path, monkeypatch: Any) -> None:
+    runtime, _process = _make_runtime(tmp_path, monkeypatch)
+
+    assert runtime.start("demo").success
+    duplicate = runtime.start("demo")
+    assert duplicate.failed
+    assert duplicate.title == "伺服器已在執行"

@@ -12,7 +12,7 @@ import tempfile
 import uuid
 import zipfile
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -58,20 +58,22 @@ class ServerBackupManager:
             備份成功回傳 True，失敗回傳 False
         """
         temp_backup_file: Path | None = None
+        lock = getattr(self.server_crud, "operation_lock", nullcontext())
         try:
-            if self.server_runtime.observe(server_name).is_running:
-                logger.error(f"備份失敗：伺服器 {server_name} 正在執行中，無法建立一致的備份")
-                return False
+            with lock:
+                if self.server_runtime.observe(server_name).is_running:
+                    logger.error(f"備份失敗：伺服器 {server_name} 正在執行中，無法建立一致的備份")
+                    return False
 
-            config = self.server_crud.servers.get(server_name)
-            if not config:
-                logger.error(f"備份失敗：找不到伺服器 {server_name}")
-                return False
+                config = self.server_crud.servers.get(server_name)
+                if not config:
+                    logger.error(f"備份失敗：找不到伺服器 {server_name}")
+                    return False
 
-            server_path = Path(config.path)
-            if not server_path.exists() or not server_path.is_dir():
-                logger.error(f"備份失敗：伺服器路徑不存在 {server_path}")
-                return False
+                server_path = Path(config.path)
+                if not server_path.exists() or not server_path.is_dir():
+                    logger.error(f"備份失敗：伺服器路徑不存在 {server_path}")
+                    return False
 
             backup_dir = self._get_backup_dir(config)
             timestamp = datetime.datetime.now().strftime(_MANAGED_TIMESTAMP_FORMAT)
@@ -204,12 +206,14 @@ class ServerBackupManager:
         """
         staging_path: Path | None = None
         rollback_path: Path | None = None
+        lock = getattr(self.server_crud, "operation_lock", nullcontext())
         try:
-            if self.server_runtime.observe(server_name).is_running:
-                logger.error(f"還原失敗：伺服器 {server_name} 正在執行中，無法還原")
-                return False
+            with lock:
+                if self.server_runtime.observe(server_name).is_running:
+                    logger.error(f"還原失敗：伺服器 {server_name} 正在執行中，無法還原")
+                    return False
 
-            config = self.server_crud.servers.get(server_name)
+                config = self.server_crud.servers.get(server_name)
             if not config:
                 logger.error(f"還原失敗：找不到伺服器 {server_name}")
                 return False

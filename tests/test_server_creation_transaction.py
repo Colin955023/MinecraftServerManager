@@ -347,3 +347,32 @@ def test_orphan_recovery_preserves_registered_instance_and_removes_marker(tmp_pa
 
     assert final_path.is_dir()
     assert not marker.exists()
+
+
+def test_orphan_recovery_cleans_tombstone_and_restore_directories(tmp_path) -> None:
+    crud = ServerCRUD(str(tmp_path))
+    tombstone = tmp_path / ".msm-delete-12345678"
+    restore_dir = tmp_path / ".demo.restore-abcdef"
+    tombstone.mkdir()
+    restore_dir.mkdir()
+
+    CreateServerJourney(crud, _FakeLoader())
+
+    assert not tombstone.exists()
+    assert not restore_dir.exists()
+
+
+def test_creation_transaction_serializes_with_config_reload(tmp_path) -> None:
+    crud = ServerCRUD(str(tmp_path))
+    loader = _FakeLoader()
+    journey = CreateServerJourney(crud, loader)
+    plan = journey.plan(_config())
+
+    # 模擬在同一 servers_root 下，另一個 CRUD 實例觸發 load_servers_config
+    crud2 = ServerCRUD(str(tmp_path))
+    crud2.load_servers_config()
+
+    result = journey.execute(plan)
+    assert result.status == "completed"
+    assert "demo" in crud.servers
+    assert "demo" in crud2.servers

@@ -167,16 +167,6 @@ class ServerRuntime:
             return ServerOperationResult(
                 success=False, title="啟動失敗", message=f"不支援的啟動意圖: {intent}", server_name=server_name
             )
-        with self._lock:
-            existing = self._records.get(server_name)
-            if existing is not None and self._record_is_running(existing):
-                return ServerOperationResult(
-                    success=False,
-                    title="伺服器已在執行",
-                    message=f"伺服器 {server_name} 已在執行",
-                    server_name=server_name,
-                )
-            self._records.pop(server_name, None)
         if server_name not in self.server_crud.servers:
             return ServerOperationResult(
                 success=False, title="伺服器未找到", message=f"找不到伺服器: {server_name}", server_name=server_name
@@ -190,10 +180,31 @@ class ServerRuntime:
                 success=False, title="啟動失敗", message=f"無法解析伺服器路徑: {server_name}", server_name=server_name
             )
 
+        with self._lock:
+            existing = self._records.get(server_name)
+            if existing is not None and (self._record_is_running(existing) or existing.state == "starting"):
+                return ServerOperationResult(
+                    success=False,
+                    title="伺服器已在執行",
+                    message=f"伺服器 {server_name} 已在執行或啟動中",
+                    server_name=server_name,
+                )
+            self._records[server_name] = _RuntimeRecord(
+                name=server_name,
+                path=server_path,
+                config=config,
+                intent=intent,
+                process=None,
+                pid=0,
+                created_at=time.time(),
+                state="starting",
+            )
+
         process: Any | None = None
         try:
             inspection = self._inspect_server(config, server_path)
             if not inspection.launchable:
+                self._cleanup_failed_process(server_name, server_path, None)
                 missing = ", ".join(inspection.missing_files) or inspection.error or "可執行的啟動目標"
                 return ServerOperationResult(
                     success=False,
@@ -203,6 +214,7 @@ class ServerRuntime:
                 )
             command, prepared = self._build_command(config, server_path, inspection)
             if not command:
+                self._cleanup_failed_process(server_name, server_path, None)
                 return ServerOperationResult(
                     success=False,
                     title="啟動命令未找到",
@@ -211,12 +223,14 @@ class ServerRuntime:
                 )
             current = self._inspect_server(config, server_path)
             if current.revision != prepared.revision:
+                self._cleanup_failed_process(server_name, server_path, None)
                 return ServerOperationResult(
                     success=False, title="伺服器內容已變更", message="啟動前內容已變更，請重試", server_name=server_name
                 )
             process = self._process_factory(command, str(server_path.resolve()))
             process.start()
             if hasattr(process, "waitForStarted") and not process.waitForStarted(3000):
+                self._cleanup_failed_process(server_name, server_path, process)
                 return ServerOperationResult(
                     success=False,
                     title="啟動失敗",
@@ -355,12 +369,14 @@ class ServerRuntime:
             record.process.terminate()
             if self._wait_for_exit(record.process, 5):
                 return True
-            pid = self._process_pid(record.process)
+            pid = self._process_pid(record.process) or record.pid
+            if pid:
+                SystemUtils.kill_process_tree(pid)
             if isinstance(record.process, QtCore.QProcess):
                 record.process.kill()
                 record.process.waitForFinished(1000)
-            else:
-                SystemUtils.kill_process_tree(pid)
+            elif hasattr(record.process, "kill"):
+                record.process.kill()
             return not self._record_is_running(record)
         except (OSError, BrokenPipeError, SubprocessUtils.TimeoutExpired) as exc:
             logger.warning(f"停止伺服器 {server_name} 時改用強制終止: {exc}")
