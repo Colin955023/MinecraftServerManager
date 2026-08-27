@@ -112,6 +112,7 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
 
     current_app_exe = tmp_path / "current_app.exe"
     monkeypatch.setattr(update_checker_module.sys, "executable", str(current_app_exe))
+    monkeypatch.setattr(update_checker_module.RuntimePaths, "is_packaged", staticmethod(lambda: True))
 
     assert UpdateChecker._apply_update(new_exe_path) is True
 

@@ -674,22 +674,8 @@ class MainWindow(FluentWindow):
 
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
         """將 UI request 交給交易式 core 匯入 owner"""
-        try:
-            inspection = self.server_import.inspect(source_path, server_name)
-        except Exception as exc:
-            UIUtils.show_message("匯入失敗", str(exc), self.root, message_level="error")
-            return
-        if not inspection.committable:
-            UIUtils.show_message(
-                "無法匯入",
-                "\n".join(inspection.warnings) or "候選不可提交",
-                self.root,
-                message_level="warning",
-            )
-            return
-
         progress_dialog = ProgressDialog(self.root, f"正在匯入 {server_name}...", show_cancel=False)
-        progress_dialog.status_label.setText("大型匯入可能需要較長時間，請稍候")
+        progress_dialog.status_label.setText("正在檢查匯入內容，大型檔案可能需要較長時間，請稍候")
         progress_dialog.show()
 
         def _close_progress_dialog() -> None:
@@ -698,6 +684,10 @@ class MainWindow(FluentWindow):
                 progress_dialog.deleteLater()
 
         def _import_task():
+            inspection = self.server_import.inspect(source_path, server_name)
+            if not inspection.committable:
+                return inspection, None
+
             def _progress(percent: int, message: str) -> None:
                 def _update() -> None:
                     with suppress(Exception):
@@ -706,7 +696,7 @@ class MainWindow(FluentWindow):
 
                 run_on_ui_thread(_update)
 
-            return self.server_import.execute(inspection, progress_callback=_progress)
+            return inspection, self.server_import.execute(inspection, progress_callback=_progress)
 
         def _on_done(outcome: WorkOutcome) -> None:
             _close_progress_dialog()
@@ -715,7 +705,18 @@ class MainWindow(FluentWindow):
                 UIUtils.show_message("匯入失敗", f"匯入伺服器失敗: {err}", self.root, message_level="error")
                 return
 
-            result = outcome.value
+            inspection, result = outcome.value
+            if not inspection.committable:
+                UIUtils.show_message(
+                    "無法匯入",
+                    "\n".join(inspection.warnings) or "候選不可提交",
+                    self.root,
+                    message_level="warning",
+                )
+                return
+            if result is None:
+                UIUtils.show_message("匯入失敗", "匯入未產生結果", self.root, message_level="error")
+                return
             if not result.completed or result.config is None:
                 cleanup = "" if result.cleanup_complete else "\n部分檔案無法自動清理，請依診斷編號檢查"
                 UIUtils.show_message(

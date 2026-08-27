@@ -42,7 +42,7 @@ class UpdateChecker:
         """套用更新：建立並執行用來覆寫當前執行檔的批次腳本"""
         try:
             current_exe = Path(sys.executable)
-            if not current_exe.name.lower().endswith(".exe"):
+            if not RuntimePaths.is_packaged() or not current_exe.name.lower().endswith(".exe"):
                 logger.error("目前環境非打包之執行檔，無法進行自我替換更新")
                 return False
 
