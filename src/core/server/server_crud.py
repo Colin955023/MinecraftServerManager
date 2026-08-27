@@ -204,7 +204,6 @@ class ServerCRUD:
             ):
                 try:
                     tombstone_path.replace(server_path)
-                    tombstone_path = None
                 except OSError as rollback_error:
                     logger.exception(f"刪除失敗後無法復原伺服器目錄: {rollback_error}")
             if not config_committed and removed_config is not None and server_name not in self.servers:
