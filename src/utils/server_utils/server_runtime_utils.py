@@ -586,8 +586,29 @@ class ServerCommands:
         if changed:
             content = content.removeprefix("\ufeff")
         new_lines = []
+        memory_min = getattr(server_config, "memory_min_mb", None)
+        memory_max = getattr(server_config, "memory_max_mb", None)
         for line in content.splitlines(keepends=True):
             new_line, line_changed = ServerCommands.replace_java_command_line(line, java_exe)
+            if line_changed or ServerCommands._java_command_tokens_from_line(line):
+                body, newline = ServerCommands._split_line_ending(new_line)
+                if memory_min:
+                    body, min_count = re.subn(
+                        r"(?i)(?<!\S)-Xms\d+(?:[KMG])?",
+                        f"-Xms{int(memory_min)}M",
+                        body,
+                        count=1,
+                    )
+                    line_changed = line_changed or min_count > 0
+                if memory_max:
+                    body, max_count = re.subn(
+                        r"(?i)(?<!\S)-Xmx\d+(?:[KMG])?",
+                        f"-Xmx{int(memory_max)}M",
+                        body,
+                        count=1,
+                    )
+                    line_changed = line_changed or max_count > 0
+                new_line = body + newline
             changed = changed or line_changed
             new_lines.append(new_line)
         if not changed:
