@@ -68,9 +68,9 @@ def _manage_service(server_crud: Any, *, server_backup: Any | None = None) -> Ma
 
 def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> None:
     server_data = [
-        ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
+        ["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"],
         [],
-        ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
+        ["Beta", "1.20.6", "Forge", "已停止", "0 B", "未備份", "servers\\Beta"],
     ]
 
     server_order, server_rows = ManageServerService._build_server_tree_payload(server_data)
@@ -82,8 +82,8 @@ def test_build_server_tree_payload_skips_empty_rows_and_preserves_order() -> Non
 
 def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
     server_data = [
-        ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
-        ["Alpha", "1.21.1", "Fabric", "已停止", "未備份", "servers\\Alpha"],
+        ["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"],
+        ["Alpha", "1.21.1", "Fabric", "已停止", "0 B", "未備份", "servers\\Alpha"],
     ]
 
     server_order, server_rows = ManageServerService._build_server_tree_payload(server_data)
@@ -94,8 +94,8 @@ def test_build_server_tree_payload_last_duplicate_name_wins_values() -> None:
 
 def test_build_server_refresh_payload_combines_signature_order_and_rows() -> None:
     server_data = [
-        ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
-        ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
+        ["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"],
+        ["Beta", "1.20.6", "Forge", "已停止", "0 B", "未備份", "servers\\Beta"],
     ]
 
     payload = ManageServerService._build_server_refresh_payload(server_data)
@@ -154,10 +154,11 @@ def test_build_server_display_row_formats_unknown_mc_version_with_loader_version
         config=config,
         status="已停止",
         backup_status="未備份",
+        server_size="0 B",
         display_path="servers\\Alpha",
     )
 
-    assert row == ["Alpha", "未知", "Fabric v0.16.10", "已停止", "未備份", "servers\\Alpha"]
+    assert row == ["Alpha", "未知", "Fabric v0.16.10", "已停止", "0 B", "未備份", "servers\\Alpha"]
 
 
 def test_build_server_display_row_formats_vanilla_loader() -> None:
@@ -175,10 +176,24 @@ def test_build_server_display_row_formats_vanilla_loader() -> None:
         config=config,
         status="運行中",
         backup_status="已備份",
+        server_size="0 B",
         display_path="servers\\Beta",
     )
 
-    assert row == ["Beta", "1.21.1", "1.21.1", "運行中", "已備份", "servers\\Beta"]
+    assert row == ["Beta", "1.21.1", "1.21.1", "運行中", "0 B", "已備份", "servers\\Beta"]
+
+
+def test_server_size_counts_all_files_and_is_recomputed_on_refresh(tmp_path) -> None:
+    server_path = tmp_path / "Alpha"
+    (server_path / "world" / "region").mkdir(parents=True)
+    (server_path / "logs").mkdir()
+    (server_path / "world" / "region" / "r.0.0.mca").write_bytes(b"12345")
+    (server_path / "server.properties").write_bytes(b"123")
+
+    assert ManageServerService._get_server_size(str(server_path)) == "8 B"
+
+    (server_path / "logs" / "latest.log").write_bytes(b"6789")
+    assert ManageServerService._get_server_size(str(server_path)) == "12 B"
 
 
 def test_begin_refresh_returns_monotonic_generation() -> None:
@@ -200,7 +215,7 @@ def test_accept_projection_rejects_stale_generation() -> None:
     gen2 = service.begin_refresh()
 
     payload = ManageServerService._build_server_refresh_payload(
-        [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
+        [["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"]]
     )
 
     assert service.accept_projection(gen1, payload, "Alpha") is None
@@ -216,7 +231,7 @@ def test_accept_projection_returns_no_changes_when_unchanged() -> None:
 
     gen1 = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
-        [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
+        [["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"]]
     )
 
     plan1 = service.accept_projection(gen1, payload, "Alpha")
@@ -236,8 +251,8 @@ def test_accept_projection_retains_selection_when_present() -> None:
     gen = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
         [
-            ["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"],
-            ["Beta", "1.20.6", "Forge", "已停止", "未備份", "servers\\Beta"],
+            ["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"],
+            ["Beta", "1.20.6", "Forge", "已停止", "0 B", "未備份", "servers\\Beta"],
         ]
     )
 
@@ -252,7 +267,7 @@ def test_accept_projection_clears_selection_when_deleted() -> None:
 
     gen = service.begin_refresh()
     payload = ManageServerService._build_server_refresh_payload(
-        [["Alpha", "1.21", "Fabric", "運行中", "已備份", "servers\\Alpha"]]
+        [["Alpha", "1.21", "Fabric", "運行中", "0 B", "已備份", "servers\\Alpha"]]
     )
 
     plan = service.accept_projection(gen, payload, "DeletedServer")

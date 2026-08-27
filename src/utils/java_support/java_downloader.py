@@ -53,7 +53,7 @@ class JavaDownloader:
 
         if not JavaDownloader._is_winget_available():
             raise JavaInstallError(
-                "無法呼叫 winget 工具這\n可能是因為：\n"
+                "無法呼叫 winget 工具，這可能是因為：\n"
                 "1. 系統未安裝「應用程式安裝員 (App Installer)」\n"
                 "2. 您的 Windows 版本過舊\n"
                 "3. 環境變數中缺少 %LocalAppData%\\Microsoft\\WindowsApps\n"

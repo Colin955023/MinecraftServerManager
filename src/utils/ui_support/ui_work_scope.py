@@ -298,4 +298,4 @@ class UIWorkScope(QtCore.QObject):
         self.drain()
 
 
-__all__ = ["UIWorkScope"]
+__all__ = ["UIWorkScope", "WorkOutcome"]

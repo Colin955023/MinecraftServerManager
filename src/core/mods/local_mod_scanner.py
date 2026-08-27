@@ -14,13 +14,13 @@ import orjson
 
 from src.core import ProviderIdentityService
 from src.models import (
-    MODRINTH_HASH_ALGORITHM,
     LocalModInfo,
     ModPlatform,
     ModStatus,
     ProviderIdentityEvidence,
 )
 from src.utils import (
+    MODRINTH_PREFERRED_HASH_ALGORITHM,
     ModIndexManager,
     ProviderIdentityPersistenceError,
     clean_mod_version,
@@ -338,8 +338,8 @@ class LocalModScanner:
             current_hash = ""
             hash_algorithm = ""
             if platform == ModPlatform.MODRINTH and platform_id:
-                current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_HASH_ALGORITHM)
-                hash_algorithm = MODRINTH_HASH_ALGORITHM if current_hash else ""
+                current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_PREFERRED_HASH_ALGORITHM)
+                hash_algorithm = MODRINTH_PREFERRED_HASH_ALGORITHM if current_hash else ""
             file_stat = file_path.stat()
             mod_info = LocalModInfo(
                 id=base_name,

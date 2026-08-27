@@ -163,3 +163,39 @@ def test_runtime_start_prevents_concurrent_duplicate_start(tmp_path: Path, monke
     duplicate = runtime.start("demo")
     assert duplicate.failed
     assert duplicate.title == "伺服器已在執行"
+
+
+def test_runtime_file_not_found_failure_releases_starting_reservation(tmp_path: Path, monkeypatch: Any) -> None:
+    runtime, _process = _make_runtime(tmp_path, monkeypatch)
+    monkeypatch.setattr(runtime_module.SystemUtils, "kill_java_processes_in_path", lambda *_args: None)
+
+    def missing_process(_command: list[str], _cwd: str) -> Any:
+        raise FileNotFoundError("simulated executable disappearance")
+
+    runtime._process_factory = missing_process
+
+    result = runtime.start("demo")
+
+    assert result.failed
+    assert result.title == "啟動失敗"
+    assert runtime.observe("demo").state == "stopped"
+    assert runtime.begin_maintenance("demo") is True
+
+
+def test_runtime_rejects_start_during_maintenance(tmp_path: Path, monkeypatch: Any) -> None:
+    runtime, _process = _make_runtime(tmp_path, monkeypatch)
+
+    assert runtime.begin_maintenance("demo") is True
+    blocked = runtime.start("demo")
+    assert blocked.failed
+    assert blocked.title == "伺服器正在維護"
+
+    runtime.end_maintenance("demo")
+    assert runtime.start("demo").success
+
+
+def test_runtime_rejects_maintenance_while_server_is_running(tmp_path: Path, monkeypatch: Any) -> None:
+    runtime, _process = _make_runtime(tmp_path, monkeypatch)
+
+    assert runtime.start("demo").success
+    assert runtime.begin_maintenance("demo") is False

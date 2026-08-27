@@ -241,7 +241,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             server_path = Path(self.config.path)
             if server_path.exists():
                 if (
-                    str(updated_config.loader_type or "").lower() == "forge"
+                    str(updated_config.loader_type or "").lower() in ("forge", "neoforge")
                     and (server_path / "user_jvm_args.txt").exists()
                 ):
                     ServerCommands.update_forge_user_jvm_args(server_path, updated_config)

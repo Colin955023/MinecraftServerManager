@@ -7,7 +7,7 @@
 3. `src/{core,models,ui,utils}/__init__.py` 的 lazy export 目標必須真實存在
 4. 每個 lazy export 必須在 `src/` runtime code 中有實際 consumer
 
-只掃描 `src/`；測試可直接匯入實作模組，以驗證 `src/` 的真實行為。
+只掃描 `src/`；測試可直接匯入實作模組，以驗證 `src/` 的真實行為
 
 執行：uv run scripts/check_import_boundaries.py
 """

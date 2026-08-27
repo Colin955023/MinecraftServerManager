@@ -1,4 +1,4 @@
-"""壓縮檔安全處理工具。"""
+"""壓縮檔安全處理工具"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ SAFE_ZIP_MAX_COMPRESSION_RATIO = 200
 
 
 def _sanitize_archive_member_name(member_name: str) -> Path | None:
-    """清理壓縮檔內部名稱，拒絕絕對路徑與父目錄參考。"""
+    """清理壓縮檔內部名稱，拒絕絕對路徑與父目錄參考"""
     try:
         if not member_name:
             return None

@@ -1,9 +1,10 @@
-name: "Google OSS 安全性打分"
+name: "OpenSSF Scorecard 安全性評分"
 
 on:
   push:
     branches:
       - master
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1'
 

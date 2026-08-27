@@ -171,6 +171,7 @@ class MessageDialog(ModalMSFluentWindow):
         self.viewLayout.addWidget(self.title_label)
 
         self.content_label = BodyLabel(message, self.widget)
+        self.content_label.setTextFormat(Qt.TextFormat.PlainText)
         self.content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.content_label.setWordWrap(True)
         self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

@@ -723,10 +723,12 @@ class ServerMonitorWindow(MSFluentWindow):
 
     def show(self) -> None:
         """建立並顯示監控視窗，啟動相關監控服務"""
+        was_visible = self.isVisible()
         if getattr(self, "_is_created", False) is False:
             self.create_window()
             self._is_created = True
-        center_window(self, self.parent if isinstance(self.parent, QWidget) else None)
+        if not was_visible and not self.isMaximized() and not self.isMinimized():
+            center_window(self, self.parent if isinstance(self.parent, QWidget) else None)
         super().show()
         if self.isVisible() and not self.is_monitoring:
             self.start_monitoring()

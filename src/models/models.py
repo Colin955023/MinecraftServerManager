@@ -20,8 +20,6 @@ from src.utils import (
     normalize_identifier,
 )
 
-MODRINTH_HASH_ALGORITHM = "sha512"
-
 type JSONValue = dict[str, Any] | list[Any]
 
 

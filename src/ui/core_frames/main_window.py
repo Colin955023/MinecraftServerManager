@@ -169,6 +169,7 @@ class MainWindow(FluentWindow):
 
     def __init__(self):
         super().__init__()
+        self.setMicaEffectEnabled(False)
         self.root = self
         self.scope = UIWorkScope(self)
         self.setProperty("_primary_window", True)

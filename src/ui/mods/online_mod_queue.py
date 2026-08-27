@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import traceback
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -141,11 +140,6 @@ class ModManagementQueueOps:
                 dialog.accept()
             elif hasattr(dialog, "close"):
                 dialog.close()
-
-    @staticmethod
-    def _format_single_line_text(value: Any) -> str:
-        """將多行或多空白文字正規化為單行"""
-        return re.sub(r"\s+", " ", str(value or "")).strip()
 
     def on_online_browse_filters_changed(self, _value: str) -> None:
         """
@@ -366,10 +360,6 @@ class ModManagementQueueOps:
     def _get_online_sort_label(self) -> str:
         """取得目前線上瀏覽使用的排序顯示文字"""
         return str(self.controller.online_browse_presenter.browse_sort_var.get() or "相關性").strip() or "相關性"
-
-    def _format_online_result_description(self, mod: Any) -> str:
-        """格式化瀏覽列表描述欄位"""
-        return self._format_single_line_text(getattr(mod, "description", ""))
 
     def _get_selected_online_mod_context(self) -> tuple[bool, str, Any | None]:
         """取得目前線上模組選取狀態、project_id 與模組物件"""

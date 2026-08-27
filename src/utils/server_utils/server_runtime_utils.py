@@ -231,7 +231,7 @@ class ServerCommands:
     @staticmethod
     def update_forge_user_jvm_args(server_path: Path, config: Any) -> None:
         """
-        更新 Forge user_jvm_args.txt 的 JVM 與記憶體參數
+        更新 Forge / NeoForge user_jvm_args.txt 的 JVM 與記憶體參數
 
         Args:
             server_path: 伺服器資料夾

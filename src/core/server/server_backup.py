@@ -58,6 +58,13 @@ class ServerBackupManager:
             備份成功回傳 True，失敗回傳 False
         """
         temp_backup_file: Path | None = None
+        maintenance_acquired = False
+        begin_maintenance = getattr(self.server_runtime, "begin_maintenance", None)
+        if callable(begin_maintenance):
+            maintenance_acquired = bool(begin_maintenance(server_name))
+            if not maintenance_acquired:
+                logger.error(f"備份失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
+                return False
         lock = getattr(self.server_crud, "operation_lock", nullcontext())
         try:
             with lock:
@@ -139,6 +146,11 @@ class ServerBackupManager:
                     temp_backup_file.unlink(missing_ok=True)
             logger.exception(f"伺服器 {server_name} 備份時發生錯誤: {e}")
             return False
+        finally:
+            if maintenance_acquired:
+                end_maintenance = getattr(self.server_runtime, "end_maintenance", None)
+                if callable(end_maintenance):
+                    end_maintenance(server_name)
 
     def list_backups(self, server_name: str, backup_dir_override: Path | None = None) -> list[dict[str, Any]]:
         """
@@ -206,6 +218,13 @@ class ServerBackupManager:
         """
         staging_path: Path | None = None
         rollback_path: Path | None = None
+        maintenance_acquired = False
+        begin_maintenance = getattr(self.server_runtime, "begin_maintenance", None)
+        if callable(begin_maintenance):
+            maintenance_acquired = bool(begin_maintenance(server_name))
+            if not maintenance_acquired:
+                logger.error(f"還原失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
+                return False
         lock = getattr(self.server_crud, "operation_lock", nullcontext())
         try:
             with lock:
@@ -250,9 +269,8 @@ class ServerBackupManager:
                     backup_file,
                     staging_path,
                     progress_callback=_on_extract_progress,
-                    max_total_uncompressed_bytes=None,
-                    max_member_uncompressed_bytes=None,
-                    max_compression_ratio=None,
+                    max_total_uncompressed_bytes=required_bytes,
+                    max_member_uncompressed_bytes=required_bytes,
                 )
             else:
                 safe_extract_zip(backup_file, staging_path, progress_callback=_on_extract_progress)
@@ -303,6 +321,10 @@ class ServerBackupManager:
                 delete_within(staging_path.parent, staging_path)
             if rollback_path is not None:
                 logger.error(f"還原回滾目錄仍存在，為避免資料遺失不自動刪除: {rollback_path}")
+            if maintenance_acquired:
+                end_maintenance = getattr(self.server_runtime, "end_maintenance", None)
+                if callable(end_maintenance):
+                    end_maintenance(server_name)
 
     def _get_backup_dir(self, config: ServerConfig) -> Path:
         """取得伺服器的備份存放目錄"""
@@ -314,7 +336,7 @@ class ServerBackupManager:
 
     @staticmethod
     def _parse_backup_timestamp(value: str) -> tuple[str, datetime.datetime | None]:
-        """解析目前與既有備份檔名中的時間戳。"""
+        """解析目前與既有備份檔名中的時間戳"""
         timestamp_str = value.split("-", 1)[0]
         timestamp_format = _SUPPORTED_TIMESTAMP_FORMATS.get(len(timestamp_str))
         if timestamp_format is None or not timestamp_str.isdigit():
@@ -325,7 +347,7 @@ class ServerBackupManager:
             return timestamp_str, None
 
     def _is_managed_backup(self, config: ServerConfig, server_name: str, backup_file: Path) -> bool:
-        """判斷備份是否位於本程式管理的備份目錄且符合命名格式。"""
+        """判斷備份是否位於本程式管理的備份目錄且符合命名格式"""
         backup_dir = self._get_backup_dir(config).resolve(strict=False)
         resolved_backup = backup_file.resolve(strict=False)
         if resolved_backup.parent != backup_dir:

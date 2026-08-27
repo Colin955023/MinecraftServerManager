@@ -126,3 +126,13 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     assert ":success" in bat_content
 
     assert popen_calls == [[str(bat_script_path)]]
+
+
+def test_markdown_to_safe_text_preserves_code_text() -> None:
+    rendered = UpdateChecker._markdown_to_safe_text(
+        "Use `server.jar` with:\n```powershell\njava -jar server.jar nogui\n```"
+    )
+
+    assert "server.jar" in rendered
+    assert "java -jar server.jar nogui" in rendered
+    assert "`" not in rendered

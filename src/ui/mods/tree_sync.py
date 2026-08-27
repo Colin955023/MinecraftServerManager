@@ -18,6 +18,8 @@ from src.ui import ModListRow
 from src.ui import mod_management_logger as logger
 from src.utils import Colors, resolve_color
 
+from .mod_presentation import format_single_line_text
+
 if TYPE_CHECKING:
     from src.ui import ModManagementFrame
 
@@ -159,7 +161,7 @@ class ModManagementTreeSyncOps:
                 display_version = "未知"
 
             raw_desc = self._get_enhanced_attr(enhanced, "description", mod.description or "")
-            display_description = self.controller.queue_ops._format_single_line_text(raw_desc)
+            display_description = format_single_line_text(raw_desc)
 
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
             mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
@@ -233,7 +235,7 @@ class ModManagementTreeSyncOps:
             f"{downloads:,}" if downloads > 0 else "N/A",
             str(getattr(mod, "source", "modrinth") or "modrinth").title(),
             self._format_online_environment_text(mod),
-            self.controller.queue_ops._format_online_result_description(mod),
+            format_single_line_text(getattr(mod, "description", "")),
         )
 
     def _clear_online_mods(self) -> None:

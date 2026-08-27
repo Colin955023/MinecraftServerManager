@@ -141,6 +141,17 @@ class ServerCRUD:
         server_path: Path | None = None
         removed_config: ServerConfig | None = None
         config_committed = False
+        maintenance_acquired = False
+        begin_maintenance = getattr(server_runtime, "begin_maintenance", None)
+        if callable(begin_maintenance):
+            maintenance_acquired = bool(begin_maintenance(server_name))
+            if not maintenance_acquired:
+                return ServerOperationResult(
+                    success=False,
+                    title="無法刪除",
+                    message=f"伺服器 {server_name} 正在執行或進行其他維護操作",
+                    server_name=server_name,
+                )
         try:
             with self.operation_lock:
                 if server_name not in self.servers:
@@ -218,6 +229,11 @@ class ServerCRUD:
                 message=f"無法刪除伺服器 {server_name} 錯誤: {e}",
                 server_name=server_name,
             )
+        finally:
+            if maintenance_acquired:
+                end_maintenance = getattr(server_runtime, "end_maintenance", None)
+                if callable(end_maintenance):
+                    end_maintenance(server_name)
 
     def load_servers_config(self) -> None:
         """載入伺服器設定"""

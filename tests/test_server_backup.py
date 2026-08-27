@@ -237,6 +237,8 @@ def test_managed_backup_restore_uses_managed_archive_policy(tmp_path: Path, monk
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
-    assert captured["max_total_uncompressed_bytes"] is None
-    assert captured["max_member_uncompressed_bytes"] is None
-    assert captured["max_compression_ratio"] is None
+    with zipfile.ZipFile(backup_file, "r") as archive:
+        required_bytes = sum(max(0, int(member.file_size)) for member in archive.infolist())
+    assert captured["max_total_uncompressed_bytes"] == required_bytes
+    assert captured["max_member_uncompressed_bytes"] == required_bytes
+    assert "max_compression_ratio" not in captured

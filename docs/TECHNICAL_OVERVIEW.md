@@ -72,7 +72,7 @@ uv run scripts\check_import_boundaries.py
 | `server_creation.py` | 交易式建立與補償 |
 | `server_import.py` | 資料夾／ZIP 匯入、探索、重新偵測 |
 | `server_inspector.py` | 唯讀內容檢查 |
-| `server_runtime.py` | 統一啟動與首次初始化生命週期 |
+| `server_runtime.py` | 統一啟動與首次初始化生命週期；協調備份、還原、刪除期間的維護保留 |
 | `server_properties.py` | `server.properties` 唯一真相來源 |
 | `server_backup.py` | 原子 ZIP 備份、交易式快照還原與失敗回滾 |
 

@@ -48,7 +48,7 @@ def summarize_text(value: str | None, max_length: int) -> str:
     Returns:
         壓縮後的文字
     """
-    normalized = re.sub(r"\s+", " ", str(value or "").strip())
+    normalized = format_single_line_text(value)
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max(0, max_length - 3)].rstrip() + "..."
@@ -269,6 +269,19 @@ def build_server_install_warning_line(server_side: Any) -> str | None:
     return None
 
 
+def format_single_line_text(value: Any) -> str:
+    """
+    將多行或多空白文字正規化為單行
+
+    Args:
+        value: 待正規化的字串或任意值
+
+    Returns:
+        正規化後的單行文字
+    """
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
 __all__ = [
     "build_client_install_reminder_line",
     "build_server_install_blocking_reason",
@@ -276,6 +289,7 @@ __all__ = [
     "format_online_version_report",
     "format_provider_label",
     "format_published_at",
+    "format_single_line_text",
     "get_online_version_status_text",
     "resolve_project_page_url",
     "sort_online_versions_for_server",

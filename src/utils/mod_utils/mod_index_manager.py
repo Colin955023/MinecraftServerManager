@@ -13,8 +13,9 @@ import orjson
 
 from src.utils import HashUtils, atomic_write_json, atomic_write_text, get_logger
 
+from .mod_version_filtering import MODRINTH_PREFERRED_HASH_ALGORITHM
+
 logger = get_logger().bind(component="ModIndexManager")
-DEFAULT_INDEX_HASH_ALGORITHM = "sha512"
 INDEX_SCHEMA_VERSION = 2
 
 
@@ -180,7 +181,7 @@ class ModIndexManager:
             return {"dependency_plan_v1": legacy["dependency_plan_v1"]}
         return None
 
-    def get_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
+    def get_cached_hash(self, file_path: Path, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM) -> str:
         """
         取得快取的指定演算法雜湊值
 
@@ -192,7 +193,7 @@ class ModIndexManager:
             快取中的雜湊值；不存在時回傳空字串
         """
         normalized_algorithm = (
-            str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
+            str(algorithm or MODRINTH_PREFERRED_HASH_ALGORITHM).strip().lower() or MODRINTH_PREFERRED_HASH_ALGORITHM
         )
         cached = self._get_valid_entry(file_path)
         if not cached:
@@ -293,7 +294,7 @@ class ModIndexManager:
             file_hash: 計算後的雜湊值
         """
         normalized_algorithm = (
-            str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
+            str(algorithm or MODRINTH_PREFERRED_HASH_ALGORITHM).strip().lower() or MODRINTH_PREFERRED_HASH_ALGORITHM
         )
         normalized_hash = str(file_hash or "").strip().lower()
         if not normalized_hash:
@@ -307,7 +308,7 @@ class ModIndexManager:
         except Exception as e:
             logger.warning(f"無法快取檔案雜湊: {e}")
 
-    def ensure_cached_hash(self, file_path: Path, algorithm: str = DEFAULT_INDEX_HASH_ALGORITHM) -> str:
+    def ensure_cached_hash(self, file_path: Path, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM) -> str:
         """
         確保指定演算法的檔案雜湊已寫入索引，並回傳該值
 
@@ -319,7 +320,7 @@ class ModIndexManager:
             索引中的雜湊值；若尚未存在且無法計算，回傳空字串
         """
         normalized_algorithm = (
-            str(algorithm or DEFAULT_INDEX_HASH_ALGORITHM).strip().lower() or DEFAULT_INDEX_HASH_ALGORITHM
+            str(algorithm or MODRINTH_PREFERRED_HASH_ALGORITHM).strip().lower() or MODRINTH_PREFERRED_HASH_ALGORITHM
         )
         cached_hash = self.get_cached_hash(file_path, normalized_algorithm)
         if cached_hash:

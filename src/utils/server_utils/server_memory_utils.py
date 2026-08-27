@@ -105,7 +105,7 @@ class MemoryUtils:
             max_mb = total_memory_mb
             adjusted_max = True
             warnings.append(
-                f"最大記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。"
+                f"最大記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB"
             )
 
         min_mb: int | None = None
@@ -123,7 +123,7 @@ class MemoryUtils:
                 min_mb = total_memory_mb
                 adjusted_min = True
                 warnings.append(
-                    f"最小記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。"
+                    f"最小記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB"
                 )
 
             if min_mb > max_mb:

@@ -74,6 +74,7 @@ class ServerRuntime:
         self.server_inspector = server_inspector or ServerInspector()
         self._process_factory = process_factory or self._create_qprocess
         self._records: dict[str, _RuntimeRecord] = {}
+        self._maintenance_servers: set[str] = set()
         self._lock = threading.RLock()
 
     @staticmethod
@@ -181,6 +182,13 @@ class ServerRuntime:
             )
 
         with self._lock:
+            if server_name in self._maintenance_servers:
+                return ServerOperationResult(
+                    success=False,
+                    title="伺服器正在維護",
+                    message=f"伺服器 {server_name} 正在進行備份、還原或其他維護操作，請稍後再試",
+                    server_name=server_name,
+                )
             existing = self._records.get(server_name)
             if existing is not None and (self._record_is_running(existing) or existing.state == "starting"):
                 return ServerOperationResult(
@@ -267,6 +275,7 @@ class ServerRuntime:
                 success=True, message=f"伺服器 {server_name} 啟動成功，PID: {pid}", server_name=server_name
             )
         except FileNotFoundError as exc:
+            self._cleanup_failed_process(server_name, server_path, process)
             logger.exception(f"檔案路徑錯誤: {exc}")
             return ServerOperationResult(
                 success=False, title="啟動失敗", message=f"找不到啟動所需檔案: {exc}", server_name=server_name
@@ -280,6 +289,35 @@ class ServerRuntime:
                 message=f"無法啟動伺服器 {server_name}\n錯誤: {exc}",
                 server_name=server_name,
             )
+
+    def begin_maintenance(self, server_name: str) -> bool:
+        """
+        保留伺服器維護時段，防止維護期間啟動同一伺服器
+
+        Args:
+            server_name: 伺服器名稱
+
+        Returns:
+            成功保留維護時段回傳 True，若伺服器正在執行或已被保留維護時段則回傳 False
+        """
+        with self._lock:
+            if server_name in self._maintenance_servers:
+                return False
+            record = self._records.get(server_name)
+            if record is not None and record.state in {"starting", "running", "ready", "stopping"}:
+                return False
+            self._maintenance_servers.add(server_name)
+            return True
+
+    def end_maintenance(self, server_name: str) -> None:
+        """
+        結束先前取得的伺服器維護時段
+
+        Args:
+            server_name: 伺服器名稱
+        """
+        with self._lock:
+            self._maintenance_servers.discard(server_name)
 
     def observe(self, server_name: str, *, after_sequence: int = 0) -> ServerRuntimeSnapshot:
         """

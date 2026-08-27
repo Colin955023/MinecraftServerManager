@@ -41,6 +41,7 @@ def test_monitor_initial_size_never_exceeds_available_screen() -> None:
 
 
 def test_modal_msfluent_window_and_message_dialog_instantiation() -> None:
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
     from src.ui.dialogs.modal_msfluent_window import MessageDialog, ModalMSFluentWindow
@@ -55,6 +56,7 @@ def test_modal_msfluent_window_and_message_dialog_instantiation() -> None:
     assert dlg.stackedWidget.count() >= 1
     assert dlg.title_label.text() == "標題"
     assert dlg.content_label.text() == "訊息內容"
+    assert dlg.content_label.textFormat() == Qt.TextFormat.PlainText
     dlg.close()
 
 

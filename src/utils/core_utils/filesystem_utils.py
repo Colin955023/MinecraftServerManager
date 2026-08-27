@@ -1,4 +1,4 @@
-"""一般檔案系統操作工具。"""
+"""一般檔案系統操作工具"""
 
 from __future__ import annotations
 

@@ -168,7 +168,7 @@ exit /b 1
         """將遠端 Markdown 轉為純文字，避免引入 HTML 渲染面"""
         if not text:
             return ""
-        safe_text = re.sub(r"`.*?`", "", text, flags=re.DOTALL)
+        safe_text = re.sub(r"```[^\n]*\n?(.*?)```", r"\1", text, flags=re.DOTALL)
         safe_text = re.sub(r"`([^`]*)`", r"\1", safe_text)
         safe_text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", safe_text)
         safe_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe_text)

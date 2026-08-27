@@ -109,10 +109,12 @@ class ManageServerFrame(QWidget):
     @staticmethod
     def _show_existing_monitor_window(window: Any, *, bring_to_front: bool) -> None:
         if bring_to_front:
-            show_normal = getattr(window, "showNormal", None)
-            if callable(show_normal):
-                with suppress(Exception):
-                    show_normal()
+            is_minimized = getattr(window, "isMinimized", None)
+            if callable(is_minimized) and is_minimized():
+                show_normal = getattr(window, "showNormal", None)
+                if callable(show_normal):
+                    with suppress(Exception):
+                        show_normal()
             else:
                 with suppress(Exception):
                     window.show()
@@ -214,11 +216,11 @@ class ManageServerFrame(QWidget):
         list_layout.addWidget(SubtitleLabel("伺服器列表", list_card))
 
         self.server_tree = TreeWidget(list_card)
-        self.server_tree.setColumnCount(6)
-        self.server_tree.setHeaderLabels(["名稱", "版本", "載入器", "狀態", "備份狀態", "路徑"])
+        self.server_tree.setColumnCount(7)
+        self.server_tree.setHeaderLabels(["名稱", "版本", "載入器", "狀態", "伺服器大小", "備份狀態", "路徑"])
         apply_table_header_style(self.server_tree)
         self.server_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.server_tree.header().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.server_tree.header().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.server_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.server_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.server_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -639,7 +641,7 @@ class ManageServerFrame(QWidget):
         if self.server_runtime.observe(self.selected_server).is_running:
             UIUtils.show_message(
                 "警告",
-                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再刪除。",
+                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再刪除",
                 self.window(),
                 message_level="warning",
             )
@@ -676,7 +678,7 @@ class ManageServerFrame(QWidget):
         if self.server_runtime.observe(self.selected_server).is_running:
             UIUtils.show_message(
                 "警告",
-                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再備份。",
+                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再備份",
                 self.window(),
                 message_level="warning",
             )
@@ -708,7 +710,7 @@ class ManageServerFrame(QWidget):
         if self.server_runtime.observe(self.selected_server).is_running:
             UIUtils.show_message(
                 "警告",
-                f"伺服器「{self.selected_server}」正在執行中，無法還原備份。請先停止伺服器。",
+                f"伺服器「{self.selected_server}」正在執行中，無法還原備份請先停止伺服器",
                 self.window(),
                 message_level="warning",
             )

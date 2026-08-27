@@ -13,7 +13,7 @@ from typing import Any
 
 from src.core import ServerInspector, ServerRuntime
 from src.models import ServerConfig, ServerInspectionIntent
-from src.utils import get_logger
+from src.utils import format_bytes, get_logger
 
 logger = get_logger().bind(component="ManageServerService")
 
@@ -171,9 +171,34 @@ class ManageServerService:
             return minecraft_version
         return "未知"
 
+    @staticmethod
+    def _get_server_size(path: str) -> str:
+        """計算伺服器目錄下所有檔案的總大小（包含 world 以外的內容）。"""
+        total_bytes = 0
+        try:
+            server_path = Path(path)
+            if not server_path.is_dir():
+                return format_bytes(0)
+            for file_path in server_path.rglob("*"):
+                try:
+                    if file_path.is_file():
+                        total_bytes += max(0, file_path.stat().st_size)
+                except (OSError, ValueError) as exc:
+                    logger.warning(f"讀取伺服器檔案大小失敗，略過 {file_path}: {exc}")
+        except (OSError, ValueError) as exc:
+            logger.warning(f"掃描伺服器大小失敗 {path}: {exc}")
+        return format_bytes(total_bytes)
+
     @classmethod
     def _build_server_display_row(
-        cls, *, name: str, config: ServerConfig, status: str, backup_status: str, display_path: str
+        cls,
+        *,
+        name: str,
+        config: ServerConfig,
+        status: str,
+        server_size: str,
+        backup_status: str,
+        display_path: str,
     ) -> list[Any]:
         """將伺服器設定與動態狀態整合成列表顯示列"""
         return [
@@ -181,6 +206,7 @@ class ManageServerService:
             cls._format_minecraft_version_display(config.minecraft_version),
             cls._format_loader_display(config.loader_type, config.loader_version, config.minecraft_version),
             status,
+            server_size,
             backup_status,
             display_path,
         ]
@@ -303,11 +329,17 @@ class ManageServerService:
         server_data: list[list[Any]] = []
         for name, config in self.server_crud.servers.items():
             status = self.get_server_status_text(name, config)
+            server_size = self._get_server_size(config.path)
             backup_status = self.get_backup_status(name)
             display_path = self._format_server_path_for_display(config.path)
             server_data.append(
                 self._build_server_display_row(
-                    name=name, config=config, status=status, backup_status=backup_status, display_path=display_path
+                    name=name,
+                    config=config,
+                    status=status,
+                    server_size=server_size,
+                    backup_status=backup_status,
+                    display_path=display_path,
                 )
             )
         return server_data

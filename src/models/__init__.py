@@ -22,7 +22,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "LocalModMutationResult": (".models", "LocalModMutationResult"),
     "LocalModUpdateCandidate": (".models", "LocalModUpdateCandidate"),
     "LocalModUpdatePlan": (".models", "LocalModUpdatePlan"),
-    "MODRINTH_HASH_ALGORITHM": (".models", "MODRINTH_HASH_ALGORITHM"),
     "ModFileOperationResult": (".models", "ModFileOperationResult"),
     "ModPlatform": (".models", "ModPlatform"),
     "ModStatus": (".models", "ModStatus"),

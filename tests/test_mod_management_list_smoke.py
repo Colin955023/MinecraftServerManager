@@ -249,9 +249,7 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
 
 
 def test_build_online_browse_row_includes_prism_style_metadata() -> None:
-    controller = SimpleNamespace(
-        queue_ops=SimpleNamespace(_format_online_result_description=lambda mod: str(mod.description))
-    )
+    controller = SimpleNamespace()
     projection = ui_module.ModManagementTreeSyncOps(cast(Any, controller))
 
     mod = SimpleNamespace(
@@ -277,13 +275,7 @@ def test_build_online_browse_row_includes_prism_style_metadata() -> None:
 
 
 def test_build_online_browse_row_keeps_full_description() -> None:
-    controller = SimpleNamespace(
-        queue_ops=SimpleNamespace(
-            _format_online_result_description=lambda mod: ui_module.ModManagementQueueOps._format_single_line_text(
-                mod.description
-            )
-        )
-    )
+    controller = SimpleNamespace()
     projection = ui_module.ModManagementTreeSyncOps(cast(Any, controller))
 
     long_description = (

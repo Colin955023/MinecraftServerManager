@@ -254,7 +254,7 @@ class CreateServerFrame(QWidget):
                             message_level="info",
                         )
                     else:
-                        err = install_outcome.exception if install_outcome.exception else "未知錯誤"
+                        err = install_outcome.error if install_outcome.error else "未知錯誤"
                         UIUtils.show_message(
                             "Java 下載失敗",
                             f"自動下載 Microsoft JDK {required_major} 失敗：{err}\n請手動安裝或指定 Java 路徑",

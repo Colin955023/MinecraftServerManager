@@ -1,4 +1,4 @@
-"""JSON 讀取與序列化工具。"""
+"""JSON 讀取與序列化工具"""
 
 from __future__ import annotations
 
