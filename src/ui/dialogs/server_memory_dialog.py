@@ -239,7 +239,9 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             self.server_crud.servers[self.config.name] = updated_config
             if not self.server_crud.write_servers_config():
                 self.server_crud.servers[self.config.name] = previous_config
-                UIUtils.show_message("儲存失敗", "無法寫入伺服器設定檔，記憶體設定未套用。", self, message_level="error")
+                UIUtils.show_message(
+                    "儲存失敗", "無法寫入伺服器設定檔，記憶體設定未套用。", self, message_level="error"
+                )
                 return
 
             server_path = Path(self.config.path)

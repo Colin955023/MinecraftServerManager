@@ -139,7 +139,7 @@ def test_repair_startup_script_rewrites_bare_java_to_full_versioned_path(
 
     repaired = script_path.read_text(encoding="utf-8-sig")
     quoted_java = f'"{javaw.with_name("java.exe")}"'
-    assert f"{quoted_java} -Xmx2G -jar server.jar" in repaired
+    assert f"{quoted_java} -Xmx2048M -jar server.jar" in repaired
     assert f"call {quoted_java} @user_jvm_args.txt %*" in repaired
     assert "echo java -jar server.jar" in repaired
 
