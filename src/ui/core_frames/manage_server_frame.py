@@ -507,7 +507,7 @@ class ManageServerFrame(QWidget):
                 self.action_buttons[start_stop_key].setEnabled(True)
             for key, btn in self.action_buttons.items():
                 if key != start_stop_key:
-                    if key == "restore" and is_running:
+                    if key in {"backup", "restore", "delete"} and is_running:
                         btn.setEnabled(False)
                     else:
                         btn.setEnabled(True)
@@ -636,6 +636,14 @@ class ManageServerFrame(QWidget):
         """刪除伺服器"""
         if not self.selected_server:
             return
+        if self.server_runtime.observe(self.selected_server).is_running:
+            UIUtils.show_message(
+                "警告",
+                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再刪除。",
+                self.window(),
+                message_level="warning",
+            )
+            return
         result = UIUtils.ask_yes_no_cancel(
             "確認刪除",
             f"確定要刪除伺服器 '{self.selected_server}' 嗎？\n\n"
@@ -646,7 +654,10 @@ class ManageServerFrame(QWidget):
         if not result:
             return
 
-        delete_result = self.server_crud.delete_server_result(self.selected_server)
+        delete_result = self.server_crud.delete_server_result(
+            self.selected_server,
+            server_runtime=self.server_runtime,
+        )
         if delete_result.success:
             UIUtils.show_message("成功", f"伺服器 {self.selected_server} 已刪除", self.window(), message_level="info")
             self.refresh_servers()
@@ -661,6 +672,14 @@ class ManageServerFrame(QWidget):
     def backup_server(self) -> None:
         """備份伺服器檔案"""
         if not self.selected_server:
+            return
+        if self.server_runtime.observe(self.selected_server).is_running:
+            UIUtils.show_message(
+                "警告",
+                f"伺服器「{self.selected_server}」正在執行中，請先停止伺服器再備份。",
+                self.window(),
+                message_level="warning",
+            )
             return
 
         dialog = ProgressDialog(self.window(), title="備份伺服器", show_cancel=False)

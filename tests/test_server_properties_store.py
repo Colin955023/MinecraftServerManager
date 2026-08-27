@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -224,7 +225,8 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path: Pa
 
     monkeypatch.setattr(manager, "write_servers_config", _track_write)
 
-    assert manager.delete_server_result(delete_config.name).success is False
+    stopped_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    assert manager.delete_server_result(delete_config.name, server_runtime=stopped_runtime).success is False
     assert manager.servers[delete_config.name] == delete_config
     assert write_calls == []
 
@@ -254,13 +256,55 @@ def test_server_manager_rolls_back_when_delete_server_write_fails(tmp_path: Path
     manager = ServerCRUD(str(tmp_path))
     server_dir = tmp_path / "demo"
     server_dir.mkdir()
+    (server_dir / "world.dat").write_bytes(b"world")
     config = ServerConfig("demo", "1.20.1", "vanilla", "", 2048, path=str(server_dir))
     manager.servers[config.name] = config
     monkeypatch.setattr(manager, "write_servers_config", lambda: False)
 
-    assert manager.delete_server_result(config.name).success is False
+    stopped_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    assert manager.delete_server_result(config.name, server_runtime=stopped_runtime).success is False
     assert manager.servers[config.name] == config
     assert server_dir.exists()
+    assert (server_dir / "world.dat").read_bytes() == b"world"
+    assert not list(tmp_path.glob(".msm-delete-*"))
+
+
+def test_server_manager_rejects_running_server_delete_without_mutation(tmp_path: Path) -> None:
+    manager = ServerCRUD(str(tmp_path))
+    server_dir = tmp_path / "demo"
+    server_dir.mkdir()
+    (server_dir / "world.dat").write_bytes(b"world")
+    config = ServerConfig("demo", "1.20.1", "vanilla", "", 2048, path=str(server_dir))
+    manager.servers[config.name] = config
+    assert manager.write_servers_config()
+    running_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
+
+    result = manager.delete_server_result(config.name, server_runtime=running_runtime)
+
+    assert result.success is False
+    assert manager.servers[config.name] == config
+    assert (server_dir / "world.dat").read_bytes() == b"world"
+
+
+def test_server_delete_commits_before_best_effort_tombstone_cleanup(tmp_path: Path, monkeypatch: Any) -> None:
+    manager = ServerCRUD(str(tmp_path))
+    server_dir = tmp_path / "demo"
+    server_dir.mkdir()
+    (server_dir / "world.dat").write_bytes(b"world")
+    config = ServerConfig("demo", "1.20.1", "vanilla", "", 2048, path=str(server_dir))
+    manager.servers[config.name] = config
+    assert manager.write_servers_config()
+    stopped_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    monkeypatch.setattr("src.core.server.server_crud.delete_within", lambda *_args: False)
+
+    result = manager.delete_server_result(config.name, server_runtime=stopped_runtime)
+
+    assert result.success is True
+    assert config.name not in manager.servers
+    assert not server_dir.exists()
+    tombstones = list(tmp_path.glob(".msm-delete-*"))
+    assert len(tombstones) == 1
+    assert (tombstones[0] / "world.dat").read_bytes() == b"world"
 
 
 def test_server_runtime_rejects_outside_path_on_start(tmp_path: Path, monkeypatch: Any) -> None:

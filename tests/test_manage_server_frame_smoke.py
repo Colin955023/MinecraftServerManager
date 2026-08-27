@@ -318,6 +318,7 @@ def test_manage_server_frame_update_selection_disables_restore_when_running() ->
     start_stop_btn = _FakeBtn()
     restore_btn = _FakeBtn()
     backup_btn = _FakeBtn()
+    delete_btn = _FakeBtn()
 
     frame = _DummyFrame()
     frame.selected_server = "Alpha"
@@ -337,13 +338,15 @@ def test_manage_server_frame_update_selection_disables_restore_when_running() ->
         "start_stop": start_stop_btn,
         "restore": restore_btn,
         "backup": backup_btn,
+        "delete": delete_btn,
     }
     frame.info_label = SimpleNamespace(setText=lambda _: None)
 
     frame.server_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
     ManageServerFrame.update_selection(cast(Any, frame))
     assert restore_btn.enabled is False
-    assert backup_btn.enabled is True
+    assert backup_btn.enabled is False
+    assert delete_btn.enabled is False
     assert start_stop_btn.enabled is True
     assert start_stop_btn.text == "🛑 停止"
 
@@ -351,5 +354,6 @@ def test_manage_server_frame_update_selection_disables_restore_when_running() ->
     ManageServerFrame.update_selection(cast(Any, frame))
     assert restore_btn.enabled is True
     assert backup_btn.enabled is True
+    assert delete_btn.enabled is True
     assert start_stop_btn.enabled is True
     assert start_stop_btn.text == "🚀 啟動"

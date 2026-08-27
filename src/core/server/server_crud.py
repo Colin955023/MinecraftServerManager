@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, ClassVar
 
+from src.core import ServerRuntime
 from src.models import ServerConfig, ServerOperationResult
 from src.utils import (
     ServerCommands,
@@ -124,7 +126,7 @@ class ServerCRUD:
             logger.debug(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
         return atomic_write_text(start_script_path, bat_content, encoding="utf-8", errors="replace")
 
-    def delete_server_result(self, server_name: str) -> ServerOperationResult:
+    def delete_server_result(self, server_name: str, *, server_runtime: ServerRuntime) -> ServerOperationResult:
         """
         刪除伺服器
 
@@ -134,43 +136,81 @@ class ServerCRUD:
         Returns:
             刪除流程結果
         """
+        tombstone_path: Path | None = None
+        server_path: Path | None = None
+        removed_config: ServerConfig | None = None
+        config_committed = False
         try:
-            if server_name not in self.servers:
+            with self.operation_lock:
+                if server_name not in self.servers:
+                    return ServerOperationResult(
+                        success=False,
+                        title="刪除失敗",
+                        message=f"找不到伺服器: {server_name}",
+                        server_name=server_name,
+                    )
+                if server_runtime.observe(server_name).is_running:
+                    return ServerOperationResult(
+                        success=False,
+                        title="無法刪除",
+                        message=f"伺服器 {server_name} 正在執行中，請先停止伺服器",
+                        server_name=server_name,
+                    )
+
+                config = self.servers[server_name]
+                server_path = Path(config.path).resolve(strict=False)
+                if not is_path_within(self.servers_root, server_path, strict=False):
+                    logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
+                    return ServerOperationResult(
+                        success=False,
+                        title="刪除失敗",
+                        message=f"拒絕刪除不在伺服器根目錄下的路徑: {server_path}",
+                        server_name=server_name,
+                    )
+
+                if server_path.exists():
+                    tombstone_path = self.servers_root / f".msm-delete-{uuid.uuid4().hex}"
+                    server_path.replace(tombstone_path)
+
+                removed_config = self.servers.pop(server_name)
+                if not self.write_servers_config():
+                    self.servers[server_name] = removed_config
+                    if tombstone_path is not None:
+                        tombstone_path.replace(server_path)
+                        tombstone_path = None
+                    return ServerOperationResult(
+                        success=False,
+                        title="刪除失敗",
+                        message=f"無法儲存刪除後的伺服器設定: {server_name}",
+                        server_name=server_name,
+                    )
+                config_committed = True
+
+                if tombstone_path is not None:
+                    if not delete_within(self.servers_root, tombstone_path):
+                        logger.warning(f"伺服器已移除，但暫存刪除目錄無法清理: {tombstone_path}")
+                    tombstone_path = None
                 return ServerOperationResult(
-                    success=False, title="刪除失敗", message=f"找不到伺服器: {server_name}", server_name=server_name
-                )
-            config = self.servers[server_name]
-            server_path = Path(config.path).resolve(strict=False)
-            if not is_path_within(self.servers_root, server_path, strict=False):
-                logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
-                return ServerOperationResult(
-                    success=False,
-                    title="刪除失敗",
-                    message=f"拒絕刪除不在伺服器根目錄下的路徑: {server_path}",
+                    success=True,
+                    message=f"伺服器 {server_name} 已刪除",
                     server_name=server_name,
                 )
-            removed_config = self.servers[server_name]
-            del self.servers[server_name]
-            if not self.write_servers_config():
-                self.servers[server_name] = removed_config
-                return ServerOperationResult(
-                    success=False,
-                    title="刪除失敗",
-                    message=f"無法儲存刪除後的伺服器設定: {server_name}",
-                    server_name=server_name,
-                )
-            if not delete_within(self.servers_root, server_path):
+        except Exception as e:
+            if (
+                tombstone_path is not None
+                and server_path is not None
+                and tombstone_path.exists()
+                and not server_path.exists()
+            ):
+                try:
+                    tombstone_path.replace(server_path)
+                    tombstone_path = None
+                except OSError as rollback_error:
+                    logger.exception(f"刪除失敗後無法復原伺服器目錄: {rollback_error}")
+            if not config_committed and removed_config is not None and server_name not in self.servers:
                 self.servers[server_name] = removed_config
                 if not self.write_servers_config():
-                    logger.error(f"回滾刪除失敗時，無法恢復伺服器設定: {server_name}")
-                return ServerOperationResult(
-                    success=False,
-                    title="刪除失敗",
-                    message=f"無法刪除伺服器資料夾: {server_path}",
-                    server_name=server_name,
-                )
-            return ServerOperationResult(success=True, message=f"伺服器 {server_name} 已刪除", server_name=server_name)
-        except Exception as e:
+                    logger.error(f"刪除失敗後無法恢復伺服器設定: {server_name}")
             logger.exception(f"刪除伺服器失敗: {e}")
             return ServerOperationResult(
                 success=False,
