@@ -147,13 +147,20 @@ def test_runtime_rejects_server_path_outside_root(tmp_path: Path) -> None:
 
 def test_runtime_force_stop_invokes_kill_process_tree(tmp_path: Path, monkeypatch: Any) -> None:
     killed_pids: list[int] = []
+    killed_java_paths: list[Path] = []
     monkeypatch.setattr(runtime_module.SystemUtils, "kill_process_tree", lambda pid: killed_pids.append(pid))
+    monkeypatch.setattr(
+        runtime_module.SystemUtils,
+        "kill_java_processes_in_path",
+        lambda path: killed_java_paths.append(path),
+    )
     runtime, process = _make_runtime(tmp_path, monkeypatch)
 
     assert runtime.start("demo").success
     process.hang_on_stop = True
     assert runtime.stop("demo")
     assert process.pid in killed_pids
+    assert killed_java_paths == [tmp_path / "servers" / "demo"]
 
 
 def test_runtime_start_prevents_concurrent_duplicate_start(tmp_path: Path, monkeypatch: Any) -> None:

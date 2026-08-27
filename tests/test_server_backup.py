@@ -241,4 +241,4 @@ def test_managed_backup_restore_uses_managed_archive_policy(tmp_path: Path, monk
         required_bytes = sum(max(0, int(member.file_size)) for member in archive.infolist())
     assert captured["max_total_uncompressed_bytes"] == required_bytes
     assert captured["max_member_uncompressed_bytes"] == required_bytes
-    assert "max_compression_ratio" not in captured
+    assert captured["max_compression_ratio"] is None

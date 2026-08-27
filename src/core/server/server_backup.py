@@ -271,6 +271,7 @@ class ServerBackupManager:
                     progress_callback=_on_extract_progress,
                     max_total_uncompressed_bytes=required_bytes,
                     max_member_uncompressed_bytes=required_bytes,
+                    max_compression_ratio=None,
                 )
             else:
                 safe_extract_zip(backup_file, staging_path, progress_callback=_on_extract_progress)

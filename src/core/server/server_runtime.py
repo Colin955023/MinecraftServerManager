@@ -410,6 +410,10 @@ class ServerRuntime:
             pid = self._process_pid(record.process) or record.pid
             if pid:
                 SystemUtils.kill_process_tree(pid)
+            java_pid = record.java_pid or SystemUtils.find_java_process(record.pid)
+            if java_pid and java_pid != pid:
+                SystemUtils.kill_process_tree(java_pid)
+            SystemUtils.kill_java_processes_in_path(record.path)
             if isinstance(record.process, QtCore.QProcess):
                 record.process.kill()
                 record.process.waitForFinished(1000)
@@ -419,6 +423,10 @@ class ServerRuntime:
         except (OSError, BrokenPipeError, SubprocessUtils.TimeoutExpired) as exc:
             logger.warning(f"停止伺服器 {server_name} 時改用強制終止: {exc}")
             SystemUtils.kill_process_tree(record.pid)
+            java_pid = record.java_pid or SystemUtils.find_java_process(record.pid)
+            if java_pid and java_pid != record.pid:
+                SystemUtils.kill_process_tree(java_pid)
+            SystemUtils.kill_java_processes_in_path(record.path)
             return not self._record_is_running(record)
         finally:
             if not self._record_is_running(record):
