@@ -35,6 +35,8 @@ logger = get_logger().bind(component="UpdateChecker")
 class UpdateChecker:
     """集中處理 GitHub Releases 更新檢查與安裝流程"""
 
+    REPLACE_RETRY_LIMIT = 120
+
     @staticmethod
     def _apply_update(new_exe_path: Path, parent=None) -> bool:
         """套用更新：建立並執行用來覆寫當前執行檔的批次腳本"""
@@ -60,15 +62,25 @@ class UpdateChecker:
 
                 bat_script_path = resolved_path.with_suffix(".update.bat")
                 bat_content = f"""@echo off
+chcp 65001 >nul
+setlocal EnableExtensions
+set "retries=0"
 timeout /t 2 /nobreak >nul
 :loop
 move /Y "{resolved_path}" "{current_exe}" >nul 2>nul
-if errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto loop
-)
+if not errorlevel 1 goto success
+set /a retries+=1 >nul
+if %retries% GEQ {UpdateChecker.REPLACE_RETRY_LIMIT} goto failed
+timeout /t 1 /nobreak >nul
+goto loop
+:success
 start "" "{current_exe}"
 del "%~f0"
+exit /b 0
+:failed
+del /Q "{resolved_path}" >nul 2>nul
+del "%~f0"
+exit /b 1
 """
                 if not atomic_write_text(bat_script_path, bat_content, encoding="utf-8", newline="\r\n"):
                     logger.error(f"無法原子建立更新腳本：{bat_script_path}")

@@ -120,5 +120,9 @@ def test_apply_update_creates_bat_and_starts_process_when_confirmed(tmp_path, mo
     bat_content = bat_script_path.read_text(encoding="utf-8")
     assert str(new_exe_path.resolve(strict=True)) in bat_content
     assert str(current_app_exe) in bat_content
+    assert "chcp 65001 >nul" in bat_content
+    assert f"GEQ {UpdateChecker.REPLACE_RETRY_LIMIT}" in bat_content
+    assert ":failed" in bat_content
+    assert ":success" in bat_content
 
     assert popen_calls == [[str(bat_script_path)]]

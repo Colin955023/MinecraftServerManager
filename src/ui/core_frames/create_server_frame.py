@@ -39,8 +39,10 @@ from src.utils import (
     Colors,
     FontManager,
     FontSize,
+    JavaDownloader,
     JavaUtils,
     JvmOptionPolicy,
+    MemoryUtils,
     ScrollableComboBox,
     Sizes,
     StatusPushButton,
@@ -200,7 +202,7 @@ class CreateServerFrame(QWidget):
             auto_btn.setText("偵測中...")
 
             def _detect_task() -> str | None:
-                return JavaUtils.get_best_java_path(mc_version)
+                return JavaUtils.get_best_java_path(mc_version, ask_download=False)
 
             def _on_done(outcome: WorkOutcome) -> None:
                 auto_btn.setEnabled(True)
@@ -208,6 +210,59 @@ class CreateServerFrame(QWidget):
                 if outcome.is_succeeded and outcome.value:
                     java_path_win = str(Path(outcome.value))
                     self.java_path_var.set(java_path_win)
+                    return
+
+                required_major = JavaUtils.get_required_java_major(mc_version)
+                vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
+                res = UIUtils.ask_yes_no_cancel(
+                    "Java 未找到",
+                    (
+                        f"未找到合適的 Java {required_major}，是否由程式自動安裝 {vendor}？\n\n"
+                        "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
+                        "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
+                    ),
+                    parent=self.window(),
+                    show_cancel=False,
+                )
+                if not res:
+                    UIUtils.show_message(
+                        "請手動下載 Java",
+                        f"請手動安裝或指定 Java 路徑\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等",
+                        self.window(),
+                        message_level="info",
+                    )
+                    return
+
+                auto_btn.setEnabled(False)
+                auto_btn.setText("安裝中...")
+
+                def _install_task() -> str | None:
+                    JavaDownloader.install_java_with_winget(required_major)
+                    JavaUtils.refresh_java_candidates_cache()
+                    return JavaUtils.get_best_java_path(mc_version, ask_download=False)
+
+                def _on_install_done(install_outcome: WorkOutcome) -> None:
+                    auto_btn.setEnabled(True)
+                    auto_btn.setText("自動偵測")
+                    if install_outcome.is_succeeded and install_outcome.value:
+                        java_path_win = str(Path(install_outcome.value))
+                        self.java_path_var.set(java_path_win)
+                        UIUtils.show_message(
+                            title=f"Java {required_major} 安裝成功",
+                            message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe",
+                            parent=self.window(),
+                            message_level="info",
+                        )
+                    else:
+                        err = install_outcome.exception if install_outcome.exception else "未知錯誤"
+                        UIUtils.show_message(
+                            "Java 下載失敗",
+                            f"自動下載 Microsoft JDK {required_major} 失敗：{err}\n請手動安裝或指定 Java 路徑",
+                            parent=self.window(),
+                            message_level="error",
+                        )
+
+                self.scope.submit(_install_task, on_done=_on_install_done, key="java_install", replace=True)
 
             self.scope.submit(_detect_task, on_done=_on_done, key="java_detect", replace=True)
 
@@ -884,48 +939,25 @@ class CreateServerFrame(QWidget):
 
         max_memory_text = self.max_memory_var.get().strip()
         min_memory_text = self.min_memory_var.get().strip()
-        try:
-            memory_max_mb = int(max_memory_text)
-        except ValueError:
-            UIUtils.show_message("錯誤", "最大記憶體必須是數字", self.window(), message_level="error")
-            return None
-        if memory_max_mb < 1024:
-            UIUtils.show_message("錯誤", "最大記憶體不可低於 1024 MB", self.window(), message_level="error")
-            return None
-
         total_memory_mb = SystemUtils.get_total_memory_mb()
-        if total_memory_mb > 0 and memory_max_mb > total_memory_mb:
-            memory_max_mb = total_memory_mb
-            self.max_memory_var.set(str(total_memory_mb))
+        mem_result = MemoryUtils.validate_and_normalize_server_memory(
+            max_memory_text, min_memory_text, total_memory_mb=total_memory_mb
+        )
+        if not mem_result.is_valid:
             UIUtils.show_message(
-                "記憶體調整",
-                f"最大記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。",
-                self.window(),
-                message_level="warning",
+                "錯誤", mem_result.error_message or "記憶體設定無效", self.window(), message_level="error"
             )
+            return None
 
-        memory_min_mb: int | None = None
-        if min_memory_text:
-            try:
-                memory_min_mb = int(min_memory_text)
-            except ValueError:
-                UIUtils.show_message("錯誤", "最小記憶體必須是數字", self.window(), message_level="error")
-                return None
-            if memory_min_mb <= 0:
-                UIUtils.show_message("錯誤", "最小記憶體必須大於 0", self.window(), message_level="error")
-                return None
-            if total_memory_mb > 0 and memory_min_mb > total_memory_mb:
-                memory_min_mb = total_memory_mb
-                self.min_memory_var.set(str(total_memory_mb))
-                UIUtils.show_message(
-                    "記憶體調整",
-                    f"最小記憶體超出系統總實體記憶體 ({total_memory_mb} MB)，已自動調整為上限值 {total_memory_mb} MB。",
-                    self.window(),
-                    message_level="warning",
-                )
-            if memory_min_mb > memory_max_mb:
-                UIUtils.show_message("錯誤", "最小記憶體不可大於最大記憶體", self.window(), message_level="error")
-                return None
+        if mem_result.adjusted_max:
+            self.max_memory_var.set(str(mem_result.memory_max_mb))
+        if mem_result.adjusted_min and mem_result.memory_min_mb is not None:
+            self.min_memory_var.set(str(mem_result.memory_min_mb))
+        for warning in mem_result.warning_messages:
+            UIUtils.show_message("記憶體調整", warning, self.window(), message_level="warning")
+
+        memory_max_mb = mem_result.memory_max_mb
+        memory_min_mb = mem_result.memory_min_mb
 
         user_java_path = self.java_path_var.get().strip() or None
         if user_java_path:

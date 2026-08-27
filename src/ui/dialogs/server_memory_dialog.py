@@ -26,6 +26,7 @@ from src.models import ServerConfig
 from src.ui import ModalMSFluentWindow
 from src.utils import (
     Colors,
+    MemoryUtils,
     ServerCommands,
     Spacing,
     SystemUtils,
@@ -205,53 +206,22 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         """驗證並儲存記憶體設定"""
         max_text = self.max_memory_input.text().strip()
         min_text = self.min_memory_input.text().strip()
-
-        try:
-            max_mb = int(max_text)
-        except ValueError:
-            UIUtils.show_message("輸入錯誤", "最大記憶體必須為整數數字", self, message_level="error")
-            return
-
-        if max_mb < 1024:
-            UIUtils.show_message("輸入錯誤", "最大記憶體不可低於 1024 MB", self, message_level="error")
-            return
-
         total_mb = SystemUtils.get_total_memory_mb()
-        if total_mb > 0 and max_mb > total_mb:
-            max_mb = total_mb
-            self.max_memory_input.setText(str(total_mb))
-            UIUtils.show_message(
-                "記憶體調整",
-                f"最大記憶體超出系統總實體記憶體 ({total_mb} MB)，已自動調整為上限值 {total_mb} MB。",
-                self,
-                message_level="warning",
-            )
 
-        min_mb: int | None = None
-        if min_text:
-            try:
-                min_mb = int(min_text)
-            except ValueError:
-                UIUtils.show_message("輸入錯誤", "最小記憶體必須為整數數字", self, message_level="error")
-                return
+        result = MemoryUtils.validate_and_normalize_server_memory(max_text, min_text, total_memory_mb=total_mb)
+        if not result.is_valid:
+            UIUtils.show_message("輸入錯誤", result.error_message or "記憶體設定無效", self, message_level="error")
+            return
 
-            if min_mb <= 0:
-                UIUtils.show_message("輸入錯誤", "最小記憶體必須大於 0", self, message_level="error")
-                return
+        if result.adjusted_max:
+            self.max_memory_input.setText(str(result.memory_max_mb))
+        if result.adjusted_min and result.memory_min_mb is not None:
+            self.min_memory_input.setText(str(result.memory_min_mb))
+        for warning in result.warning_messages:
+            UIUtils.show_message("記憶體調整", warning, self, message_level="warning")
 
-            if total_mb > 0 and min_mb > total_mb:
-                min_mb = total_mb
-                self.min_memory_input.setText(str(total_mb))
-                UIUtils.show_message(
-                    "記憶體調整",
-                    f"最小記憶體超出系統總實體記憶體 ({total_mb} MB)，已自動調整為上限值 {total_mb} MB。",
-                    self,
-                    message_level="warning",
-                )
-
-            if min_mb > max_mb:
-                UIUtils.show_message("輸入錯誤", "最小記憶體不可大於最大記憶體", self, message_level="error")
-                return
+        max_mb = result.memory_max_mb
+        min_mb = result.memory_min_mb
 
         updated_config = ServerConfig(
             name=self.config.name,

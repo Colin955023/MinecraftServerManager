@@ -3,9 +3,6 @@ name: Build and Create Release
 on:
   workflow_dispatch:
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -30,6 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Setup Environment
@@ -135,7 +133,9 @@ jobs:
           inputs: |
             dist/*.exe
 
-      - name: Create and push release tag
+      - name: Create release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           if ($env:GITHUB_REF_NAME -ne 'master') {
@@ -144,19 +144,16 @@ jobs:
           }
 
           git fetch --tags --force
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
           $tag = $env:RELEASE_TAG
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $headCommit) {
+              Write-Error "無法取得目前 commit"
+              exit 1
+          }
+
           $existingTagCommit = git rev-parse -q --verify "refs/tags/$tag^{commit}"
           if ($LASTEXITCODE -eq 0) {
-              $headCommit = git rev-parse HEAD
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "無法取得目前 commit"
-                  exit $LASTEXITCODE
-              }
-
-              if ($existingTagCommit.Trim() -ne $headCommit.Trim()) {
+              if ($existingTagCommit.Trim() -ne $headCommit) {
                   Write-Error "Tag $tag 已存在，但指向不同 commit；請改用新版本號"
                   exit 1
               }
@@ -165,17 +162,35 @@ jobs:
               exit 0
           }
 
-          git tag -a $tag -m $tag
+          $tagRequest = @{
+              tag = $tag
+              message = $tag
+              object = $headCommit
+              type = 'commit'
+          } | ConvertTo-Json -Compress
+          $tagResponseJson = $tagRequest | gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/tags" --input -
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "建立 tag 失敗：$tag"
+              Write-Error "建立 annotated tag object 失敗：$tag"
               exit $LASTEXITCODE
           }
 
-          git push origin "refs/tags/$tag"
+          $tagResponse = $tagResponseJson | ConvertFrom-Json
+          if (-not $tagResponse.sha) {
+              Write-Error "GitHub API 未回傳 tag object SHA：$tag"
+              exit 1
+          }
+
+          $refRequest = @{
+              ref = "refs/tags/$tag"
+              sha = $tagResponse.sha
+          } | ConvertTo-Json -Compress
+          $null = $refRequest | gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" --input -
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "推送 tag 失敗：$tag"
+              Write-Error "建立 tag ref 失敗：$tag"
               exit $LASTEXITCODE
           }
+
+          Write-Host "Created annotated tag: $tag -> $headCommit"
 
       - name: Create Release and Upload Assets
         env:
@@ -208,7 +223,7 @@ jobs:
           }
 
       - name: Save Nuitka compilation cache
-        if: always()
+        if: success()
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ${{ env.NUITKA_CACHE_DIR }}

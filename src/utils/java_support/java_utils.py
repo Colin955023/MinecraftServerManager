@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import ClassVar
@@ -18,7 +19,6 @@ from src.utils import (
     JavaDownloader,
     RuntimePaths,
     SubprocessUtils,
-    UIUtils,
     atomic_write_json,
     get_logger,
     read_json,
@@ -286,6 +286,9 @@ class JavaUtils:
         mc_version: str,
         required_major: int | None = None,
         ask_download: bool = True,
+        *,
+        confirm_download: Callable[[str, str], bool] | None = None,
+        notify: Callable[[str, str, str], None] | None = None,
     ) -> str | None:
         """
         為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑
@@ -294,6 +297,8 @@ class JavaUtils:
             mc_version: Minecraft 版本字串
             required_major: 指定的 Java major 版本；未提供時會自動推導
             ask_download: 找不到符合版本時是否詢問自動安裝
+            confirm_download: 詢問是否自動安裝的回呼函式
+            notify: 通知安裝進度或結果的回呼函式
 
         Returns:
             找到時回傳 javaw.exe 路徑，否則回傳 None
@@ -303,17 +308,15 @@ class JavaUtils:
         for path, major in candidates:
             if major == required_major:
                 return path
-        if ask_download:
+        if ask_download and confirm_download is not None:
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
-            res = UIUtils.ask_yes_no_cancel(
-                "Java 未找到",
-                (
-                    f"未找到合適的 Java {required_major}是否由程式自動安裝 {vendor}？\n\n"
-                    "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                    "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
-                ),
-                show_cancel=False,
+            title = "Java 未找到"
+            prompt = (
+                f"未找到合適的 Java {required_major}，是否由程式自動安裝 {vendor}？\n\n"
+                "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
+                "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
             )
+            res = confirm_download(title, prompt)
             if res:
                 try:
                     JavaDownloader.install_java_with_winget(required_major)
@@ -321,24 +324,26 @@ class JavaUtils:
                     candidates = JavaUtils.get_all_local_java_candidates()
                     for path, major in candidates:
                         if major == required_major:
-                            UIUtils.show_message(
-                                title=f"Java {required_major} 安裝成功",
-                                message=f"Java {required_major} 已成功安裝並偵測到 javaw.exe",
-                                message_level="info",
-                            )
+                            if notify is not None:
+                                notify(
+                                    f"Java {required_major} 安裝成功",
+                                    f"Java {required_major} 已成功安裝並偵測到 javaw.exe",
+                                    "info",
+                                )
                             return path
                 except Exception as e:
                     logger.exception(f"自動下載 Microsoft JDK {required_major} 失敗：{e}")
-                    UIUtils.show_message(
-                        "Java 下載失敗",
-                        f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
-                        message_level="error",
-                    )
-            else:
-                UIUtils.show_message(
+                    if notify is not None:
+                        notify(
+                            "Java 下載失敗",
+                            f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
+                            "error",
+                        )
+            elif notify is not None:
+                notify(
                     "請手動下載 Java",
                     f"請手動安裝或指定 Java 路徑\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等",
-                    message_level="info",
+                    "info",
                 )
         return None
 

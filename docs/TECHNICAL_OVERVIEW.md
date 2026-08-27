@@ -74,7 +74,7 @@ uv run scripts\check_import_boundaries.py
 | `server_inspector.py` | 唯讀內容檢查 |
 | `server_runtime.py` | 統一啟動與首次初始化生命週期 |
 | `server_properties.py` | `server.properties` 唯一真相來源 |
-| `server_backup.py` | 原子 ZIP 備份與安全覆寫還原 |
+| `server_backup.py` | 原子 ZIP 備份、交易式快照還原與失敗回滾 |
 
 ### `src/core/mods/`
 

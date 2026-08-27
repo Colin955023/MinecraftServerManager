@@ -4,8 +4,8 @@
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
- [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11917/badge)](https://www.bestpractices.dev/projects/11917)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11917/badge)](https://www.bestpractices.dev/projects/11917)
 
 Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建立、匯入、啟停、監控、備份、`server.properties` 與 Modrinth 模組管理。
 
@@ -15,7 +15,7 @@ Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建�
 - 自動偵測 Java；缺少時引導 winget 或手動安裝
 - 集中管理伺服器狀態、控制台、玩家與記憶體
 - 匯入資料夾或 ZIP，支援批次探索與重新偵測
-- 原子建立備份；安全覆寫還原
+- 原子建立備份；交易式快照還原與失敗回滾
 - 視覺化編輯 `server.properties`
 - 掃描本地模組、搜尋 Modrinth、規劃依賴及 Review 後安裝／更新
 - 匯出模組清單為 XLSX、JSON、HTML 或純文字

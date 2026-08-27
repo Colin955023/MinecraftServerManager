@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import traceback
+from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -161,6 +162,25 @@ class LocalModListPresenter:
         self.local_search_var = ValueState("")
         self.local_filter_var = ValueState("所有")
         self.local_search_filter = SearchFilter()
+
+    @staticmethod
+    def _build_mods_by_base_name(mods: Iterable[Any]) -> dict[str, Any]:
+        """
+        依 base_name 建立本地模組字典，優先保留已啟用的模組
+
+        Args:
+            mods: 本地模組集合
+
+        Returns:
+            以 base_name 為鍵的去重模組字典
+        """
+        dedup: dict[str, Any] = {}
+        for mod in mods:
+            base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
+            existing = dedup.get(base_name)
+            if existing is None or mod.status == ModStatus.ENABLED:
+                dedup[base_name] = mod
+        return dedup
 
     def export_mod_list_dialog(self) -> None:
         """開啟模組列表匯出對話框"""
@@ -602,14 +622,7 @@ class LocalModListPresenter:
         def load_thread():
             try:
                 self.controller.update_status_safe("正在掃描本地模組...")
-                mods = list(manager.local_mod_scanner.scan_mods())
-                dedup: dict[str, Any] = {}
-                for mod in mods:
-                    base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
-                    existing = dedup.get(base_name)
-                    if existing is None or mod.status == ModStatus.ENABLED:
-                        dedup[base_name] = mod
-                mods = list(dedup.values())
+                mods = list(self._build_mods_by_base_name(manager.local_mod_scanner.scan_mods()).values())
                 total = len(mods)
                 new_local_mods: list[Any] = []
                 last_percent = -1
@@ -729,13 +742,7 @@ class LocalModListPresenter:
                 self.controller.update_status(f"無法識別模組: {mod_name}")
                 return
 
-            mods_by_base_name: dict[str, Any] = {}
-            for m in self.controller.mod_session.local_mods:
-                base_name = m.filename.replace(".jar.disabled", "").replace(".jar", "")
-                existing = mods_by_base_name.get(base_name)
-                if existing is None or m.status == ModStatus.ENABLED:
-                    mods_by_base_name[base_name] = m
-
+            mods_by_base_name = self._build_mods_by_base_name(self.controller.mod_session.local_mods)
             found_mod = mods_by_base_name.get(mod_id)
             if not found_mod:
                 self.controller.update_status(f"找不到模組檔案: {mod_id}")
@@ -849,12 +856,7 @@ class LocalModListPresenter:
                 UIUtils.show_message("提示", "請先選擇要操作的模組", self.controller.parent, message_level="warning")
                 return
 
-            mods_by_base_name: dict[str, Any] = {}
-            for mod in self.controller.mod_session.local_mods:
-                base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
-                existing = mods_by_base_name.get(base_name)
-                if existing is None or mod.status == ModStatus.ENABLED:
-                    mods_by_base_name[base_name] = mod
+            mods_by_base_name = self._build_mods_by_base_name(self.controller.mod_session.local_mods)
 
             selected_pairs = []
             seen = set()
