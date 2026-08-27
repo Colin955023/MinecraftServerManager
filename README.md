@@ -5,6 +5,7 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
+ [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11917/badge)](https://www.bestpractices.dev/projects/11917)
 
 Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建立、匯入、啟停、監控、備份、`server.properties` 與 Modrinth 模組管理。
 

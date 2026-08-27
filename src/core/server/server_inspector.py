@@ -551,7 +551,10 @@ class ServerInspector:
                 missing_files=("伺服器資料夾",),
             )
 
-        revision = self._build_revision(server_path)
+        if intent and intent.purpose == "status":
+            revision = self._build_status_revision(server_path)
+        else:
+            revision = self._build_revision(server_path)
         jar_paths = tuple(sorted(server_path.glob("*.jar"), key=lambda item: item.name.lower()))
         jar_names = [jar.name for jar in jar_paths]
         is_candidate = _InspectionEngine.is_valid_server_folder(server_path)
@@ -645,6 +648,25 @@ class ServerInspector:
             status_ready=status_ready,
             launchable=launchable,
         )
+
+    @staticmethod
+    def _build_status_revision(server_path: Path) -> str:
+        digest = hashlib.sha256()
+        try:
+            for item in sorted(server_path.glob("*"), key=lambda p: p.name.lower()):
+                if item.name.startswith(".msm-"):
+                    continue
+                stat = item.stat(follow_symlinks=False)
+                digest.update(item.name.encode("utf-8", errors="surrogatepass"))
+                digest.update(b"\0")
+                digest.update(str(stat.st_size).encode("ascii"))
+                digest.update(b":")
+                digest.update(str(stat.st_mtime_ns).encode("ascii"))
+                digest.update(b"\n")
+        except OSError as exc:
+            logger.warning(f"建立伺服器狀態 revision 失敗: {exc}")
+            return ""
+        return digest.hexdigest()
 
     @staticmethod
     def _build_revision(server_path: Path) -> str:

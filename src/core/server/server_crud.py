@@ -93,6 +93,8 @@ class ServerCRUD:
             java_command_str = java_command_override.strip()
         else:
             resolved_target = launch_target
+            if resolved_target and Path(resolved_target).suffix.lower() in {".bat", ".cmd", ".sh", ".ps1"}:
+                resolved_target = None
             if not resolved_target and server_path.is_dir():
                 from src.core import ServerInspector
 

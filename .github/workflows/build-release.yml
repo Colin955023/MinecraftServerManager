@@ -95,6 +95,46 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "Artifact attestation verification failed: $($_.Name)" }
           }
 
+      - name: Export SLSA provenance for GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+              $exe = $_
+              $tempDir = Join-Path $env:RUNNER_TEMP ("attestation-" + [guid]::NewGuid().ToString("N"))
+              New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+              Push-Location $tempDir
+              try {
+                  gh attestation download $exe.FullName `
+                    --repo $env:GITHUB_REPOSITORY `
+                    --predicate-type 'https://slsa.dev/provenance/v1' `
+                    --limit 1
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to download SLSA provenance: $($exe.Name)"
+                  }
+
+                  $bundles = @(Get-ChildItem -Path $tempDir -Filter '*.jsonl' -File)
+                  if ($bundles.Count -ne 1) {
+                      throw "Expected exactly one SLSA provenance bundle for $($exe.Name), found $($bundles.Count)"
+                  }
+
+                  $destination = Join-Path $exe.DirectoryName ($exe.Name + '.intoto.jsonl')
+                  Copy-Item -Path $bundles[0].FullName -Destination $destination -Force
+              }
+              finally {
+                  Pop-Location
+                  Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Sign release executable with Sigstore
+        uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
+        with:
+          inputs: |
+            dist/*.exe
+
       - name: Create and push release tag
         shell: pwsh
         run: |
@@ -146,7 +186,9 @@ jobs:
           $prereleaseArgs = @()
           if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
           $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
-              $_.Name -match '^MinecraftServerManager.*\.exe$'
+              $_.Name -match '^MinecraftServerManager.*\.exe$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.sigstore\.json$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.intoto\.jsonl$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
               Write-Error "No release executable was found in dist."
