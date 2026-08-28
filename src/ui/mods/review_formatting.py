@@ -46,10 +46,10 @@ def mask_redundant_review_values(parent_values: tuple[str, ...], child_values: t
 
 def format_local_update_source_text(review_entry: LocalUpdateReviewEntry) -> str:
     """
-    格式化本機更新項目的來源與推薦來源文字
+    格式化本地更新項目的來源與推薦來源文字
 
     Args:
-        review_entry: 包含 provider 與候選版本來源資訊的本機更新項目
+        review_entry: 包含 provider 與候選版本來源資訊的本地更新項目
 
     Returns:
         以分隔符串接的來源標籤文字
@@ -73,17 +73,17 @@ def format_review_overview_text(
     deduped_dependency_count: int = 0,
 ) -> str:
     """
-    格式化 Review 任務樹的數量摘要與預檢提示
+    格式化 Review 工作樹的數量摘要與預檢提示
 
     Args:
         entries: Review 根項目清單
-        nodes: 任務樹節點清單
+        nodes: 工作樹節點清單
         action_label: 摘要中要顯示的後續動作名稱
         global_notes: 要去重後加入摘要的全域提示
         deduped_dependency_count: 已合併的重複依賴數量
 
     Returns:
-        顯示根任務、依賴、問題、提醒與未選取項目的摘要文字
+        顯示根工作、依賴、問題、提醒與未選取項目的摘要文字
     """
     root_count = len(entries)
     dependency_count = count_review_nodes(nodes, "dependency")
@@ -93,7 +93,7 @@ def format_review_overview_text(
     unselected_count = sum(
         1 for entry in entries if getattr(entry, "runnable", False) and not getattr(entry, "selected", False)
     )
-    segments = [f"Task graph：{root_count} 個根任務", f"目前將{action_label} {selected_count} 個根項目"]
+    segments = [f"Task graph：{root_count} 個根工作", f"目前將{action_label} {selected_count} 個根項目"]
     if dependency_count:
         segments.append(f"{dependency_count} 個依賴")
     if issue_count:
@@ -133,10 +133,10 @@ def resolve_pending_install_review_project_page_url(review_entry: PendingInstall
 
 def resolve_local_update_review_project_page_url(review_entry: LocalUpdateReviewEntry) -> str:
     """
-    解析本機更新 Review 項目的專案頁面網址
+    解析本地更新 Review 項目的專案頁面網址
 
     Args:
-        review_entry: 包含本機模組與更新候選資料的 Review 項目
+        review_entry: 包含本地模組與更新候選資料的 Review 項目
 
     Returns:
         更新候選專案頁面網址，無法解析時回傳空字串
@@ -255,7 +255,7 @@ def summarize_review_messages(messages: list[str] | tuple[str, ...], max_items: 
     deduped = dedupe_review_messages(messages)
     if len(deduped) <= max_items:
         return deduped
-    return [*deduped[:max_items], f"其餘 {len(deduped) - max_items} 項請於任務樹查看"]
+    return [*deduped[:max_items], f"其餘 {len(deduped) - max_items} 項請於工作樹查看"]
 
 
 def format_required_by_list(required_by: list[str]) -> str:

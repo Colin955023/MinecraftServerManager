@@ -35,8 +35,8 @@ def main() -> int:
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateMutexW(None, False, mutex_name)
         run_application()
-    except Exception as exc:
-        logger.critical(f"應用程式啟動失敗: {exc}\n{traceback.format_exc()}")
+    except Exception as e:
+        logger.critical(f"應用程式啟動失敗: {e}\n{traceback.format_exc()}")
         return 1
     finally:
         shutdown_shared_manager(wait=False)

@@ -5,7 +5,24 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from src.core import (
+from src.models import ModrinthVersionLookupResult, OnlineModInfo, OnlineModVersion
+from src.utils import (
+    MODRINTH_PREFERRED_HASH_ALGORITHM,
+    HTTPClient,
+    clean_api_identifier,
+    get_modrinth_loader_filters,
+    is_allowed_version_type,
+    is_supported_modrinth_update_loader,
+    normalize_hash_algorithm,
+    normalize_identifier,
+    normalize_mod_search_query,
+    parse_modrinth_version,
+    parse_modrinth_version_lookup_response,
+    select_best_mod_version,
+    serialize_json,
+)
+
+from .mod_search_constants import (
     MODRINTH_BATCH_HASH_LOOKUP_SIZE,
     MODRINTH_BATCH_PROJECT_LOOKUP_SIZE,
     MODRINTH_PROJECT_BATCH_TIMEOUT_SECONDS,
@@ -22,25 +39,7 @@ from src.core import (
     MODRINTH_VERSION_TIMEOUT_SECONDS,
     MODRINTH_VERSION_URL_TEMPLATE,
     SUPPORTED_SORT_OPTIONS,
-)
-from src.core import (
-    mod_search_logger as logger,
-)
-from src.models import ModrinthVersionLookupResult, OnlineModInfo, OnlineModVersion
-from src.utils import (
-    MODRINTH_PREFERRED_HASH_ALGORITHM,
-    HTTPClient,
-    clean_api_identifier,
-    get_modrinth_loader_filters,
-    is_allowed_version_type,
-    is_supported_modrinth_update_loader,
-    normalize_hash_algorithm,
-    normalize_identifier,
-    normalize_mod_search_query,
-    parse_modrinth_version,
-    parse_modrinth_version_lookup_response,
-    select_best_mod_version,
-    serialize_json,
+    logger,
 )
 
 

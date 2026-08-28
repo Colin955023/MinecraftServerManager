@@ -663,8 +663,8 @@ class ServerInspector:
                 digest.update(b":")
                 digest.update(str(stat.st_mtime_ns).encode("ascii"))
                 digest.update(b"\n")
-        except OSError as exc:
-            logger.warning(f"建立伺服器狀態 revision 失敗: {exc}")
+        except OSError as e:
+            logger.warning(f"建立伺服器狀態 revision 失敗: {e}")
             return ""
         return digest.hexdigest()
 
@@ -682,8 +682,8 @@ class ServerInspector:
                 digest.update(b":")
                 digest.update(str(stat.st_mtime_ns).encode("ascii"))
                 digest.update(b"\n")
-        except OSError as exc:
-            logger.warning(f"建立伺服器檢查 revision 失敗: {exc}")
+        except OSError as e:
+            logger.warning(f"建立伺服器檢查 revision 失敗: {e}")
             return ""
         return digest.hexdigest()
 

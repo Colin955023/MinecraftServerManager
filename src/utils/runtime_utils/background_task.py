@@ -1,10 +1,10 @@
 """
-背景任務工具、取消標記與共享工作池
+背景工作工具、取消標記與共享工作池
 
-提供背景任務執行器（基於 QThreadPool）、協作式取消（CancellationToken），
+提供背景工作執行器（基於 QThreadPool）、協作式取消（CancellationToken），
 以及專案共享工作池（原 worker_pool.py 合併至此）
 
-規範：若任務支援取消，應接受名為 cancel_token 的參數並自行檢查其狀態
+規範：若工作支援取消，應接受名為 cancel_token 的參數並自行檢查其狀態
 """
 
 from __future__ import annotations
@@ -51,13 +51,13 @@ def _make_done_callback(
     callback: Callable[[Any], None],
     task_label: str = "Background task",
 ) -> Callable[[concurrent.futures.Future | asyncio.Future], None]:
-    """建立統一的任務完成回呼包裝器"""
+    """建立統一的工作完成回呼包裝器"""
 
     def _on_done(future) -> None:
         try:
             result = future.result()
-        except Exception as exc:
-            logger.exception(f"{task_label} failed: {exc}")
+        except Exception as e:
+            logger.exception(f"{task_label} failed: {e}")
             try:
                 callback(None)
             except Exception:
@@ -72,7 +72,7 @@ def _make_done_callback(
 
 
 class BackgroundTaskManager:
-    """簡單的背景任務執行器，支援取消 token 與回呼"""
+    """簡單的背景工作執行器，支援取消 token 與回呼"""
 
     def __init__(self, max_workers: int = DEFAULT_WORKER_COUNT):
         self._pool = QtCore.QThreadPool()
@@ -87,12 +87,12 @@ class BackgroundTaskManager:
         **kwargs,
     ) -> concurrent.futures.Future:
         """
-        提交背景任務到 QThreadPool 執行
+        提交背景工作到 QThreadPool 執行
 
         Args:
             fn: 要執行的函式
             *args: 傳入函式的位置參數
-            callback: 任務完成後的回呼，會在背景執行緒被呼叫
+            callback: 工作完成後的回呼，會在背景執行緒被呼叫
             cancel_token: 協作式取消標記
             **kwargs: 傳入函式的關鍵字參數
 
@@ -106,7 +106,7 @@ class BackgroundTaskManager:
         try:
             self._pool.start(runnable)
         except RuntimeError:
-            logger.debug("QThreadPool 已銷毀，無法提交背景任務")
+            logger.debug("QThreadPool 已銷毀，無法提交背景工作")
             future.set_exception(RuntimeError("QThreadPool has been deleted, cannot submit background task"))
             return future
         if callback:
@@ -115,10 +115,10 @@ class BackgroundTaskManager:
 
     def shutdown(self, wait: bool = True, timeout_ms: int = 2000) -> None:
         """
-        關閉 Qt 工作池，必要時等待既有任務完成
+        關閉 Qt 工作池，必要時等待既有工作完成
 
         Args:
-            wait: 是否等待既有任務完成
+            wait: 是否等待既有工作完成
             timeout_ms: 最大等待毫秒數，預設 2000ms
         """
         if wait:
@@ -143,8 +143,8 @@ class _QtRunnable(QtCore.QRunnable):
             return
         try:
             result = self.call()
-        except Exception as exc:
-            self.future.set_exception(exc)
+        except Exception as e:
+            self.future.set_exception(e)
             return
         self.future.set_result(result)
 
@@ -154,7 +154,7 @@ _shared_manager: BackgroundTaskManager | None = None
 
 def get_shared_manager() -> BackgroundTaskManager:
     """
-    取得全域共用的背景任務管理器（相容既有呼叫端，執行緒安全）
+    取得全域共用的背景工作管理器
 
     Returns:
         全域共用的 BackgroundTaskManager 實例
@@ -172,7 +172,7 @@ def shutdown_shared_manager(wait: bool = True) -> None:
     停止並釋放全域背景工作池，避免程式結束時仍有工作存取已關閉資源
 
     Args:
-        wait: 是否等待既有任務完成
+        wait: 是否等待既有工作完成
     """
     global _shared_manager
     with _shared_manager_lock:

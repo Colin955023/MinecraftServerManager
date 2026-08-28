@@ -66,10 +66,10 @@ def get_online_install_review_group_key(entry: PendingInstallReviewEntry) -> str
 
 def get_local_update_review_group_key(entry: LocalUpdateReviewEntry) -> str:
     """
-    依本機更新項目的狀態分類群組鍵
+    依本地更新項目的狀態分類群組鍵
 
     Args:
-        entry: 要分類的本機更新 Review 項目
+        entry: 要分類的本地更新 Review 項目
 
     Returns:
         selected、advisory、unselected、retryable、unknown 或 blocked 群組鍵
@@ -133,13 +133,13 @@ def count_review_groups(
 
 def count_local_update_review_groups(entries: list[LocalUpdateReviewEntry]) -> dict[str, int]:
     """
-    統計本機更新 Review 項目的各狀態群組數量
+    統計本地更新 Review 項目的各狀態群組數量
 
     Args:
-        entries: 本機更新 Review 項目清單
+        entries: 本地更新 Review 項目清單
 
     Returns:
-        本機更新各群組鍵對應的數量
+        本地更新各群組鍵對應的數量
     """
     return count_review_groups(
         entries,
@@ -182,10 +182,10 @@ def get_review_group_label(group_key: str, label_map: dict[str, str], *, default
 
 def get_local_update_group_status_label(group_key: str) -> str:
     """
-    依本機更新群組鍵取得對應的顯示標籤
+    依本地更新群組鍵取得對應的顯示標籤
 
     Args:
-        group_key: 本機更新群組鍵
+        group_key: 本地更新群組鍵
 
     Returns:
         對應的顯示標籤
@@ -221,7 +221,7 @@ def get_online_install_group_status_label(group_key: str) -> str:
 
 def build_local_update_review_key(candidate: Any) -> str:
     """
-    建立本機更新候選的穩定 Review 識別鍵
+    建立本地更新候選的穩定 Review 識別鍵
 
     Args:
         candidate: 提供 project_id、local_mod、filename 或 project_name 的更新候選

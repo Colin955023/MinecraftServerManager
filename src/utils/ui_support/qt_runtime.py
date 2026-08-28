@@ -191,8 +191,8 @@ class _UiDispatcher(QtCore.QObject):
         func, done, result = cast(tuple[Callable[[], Any], QtCore.QSemaphore, dict[str, Any]], payload)
         try:
             result["value"] = func()
-        except Exception as exc:
-            result["exc"] = exc
+        except Exception as e:
+            result["exc"] = e
         finally:
             done.release()
 
@@ -224,7 +224,7 @@ def run_on_ui_thread(func: Callable[[], Any], timeout: float | None = 30.0) -> A
     if timeout is None:
         done.acquire()
     elif not done.tryAcquire(1, max(0, int(timeout * 1000))):
-        raise TimeoutError(f"UI 任務等待逾時 ({timeout} 秒)")
+        raise TimeoutError(f"UI 工作等待逾時 ({timeout} 秒)")
     if result["exc"] is not None:
         raise result["exc"]
     return result["value"]

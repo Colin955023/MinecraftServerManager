@@ -91,7 +91,7 @@ class RestoreBackupDialog(ModalMSFluentWindow):
 
         if not UIUtils.ask_yes_no_cancel(
             "確認還原",
-            f"您確定要還原備份 {filename} 嗎？\n伺服器目前的資料將會遺失！",
+            f"你確定要還原備份 {filename} 嗎？\n伺服器目前的資料將會遺失！",
             self,
             show_cancel=False,
         ):

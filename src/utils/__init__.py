@@ -1,7 +1,7 @@
 """
 src/utils/__init__.py
 工具模組套件
-提供 Minecraft 伺服器管理器應用程式的各種工具函數和輔助類別
+提供 Minecraft 伺服器管理器應用程式的各種工具函式和輔助類別
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "APP_NAME": (".runtime_utils.app_info", "APP_NAME"),
     "APP_VERSION": (".runtime_utils.app_info", "APP_VERSION"),
     "AppException": (".core_utils.exceptions", "AppException"),
-    "ArchiveSecurityError": (".core_utils.exceptions", "ArchiveSecurityError"),
     "BoolState": (".ui_support.ui_state", "BoolState"),
     "CancellationToken": (".runtime_utils.background_task", "CancellationToken"),
     "Colors": (".ui_support.ui_tokens", "Colors"),
@@ -198,7 +197,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "UIWorkScope": (".ui_support.ui_work_scope", "UIWorkScope"),
     "WorkOutcome": (".ui_support.ui_work_scope", "WorkOutcome"),
     "UpdateChecker": (".update_utils.update_checker", "UpdateChecker"),
-    "UpdateParsing": (".update_utils.update_parsing", "UpdateParsing"),
     "ValueState": (".ui_support.qt_runtime", "ValueState"),
     "SUPPORTED_MODRINTH_UPDATE_LOADERS": (
         ".mod_utils.modrinth_query_utils",
@@ -219,7 +217,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "build_non_official_source_warning_message",
     ),
     "bytes_to_mb": (".core_utils.units_utils", "bytes_to_mb"),
-    "cancel_timer": (".ui_support.qt_runtime", "cancel_timer"),
     "center_window": (".ui_support.ui_config", "center_window"),
     "clean_api_identifier": (".mod_utils.modrinth_query_utils", "clean_api_identifier"),
     "clean_mod_version": (".server_utils.server_version_semantics", "clean_mod_version"),

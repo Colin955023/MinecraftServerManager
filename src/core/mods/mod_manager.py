@@ -12,14 +12,6 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from src.core import (
-    LocalModScanner,
-    ModFileInstaller,
-    ModIndexProviderIdentityStore,
-    ModrinthProviderAdapter,
-    ProviderCatalogPort,
-    ProviderIdentityService,
-)
 from src.models import (
     LocalModInfo,
     ModStatus,
@@ -29,6 +21,11 @@ from src.utils import (
     get_logger,
     serialize_json,
 )
+
+from .local_mod_scanner import LocalModScanner
+from .mod_file_installer import ModFileInstaller
+from .modrinth_provider_adapter import ModrinthProviderAdapter
+from .provider_identity import ModIndexProviderIdentityStore, ProviderCatalogPort, ProviderIdentityService
 
 logger = get_logger().bind(component="ModManager")
 
@@ -44,7 +41,7 @@ def _normalize_xlsx_sheet_name(sheet_name: str) -> str:
 
 
 def _build_xlsx(rows: list[list[object]], *, sheet_name: str = "Sheet1") -> bytes:
-    """使用標準庫建立單工作表 XLSX"""
+    """使用標準函式庫建立單工作表 XLSX"""
     sheet_rows: list[str] = []
     for row_index, row in enumerate(rows, start=1):
         cells: list[str] = []
@@ -285,8 +282,8 @@ class ModManager:
                 logger.info(f"已標記檔案為有問題: {file_path} ({reason})")
             else:
                 logger.warning(f"建立檔案問題標記失敗: {file_path} ({reason})")
-        except Exception as exc:
-            logger.exception(f"標記檔案為有問題時發生未預期錯誤: {file_path}\n{exc}")
+        except Exception as e:
+            logger.exception(f"標記檔案為有問題時發生未預期錯誤: {file_path}\n{e}")
 
     def clear_mod_index(self) -> None:
         """清空模組快取索引"""

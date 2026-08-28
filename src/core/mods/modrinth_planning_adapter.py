@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from src.core import (
-    LoaderManager,
+from src.core import LoaderManager
+from src.models import ModrinthVersionLookupResult, OnlineModVersion
+
+from .modrinth_service import (
     fetch_modrinth_project_name,
     get_mod_version_details,
     get_mod_versions,
@@ -14,7 +16,6 @@ from src.core import (
     get_recommended_mod_version,
     resolve_modrinth_project_names,
 )
-from src.models import ModrinthVersionLookupResult, OnlineModVersion
 
 
 class ModrinthPlanningAdapter:

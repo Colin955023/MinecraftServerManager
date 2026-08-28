@@ -167,8 +167,8 @@ def test_settings_manager_concurrent_window_pref_updates_preserve_snapshot_integ
         try:
             start.wait(timeout=5)
             work()
-        except Exception as exc:
-            errors.append(exc)
+        except Exception as e:
+            errors.append(e)
 
     threads = [
         threading.Thread(target=_run, args=(lambda: manager.set_auto_center(False),)),

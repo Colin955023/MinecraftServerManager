@@ -365,7 +365,7 @@ class ServerMonitorWindow(MSFluentWindow):
         parent_layout.addWidget(console_frame, 1)
 
     def start_monitoring(self) -> None:
-        """啟動伺服器監控循環，開始追蹤狀態、輸出與玩家資訊"""
+        """啟動伺服器監控迴圈，開始追蹤狀態、輸出與玩家資訊"""
         if not self.is_monitoring:
             self.is_monitoring = True
             self._last_monitor_status_update = 0.0
@@ -385,7 +385,7 @@ class ServerMonitorWindow(MSFluentWindow):
         self._cancel_window_jobs()
 
     def monitor_loop(self) -> None:
-        """監控主循環，定期觸發狀態更新與輸出讀取"""
+        """監控主迴圈，定期觸發狀態更新與輸出讀取"""
         if not self.is_monitoring:
             return
         try:
@@ -438,8 +438,8 @@ class ServerMonitorWindow(MSFluentWindow):
                             clean = line.strip()
                             if clean:
                                 raw_lines.append(clean)
-                except Exception as log_err:
-                    logger.debug(f"增量讀取日誌失敗: {log_err}")
+                except Exception as e:
+                    logger.debug(f"增量讀取日誌失敗: {e}")
 
             if not raw_lines:
                 return
@@ -589,7 +589,7 @@ class ServerMonitorWindow(MSFluentWindow):
             )
 
     def stop_server(self) -> None:
-        """執行伺服器停止操作（優雅停止）"""
+        """執行伺服器停止操作（正常停止）"""
         success = self.server_runtime.stop(self.server_name)
         if success:
             self.add_console_message(f"⏹️ 伺服器 {self.server_name} 停止指令已發送")

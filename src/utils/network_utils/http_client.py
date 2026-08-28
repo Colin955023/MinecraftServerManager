@@ -246,7 +246,7 @@ class HTTPClient:
 
         for redirect_count in range(cls.MAX_REDIRECTS + 1):
             if not cls._is_valid_url(current_url):
-                raise NetworkSecurityError("拒絕非 HTTPS、本機/私有 IP 或含 credential 的 URL")
+                raise NetworkSecurityError("拒絕非 HTTPS、本地/私有 IP 或含 credential 的 URL")
 
             client = cls._get_client()
             request = client.build_request(
@@ -363,7 +363,7 @@ class HTTPClient:
         if exc is None:
             logger.error(final_log_message)
         else:
-            logger.exception(final_log_message)
+            logger.opt(exception=exc).error(final_log_message)
         return OperationResult(False, message, exc)
 
     @staticmethod
@@ -392,8 +392,8 @@ class HTTPClient:
             try:
                 size = local_path.stat().st_size
                 progress_callback(size, size)
-            except OSError as exc:
-                logger.debug(f"progress_callback/stat failed: {exc}")
+            except OSError as e:
+                logger.debug(f"progress_callback/stat failed: {e}")
         return True
 
     @classmethod
@@ -432,11 +432,11 @@ class HTTPClient:
                     continue
                 response.raise_for_status()
                 return cls._read_limited(response, max_bytes)
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (suppress_status_codes or set()):
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (suppress_status_codes or set()):
                     return None
-                if exc.response.status_code in cls.RETRY_STATUS_CODES and attempt < max_attempts:
-                    delay = cls._retry_delay_seconds(exc.response, attempt)
+                if e.response.status_code in cls.RETRY_STATUS_CODES and attempt < max_attempts:
+                    delay = cls._retry_delay_seconds(e.response, attempt)
                     time.sleep(delay)
                     continue
                 if attempt >= max_attempts:
@@ -485,12 +485,12 @@ class HTTPClient:
                 return None
             payload = orjson.loads(raw_bytes)
             return payload if isinstance(payload, dict | list) else None
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (suppress_status_codes or set()):
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (suppress_status_codes or set()):
                 return None
-            logger.warning(f"HTTP {normalized_method} JSON 請求失敗 ({safe_url}): {cls._describe_request_failure(exc)}")
-        except (httpx.RequestError, NetworkSecurityError, ResponseTooLargeError, orjson.JSONDecodeError) as exc:
-            logger.warning(f"HTTP {normalized_method} JSON 請求失敗 ({safe_url}): {cls._describe_request_failure(exc)}")
+            logger.warning(f"HTTP {normalized_method} JSON 請求失敗 ({safe_url}): {cls._describe_request_failure(e)}")
+        except (httpx.RequestError, NetworkSecurityError, ResponseTooLargeError, orjson.JSONDecodeError) as e:
+            logger.warning(f"HTTP {normalized_method} JSON 請求失敗 ({safe_url}): {cls._describe_request_failure(e)}")
         return None
 
     @classmethod
@@ -653,11 +653,11 @@ class HTTPClient:
                 max_bytes=cls.MAX_CONTENT_RESPONSE_BYTES,
                 headers=headers,
             )
-        except (httpx.HTTPError, NetworkSecurityError, ResponseTooLargeError) as exc:
+        except (httpx.HTTPError, NetworkSecurityError, ResponseTooLargeError) as e:
             if log_errors:
-                logger.exception(f"HTTP GET 請求失敗 ({safe_url}): {cls._describe_request_failure(exc)}")
+                logger.exception(f"HTTP GET 請求失敗 ({safe_url}): {cls._describe_request_failure(e)}")
             else:
-                logger.debug(f"HTTP GET 請求未成功 ({safe_url}): {cls._describe_request_failure(exc)}")
+                logger.debug(f"HTTP GET 請求未成功 ({safe_url}): {cls._describe_request_failure(e)}")
             return None
 
     @classmethod
@@ -754,8 +754,8 @@ class HTTPClient:
                 if total_size > 0:
                     try:
                         free_space = shutil.disk_usage(local_path_obj.parent).free
-                    except OSError as exc:
-                        logger.debug(f"無法查詢目的地磁碟空間，略過預檢: {exc}")
+                    except OSError as e:
+                        logger.debug(f"無法查詢目的地磁碟空間，略過預檢: {e}")
                     else:
                         if free_space < total_size:
                             failure_message = (
@@ -809,24 +809,24 @@ class HTTPClient:
                 if not atomic_replace_file(temp_path_obj, local_path_obj):
                     raise OSError(f"無法原子提交下載檔案: {local_path_obj}")
                 return OperationResult(True)
-            except (httpx.TransportError, httpx.TimeoutException) as exc:
+            except (httpx.TransportError, httpx.TimeoutException) as e:
                 if attempt >= cls.RETRY_TOTAL:
                     result = cls._download_failure(
                         url=url,
                         local_path=local_path,
-                        message=cls._describe_request_failure(exc),
-                        exc=exc,
+                        message=cls._describe_request_failure(e),
+                        exc=e,
                     )
                     cls._cleanup_temp_file(temp_path_obj)
                     return result
                 delay = cls._retry_delay_seconds(None, attempt)
                 time.sleep(delay)
-            except (httpx.HTTPError, NetworkSecurityError, ResponseTooLargeError, OSError, ValueError) as exc:
+            except (httpx.HTTPError, NetworkSecurityError, ResponseTooLargeError, OSError, ValueError) as e:
                 result = cls._download_failure(
                     url=url,
                     local_path=local_path,
-                    message=cls._describe_request_failure(exc),
-                    exc=exc,
+                    message=cls._describe_request_failure(e),
+                    exc=e,
                 )
                 cls._cleanup_temp_file(temp_path_obj)
                 return result

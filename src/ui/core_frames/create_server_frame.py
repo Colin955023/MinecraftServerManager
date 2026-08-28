@@ -550,7 +550,7 @@ class CreateServerFrame(QWidget):
         )
 
         def task():
-            """執行背景任務的工作內容"""
+            """執行背景工作的工作內容"""
             versions = self.loader_manager.get_versions()
 
             def update_mc():
@@ -576,7 +576,7 @@ class CreateServerFrame(QWidget):
         self._update_combo_state(self.mc_version_combo, enabled=True)
 
         def task():
-            """執行背景任務的工作內容"""
+            """執行背景工作的工作內容"""
             versions = self.loader_manager.get_versions(force_fetch=True)
 
             def _update():
@@ -600,7 +600,7 @@ class CreateServerFrame(QWidget):
         self._update_combo_state(self.loader_version_combo, self.loader_version_var, enabled=False)
 
         def task():
-            """執行背景任務的工作內容"""
+            """執行背景工作的工作內容"""
             self.loader_manager.clear_cache_file()
             self.loader_manager.preload_loader_versions()
             versions = self.loader_manager.get_compatible_loader_versions(mc_version, loader_type)
@@ -881,8 +881,8 @@ class CreateServerFrame(QWidget):
                         self._update_combo_state(
                             self.loader_version_combo, self.loader_version_var, "載入失敗", enabled=True
                         )
-                except Exception as e2:
-                    logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e2}")
+                except Exception as e:
+                    logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e}")
                 if hasattr(self, "_loading_key"):
                     delattr(self, "_loading_key")
 
@@ -1159,14 +1159,14 @@ class CreateServerFrame(QWidget):
         return [combo.itemText(i) for i in range(combo.count())]
 
     def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:
-        """執行背景任務並處理錯誤"""
+        """執行背景工作並處理錯誤"""
 
         def _work() -> None:
             task_func()
 
         def _on_done(outcome: WorkOutcome) -> None:
             if outcome.is_failed:
-                logger.exception("%s: %s", error_msg, outcome.error)
+                logger.error(f"{error_msg}: {outcome.error}")
                 if error_callback is not None:
                     error_callback()
 

@@ -6,7 +6,8 @@ from typing import Any, cast
 
 import pytest
 
-from src.ui import ModReviewWorkflow, ReviewExecutionHandoff, ReviewInstallStep
+from src.ui.mods.review_contracts import ReviewExecutionHandoff, ReviewInstallStep
+from src.ui.mods.review_workflow import ModReviewWorkflow
 
 
 def _server(**overrides: str) -> SimpleNamespace:
@@ -87,4 +88,4 @@ def test_context_stamp_rejects_changed_installed_mod_revision(tmp_path) -> None:
     mod.current_hash = "second-hash"
     mismatch = ModReviewWorkflow.validate_handoff_context(_handoff(context_stamp), _server(), [mod])
 
-    assert mismatch == "本機 Mod 清單已變更"
+    assert mismatch == "本地 Mod 清單已變更"

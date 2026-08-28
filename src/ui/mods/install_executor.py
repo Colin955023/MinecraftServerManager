@@ -13,16 +13,19 @@ from PySide6.QtWidgets import QWidget
 
 from src.core import ModManager
 from src.models import ModStatus
-from src.ui import ModReviewWorkflow, ProgressDialog, ReviewExecutionHandoff, ReviewInstallStep
-from src.ui import mod_management_logger as logger
+from src.ui import ProgressDialog
 from src.utils import (
     ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE,
     CancellationToken,
     UIUtils,
 )
 
+from .constants import logger
+from .review_contracts import ReviewExecutionHandoff, ReviewInstallStep
+from .review_workflow import ModReviewWorkflow
+
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 def _close_progress_dialog(progress_dialog: ProgressDialog | None) -> None:
@@ -46,8 +49,8 @@ class ModManagementInstallExecutor:
                 progress_dialog = ProgressDialog(self.controller.parent, title=title, show_cancel=True)
                 progress_dialog.rejected.connect(cancel_token.cancel)
                 progress_dialog.show()
-            except Exception as exc:
-                logger.debug(f"ProgressDialog 初始化略過: {exc}")
+            except Exception as e:
+                logger.debug(f"ProgressDialog 初始化略過: {e}")
         return cancel_token, progress_dialog
 
     @staticmethod
@@ -101,8 +104,8 @@ class ModManagementInstallExecutor:
                 current_server,
                 manager.get_mod_list(),
             )
-        except Exception as exc:
-            logger.error("驗證 Review context 失敗: %s", exc)
+        except Exception as e:
+            logger.error(f"驗證 Review context 失敗: {e}")
             UIUtils.show_message(
                 "無法驗證 Review",
                 "無法重新讀取目標伺服器的 Mod 狀態，請重新建立 Review",
@@ -112,7 +115,7 @@ class ModManagementInstallExecutor:
             return False
         if not mismatch:
             return True
-        logger.info("拒絕過期 Review handoff: %s", mismatch)
+        logger.info(f"拒絕過期 Review handoff: {mismatch}")
         self.controller.update_status_safe(f"Review 已失效：{mismatch}")
         UIUtils.show_message(
             "Review 已失效",
@@ -140,7 +143,7 @@ class ModManagementInstallExecutor:
                 self.controller.update_status_safe(f"已取消模組{action_label}執行")
                 return False
         if handoff.source_confirmation_prompt:
-            logger.warning("偵測到非官方下載來源，進入二次確認流程: action=%s", action_label)
+            logger.warning(f"偵測到非官方下載來源，進入二次確認流程: action={action_label}")
             proceed = UIUtils.ask_yes_no_cancel(
                 "非官方來源二次確認",
                 handoff.source_confirmation_prompt,
@@ -351,14 +354,14 @@ class ModManagementInstallExecutor:
                         message_level="info",
                     )
                 )
-            except Exception as exc:
+            except Exception as e:
                 if not accept_effect():
                     return
                 self.controller.ui_queue.put(close_progress)
                 self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
-                logger.error("批次安裝線上模組失敗: %s\n%s", exc, traceback.format_exc())
-                self.controller.update_status_safe(f"批次安裝失敗: {exc}")
-                message = f"無法完成安裝：{exc}"
+                logger.error(f"批次安裝線上模組失敗: {e}\n{traceback.format_exc()}")
+                self.controller.update_status_safe(f"批次安裝失敗: {e}")
+                message = f"無法完成安裝：{e}"
 
                 self.controller.ui_queue.put(
                     partial(UIUtils.show_message, "安裝失敗", message, self.controller.parent, message_level="error")
@@ -455,14 +458,14 @@ class ModManagementInstallExecutor:
                         message_level="info",
                     )
                 )
-            except Exception as exc:
+            except Exception as e:
                 if not accept_effect():
                     return
                 self.controller.ui_queue.put(close_progress)
                 self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
-                logger.error("本地模組更新失敗: %s\n%s", exc, traceback.format_exc())
-                self.controller.update_status_safe(f"本地模組更新失敗: {exc}")
-                message = f"無法完成更新：{exc}"
+                logger.error(f"本地模組更新失敗: {e}\n{traceback.format_exc()}")
+                self.controller.update_status_safe(f"本地模組更新失敗: {e}")
+                message = f"無法完成更新：{e}"
 
                 self.controller.ui_queue.put(
                     partial(UIUtils.show_message, "更新失敗", message, self.controller.parent, message_level="error")

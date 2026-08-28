@@ -89,7 +89,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         card_layout.setSpacing(Spacing.MEDIUM)
         card_layout.setContentsMargins(Spacing.LARGE, Spacing.LARGE, Spacing.LARGE, Spacing.LARGE)
 
-        sub_title = SubtitleLabel("記憶體分配 (MB)", card)
+        sub_title = SubtitleLabel("記憶體設定 (MB)", card)
         sub_title.setStyleSheet("background: transparent;")
         card_layout.addWidget(sub_title)
 

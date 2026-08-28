@@ -185,7 +185,7 @@ class JavaUtils:
     @staticmethod
     def refresh_java_candidates_cache() -> list[tuple[str, int]]:
         """
-        重新掃描本機 Java 並更新 JSON 快取
+        重新掃描本地 Java 並更新 JSON 快取
 
         Returns:
             最新掃描到的 Java 候選清單

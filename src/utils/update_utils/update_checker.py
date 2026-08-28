@@ -21,13 +21,14 @@ from src.utils import (
     RuntimePaths,
     SubprocessUtils,
     UIUtils,
-    UpdateParsing,
     atomic_write_text,
     get_logger,
     invoke_later,
     is_qobject_alive,
     run_on_ui_thread,
 )
+
+from .update_parsing import UpdateParsing
 
 logger = get_logger().bind(component="UpdateChecker")
 
@@ -226,7 +227,7 @@ exit /b 1
                 run_on_ui_thread(
                     lambda: UIUtils.show_message(
                         "檔案雜湊驗證失敗",
-                        f"下載的檔案 {algorithm_label} 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意竄改\n• 網路傳輸錯誤\n\n為了您的安全：\n- 已立即刪除下載的檔案\n- 更新已取消\n\n請稍後重試，或手動從 GitHub 下載",
+                        f"下載的檔案 {algorithm_label} 驗證失敗！\n\n可能原因：\n• 下載過程中檔案損壞\n• 檔案被惡意竄改\n• 網路傳輸錯誤\n\n為了你的安全：\n- 已立即刪除下載的檔案\n- 更新已取消\n\n請稍後重試，或手動從 GitHub 下載",
                         parent=parent,
                         message_level="error",
                     ),
@@ -343,7 +344,7 @@ exit /b 1
                         run_on_ui_thread(
                             lambda: UIUtils.show_message(
                                 "缺少 digest 驗證資訊",
-                                "無法從 GitHub Release 中取得此安裝程式的 SHA-256 digest 驗證資訊\n\n為了您的系統安全：\n- 將不會下載任何檔案\n- 更新已取消\n\n建議聯絡開發者確認 Release 是否包含 digest 資訊",
+                                "無法從 GitHub Release 中取得此安裝程式的 SHA-256 digest 驗證資訊\n\n為了你的系統安全：\n- 將不會下載任何檔案\n- 更新已取消\n\n建議聯絡開發者確認 Release 是否包含 digest 資訊",
                                 parent=parent,
                                 message_level="error",
                             ),
@@ -358,7 +359,7 @@ exit /b 1
                     run_on_ui_thread(
                         lambda: UIUtils.show_message(
                             "安全驗證錯誤",
-                            "在線上查詢 digest 驗證資訊時發生錯誤\n\n為了您的系統安全：\n- 將不會下載任何檔案\n- 更新已取消",
+                            "在線上查詢 digest 驗證資訊時發生錯誤\n\n為了你的系統安全：\n- 將不會下載任何檔案\n- 更新已取消",
                             parent=parent,
                             message_level="error",
                         ),

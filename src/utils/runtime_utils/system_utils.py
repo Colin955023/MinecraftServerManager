@@ -51,8 +51,8 @@ class SystemUtils:
                 return
             with cls._managed_processes_lock:
                 cls._managed_processes_by_path.setdefault(normalized_path, set()).add(int(pid))
-        except Exception as exc:
-            logger.debug(f"記錄受管理行程失敗: {exc}")
+        except Exception as e:
+            logger.debug(f"記錄受管理行程失敗: {e}")
 
     @classmethod
     def unregister_managed_process(cls, path: Path | str, pid: int) -> None:
@@ -155,13 +155,13 @@ class SystemUtils:
     @staticmethod
     def get_process_memory_usage(pid: int) -> int:
         """
-        獲取進程實體記憶體使用量（bytes）
+        取得行程實體記憶體使用量（bytes）
 
         Args:
-            pid: 進程 ID
+            pid: 行程 ID
 
         Returns:
-            進程記憶體使用量（位元組）
+            行程記憶體使用量（位元組）
         """
         try:
             proc = psutil.Process(pid)
@@ -230,8 +230,8 @@ class SystemUtils:
                 cmd = ["taskkill", "/PID", str(pid), "/T", "/F"]
                 SubprocessUtils.run_checked(cmd, stdout=SubprocessUtils.DEVNULL, stderr=SubprocessUtils.DEVNULL)
                 return True
-            except Exception as e2:
-                logger.error(f"無法結束行程樹 {pid}: {e2}")
+            except Exception as e:
+                logger.error(f"無法結束行程樹 {pid}: {e}")
                 return False
 
     @staticmethod

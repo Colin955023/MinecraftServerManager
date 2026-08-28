@@ -158,7 +158,7 @@ class ManageServerFrame(QWidget):
         建立控制區
 
         Args:
-            main_layout: 主版面配置
+            主版面配置
         """
         control_frame = QWidget(self)
         control_layout = QVBoxLayout(control_frame)
@@ -208,7 +208,7 @@ class ManageServerFrame(QWidget):
         建立伺服器列表
 
         Args:
-            main_layout: 主版面配置
+            主版面配置
         """
         list_card = CardWidget(self)
         list_layout = QVBoxLayout(list_card)
@@ -289,8 +289,8 @@ class ManageServerFrame(QWidget):
                 inspection = self.server_import.inspect_registered(server_name)
                 result = self.server_import.execute(inspection)
                 return result, None
-            except Exception as exc:
-                return None, str(exc)
+            except Exception as e:
+                return None, str(e)
 
         def on_done(outcome: WorkOutcome) -> None:
             if not outcome.is_succeeded or outcome.value is None:
@@ -349,7 +349,7 @@ class ManageServerFrame(QWidget):
         建立操作區
 
         Args:
-            main_layout: 主版面配置
+            主版面配置
         """
         action_frame = QWidget(self)
         action_layout = QVBoxLayout(action_frame)

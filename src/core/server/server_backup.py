@@ -103,8 +103,8 @@ class ServerBackupManager:
                         continue
                     try:
                         file_size = file_path.stat().st_size
-                    except OSError as exc:
-                        raise OSError(f"無法讀取備份來源檔案資訊: {file_path}") from exc
+                    except OSError as e:
+                        raise OSError(f"無法讀取備份來源檔案資訊: {file_path}") from e
                     files_to_backup.append((file_path, file_size))
                     total_size += file_size
 
@@ -124,8 +124,8 @@ class ServerBackupManager:
                         progress_callback(pct, f"正在壓縮: {rel_path.name}")
                     try:
                         zf.write(file_path, arcname=str(rel_path))
-                    except Exception as exc:
-                        raise OSError(f"備份檔案失敗: {file_path}") from exc
+                    except Exception as e:
+                        raise OSError(f"備份檔案失敗: {file_path}") from e
                     processed_size += file_size
 
             Path.replace(temp_backup_file, backup_file)
@@ -299,8 +299,8 @@ class ServerBackupManager:
                     if staged_preserved.exists():
                         try:
                             staged_preserved.replace(rollback_path / excluded_name)
-                        except OSError as preserve_error:
-                            logger.exception(f"還原失敗時無法復原排除目錄 {excluded_name}: {preserve_error}")
+                        except OSError as e:
+                            logger.exception(f"還原失敗時無法復原排除目錄 {excluded_name}: {e}")
                 rollback_path.replace(server_path)
                 rollback_path = None
                 raise

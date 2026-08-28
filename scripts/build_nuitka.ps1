@@ -30,11 +30,11 @@ from src.utils.runtime_utils.app_info import (
 )
 
 print(json.dumps({
-    "APP_DESCRIPTION": APP_DESCRIPTION,
-    "APP_NAME": APP_NAME,
-    "APP_VERSION": APP_VERSION,
-    "GITHUB_OWNER": GITHUB_OWNER,
-    "GITHUB_REPO": GITHUB_REPO,
+    'APP_DESCRIPTION': APP_DESCRIPTION,
+    'APP_NAME': APP_NAME,
+    'APP_VERSION': APP_VERSION,
+    'GITHUB_OWNER': GITHUB_OWNER,
+    'GITHUB_REPO': GITHUB_REPO,
 }))
 '@
 
@@ -87,7 +87,28 @@ print(json.dumps({
         'printsupport',
         'tls',
         'generic',
-        'platforminputcontexts'
+        'platforminputcontexts',
+        'networkinformation',
+        'sqldrivers'
+    )
+
+    $pythonUnusedModules = @(
+        'anyio',
+        'zstandard',
+        'httpx._main',
+        'psutil._pslinux',
+        'psutil._psbsd',
+        'psutil._psosx',
+        'psutil._pssunos',
+        'psutil._psaix',
+        'psutil._psposix',
+        'defusedxml.cElementTree',
+        'defusedxml.minidom',
+        'defusedxml.pulldom',
+        'defusedxml.sax',
+        'defusedxml.expatbuilder',
+        'defusedxml.expatreader',
+        'defusedxml.xmlrpc'
     )
 
     $numJobs = [Math]::Max(1, [System.Environment]::ProcessorCount - 1)
@@ -116,7 +137,6 @@ print(json.dumps({
         '--noinclude-unittest-mode=nofollow',
         '--noinclude-pydoc-mode=nofollow',
         '--noinclude-IPython-mode=nofollow',
-        '--include-qt-plugins=platforms,imageformats,iconengines',
         '--windows-icon-from-ico=assets/icon.ico',
         "--file-version=$($appInfo.APP_VERSION)",
         "--product-version=$($appInfo.APP_VERSION)",
@@ -130,6 +150,10 @@ print(json.dumps({
     )
 
     foreach ($module in $qtUnusedModules) {
+        $nuitkaArgs += "--nofollow-import-to=$module"
+    }
+
+    foreach ($module in $pythonUnusedModules) {
         $nuitkaArgs += "--nofollow-import-to=$module"
     }
 

@@ -274,19 +274,19 @@ class ServerRuntime:
             return ServerOperationResult(
                 success=True, message=f"伺服器 {server_name} 啟動成功，PID: {pid}", server_name=server_name
             )
-        except FileNotFoundError as exc:
+        except FileNotFoundError as e:
             self._cleanup_failed_process(server_name, server_path, process)
-            logger.exception(f"檔案路徑錯誤: {exc}")
+            logger.exception(f"檔案路徑錯誤: {e}")
             return ServerOperationResult(
-                success=False, title="啟動失敗", message=f"找不到啟動所需檔案: {exc}", server_name=server_name
+                success=False, title="啟動失敗", message=f"找不到啟動所需檔案: {e}", server_name=server_name
             )
-        except Exception as exc:
+        except Exception as e:
             self._cleanup_failed_process(server_name, server_path, process)
-            logger.exception(f"啟動伺服器 {server_name} 失敗: {exc}")
+            logger.exception(f"啟動伺服器 {server_name} 失敗: {e}")
             return ServerOperationResult(
                 success=False,
                 title="啟動失敗",
-                message=f"無法啟動伺服器 {server_name}\n錯誤: {exc}",
+                message=f"無法啟動伺服器 {server_name}\n錯誤: {e}",
                 server_name=server_name,
             )
 
@@ -327,7 +327,7 @@ class ServerRuntime:
             server_name: 伺服器名稱
             after_sequence: 事件序號，僅回傳大於此序號的
         Returns:
-            伺服器狀態快照，包含狀態、PID、記憶體使用量、運行時間、事件序號與事件
+            伺服器狀態快照，包含狀態、PID、記憶體使用量、運作時間、事件序號與事件
         """
         with self._lock:
             record = self._records.get(server_name)
@@ -420,8 +420,8 @@ class ServerRuntime:
             elif hasattr(record.process, "kill"):
                 record.process.kill()
             return not self._record_is_running(record)
-        except (OSError, BrokenPipeError, SubprocessUtils.TimeoutExpired) as exc:
-            logger.warning(f"停止伺服器 {server_name} 時改用強制終止: {exc}")
+        except (OSError, BrokenPipeError, SubprocessUtils.TimeoutExpired) as e:
+            logger.warning(f"停止伺服器 {server_name} 時改用強制終止: {e}")
             SystemUtils.kill_process_tree(record.pid)
             java_pid = record.java_pid or SystemUtils.find_java_process(record.pid)
             if java_pid and java_pid != record.pid:
@@ -555,9 +555,9 @@ class ServerRuntime:
     def _validate_server_runtime_path(self, config: ServerConfig) -> tuple[Path | None, ServerOperationResult | None]:
         try:
             server_path = Path(config.path).resolve(strict=False)
-        except Exception as exc:
+        except Exception as e:
             return None, ServerOperationResult(
-                success=False, title="伺服器路徑無效", message=f"伺服器路徑無效: {exc}", server_name=config.name
+                success=False, title="伺服器路徑無效", message=f"伺服器路徑無效: {e}", server_name=config.name
             )
         if not is_path_within(self.server_crud.servers_root, server_path, strict=False):
             return None, ServerOperationResult(

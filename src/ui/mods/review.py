@@ -12,19 +12,20 @@ from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
 from src.models import LocalModUpdatePlan
-from src.ui import (
-    InstallReviewDialogBuilder,
-    LocalReviewSession,
-    ModReviewWorkflow,
-    OnlineReviewSession,
-    ReviewViewSnapshot,
-)
-from src.ui import mod_management_logger as logger
 from src.utils import (
     Colors,
     Sizes,
     Spacing,
     UIUtils,
+)
+
+from .constants import logger
+from .install_review_dialog_builder import InstallReviewDialogBuilder
+from .review_contracts import ReviewViewSnapshot
+from .review_workflow import (
+    LocalReviewSession,
+    ModReviewWorkflow,
+    OnlineReviewSession,
 )
 
 
@@ -47,7 +48,7 @@ def _selected_root_key(tree: Any, snapshot: ReviewViewSnapshot) -> str:
 
 
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 class ModManagementReviewOps:
@@ -267,12 +268,12 @@ class ModManagementReviewOps:
                     f"更新檢查完成：{update_plan.actionable_count} 個可更新，{len(update_plan.candidates)} 個需 Review"
                 )
                 self.controller.ui_queue.put(lambda: self._show_local_update_review_dialog(update_plan, scope_text))
-            except Exception as exc:
-                logger.error("檢查本地模組更新失敗: %s\n%s", exc, traceback.format_exc())
+            except Exception as e:
+                logger.error(f"檢查本地模組更新失敗: {e}\n{traceback.format_exc()}")
                 self.controller.update_progress_safe(0)
-                self.controller.update_status_safe(f"檢查本地模組更新失敗: {exc}")
+                self.controller.update_status_safe(f"檢查本地模組更新失敗: {e}")
                 parent = self._get_dialog_parent()
-                message = str(exc)
+                message = str(e)
 
                 def show_error() -> None:
                     UIUtils.show_message("更新檢查失敗", message, parent, message_level="error")

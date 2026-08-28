@@ -31,7 +31,7 @@ def iter_review_download_source_records(review_entry: Any, *, selected_only: boo
     列出 Review 項目本身與依賴項目的下載來源紀錄
 
     Args:
-        review_entry: 線上安裝或本機更新 Review 項目
+        review_entry: 線上安裝或本地更新 Review 項目
         selected_only: 是否只保留已選取的依賴項目
 
     Returns:
@@ -181,13 +181,13 @@ def build_online_install_execution_prompt(review_entries: list[PendingInstallRev
 
 def build_local_update_execution_prompt(review_entries: list[LocalUpdateReviewEntry]) -> str | None:
     """
-    建立本機更新流程的執行前確認提示
+    建立本地更新流程的執行前確認提示
 
     Args:
-        review_entries: 本機更新 Review 項目清單
+        review_entries: 本地更新 Review 項目清單
 
     Returns:
-        本機更新確認提示；沒有需要提示的狀態時回傳 None
+        本地更新確認提示；沒有需要提示的狀態時回傳 None
     """
     return build_review_execution_prompt(
         review_entries,

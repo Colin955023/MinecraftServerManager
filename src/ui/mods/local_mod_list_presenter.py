@@ -27,8 +27,7 @@ from qfluentwidgets import (
 
 from src.core import ModManager, get_modrinth_project_info
 from src.models import ModStatus, ServerConfig
-from src.ui import ModalMSFluentWindow, ModOperationScope
-from src.ui import mod_management_logger as logger
+from src.ui import ModalMSFluentWindow
 from src.utils import (
     Colors,
     ScrollableComboBox,
@@ -43,10 +42,12 @@ from src.utils import (
     resolve_color,
 )
 
+from .constants import logger
+from .mod_management_session import ModOperationScope
 from .online_browse_presenter import SearchFilter
 
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 class _ExportModListDialog(ModalMSFluentWindow):
@@ -122,18 +123,18 @@ class _ExportModListDialog(ModalMSFluentWindow):
                 if not saved:
                     UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
                     return
-            except Exception as exc:
-                logger.error(f"匯出模組列表失敗: {exc}\n{traceback.format_exc()}")
-                UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {exc}", self, message_level="error")
+            except Exception as e:
+                logger.error(f"匯出模組列表失敗: {e}\n{traceback.format_exc()}")
+                UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {e}", self, message_level="error")
                 return
             if UIUtils.ask_yes_no_cancel(
                 "匯出成功", f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？", parent=self, show_cancel=False
             ):
                 try:
                     UIUtils.open_external(file_path)
-                except Exception as exc:
-                    logger.error(f"開啟檔案失敗: {exc}\n{traceback.format_exc()}")
-                    UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {exc}", parent=self, message_level="error")
+                except Exception as e:
+                    logger.error(f"開啟檔案失敗: {e}\n{traceback.format_exc()}")
+                    UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=self, message_level="error")
 
         save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
         save_btn.clicked.connect(save_export)
@@ -273,8 +274,8 @@ class LocalModListPresenter:
             return
         try:
             UIUtils.open_external(mods_dir)
-        except Exception as exc:
-            logger.error(f"開啟模組資料夾失敗: {exc}")
+        except Exception as e:
+            logger.error(f"開啟模組資料夾失敗: {e}")
 
     def copy_mod_info(self) -> None:
         """將選中模組的詳細資訊複製到剪貼簿"""
@@ -295,8 +296,8 @@ class LocalModListPresenter:
             )
             QApplication.clipboard().setText("\n".join(f"{label}: {value}" for label, value in values if value))
             self.controller.update_status("模組詳細資訊已複製到剪貼簿")
-        except Exception as exc:
-            logger.error(f"複製模組資訊失敗: {exc}\n{traceback.format_exc()}")
+        except Exception as e:
+            logger.error(f"複製模組資訊失敗: {e}\n{traceback.format_exc()}")
 
     def show_in_explorer(self) -> None:
         """在檔案總管中定位選中的模組檔案"""
@@ -318,9 +319,9 @@ class LocalModListPresenter:
                 return
             UIUtils.reveal_in_explorer(mod_file)
             self.controller.update_status(f"已在檔案總管中顯示: {mod_file.name}")
-        except Exception as exc:
-            logger.error(f"開啟檔案總管失敗: {exc}\n{traceback.format_exc()}")
-            self.controller.update_status(f"開啟檔案總管失敗: {exc}")
+        except Exception as e:
+            logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
+            self.controller.update_status(f"開啟檔案總管失敗: {e}")
 
     def delete_local_mod(self) -> None:
         """刪除選中的本地模組檔案"""
@@ -838,7 +839,7 @@ class LocalModListPresenter:
 
     def batch_toggle_selected(self, _event=None) -> None:
         """
-        批量切換選中模組的啟用/停用狀態
+        批次切換選中模組的啟用/停用狀態
 
         Args:
             _event: 事件物件（未使用）

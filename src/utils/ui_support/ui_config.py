@@ -40,7 +40,7 @@ def resolve_color(color: Any, *, dark: bool | None = None) -> str:
 
 
 class _TableHeaderScrollFilter(QObject):
-    """確保表格/樹狀列表的垂直滾動條起始於表頭正下方，不突出版頭"""
+    """確保表格/樹狀列表的垂直捲軸起始於表頭正下方，不突出版頭"""
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         res = super().eventFilter(watched, event)
@@ -57,9 +57,6 @@ class _TableHeaderScrollFilter(QObject):
                 vbar.move(watched.width() - 13, header_h + 1)
                 vbar.resize(12, max(0, watched.height() - header_h - 2))
         return res
-
-
-_TABLE_HEADER_SCROLL_FILTER = _TableHeaderScrollFilter()
 
 
 def apply_table_header_style(table: Any) -> None:
@@ -96,7 +93,7 @@ def apply_table_header_style(table: Any) -> None:
     if header.styleSheet() != stylesheet:
         header.setStyleSheet(stylesheet)
     if isinstance(table, QObject) and not bool(table.property("_msm_header_scroll_filtered")):
-        table.installEventFilter(_TABLE_HEADER_SCROLL_FILTER)
+        table.installEventFilter(_TableHeaderScrollFilter())
         table.setProperty("_msm_header_scroll_filtered", True)
 
 

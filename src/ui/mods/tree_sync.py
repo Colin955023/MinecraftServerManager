@@ -14,14 +14,14 @@ from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import isDarkTheme
 
 from src.models import ModStatus
-from src.ui import ModListRow
-from src.ui import mod_management_logger as logger
 from src.utils import Colors, resolve_color
 
+from .constants import logger
+from .mod_management_session import ModListRow
 from .mod_presentation import format_single_line_text
 
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 class ModManagementTreeSyncOps:
@@ -49,7 +49,7 @@ class ModManagementTreeSyncOps:
         server_side = str(getattr(mod, "server_side", "") or "").strip()
         client_side = str(getattr(mod, "client_side", "") or "").strip()
         if client_side and server_side:
-            return "兼容（客戶端/伺服器）"
+            return "相容（客戶端/伺服器）"
         if client_side:
             return "僅客戶端"
         if server_side:

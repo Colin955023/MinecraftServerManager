@@ -243,7 +243,7 @@ def test_import_service_builds_managed_startup_script_and_removes_old_script(tmp
     assert "echo Minecraft" not in generated_content
     assert "正在啟動" not in generated_content
     assert "模組載入器" not in generated_content
-    assert "記憶體配置" not in generated_content
+    assert "記憶體設定" not in generated_content
     assert "java -XX:+UseG1GC -Dfoo=bar -Xms1G -Xmx20G -jar server.jar nogui" in generated_content
 
 

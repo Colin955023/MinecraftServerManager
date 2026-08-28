@@ -27,13 +27,14 @@ from src.ui import MessageDialog
 from src.utils import (
     Colors,
     SubprocessUtils,
-    cancel_timer,
     get_logger,
     invoke_later,
     is_qobject_alive,
     resolve_color,
     run_on_ui_thread,
 )
+
+from .qt_runtime import cancel_timer
 
 logger = get_logger().bind(component="UIUtils")
 
@@ -172,7 +173,7 @@ class UIUtils:
     ) -> Any | None:
         """
         建立合併的閒置排程 (Coalesced Idle)
-        將任務排在 UI 執行緒的下一次閒置週期執行，避免重複排程
+        將工作排在 UI 執行緒的下一次閒置週期執行，避免重複排程
 
         Args:
             widget: 關聯的 UI 元件，用於生命週期管理

@@ -62,10 +62,10 @@ class JvmArgsDialog(ModalMSFluentWindow):
         desc_text = "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可查看說明。"
         if self.java_major and self.java_major >= 21:
             desc_text = (
-                f"目前偵測為 Java {self.java_major}，已自動切換至 ZGC 低延遲優化設定。滑鼠游標移至項目可查看說明。"
+                f"目前偵測為 Java {self.java_major}，已自動切換至 ZGC 低延遲最佳化設定。滑鼠游標移至項目可查看說明。"
             )
         elif self.java_major:
-            desc_text = f"目前偵測為 Java {self.java_major}，已自動切換至 G1GC (Aikar's Flags) 優化設定。滑鼠游標移至項目可查看說明。"
+            desc_text = f"目前偵測為 Java {self.java_major}，已自動切換至 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可查看說明。"
 
         desc_label = BodyLabel(desc_text, self.widget)
         desc_label.setWordWrap(True)

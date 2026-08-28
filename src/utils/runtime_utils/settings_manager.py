@@ -74,8 +74,8 @@ def _clone_settings_payload(value: Any) -> Any:
     """複製設定 payload，避免呼叫端持有內部可變物件"""
     try:
         return copy.deepcopy(value)
-    except Exception as exc:
-        logger.debug(f"複製設定 payload 失敗，改用原值: {exc}")
+    except Exception as e:
+        logger.debug(f"複製設定 payload 失敗，改用原值: {e}")
         return value
 
 
@@ -212,8 +212,8 @@ class SettingsManager:
             raise ConfigurationError(f"找不到伺服器資料夾： {servers_root}")
         try:
             servers_root.mkdir(parents=True, exist_ok=True)
-        except OSError as exc:
-            raise ConfigurationError(f"無法建立伺服器資料夾： {servers_root}") from exc
+        except OSError as e:
+            raise ConfigurationError(f"無法建立伺服器資料夾： {servers_root}") from e
         return servers_root
 
     def is_auto_update_enabled(self) -> bool:

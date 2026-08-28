@@ -129,7 +129,7 @@ class ModalMSFluentWindow(MSFluentWindow):
 
     def closeEvent(self, e: QCloseEvent) -> None:
         """
-        視窗關閉事件處理，確保在關閉時退出事件循環並解除主題信號連接
+        視窗關閉事件處理，確保在關閉時退出事件迴圈並解除主題訊號連接
 
         Args:
             e: QCloseEvent 事件物件

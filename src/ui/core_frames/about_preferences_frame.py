@@ -120,7 +120,7 @@ class AboutPreferencesFrame(QWidget):
 
         dev_info = BodyLabel(
             "• 開發者: Minecraft Server Manager Team\n"
-            "• 技術棧: Python 3.14, PySide6 + QFluentWidgets\n"
+            "• 技術堆疊: Python 3.14, PySide6 + QFluentWidgets\n"
             "• Java 管理: 自動偵測 Java，支援 winget 自動下載與手動指定\n"
             "• 架構: 模組化設計, 事件驅動\n"
             "• 參考專案: PrismLauncher",

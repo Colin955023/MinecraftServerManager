@@ -363,7 +363,7 @@ class ServerImportService:
                 previous_script,
             )
             return ServerImportResult("cancelled", "使用者已取消匯入", inspection.name, cleanup_complete=cleanup)
-        except FileExistsError as exc:
+        except FileExistsError as e:
             cleanup = self._compensate(
                 inspection,
                 staging,
@@ -374,8 +374,8 @@ class ServerImportService:
                 previous_script_existed,
                 previous_script,
             )
-            return ServerImportResult("skipped", str(exc), inspection.name, cleanup_complete=cleanup)
-        except Exception as exc:
+            return ServerImportResult("skipped", str(e), inspection.name, cleanup_complete=cleanup)
+        except Exception as e:
             cleanup = self._compensate(
                 inspection,
                 staging,
@@ -386,8 +386,8 @@ class ServerImportService:
                 previous_script_existed,
                 previous_script,
             )
-            diagnostic_id = self._record_diagnostic(inspection, phase, exc)
-            logger.exception(f"伺服器匯入交易失敗 [{diagnostic_id}]: {exc}")
+            diagnostic_id = self._record_diagnostic(inspection, phase, e)
+            logger.exception(f"伺服器匯入交易失敗 [{diagnostic_id}]: {e}")
             return ServerImportResult(
                 "failed",
                 f"匯入失敗；診斷編號：{diagnostic_id}",
@@ -413,8 +413,8 @@ class ServerImportService:
                     if isinstance(loaded, dict):
                         payload = loaded
                     state = str(payload.get("state", ""))
-                except Exception as exc:
-                    logger.warning(f"無法解析匯入交易 marker {marker}: {exc}")
+                except Exception as e:
+                    logger.warning(f"無法解析匯入交易 marker {marker}: {e}")
                 config = self.server_crud.servers.get(candidate.name)
                 registered = config is not None and Path(config.path).resolve(strict=False) == candidate.resolve()
                 source_kind = str(payload.get("source_kind", ""))
@@ -445,7 +445,7 @@ class ServerImportService:
             raise ValueError("伺服器名稱包含 Windows 不允許的字元")
         final_path = (self._root / normalized).resolve(strict=False)
         if final_path.parent != self._root or not is_path_within(self._root, final_path, strict=False):
-            raise ValueError("無效的伺服器名稱（路徑遍歷偵測）")
+            raise ValueError("無效的伺服器名稱（路徑穿越偵測）")
         return normalized, final_path
 
     def _inspect_directory(
@@ -513,8 +513,8 @@ class ServerImportService:
                     revision=self._archive_revision(archive_path),
                 )
                 return replace(inspected, source_path=archive_path, server=server)
-        except Exception as exc:
-            warnings.append(f"無法讀取 ZIP 壓縮檔：{exc}")
+        except Exception as e:
+            warnings.append(f"無法讀取 ZIP 壓縮檔：{e}")
             return self._empty_inspection(
                 archive_path,
                 name,
@@ -707,16 +707,16 @@ class ServerImportService:
         for name in (self._MARKER_NAME, self._BACKUP_NAME):
             try:
                 (path / name).unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning(f"無法移除匯入交易檔案 {name}: {exc}")
+            except OSError as e:
+                logger.warning(f"無法移除匯入交易檔案 {name}: {e}")
 
     @staticmethod
     def _emit(callback: ProgressCallback | None, percent: int, message: str) -> None:
         if callback is not None:
             try:
                 callback(percent, message)
-            except Exception as exc:
-                logger.warning(f"忽略匯入 progress callback 例外: {exc}")
+            except Exception as e:
+                logger.warning(f"忽略匯入 progress callback 例外: {e}")
 
     @classmethod
     def _emit_units(
@@ -760,8 +760,8 @@ class ServerImportService:
                     "timestamp_epoch_ms": int(time.time() * 1000),
                 },
             )
-        except Exception as exc:
-            logger.error(f"無法寫入 server import 診斷 [{diagnostic_id}]: {exc}")
+        except Exception as e:
+            logger.error(f"無法寫入 server import 診斷 [{diagnostic_id}]: {e}")
         return diagnostic_id
 
     @staticmethod

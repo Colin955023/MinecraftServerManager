@@ -129,7 +129,7 @@ class _WorkRunnable(QtCore.QRunnable):
             else:
                 self._outcome_signal.emit(self._generation, WorkOutcome.succeeded(result))
         except Exception as e:
-            logger.exception(f"Background work error in generation {self._generation}", exc_info=e)
+            logger.exception(f"Background work error in generation {self._generation}: {e}")
             self._outcome_signal.emit(self._generation, WorkOutcome.failed(e))
 
 

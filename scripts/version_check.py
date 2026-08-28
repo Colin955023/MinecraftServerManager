@@ -1,8 +1,7 @@
 """
 版本與發行說明檢查工具
 
-集中管理版本解析、標籤驗證與 CHANGELOG 提取邏輯，
-避免在 GitHub Actions workflow 內重複維護字串與正則處理
+集中管理版本解析、標籤驗證與 CHANGELOG 提取邏輯，以便在 CI/CD 流程中使用。
 """
 
 from __future__ import annotations

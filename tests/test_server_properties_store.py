@@ -203,7 +203,7 @@ def test_server_manager_rejects_path_traversal_on_create_and_delete(tmp_path: Pa
         memory_max_mb=2048,
         path="",
     )
-    with pytest.raises(ValueError, match="路徑遍歷"):
+    with pytest.raises(ValueError, match="路徑穿越"):
         CreateServerJourney(manager, _PlanOnlyLoader()).plan(create_config)
     assert "../escape" not in manager.servers
 

@@ -183,10 +183,10 @@ class ManageServerService:
                 try:
                     if file_path.is_file():
                         total_bytes += max(0, file_path.stat().st_size)
-                except (OSError, ValueError) as exc:
-                    logger.warning(f"讀取伺服器檔案大小失敗，略過 {file_path}: {exc}")
-        except (OSError, ValueError) as exc:
-            logger.warning(f"掃描伺服器大小失敗 {path}: {exc}")
+                except (OSError, ValueError) as e:
+                    logger.warning(f"讀取伺服器檔案大小失敗，略過 {file_path}: {e}")
+        except (OSError, ValueError) as e:
+            logger.warning(f"掃描伺服器大小失敗 {path}: {e}")
         return format_bytes(total_bytes)
 
     @classmethod

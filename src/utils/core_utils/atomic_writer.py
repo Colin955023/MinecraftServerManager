@@ -1,6 +1,6 @@
 """
 原子性寫入工具
-提供 JSON、文字與 bytes 的同目錄臨時檔案寫入，並在成功後以原子方式替換目標檔案
+提供 JSON、文字與 bytes 的同目錄暫存檔案寫入，並在成功後以原子方式替換目標檔案
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode:
                     if tmp_path.exists():
                         tmp_path.unlink()
                 except OSError:
-                    logger.debug(f"嘗試移除臨時檔案 {tmp_path} 時失敗；忽略錯誤")
+                    logger.debug(f"嘗試移除暫存檔案 {tmp_path} 時失敗；忽略錯誤")
                 if attempt + 1 >= _RETRY_COUNT:
                     return False
                 time.sleep(_RETRY_DELAY * (attempt + 1))

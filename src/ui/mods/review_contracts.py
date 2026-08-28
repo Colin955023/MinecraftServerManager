@@ -23,7 +23,7 @@ class ReviewContextStamp:
 
 @dataclass(frozen=True, slots=True)
 class ReviewTaskView:
-    """Review 任務樹單一節點的不可變呈現資料"""
+    """Review 工作樹單一節點的不可變呈現資料"""
 
     node_id: str
     root_key: str
@@ -183,7 +183,7 @@ def describe_context_mismatch(expected: ReviewContextStamp, actual: ReviewContex
     if expected.loader_type != actual.loader_type or expected.loader_version != actual.loader_version:
         return "Loader context 已變更"
     if expected.installed_mod_revision != actual.installed_mod_revision:
-        return "本機 Mod 清單已變更"
+        return "本地 Mod 清單已變更"
     return ""
 
 

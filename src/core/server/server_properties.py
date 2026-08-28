@@ -36,8 +36,8 @@ class ServerPropertiesStore:
             path = self._registered_properties_path(server_name)
         except KeyError:
             return ServerPropertiesSnapshot(server_name, "invalid", "", message="找不到伺服器設定")
-        except ValueError as exc:
-            return ServerPropertiesSnapshot(server_name, "invalid", "", message=str(exc))
+        except ValueError as e:
+            return ServerPropertiesSnapshot(server_name, "invalid", "", message=str(e))
         with self._lock:
             return self._read_path(server_name, path)
 
@@ -63,9 +63,9 @@ class ServerPropertiesStore:
         except KeyError:
             snapshot = ServerPropertiesSnapshot(server_name, "invalid", "", message="找不到伺服器設定")
             return ServerPropertiesUpdateResult(False, snapshot, "missing_server", snapshot.message)
-        except ValueError as exc:
-            snapshot = ServerPropertiesSnapshot(server_name, "invalid", "", message=str(exc))
-            return ServerPropertiesUpdateResult(False, snapshot, "unsafe_path", str(exc))
+        except ValueError as e:
+            snapshot = ServerPropertiesSnapshot(server_name, "invalid", "", message=str(e))
+            return ServerPropertiesUpdateResult(False, snapshot, "unsafe_path", str(e))
         with self._lock:
             current = self._read_path(server_name, path)
             if not current.readable:
@@ -133,18 +133,18 @@ class ServerPropertiesStore:
             return ServerPropertiesSnapshot(server_name, "missing", cls._MISSING_REVISION)
         try:
             raw = path.read_bytes()
-        except PermissionError as exc:
-            return ServerPropertiesSnapshot(server_name, "unreadable", "", message=str(exc))
-        except OSError as exc:
-            return ServerPropertiesSnapshot(server_name, "unreadable", "", message=str(exc))
+        except PermissionError as e:
+            return ServerPropertiesSnapshot(server_name, "unreadable", "", message=str(e))
+        except OSError as e:
+            return ServerPropertiesSnapshot(server_name, "unreadable", "", message=str(e))
         revision = hashlib.sha256(raw).hexdigest()
         if not raw:
             return ServerPropertiesSnapshot(server_name, "empty", revision)
         try:
             content = raw.decode("utf-8-sig")
             properties = PropertiesDocumentCodec.parse(content)
-        except (UnicodeError, ValueError) as exc:
-            return ServerPropertiesSnapshot(server_name, "invalid", revision, message=str(exc))
+        except (UnicodeError, ValueError) as e:
+            return ServerPropertiesSnapshot(server_name, "invalid", revision, message=str(e))
         return cls._snapshot(server_name, "ok", content, properties)
 
     @staticmethod

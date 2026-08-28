@@ -1,6 +1,6 @@
 """
-背景任務協調器
-負責處理主視窗啟動時的初始化任務與背景資料預載
+背景工作協調器
+負責處理主視窗啟動時的初始化工作與背景資料預載
 """
 
 from __future__ import annotations
@@ -28,13 +28,13 @@ logger = get_logger().bind(component="TaskCoordinator")
 
 
 class TaskCoordinator:
-    """背景任務協調器"""
+    """背景工作協調器"""
 
     def __init__(self, main_window: MainWindow):
         self.main_window = main_window
 
     def preload_java_candidates(self) -> None:
-        """啟動時背景掃描本機 Java 並更新快取"""
+        """啟動時背景掃描本地 Java 並更新快取"""
 
         def refresh_java_cache():
             JavaUtils.refresh_java_candidates_cache()
@@ -43,7 +43,7 @@ class TaskCoordinator:
             self.main_window.scope.submit(refresh_java_cache, key="preload_java", replace=True)
 
     def handle_startup_tasks(self) -> None:
-        """處理啟動時的任務：首次執行提示和自動更新檢查"""
+        """處理啟動時的工作：首次執行提示和自動更新檢查"""
         settings = get_settings_manager()
         if not settings.is_first_run_completed():
             self._show_first_run_prompt()
@@ -93,7 +93,7 @@ class TaskCoordinator:
 
         UIUtils.show_message(
             title="歡迎使用 Minecraft 伺服器管理器",
-            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n您可於「關於」視窗中隨時關閉此功能",
+            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n你可於「關於」視窗中隨時關閉此功能",
             parent=self.main_window.root,
             message_level="info",
         )

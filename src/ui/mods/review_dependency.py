@@ -130,10 +130,10 @@ def count_dependency_plan_items(dependency_plan: Any) -> tuple[int, int]:
 
 def count_review_nodes(nodes: list[ReviewTaskNode], node_kind: str) -> int:
     """
-    計算指定種類的 Review 任務節點數量
+    計算指定種類的 Review 工作節點數量
 
     Args:
-        nodes: 要統計的 Review 任務節點清單
+        nodes: 要統計的 Review 工作節點清單
         node_kind: 要比對的節點種類名稱
 
     Returns:
@@ -201,7 +201,7 @@ def append_dependency_review_sections(
         lines.append(required_heading)
         lines.extend(f"- {item.project_name} ({item.version_name})" for item in dependency_items[:3])
         if len(dependency_items) > 3:
-            lines.append(f"- 其餘 {len(dependency_items) - 3} 項請於任務樹查看")
+            lines.append(f"- 其餘 {len(dependency_items) - 3} 項請於工作樹查看")
     if advisory_items:
         optional_items = [item for item in advisory_items if is_optional_dependency_item(item)]
         maybe_installed_items = [item for item in advisory_items if not is_optional_dependency_item(item)]
@@ -213,7 +213,7 @@ def append_dependency_review_sections(
                 for item in optional_items[:2]
             )
             if len(optional_items) > 2:
-                lines.append(f"- 其餘 {len(optional_items) - 2} 項請於任務樹查看")
+                lines.append(f"- 其餘 {len(optional_items) - 2} 項請於工作樹查看")
         if maybe_installed_items:
             lines.append("")
             lines.append("疑似已安裝、預設略過的必要依賴：")
@@ -222,12 +222,12 @@ def append_dependency_review_sections(
                 for item in maybe_installed_items[:2]
             )
             if len(maybe_installed_items) > 2:
-                lines.append(f"- 其餘 {len(maybe_installed_items) - 2} 項請於任務樹查看")
+                lines.append(f"- 其餘 {len(maybe_installed_items) - 2} 項請於工作樹查看")
 
 
 def build_installed_mod_simulation_item(project_id: str, project_name: str, filename: str, version_name: str) -> Any:
     """
-    建立供依賴規劃模擬使用的本機模組資料
+    建立供依賴規劃模擬使用的本地模組資料
 
     Args:
         project_id: 模組的專案識別值

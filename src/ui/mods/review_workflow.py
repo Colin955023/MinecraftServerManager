@@ -378,7 +378,7 @@ class OnlineReviewSession:
         建立目前線上 Review 狀態的 UI 快照
 
         Returns:
-            完整任務樹、摘要與計數的不可變投影
+            完整工作樹、摘要與計數的不可變投影
         """
         presentation = self._workflow._presentation
         entries = list(self._entries)
@@ -527,7 +527,7 @@ class LocalReviewSession:
         建立目前本地更新 Review 的 UI 快照
 
         Returns:
-            完整任務樹、摘要、選取與分組計數
+            完整工作樹、摘要、選取與分組計數
         """
         presentation = self._workflow._presentation
         entries = list(self._entries)
@@ -570,7 +570,7 @@ class LocalReviewSession:
         套用 root 或可選依賴節點的選取狀態
 
         Args:
-            selected_node_ids: 使用者選取的任務樹節點 ID
+            selected_node_ids: 使用者選取的工作樹節點 ID
             selected: 要套用的新選取狀態
 
         Returns:

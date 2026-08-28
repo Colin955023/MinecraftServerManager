@@ -42,12 +42,8 @@ from src.core import (
 )
 from src.models import ServerConfig
 from src.ui import (
-    AboutPreferencesFrame,
-    CreateServerFrame,
-    ManageServerFrame,
     ModalMSFluentWindow,
     ModManagementFrame,
-    PageRouter,
     ProgressDialog,
     TaskCoordinator,
 )
@@ -68,6 +64,11 @@ from src.utils import (
     initialize_ui_theme,
     run_on_ui_thread,
 )
+
+from .about_preferences_frame import AboutPreferencesFrame
+from .create_server_frame import CreateServerFrame
+from .manage_server_frame import ManageServerFrame
+from .page_router import PageRouter
 
 logger = get_logger().bind(component="MainWindow")
 
@@ -287,8 +288,8 @@ class MainWindow(FluentWindow):
             if stored:
                 try:
                     path_obj = settings.get_validated_servers_root_path(create=True)
-                except ConfigurationError as exc:
-                    _fail_exit(str(exc))
+                except ConfigurationError as e:
+                    _fail_exit(str(e))
                     return ""
             else:
                 base_dir = _prompt_for_directory()
@@ -306,12 +307,12 @@ class MainWindow(FluentWindow):
         self.servers_root = str(path_obj)
         return self.servers_root
 
-    def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """
         主視窗關閉處理，儲存視窗狀態並清理快取
 
         Args:
-            e: 關閉事件
+            event: 關閉事件
         """
         try:
             is_maximized = self.isMaximized()
@@ -350,23 +351,38 @@ class MainWindow(FluentWindow):
                         with suppress(Exception):
                             widget.close()
                 app.quit()
-        except Exception as ex:
-            logger.error(f"清理資源時發生錯誤: {ex}\n{traceback.format_exc()}")
-        super().closeEvent(e)
+        except Exception as e:
+            logger.error(f"清理資源時發生錯誤: {e}\n{traceback.format_exc()}")
+        super().closeEvent(event)
 
     def _force_full_window_repaint(self) -> None:
         """強制整個主視窗及其子頁面重新排版與重繪，防止最大化、還原或失焦時的畫面撕裂與殘影"""
-        win_layout = self.layout()
-        if win_layout is not None:
-            win_layout.activate()
-        if hasattr(self, "navigationInterface") and self.navigationInterface:
-            self.navigationInterface.update()
-        if hasattr(self, "stackedWidget") and self.stackedWidget:
-            current = self.stackedWidget.currentWidget()
-            if current is not None:
-                current.update()
-            self.stackedWidget.update()
+        # FluentWindow 在 Windows 還原／重新取得焦點時可能保留 backing store 的舊像素，
+        # 導致底部固定操作列殘影；先讓完整 widget 樹失效，再重新啟用更新繪製。
+        self.setUpdatesEnabled(False)
+        try:
+            win_layout = self.layout()
+            if win_layout is not None:
+                win_layout.invalidate()
+                win_layout.activate()
+            central = self.centralWidget()
+            if central is not None:
+                central.updateGeometry()
+                central.update()
+            if hasattr(self, "navigationInterface") and self.navigationInterface:
+                self.navigationInterface.updateGeometry()
+                self.navigationInterface.update()
+            if hasattr(self, "stackedWidget") and self.stackedWidget:
+                self.stackedWidget.updateGeometry()
+                current = self.stackedWidget.currentWidget()
+                if current is not None:
+                    current.updateGeometry()
+                    current.update()
+                self.stackedWidget.update()
+        finally:
+            self.setUpdatesEnabled(True)
         self.update()
+        self.repaint()
 
     def changeEvent(self, e: QtCore.QEvent) -> None:
         """
@@ -439,8 +455,8 @@ class MainWindow(FluentWindow):
             self.server_properties,
         )
         self.create_server_frame.setObjectName("CreateServerInterface")
-        self.manage_server_frame = None
-        self.mod_frame = None
+        self.manage_server_frame: ManageServerFrame | None = None
+        self.mod_frame: QWidget | None = None
         self._ensure_manage_server_frame()
         self._ensure_mod_management_frame()
 
@@ -515,7 +531,7 @@ class MainWindow(FluentWindow):
 
     def on_server_selected(self, server_name: str) -> None:
         """
-        伺服器被選中的回調
+        伺服器被選中的回呼
 
         Args:
             server_name: 被選取的伺服器名稱
@@ -547,7 +563,7 @@ class MainWindow(FluentWindow):
         )
 
     def _deferred_init(self) -> None:
-        """延遲初始化：在事件循環啟動後執行需要使用者互動的步驟與背景任務排程"""
+        """延遲初始化：在事件迴圈啟動後執行需要使用者互動的步驟與背景工作排程"""
         try:
             if not self._widgets_initialized:
                 self.servers_root = self.set_servers_root()
@@ -902,7 +918,7 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         else:
             self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
             if self.progress_label:
-                self.progress_label.setText("狀態: 啟動異常")
+                self.progress_label.setText("狀態: 啟動錯誤")
 
     def _handle_server_error(self, err_msg: str) -> None:
         """處理伺服器錯誤並啟動倒數計時強制終止"""
@@ -945,7 +961,7 @@ def run_application():
 
     logger.info("啟動主視窗...")
     manager = MainWindow()
-    logger.info("主視窗啟動完成，進入事件循環...")
+    logger.info("主視窗啟動完成，進入事件迴圈...")
     manager.show()
     app.exec()
 

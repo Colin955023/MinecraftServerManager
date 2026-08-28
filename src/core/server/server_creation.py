@@ -76,7 +76,7 @@ class CreateServerJourney:
         root = self._root
         final_path = (root / name).resolve(strict=False)
         if final_path.parent != root or not is_path_within(root, final_path, strict=False):
-            raise ValueError("無效的伺服器名稱（路徑遍歷偵測）")
+            raise ValueError("無效的伺服器名稱（路徑穿越偵測）")
         if name in self.server_crud.servers or final_path.exists():
             raise FileExistsError("同名伺服器已存在")
 
@@ -258,8 +258,8 @@ class CreateServerJourney:
             marker = plan.final_path / self._MARKER_NAME
             try:
                 marker.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning(f"已提交實例但無法移除 transaction marker: {exc}")
+            except OSError as e:
+                logger.warning(f"已提交實例但無法移除 transaction marker: {e}")
             self._emit(progress_callback, 100, "伺服器建立完成！")
             return ServerCreationResult("completed", f"伺服器 {plan.name} 已建立", config=config)
         except _CreationCancelled:
@@ -271,10 +271,10 @@ class CreateServerJourney:
                 diagnostic_id=diagnostic_id,
                 cleanup_complete=cleanup_complete,
             )
-        except Exception as exc:
+        except Exception as e:
             cleanup_complete = self._compensate(plan, moved_to_final, registered, previous_config)
-            diagnostic_id = self._record_diagnostic(plan, phase, exc)
-            logger.exception(f"伺服器建立交易失敗 [{diagnostic_id}]: {exc}")
+            diagnostic_id = self._record_diagnostic(plan, phase, e)
+            logger.exception(f"伺服器建立交易失敗 [{diagnostic_id}]: {e}")
             return ServerCreationResult(
                 "failed",
                 f"建立失敗；診斷編號：{diagnostic_id}",
@@ -303,8 +303,8 @@ class CreateServerJourney:
                 if registered_path == candidate.resolve(strict=False):
                     try:
                         (candidate / self._MARKER_NAME).unlink(missing_ok=True)
-                    except OSError as exc:
-                        logger.warning(f"無法移除已註冊 instance 的 orphan marker: {exc}")
+                    except OSError as e:
+                        logger.warning(f"無法移除已註冊 instance 的 orphan marker: {e}")
                 else:
                     self._cleanup_path(candidate)
 
@@ -313,8 +313,8 @@ class CreateServerJourney:
         if callback is not None:
             try:
                 callback(percent, message)
-            except Exception as exc:
-                logger.warning(f"忽略 server creation progress callback 例外: {exc}")
+            except Exception as e:
+                logger.warning(f"忽略 server creation progress callback 例外: {e}")
 
     def _check_disk_space(self, required_bytes: int = 500 * 1024 * 1024) -> None:
         try:
@@ -322,8 +322,8 @@ class CreateServerJourney:
                 raise OSError(f"可用磁碟空間不足，無法建立伺服器；至少需要 {required_bytes} bytes")
         except OSError:
             raise
-        except Exception as exc:
-            logger.warning(f"檢查磁碟空間時發生異常: {exc}")
+        except Exception as e:
+            logger.warning(f"檢查磁碟空間時發生例外: {e}")
 
     @staticmethod
     def _check_cancel(cancel_check: CancelCheck) -> None:
@@ -373,8 +373,8 @@ class CreateServerJourney:
             return True
         try:
             SystemUtils.kill_java_processes_in_path(path)
-        except Exception as exc:
-            logger.warning(f"清理建立交易時無法終止 Java process: {exc}")
+        except Exception as e:
+            logger.warning(f"清理建立交易時無法終止 Java process: {e}")
         return delete_within(self._root, path)
 
     def _record_diagnostic(self, plan: ServerCreationPlan, phase: str, error: Any) -> str:
@@ -398,8 +398,8 @@ class CreateServerJourney:
                     "timestamp_epoch_ms": int(time.time() * 1000),
                 },
             )
-        except Exception as exc:
-            logger.error(f"無法寫入 server creation 診斷 [{diagnostic_id}]: {exc}")
+        except Exception as e:
+            logger.error(f"無法寫入 server creation 診斷 [{diagnostic_id}]: {e}")
         return diagnostic_id
 
 

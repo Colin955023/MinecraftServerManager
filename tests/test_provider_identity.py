@@ -4,7 +4,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.core import ModrinthProviderAdapter, ProviderIdentityService
+from src.core.mods.modrinth_provider_adapter import ModrinthProviderAdapter
+from src.core.mods.provider_identity import ProviderIdentityService
 from src.models import (
     HTTPJSONResponse,
     ProviderCatalogOutcome,

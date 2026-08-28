@@ -6,7 +6,8 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from src.utils import ArchiveSecurityError, is_path_within
+from .exceptions import ArchiveSecurityError
+from .filesystem_utils import is_path_within
 
 SAFE_ZIP_MAX_MEMBER_BYTES = 512 * 1024 * 1024
 SAFE_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
@@ -63,7 +64,7 @@ def safe_extract_zip(
     max_compression_ratio: int | None = SAFE_ZIP_MAX_COMPRESSION_RATIO,
 ) -> None:
     """
-    安全解壓縮 ZIP，拒絕路徑遍歷、符號連結與異常大小
+    安全解壓縮 ZIP，拒絕路徑穿越、符號連結與異常大小
 
     Args:
         zip_path: ZIP 檔案路徑
@@ -93,7 +94,7 @@ def safe_extract_zip(
             if sanitized is None:
                 raise ArchiveSecurityError(f"壓縮檔包含不安全的成員名稱: {member.filename}")
             if not is_path_within(dest_dir, dest_dir / sanitized, strict=False):
-                raise ArchiveSecurityError(f"壓縮檔嘗試路徑遍歷: {member.filename}")
+                raise ArchiveSecurityError(f"壓縮檔嘗試路徑穿越: {member.filename}")
             sanitized_members.append((member, sanitized))
 
         extracted_bytes = 0

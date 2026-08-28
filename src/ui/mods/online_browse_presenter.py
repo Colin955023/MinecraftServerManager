@@ -24,7 +24,7 @@ from src.utils import (
 )
 
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 @dataclass(slots=True)

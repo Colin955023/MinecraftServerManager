@@ -6,12 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.core import (
-    LoaderRulesPort,
-    ModPlanningProviderPort,
-    analyze_local_mod_file_compatibility,
-)
-from src.core import mod_search_logger as logger
 from src.models import (
     LocalModUpdateCandidate,
     LocalModUpdatePlan,
@@ -63,6 +57,13 @@ from src.utils import (
     normalize_local_loader,
     select_best_mod_version,
 )
+
+from .compatibility_analyzer import analyze_local_mod_file_compatibility
+from .mod_planning_ports import (
+    LoaderRulesPort,
+    ModPlanningProviderPort,
+)
+from .mod_search_constants import logger
 
 
 def _resolve_reference(

@@ -31,7 +31,7 @@ class RuntimePaths:
 
     @staticmethod
     def _get_localappdata() -> Path:
-        """取得 Windows 系統的本機應用程式資料目錄路徑"""
+        """取得 Windows 系統的本地應用程式資料目錄路徑"""
         base = os.environ.get("LOCALAPPDATA")
         if not base:
             base = str(Path.home() / "AppData" / "Local")

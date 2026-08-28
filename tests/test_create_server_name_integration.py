@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from src.ui import CreateServerFrame
+from src.ui.core_frames.create_server_frame import CreateServerFrame
 
 
 class _Var:

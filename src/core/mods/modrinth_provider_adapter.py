@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from src.core import (
+from src.models import CatalogOutcomeKind, ProviderCatalogOutcome
+from src.utils import HTTPClient
+
+from .mod_search_constants import (
     MODRINTH_PROJECT_DETAIL_TIMEOUT_SECONDS,
     MODRINTH_SEARCH_TIMEOUT_SECONDS,
     MODRINTH_SEARCH_URL,
 )
-from src.models import CatalogOutcomeKind, ProviderCatalogOutcome
-from src.utils import HTTPClient
 
 MODRINTH_PROJECT_DETAIL_URL = "https://api.modrinth.com/v2/project/{identifier}"
 

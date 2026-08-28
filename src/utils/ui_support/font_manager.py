@@ -93,8 +93,8 @@ class FontManager:
             if len(cls._fonts) > cls.MAX_CACHE_SIZE:
                 cls._fonts.popitem(last=False)
             return font
-        except Exception as exc:
-            logger.exception(f"建立字體失敗 {family}, {size}, {weight}: {exc}")
+        except Exception as e:
+            logger.exception(f"建立字體失敗 {family}, {size}, {weight}: {e}")
             return cls._get_fallback_font()
 
     @classmethod
@@ -110,8 +110,8 @@ class FontManager:
         """清空字體快取"""
         try:
             cls._fonts.clear()
-        except Exception as exc:
-            logger.exception(f"清理字體快取時發生錯誤: {exc}")
+        except Exception as e:
+            logger.exception(f"清理字體快取時發生錯誤: {e}")
 
 
 __all__ = ["FontManager"]

@@ -5,8 +5,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from src.ui import MODRINTH_PROJECT_PAGE_BASE_URL
 from src.utils import normalize_identifier
+
+from .constants import MODRINTH_PROJECT_PAGE_BASE_URL
 
 
 def format_provider_label(provider: str | None) -> str:
@@ -58,7 +59,7 @@ def _summarize_messages(messages: list[str] | tuple[str, ...], max_items: int = 
     values = list(dict.fromkeys(str(message or "").strip() for message in messages if str(message or "").strip()))
     if len(values) <= max_items:
         return values
-    return [*values[:max_items], f"其餘 {len(values) - max_items} 項請於任務樹查看"]
+    return [*values[:max_items], f"其餘 {len(values) - max_items} 項請於工作樹查看"]
 
 
 def get_online_version_status_text(report: Any | None) -> str:

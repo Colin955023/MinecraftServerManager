@@ -8,19 +8,31 @@ from typing import Any, cast
 import pytest
 
 import src.models as models_module
-import src.ui as ui_module
 import src.ui.mods.online_mod_queue as online_mod_queue_module
 import src.utils as utils_module
 import src.utils.ui_support.ui_utils as ui_utils_module
 from src.core import ModPlanning
 from src.models import ModrinthVersionLookupResult, OnlineModVersion
-from src.ui import (
+from src.ui.mods.frame import ModManagementFrame
+from src.ui.mods.install_executor import ModManagementInstallExecutor
+from src.ui.mods.local_mod_list_presenter import LocalModListPresenter
+from src.ui.mods.mod_management_session import (
     ModManagementSession,
-    ModReviewWorkflow,
+    OnlineBrowseRequest,
+)
+from src.ui.mods.mod_presentation import (
     format_online_version_report,
     get_online_version_status_text,
     sort_online_versions_for_server,
 )
+from src.ui.mods.online_browse_presenter import OnlineBrowsePresenter
+from src.ui.mods.online_mod_queue import ModManagementQueueOps
+from src.ui.mods.review_contracts import (
+    ReviewExecutionHandoff,
+    ReviewInstallStep,
+)
+from src.ui.mods.review_workflow import ModReviewWorkflow
+from src.ui.mods.tree_sync import ModManagementTreeSyncOps
 
 
 class _EmptyPlanningProvider:
@@ -78,7 +90,7 @@ class _EmptyLoaderRules:
 
 
 def _search_filter():
-    return ui_module.OnlineBrowsePresenter(cast(Any, SimpleNamespace())).online_search_filter
+    return OnlineBrowsePresenter(cast(Any, SimpleNamespace())).online_search_filter
 
 
 def _review_server() -> SimpleNamespace:
@@ -118,7 +130,7 @@ def _mod_session(
         scope = session.begin_local_scan()
         assert session.accept_local_results(scope, local_mods)
     if online_mods is not None:
-        request = ui_module.OnlineBrowseRequest("test", "1.21.1", "fabric", "relevance")
+        request = OnlineBrowseRequest("test", "1.21.1", "fabric", "relevance")
         scope = session.begin_online_search(request)
         assert session.accept_online_results(scope, request, online_mods)
     for item in pending or []:
@@ -188,7 +200,7 @@ def _queue_feature(
         online_search_filter=_search_filter(),
     )
     controller = SimpleNamespace(mod_session=session, online_browse_presenter=presenter)
-    feature = ui_module.ModManagementQueueOps(cast(Any, controller))
+    feature = ModManagementQueueOps(cast(Any, controller))
     controller.queue_ops = feature
     return feature, controller
 
@@ -227,7 +239,7 @@ def test_on_online_browse_filters_changed_refreshes_hint_and_reloads(monkeypatch
         lambda *, force=False, show_warning=True: called.append((force, show_warning)),
     )
 
-    feature.on_online_browse_filters_changed("效能優化")
+    feature.on_online_browse_filters_changed("效能最佳化")
 
     assert called == ["hint", "summary", (True, False)]
 
@@ -250,7 +262,7 @@ def test_build_online_results_summary_text_prompts_keyword_when_query_empty() ->
 
 def test_build_online_browse_row_includes_prism_style_metadata() -> None:
     controller = SimpleNamespace()
-    projection = ui_module.ModManagementTreeSyncOps(cast(Any, controller))
+    projection = ModManagementTreeSyncOps(cast(Any, controller))
 
     mod = SimpleNamespace(
         name="Sodium",
@@ -276,7 +288,7 @@ def test_build_online_browse_row_includes_prism_style_metadata() -> None:
 
 def test_build_online_browse_row_keeps_full_description() -> None:
     controller = SimpleNamespace()
-    projection = ui_module.ModManagementTreeSyncOps(cast(Any, controller))
+    projection = ModManagementTreeSyncOps(cast(Any, controller))
 
     long_description = (
         "You can drink from a water source, cauldron or with vanilla items.\n"
@@ -380,7 +392,7 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
         local_mod_list_presenter=presenter,
         queue_ops=SimpleNamespace(_format_single_line_text=lambda text: text.replace("\n", " ")),
     )
-    projection = ui_module.ModManagementTreeSyncOps(cast(Any, controller))
+    projection = ModManagementTreeSyncOps(cast(Any, controller))
 
     def _capture_selected_mod_ids_func() -> set:
         return set()
@@ -496,7 +508,7 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
 
 
 def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is_fuzzy() -> None:
-    projection = ui_module.ModManagementTreeSyncOps(cast(Any, SimpleNamespace()))
+    projection = ModManagementTreeSyncOps(cast(Any, SimpleNamespace()))
     local_mod = cast(Any, type("LocalMod", (), {"name": "Fabric API", "platform_id": "fabric-api"})())
     enhanced = cast(Any, type("EnhancedMod", (), {"name": "Dawn API", "project_id": "dawn-api", "slug": "dawn-api"})())
 
@@ -506,7 +518,7 @@ def test_resolve_local_display_name_keeps_trusted_local_name_when_enhancement_is
 
 
 def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unknown() -> None:
-    projection = ui_module.ModManagementTreeSyncOps(cast(Any, SimpleNamespace()))
+    projection = ModManagementTreeSyncOps(cast(Any, SimpleNamespace()))
     local_mod = cast(Any, type("LocalMod", (), {"name": "Unknown Mod", "platform_id": "fabric-api"})())
     enhanced = cast(
         Any, type("EnhancedMod", (), {"name": "Fabric API", "project_id": "P7dR8mSH", "slug": "fabric-api"})()
@@ -518,13 +530,13 @@ def test_resolve_local_display_name_uses_exact_enhancement_when_local_name_unkno
 
 
 def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path, monkeypatch) -> None:
-    frame = object.__new__(ui_module.ModManagementFrame)
+    frame = object.__new__(ModManagementFrame)
     deleted_ids: list[list[str]] = []
     shown_messages: list[str] = []
     frame.mod_session = _mod_session(type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
-    frame.update_status = frame.status_label.setText
+    monkeypatch.setattr(frame, "update_status", frame.status_label.setText)
 
     def _delete_local_mods_result(ids: list[str]) -> SimpleNamespace:
         deleted_ids.append(list(ids))
@@ -543,9 +555,9 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
             mod_file_installer=SimpleNamespace(delete_local_mods_result=_delete_local_mods_result),
         ),
     )
-    presenter = ui_module.LocalModListPresenter(cast(Any, frame))
+    presenter = LocalModListPresenter(cast(Any, frame))
     presenter.local_tree = cast(Any, _DeleteTree())
-    presenter.load_local_mods = lambda: shown_messages.append("reloaded")
+    monkeypatch.setattr(presenter, "load_local_mods", lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
         del parent, show_cancel
@@ -569,12 +581,12 @@ def test_delete_local_mod_delegates_to_mod_manager_and_refreshes(tmp_path: Path,
 
 
 def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypatch) -> None:
-    frame = object.__new__(ui_module.ModManagementFrame)
+    frame = object.__new__(ModManagementFrame)
     shown_messages: list[str] = []
     frame.mod_session = _mod_session(type("Server", (), {"path": str(tmp_path)})())
     frame.parent = cast(Any, object())
     frame.status_label = cast(Any, _StatusLabel())
-    frame.update_status = frame.status_label.setText
+    monkeypatch.setattr(frame, "update_status", frame.status_label.setText)
     frame.mod_manager = cast(
         Any,
         SimpleNamespace(
@@ -590,9 +602,9 @@ def test_delete_local_mod_shows_manager_failure_message(tmp_path: Path, monkeypa
             ),
         ),
     )
-    presenter = ui_module.LocalModListPresenter(cast(Any, frame))
+    presenter = LocalModListPresenter(cast(Any, frame))
     presenter.local_tree = cast(Any, _DeleteTree())
-    presenter.load_local_mods = lambda: shown_messages.append("reloaded")
+    monkeypatch.setattr(presenter, "load_local_mods", lambda: shown_messages.append("reloaded"))
 
     def fake_ask_yes_no_cancel(_title, _message, parent=None, show_cancel=False) -> bool:
         del parent, show_cancel
@@ -639,7 +651,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
         filename="cloth-config.jar",
         download_url="https://example.com/cloth-config.jar",
     )
-    handoff = ui_module.ReviewExecutionHandoff(
+    handoff = ReviewExecutionHandoff(
         mode="online_install",
         context_stamp=ModReviewWorkflow(
             mod_planning=_empty_planning(),
@@ -647,7 +659,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
             installed_mods=[],
         ).context_stamp,
         steps=(
-            ui_module.ReviewInstallStep(
+            ReviewInstallStep(
                 kind="dependency",
                 root_key="first-mod::v1",
                 project_name=shared_dependency.project_name,
@@ -657,7 +669,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
                 expected_hash="",
                 provider="modrinth",
             ),
-            ui_module.ReviewInstallStep(
+            ReviewInstallStep(
                 kind="online_root",
                 root_key="first-mod::v1",
                 project_name="First Mod",
@@ -667,7 +679,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
                 expected_hash="",
                 provider="modrinth",
             ),
-            ui_module.ReviewInstallStep(
+            ReviewInstallStep(
                 kind="online_root",
                 root_key="second-mod::v2",
                 project_name="Second Mod",
@@ -718,7 +730,7 @@ def test_install_pending_online_install_queue_deduplicates_shared_dependencies(m
     controller.update_status_safe = lambda _message: None
     controller.update_progress_safe = lambda _value: None
     controller.mod_manager = SimpleNamespace(install_remote_mod_file=_record_install)
-    executor = ui_module.ModManagementInstallExecutor(cast(Any, controller))
+    executor = ModManagementInstallExecutor(cast(Any, controller))
     monkeypatch.setattr(
         executor,
         "_make_step_progress_callback",
@@ -1003,7 +1015,7 @@ def test_prepare_local_update_review_entries_uses_fallback_root_key_when_project
     assert snapshot.selected_count == 0
 
 
-def test_load_local_mods_discards_stale_scan_results(tmp_path: Path) -> None:
+def test_load_local_mods_discards_stale_scan_results(tmp_path: Path, monkeypatch) -> None:
     controller = SimpleNamespace()
     server_a = SimpleNamespace(name="server-a", path=str(tmp_path / "server-a"))
     server_b = SimpleNamespace(name="server-b", path=str(tmp_path / "server-b"))
@@ -1018,8 +1030,8 @@ def test_load_local_mods_discards_stale_scan_results(tmp_path: Path) -> None:
     controller.update_progress_safe = lambda _value: None
     controller.tree_sync = SimpleNamespace(refresh_local_list=lambda: queued_items.append("refresh_local_list"))
     controller.ui_queue = SimpleNamespace(put=lambda item: queued_items.append(item))
-    presenter = ui_module.LocalModListPresenter(cast(Any, controller))
-    presenter.enhance_local_mods = lambda _scope=None: enhancement_calls.append("called")
+    presenter = LocalModListPresenter(cast(Any, controller))
+    monkeypatch.setattr(presenter, "enhance_local_mods", lambda _scope=None: enhancement_calls.append("called"))
 
     def _scan_mods() -> list[Any]:
         old_session.invalidate()

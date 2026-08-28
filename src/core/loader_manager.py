@@ -289,8 +289,8 @@ class LoaderManager:
             for spec in self.LOADER_SPECS.values():
                 try:
                     self._preload_loader(spec)
-                except Exception as exc:
-                    logger.exception(f"預抓 {spec.id} 版本失敗: {exc}")
+                except Exception as e:
+                    logger.exception(f"預抓 {spec.id} 版本失敗: {e}")
 
     def _preload_loader(self, spec: LoaderSpec):
         data: Any = None
@@ -344,9 +344,9 @@ class LoaderManager:
                 try:
                     detail = HTTPClient.fetch_json(ent["url"], timeout=10)
                     ent["server_url"] = detail.get("downloads", {}).get("server", {}).get("url", "") if detail else ""
-                except Exception as exc:
+                except Exception as e:
                     ent["server_url"] = ""
-                    logger.debug(f"查詢 Minecraft {ent['id']} server URL 失敗: {exc}")
+                    logger.debug(f"查詢 Minecraft {ent['id']} server URL 失敗: {e}")
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
                 list(executor.map(fetch_single_server_url, entries_to_fetch))
@@ -441,8 +441,8 @@ class LoaderManager:
             if result:
                 self._version_cache[cache_key] = result
             return result
-        except Exception as exc:
-            logger.exception(f"讀取 {loader_id} 相容版本失敗: {exc}")
+        except Exception as e:
+            logger.exception(f"讀取 {loader_id} 相容版本失敗: {e}")
             return []
 
     # ------------------------------------------------------------------
@@ -465,8 +465,8 @@ class LoaderManager:
                 self._preload_loader(spec)
             versions = read_json(Path(self._cache_path(spec.id))) or []
             return [v for v in versions if isinstance(v, dict) and bool(v.get("server_url"))]
-        except Exception as exc:
-            logger.exception(f"取得 Minecraft 版本失敗: {exc}")
+        except Exception as e:
+            logger.exception(f"取得 Minecraft 版本失敗: {e}")
             return []
 
     def get_server_download_url(self, version_id: str) -> str | None:
@@ -514,7 +514,7 @@ class LoaderManager:
             minecraft_version: Minecraft 版本
             loader_version: 載入器版本
             download_path: 下載路徑
-            progress_callback: 進度回調函數
+            progress_callback: 進度回呼函式
             cancel_flag: 取消標誌
             user_java_path: 使用者 Java 路徑
 
@@ -620,8 +620,8 @@ class LoaderManager:
                     if value:
                         logger.info(f"成功取得校驗碼 (網址: {target_url}, 演算法: {algorithm})")
                         return LoaderInstallerArtifact(url, value[0], algorithm)
-                except Exception as exc:
-                    logger.debug(f"讀取 installer {algorithm} checksum 失敗 ({target_url}): {exc}")
+                except Exception as e:
+                    logger.debug(f"讀取 installer {algorithm} checksum 失敗 ({target_url}): {e}")
         return LoaderInstallerArtifact(url, None, None)
 
     def _download_and_run_installer(
@@ -719,8 +719,8 @@ class LoaderManager:
                                 if progress_callback and not self._is_cancel_requested(cancel_flag):
                                     display_text = text if len(text) <= 80 else text[:77] + "..."
                                     progress_callback(f"正在執行 {loader_type} 安裝: {display_text}")
-                except Exception as ex:
-                    logger.debug(f"讀取安裝程序輸出例外: {ex}")
+                except Exception as e:
+                    logger.debug(f"讀取安裝程序輸出例外: {e}")
                 finally:
                     with suppress(Exception):
                         stream.close()
@@ -762,7 +762,7 @@ class LoaderManager:
                 SystemUtils.unregister_managed_process(base_dir, process.pid)
 
             if progress_callback:
-                progress_callback("安裝成功，正在清理臨時檔案...")
+                progress_callback("安裝成功，正在清理暫存檔案...")
 
             if loader_type in {"forge", "neoforge"}:
                 run_bat = base_dir / "run.bat"
@@ -781,15 +781,15 @@ class LoaderManager:
 
             return True
 
-        except Exception as exc:
-            logger.exception(f"執行 {loader_type} 安裝器時發生錯誤: {exc}")
+        except Exception as e:
+            logger.exception(f"執行 {loader_type} 安裝器時發生錯誤: {e}")
             self._cleanup_installer_process(
                 process,
                 base_dir,
             )
             return self._fail(
                 progress_callback,
-                f"執行 {loader_type} 安裝器時發生錯誤：{exc}",
+                f"執行 {loader_type} 安裝器時發生錯誤：{e}",
             )
 
     def _cleanup_installer_process(
@@ -804,13 +804,13 @@ class LoaderManager:
         try:
             if pid and (process.poll() is None or bool(getattr(process, "cancelled", False))):
                 SystemUtils.kill_process_tree(pid)
-        except Exception as exc:
-            logger.warning(f"終止安裝器行程樹失敗: {exc}")
+        except Exception as e:
+            logger.warning(f"終止安裝器行程樹失敗: {e}")
 
         try:
             SystemUtils.kill_java_processes_in_path(base_dir)
-        except Exception as exc:
-            logger.warning(f"清理安裝器 Java 行程失敗: {exc}")
+        except Exception as e:
+            logger.warning(f"清理安裝器 Java 行程失敗: {e}")
 
         with suppress(Exception):
             SystemUtils.unregister_managed_process(base_dir, pid)
@@ -838,8 +838,8 @@ class LoaderManager:
                             item.rename(target)
                         else:
                             item.unlink(missing_ok=True)
-        except Exception as exc:
-            logger.debug(f"快取檔案遷移跳過或發生例外: {exc}")
+        except Exception as e:
+            logger.debug(f"快取檔案遷移跳過或發生例外: {e}")
 
     def clear_cache_file(self) -> OperationResult:
         """
@@ -863,9 +863,9 @@ class LoaderManager:
 
             self._version_cache.clear()
             return OperationResult(True, "快取檔案已成功清除")
-        except (PermissionError, OSError) as exc:
-            logger.exception(f"清除 Loader 快取檔案失敗: {exc}")
-            return OperationResult(False, f"清除 Loader 快取檔案失敗: {exc}")
+        except (PermissionError, OSError) as e:
+            logger.exception(f"清除 Loader 快取檔案失敗: {e}")
+            return OperationResult(False, f"清除 Loader 快取檔案失敗: {e}")
 
     def _cache_path(self, loader_id: str) -> str:
         cache_name = self.LOADER_SPECS[loader_id].cache_name
@@ -941,8 +941,8 @@ class LoaderManager:
             root = ET.fromstring(content)
             value = root.findtext(".//versioning/release") or root.findtext(".//versioning/latest")
             return value.strip() if value else None
-        except Exception as exc:
-            logger.exception(f"讀取 Quilt installer metadata 失敗: {exc}")
+        except Exception as e:
+            logger.exception(f"讀取 Quilt installer metadata 失敗: {e}")
             return None
 
     @staticmethod

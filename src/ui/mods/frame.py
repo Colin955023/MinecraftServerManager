@@ -34,16 +34,6 @@ from src.models import (
     ModStatus,
     ServerConfig,
 )
-from src.ui import (
-    LocalModListPresenter,
-    ModManagementInstallExecutor,
-    ModManagementQueueOps,
-    ModManagementReviewOps,
-    ModManagementSession,
-    ModManagementTreeSyncOps,
-    OnlineBrowsePresenter,
-)
-from src.ui import mod_management_logger as logger
 from src.utils import (
     AppException,
     Colors,
@@ -57,6 +47,15 @@ from src.utils import (
     apply_table_header_style,
     resolve_color,
 )
+
+from .constants import logger
+from .install_executor import ModManagementInstallExecutor
+from .local_mod_list_presenter import LocalModListPresenter
+from .mod_management_session import ModManagementSession
+from .online_browse_presenter import OnlineBrowsePresenter
+from .online_mod_queue import ModManagementQueueOps
+from .review import ModManagementReviewOps
+from .tree_sync import ModManagementTreeSyncOps
 
 
 def _is_alive(obj: Any) -> bool:

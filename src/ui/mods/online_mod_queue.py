@@ -32,15 +32,7 @@ from src.core import (
     search_mods_online,
 )
 from src.models import PendingOnlineInstall
-from src.ui import (
-    ModalMSFluentWindow,
-    OnlineBrowseRequest,
-    build_server_install_blocking_reason,
-    format_online_version_report,
-    get_online_version_status_text,
-    sort_online_versions_for_server,
-)
-from src.ui import mod_management_logger as logger
+from src.ui import ModalMSFluentWindow
 from src.utils import (
     SUPPORTED_MODRINTH_UPDATE_LOADERS,
     AppException,
@@ -49,10 +41,18 @@ from src.utils import (
     apply_table_header_style,
 )
 
-from .mod_presentation import resolve_project_page_url
+from .constants import logger
+from .mod_management_session import OnlineBrowseRequest
+from .mod_presentation import (
+    build_server_install_blocking_reason,
+    format_online_version_report,
+    get_online_version_status_text,
+    resolve_project_page_url,
+    sort_online_versions_for_server,
+)
 
 if TYPE_CHECKING:
-    from src.ui import ModManagementFrame
+    from .frame import ModManagementFrame
 
 
 class ModManagementQueueOps:
@@ -82,7 +82,7 @@ class ModManagementQueueOps:
     def _add_pending_online_install(self, pending: PendingOnlineInstall) -> bool:
         blocking_reason = build_server_install_blocking_reason(pending.server_side)
         if blocking_reason:
-            logger.info("拒絕加入安裝清單: %s", blocking_reason)
+            logger.info(f"拒絕加入安裝清單: {blocking_reason}")
             UIUtils.show_message("無法加入安裝清單", blocking_reason, self.controller.parent, message_level="warning")
             return False
         self.controller.mod_session.add_pending_install(pending)

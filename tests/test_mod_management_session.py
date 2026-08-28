@@ -4,7 +4,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from src.models import PendingOnlineInstall, ServerConfig
-from src.ui import ModListRow, ModManagementSession, OnlineBrowseRequest
+from src.ui.mods.mod_management_session import (
+    ModListRow,
+    ModManagementSession,
+    OnlineBrowseRequest,
+)
 
 
 def _server(name: str) -> ServerConfig:

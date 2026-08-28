@@ -137,7 +137,7 @@ class LoaderVersion:
 
 @dataclass
 class ServerConfig:
-    """伺服器完整配置資料類別，包含所有伺服器設定和屬性"""
+    """伺服器完整設定資料類別，包含所有伺服器設定和屬性"""
 
     name: str
     minecraft_version: str
@@ -484,7 +484,7 @@ class LoaderSpec:
 
 
 # ----------------------------------------------------------------------
-# Provider 身份與中繼資料模型 (Provider Identity Models)
+# Provider 身分與中繼資料模型 (Provider Identity Models)
 # ----------------------------------------------------------------------
 
 ProviderLifecycle = Literal["fresh", "stale", "missing", "retrying", "invalidated"]

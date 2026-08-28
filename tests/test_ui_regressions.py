@@ -8,7 +8,8 @@ import src.ui.core_frames.create_server_frame as create_server_frame_module
 import src.ui.core_frames.main_window as main_window_module
 from src.core import ModPlanning
 from src.models import ServerConfig, ServerCreationPlan, ServerCreationWarning
-from src.ui import CreateServerFrame, MainWindow, ModManagementFrame, ServerMonitorWindow
+from src.ui import MainWindow, ModManagementFrame, ServerMonitorWindow
+from src.ui.core_frames.create_server_frame import CreateServerFrame
 
 
 def test_initial_server_root_cancel_closes_without_reprompt_loop(monkeypatch) -> None:
@@ -125,13 +126,14 @@ def test_table_header_scroll_filter_adjusts_vbar() -> None:
     from PySide6.QtWidgets import QApplication
     from qfluentwidgets import TreeWidget
 
-    from src.utils.ui_support.ui_config import _TABLE_HEADER_SCROLL_FILTER, apply_table_header_style
+    from src.utils.ui_support.ui_config import _TableHeaderScrollFilter, apply_table_header_style
 
     _ = QApplication.instance() or QApplication([])
     tree = TreeWidget()
     tree.resize(500, 400)
     apply_table_header_style(tree)
-    _TABLE_HEADER_SCROLL_FILTER.eventFilter(tree, QEvent(QEvent.Type.Resize))
+    filter = _TableHeaderScrollFilter()
+    filter.eventFilter(tree, QEvent(QEvent.Type.Resize))
     vbar = tree.scrollDelagate.vScrollBar
     header_h = tree.header().height() if tree.header().isVisible() else 0
     assert vbar.y() >= header_h
@@ -290,7 +292,7 @@ def _run_server_creation_ui_flow(monkeypatch, *, plan_error: Exception | None = 
     monkeypatch.setattr(create_server_frame_module, "ServerCreationConfirmDialog", _ConfirmDialog)
     monkeypatch.setattr(create_server_frame_module, "run_on_ui_thread", lambda callback, **_kwargs: callback())
     monkeypatch.setattr(create_server_frame_module.UIUtils, "show_message", lambda *_args, **_kwargs: None)
-    CreateServerFrame.create_server_async(_Frame(), config, "C:/Java/java.exe")
+    CreateServerFrame.create_server_async(cast(Any, _Frame()), config, "C:/Java/java.exe")
     return events, plan
 
 

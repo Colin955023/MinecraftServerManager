@@ -1,7 +1,7 @@
 """
 伺服器管理器
 
-負責建立、管理與配置 Minecraft 伺服器
+負責建立、管理與設定 Minecraft 伺服器的核心邏輯。
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ logger = get_logger().bind(component="ServerManager")
 
 
 class ServerCRUD:
-    """負責建立、管理和配置 Minecraft 伺服器"""
+    """伺服器管理類別，負責建立、管理和設定 Minecraft 伺服器"""
 
     _shared_servers: ClassVar[dict[str, dict[str, ServerConfig]]] = {}
     _operation_locks_guard: ClassVar[threading.Lock] = threading.Lock()
@@ -208,6 +208,7 @@ class ServerCRUD:
                     server_name=server_name,
                 )
         except Exception as e:
+            error_message = str(e)
             if (
                 tombstone_path is not None
                 and server_path is not None
@@ -216,17 +217,17 @@ class ServerCRUD:
             ):
                 try:
                     tombstone_path.replace(server_path)
-                except OSError as rollback_error:
-                    logger.exception(f"刪除失敗後無法復原伺服器目錄: {rollback_error}")
+                except OSError as e:
+                    logger.exception(f"刪除失敗後無法復原伺服器目錄: {e}")
             if not config_committed and removed_config is not None and server_name not in self.servers:
                 self.servers[server_name] = removed_config
                 if not self.write_servers_config():
                     logger.error(f"刪除失敗後無法恢復伺服器設定: {server_name}")
-            logger.exception(f"刪除伺服器失敗: {e}")
+            logger.exception(f"刪除伺服器失敗: {error_message}")
             return ServerOperationResult(
                 success=False,
                 title="刪除失敗",
-                message=f"無法刪除伺服器 {server_name} 錯誤: {e}",
+                message=f"無法刪除伺服器 {server_name} 錯誤: {error_message}",
                 server_name=server_name,
             )
         finally:
@@ -250,8 +251,8 @@ class ServerCRUD:
                     self.servers.update(new_servers)
                 else:
                     logger.warning("伺服器設定檔為空或無法解析")
-            except Exception as exc:
-                logger.exception(f"載入伺服器設定失敗: {exc}")
+            except Exception as e:
+                logger.exception(f"載入伺服器設定失敗: {e}")
 
     def write_servers_config(self) -> bool:
         """

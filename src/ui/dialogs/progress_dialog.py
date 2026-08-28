@@ -131,8 +131,8 @@ class ProgressDialog(ModalMSFluentWindow):
             clamped = max(0.0, min(100.0, percent))
             self.progress.setValue(round(clamped))
             self.status_label.setText(status_text)
-        except Exception as exc:
-            logger.exception(f"更新進度 UI 失敗: {exc}")
+        except Exception as e:
+            logger.exception(f"更新進度 UI 失敗: {e}")
 
 
 __all__ = ["ProgressDialog"]

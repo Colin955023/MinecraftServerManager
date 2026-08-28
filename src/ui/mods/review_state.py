@@ -49,7 +49,7 @@ class LocalUpdateReviewEntry(AbstractReviewEntry):
 
 @dataclass(slots=True)
 class ReviewTaskNode:
-    """產生 immutable view snapshot 前的內部任務節點"""
+    """產生 immutable view snapshot 前的內部工作節點"""
 
     node_id: str
     root_key: str

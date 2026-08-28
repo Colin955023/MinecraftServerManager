@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import src.core as mod_search_service_module
+import src.core.mods.compatibility_analyzer as compatibility_analyzer_module
 import src.core.mods.mod_file_installer as mod_file_installer_module
 import src.core.mods.mod_manager as mod_manager_module
 import src.core.mods.modrinth_service as mod_search_provider_module
@@ -2238,8 +2239,7 @@ def test_analyze_local_mod_file_compatibility_does_not_flag_lossy_mc_version_met
         loader_type="Fabric",
     )
 
-    issues = mod_search_service_module.analyze_local_mod_file_compatibility(local_mod, loader="fabric")
-
+    issues = compatibility_analyzer_module.analyze_local_mod_file_compatibility(local_mod, loader="fabric")
     assert issues == []
 
 
@@ -2252,7 +2252,7 @@ def test_analyze_local_mod_file_compatibility_reports_loader_mismatch_on_quilt_s
         loader_type="Fabric",
     )
 
-    issues = mod_search_service_module.analyze_local_mod_file_compatibility(local_mod, loader="quilt")
+    issues = compatibility_analyzer_module.analyze_local_mod_file_compatibility(local_mod, loader="quilt")
 
     assert issues
     assert any("載入器" in issue for issue in issues)

@@ -13,7 +13,7 @@
 - mypy: 靜態類型檢查
 - pylint: 循環引用與程式風格檢查
 - bandit: 安全性漏洞檢測
-- vulture: 死代碼（未使用的代碼）檢測
+- vulture: 無用程式碼（未使用的程式碼）檢測
 - import-linter: 分層匯入契約檢查
 - check_import_boundaries.py: 專案自訂匯入／lazy export 存在性與 consumer 邊界檢查
 - compileall: Python 語法檢查
@@ -130,14 +130,14 @@ def get_file_context(path: Path) -> FileContext:
         parse_err: str | None
         try:
             tree = ast.parse(content, filename=str(path))
-        except SyntaxError as exc:
+        except SyntaxError as e:
             tree = None
-            parse_err = f"語法解析失敗：{exc.msg} (Line {exc.lineno})"
+            parse_err = f"語法解析失敗：{e.msg} (Line {e.lineno})"
         else:
             parse_err = None
         ctx = FileContext(path=path, content=content, lines=lines, ast_tree=tree, parse_error=parse_err)
-    except OSError as exc:
-        ctx = FileContext(path=path, content="", lines=[], ast_tree=None, parse_error=f"讀取失敗：{exc}")
+    except OSError as e:
+        ctx = FileContext(path=path, content="", lines=[], ast_tree=None, parse_error=f"讀取失敗：{e}")
     FILE_CONTEXT_CACHE[path] = ctx
     return ctx
 
@@ -208,10 +208,10 @@ def run_command(name: str, command: list[str]) -> ToolResult:
             shell=False,
             timeout=TOOL_TIMEOUT_SECONDS,
         )
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired as e:
         ended = time.perf_counter()
-        stdout = exc.stdout if isinstance(exc.stdout, str) else ""
-        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        stdout = e.stdout if isinstance(e.stdout, str) else ""
+        stderr = e.stderr if isinstance(e.stderr, str) else ""
         merged = sanitize_tool_output("\n".join(part for part in [stdout, stderr] if part))
         timeout_msg = f"Command timed out after {TOOL_TIMEOUT_SECONDS}s."
         output = f"{timeout_msg}\n{merged}".strip()
@@ -269,7 +269,7 @@ def run_tool_specs(specs: list[ToolSpec]) -> list[ToolResult]:
         command = resolve_tool_command(spec.tool_name, spec.args, module_name=spec.module_name)
         return run_command(spec.name, command)
 
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         return list(executor.map(execute_spec, specs))
 
 
@@ -300,7 +300,7 @@ def render_category_overview() -> str:
         (
             "程式碼品質",
             "ruff lint、mypy、pylint、bandit、vulture、import-linter、compileall",
-            "依 pyproject/CI 執行靜態分析、型別、匯入邊界、安全、死代碼與語法檢查",
+            "依 pyproject/CI 執行靜態分析、型別、匯入邊界、安全、無用程式碼與語法檢查",
         ),
         (
             "API 命名",
@@ -1286,7 +1286,7 @@ def count_tool_reported_issues(result: ToolResult) -> int:
 
 _HIGHLIGHT_MESSAGES = {
     "pylint": "pylint 偵測問題：",
-    "vulture": "未使用代碼項目：",
+    "vulture": "未使用程式碼項目：",
     "ruff": "ruff 偵測問題：",
     "mypy": "mypy 偵測問題：",
     "bandit": "bandit 偵測問題：",
@@ -1317,7 +1317,7 @@ def extract_tool_highlights(result: ToolResult) -> list[str]:
     if "No known security vulnerabilities" in output:
         highlights.append("依賴套件安全（無已知漏洞）")
     if "found 0 potentially unused" in output.lower():
-        highlights.append("未發現死代碼")
+        highlights.append("未發現無用程式碼")
 
     counter = _ISSUE_COUNTERS.get(result.name)
     if counter and (count := counter(output)) > 0:
@@ -1341,7 +1341,7 @@ def build_quality_action_items(
         ("mypy", "優先處理 mypy 型別錯誤：可有效降低執行期錯誤風險"),
         ("pylint", "優先處理 pylint 循環引用警告：先降低模組耦合與匯入風險"),
         ("bandit", "優先處理 bandit 安全警示：先修正高風險項目"),
-        ("vulture", "處理 vulture 未使用代碼：可降低維護成本與誤判噪音"),
+        ("vulture", "處理 vulture 未使用程式碼：可降低維護成本與誤判噪音"),
     )
     for tool_name, message in issue_actions:
         if (result := tools_by_name.get(tool_name)) and _ISSUE_COUNTERS[tool_name](result.output) > 0:
@@ -1884,67 +1884,109 @@ def main() -> int:
         logging.info(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
 
     idx, started = begin_step("程式碼品質檢查 (ruff lint/mypy/pylint/bandit/vulture/import-public-facade/compileall)")
-    code_quality_tools = collect_code_quality_results()
-    code_quality_findings = summarize_tool_findings(code_quality_tools, "code_quality_tools")
+    try:
+        code_quality_tools = collect_code_quality_results()
+        code_quality_findings = summarize_tool_findings(code_quality_tools, "code_quality_tools")
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        code_quality_tools = []
+        code_quality_findings = SectionResult(
+            name="code_quality_tools", findings=[], meta={"tool_count": 0, "issue_count": 0}
+        )
     end_step(idx, started, f"issues={code_quality_findings.meta.get('issue_count', 0)}")
 
     idx, started = begin_step("跨檔 private callable 命名檢查")
-    cross_file_callable_result, _ = run_timed_operation(
-        "cross-file-private-callable-scan", lambda: collect_cross_file_private_callable_findings(REPO_ROOT)
-    )
+    try:
+        cross_file_callable_result, _ = run_timed_operation(
+            "cross-file-private-callable-scan", lambda: collect_cross_file_private_callable_findings(REPO_ROOT)
+        )
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        cross_file_callable_result = SectionResult(name="cross_file_private_callable", findings=[], meta={})
     end_step(idx, started, f"findings={len(cross_file_callable_result.findings)}")
 
     idx, started = begin_step("重複程式碼檢查 (src)")
-    duplicate_result, _ = run_timed_operation("duplicate-code-scan", lambda: collect_duplicate_code_findings(src_dir))
+    try:
+        duplicate_result, _ = run_timed_operation(
+            "duplicate-code-scan", lambda: collect_duplicate_code_findings(src_dir)
+        )
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        duplicate_result = SectionResult(
+            name="duplicate_code", findings=[], meta={"window_size": 8, "min_chars": 220, "duplicate_groups": 0}
+        )
     end_step(idx, started, f"findings={len(duplicate_result.findings)}")
 
     idx, started = begin_step("UI 硬編碼檢查")
-    hardcode_result, _ = run_timed_operation("ui-hardcode-scan", lambda: collect_ui_hardcode_findings(src_dir))
+    try:
+        hardcode_result, _ = run_timed_operation("ui-hardcode-scan", lambda: collect_ui_hardcode_findings(src_dir))
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        hardcode_result = SectionResult(name="ui_hardcode", findings=[], meta={})
     end_step(idx, started, f"findings={len(hardcode_result.findings)}")
 
     idx, started = begin_step("無用註解檢查 (ruff ERA)")
-    comment_tool_results = collect_comment_tool_results(code_quality_tools)
-    comment_result = summarize_tool_findings(comment_tool_results, "comment_tools")
-
+    try:
+        comment_tool_results = collect_comment_tool_results(code_quality_tools)
+        comment_result = summarize_tool_findings(comment_tool_results, "comment_tools")
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        comment_tool_results = []
+        comment_result = SectionResult(name="comment_tools", findings=[], meta={"tool_count": 0, "issue_count": 0})
     end_step(idx, started, f"findings={comment_result.meta.get('issue_count', 0)}")
 
     idx, started = begin_step("隱私與安全工具檢查 (detect-secrets)")
-    privacy_tool_results = collect_privacy_tool_results()
+    try:
+        privacy_tool_results = collect_privacy_tool_results()
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        privacy_tool_results = []
     end_step(idx, started, f"tool_runs={len(privacy_tool_results)}")
 
     idx, started = begin_step("隱私規則掃描")
-    privacy_regex_result, _ = run_timed_operation(
-        "privacy-regex-scan", lambda: collect_privacy_regex_findings(REPO_ROOT)
-    )
+    try:
+        privacy_regex_result, _ = run_timed_operation(
+            "privacy-regex-scan", lambda: collect_privacy_regex_findings(REPO_ROOT)
+        )
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        privacy_regex_result = SectionResult(name="privacy_regex", findings=[], meta={"pattern_count": 0})
     end_step(idx, started, f"findings={len(privacy_regex_result.findings)}")
 
     idx, started = begin_step("Docstring 檢查 (公開 API docstrings)")
-    docstring_result, _ = run_timed_operation("docstring-scan", lambda: collect_docstring_section(src_dir))
+    try:
+        docstring_result, _ = run_timed_operation("docstring-scan", lambda: collect_docstring_section(src_dir))
+    except Exception:
+        logging.exception("步驟失敗，以空結果繼續")
+        docstring_result = SectionResult(name="docstrings", findings=[], meta={})
     end_step(idx, started, f"findings={len(docstring_result.findings)}")
 
     output_html_path = HTML_REPORT_PATH
     output_html_path.parents[0].mkdir(parents=True, exist_ok=True)
 
     idx, started = begin_step("產生並輸出 HTML 報告")
-    html_text, _ = run_timed_operation(
-        "build-html-report",
-        lambda: build_html_report(
-            generated_at=generated_at,
-            code_quality_tools=code_quality_tools,
-            code_quality_findings=code_quality_findings,
-            cross_file_callable_result=cross_file_callable_result,
-            duplicate_result=duplicate_result,
-            hardcode_result=hardcode_result,
-            comment_result=comment_result,
-            docstring_result=docstring_result,
-            comment_tool_results=comment_tool_results,
-            privacy_tool_results=privacy_tool_results,
-            privacy_regex_result=privacy_regex_result,
-            max_details=max_details,
-            total_runtime_seconds=time.perf_counter() - started_at,
-        ),
-    )
-    output_html_path.write_text(html_text, encoding="utf-8")
+    try:
+        html_text, _ = run_timed_operation(
+            "build-html-report",
+            lambda: build_html_report(
+                generated_at=generated_at,
+                code_quality_tools=code_quality_tools,
+                code_quality_findings=code_quality_findings,
+                cross_file_callable_result=cross_file_callable_result,
+                duplicate_result=duplicate_result,
+                hardcode_result=hardcode_result,
+                comment_result=comment_result,
+                docstring_result=docstring_result,
+                comment_tool_results=comment_tool_results,
+                privacy_tool_results=privacy_tool_results,
+                privacy_regex_result=privacy_regex_result,
+                max_details=max_details,
+                total_runtime_seconds=time.perf_counter() - started_at,
+            ),
+        )
+        output_html_path.write_text(html_text, encoding="utf-8")
+    except Exception:
+        logging.exception("HTML 報告產生失敗")
     end_step(idx, started, f"path={output_html_path}")
 
     total_elapsed = time.perf_counter() - started_at

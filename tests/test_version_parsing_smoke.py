@@ -7,11 +7,11 @@ from packaging.version import Version
 
 from src.core import ServerCRUD, ServerImportService
 from src.utils import (
-    UpdateParsing,
     detect_loader_from_text,
     is_fabric_compatible_version,
     standardize_loader_type,
 )
+from src.utils.update_utils.update_parsing import UpdateParsing
 
 
 @pytest.mark.parametrize(

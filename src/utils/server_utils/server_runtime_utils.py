@@ -325,8 +325,8 @@ class ServerCommands:
                 required_major=int(required_major) if required_major else None,
                 ask_download=False,
             )
-        except Exception as exc:
-            logger.warning(f"無法依 Minecraft {mc_version} 解析 Java 執行檔，將使用 {fallback}: {exc}")
+        except Exception as e:
+            logger.warning(f"無法依 Minecraft {mc_version} 解析 Java 執行檔，將使用 {fallback}: {e}")
             return fallback
         java_exe = ServerCommands.to_console_java_executable(java_path)
         return java_exe or fallback

@@ -1,10 +1,10 @@
-"""共用異常型別定義"""
+"""共用例外型別定義"""
 
 from __future__ import annotations
 
 
 class AppException(Exception):
-    """應用程式層的基底異常"""
+    """應用程式層的基底例外"""
 
 
 class ConfigurationError(AppException):
@@ -24,11 +24,11 @@ class NetworkSecurityError(ValueError):
 
 
 class ResponseTooLargeError(ValueError):
-    """HTTP 回應超過本機允許的記憶體上限"""
+    """HTTP 回應超過本地允許的記憶體上限"""
 
 
 class ProviderIdentityPersistenceError(AppException, RuntimeError):
-    """Provider 身份持久化儲存失敗"""
+    """Provider 身分持久化儲存失敗"""
 
 
 class OperationCancelledError(AppException):

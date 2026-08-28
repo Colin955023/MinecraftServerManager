@@ -133,8 +133,8 @@ class ModFileInstaller:
             return False
         try:
             return bool(cancel_check())
-        except Exception as exc:
-            self.logger.exception(f"取消檢查回呼失敗: {exc}")
+        except Exception as e:
+            self.logger.exception(f"取消檢查回呼失敗: {e}")
             return False
 
     def restore_backup_to_path(self, original_path: Path | None, backup_path: Path | None) -> bool:
@@ -257,8 +257,8 @@ class ModFileInstaller:
                         try:
                             size = target_path.stat().st_size
                             progress_callback(size, size)
-                        except OSError as exc:
-                            self.logger.exception(f"更新進度回呼時發生錯誤: {exc}")
+                        except OSError as e:
+                            self.logger.exception(f"更新進度回呼時發生錯誤: {e}")
                     self.logger.info(f"遠端模組已存在且雜湊一致，略過下載: {safe_filename}")
                     return ModFileOperationResult(status="completed", final_path=target_path)
             verification_note = f"，含雜湊驗證({expected_hash_algorithm})" if normalized_expected_hash else ""
@@ -299,12 +299,12 @@ class ModFileInstaller:
                 self.notify_mod_list_changed()
             self.logger.info(f"遠端模組安裝完成: {safe_filename}")
             return ModFileOperationResult(status="completed", final_path=target_path)
-        except (OSError, ValueError) as exc:
-            self.logger.exception(f"安裝遠端模組失敗（IO/參數） {safe_filename}: {exc}")
-            return ModFileOperationResult(status="failed", message=str(exc))
-        except Exception as exc:
-            self.logger.exception(f"安裝遠端模組失敗 {safe_filename}: {exc}")
-            return ModFileOperationResult(status="failed", message=str(exc))
+        except (OSError, ValueError) as e:
+            self.logger.exception(f"安裝遠端模組失敗（IO/參數） {safe_filename}: {e}")
+            return ModFileOperationResult(status="failed", message=str(e))
+        except Exception as e:
+            self.logger.exception(f"安裝遠端模組失敗 {safe_filename}: {e}")
+            return ModFileOperationResult(status="failed", message=str(e))
 
     def replace_local_mod_file(
         self,
@@ -361,7 +361,7 @@ class ModFileInstaller:
         try:
             if old_path_is_internal:
                 if old_path is None:
-                    self.logger.error("更新本地模組失敗：old_path 狀態異常")
+                    self.logger.error(f"更新本地模組失敗：old_path 狀態錯誤 ({old_path})")
                     return None
                 backup_context = tempfile.TemporaryDirectory(
                     prefix=f"replace-backup-{Path(filename).name}.",
@@ -406,13 +406,13 @@ class ModFileInstaller:
             self.notify_mod_list_changed()
             cleanup_backup_context()
             return final_path
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError) as e:
             rollback_and_stop(cancelled=False)
-            self.logger.exception(f"更新本地模組失敗（IO/參數） {getattr(local_mod, 'filename', 'unknown')}: {exc}")
+            self.logger.exception(f"更新本地模組失敗（IO/參數） {getattr(local_mod, 'filename', 'unknown')}: {e}")
             return None
-        except Exception as exc:
+        except Exception as e:
             rollback_and_stop(cancelled=False)
-            self.logger.exception(f"更新本地模組失敗 {getattr(local_mod, 'filename', 'unknown')}: {exc}")
+            self.logger.exception(f"更新本地模組失敗 {getattr(local_mod, 'filename', 'unknown')}: {e}")
             return None
 
     def set_mod_state_result(self, mod_id: str, enable: bool, notify_change: bool = True) -> LocalModMutationResult:
@@ -491,12 +491,12 @@ class ModFileInstaller:
                 f"找不到對應的模組檔案: {src_file.name}",
                 missing_ids=(mod_id,),
             )
-        except (OSError, PermissionError) as exc:
-            self.logger.exception(f"{action}模組失敗（IO/權限）: {exc}")
-            return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {exc}")
-        except Exception as exc:
-            self.logger.exception(f"{action}模組時發生未預期錯誤: {exc}")
-            return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {exc}")
+        except (OSError, PermissionError) as e:
+            self.logger.exception(f"{action}模組失敗（IO/權限）: {e}")
+            return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {e}")
+        except Exception as e:
+            self.logger.exception(f"{action}模組時發生未預期錯誤: {e}")
+            return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {e}")
 
     def import_local_mod_file_result(self, source_path: str | Path) -> LocalModMutationResult:
         """
@@ -511,8 +511,8 @@ class ModFileInstaller:
 
         try:
             normalized_source = Path(source_path).expanduser().resolve(strict=False)
-        except Exception as exc:
-            return self.failure_mutation_result("匯入失敗", f"無法解析模組檔案路徑: {exc}")
+        except Exception as e:
+            return self.failure_mutation_result("匯入失敗", f"無法解析模組檔案路徑: {e}")
         if not normalized_source.exists() or not normalized_source.is_file():
             return self.failure_mutation_result("匯入失敗", f"找不到模組檔案: {normalized_source}")
         safe_filename = normalized_source.name
@@ -532,9 +532,9 @@ class ModFileInstaller:
                 final_path=target_path,
                 affected_count=1,
             )
-        except Exception as exc:
-            self.logger.exception(f"匯入本地模組失敗 {safe_filename}: {exc}")
-            return self.failure_mutation_result("匯入失敗", f"匯入模組失敗: {exc}")
+        except Exception as e:
+            self.logger.exception(f"匯入本地模組失敗 {safe_filename}: {e}")
+            return self.failure_mutation_result("匯入失敗", f"匯入模組失敗: {e}")
 
     def delete_local_mods_result(self, mod_ids: list[str] | tuple[str, ...]) -> LocalModMutationResult:
         """
@@ -590,9 +590,9 @@ class ModFileInstaller:
                 "找不到任何可刪除的模組檔案",
                 missing_ids=tuple(missing_ids),
             )
-        except Exception as exc:
-            self.logger.exception(f"刪除本地模組失敗 {normalized_ids}: {exc}")
-            return self.failure_mutation_result("刪除失敗", f"刪除模組失敗: {exc}")
+        except Exception as e:
+            self.logger.exception(f"刪除本地模組失敗 {normalized_ids}: {e}")
+            return self.failure_mutation_result("刪除失敗", f"刪除模組失敗: {e}")
 
 
 __all__ = ["ModFileInstaller"]

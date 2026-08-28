@@ -1,6 +1,6 @@
 """
 Java 下載工具模組
-提供 Java 安裝包下載與管理功能，支援 Microsoft OpenJDK 的自動下載與安裝流程
+提供 Java 安裝套件下載與管理功能，支援 Microsoft OpenJDK 的自動下載與安裝流程
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class JavaDownloader:
             logger.error(f"winget 存在但回傳錯誤代碼 ({e.returncode})，錯誤內容: {error_msg}")
             return False
         except Exception as e:
-            logger.exception(f"檢查 winget 時發生未預期的異常: {e}")
+            logger.exception(f"檢查 winget 時發生未預期的錯誤: {e}")
             return False
 
     @staticmethod
@@ -55,7 +55,7 @@ class JavaDownloader:
             raise JavaInstallError(
                 "無法呼叫 winget 工具，這可能是因為：\n"
                 "1. 系統未安裝「應用程式安裝員 (App Installer)」\n"
-                "2. 您的 Windows 版本過舊\n"
+                "2. 你的 Windows 版本過舊\n"
                 "3. 環境變數中缺少 %LocalAppData%\\Microsoft\\WindowsApps\n"
                 "請檢查程式日誌以取得詳細錯誤代碼"
             )
@@ -76,7 +76,7 @@ class JavaDownloader:
                 raise JavaInstallError(f"winget 安裝程序回傳錯誤代碼 ({returncode})")
             logger.info(f"Java {major} ({pkg}) 安裝程序已完成")
         except Exception as e:
-            logger.exception(f"winget 安裝過程發生異常: {e}")
+            logger.exception(f"winget 安裝過程發生錯誤: {e}")
             raise JavaInstallError(
                 f"透過 winget 安裝 {pkg} 失敗。建議手動開啟終端機執行：\nwinget install {pkg}"
             ) from e
