@@ -25,26 +25,28 @@ from qfluentwidgets import (
 
 from src.core import ServerPropertiesStore
 from src.models import ServerConfig
-from src.ui import ModalMSFluentWindow
-from src.utils import (
+from src.ui import (
     Colors,
-    PropertiesDocumentCodec,
-    PropertiesSchema,
+    ModalMSFluentWindow,
     ScrollableComboBox,
     Sizes,
     Spacing,
     TextState,
     UIUtils,
-    get_logger,
     resolve_color,
 )
-
-logger = get_logger().bind(component="ServerPropertiesDialog")
 
 
 class ServerPropertiesDialog(ModalMSFluentWindow):
     """server.properties 設定對話框"""
 
+    SENSITIVE_PROPS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "management-server-secret",
+            "management-server-tls-keystore-password",
+            "rcon.password",
+        }
+    )
     CHOICE_PROPS: ClassVar[dict[str, tuple[str, ...]]] = {
         "gamemode": ("survival", "creative", "adventure", "spectator"),
         "difficulty": ("peaceful", "easy", "normal", "hard"),
@@ -84,8 +86,8 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         super().__init__(parent)
         self.server_config = server_config
         self.server_properties = server_properties
-        self._default_properties: dict[str, str] = self._load_default_properties()
-        self._snapshot = self.server_properties.read(self.server_config.name)
+        self._snapshot = self.server_properties.describe(self.server_config.name)
+        self._default_properties: dict[str, str] = self._snapshot.defaults
         current_properties = self._snapshot.properties if self._snapshot.readable else {}
         self._property_value_cache = {**self._default_properties, **current_properties}
         self._initial_values = dict(self._property_value_cache)
@@ -139,7 +141,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
     def create_property_tabs(self) -> None:
         """根據屬性類別建立對應的分頁，並在每個分頁中生成屬性控制元件"""
-        categories = PropertiesDocumentCodec.get_property_categories()
+        categories = self._snapshot.categories
         categorized_keys: set[str] = set()
         for props in categories.values():
             categorized_keys.update(props)
@@ -180,12 +182,12 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
             widget.stateChanged.connect(lambda state: _on_check_changed(state == Qt.CheckState.Checked.value))
 
-            def _on_var_changed(*_args):
+            def _on_var_changed():
                 val = var.get().strip().lower() in ("true", "1", "yes", "on")
                 if widget.isChecked() != val:
                     widget.setChecked(val)
 
-            var.trace_add("write", _on_var_changed)
+            var.trace_add(_on_var_changed)
 
         elif prop_name in self.CHOICE_PROPS:
             widget = ScrollableComboBox(parent)
@@ -200,12 +202,12 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
             widget.currentIndexChanged.connect(_on_combo_changed)
 
-            def _on_var_changed(*_args):
+            def _on_var_changed():
                 val = var.get()
                 if val in items and widget.currentIndex() != items.index(val):
                     widget.setCurrentIndex(items.index(val))
 
-            var.trace_add("write", _on_var_changed)
+            var.trace_add(_on_var_changed)
 
         elif prop_name in self.RANGE_PROPS:
             min_val, max_val = self.RANGE_PROPS[prop_name]
@@ -219,17 +221,19 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
             widget.valueChanged.connect(_on_spin_changed)
 
-            def _on_var_changed(*_args):
+            def _on_var_changed():
                 with suppress(ValueError):
                     val = int(var.get() or min_val)
                     if widget.value() != val:
                         widget.setValue(val)
 
-            var.trace_add("write", _on_var_changed)
+            var.trace_add(_on_var_changed)
 
         else:
             widget = LineEdit(parent)
             widget.setMinimumWidth(Sizes.INPUT_WIDTH)
+            if prop_name in self.SENSITIVE_PROPS:
+                widget.setEchoMode(LineEdit.EchoMode.Password)
             widget.setText(var.get())
 
             def _on_text_changed(text):
@@ -237,11 +241,11 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
 
             widget.textChanged.connect(_on_text_changed)
 
-            def _on_var_changed(*_args):
+            def _on_var_changed():
                 if widget.text() != var.get():
                     widget.setText(var.get())
 
-            var.trace_add("write", _on_var_changed)
+            var.trace_add(_on_var_changed)
 
         return widget
 
@@ -255,13 +259,8 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         """驗證目前所有屬性值，若通過則儲存至伺服器設定檔"""
         try:
             properties = self._collect_property_values()
-            is_valid, errors = PropertiesSchema.validate_properties(properties)
-            if not is_valid:
-                error_message = "以下屬性值無效：\n\n" + "\n".join(errors)
-                UIUtils.show_message("驗證失敗", error_message, self, message_level="error")
-                return
             patch = {key: value for key, value in properties.items() if self._initial_values.get(key) != value}
-            result = self.server_properties.update(
+            result = self.server_properties.commit(
                 self.server_config.name,
                 patch,
                 expected_revision=self._snapshot.revision,
@@ -283,22 +282,12 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
     def reset_properties(self) -> None:
         """將所有屬性值重設為預設值"""
         if UIUtils.ask_yes_no_cancel("確認", "確定要重設所有屬性為預設值嗎？", self, show_cancel=False):
-            default_properties = PropertiesSchema.default_values()
+            default_properties = self._snapshot.defaults
             for prop_name, value in default_properties.items():
                 value_str = str(value)
                 self._property_value_cache[prop_name] = value_str
                 if prop_name in self.property_vars:
                     self.property_vars[prop_name].set(value_str)
-
-    def _load_default_properties(self) -> dict[str, str]:
-        try:
-            defaults = PropertiesSchema.default_values()
-        except Exception as e:
-            logger.exception(f"讀取預設 server.properties 失敗: {e}")
-            return {}
-        if not isinstance(defaults, dict):
-            return {}
-        return {str(key): "" if value is None else str(value) for key, value in defaults.items()}
 
     def _add_tab(self, tab_name: str, properties: list[str]) -> None:
         scroll_area = ScrollArea(self)
@@ -322,7 +311,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         return normalized in {"true", "false"}
 
     def _should_use_checkbox(self, prop_name: str, value: Any) -> bool:
-        if PropertiesSchema.is_boolean_property(prop_name):
+        if prop_name in self._snapshot.boolean_properties:
             return True
         if self._is_boolean_string(value):
             return True
@@ -337,16 +326,16 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         if cached_value is not None:
             var.set(cached_value)
 
-        def _sync_cache(*_args) -> None:
+        def _sync_cache() -> None:
             self._property_value_cache[prop_name] = var.get()
 
-        var.trace_add("write", _sync_cache)
+        var.trace_add(_sync_cache)
         self.property_vars[prop_name] = var
         return var
 
     def _create_property_control(self, layout: QVBoxLayout, prop_name: str, parent_widget: QWidget) -> None:
         prop_frame = QWidget(parent_widget)
-        description = PropertiesDocumentCodec.get_property_descriptions().get(prop_name, f"未知屬性: {prop_name}")
+        description = self._snapshot.descriptions.get(prop_name, f"未知屬性: {prop_name}")
         prop_frame.setToolTip(description)
         h_layout = QHBoxLayout(prop_frame)
         h_layout.setContentsMargins(0, 0, 0, 0)

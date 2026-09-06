@@ -16,7 +16,7 @@ from src.utils import (
     RECOMMENDATION_SOURCE_SHORT_LABELS,
 )
 
-from .mod_presentation import format_provider_label, resolve_project_page_url, summarize_text
+from .mod_presentation import format_provider_label, resolve_project_page_url, summarize_messages, summarize_text
 from .review_dependency import count_review_nodes
 from .review_selection import count_selected_runnable_entries
 from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
@@ -231,14 +231,7 @@ def dedupe_review_messages(messages: list[str] | tuple[str, ...]) -> list[str]:
     Returns:
         去除空白項目與重複內容後的訊息清單
     """
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for message in messages:
-        normalized = str(message or "").strip()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            deduped.append(normalized)
-    return deduped
+    return list(dict.fromkeys(filter(None, (str(message or "").strip() for message in messages))))
 
 
 def summarize_review_messages(messages: list[str] | tuple[str, ...], max_items: int = 3) -> list[str]:
@@ -252,10 +245,7 @@ def summarize_review_messages(messages: list[str] | tuple[str, ...], max_items: 
     Returns:
         摘要訊息清單，超出數量時追加其餘項目提示
     """
-    deduped = dedupe_review_messages(messages)
-    if len(deduped) <= max_items:
-        return deduped
-    return [*deduped[:max_items], f"其餘 {len(deduped) - max_items} 項請於工作樹查看"]
+    return summarize_messages(messages, max_items=max_items)
 
 
 def format_required_by_list(required_by: list[str]) -> str:

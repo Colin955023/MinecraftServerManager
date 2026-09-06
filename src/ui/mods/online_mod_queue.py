@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import traceback
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QCursor
@@ -27,39 +26,36 @@ from qfluentwidgets import (
     TreeWidget,
 )
 
-from src.core import (
-    get_mod_versions,
-    search_mods_online,
-)
 from src.models import PendingOnlineInstall
-from src.ui import ModalMSFluentWindow
-from src.utils import (
-    SUPPORTED_MODRINTH_UPDATE_LOADERS,
-    AppException,
+from src.ui import (
+    ModalMSFluentWindow,
     Sizes,
     UIUtils,
     apply_table_header_style,
 )
+from src.utils import (
+    SUPPORTED_MODRINTH_UPDATE_LOADERS,
+    AppException,
+)
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
 from .mod_management_session import OnlineBrowseRequest
 from .mod_presentation import (
     build_server_install_blocking_reason,
     format_online_version_report,
+    format_published_at,
     get_online_version_status_text,
     resolve_project_page_url,
     sort_online_versions_for_server,
 )
 
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
-
 
 class ModManagementQueueOps:
     """封裝線上瀏覽、搜尋與安裝佇列互動流程"""
 
-    def __init__(self, controller: ModManagementFrame) -> None:
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext) -> None:
+        self.controller = context
 
     def _get_supported_online_loader(self) -> tuple[str | None, str | None]:
         current_server = self.controller.mod_session.server
@@ -74,7 +70,8 @@ class ModManagementQueueOps:
             )
         return (normalized_loader, None)
 
-    def _refresh_online_queue_button(self) -> None:
+    def refresh_online_queue(self) -> None:
+        """重新整理線上安裝清單按鈕的數量標籤"""
         button = self.controller.online_browse_presenter.online_queue_button
         if button:
             button.setText(f"🧺 安裝清單 ({len(self.controller.mod_session.pending_online_installs)})")
@@ -82,11 +79,11 @@ class ModManagementQueueOps:
     def _add_pending_online_install(self, pending: PendingOnlineInstall) -> bool:
         blocking_reason = build_server_install_blocking_reason(pending.server_side)
         if blocking_reason:
-            logger.info(f"拒絕加入安裝清單: {blocking_reason}")
+            logger.warning(f"拒絕加入安裝清單: {blocking_reason}")
             UIUtils.show_message("無法加入安裝清單", blocking_reason, self.controller.parent, message_level="warning")
             return False
         self.controller.mod_session.add_pending_install(pending)
-        self._refresh_online_queue_button()
+        self.refresh_online_queue()
         self.controller.update_status_safe(
             f"已加入安裝清單：{pending.project_name} ({getattr(pending.version, 'display_name', '未知版本')})"
         )
@@ -141,23 +138,19 @@ class ModManagementQueueOps:
             elif hasattr(dialog, "close"):
                 dialog.close()
 
-    def on_online_browse_filters_changed(self, _value: str) -> None:
+    def on_online_browse_filters_changed(self) -> None:
         """
         線上瀏覽排序變更時立即刷新清單
 
-        Args:
-            _value: 下拉選單回傳的目前值
         """
-        self._refresh_online_filter_hint()
-        self._refresh_online_results_summary()
+        self.refresh_online_filter_hint()
+        self.refresh_online_results_summary()
         self._load_online_mods(force=True, show_warning=False)
 
-    def search_online_mods(self, _event=None) -> None:
+    def search_online_mods(self) -> None:
         """
         載入 Modrinth 線上模組並觸發搜尋
 
-        Args:
-            _event: 事件繫結傳入的事件物件，未使用
         """
         self._load_online_mods(force=True, show_warning=True)
 
@@ -197,12 +190,10 @@ class ModManagementQueueOps:
 
         menu.exec(QCursor.pos())
 
-    def install_online_mod(self, _event=None) -> None:
+    def install_online_mod(self) -> None:
         """
         取得模組版本列表並讓使用者選擇要安裝的版本
 
-        Args:
-            _event: 事件繫結傳入的事件物件，未使用
         """
         manager = self.controller.mod_manager
         if not self.controller.mod_session.server or not manager:
@@ -215,7 +206,7 @@ class ModManagementQueueOps:
         if not selected_mod:
             UIUtils.show_message("錯誤", "找不到選取的線上模組資料", self.controller.parent, message_level="error")
             return
-        minecraft_version, _, loader_version = self._get_current_modrinth_context()
+        minecraft_version, _, loader_version = self.get_current_modrinth_context()
         loader_type, warning_message = self._get_supported_online_loader()
         if warning_message:
             UIUtils.show_message("目前不支援", warning_message, self.controller.parent, message_level="warning")
@@ -227,10 +218,19 @@ class ModManagementQueueOps:
         def load_versions_task() -> None:
             try:
                 self.controller.update_status_safe(f"正在讀取 {selected_mod.name} 的版本列表...")
-                versions = get_mod_versions(selected_mod.project_id, minecraft_version, loader_type)
+                versions = self.controller.mod_provider.resolve_versions(
+                    selected_mod.project_id, minecraft_version, loader_type
+                )
                 if not versions:
-                    versions = get_mod_versions(selected_mod.project_id)
+                    versions = self.controller.mod_provider.resolve_versions(selected_mod.project_id)
                 installed_mods = manager.get_mod_list()
+                dependency_ids = {
+                    str(dependency.get("project_id", "") or "").strip()
+                    for version in versions
+                    for dependency in getattr(version, "dependencies", ()) or ()
+                    if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
+                }
+                dependency_names = self.controller.mod_provider.find_projects(dependency_ids) if dependency_ids else {}
                 version_reports = [
                     self.controller.mod_planning.analyze_version(
                         version,
@@ -240,6 +240,7 @@ class ModManagementQueueOps:
                         loader=loader_type,
                         loader_version=loader_version,
                         installed_mods=installed_mods,
+                        dependency_names=dependency_names,
                     )
                     for version in versions
                 ]
@@ -263,12 +264,12 @@ class ModManagementQueueOps:
                         return
                     self._show_version_install_dialog(selected_mod, versions, version_reports)
 
-                self.controller.ui_queue.put(open_dialog)
+                self.controller.scope.schedule(0, open_dialog)
                 self.controller.update_status_safe(f"已載入 {selected_mod.name} 的 {len(versions)} 個版本")
             except Exception as e:
                 if not session.is_scope_current(scope):
                     return
-                logger.error(f"取得模組版本失敗: {e}\n{traceback.format_exc()}")
+                logger.exception("取得模組版本失敗")
                 self.controller.update_status_safe(f"取得模組版本失敗: {e}")
 
         self.controller.scope.submit(load_versions_task, key="online_versions", replace=True)
@@ -284,7 +285,7 @@ class ModManagementQueueOps:
             f"作者: {getattr(mod, 'author', '?') or '?'}\n"
             f"下載數: {f'{downloads:,}' if downloads > 0 else 'N/A'}\n"
             f"平台: {str(getattr(mod, 'source', 'modrinth') or 'modrinth').title()}\n"
-            f"支援環境: {self.controller.tree_sync._format_online_environment_text(mod)}\n"
+            f"支援環境: {self.controller.format_online_environment(mod) if self.controller.format_online_environment else '未知'}\n"
             f"頁面: {getattr(mod, 'url', '')}"
         )
         try:
@@ -310,10 +311,15 @@ class ModManagementQueueOps:
             identifiers=(getattr(mod, "slug", ""), getattr(mod, "project_id", "")),
         )
         if url:
-            UIUtils.open_external(url)
+            UIUtils.open_external_url(url)
 
-    def _get_current_modrinth_context(self) -> tuple[str | None, str | None, str | None]:
-        """依目前選取伺服器取得 Minecraft、loader 與 loader 版本資訊"""
+    def get_current_modrinth_context(self) -> tuple[str | None, str | None, str | None]:
+        """
+        依目前選取伺服器取得 Minecraft、loader 與 loader 版本資訊
+
+        Returns:
+            Minecraft 版本、loader 類型與 loader 版本；未選取伺服器時皆為 None
+        """
         current_server = self.controller.mod_session.server
         if not current_server:
             return (None, None, None)
@@ -324,12 +330,12 @@ class ModManagementQueueOps:
 
     def _get_current_modrinth_filters(self) -> tuple[str | None, str | None]:
         """依目前選取伺服器取得 Minecraft 版本與 loader 過濾條件"""
-        minecraft_version, loader_type, _ = self._get_current_modrinth_context()
+        minecraft_version, loader_type, _ = self.get_current_modrinth_context()
         return (minecraft_version, loader_type)
 
     def _get_online_filter_hint_text(self) -> str:
         """建立線上模組瀏覽/搜尋提示文字"""
-        minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
+        minecraft_version, loader_type, loader_version = self.get_current_modrinth_context()
         if not self.controller.mod_session.server:
             return "請先選擇伺服器並輸入關鍵字後搜尋；僅支援 Fabric / Forge / Quilt / NeoForge"
         loader_display = loader_type or "未設定"
@@ -343,7 +349,7 @@ class ModManagementQueueOps:
 
     def _get_online_version_dialog_hint_text(self) -> str:
         """建立版本選擇視窗的伺服器條件摘要"""
-        minecraft_version, loader_type, loader_version = self._get_current_modrinth_context()
+        minecraft_version, loader_type, loader_version = self.get_current_modrinth_context()
         if not self.controller.mod_session.server:
             return "會依目前伺服器條件自動分析版本相容性"
         loader_display = loader_type or "未設定"
@@ -352,7 +358,7 @@ class ModManagementQueueOps:
             info_parts.append(loader_version)
         return "相容性條件：" + " / ".join(info_parts)
 
-    def _refresh_online_filter_hint(self) -> None:
+    def refresh_online_filter_hint(self) -> None:
         """更新線上模組搜尋提示"""
         if self.controller.online_browse_presenter.browse_filter_label:
             self.controller.online_browse_presenter.browse_filter_label.setText(self._get_online_filter_hint_text())
@@ -393,7 +399,7 @@ class ModManagementQueueOps:
         result_count = len(self.controller.mod_session.online_mods)
         return f"{mode_text}｜{result_count} 筆｜排序 {sort_text}"
 
-    def _refresh_online_results_summary(self) -> None:
+    def refresh_online_results_summary(self) -> None:
         """更新瀏覽結果摘要列"""
         if self.controller.online_browse_presenter.browse_results_label:
             self.controller.online_browse_presenter.browse_results_label.setText(
@@ -442,7 +448,8 @@ class ModManagementQueueOps:
         if request is None:
             if show_warning:
                 UIUtils.show_message("目前不支援", warning_message, self.controller.parent, message_level="warning")
-            self.controller.tree_sync._clear_online_mods()
+            if self.controller.clear_online_results is not None:
+                self.controller.clear_online_results()
             return
         snapshot = self.controller.mod_session.snapshot()
         if not force and request == snapshot.latest_online_request and snapshot.online_mods:
@@ -454,15 +461,16 @@ class ModManagementQueueOps:
             try:
                 filter_hint = self._get_online_filter_hint_text()
                 self.controller.update_status_safe(f"正在搜尋 Modrinth 模組... {filter_hint}")
-                mods = search_mods_online(
+                mods = self.controller.mod_provider.find_projects(
                     request.query,
+                    search=True,
                     minecraft_version=request.minecraft_version,
                     loader=request.loader_type,
                     sort_by=request.sort_by,
                 )
                 if not session.accept_online_results(scope, request, mods):
                     return
-                self.controller.ui_queue.put(self.controller.tree_sync.refresh_browse_list)
+                self.controller.scope.schedule(0, self.controller.tree_sync.refresh_browse_list)
                 self.controller.update_status_safe(f"找到 {len(mods)} 個線上模組")
             except AppException as e:
                 if not session.is_scope_current(scope):
@@ -471,18 +479,18 @@ class ModManagementQueueOps:
                 self.controller.update_status_safe(f"搜尋線上模組失敗: {e}")
                 message = f"搜尋線上模組失敗: {e}"
 
-                self.controller.ui_queue.put(
-                    partial(UIUtils.show_message, "搜尋失敗", message, self.controller.parent, message_level="error")
+                self.controller.scope.schedule(
+                    0, partial(UIUtils.show_message, "搜尋失敗", message, self.controller.parent, message_level="error")
                 )
             except Exception as e:
                 if not session.is_scope_current(scope):
                     return
-                logger.error(f"搜尋線上模組失敗: 未知錯誤\n{traceback.format_exc()}")
+                logger.exception("搜尋線上模組失敗: 未知錯誤")
                 self.controller.update_status_safe("搜尋線上模組失敗：內部錯誤")
                 message = f"搜尋線上模組時發生未知錯誤:\n{e}"
 
-                self.controller.ui_queue.put(
-                    partial(UIUtils.show_message, "搜尋失敗", message, self.controller.parent, message_level="error")
+                self.controller.scope.schedule(
+                    0, partial(UIUtils.show_message, "搜尋失敗", message, self.controller.parent, message_level="error")
                 )
 
         self.controller.scope.submit(search_task, key="online_search", replace=True)
@@ -531,7 +539,7 @@ class ModManagementQueueOps:
                     ", ".join(getattr(version, "game_versions", []) or []) or "-",
                     ", ".join(getattr(version, "loaders", []) or []) or "-",
                     status_text,
-                    published.replace("T", " ").replace("Z", "")[:16] if published else "-",
+                    format_published_at(published) or "-",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, version)
@@ -555,9 +563,11 @@ class ModManagementQueueOps:
         dialog.viewLayout.addWidget(button_frame)
 
         install_button = PrimaryPushButton("➕ 加入安裝清單", button_frame)
-        install_button.clicked.connect(
-            lambda _checked=False: self._install_online_version(mod, versions, version_tree, dialog, version_reports)
-        )
+
+        def install_selected_version() -> None:
+            self._install_online_version(mod, versions, version_tree, dialog, version_reports)
+
+        install_button.clicked.connect(install_selected_version)
         button_layout.addWidget(install_button)
 
         open_button = PushButton("🧺 查看清單", button_frame)
@@ -569,9 +579,12 @@ class ModManagementQueueOps:
             identifiers=(getattr(mod, "slug", ""), getattr(mod, "project_id", "")),
         )
         project_page_button = PushButton("🌐 專案頁面", button_frame)
-        project_page_button.clicked.connect(
-            lambda _checked=False: self.controller.review_ops._open_project_page(project_page_url, dialog)
-        )
+
+        def open_project_page() -> None:
+            if self.controller.open_project_page is not None:
+                self.controller.open_project_page(project_page_url, dialog)
+
+        project_page_button.clicked.connect(open_project_page)
         project_page_button.setEnabled(bool(project_page_url))
         button_layout.addWidget(project_page_button)
 

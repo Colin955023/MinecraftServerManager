@@ -77,13 +77,12 @@ def test_download_source_policy_flags_non_official_hosts_only() -> None:
         get_non_official_download_host("https://mirror.example.com/files/example.jar", "modrinth")
         == "mirror.example.com"
     )
-    assert build_non_official_source_warning(
+    warning = build_non_official_source_warning(
         "https://mirror.example.com/files/example.jar",
         "modrinth",
-    ) == (
-        "偵測到非官方下載來源：provider=modrinth host=mirror.example.com "
-        "url=https://mirror.example.com/files/example.jar"
     )
+    assert warning == "偵測到非官方下載來源：provider=modrinth host=mirror.example.com"
+    assert "https://" not in warning
     assert build_non_official_source_warning_message(
         "Example Mod",
         "https://mirror.example.com/files/example.jar",
@@ -93,12 +92,12 @@ def test_download_source_policy_flags_non_official_hosts_only() -> None:
     assert (
         get_non_official_download_host("https://edge.example.net/files/example2.jar", "modrinth") == "edge.example.net"
     )
-    assert build_non_official_source_warning(
+    warning = build_non_official_source_warning(
         "https://edge.example.net/files/example2.jar",
         "modrinth",
-    ) == (
-        "偵測到非官方下載來源：provider=modrinth host=edge.example.net url=https://edge.example.net/files/example2.jar"
     )
+    assert warning == "偵測到非官方下載來源：provider=modrinth host=edge.example.net"
+    assert "https://" not in warning
     assert build_non_official_source_warning_message(
         "Edge Mod",
         "https://edge.example.net/files/example2.jar",

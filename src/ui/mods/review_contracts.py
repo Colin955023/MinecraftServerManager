@@ -60,7 +60,8 @@ class ReviewViewSnapshot:
     blocked_count: int
 
     def root(self, root_key: str) -> ReviewRootView | None:
-        """依 stable root key 取得摘要資料
+        """
+        依 stable root key 取得摘要資料
 
         Args:
             root_key: Review root 的穩定識別碼
@@ -190,7 +191,6 @@ def describe_context_mismatch(expected: ReviewContextStamp, actual: ReviewContex
 __all__ = [
     "ReviewExecutionHandoff",
     "ReviewInstallStep",
-    "ReviewMode",
     "ReviewRootView",
     "ReviewTaskView",
     "ReviewViewSnapshot",

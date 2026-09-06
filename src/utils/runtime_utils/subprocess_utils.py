@@ -12,9 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from PySide6 import QtCore
-
-from src.utils import get_logger
+from src.utils import get_logger, is_reparse_point
 
 logger = get_logger().bind(component="SubprocessUtils")
 
@@ -27,28 +25,27 @@ class SubprocessUtils:
     DEVNULL = subprocess.DEVNULL
     CalledProcessError = subprocess.CalledProcessError
     TimeoutExpired = subprocess.TimeoutExpired
-    STARTUPINFO = getattr(subprocess, "STARTUPINFO", None)
-    STARTF_USESHOWWINDOW = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
-    SW_HIDE = 0
-    CREATE_NO_WINDOW = 134217728
-    CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+    STARTUPINFO = subprocess.STARTUPINFO
+    STARTF_USESHOWWINDOW = subprocess.STARTF_USESHOWWINDOW
+    SW_HIDE = subprocess.SW_HIDE
+    CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+    CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE
 
     @staticmethod
     def get_hidden_windows_kwargs() -> dict:
         """
-        回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict
+        回傳 Windows 隱藏視窗所需參數
 
         Returns:
-            Windows 隱藏視窗所需參數，非 Windows 平台回傳空 dict
+            Windows 隱藏視窗所需參數
         """
-        if os.name != "nt":
-            return {}
-        hidden_kwargs: dict = {"creationflags": SubprocessUtils.CREATE_NO_WINDOW}
-        if SubprocessUtils.STARTUPINFO is not None:
-            startupinfo = SubprocessUtils.STARTUPINFO()
-            startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
-            hidden_kwargs["startupinfo"] = startupinfo
+        startupinfo = SubprocessUtils.STARTUPINFO()
+        startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
+        hidden_kwargs: dict[str, Any] = {
+            "creationflags": SubprocessUtils.CREATE_NO_WINDOW,
+            "startupinfo": startupinfo,
+        }
         return hidden_kwargs
 
     @staticmethod
@@ -62,19 +59,22 @@ class SubprocessUtils:
         if not exe.strip():
             raise ValueError("cmd[0] 不得為空")
         p = Path(exe)
-        if p.is_absolute() or os.sep in exe or ("/" in exe and os.sep != "/"):
-            if not p.exists():
-                raise FileNotFoundError(f"執行檔路徑不存在: {exe}")
+        if p.is_absolute() or os.sep in exe or (os.altsep is not None and os.altsep in exe):
+            if not p.is_file() or is_reparse_point(p):
+                raise FileNotFoundError(f"執行檔路徑不是安全的一般檔案: {exe}")
             return cmd_list
         which = shutil.which(exe)
-        if which is None and os.name == "nt" and exe.lower() == "winget":
+        if which is None and exe.lower() == "winget":
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if local_app_data:
                 winget_path = Path(local_app_data).resolve() / "Microsoft" / "WindowsApps" / "winget.exe"
-                which = str(winget_path) if getattr(winget_path, "exists", lambda: False)() else None
+                which = str(winget_path) if winget_path.is_file() and not is_reparse_point(winget_path) else None
 
         if which is None:
             raise FileNotFoundError(f"無法在 PATH 找到執行檔: {exe}")
+        which_path = Path(which)
+        if not which_path.is_file() or is_reparse_point(which_path):
+            raise FileNotFoundError(f"PATH 執行檔不是安全的一般檔案: {which}")
         cmd_list[0] = which
         return cmd_list
 
@@ -149,8 +149,7 @@ class SubprocessUtils:
             "cwd": str(cwd) if cwd else None,
             "env": env,
         }
-        if os.name == "nt":
-            kwargs["creationflags"] = SubprocessUtils.CREATE_NEW_CONSOLE
+        kwargs["creationflags"] = SubprocessUtils.CREATE_NEW_CONSOLE
         return subprocess.Popen(resolved_cmd, **kwargs)  # nosec B603
 
     @staticmethod
@@ -168,44 +167,13 @@ class SubprocessUtils:
         return proc.wait()
 
     @staticmethod
-    def create_qprocess_checked(
-        cmd: Iterable[str],
-        *,
-        cwd: str | None = None,
-        merged_channels: bool = True,
-        parent: QtCore.QObject | None = None,
-    ) -> QtCore.QProcess:
-        """
-        建立已驗證 argv 的 QProcess
-
-        Args:
-            cmd: 命令列參數序列
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄
-            merged_channels: 是否合併 stdout/stderr
-            parent: QProcess 的 Qt parent
-
-        Returns:
-            已設定 program、arguments 與 channel mode 的 QProcess
-        """
-
-        cmd_list = SubprocessUtils._validate_cmd(cmd)
-        process = QtCore.QProcess(parent)
-        process.setProgram(cmd_list[0])
-        process.setArguments(cmd_list[1:])
-        if cwd:
-            process.setWorkingDirectory(str(cwd))
-        if merged_channels:
-            process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
-        return process
-
-    @staticmethod
     def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
         """
         啟動分離的子行程，隔離 I/O 和生命週期，不顯示控制台視窗
 
         用於重新啟動/更新等場景，避免主行程結束時留下孤兒行程
         Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗
-        自動設定 DEVNULL、close_fds 和平台相關的分離旗標
+        自動設定 DEVNULL、close_fds 和 Windows 分離旗標
 
         Args:
             cmd: 命令列表

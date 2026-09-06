@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import stat
 import tomllib
 import zipfile
 from collections.abc import Callable
@@ -16,24 +18,26 @@ from src.models import (
     LocalModInfo,
     ModPlatform,
     ModStatus,
-    ProviderIdentityEvidence,
 )
 from src.utils import (
+    ARCHIVE_METADATA_MAX_BYTES,
     MODRINTH_PREFERRED_HASH_ALGORITHM,
-    ModIndexManager,
-    ProviderIdentityPersistenceError,
+    SAFE_HASH_FILE_MAX_BYTES,
     clean_mod_version,
     detect_loader_from_text,
     get_logger,
-    get_shared_manager,
+    list_bounded_directory,
     normalize_minecraft_version,
+    open_bounded_zip,
+    open_regular_file,
+    read_archive_metadata_bytes,
 )
 
+from .mod_index_persistence import ModIndexPersistence
 from .provider_identity import ProviderIdentityService
 
-TomlDecodeError = tomllib.TOMLDecodeError
 logger = get_logger().bind(component="LocalModScanner")
-MAX_JAR_METADATA_BYTES = 2 * 1024 * 1024
+_LOCAL_MOD_SCAN_BATCH_SIZE = 32
 
 
 class LocalModScanner:
@@ -42,7 +46,7 @@ class LocalModScanner:
     def __init__(
         self,
         *,
-        index_manager: ModIndexManager,
+        index_manager: ModIndexPersistence,
         mods_path: Path,
         server_config: Any,
         provider_identity_service: ProviderIdentityService,
@@ -71,35 +75,9 @@ class LocalModScanner:
         return (filename, enabled, base_name)
 
     @staticmethod
-    def read_zip_member_bytes(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> bytes | None:
-        """
-        從 JAR/ZIP 檔案中讀取指定成員檔案的 bytes，並限制最大讀取大小
-
-        Args:
-            jar: 已開啟的 JAR/ZIP 物件
-            file_path: JAR 內部檔案路徑
-            max_bytes: 允許讀取的最大位元組數
-
-        Returns:
-            讀取到的 bytes；找不到檔案、讀取失敗或超過上限時回傳 None
-        """
-
-        try:
-            info = jar.getinfo(file_path)
-            if int(info.file_size) > max_bytes:
-                logger.warning(f"略過過大的 JAR metadata: {file_path} ({info.file_size} bytes)")
-                return None
-            with jar.open(info) as file_obj:
-                payload = file_obj.read(max_bytes + 1)
-            if len(payload) > max_bytes:
-                logger.warning(f"略過超過讀取上限的 JAR metadata: {file_path}")
-                return None
-            return payload
-        except KeyError, OSError, orjson.JSONDecodeError:
-            return None
-
-    @staticmethod
-    def read_json_from_jar(jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES) -> dict | list | None:
+    def read_json_from_jar(
+        jar: Any, file_path: str, *, max_bytes: int = ARCHIVE_METADATA_MAX_BYTES
+    ) -> dict | list | None:
         """
         讀取 JAR 內的 JSON 檔案並解析
 
@@ -113,7 +91,7 @@ class LocalModScanner:
         """
 
         try:
-            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            payload = read_archive_metadata_bytes(jar, file_path, max_bytes=max_bytes)
             if payload is None:
                 return None
             return orjson.loads(payload)
@@ -122,7 +100,7 @@ class LocalModScanner:
 
     @staticmethod
     def read_toml_from_jar(
-        jar: Any, file_path: str, *, max_bytes: int = MAX_JAR_METADATA_BYTES
+        jar: Any, file_path: str, *, max_bytes: int = ARCHIVE_METADATA_MAX_BYTES
     ) -> dict[str, Any] | None:
         """
         讀取 JAR 內的 TOML 檔案並解析
@@ -137,11 +115,11 @@ class LocalModScanner:
         """
 
         try:
-            payload = LocalModScanner.read_zip_member_bytes(jar, file_path, max_bytes=max_bytes)
+            payload = read_archive_metadata_bytes(jar, file_path, max_bytes=max_bytes)
             if payload is None:
                 return None
             return tomllib.loads(payload.decode("utf-8"))
-        except KeyError, TomlDecodeError, OSError, UnicodeDecodeError:
+        except KeyError, tomllib.TOMLDecodeError, OSError, UnicodeDecodeError:
             return None
         except Exception as e:
             logger.debug(f"讀取 JAR 中的 TOML 時發生非預期錯誤 {file_path}: {e}")
@@ -263,23 +241,22 @@ class LocalModScanner:
         """
         self.index_manager.cleanup_stale_entries()
         mods: list[LocalModInfo] = []
+        try:
+            directory_entries = list_bounded_directory(self.mods_path)
+        except OSError:
+            directory_entries = []
         files_to_scan = [
             file_path
-            for file_path in self.mods_path.glob("*.jar*")
-            if file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled")
+            for file_path in directory_entries
+            if file_path.is_file() and (file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"))
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        self._provider_identity_service.begin_resolution_batch()
-        try:
-            futures = [
-                get_shared_manager().run(self.create_mod_info_from_file, file_path) for file_path in files_to_scan
-            ]
-            results = [future.result() for future in futures]
-        finally:
-            self._provider_identity_service.end_resolution_batch()
-        for mod_info in results:
+        for index, file_path in enumerate(files_to_scan, start=1):
+            mod_info = self.create_mod_info_from_file(file_path)
             if mod_info:
                 mods.append(mod_info)
+            if index % _LOCAL_MOD_SCAN_BATCH_SIZE == 0:
+                self.index_manager.flush()
         self.index_manager.flush()
         return mods
 
@@ -294,6 +271,12 @@ class LocalModScanner:
             若檔案無法處理或發生錯誤時回傳 None，否則回傳 LocalModInfo 物件
         """
         try:
+            with open_regular_file(file_path) as source:
+                if os.fstat(source.fileno()).st_size > SAFE_HASH_FILE_MAX_BYTES:
+                    return None
+            file_stat = file_path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(file_stat.st_mode):
+                return None
             filename, enabled, base_name = self.parse_file_info(file_path)
             mod_data = {
                 "name": base_name,
@@ -304,7 +287,8 @@ class LocalModScanner:
                 "mc_version": "未知",
             }
             cached_metadata = self.index_manager.get_cached_metadata(file_path)
-            if cached_metadata:
+            cached_name = str(cached_metadata.get("name", "") or "").strip() if cached_metadata else ""
+            if cached_metadata and cached_name:
                 mod_data.update(cached_metadata)
             else:
                 archive_readable = self.extract_metadata_from_jar(file_path, mod_data)
@@ -312,6 +296,7 @@ class LocalModScanner:
                 self.index_manager.cache_metadata(
                     file_path,
                     {
+                        "name": mod_data["name"],
                         "version": mod_data["version"],
                         "author": mod_data["author"],
                         "description": mod_data["description"],
@@ -321,18 +306,7 @@ class LocalModScanner:
                     clear_issue=archive_readable,
                 )
             self.apply_server_config_overrides(mod_data)
-            try:
-                identity = self._provider_identity_service.resolve(
-                    ProviderIdentityEvidence(
-                        file_path=file_path,
-                        display_name=str(mod_data["name"] or "").strip(),
-                        jar_aliases=self.extract_provider_aliases(file_path),
-                        search_terms=(str(mod_data["name"] or ""), base_name, filename),
-                    )
-                )
-            except ProviderIdentityPersistenceError as e:
-                logger.warning(f"provider identity 無法提交，保留既有 snapshot: {file_path.name} - {e}")
-                identity = self._provider_identity_service.load(file_path)
+            identity = self._provider_identity_service.load(file_path)
             platform = ModPlatform.MODRINTH if identity.canonical else ModPlatform.LOCAL
             platform_id = identity.project_id if identity.canonical else ""
             platform_slug = identity.alias
@@ -341,7 +315,6 @@ class LocalModScanner:
             if platform == ModPlatform.MODRINTH and platform_id:
                 current_hash = self.index_manager.ensure_cached_hash(file_path, MODRINTH_PREFERRED_HASH_ALGORITHM)
                 hash_algorithm = MODRINTH_PREFERRED_HASH_ALGORITHM if current_hash else ""
-            file_stat = file_path.stat()
             mod_info = LocalModInfo(
                 id=base_name,
                 name=mod_data["name"],
@@ -377,32 +350,6 @@ class LocalModScanner:
                 self._quarantine_file(file_path, "unexpected_error")
             return None
 
-    def extract_provider_aliases(self, file_path: Path) -> tuple[str, ...]:
-        """
-        只提取 JAR evidence；canonicalization 一律交由 identity service
-
-        Args:
-            file_path: 要檢查的 Mod JAR 路徑
-
-        Returns:
-            依出現順序去重的 provider alias
-        """
-        aliases: list[str] = []
-        try:
-            with zipfile.ZipFile(file_path, "r") as jar:
-                fabric = self.read_json_from_jar(jar, "fabric.mod.json")
-                if isinstance(fabric, dict):
-                    aliases.append(str(fabric.get("id", "") or "").strip())
-                forge = self.read_toml_from_jar(jar, "META-INF/mods.toml")
-                if isinstance(forge, dict):
-                    mods = forge.get("mods")
-                    for mod in mods if isinstance(mods, list) else []:
-                        if isinstance(mod, dict):
-                            aliases.append(str(mod.get("modId", "") or "").strip())
-        except OSError, zipfile.BadZipFile:
-            return ()
-        return tuple(dict.fromkeys(alias for alias in aliases if alias))
-
     def get_manifest_version(self, jar: Any) -> str | None:
         """
         嘗試從 JAR 檔案的 MANIFEST.MF 中提取版本資訊，特別是當版本被指定為 ${file.jarVersion} 時
@@ -414,13 +361,13 @@ class LocalModScanner:
             從 MANIFEST.MF 中提取的版本字串，如果無法提取或發生錯誤則回傳 None
         """
         try:
-            if "META-INF/MANIFEST.MF" in jar.namelist():
-                with jar.open("META-INF/MANIFEST.MF") as manifest_file:
-                    for line in manifest_file.read().decode(errors="ignore").splitlines():
-                        if line.startswith("Implementation-Version:"):
-                            version = line.split(":", 1)[1].strip()
-                            if version and version != "${projectversion}":
-                                return version
+            payload = read_archive_metadata_bytes(jar, "META-INF/MANIFEST.MF")
+            if payload is not None:
+                for line in payload.decode(errors="ignore").splitlines():
+                    if line.startswith("Implementation-Version:"):
+                        version = line.split(":", 1)[1].strip()
+                        if version and version != "${projectversion}":
+                            return version
         except (zipfile.BadZipFile, OSError) as e:
             logger.exception(f"讀取 MANIFEST.MF 版本資訊失敗（IO/ZIP）: {e}")
         return None
@@ -437,7 +384,7 @@ class LocalModScanner:
             JAR 可正常開啟並完成檢查時回傳 True，檔案損毀或讀取失敗時回傳 False
         """
         try:
-            with zipfile.ZipFile(file_path, "r") as jar:
+            with open_bounded_zip(file_path) as jar:
                 metadata_extractors = [
                     ("fabric.mod.json", self.extract_fabric_metadata),
                     ("META-INF/mods.toml", self.extract_forge_metadata),

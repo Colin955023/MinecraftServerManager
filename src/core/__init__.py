@@ -10,19 +10,33 @@ from src import lazy_exports
 
 _EXPORTS: dict[str, tuple[str, str]] = {
     "CreateServerJourney": (".server.server_creation", "CreateServerJourney"),
-    "LoaderManager": (".loader_manager", "LoaderManager"),
-    "LoaderManagerRulesAdapter": (".mods.modrinth_planning_adapter", "LoaderManagerRulesAdapter"),
+    "LoaderManager": (".loader.loader_manager", "LoaderManager"),
     "ModManager": (".mods.mod_manager", "ModManager"),
     "ModPlanning": (".mods.dependency_planner_facade", "ModPlanning"),
-    "ModrinthPlanningAdapter": (".mods.modrinth_planning_adapter", "ModrinthPlanningAdapter"),
+    "deserialize_online_dependency_install_plan": (
+        ".mods.dependency_plan_serializer",
+        "deserialize_online_dependency_install_plan",
+    ),
+    "migrate_online_dependency_install_plan_payload": (
+        ".mods.dependency_plan_serializer",
+        "migrate_online_dependency_install_plan_payload",
+    ),
+    "serialize_online_dependency_install_plan": (
+        ".mods.dependency_plan_serializer",
+        "serialize_online_dependency_install_plan",
+    ),
+    "validate_online_dependency_install_plan_payload": (
+        ".mods.dependency_plan_serializer",
+        "validate_online_dependency_install_plan_payload",
+    ),
+    "LoaderManagerRulesAdapter": (".mods.mod_planning_ports", "LoaderManagerRulesAdapter"),
+    "ModrinthHttpAdapter": (".mods.modrinth_http", "ModrinthHttpAdapter"),
     "ServerBackupManager": (".server.server_backup", "ServerBackupManager"),
     "ServerCRUD": (".server.server_crud", "ServerCRUD"),
+    "ServerConfigChangeSet": (".server.server_crud", "ServerConfigChangeSet"),
     "ServerImportService": (".server.server_import", "ServerImportService"),
     "ServerInspector": (".server.server_inspector", "ServerInspector"),
     "ServerPropertiesStore": (".server.server_properties", "ServerPropertiesStore"),
     "ServerRuntime": (".server.server_runtime", "ServerRuntime"),
-    "get_mod_versions": (".mods.modrinth_service", "get_mod_versions"),
-    "get_modrinth_project_info": (".mods.modrinth_service", "get_modrinth_project_info"),
-    "search_mods_online": (".mods.modrinth_service", "search_mods_online"),
 }
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

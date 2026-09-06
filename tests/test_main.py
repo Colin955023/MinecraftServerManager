@@ -44,3 +44,22 @@ def test_main_returns_failure_after_startup_exception(monkeypatch: pytest.Monkey
 
     assert result == 1
     assert events == ["mutex", "shutdown", "http"]
+
+
+def test_main_returns_zero_when_instance_already_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    kernel32 = SimpleNamespace(
+        CreateMutexW=lambda *_args: 12345,
+        GetLastError=lambda: 183,
+        CloseHandle=lambda _handle: events.append("closed"),
+    )
+    monkeypatch.setattr(main_module.ctypes, "windll", SimpleNamespace(kernel32=kernel32), raising=False)
+    monkeypatch.setattr(main_module, "run_application", lambda: events.append("run"))
+    monkeypatch.setattr(main_module, "shutdown_shared_manager", lambda **_kwargs: events.append("shutdown"))
+    monkeypatch.setattr(main_module, "HTTPClient", SimpleNamespace(close=lambda: events.append("http")))
+
+    result = main_module.main()
+
+    assert result == 0
+    assert "run" not in events
+    assert events == ["closed", "shutdown", "http"]

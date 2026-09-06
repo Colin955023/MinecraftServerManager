@@ -2,160 +2,47 @@
 
 from __future__ import annotations
 
-import time
-import traceback
 from collections.abc import Iterable
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QBrush, QColor, QCursor
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
-    PrimaryPushButton,
     PushButton,
-    RadioButton,
     RoundMenu,
     SearchLineEdit,
-    SubtitleLabel,
-    TextEdit,
-    TitleLabel,
     TreeWidget,
 )
 
-from src.core import ModManager, get_modrinth_project_info
-from src.models import ModStatus, ServerConfig
-from src.ui import ModalMSFluentWindow
-from src.utils import (
+from src.models import ModStatus
+from src.ui import (
     Colors,
     ScrollableComboBox,
     Sizes,
     Spacing,
-    TextState,
     UIUtils,
     ValueState,
     apply_table_header_style,
-    atomic_write_bytes,
-    atomic_write_text,
     resolve_color,
 )
+from src.utils import list_bounded_directory
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
+from .local_mod_export_dialog import LocalModExportDialog
 from .mod_management_session import ModOperationScope
 from .online_browse_presenter import SearchFilter
-
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
-
-
-class _ExportModListDialog(ModalMSFluentWindow):
-    """本地模組功能擁有的列表匯出對話框"""
-
-    def __init__(self, parent: Any, mod_manager: ModManager, server: ServerConfig):
-        super().__init__(parent, is_modal=True, show_buttons=False)
-        self.mod_manager = mod_manager
-        self.server = server
-        self.setWindowTitle("匯出模組列表")
-        self.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-        self.setMinimumSize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-        self._setup_ui()
-
-    def _setup_ui(self) -> None:
-        title_label = TitleLabel("匯出模組列表", self.widget)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(title_label)
-
-        fmt_frame = QWidget(self.widget)
-        fmt_layout = QHBoxLayout(fmt_frame)
-        fmt_layout.setContentsMargins(0, Spacing.MEDIUM, 0, Spacing.MEDIUM)
-        fmt_layout.addWidget(SubtitleLabel("選擇匯出格式:", fmt_frame))
-
-        self.fmt_var = TextState(value="text")
-        for label, value in (("純文字", "text"), ("JSON", "json"), ("HTML", "html"), ("Excel (.xlsx)", "xlsx")):
-            radio = RadioButton(label, fmt_frame)
-            radio.setChecked(value == "text")
-            radio.toggled.connect(lambda checked, fmt=value: self.fmt_var.set(fmt) if checked else None)
-            fmt_layout.addWidget(radio)
-        fmt_layout.addStretch(1)
-        self.viewLayout.addWidget(fmt_frame)
-
-        self.viewLayout.addWidget(SubtitleLabel("預覽:", self.widget))
-        text_widget = TextEdit(self.widget)
-        text_widget.setMinimumHeight(Sizes.PREVIEW_TEXTBOX_HEIGHT)
-        self.viewLayout.addWidget(text_widget, 1)
-
-        def update_preview(*_) -> None:
-            export_content = self.mod_manager.export_mod_list(self.fmt_var.get())
-            text_widget.clear()
-            if isinstance(export_content, bytes):
-                text_widget.setPlainText(f"這是二進位 Excel 檔案，無法在此預覽。檔案大小：{len(export_content)} 位元組")
-            else:
-                text_widget.setPlainText(export_content)
-
-        self.fmt_var.trace_add("write", update_preview)
-        update_preview()
-
-        btn_frame = QWidget(self.widget)
-        btn_layout = QHBoxLayout(btn_frame)
-        btn_layout.setContentsMargins(0, Spacing.MEDIUM, 0, 0)
-
-        def save_export() -> None:
-            fmt = self.fmt_var.get()
-            ext = {"text": "txt", "json": "json", "html": "html", "xlsx": "xlsx"}[fmt]
-            default_name = f"{self.server.name}_模組列表.{ext}"
-            file_path = UIUtils.get_save_file_name(
-                self,
-                "儲存模組列表",
-                str(Path(self.server.path) / default_name),
-                "所有檔案 (*.*);;純文字 (*.txt);;JSON (*.json);;HTML (*.html);;Excel 試算表 (*.xlsx)",
-            )
-            if not file_path:
-                return
-            try:
-                export_content = self.mod_manager.export_mod_list(fmt)
-                saved = (
-                    atomic_write_bytes(file_path, export_content)
-                    if isinstance(export_content, bytes)
-                    else atomic_write_text(Path(file_path), export_content)
-                )
-                if not saved:
-                    UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
-                    return
-            except Exception as e:
-                logger.error(f"匯出模組列表失敗: {e}\n{traceback.format_exc()}")
-                UIUtils.show_message("匯出失敗", f"產生匯出內容時發生錯誤: {e}", self, message_level="error")
-                return
-            if UIUtils.ask_yes_no_cancel(
-                "匯出成功", f"已儲存: {file_path}\n\n是否要立即開啟匯出的檔案？", parent=self, show_cancel=False
-            ):
-                try:
-                    UIUtils.open_external(file_path)
-                except Exception as e:
-                    logger.error(f"開啟檔案失敗: {e}\n{traceback.format_exc()}")
-                    UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=self, message_level="error")
-
-        save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
-        save_btn.clicked.connect(save_export)
-        save_btn.setMinimumWidth(Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
-        save_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-        btn_layout.addWidget(save_btn)
-
-        close_btn = PushButton("關閉", btn_frame)
-        close_btn.clicked.connect(self.close)
-        close_btn.setMinimumWidth(Sizes.MOD_EXPORT_CLOSE_BUTTON_WIDTH)
-        close_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-        btn_layout.addWidget(close_btn)
-        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(btn_frame)
 
 
 class LocalModListPresenter:
     """封裝本地模組列表的 UI 建立、篩選、選取與批次操作"""
 
-    def __init__(self, controller: ModManagementFrame):
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext):
+        self.controller = context
         self.all_selected: bool = False
         self.local_tree: TreeWidget
         self.select_all_btn: PushButton
@@ -177,7 +64,7 @@ class LocalModListPresenter:
         """
         dedup: dict[str, Any] = {}
         for mod in mods:
-            base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
+            base_name = mod.filename.removesuffix(".jar.disabled").removesuffix(".jar")
             existing = dedup.get(base_name)
             if existing is None or mod.status == ModStatus.ENABLED:
                 dedup[base_name] = mod
@@ -188,14 +75,15 @@ class LocalModListPresenter:
         if not self.controller.mod_manager or not self.controller.mod_session.server:
             UIUtils.show_message("錯誤", "請先選擇伺服器以匯出模組列表", self.controller.parent, message_level="error")
             return
-        _ExportModListDialog(
+        LocalModExportDialog(
             self.controller.parent,
             self.controller.mod_manager,
             self.controller.mod_session.server,
         ).show()
 
     def show_local_context_menu(self, event) -> None:
-        """在本地模組列表上顯示右鍵選單
+        """
+        在本地模組列表上顯示右鍵選單
 
         Args:
             event: 觸發選單的列表座標
@@ -296,8 +184,8 @@ class LocalModListPresenter:
             )
             QApplication.clipboard().setText("\n".join(f"{label}: {value}" for label, value in values if value))
             self.controller.update_status("模組詳細資訊已複製到剪貼簿")
-        except Exception as e:
-            logger.error(f"複製模組資訊失敗: {e}\n{traceback.format_exc()}")
+        except Exception:
+            logger.exception("複製模組資訊失敗")
 
     def show_in_explorer(self) -> None:
         """在檔案總管中定位選中的模組檔案"""
@@ -320,7 +208,7 @@ class LocalModListPresenter:
             UIUtils.reveal_in_explorer(mod_file)
             self.controller.update_status(f"已在檔案總管中顯示: {mod_file.name}")
         except Exception as e:
-            logger.error(f"開啟檔案總管失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("開啟檔案總管失敗")
             self.controller.update_status(f"開啟檔案總管失敗: {e}")
 
     def delete_local_mod(self) -> None:
@@ -389,7 +277,7 @@ class LocalModListPresenter:
             return ()
         try:
             signature: list[tuple[str, int, int]] = []
-            for entry in mods_dir.iterdir():
+            for entry in list_bounded_directory(mods_dir):
                 if not entry.is_file():
                     continue
                 try:
@@ -466,14 +354,14 @@ class LocalModListPresenter:
         search_entry = SearchLineEdit(right_frame)
         search_entry.setPlaceholderText("搜尋本地模組")
         search_entry.textChanged.connect(self.local_search_var.set)
-        self.local_search_var.trace_add("write", self.filter_local_mods)
+        self.local_search_var.trace_add(self.filter_local_mods)
         search_filter_layout.addWidget(search_entry)
 
         self.local_filter_var = ValueState("所有")
         filter_combo = ScrollableComboBox(right_frame)
         filter_combo.addItems(["所有", "啟用", "停用"])
         filter_combo.currentTextChanged.connect(self.local_filter_var.set)
-        self.local_filter_var.trace_add("write", self.filter_local_mods)
+        self.local_filter_var.trace_add(self.apply_local_filter)
         search_filter_layout.addWidget(filter_combo)
 
         right_layout.addLayout(search_filter_layout)
@@ -483,12 +371,10 @@ class LocalModListPresenter:
         export_btn.clicked.connect(self.export_mod_list_dialog)
         right_layout.addWidget(export_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
-    def refresh_mod_list_force(self, _event=None) -> None:
+    def refresh_mod_list_force(self) -> None:
         """
         強制重新掃描本地模組並重繪列表
 
-        Args:
-            _event: 事件物件（未使用）
         """
         if self.controller.mod_manager:
             manager = self.controller.mod_manager
@@ -505,11 +391,11 @@ class LocalModListPresenter:
                     if not session.accept_local_results(scope, mods):
                         return
                     session.update_local_scan_fingerprint(None, None, None)
-                    self.controller.ui_queue.put(self.controller.tree_sync.refresh_local_list)
+                    self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
                     self.enhance_local_mods(scope)
                     self.controller.update_status_safe(f"找到 {len(mods)} 個本地模組 (已重新整理)")
                 except Exception as e:
-                    logger.error(f"強制掃描失敗: {e}\n{traceback.format_exc()}")
+                    logger.exception("強制掃描失敗")
                     if session.is_scope_current(scope):
                         self.controller.update_status_safe(f"強制掃描失敗: {e}")
 
@@ -569,18 +455,10 @@ class LocalModListPresenter:
         from qfluentwidgets import isDarkTheme
 
         is_dark = isDarkTheme()
-        bg_color = resolve_color((Colors.BG_CARD_LIGHT, Colors.BG_CARD_DARK), dark=is_dark)
-        border_color = resolve_color(Colors.BORDER, dark=is_dark)
         primary_color = resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)
         muted_color = resolve_color(Colors.TEXT_MUTED, dark=is_dark)
 
-        header_bg = resolve_color((Colors.BG_LISTBOX_LIGHT, Colors.BG_LISTBOX_DARK), dark=is_dark)
-        header_border = resolve_color(Colors.TABLE_HEADER_BORDER, dark=is_dark)
-        tree.setStyleSheet(
-            f"TreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}\n"
-            f"QHeaderView {{ background-color: transparent; border: none; }}\n"
-            f"QHeaderView::section {{ background-color: {header_bg}; color: {primary_color}; border: {Sizes.TABLE_HEADER_BORDER_WIDTH}px solid {header_border}; padding: 4px 6px; }}"
-        )
+        apply_table_header_style(tree)
 
         for row in range(tree.topLevelItemCount()):
             item = tree.topLevelItem(row)
@@ -604,24 +482,23 @@ class LocalModListPresenter:
         mods_dir = Path(server_path_key) / "mods" if server_path_key else None
         mods_dir_key = str(mods_dir.resolve()) if mods_dir else ""
 
-        mods_dir_signature = self._build_mods_dir_signature(mods_dir)
-        try:
-            mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
-        except Exception:
-            mods_dir_mtime = None
-        last_mods_dir, _last_mtime, last_signature = session.local_scan_fingerprint()
-        if (
-            mods_dir_key
-            and mods_dir_key == last_mods_dir
-            and (mods_dir_signature is not None)
-            and (mods_dir_signature == last_signature)
-        ):
-            self.controller.update_status_safe(f"找到 {len(session.local_mods)} 個本地模組")
-            self.controller.ui_queue.put(self.controller.tree_sync.refresh_local_list)
-            return
-
         def load_thread():
             try:
+                mods_dir_signature = self._build_mods_dir_signature(mods_dir)
+                try:
+                    mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
+                except Exception:
+                    mods_dir_mtime = None
+                last_mods_dir, _last_mtime, last_signature = session.local_scan_fingerprint()
+                if (
+                    mods_dir_key
+                    and mods_dir_key == last_mods_dir
+                    and mods_dir_signature is not None
+                    and mods_dir_signature == last_signature
+                ):
+                    self.controller.update_status_safe(f"找到 {len(session.local_mods)} 個本地模組")
+                    self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
+                    return
                 self.controller.update_status_safe("正在掃描本地模組...")
                 mods = list(self._build_mods_by_base_name(manager.local_mod_scanner.scan_mods()).values())
                 total = len(mods)
@@ -654,11 +531,11 @@ class LocalModListPresenter:
                 except Exception:
                     accepted_mtime = mods_dir_mtime
                 session.update_local_scan_fingerprint(mods_dir_key, accepted_mtime, current_signature)
-                self.controller.ui_queue.put(self.controller.tree_sync.refresh_local_list)
+                self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
                 self.enhance_local_mods(scope)
                 self.controller.update_status_safe(f"找到 {len(mods)} 個本地模組")
             except Exception as e:
-                logger.error(f"掃描失敗: {e}\n{traceback.format_exc()}")
+                logger.exception("掃描失敗")
                 if session.is_scope_current(scope):
                     self.controller.update_progress_safe(0)
                     self.controller.update_status_safe(f"掃描失敗: {e}")
@@ -666,7 +543,8 @@ class LocalModListPresenter:
         self.controller.scope.submit(load_thread, key="local_scan", replace=True)
 
     def enhance_local_mods(self, scope: ModOperationScope | None = None) -> None:
-        """查詢本地模組增強資訊，並只接受目前工作階段的結果
+        """
+        查詢本地模組增強資訊，並只接受目前工作階段的結果
 
         Args:
             scope: 選用的既有操作 scope；省略時建立新的本地掃描 scope
@@ -686,20 +564,26 @@ class LocalModListPresenter:
             try:
                 if not session.is_scope_current(scope):
                     return
+                identity = manager.provider_identity_service.resolve_for_local_mod(mod)
+                manager.provider_identity_service.project(mod, identity)
                 if session.get_provider_cache(mod.filename) is not None:
                     return
-                project_id = str(getattr(mod, "platform_id", "") or "").strip()
+                project_id = identity.project_id if identity.canonical else ""
                 if not project_id:
                     return
-                enhanced = get_modrinth_project_info(project_id)
+                enhanced = self.controller.mod_provider.find_projects(project_id, exact=True, include_details=True)
                 if enhanced:
                     if not session.is_scope_current(scope):
                         return
                     if not session.cache_provider_enhancement(scope, mod.filename, enhanced):
                         return
-                    time.sleep(0.05)
-            except Exception as e:
-                logger.error(f"模組 {mod.filename} 資訊失敗: {e}\n{traceback.format_exc()}")
+                    self.controller.scope.schedule(
+                        50,
+                        self.controller.tree_sync.refresh_local_list,
+                        key="local_enhance_refresh",
+                    )
+            except Exception:
+                logger.exception(f"模組 {mod.filename} 資訊失敗")
 
         def enhance_thread():
             if not session.is_scope_current(scope):
@@ -710,16 +594,14 @@ class LocalModListPresenter:
                 enhance_single(mod)
             if not session.is_scope_current(scope):
                 return
-            self.controller.ui_queue.put(self.controller.tree_sync.refresh_local_list)
+            self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list, key="local_enhance_refresh")
 
         self.controller.scope.submit(enhance_thread, key="local_enhance", replace=True)
 
-    def toggle_local_mod(self, _event=None) -> None:
+    def toggle_local_mod(self) -> None:
         """
         切換目前選取本地模組的啟用/停用狀態
 
-        Args:
-            _event: 觸發切換的事件物件（可選）
         """
         tree = self.local_tree
         if not tree:
@@ -771,10 +653,9 @@ class LocalModListPresenter:
                 def apply_ui_update() -> None:
                     try:
                         if ok:
-                            self.controller._apply_local_toggle_success(
+                            self.controller.apply_local_toggle_success(
                                 tree=tree,
                                 item_id=row,
-                                _mod_id=mod_id,
                                 mod_obj=found_mod,
                                 new_status=new_status,
                                 new_filename=new_filename,
@@ -797,29 +678,29 @@ class LocalModListPresenter:
             do_toggle()
         except Exception as e:
             self.controller.update_status(f"操作失敗: {e}")
-            logger.error(f"切換模組狀態錯誤: {e}\n{traceback.format_exc()}")
+            logger.exception("切換模組狀態錯誤")
 
-    def filter_local_mods(self, *_args) -> None:
+    def filter_local_mods(self) -> None:
         """
         篩選本地模組，使用 debounce 避免連續重建 Treeview
 
-        Args:
-            *_args: 事件處理器的參數，未使用
         """
         UIUtils.schedule_debounce(
             self.controller.parent,
             "_local_filter_job",
-            120,
+            60,
             self._run_debounced_local_filter_refresh,
             owner=self.controller,
         )
 
-    def toggle_select_all(self, _event=None) -> None:
+    def apply_local_filter(self) -> None:
+        """立即套用離散狀態篩選"""
+        self.controller.tree_sync.refresh_local_list()
+
+    def toggle_select_all(self) -> None:
         """
         全選或取消全選列表中的模組
 
-        Args:
-            _event: 事件物件（未使用）
         """
         tree = self.local_tree
         if not tree:
@@ -828,21 +709,22 @@ class LocalModListPresenter:
         new_state = not getattr(self, "all_selected", False)
         self.all_selected = new_state
         row_count = tree.topLevelItemCount()
-        for i in range(row_count):
-            item = tree.topLevelItem(i)
-            if item:
-                item.setSelected(new_state)
+        with QSignalBlocker(tree):
+            for i in range(row_count):
+                item = tree.topLevelItem(i)
+                if item:
+                    item.setSelected(new_state)
 
         if hasattr(self.select_all_btn, "setText"):
             self.select_all_btn.setText("❌ 取消全選" if new_state else "☑️ 全選")
-        self.update_selection_status()
+        tree.setFocus(Qt.FocusReason.OtherFocusReason)
+        tree.viewport().update()
+        self.on_tree_selection_changed()
 
-    def batch_toggle_selected(self, _event=None) -> None:
+    def batch_toggle_selected(self) -> None:
         """
         批次切換選中模組的啟用/停用狀態
 
-        Args:
-            _event: 事件物件（未使用）
         """
         try:
             if not self.controller.mod_manager:
@@ -905,16 +787,14 @@ class LocalModListPresenter:
                             item_id=row,
                             status=new_status,
                             mod_obj=mod,
-                            mod_id=base_name,
                             filename=new_filename,
                             previous_filename=old_filename,
                             previous_file_path=old_file_path,
                         ) -> None:
                             try:
-                                self.controller._apply_local_toggle_success(
+                                self.controller.apply_local_toggle_success(
                                     tree=tree,
                                     item_id=item_id,
-                                    _mod_id=mod_id,
                                     mod_obj=mod_obj,
                                     new_status=status,
                                     new_filename=filename,
@@ -942,7 +822,7 @@ class LocalModListPresenter:
 
             do_batch()
         except Exception as e:
-            logger.error(f"批次操作失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("批次操作失敗")
             self.controller.update_progress_safe(0)
             UIUtils.show_message("錯誤", f"批次操作失敗: {e}", self.controller.parent, message_level="error")
 
@@ -979,15 +859,13 @@ class LocalModListPresenter:
             self.controller.mod_session.set_status(status_text)
             if hasattr(self.controller.status_label, "setText"):
                 self.controller.status_label.setText(status_text)
-        except Exception as e:
-            logger.error(f"更新選擇狀態失敗: {e}\n{traceback.format_exc()}")
+        except Exception:
+            logger.exception("更新選擇狀態失敗")
 
-    def on_tree_selection_changed(self, _event=None) -> None:
+    def on_tree_selection_changed(self) -> None:
         """
         本地模組樹狀檢視選擇變更時同步狀態
 
-        Args:
-            _event: 觸發選擇變更的事件物件（可選）
         """
         tree = self.local_tree
         if not tree:
@@ -1028,8 +906,8 @@ class LocalModListPresenter:
                         self.select_all_btn.setText("☑️ 全選")
                 except Exception as e:
                     logger.exception(f"更新全選按鈕文字失敗: {e}")
-        except Exception as e:
-            logger.error(f"處理選擇變化失敗: {e}\n{traceback.format_exc()}")
+        except Exception:
+            logger.exception("處理選擇變化失敗")
 
     def _set_bulk_controls_enabled(self, enabled: bool) -> None:
         """設定批次操作控制元件的啟用/停用狀態"""

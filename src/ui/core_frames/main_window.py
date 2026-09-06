@@ -7,32 +7,24 @@ Minecraft 伺服器管理器的主要使用者介面
 from __future__ import annotations
 
 import sys
-import traceback
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtWidgets import QWidget
+from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (
-    BodyLabel,
     FluentWindow,
-    LineEdit,
     NavigationItemPosition,
-    PushButton,
-    SubtitleLabel,
-    TextEdit,
     Theme,
-    TitleLabel,
     setTheme,
 )
-from qfluentwidgets import FluentIcon as FIF
 
 from src.core import (
     LoaderManager,
     LoaderManagerRulesAdapter,
     ModPlanning,
-    ModrinthPlanningAdapter,
+    ModrinthHttpAdapter,
     ServerBackupManager,
     ServerCRUD,
     ServerImportService,
@@ -42,140 +34,50 @@ from src.core import (
 )
 from src.models import ServerConfig
 from src.ui import (
-    ModalMSFluentWindow,
+    FluentInputDialog,
+    FontManager,
+    ImportDialog,
     ModManagementFrame,
     ProgressDialog,
-    TaskCoordinator,
-)
-from src.utils import (
-    Colors,
-    ConfigurationError,
-    FontManager,
-    FontSize,
+    ServerInitializationDialog,
     Sizes,
-    StatusPushButton,
+    TaskCoordinator,
     UIUtils,
     UIWorkScope,
     WorkOutcome,
+    apply_window_icon,
     center_window,
     ensure_application,
-    get_logger,
-    get_settings_manager,
     initialize_ui_theme,
-    run_on_ui_thread,
+    is_qobject_alive,
+    set_ui_closing,
+)
+from src.utils import (
+    ConfigurationError,
+    SettingsManager,
+    get_logger,
+    shutdown_shared_manager,
+    validate_server_name,
 )
 
 from .about_preferences_frame import AboutPreferencesFrame
 from .create_server_frame import CreateServerFrame
 from .manage_server_frame import ManageServerFrame
-from .page_router import PageRouter
 
 logger = get_logger().bind(component="MainWindow")
-
-
-class ImportDialog(ModalMSFluentWindow):
-    """匯入伺服器對話框"""
-
-    def __init__(self, parent):
-        super().__init__(parent, is_modal=True, show_buttons=False)
-        self.setWindowTitle("匯入伺服器")
-        self.setFixedSize(520, 340)
-
-        if hasattr(self, "titleBar"):
-            if hasattr(self.titleBar, "minBtn"):
-                self.titleBar.minBtn.hide()
-            if hasattr(self.titleBar, "maxBtn"):
-                self.titleBar.maxBtn.hide()
-
-        self.choice = None
-
-        title_lbl = TitleLabel("匯入伺服器", self.widget)
-        title_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(title_lbl)
-
-        info_label = SubtitleLabel("請選擇要匯入的伺服器類型:", self.widget)
-        info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(info_label)
-        self.viewLayout.addStretch(1)
-
-        folder_btn = PushButton("📁 匯入資料夾", self.widget)
-        folder_btn.clicked.connect(lambda _checked=False: self._set_choice("folder"))
-        self.viewLayout.addWidget(folder_btn)
-
-        archive_btn = PushButton("📦 匯入壓縮檔", self.widget)
-        archive_btn.clicked.connect(lambda _checked=False: self._set_choice("archive"))
-        self.viewLayout.addWidget(archive_btn)
-
-        cancel_btn = PushButton("❌ 取消", self.widget)
-        cancel_btn.clicked.connect(lambda _checked=False: self._set_choice("cancel"))
-        self.viewLayout.addWidget(cancel_btn)
-
-    def _set_choice(self, val):
-        self.choice = val
-        self.accept()
-
-
-class FluentInputDialog(ModalMSFluentWindow):
-    """現代化輸入對話框"""
-
-    def __init__(self, parent, title: str, content: str, default_text: str = ""):
-        super().__init__(parent, is_modal=True, show_buttons=False)
-        self.setWindowTitle(title)
-        self.setFixedSize(520, 300)
-
-        if hasattr(self, "titleBar"):
-            if hasattr(self.titleBar, "minBtn"):
-                self.titleBar.minBtn.hide()
-            if hasattr(self.titleBar, "maxBtn"):
-                self.titleBar.maxBtn.hide()
-
-        title_lbl = TitleLabel(title, self.widget)
-        title_lbl.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(title_lbl)
-        info_label = SubtitleLabel(content, self.widget)
-        info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(info_label)
-
-        self.lineEdit = LineEdit(self.widget)
-        self.lineEdit.setText(default_text)
-        self.lineEdit.setClearButtonEnabled(True)
-        self.viewLayout.addWidget(self.lineEdit)
-        self.viewLayout.addStretch(1)
-
-        self.yesButton.setText("確定")
-        self.yesButton.clicked.connect(self._accept_input)
-        self.cancelButton.setText("取消")
-        self.cancelButton.clicked.connect(self.reject)
-        self.buttonGroup.show()
-
-        self.textValue = ""
-
-    def _accept_input(self) -> None:
-        self.validate()
-        self.accept()
-
-    def validate(self) -> bool:
-        """
-        驗證輸入是否有效，並將輸入值儲存到 self.textValue
-
-        Returns:
-            輸入是否有效
-        """
-        self.textValue = self.lineEdit.text()
-        return True
 
 
 class MainWindow(FluentWindow):
     """Minecraft 伺服器管理器主視窗類別"""
 
-    def __init__(self):
+    def __init__(self, settings: SettingsManager):
         super().__init__()
+        apply_window_icon(self)
         self.setMicaEffectEnabled(False)
         self.root = self
         self.scope = UIWorkScope(self)
         self.setProperty("_primary_window", True)
-        self.page_router = PageRouter(self)
-        self.settings = get_settings_manager()
+        self.settings = settings
         self.setup_window()
 
         theme_mode = self.settings.get_theme_mode()
@@ -196,13 +98,14 @@ class MainWindow(FluentWindow):
                 self._compose_services(str(path_obj))
                 self.create_widgets()
                 self._widgets_initialized = True
-            except Exception as e:
-                logger.warning(f"啟動時預先建立介面未完成，將延後至 deferred_init 處理: {e}\n{traceback.format_exc()}")
+            except Exception:
+                logger.exception("啟動時預先建立介面未完成，將延後至 deferred_init 處理")
 
         QtCore.QTimer.singleShot(0, self._deferred_init)
 
     def _compose_services(self, servers_root: str) -> None:
-        """建立 MainWindow 唯一使用的 production service graph
+        """
+        建立 MainWindow 唯一使用的 production service graph
 
         Args:
             servers_root: 已驗證的伺服器根目錄
@@ -210,8 +113,9 @@ class MainWindow(FluentWindow):
         server_crud = ServerCRUD(servers_root=servers_root)
         loader_manager = LoaderManager()
         server_inspector = ServerInspector()
+        mod_provider = ModrinthHttpAdapter()
         mod_planning = ModPlanning(
-            ModrinthPlanningAdapter(),
+            mod_provider,
             LoaderManagerRulesAdapter(loader_manager),
         )
         server_import = ServerImportService(server_crud, server_inspector)
@@ -221,6 +125,7 @@ class MainWindow(FluentWindow):
 
         self.servers_root = servers_root
         self.loader_manager = loader_manager
+        self.mod_provider = mod_provider
         self.mod_planning = mod_planning
         self.server_crud = server_crud
         self.server_inspector = server_inspector
@@ -231,9 +136,7 @@ class MainWindow(FluentWindow):
 
     def _on_page_changed(self, index: int) -> None:
         widget = self.stackedWidget.widget(index)
-        if widget is getattr(self, "mod_frame", None) and getattr(self, "mod_frame_controller", None):
-            QtCore.QTimer.singleShot(60, self.mod_frame_controller.load_servers)
-        elif widget is getattr(self, "manage_server_frame", None) and self.manage_server_frame:
+        if widget is getattr(self, "manage_server_frame", None) and self.manage_server_frame:
             QtCore.QTimer.singleShot(60, self.manage_server_frame.refresh_servers)
 
     def set_servers_root(self, new_root: str | None = None) -> str:
@@ -246,7 +149,7 @@ class MainWindow(FluentWindow):
         Returns:
             解析後的伺服器根目錄字串
         """
-        settings = get_settings_manager()
+        settings = self.settings
 
         def _fail_exit(msg: str):
             """錯誤退出處理"""
@@ -280,7 +183,7 @@ class MainWindow(FluentWindow):
                 settings.set_servers_root(new_root)
                 path_obj = settings.get_validated_servers_root_path(create=True)
             except Exception as e:
-                logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
+                logger.exception("無法寫入設定")
                 UIUtils.show_message("設定錯誤", f"無法寫入設定: {e}", self.root, message_level="error")
                 return ""
         else:
@@ -301,7 +204,7 @@ class MainWindow(FluentWindow):
                         path_obj = settings.get_validated_servers_root_path(create=True)
                         break
                     except Exception as e:
-                        logger.error(f"無法寫入設定: {e}\n{traceback.format_exc()}")
+                        logger.exception("無法寫入設定")
                         UIUtils.show_message("設定錯誤", f"無法寫入設定: {e}", self.root, message_level="error")
                         return ""
         self.servers_root = str(path_obj)
@@ -314,6 +217,16 @@ class MainWindow(FluentWindow):
         Args:
             event: 關閉事件
         """
+        if getattr(self, "_shutdown_complete", False):
+            super().closeEvent(event)
+            return
+        event.ignore()
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
+        set_ui_closing(True)
+        self.setEnabled(False)
+        self.setWindowTitle("Minecraft 伺服器管理器 — 正在安全關閉…")
         try:
             is_maximized = self.isMaximized()
             if not is_maximized:
@@ -325,75 +238,72 @@ class MainWindow(FluentWindow):
                 x, y = prev.get("x"), prev.get("y")
             self.settings.set_main_window_settings(w, h, x, y, is_maximized)
 
-            FontManager.clear_cache()
-            if getattr(self, "server_crud", None) is not None:
-                self.server_crud.write_servers_config()
-            if getattr(self, "server_runtime", None) is not None:
-                self.server_runtime.shutdown()
-
-            if hasattr(self, "manage_server_frame") and self.manage_server_frame:
-                with suppress(Exception):
-                    if hasattr(self.manage_server_frame, "_auto_refresh_timer"):
-                        self.manage_server_frame._auto_refresh_timer.stop()
-
-            if hasattr(self, "mod_frame_controller") and self.mod_frame_controller:
-                with suppress(Exception):
-                    if hasattr(self.mod_frame_controller, "_ui_queue_timer"):
-                        self.mod_frame_controller._ui_queue_timer.stop()
-
-            if hasattr(self, "scope") and self.scope:
-                self.scope.drain(timeout_ms=1000)
-
-            app = QtWidgets.QApplication.instance()
-            if isinstance(app, QtWidgets.QApplication):
-                for widget in app.topLevelWidgets():
-                    if widget is not self:
-                        with suppress(Exception):
-                            widget.close()
-                app.quit()
         except Exception as e:
-            logger.error(f"清理資源時發生錯誤: {e}\n{traceback.format_exc()}")
-        super().closeEvent(event)
+            logger.error(f"關閉時儲存設定失敗: {e}")
+        app = QtWidgets.QApplication.instance()
+        windows = app.topLevelWidgets() if isinstance(app, QtWidgets.QApplication) else [self]
+        self._shutdown_scopes = {scope for widget in windows for scope in widget.findChildren(UIWorkScope)}
+        for scope in self._shutdown_scopes:
+            scope.drain()
+        for widget in windows:
+            for timer in widget.findChildren(QtCore.QTimer):
+                timer.stop()
+            if widget is not self:
+                widget.close()
+        self._shutdown_timer = QtCore.QTimer(self)
+        self._shutdown_timer.setInterval(50)
+        self._shutdown_timer.timeout.connect(self._advance_shutdown)
+        self._shutdown_timer.start()
+        self._advance_shutdown()
 
-    def _force_full_window_repaint(self) -> None:
-        """強制整個主視窗及其子頁面重新排版與重繪，防止最大化、還原或失焦時的畫面撕裂與殘影"""
-        # FluentWindow 在 Windows 還原／重新取得焦點時可能保留 backing store 的舊像素，
-        # 導致底部固定操作列殘影；先讓完整 widget 樹失效，再重新啟用更新繪製。
-        self.setUpdatesEnabled(False)
-        try:
-            win_layout = self.layout()
-            if win_layout is not None:
-                win_layout.invalidate()
-                win_layout.activate()
-            central = self.centralWidget()
-            if central is not None:
-                central.updateGeometry()
-                central.update()
-            if hasattr(self, "navigationInterface") and self.navigationInterface:
-                self.navigationInterface.updateGeometry()
-                self.navigationInterface.update()
-            if hasattr(self, "stackedWidget") and self.stackedWidget:
-                self.stackedWidget.updateGeometry()
-                current = self.stackedWidget.currentWidget()
-                if current is not None:
-                    current.updateGeometry()
-                    current.update()
-                self.stackedWidget.update()
-        finally:
-            self.setUpdatesEnabled(True)
+    def _advance_shutdown(self) -> None:
+        """保留 Qt 事件迴圈，等待交易與程序完整結束後關閉視窗"""
+        runtime = getattr(self, "server_runtime", None)
+        if runtime is not None and not runtime.shutdown(wait=False):
+            return
+        if not all(not is_qobject_alive(scope) or scope.drain() for scope in self._shutdown_scopes):
+            return
+        if not shutdown_shared_manager(wait=False):
+            return
+        self._shutdown_timer.stop()
+        self._shutdown_scopes.clear()
+        FontManager.clear_cache()
+        self._shutdown_complete = True
+        self.close()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.quit()
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        """所有退出要求均先經過主視窗的安全關閉流程"""
+        if event.type() == QtCore.QEvent.Type.Quit and not getattr(self, "_shutdown_complete", False):
+            self.close()
+            return True
+        return super().eventFilter(watched, event)
+
+    def _queue_surface_refresh(self) -> None:
+        """重新取得焦點後只排程 repaint，不在 frameless 過渡狀態強制重算 geometry"""
+        if not self.isVisible() or self.isMinimized():
+            return
         self.update()
-        self.repaint()
+        if hasattr(self, "navigationInterface") and self.navigationInterface:
+            self.navigationInterface.update()
+        if hasattr(self, "stackedWidget") and self.stackedWidget:
+            current = self.stackedWidget.currentWidget()
+            if current is not None:
+                current.update()
+            self.stackedWidget.update()
 
-    def changeEvent(self, e: QtCore.QEvent) -> None:
+    def changeEvent(self, event: QtCore.QEvent) -> None:
         """
-        監聽視窗狀態變更（最大化/還原/焦點切換），強制重新計算佈局並重繪防止畫面撕裂
+        Windows Show Desktop/還原及最大化狀態改變後安全刷新 surface
 
         Args:
-            e: 視窗事件
+            event: QEvent 事件物件
         """
-        super().changeEvent(e)
-        if e.type() in (QtCore.QEvent.Type.WindowStateChange, QtCore.QEvent.Type.ActivationChange):
-            QtCore.QTimer.singleShot(0, self._force_full_window_repaint)
+        super().changeEvent(event)
+        if event.type() in (QtCore.QEvent.Type.WindowStateChange, QtCore.QEvent.Type.ActivationChange):
+            QtCore.QTimer.singleShot(0, self._queue_surface_refresh)
 
     def resizeEvent(self, e: QtGui.QResizeEvent) -> None:
         """
@@ -460,7 +370,7 @@ class MainWindow(FluentWindow):
         self._ensure_manage_server_frame()
         self._ensure_mod_management_frame()
 
-        self.about_prefs_frame = AboutPreferencesFrame(self)
+        self.about_prefs_frame = AboutPreferencesFrame(self, self.settings)
         self.about_prefs_frame.setObjectName("AboutPreferencesInterface")
 
         self.addSubInterface(self.create_server_frame, FIF.ADD, "建立伺服器")
@@ -472,7 +382,43 @@ class MainWindow(FluentWindow):
         self.navigationInterface.addItem("folder", FIF.FOLDER, "開啟資料夾", onClick=self.open_servers_folder)
         self.addSubInterface(self.about_prefs_frame, FIF.INFO, "關於與設定", position=NavigationItemPosition.BOTTOM)
 
-        self.page_router.show_create_server()
+        self.show_create_server()
+
+    def show_create_server(self) -> None:
+        """顯示建立伺服器頁面並同步導覽列"""
+        self._ensure_manage_server_frame()
+        self._show_page_frame(self.create_server_frame)
+
+    def show_manage_server(self, auto_select: str | None = None) -> None:
+        """
+        顯示管理伺服器頁面，必要時延遲選取指定伺服器
+
+        Args:
+            auto_select: 自動選取的伺服器名稱
+        """
+        self._ensure_manage_server_frame()
+        self._show_page_frame(self.manage_server_frame)
+        if auto_select:
+            QtCore.QTimer.singleShot(100, lambda: self._refresh_and_optionally_select(auto_select))
+
+    def _show_page_frame(self, frame: QWidget | None) -> None:
+        """切換頁面並同步導覽列選取狀態"""
+        if frame is None:
+            return
+        self.switchTo(frame)
+        if getattr(self, "navigationInterface", None) and frame.objectName():
+            self.navigationInterface.setCurrentItem(frame.objectName())
+
+    def _refresh_and_optionally_select(self, server_name: str) -> None:
+        """重新整理管理頁並選取伺服器"""
+        frame = getattr(self, "manage_server_frame", None)
+        if frame is None:
+            return
+        try:
+            frame.selected_server = server_name
+            frame.refresh_servers()
+        except Exception as exc:
+            logger.error(f"自動選取伺服器失敗: {exc}")
 
     def _restore_current_navigation_item(self) -> None:
         """將導航欄選中指示條還原為目前實際顯示的子介面"""
@@ -511,7 +457,7 @@ class MainWindow(FluentWindow):
         try:
             UIUtils.open_external(str(folder_path))
         except Exception as e:
-            logger.error(f"無法開啟路徑: {e}\n{traceback.format_exc()}")
+            logger.exception("無法開啟路徑")
             UIUtils.show_message("錯誤", f"無法開啟路徑: {e}", self.root, message_level="error")
 
     def initialize_server(self, server_config: ServerConfig) -> None:
@@ -551,7 +497,7 @@ class MainWindow(FluentWindow):
         """
         init_dialog.reject()
         init_dialog.deleteLater()
-        self.page_router.show_manage_server(auto_select=server_config.name)
+        self.show_manage_server(auto_select=server_config.name)
         QtCore.QTimer.singleShot(
             0,
             lambda: UIUtils.show_message(
@@ -583,7 +529,7 @@ class MainWindow(FluentWindow):
                 UIUtils.schedule_debounce(
                     self.root, "_post_reveal_zoom_job", 160, lambda: self.root.showMaximized(), owner=self
                 )
-            self.task_coordinator = TaskCoordinator(self)
+            self.task_coordinator = TaskCoordinator(self, self.settings)
             self.task_coordinator.preload_java_candidates()
             UIUtils.schedule_debounce(
                 self.root, "_startup_tasks_job", 1200, self.task_coordinator.handle_startup_tasks, owner=self
@@ -604,7 +550,7 @@ class MainWindow(FluentWindow):
             self.server_backup,
             self.server_import,
             self.on_server_selected,
-            self.page_router.show_create_server,
+            self.show_create_server,
         )
         self.manage_server_frame = manage_server_frame
         manage_server_frame.setObjectName("ManageServerInterface")
@@ -617,6 +563,7 @@ class MainWindow(FluentWindow):
             self,
             self.server_crud,
             self.mod_planning,
+            self.mod_provider,
             self.on_server_selected,
             self.loader_manager,
         )
@@ -644,7 +591,7 @@ class MainWindow(FluentWindow):
                 if server_name:
                     self._finalize_import(path, server_name)
         except Exception as e:
-            logger.error(f"匯入錯誤: {e}\n{traceback.format_exc()}")
+            logger.exception("匯入錯誤")
             UIUtils.show_message("匯入錯誤", str(e), self.root, message_level="error")
 
     def _select_server_folder(self) -> Path | None:
@@ -683,10 +630,10 @@ class MainWindow(FluentWindow):
             if not dialog.exec():
                 return None
             name = dialog.textValue.strip()
-            if not name:
-                UIUtils.show_message("輸入錯誤", "請輸入伺服器名稱", self.root, message_level="error")
-                continue
-            return name
+            try:
+                return validate_server_name(name)
+            except ValueError as e:
+                UIUtils.show_message("輸入錯誤", str(e), self.root, message_level="error")
 
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
         """將 UI request 交給交易式 core 匯入 owner"""
@@ -704,15 +651,10 @@ class MainWindow(FluentWindow):
             if not inspection.committable:
                 return inspection, None
 
-            def _progress(percent: int, message: str) -> None:
-                def _update() -> None:
-                    with suppress(Exception):
-                        progress_dialog.progress.setValue(percent)
-                        progress_dialog.status_label.setText(message)
-
-                run_on_ui_thread(_update)
-
-            return inspection, self.server_import.execute(inspection, progress_callback=_progress)
+            return inspection, self.server_import.execute(
+                inspection,
+                progress_callback=progress_dialog.update_progress_event,
+            )
 
         def _on_done(outcome: WorkOutcome) -> None:
             _close_progress_dialog()
@@ -743,7 +685,7 @@ class MainWindow(FluentWindow):
                 )
                 return
 
-            self.page_router.show_manage_server(auto_select=server_name)
+            self.show_manage_server(auto_select=server_name)
             UIUtils.show_message(
                 "匯入成功",
                 f"伺服器 '{server_name}' 匯入成功!\n\n"
@@ -755,212 +697,18 @@ class MainWindow(FluentWindow):
         self.scope.submit(_import_task, on_done=_on_done, key="server_import", critical=True)
 
 
-class ServerInitializationDialog(ModalMSFluentWindow):
-    """伺服器初始化對話框"""
-
-    def __init__(self, parent: QWidget, server_runtime: Any, server_config: ServerConfig, completion_callback=None):
-        super().__init__(parent, is_modal=True, show_buttons=False)
-        self.parent_widget = parent
-        self.server_runtime = server_runtime
-        self.server_config = server_config
-        self.completion_callback = completion_callback
-        self._completion_scheduled = False
-        self.done_detected = False
-        self._runtime_sequence = 0
-
-        self.setWindowTitle(f"初始化伺服器 - {self.server_config.name}")
-        self.setMinimumSize(600, 450)
-
-        self.title_label = TitleLabel(f"正在初始化伺服器: {self.server_config.name}", self.widget)
-        self.title_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(self.title_label)
-
-        self.info_label = SubtitleLabel(
-            "伺服器正在首次啟動，請等待初始化完成...\n系統會自動在完成後關閉伺服器", self.widget
-        )
-        self.info_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(self.info_label)
-
-        self.console_text = TextEdit(self.widget)
-        self.console_text.setReadOnly(True)
-        self.console_text.setFont(FontManager.get_font(family="Consolas", size=FontSize.TINY))
-        self.console_text.setStyleSheet(
-            f"TextEdit {{ background-color: {Colors.BG_CONSOLE}; color: {Colors.CONSOLE_TEXT}; border: 1px solid #333333; }}"
-        )
-        self.viewLayout.addWidget(self.console_text, 1)
-
-        self.progress_label = BodyLabel("狀態: 準備啟動...", self.widget)
-        self.progress_label.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold"))
-        self.progress_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.viewLayout.addWidget(self.progress_label)
-
-        self.close_button = StatusPushButton("取消初始化", self.widget)
-        self.close_button.set_status("danger")
-        self.close_button.clicked.connect(self._close_initialization)
-
-        self.cancelButton.hide()
-        self.yesButton.hide()
-        self.buttonLayout.insertWidget(3, self.close_button)
-        self.buttonGroup.show()
-
-        self._timeout_timer = QtCore.QTimer(self)
-        self._timeout_timer.timeout.connect(self._timeout_force_close)
-        self._runtime_timer = QtCore.QTimer(self)
-        self._runtime_timer.timeout.connect(self._poll_runtime)
-
-    def start_initialization(self) -> None:
-        """啟動初始化對話框流程"""
-        self._timeout_timer.start(120000)
-        self._runtime_timer.start(100)
-        center_window(self, self.parentWidget())
-        self.show()
-        self._start_initialization()
-
-    def _start_initialization(self) -> None:
-        """透過唯一 ServerRuntime 啟動初始化流程"""
-        self.progress_label.setText("狀態: 正在啟動伺服器...")
-        self._update_console("正在啟動 Minecraft 伺服器...\n")
-        result = self.server_runtime.start(self.server_config.name, intent="initialize")
-        if result.failed:
-            self._handle_server_error(result.message)
-
-    def _poll_runtime(self) -> None:
-        """讀取 runtime 快照並將事件投影到初始化 UI"""
-        snapshot = self.server_runtime.observe(
-            self.server_config.name,
-            after_sequence=self._runtime_sequence,
-        )
-        self._runtime_sequence = snapshot.sequence
-        for event in snapshot.events:
-            if event.kind == "output":
-                self._update_console(f"{event.message}\n")
-                self._process_server_output(event.message)
-            elif event.kind == "ready":
-                self.done_detected = True
-                self.progress_label.setText("狀態: 伺服器完全啟動，正在關閉...")
-                self._update_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
-            elif event.kind == "failed":
-                self._handle_server_error(event.message)
-        if snapshot.state in {"stopped", "failed"}:
-            self._runtime_timer.stop()
-            if snapshot.state == "stopped":
-                self._handle_server_completion()
-
-    def _close_initialization(self) -> None:
-        """關閉初始化伺服器"""
-        if hasattr(self, "_countdown_timer"):
-            self._countdown_timer.stop()
-        if self.done_detected:
-            self._timeout_timer.stop()
-            self._runtime_timer.stop()
-            if self.completion_callback and not self._completion_scheduled:
-                self._completion_scheduled = True
-                self.completion_callback(self.server_config, self)
-            else:
-                self.reject()
-        else:
-            self._stop_initialization()
-            self._timeout_timer.stop()
-            self._runtime_timer.stop()
-            UIUtils.show_message(
-                "強制關閉",
-                "伺服器初始化未完成，已強制關閉請檢查伺服器日誌",
-                self.parent_widget,
-                message_level="warning",
-            )
-            self.reject()
-
-    def _stop_initialization(self) -> None:
-        """要求 runtime 終止初始化伺服器"""
-        try:
-            self.server_runtime.stop(self.server_config.name)
-        except Exception as e:
-            logger.exception(f"終止伺服器程式失敗: {e}")
-
-    def _timeout_force_close(self) -> None:
-        """超時強制關閉"""
-        if not self.done_detected:
-            self._close_initialization()
-
-    def _update_console(self, text: str) -> None:
-        """更新控制台輸出"""
-        try:
-            if self.console_text:
-                self.console_text.insertPlainText(text)
-                scrollbar = self.console_text.verticalScrollBar()
-                scrollbar.setValue(scrollbar.maximum())
-        except Exception:
-            logger.exception("更新控制台輸出失敗")
-
-    def _process_server_output(self, output: str) -> None:
-        """處理伺服器輸出"""
-        if not self.isVisible():
-            return
-        if "Loading dimension" in output or "Preparing spawn area" in output:
-            with suppress(Exception):
-                self.progress_label.setText("狀態: 準備世界...")
-        elif "Preparing level" in output:
-            with suppress(Exception):
-                self.progress_label.setText("狀態: 載入世界...")
-
-    def _handle_server_completion(self) -> None:
-        """處理伺服器完成狀態"""
-        if not self.isVisible():
-            return
-        if self.done_detected:
-            self._update_console("[系統] 伺服器初始化完成！\n")
-            if self.progress_label:
-                self.progress_label.setText("狀態: 初始化完成")
-
-            if self.completion_callback and not self._completion_scheduled:
-                self._completion_scheduled = True
-                QtCore.QTimer.singleShot(2000, lambda: self.completion_callback(self.server_config, self))
-        else:
-            self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
-            if self.progress_label:
-                self.progress_label.setText("狀態: 啟動錯誤")
-
-    def _handle_server_error(self, err_msg: str) -> None:
-        """處理伺服器錯誤並啟動倒數計時強制終止"""
-        if not self.isVisible():
-            return
-
-        self._update_console(f"[錯誤] 啟動失敗: {err_msg}\n")
-        self._start_failure_countdown(60)
-
-    def _start_failure_countdown(self, seconds: int = 60) -> None:
-        """啟動失敗倒數計時"""
-        self._failure_countdown = seconds
-        self._update_failure_countdown_ui()
-        if not hasattr(self, "_countdown_timer"):
-            self._countdown_timer = QtCore.QTimer(self)
-            self._countdown_timer.timeout.connect(self._on_countdown_tick)
-        self._countdown_timer.start(1000)
-
-    def _update_failure_countdown_ui(self) -> None:
-        if self.progress_label:
-            self.progress_label.setText(f"狀態: 啟動失敗\n將於 {self._failure_countdown} 秒後強制終止")
-
-    def _on_countdown_tick(self) -> None:
-        self._failure_countdown -= 1
-        if self._failure_countdown <= 0:
-            if hasattr(self, "_countdown_timer"):
-                self._countdown_timer.stop()
-            self._close_initialization()
-        else:
-            self._update_failure_countdown_ui()
-
-
 def run_application():
     """初始化應用程式並啟動主視窗"""
     logger.info("啟動 Minecraft 伺服器管理器...")
+    set_ui_closing(False)
     app = ensure_application()
     app.setQuitOnLastWindowClosed(True)
-    settings = get_settings_manager()
+    settings = SettingsManager()
     initialize_ui_theme(settings.get_theme_mode())
 
     logger.info("啟動主視窗...")
-    manager = MainWindow()
+    manager = MainWindow(settings)
+    app.installEventFilter(manager)
     logger.info("主視窗啟動完成，進入事件迴圈...")
     manager.show()
     app.exec()

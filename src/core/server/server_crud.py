@@ -1,38 +1,139 @@
 """
 伺服器管理器
 
-負責建立、管理與設定 Minecraft 伺服器的核心邏輯。
+負責建立、管理與設定 Minecraft 伺服器的核心邏輯
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
 import threading
+import time
 import uuid
-from dataclasses import asdict, fields, is_dataclass
+from collections.abc import Callable, Mapping
+from copy import copy as shallow_copy
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
-from src.core import ServerRuntime
-from src.models import ServerConfig, ServerOperationResult
+import orjson
+
+from src.models import ProgressEvent, ServerConfig, ServerOperationResult
 from src.utils import (
+    SAFE_TEXT_FILE_MAX_BYTES,
     ServerCommands,
     atomic_write_json,
     atomic_write_text,
     delete_within,
     get_logger,
     is_path_within,
+    is_reparse_point,
+    list_bounded_directory,
+    move_within,
+    move_within_strict,
+    open_regular_file,
+    read_bytes_file,
     read_json,
+    validate_server_name,
 )
+
+from .server_inspector import ServerInspector
+from .server_runtime import ServerRuntime
 
 logger = get_logger().bind(component="ServerManager")
 
 
-class ServerCRUD:
-    """伺服器管理類別，負責建立、管理和設定 Minecraft 伺服器"""
+def _clone_server_config(config: ServerConfig) -> ServerConfig:
+    """複製設定的不可變欄位，僅複製唯一可變的 JVM 參數清單"""
+    cloned = shallow_copy(config)
+    if hasattr(config, "jvm_args"):
+        cloned.jvm_args = list(config.jvm_args)
+    return cloned
 
-    _shared_servers: ClassVar[dict[str, dict[str, ServerConfig]]] = {}
+
+@dataclass(frozen=True, slots=True)
+class ServerConfigRegistrySnapshot:
+    """伺服器設定登錄表的不可變投影"""
+
+    revision: str
+    entries: tuple[tuple[str, ServerConfig], ...]
+
+    def get(self, name: str) -> ServerConfig | None:
+        """
+        取得設定副本，避免 caller 修改 owner 內部狀態
+
+        Args:
+            name: 伺服器名稱
+
+        Returns:
+            找到的設定副本；不存在時回傳 None
+        """
+        for key, config in self.entries:
+            if key == name:
+                return _clone_server_config(config)
+        return None
+
+    def items(self) -> tuple[tuple[str, ServerConfig], ...]:
+        """
+        取得所有名稱與設定副本
+
+        Returns:
+            依登錄順序排列的名稱／設定元組
+        """
+        return tuple((name, _clone_server_config(config)) for name, config in self.entries)
+
+    def values(self) -> tuple[ServerConfig, ...]:
+        """
+        取得所有設定副本
+
+        Returns:
+            依登錄順序排列的設定元組
+        """
+        return tuple(_clone_server_config(config) for _, config in self.entries)
+
+    def __contains__(self, name: object) -> bool:
+        return any(key == name for key, _ in self.entries)
+
+    def __bool__(self) -> bool:
+        return bool(self.entries)
+
+
+@dataclass(frozen=True, slots=True)
+class ServerConfigChangeSet:
+    """一次登錄表提交所需的新增／取代與移除"""
+
+    upserts: tuple[ServerConfig, ...] = ()
+    removals: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ServerConfigCommitResult:
+    """登錄表批次提交結果"""
+
+    success: bool
+    snapshot: ServerConfigRegistrySnapshot
+    error_kind: str = ""
+    message: str = ""
+
+
+@dataclass(slots=True)
+class _RegistryState:
+    configs: dict[str, ServerConfig]
+    revision: str
+
+
+class ServerCRUD:
+    """伺服器檔案流程與伺服器設定登錄表的唯一 owner"""
+
+    _shared_registry_states: ClassVar[dict[str, _RegistryState]] = {}
     _operation_locks_guard: ClassVar[threading.Lock] = threading.Lock()
     _operation_locks: ClassVar[dict[str, threading.RLock]] = {}
+    _delete_cleanup_guard: ClassVar[threading.Lock] = threading.Lock()
+    _active_delete_cleanups: ClassVar[set[str]] = set()
+
+    _DELETE_PREFIX = ".msm-delete-"
+    _DELETE_MARKER = ".msm-delete.json"
 
     STARTUP_CHECK_DELAY = 0.1
 
@@ -42,28 +143,195 @@ class ServerCRUD:
         self.servers_root = Path(servers_root).resolve()
         self.servers_root.mkdir(parents=True, exist_ok=True)
         self.config_file = self.servers_root / "servers_config.json"
+        config_existed = self.config_file.is_file()
 
         key = str(self.servers_root)
         with self._operation_locks_guard:
             self.operation_lock = self._operation_locks.setdefault(key, threading.RLock())
-        if key in ServerCRUD._shared_servers:
-            self.servers = ServerCRUD._shared_servers[key]
-        else:
-            self.servers = {}
-            ServerCRUD._shared_servers[key] = self.servers
-        self.load_servers_config()
+        self._registry_state = ServerCRUD._shared_registry_states.setdefault(
+            key,
+            _RegistryState(configs={}, revision=self._empty_revision()),
+        )
+        with self.operation_lock:
+            registry_loaded = self._refresh_registry_locked()
+            if not self.config_file.exists():
+                self._persist_registry_locked(self._registry_state.configs)
+            if registry_loaded and config_existed:
+                self._recover_delete_tombstones_locked()
+
+    @staticmethod
+    def _empty_revision() -> str:
+        return hashlib.sha256(b"{}").hexdigest()
+
+    @staticmethod
+    def _revision_for_bytes(payload: bytes) -> str:
+        return hashlib.sha256(payload).hexdigest()
+
+    def _snapshot_locked(self) -> ServerConfigRegistrySnapshot:
+        return ServerConfigRegistrySnapshot(
+            revision=self._registry_state.revision,
+            entries=tuple(
+                (name, _clone_server_config(config)) for name, config in self._registry_state.configs.items()
+            ),
+        )
+
+    def _serialize_registry(self, configs: Mapping[str, ServerConfig]) -> dict[str, dict[str, Any]]:
+        data: dict[str, dict[str, Any]] = {}
+        for name, config in configs.items():
+            if not isinstance(config, ServerConfig):
+                raise TypeError(f"無法序列化類型 {type(config).__name__} ({name})")
+            data[name] = {
+                "name": config.name,
+                "minecraft_version": config.minecraft_version,
+                "loader_type": config.loader_type,
+                "loader_version": config.loader_version,
+                "memory_max_mb": config.memory_max_mb,
+                "memory_min_mb": config.memory_min_mb,
+                "path": config.path,
+                "jvm_args": list(config.jvm_args),
+            }
+        return data
+
+    def _persist_registry_locked(self, configs: Mapping[str, ServerConfig]) -> bool:
+        try:
+            data = self._serialize_registry(configs)
+            if not atomic_write_json(self.config_file, data):
+                logger.error("儲存伺服器設定失敗：無法寫入檔案")
+                return False
+            raw = read_bytes_file(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
+            self._registry_state.revision = self._revision_for_bytes(raw) if raw is not None else self._empty_revision()
+            logger.info("伺服器設定已原子提交到 servers_config.json")
+            return True
+        except Exception as e:
+            logger.exception(f"儲存伺服器設定失敗: {e}")
+            return False
+
+    def _decode_registry(self, data: Any) -> dict[str, ServerConfig] | None:
+        if not isinstance(data, dict):
+            logger.warning("伺服器設定檔格式不是物件")
+            return None
+        valid_keys = {field.name for field in fields(ServerConfig)}
+        decoded: dict[str, ServerConfig] = {}
+        for name, config_data in data.items():
+            if not isinstance(name, str) or not isinstance(config_data, dict):
+                continue
+            filtered_data = {key: value for key, value in config_data.items() if key in valid_keys}
+            try:
+                validated_name = validate_server_name(name)
+                config = ServerConfig(**filtered_data)
+                if config.name != validated_name:
+                    raise ValueError("設定名稱與伺服器索引不一致")
+                config.path = str(self._resolve_registered_server_path(validated_name, config.path))
+            except (OSError, TypeError, ValueError) as e:
+                logger.warning(f"略過不安全的伺服器設定 {name}: {e}")
+                continue
+            decoded[validated_name] = config
+        return decoded
+
+    def _refresh_registry_locked(self) -> bool:
         if not self.config_file.exists():
-            self.write_servers_config()
+            self._registry_state.configs = {}
+            self._registry_state.revision = self._empty_revision()
+            return True
+        raw = read_bytes_file(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
+        if raw is None:
+            logger.warning("伺服器設定檔為空、超過大小上限或無法讀取")
+            return False
+        try:
+            data = orjson.loads(raw)
+        except OSError, TypeError, ValueError, orjson.JSONDecodeError:
+            logger.warning("伺服器設定檔格式無法解析")
+            return False
+        decoded = self._decode_registry(data)
+        if decoded is None:
+            return False
+        self._registry_state.configs = decoded
+        self._registry_state.revision = self._revision_for_bytes(raw)
+        return True
+
+    def snapshot(self) -> ServerConfigRegistrySnapshot:
+        """
+        回傳目前完整登錄表投影與 revision
+
+        Returns:
+            不可變登錄表快照
+        """
+        with self.operation_lock:
+            self._refresh_registry_locked()
+            return self._snapshot_locked()
+
+    def commit(
+        self,
+        change_set: ServerConfigChangeSet,
+        expected_revision: str,
+    ) -> ServerConfigCommitResult:
+        """
+        驗證並原子提交一次登錄表變更
+
+        Args:
+            change_set: 要新增／取代或移除的登錄變更
+            expected_revision: 呼叫端讀取快照時的 revision
+
+        Returns:
+            提交結果與成功或失敗時的登錄表快照
+        """
+        with self.operation_lock:
+            self._refresh_registry_locked()
+            current = self._snapshot_locked()
+            if expected_revision != current.revision:
+                return ServerConfigCommitResult(
+                    False,
+                    current,
+                    "conflict",
+                    "伺服器設定已被其他程序修改，請重新載入後再試",
+                )
+            candidate = {name: _clone_server_config(config) for name, config in current.entries}
+            try:
+                removals = tuple(validate_server_name(name) for name in change_set.removals)
+                for name in removals:
+                    candidate.pop(name, None)
+                for incoming in change_set.upserts:
+                    config = _clone_server_config(incoming)
+                    validated_name = validate_server_name(config.name)
+                    config.path = str(self._resolve_registered_server_path(validated_name, config.path))
+                    candidate[validated_name] = config
+            except (OSError, TypeError, ValueError) as e:
+                return ServerConfigCommitResult(False, current, "invalid", str(e))
+            if not self._persist_registry_locked(candidate):
+                return ServerConfigCommitResult(False, current, "write_failed", "無法原子寫入伺服器設定")
+            self._registry_state.configs = candidate
+            return ServerConfigCommitResult(True, self._snapshot_locked())
+
+    def _resolve_server_path(self, raw_path: str | Path, *, require_exists: bool = False) -> Path:
+        """解析並限制伺服器設定指定的路徑"""
+        if not str(raw_path).strip():
+            raise ValueError("伺服器路徑不可為空")
+        candidate = Path(raw_path)
+        if is_reparse_point(candidate):
+            raise ValueError("伺服器路徑不可為符號連結或 reparse point")
+        resolved = candidate.resolve(strict=require_exists)
+        if resolved == self.servers_root or not is_path_within(self.servers_root, resolved, strict=False):
+            raise ValueError(f"伺服器路徑必須位於伺服器根目錄內: {resolved}")
+        return resolved
+
+    def _resolve_registered_server_path(self, name: str, raw_path: str | Path) -> Path:
+        """解析已註冊伺服器路徑並繫結名稱與 root 直接子目錄"""
+        validated_name = validate_server_name(name)
+        resolved = self._resolve_server_path(raw_path)
+        if resolved.parent != self.servers_root or resolved.name.casefold() != validated_name.casefold():
+            raise ValueError("伺服器路徑必須是與名稱一致的 root 直接子目錄")
+        if resolved.exists() and (is_reparse_point(resolved) or not resolved.is_dir()):
+            raise ValueError("已註冊伺服器路徑必須是一般資料夾")
+        return resolved
 
     def prepare_server_files(self, config: ServerConfig) -> None:
-        """在 transaction staging 目錄準備 EULA 與基礎資料夾
+        """
+        在 transaction staging 目錄準備 EULA 與基礎資料夾
 
         Args:
             config: 指向 staging 目錄的伺服器設定
         """
-        server_path = Path(config.path).resolve(strict=False)
-        if not is_path_within(self.servers_root, server_path, strict=False):
-            raise ValueError("伺服器 staging 路徑不在伺服器根目錄內")
+        server_path = self._resolve_server_path(config.path)
         if not server_path.is_dir():
             raise FileNotFoundError("伺服器 staging 目錄不存在")
         if not self._create_eula_file(server_path):
@@ -88,16 +356,21 @@ class ServerCRUD:
         Returns:
             啟動腳本寫入成功時回傳 True，失敗時回傳 False
         """
-        server_path = Path(config.path)
+        try:
+            server_path = self._resolve_server_path(config.path)
+        except (OSError, ValueError) as e:
+            logger.error(f"拒絕建立啟動腳本，伺服器路徑無效: {e}")
+            return False
         if java_command_override:
-            java_command_str = java_command_override.strip()
+            java_command_str = ServerCommands.normalize_imported_java_command(java_command_override) or ""
+            if not java_command_str:
+                logger.error("拒絕寫入含不安全 cmd 語法的匯入啟動命令")
+                return False
         else:
             resolved_target = launch_target
             if resolved_target and Path(resolved_target).suffix.lower() in {".bat", ".cmd", ".sh", ".ps1"}:
                 resolved_target = None
             if not resolved_target and server_path.is_dir():
-                from src.core import ServerInspector
-
                 detected = ServerInspector.find_main_jar(server_path, config.loader_type, config)
                 if detected and detected.lower() != "@user_jvm_args.txt":
                     resolved_target = detected
@@ -107,6 +380,9 @@ class ServerCRUD:
                 launch_target=resolved_target,
             )
             java_command_str = str(command_result).strip()
+            if not java_command_str:
+                logger.error("拒絕建立含不安全啟動參數的批次腳本")
+                return False
         bat_lines = [
             "@echo off",
             "chcp 65001 >nul",
@@ -118,16 +394,78 @@ class ServerCRUD:
         start_script_path = server_path / "start_server.bat"
         try:
             if start_script_path.exists():
-                existing_bytes = start_script_path.read_bytes()
+                existing_bytes = read_bytes_file(start_script_path, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
+                if existing_bytes is None:
+                    existing_bytes = b""
                 existing_has_bom = existing_bytes.startswith(b"\xef\xbb\xbf")
                 existing_content = existing_bytes.decode("utf-8-sig", errors="ignore")
                 if existing_content == bat_content and not existing_has_bom:
                     return True
         except Exception as e:
-            logger.debug(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
+            logger.warning(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
         return atomic_write_text(start_script_path, bat_content, encoding="utf-8", errors="replace")
 
-    def delete_server_result(self, server_name: str, *, server_runtime: ServerRuntime) -> ServerOperationResult:
+    def _recover_delete_tombstones_locked(self) -> None:
+        """
+        恢復或清理上次非正常結束留下的刪除 tombstone
+
+        已登錄且原路徑消失時採 fail-safe 還原
+        已不在登錄中的 tombstone 視為已提交刪除並交由背景清理
+        """
+        try:
+            entries = list_bounded_directory(self.servers_root, reject_reparse=False)
+        except OSError as e:
+            logger.warning(f"無法掃描刪除交易暫存目錄: {e}")
+            return
+
+        for candidate in entries:
+            if not candidate.name.startswith(self._DELETE_PREFIX):
+                continue
+            try:
+                if is_reparse_point(candidate) or not candidate.is_dir():
+                    continue
+            except OSError:
+                continue
+
+            marker = candidate / self._DELETE_MARKER
+            payload = read_json(marker, {}, allowed_root=candidate)
+            if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+                logger.warning(f"保留無法驗證的刪除 tombstone，避免誤刪資料: {candidate}")
+                continue
+            try:
+                server_name = validate_server_name(str(payload.get("server_name", "")))
+            except ValueError as e:
+                logger.warning(f"保留名稱無效的刪除 tombstone {candidate.name}: {e}")
+                continue
+
+            config = self._registry_state.configs.get(server_name)
+            if config is None:
+                self._schedule_delete_cleanup(candidate)
+                continue
+
+            try:
+                original_path = self._resolve_registered_server_path(server_name, config.path)
+            except (OSError, ValueError) as e:
+                logger.warning(f"無法安全恢復刪除 tombstone {candidate.name}: {e}")
+                continue
+            if original_path.exists():
+                logger.warning(f"刪除 tombstone 與已登錄伺服器同時存在，為避免資料遺失而保留暫存目錄: {candidate.name}")
+                continue
+            try:
+                move_within_strict(self.servers_root, candidate, original_path)
+                if not delete_within(original_path, original_path / self._DELETE_MARKER):
+                    logger.warning(f"已恢復伺服器但無法移除刪除交易標記: {server_name}")
+                logger.warning(f"偵測到未提交完成的刪除交易，已恢復伺服器目錄: {server_name}")
+            except OSError as e:
+                logger.exception(f"恢復刪除 tombstone 失敗 {candidate.name}: {e}")
+
+    def delete_server_result(
+        self,
+        server_name: str,
+        *,
+        server_runtime: ServerRuntime,
+        progress_callback: Callable[[ProgressEvent], None] | None = None,
+    ) -> ServerOperationResult:
         """
         刪除伺服器
 
@@ -139,8 +477,6 @@ class ServerCRUD:
         """
         tombstone_path: Path | None = None
         server_path: Path | None = None
-        removed_config: ServerConfig | None = None
-        config_committed = False
         maintenance_acquired = False
         begin_maintenance = getattr(server_runtime, "begin_maintenance", None)
         if callable(begin_maintenance):
@@ -154,7 +490,9 @@ class ServerCRUD:
                 )
         try:
             with self.operation_lock:
-                if server_name not in self.servers:
+                baseline = self.snapshot()
+                config = baseline.get(server_name)
+                if config is None:
                     return ServerOperationResult(
                         success=False,
                         title="刪除失敗",
@@ -169,39 +507,80 @@ class ServerCRUD:
                         server_name=server_name,
                     )
 
-                config = self.servers[server_name]
-                server_path = Path(config.path).resolve(strict=False)
-                if not is_path_within(self.servers_root, server_path, strict=False):
-                    logger.error(f"拒絕刪除不在 servers_root 之下的路徑: {server_path}")
+                try:
+                    server_path = self._resolve_registered_server_path(server_name, config.path)
+                except (OSError, ValueError) as e:
+                    logger.error(f"拒絕刪除伺服器，路徑無效: {e}")
                     return ServerOperationResult(
                         success=False,
                         title="刪除失敗",
-                        message=f"拒絕刪除不在伺服器根目錄下的路徑: {server_path}",
+                        message=f"拒絕刪除不安全的伺服器路徑: {e}",
+                        server_name=server_name,
+                    )
+
+                if not server_runtime.prepare_maintenance(server_name, server_path):
+                    return ServerOperationResult(
+                        success=False,
+                        title="無法刪除",
+                        message=f"伺服器 {server_name} 的背景行程尚未完全結束",
                         server_name=server_name,
                     )
 
                 if server_path.exists():
-                    tombstone_path = self.servers_root / f".msm-delete-{uuid.uuid4().hex}"
-                    server_path.replace(tombstone_path)
+                    tombstone_path = self.servers_root / f"{self._DELETE_PREFIX}{uuid.uuid4().hex}"
+                    self._emit_progress(progress_callback, "delete_move", "正在準備安全刪除...")
+                    last_error: OSError | None = None
+                    for delay in (0.0, 0.1, 0.25, 0.5, 0.75):
+                        if delay:
+                            time.sleep(delay)
+                        self._resolve_registered_server_path(server_name, config.path)
+                        try:
+                            move_within_strict(self.servers_root, server_path, tombstone_path)
+                            last_error = None
+                            break
+                        except OSError as e:
+                            last_error = e
+                            if getattr(e, "winerror", None) not in {5, 32, 33}:
+                                break
+                    if last_error is not None:
+                        raise OSError(
+                            getattr(last_error, "winerror", None) or 0,
+                            f"無法將伺服器目錄移至刪除暫存位置：{last_error}",
+                        ) from last_error
+                    if not atomic_write_json(
+                        tombstone_path / self._DELETE_MARKER,
+                        {
+                            "schema_version": 1,
+                            "server_name": server_name,
+                            "created_epoch_ms": int(time.time() * 1000),
+                        },
+                    ):
+                        move_within_strict(self.servers_root, tombstone_path, server_path)
+                        tombstone_path = None
+                        raise OSError("無法建立刪除暫存目錄識別標記")
 
-                removed_config = self.servers.pop(server_name)
-                if not self.write_servers_config():
-                    self.servers[server_name] = removed_config
+                commit_result = self.commit(
+                    ServerConfigChangeSet(removals=(server_name,)),
+                    expected_revision=baseline.revision,
+                )
+                if not commit_result.success:
                     if tombstone_path is not None:
-                        tombstone_path.replace(server_path)
+                        if not move_within(self.servers_root, tombstone_path, server_path):
+                            raise OSError("無法復原刪除暫存目錄")
+                        if not delete_within(server_path, server_path / self._DELETE_MARKER):
+                            logger.warning(f"已復原伺服器但無法移除刪除交易標記: {server_name}")
                         tombstone_path = None
                     return ServerOperationResult(
                         success=False,
                         title="刪除失敗",
-                        message=f"無法儲存刪除後的伺服器設定: {server_name}",
+                        message=f"無法儲存刪除後的伺服器設定: {commit_result.message or server_name}",
                         server_name=server_name,
                     )
-                config_committed = True
-
+                self._emit_progress(progress_callback, "delete_committed", "伺服器已從列表移除")
                 if tombstone_path is not None:
-                    if not delete_within(self.servers_root, tombstone_path):
-                        logger.warning(f"伺服器已移除，但暫存刪除目錄無法清理: {tombstone_path}")
+                    cleanup_path = tombstone_path
                     tombstone_path = None
+                    self._schedule_delete_cleanup(cleanup_path)
                 return ServerOperationResult(
                     success=True,
                     message=f"伺服器 {server_name} 已刪除",
@@ -216,13 +595,12 @@ class ServerCRUD:
                 and not server_path.exists()
             ):
                 try:
-                    tombstone_path.replace(server_path)
+                    if not move_within(self.servers_root, tombstone_path, server_path):
+                        raise OSError("無法復原刪除暫存目錄")
+                    if not delete_within(server_path, server_path / self._DELETE_MARKER):
+                        logger.warning(f"已復原伺服器但無法移除刪除交易標記: {server_name}")
                 except OSError as e:
                     logger.exception(f"刪除失敗後無法復原伺服器目錄: {e}")
-            if not config_committed and removed_config is not None and server_name not in self.servers:
-                self.servers[server_name] = removed_config
-                if not self.write_servers_config():
-                    logger.error(f"刪除失敗後無法恢復伺服器設定: {server_name}")
             logger.exception(f"刪除伺服器失敗: {error_message}")
             return ServerOperationResult(
                 success=False,
@@ -236,59 +614,54 @@ class ServerCRUD:
                 if callable(end_maintenance):
                     end_maintenance(server_name)
 
-    def load_servers_config(self) -> None:
-        """載入伺服器設定"""
-        with self.operation_lock:
-            try:
-                data = read_json(self.config_file)
-                if data is not None:
-                    valid_keys = {f.name for f in fields(ServerConfig)}
-                    new_servers: dict[str, ServerConfig] = {}
-                    for name, config_data in data.items():
-                        filtered_data = {k: v for k, v in config_data.items() if k in valid_keys}
-                        new_servers[name] = ServerConfig(**filtered_data)
-                    self.servers.clear()
-                    self.servers.update(new_servers)
-                else:
-                    logger.warning("伺服器設定檔為空或無法解析")
-            except Exception as e:
-                logger.exception(f"載入伺服器設定失敗: {e}")
+    @staticmethod
+    def _emit_progress(callback: Callable[[ProgressEvent], None] | None, phase: str, message: str) -> None:
+        if callback is None:
+            return
+        try:
+            callback(ProgressEvent(phase, message))
+        except Exception as e:
+            logger.debug(f"忽略刪除進度回呼例外: {e}")
 
-    def write_servers_config(self) -> bool:
+    def _schedule_delete_cleanup(self, tombstone_path: Path) -> bool:
         """
-        實際執行儲存伺服器設定到 servers_config.json
+        將已提交刪除的 tombstone 交由 daemon thread 清理
 
-        Returns:
-            成功寫入時回傳 True，失敗時回傳 False
+        伺服器登錄與原路徑已在同步交易中完成移除
+        大型世界目錄的遞迴 unlink 不再阻塞 UI 完成通知與其他伺服器操作
         """
-        with self.operation_lock:
-            try:
-                data: dict[str, dict[str, Any]] = {}
-                for name, config in list(self.servers.items()):
-                    if is_dataclass(config) and not isinstance(config, type):
-                        raw_dict = asdict(config)
 
-                        def _remove_callables(d: Any) -> Any:
-                            if isinstance(d, dict):
-                                return {k: _remove_callables(v) for k, v in d.items() if not callable(v)}
-                            if isinstance(d, list):
-                                return [_remove_callables(v) for v in d if not callable(v)]
-                            return d
-
-                        data[name] = _remove_callables(raw_dict)
-                    elif isinstance(config, dict):
-                        data[name] = config
-                    else:
-                        logger.error(f"儲存伺服器設定失敗: 無法序列化類型 {type(config).__name__} ({name})")
-                        return False
-                if not atomic_write_json(self.config_file, data):
-                    logger.error("儲存伺服器設定失敗: 無法寫入檔案")
-                    return False
-                logger.info("伺服器設定已儲存到 servers_config.json")
+        cleanup_key = os.path.normcase(str(tombstone_path.resolve(strict=False)))
+        with self._delete_cleanup_guard:
+            if cleanup_key in self._active_delete_cleanups:
                 return True
-            except Exception as e:
-                logger.exception(f"儲存伺服器設定失敗: {e}")
-                return False
+            self._active_delete_cleanups.add(cleanup_key)
+
+        def _cleanup() -> None:
+            try:
+                for delay in (0.0, 0.25, 1.0, 2.0, 5.0):
+                    if delay:
+                        time.sleep(delay)
+                    if delete_within(self.servers_root, tombstone_path):
+                        return
+                logger.warning(f"伺服器已移除，但暫存刪除目錄仍無法清理: {tombstone_path}")
+            finally:
+                with self._delete_cleanup_guard:
+                    self._active_delete_cleanups.discard(cleanup_key)
+
+        try:
+            worker = threading.Thread(
+                target=_cleanup,
+                name=f"server-delete-{tombstone_path.name[-8:]}",
+                daemon=True,
+            )
+            worker.start()
+            return True
+        except RuntimeError as e:
+            with self._delete_cleanup_guard:
+                self._active_delete_cleanups.discard(cleanup_key)
+            logger.warning(f"無法啟動背景刪除工作，將於後續啟動清理 tombstone: {e}")
+            return False
 
     def get_server_log_file(self, server_name: str) -> Path | None:
         """
@@ -301,16 +674,24 @@ class ServerCRUD:
             找到的日誌檔案路徑；找不到時回傳 None
         """
         try:
-            if server_name not in self.servers:
+            server_config = self.snapshot().get(server_name)
+            if server_config is None:
                 return None
-            server_config = self.servers[server_name]
-            server_path = Path(server_config.path)
+            server_path = self._resolve_server_path(server_config.path)
             log_files = [
                 server_path / "logs" / "latest.log",
                 server_path / "server.log",
                 server_path / "logs" / "server.log",
             ]
-            return next((f for f in log_files if f.exists()), None)
+            for log_file in log_files:
+                if is_reparse_point(log_file.parent):
+                    continue
+                try:
+                    with open_regular_file(log_file, allowed_root=server_path):
+                        return log_file
+                except OSError:
+                    continue
+            return None
         except Exception as e:
             logger.exception(f"取得伺服器日誌檔案失敗: {e}")
             return None
@@ -333,4 +714,4 @@ class ServerCRUD:
             (path / directory).mkdir(exist_ok=True)
 
 
-__all__ = ["ServerCRUD"]
+__all__ = ["ServerCRUD", "ServerConfigChangeSet"]

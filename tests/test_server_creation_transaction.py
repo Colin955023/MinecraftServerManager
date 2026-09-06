@@ -6,8 +6,9 @@ from typing import Any
 import pytest
 
 import src.core.server.server_creation as server_creation_module
-from src.core import CreateServerJourney, ServerCRUD, ServerPropertiesStore
-from src.models import LoaderInstallerArtifact, ServerConfig
+from src.core import CreateServerJourney, ServerConfigChangeSet, ServerCRUD, ServerPropertiesStore
+from src.core.loader.loader_adapters import LoaderInstallerArtifact
+from src.models import ProgressEvent, ServerConfig
 from src.utils import ServerCommands, atomic_write_json
 
 
@@ -51,6 +52,12 @@ def _config(name: str = "demo", *, loader_type: str = "vanilla") -> ServerConfig
     )
 
 
+def _register(manager: ServerCRUD, *configs: ServerConfig) -> None:
+    baseline = manager.snapshot()
+    result = manager.commit(ServerConfigChangeSet(upserts=tuple(configs)), expected_revision=baseline.revision)
+    assert result.success, result.message
+
+
 def test_creation_commits_only_after_complete_instance_is_ready(tmp_path) -> None:
     crud = ServerCRUD(str(tmp_path))
     loader = _FakeLoader()
@@ -60,7 +67,7 @@ def test_creation_commits_only_after_complete_instance_is_ready(tmp_path) -> Non
     result = service.execute(plan)
 
     assert result.completed is True
-    assert result.config is crud.servers["demo"]
+    assert result.config == crud.snapshot().get("demo")
     final_path = tmp_path / "demo"
     assert (final_path / "server.jar").is_file()
     assert (final_path / "eula.txt").is_file()
@@ -82,7 +89,7 @@ def test_progress_callback_failure_cannot_roll_back_committed_instance(tmp_path)
 
     assert result.completed is True
     assert plan.final_path.is_dir()
-    assert "demo" in crud.servers
+    assert "demo" in crud.snapshot()
 
 
 def test_creation_cancellation_cleans_staging_and_does_not_register(tmp_path) -> None:
@@ -100,25 +107,22 @@ def test_creation_cancellation_cleans_staging_and_does_not_register(tmp_path) ->
 
     assert result.status == "cancelled"
     assert result.cleanup_complete is True
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
     assert not plan.staging_path.exists()
     assert not plan.final_path.exists()
 
 
-def test_unverified_installer_requires_explicit_allow_and_reuses_plan_artifact(tmp_path) -> None:
+def test_unverified_installer_is_rejected_before_creation(tmp_path) -> None:
     artifact = LoaderInstallerArtifact("https://example.invalid/installer.jar", None, None)
     crud = ServerCRUD(str(tmp_path))
     loader = _FakeLoader(artifact=artifact)
     service = CreateServerJourney(crud, loader)
-    plan = service.plan(_config(loader_type="fabric"))
 
-    refused = service.execute(plan)
-    accepted = service.execute(plan, allow_unverified_installer=True)
+    with pytest.raises(ValueError, match="缺少可驗證"):
+        service.plan(_config(loader_type="fabric"))
 
-    assert refused.status == "confirmation_required"
-    assert not plan.staging_path.exists()
-    assert accepted.completed is True
-    assert loader.received_artifact is artifact
+    assert not list(tmp_path.glob(".msm-create-*.staging"))
+    assert loader.received_artifact is None
 
 
 def test_creation_cancellation_at_initial_stage_cleans_up(tmp_path) -> None:
@@ -130,7 +134,7 @@ def test_creation_cancellation_at_initial_stage_cleans_up(tmp_path) -> None:
 
     assert result.status == "cancelled"
     assert result.cleanup_complete is True
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
     assert not plan.staging_path.exists()
     assert not plan.final_path.exists()
 
@@ -172,7 +176,7 @@ def test_checksum_mismatch_failure_rolls_back(tmp_path) -> None:
     assert result.status == "failed"
     assert result.diagnostic_id.startswith("server-create-")
     assert result.cleanup_complete is True
-    assert "mismatch" not in crud.servers
+    assert "mismatch" not in crud.snapshot()
     assert not plan.staging_path.exists()
     assert not plan.final_path.exists()
 
@@ -180,18 +184,31 @@ def test_checksum_mismatch_failure_rolls_back(tmp_path) -> None:
 def test_installer_nonzero_exit_rolls_back(tmp_path) -> None:
     class _InstallerFailedLoader(_FakeLoader):
         def download_server_jar_with_progress(self, *_args, **_kwargs) -> bool:
+            progress_callback = _args[4] if len(_args) > 4 else None
+            if callable(progress_callback):
+                progress_callback(
+                    ProgressEvent("failed", "fabric 安裝程序執行失敗: Caused by: unknown loader version: 26.2")
+                )
             return False
 
     crud = ServerCRUD(str(tmp_path))
-    service = CreateServerJourney(crud, _InstallerFailedLoader())
+    loader = _InstallerFailedLoader(
+        artifact=LoaderInstallerArtifact(
+            "https://example.invalid/installer.jar",
+            "a" * 64,
+            "sha256",
+        )
+    )
+    service = CreateServerJourney(crud, loader)
     plan = service.plan(_config(name="installer-fail", loader_type="fabric"))
 
     result = service.execute(plan)
 
     assert result.status == "failed"
+    assert "unknown loader version: 26.2" in result.message
     assert result.diagnostic_id.startswith("server-create-")
     assert result.cleanup_complete is True
-    assert "installer-fail" not in crud.servers
+    assert "installer-fail" not in crud.snapshot()
     assert not plan.staging_path.exists()
     assert not plan.final_path.exists()
 
@@ -213,7 +230,7 @@ def test_disk_space_insufficient_fails_gracefully(tmp_path, monkeypatch) -> None
     assert result.status == "failed"
     assert not plan.staging_path.exists()
     assert not plan.final_path.exists()
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
 
 
 def test_launch_script_failure_rolls_back(tmp_path, monkeypatch) -> None:
@@ -225,7 +242,7 @@ def test_launch_script_failure_rolls_back(tmp_path, monkeypatch) -> None:
     result = service.execute(plan)
 
     assert result.status == "failed"
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
     assert not plan.staging_path.exists()
 
 
@@ -233,13 +250,13 @@ def test_config_commit_failure_removes_moved_instance_and_registration(tmp_path,
     crud = ServerCRUD(str(tmp_path))
     service = CreateServerJourney(crud, _FakeLoader())
     plan = service.plan(_config())
-    monkeypatch.setattr(crud, "write_servers_config", lambda: False)
+    monkeypatch.setattr(crud, "_persist_registry_locked", lambda *_args: False)
 
     result = service.execute(plan)
 
     assert result.status == "failed"
     assert result.cleanup_complete is True
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
     assert not plan.final_path.exists()
 
 
@@ -272,7 +289,7 @@ def test_execute_rejects_stale_final_path_before_writing_staging(tmp_path) -> No
     assert result.status == "failed"
     assert sentinel.read_text(encoding="utf-8") == "existing"
     assert not plan.staging_path.exists()
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
 
 
 def test_plan_owns_memory_domain_invariants(tmp_path) -> None:
@@ -296,13 +313,13 @@ def test_server_properties_write_failure_rolls_back_staging(tmp_path, monkeypatc
     def _fail_write(*_args, **_kwargs):
         raise OSError("properties write failed")
 
-    monkeypatch.setattr(properties, "write_initial", _fail_write)
+    monkeypatch.setattr(properties, "initialize", _fail_write)
     result = journey.execute(plan)
 
     assert result.status == "failed"
     assert result.cleanup_complete is True
     assert not plan.staging_path.exists()
-    assert "demo" not in crud.servers
+    assert "demo" not in crud.snapshot()
 
 
 def test_cleanup_failure_is_reported_without_private_journey_access(tmp_path, monkeypatch) -> None:
@@ -341,7 +358,7 @@ def test_orphan_recovery_preserves_registered_instance_and_removes_marker(tmp_pa
     atomic_write_json(marker, {"state": "moved"})
     config = _config(name="registered")
     config.path = str(final_path)
-    crud.servers[config.name] = config
+    _register(crud, config)
 
     CreateServerJourney(crud, _FakeLoader())
 
@@ -349,17 +366,23 @@ def test_orphan_recovery_preserves_registered_instance_and_removes_marker(tmp_pa
     assert not marker.exists()
 
 
-def test_orphan_recovery_cleans_tombstone_and_restore_directories(tmp_path) -> None:
+def test_creation_orphan_recovery_does_not_claim_delete_tombstones(tmp_path) -> None:
     crud = ServerCRUD(str(tmp_path))
     tombstone = tmp_path / ".msm-delete-12345678"
     restore_dir = tmp_path / ".demo.restore-abcdef"
+    rollback_dir = tmp_path / ".demo.restore-rollback-abcdef"
     tombstone.mkdir()
+    (tombstone / ".msm-delete.json").write_text("{}", encoding="utf-8")
     restore_dir.mkdir()
+    rollback_dir.mkdir()
+    (rollback_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
 
     CreateServerJourney(crud, _FakeLoader())
 
-    assert not tombstone.exists()
+    assert tombstone.is_dir()
     assert not restore_dir.exists()
+    assert rollback_dir.is_dir()
+    assert (rollback_dir / "server.properties").read_text(encoding="utf-8") == "motd=old\n"
 
 
 def test_creation_transaction_serializes_with_config_reload(tmp_path) -> None:
@@ -368,11 +391,35 @@ def test_creation_transaction_serializes_with_config_reload(tmp_path) -> None:
     journey = CreateServerJourney(crud, loader)
     plan = journey.plan(_config())
 
-    # 模擬在同一 servers_root 下，另一個 CRUD 實例觸發 load_servers_config
+    # 模擬在同一 servers_root 下建立另一個登錄表 owner
     crud2 = ServerCRUD(str(tmp_path))
-    crud2.load_servers_config()
 
     result = journey.execute(plan)
     assert result.status == "completed"
-    assert "demo" in crud.servers
-    assert "demo" in crud2.servers
+    assert "demo" in crud.snapshot()
+    assert "demo" in crud2.snapshot()
+
+
+def test_creation_progress_stays_determinate_and_monotonic_across_loader_stage_messages(tmp_path) -> None:
+    class _ProgressLoader(_FakeLoader):
+        def download_server_jar_with_progress(self, *args, **kwargs) -> bool:
+            progress_callback = args[4]
+            progress_callback(ProgressEvent("vanilla_prepare", "準備原版檔案"))
+            progress_callback(ProgressEvent("server_download", "下載中", 40, 100))
+            progress_callback(ProgressEvent("installer_cleanup", "清理安裝器"))
+            return super().download_server_jar_with_progress(*args, **kwargs)
+
+    crud = ServerCRUD(str(tmp_path))
+    journey = CreateServerJourney(crud, _ProgressLoader())
+    plan = journey.plan(_config(name="progress-demo"))
+    events: list[ProgressEvent] = []
+
+    result = journey.execute(plan, progress_callback=events.append)
+
+    assert result.completed is True
+    overall = [event.overall_percent for event in events]
+    assert all(percent is not None for percent in overall)
+    numeric = [float(percent) for percent in overall if percent is not None]
+    assert numeric == sorted(numeric)
+    assert numeric[0] == 2
+    assert numeric[-1] == 100

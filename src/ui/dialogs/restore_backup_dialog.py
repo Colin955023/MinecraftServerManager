@@ -12,8 +12,14 @@ from PySide6 import QtCore
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, TreeWidget
 
-from src.ui import ModalMSFluentWindow, ProgressDialog
-from src.utils import UIUtils, UIWorkScope, WorkOutcome, apply_table_header_style
+from src.ui import (
+    ModalMSFluentWindow,
+    ProgressDialog,
+    UIUtils,
+    UIWorkScope,
+    WorkOutcome,
+    apply_table_header_style,
+)
 
 
 class RestoreBackupDialog(ModalMSFluentWindow):
@@ -67,7 +73,7 @@ class RestoreBackupDialog(ModalMSFluentWindow):
         return self.exec()
 
     def _load_backups(self):
-        config = self.server_crud.servers.get(self.server_name)
+        config = self.server_crud.snapshot().get(self.server_name)
         if not config:
             return
         backups = self.server_backup.list_backups(self.server_name)

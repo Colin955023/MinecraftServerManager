@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import ctypes
 import sys
-import traceback
 from pathlib import Path
 
 if __name__ == "__main__" and __package__ is None:
@@ -17,7 +16,7 @@ if __name__ == "__main__" and __package__ is None:
         sys.path.insert(0, str(project_root))
 
 from src.ui import run_application
-from src.utils import HTTPClient, get_logger, shutdown_shared_manager
+from src.utils import APP_VERSION, HTTPClient, RuntimePaths, get_logger, shutdown_shared_manager
 
 logger = get_logger().bind(component="Main")
 
@@ -31,16 +30,32 @@ def main() -> int:
     """
 
     mutex_name = "MinecraftServerManagerMutex"
+    error_already_exists = 183
+    mutex_handle = None
+    kernel32 = getattr(ctypes.windll, "kernel32", None)
     try:
-        kernel32 = ctypes.windll.kernel32
-        kernel32.CreateMutexW(None, False, mutex_name)
+        if kernel32 is not None:
+            mutex_handle = kernel32.CreateMutexW(None, False, mutex_name)
+            get_last_error = getattr(kernel32, "GetLastError", None)
+            if get_last_error is not None and get_last_error() == error_already_exists:
+                logger.warning("偵測到已有執行中的應用程式實例，略過重複啟動")
+                return 0
         run_application()
-    except Exception as e:
-        logger.critical(f"應用程式啟動失敗: {e}\n{traceback.format_exc()}")
+        RuntimePaths.cleanup_old_onefile_caches(APP_VERSION)
+    except Exception:
+        logger.critical("應用程式啟動失敗", exc_info=True)
         return 1
     finally:
-        shutdown_shared_manager(wait=False)
-        HTTPClient.close()
+        try:
+            if kernel32 is not None and mutex_handle:
+                close_handle = getattr(kernel32, "CloseHandle", None)
+                if close_handle is not None:
+                    close_handle(mutex_handle)
+        finally:
+            try:
+                shutdown_shared_manager(wait=True)
+            finally:
+                HTTPClient.close()
     return 0
 
 

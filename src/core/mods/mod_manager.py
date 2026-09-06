@@ -17,15 +17,17 @@ from src.models import (
     ModStatus,
 )
 from src.utils import (
-    ModIndexManager,
     get_logger,
+    is_reparse_point,
     serialize_json,
 )
 
 from .local_mod_scanner import LocalModScanner
 from .mod_file_installer import ModFileInstaller
-from .modrinth_provider_adapter import ModrinthProviderAdapter
-from .provider_identity import ModIndexProviderIdentityStore, ProviderCatalogPort, ProviderIdentityService
+from .mod_index_persistence import ModIndexPersistence
+from .mod_provider_port import ModProviderPort
+from .modrinth_http import ModrinthHttpAdapter
+from .provider_identity import ModIndexProviderIdentityStore, ProviderIdentityService
 
 logger = get_logger().bind(component="ModManager")
 
@@ -109,28 +111,35 @@ def _build_xlsx(rows: list[list[object]], *, sheet_name: str = "Sheet1") -> byte
 class ModManager:
     """負責伺服器模組的掃描、啟用/停用、移除等功能"""
 
-    index_manager: ModIndexManager
-
     def __init__(
         self,
         server_path: str,
         server_config=None,
         *,
-        provider_catalog: ProviderCatalogPort | None = None,
+        provider_catalog: ModProviderPort | None = None,
     ) -> None:
         self.server_path = Path(server_path)
+        if is_reparse_point(self.server_path):
+            raise ValueError("模組管理伺服器路徑不可為符號連結或 reparse point")
+        self.server_path.mkdir(parents=True, exist_ok=True)
+        if is_reparse_point(self.server_path) or not self.server_path.is_dir():
+            raise ValueError("模組管理伺服器路徑不是安全的一般資料夾")
         self.mods_path = self.server_path / "mods"
         self.download_staging_root = self.server_path / ".download_staging"
         self.server_config = server_config
-        self.mods_path.mkdir(parents=True, exist_ok=True)
-        self.download_staging_root.mkdir(parents=True, exist_ok=True)
-        self.index_manager: ModIndexManager = ModIndexManager(server_path)
+        for managed_path in (self.mods_path, self.download_staging_root):
+            if is_reparse_point(managed_path):
+                raise ValueError(f"模組管理目錄不可為符號連結或 reparse point: {managed_path.name}")
+            managed_path.mkdir(parents=True, exist_ok=True)
+            if is_reparse_point(managed_path) or not managed_path.is_dir():
+                raise ValueError(f"模組管理目錄不是安全的一般資料夾: {managed_path.name}")
+        self._index_persistence = ModIndexPersistence(server_path)
         self.provider_identity_service = ProviderIdentityService(
-            store=ModIndexProviderIdentityStore(self.index_manager),
-            catalog=provider_catalog or ModrinthProviderAdapter(),
+            store=ModIndexProviderIdentityStore(self._index_persistence),
+            catalog=provider_catalog if provider_catalog is not None else ModrinthHttpAdapter(),
         )
         self.local_mod_scanner = LocalModScanner(
-            index_manager=self.index_manager,
+            index_manager=self._index_persistence,
             mods_path=self.mods_path,
             server_config=self.server_config,
             provider_identity_service=self.provider_identity_service,
@@ -214,19 +223,18 @@ class ModManager:
                 lines.append(line)
             return "\n".join(lines)
         if format_type == "json":
-            export_data = []
-            for mod in mods:
-                export_data.append(
-                    {
-                        "name": mod.name,
-                        "version": mod.version,
-                        "enabled": mod.status == ModStatus.ENABLED,
-                        "author": mod.author,
-                        "filename": mod.filename,
-                        "description": mod.description,
-                        "id": mod.id,
-                    }
-                )
+            export_data = [
+                {
+                    "name": mod.name,
+                    "version": mod.version,
+                    "enabled": mod.status == ModStatus.ENABLED,
+                    "author": mod.author,
+                    "filename": mod.filename,
+                    "description": mod.description,
+                    "id": mod.id,
+                }
+                for mod in mods
+            ]
             return serialize_json(export_data, indent=2)
         if format_type == "html":
 
@@ -243,8 +251,8 @@ class ModManager:
                 "<table>",
                 "<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>描述</th></tr>",
             ]
-            for mod in mods:
-                html.append(
+            html.extend(
+                (
                     "<tr>"
                     f"<td>{'✅' if mod.status == ModStatus.ENABLED else '❌'}</td>"
                     f"<td>{_html(mod.name)}</td>"
@@ -255,6 +263,8 @@ class ModManager:
                     f"<td>{_html(mod.description)}</td>"
                     "</tr>"
                 )
+                for mod in mods
+            )
             html.append("</table></body></html>")
             return "\n".join(html)
         if format_type == "xlsx":
@@ -277,7 +287,7 @@ class ModManager:
     def _quarantine_file(self, file_path: Path, reason: str) -> None:
         """標記檔案為有問題（不移動），以便 UI/人員檢查後再決定復原或移動"""
         try:
-            marked = self.index_manager.mark_issue(file_path, reason)
+            marked = self._index_persistence.mark_issue(file_path, reason)
             if marked:
                 logger.info(f"已標記檔案為有問題: {file_path} ({reason})")
             else:
@@ -287,8 +297,37 @@ class ModManager:
 
     def clear_mod_index(self) -> None:
         """清空模組快取索引"""
-        if hasattr(self, "index_manager") and self.index_manager:
-            self.index_manager.clear_index()
+        self._index_persistence.clear_index()
+
+    def cache_file_hash(self, file_path: Path, algorithm: str, file_hash: str) -> None:
+        """
+        保存模組檔案雜湊，供更新規劃使用
+
+        Args:
+            file_path: 模組檔案路徑
+            algorithm: 雜湊演算法名稱，例如 "sha256" 或 "sha512"
+            file_hash: 檔案雜湊值
+        """
+        self._index_persistence.cache_file_hash(file_path, algorithm, file_hash)
+
+    def get_review_metadata(self, file_path: Path) -> dict[str, object] | None:
+        """
+        讀取模組變更審核快照資料
+
+        Args:
+            file_path: 模組檔案路徑
+        """
+        return self._index_persistence.get_review_metadata(file_path)
+
+    def replace_review_metadata(self, file_path: Path, metadata: dict[str, object]) -> None:
+        """
+        保存模組變更審核快照資料
+
+        Args:
+            file_path: 模組檔案路徑
+            metadata: 審核快照資料字典
+        """
+        self._index_persistence.replace_review_metadata(file_path, metadata)
 
 
 __all__ = ["ModManager"]

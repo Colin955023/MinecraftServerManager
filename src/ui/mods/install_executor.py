@@ -2,30 +2,26 @@
 
 from __future__ import annotations
 
-import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from functools import partial
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from PySide6.QtWidgets import QWidget
 
 from src.core import ModManager
 from src.models import ModStatus
-from src.ui import ProgressDialog
+from src.ui import ProgressDialog, UIUtils
 from src.utils import (
     ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE,
     CancellationToken,
-    UIUtils,
 )
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
 from .review_contracts import ReviewExecutionHandoff, ReviewInstallStep
 from .review_workflow import ModReviewWorkflow
-
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
 
 
 def _close_progress_dialog(progress_dialog: ProgressDialog | None) -> None:
@@ -38,8 +34,8 @@ def _close_progress_dialog(progress_dialog: ProgressDialog | None) -> None:
 class ModManagementInstallExecutor:
     """只負責下載、替換、進度、取消與結果回報"""
 
-    def __init__(self, controller: ModManagementFrame) -> None:
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext) -> None:
+        self.controller = context
 
     def _create_progress_dialog(self, title: str) -> tuple[CancellationToken, ProgressDialog | None]:
         cancel_token = CancellationToken()
@@ -115,7 +111,7 @@ class ModManagementInstallExecutor:
             return False
         if not mismatch:
             return True
-        logger.info(f"拒絕過期 Review handoff: {mismatch}")
+        logger.warning(f"拒絕過期 Review handoff: {mismatch}")
         self.controller.update_status_safe(f"Review 已失效：{mismatch}")
         UIUtils.show_message(
             "Review 已失效",
@@ -124,6 +120,12 @@ class ModManagementInstallExecutor:
             message_level="warning",
         )
         return False
+
+    def _schedule_review_cleanup(self, close_progress: Callable[[], None], *, reload_local_mods: bool) -> None:
+        """排程關閉進度視窗，並依需要重新載入本地模組清單"""
+        self.controller.scope.schedule(0, close_progress)
+        if reload_local_mods:
+            self.controller.scope.schedule(0, self.controller.local_mod_list_presenter.load_local_mods)
 
     def _confirm_review_handoff(
         self,
@@ -179,7 +181,7 @@ class ModManagementInstallExecutor:
                 pct = (step_index / max(1, total_steps)) * 100.0
                 progress_text = f"{status_text} ({step_index + 1}/{total_steps})"
 
-                self.controller.ui_queue.put(partial(progress_dialog.update_progress, pct, progress_text))
+                self.controller.scope.schedule(0, partial(progress_dialog.update_progress, pct, progress_text))
             installed_path = manager.install_remote_mod_file(
                 download_url=step.download_url,
                 filename=step.filename,
@@ -261,7 +263,8 @@ class ModManagementInstallExecutor:
         dialog: Any,
         handoff: ReviewExecutionHandoff,
     ) -> None:
-        """執行已確認的線上模組安裝交付
+        """
+        執行已確認的線上模組安裝交付
 
         Args:
             dialog: 發起執行的 Review 對話框
@@ -315,21 +318,20 @@ class ModManagementInstallExecutor:
                         succeeded_root_keys.add(step.root_key) if step.kind == "online_root" else None
                     ),
                 ):
-                    self.controller.ui_queue.put(close_progress)
-                    self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
+                    self._schedule_review_cleanup(close_progress, reload_local_mods=True)
                     return
                 if not session.is_scope_current(install_scope):
-                    self.controller.ui_queue.put(close_progress)
+                    self._schedule_review_cleanup(close_progress, reload_local_mods=False)
                     return
                 session.remove_pending_review_keys(succeeded_root_keys)
                 retained = session.pending_online_installs
-                self.controller.queue_ops._refresh_online_queue_button()
+                if self.controller.refresh_online_queue is not None:
+                    self.controller.refresh_online_queue()
                 self.controller.update_progress_safe(1.0)
                 self.controller.update_status_safe(
                     f"已完成 {len(succeeded_root_keys)} 個模組安裝，必要依賴已補裝 {handoff.dependency_count} 個"
                 )
-                self.controller.ui_queue.put(close_progress)
-                self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
+                self._schedule_review_cleanup(close_progress, reload_local_mods=True)
                 msg_body = (
                     f"已完成 {len(succeeded_root_keys)} 個模組安裝"
                     + (
@@ -346,28 +348,28 @@ class ModManagementInstallExecutor:
                     + handoff.skipped_text
                     + handoff.completion_notes
                 )
-                self.controller.ui_queue.put(
+                self.controller.scope.schedule(
+                    0,
                     lambda: UIUtils.show_message(
                         "安裝完成",
                         msg_body,
                         self.controller.parent,
                         message_level="info",
-                    )
+                    ),
                 )
             except Exception as e:
                 if not accept_effect():
                     return
-                self.controller.ui_queue.put(close_progress)
-                self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
-                logger.error(f"批次安裝線上模組失敗: {e}\n{traceback.format_exc()}")
+                self._schedule_review_cleanup(close_progress, reload_local_mods=True)
+                logger.exception("批次安裝線上模組失敗")
                 self.controller.update_status_safe(f"批次安裝失敗: {e}")
                 message = f"無法完成安裝：{e}"
 
-                self.controller.ui_queue.put(
-                    partial(UIUtils.show_message, "安裝失敗", message, self.controller.parent, message_level="error")
+                self.controller.scope.schedule(
+                    0, partial(UIUtils.show_message, "安裝失敗", message, self.controller.parent, message_level="error")
                 )
             finally:
-                self.controller.ui_queue.put(close_progress)
+                self._schedule_review_cleanup(close_progress, reload_local_mods=False)
                 if accept_effect():
                     self.controller.update_progress_safe(0)
 
@@ -378,7 +380,8 @@ class ModManagementInstallExecutor:
         dialog: Any,
         handoff: ReviewExecutionHandoff,
     ) -> None:
-        """執行已確認的本地模組更新交付
+        """
+        執行已確認的本地模組更新交付
 
         Args:
             dialog: 發起執行的 Review 對話框
@@ -434,44 +437,42 @@ class ModManagementInstallExecutor:
                     action_label="模組更新",
                     on_step_completed=record_completed_step,
                 ):
-                    self.controller.ui_queue.put(close_progress)
-                    self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
+                    self._schedule_review_cleanup(close_progress, reload_local_mods=True)
                     return
                 if not session.is_scope_current(install_scope):
-                    self.controller.ui_queue.put(close_progress)
+                    self._schedule_review_cleanup(close_progress, reload_local_mods=False)
                     return
                 self.controller.update_progress_safe(1.0)
                 self.controller.update_status_safe(f"已完成 {success_count} 個模組更新")
-                self.controller.ui_queue.put(close_progress)
-                self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
+                self._schedule_review_cleanup(close_progress, reload_local_mods=True)
                 msg_body = (
                     f"已完成 {success_count} 個模組更新"
                     + (f"\n已略過 {handoff.unselected_count} 個未選取項目" if handoff.unselected_count else "")
                     + handoff.skipped_text
                     + handoff.completion_notes
                 )
-                self.controller.ui_queue.put(
+                self.controller.scope.schedule(
+                    0,
                     lambda: UIUtils.show_message(
                         "更新完成",
                         msg_body,
                         self.controller.parent,
                         message_level="info",
-                    )
+                    ),
                 )
             except Exception as e:
                 if not accept_effect():
                     return
-                self.controller.ui_queue.put(close_progress)
-                self.controller.ui_queue.put(self.controller.local_mod_list_presenter.load_local_mods)
-                logger.error(f"本地模組更新失敗: {e}\n{traceback.format_exc()}")
+                self._schedule_review_cleanup(close_progress, reload_local_mods=True)
+                logger.exception("本地模組更新失敗")
                 self.controller.update_status_safe(f"本地模組更新失敗: {e}")
                 message = f"無法完成更新：{e}"
 
-                self.controller.ui_queue.put(
-                    partial(UIUtils.show_message, "更新失敗", message, self.controller.parent, message_level="error")
+                self.controller.scope.schedule(
+                    0, partial(UIUtils.show_message, "更新失敗", message, self.controller.parent, message_level="error")
                 )
             finally:
-                self.controller.ui_queue.put(close_progress)
+                self._schedule_review_cleanup(close_progress, reload_local_mods=False)
                 if accept_effect():
                     self.controller.update_progress_safe(0)
 

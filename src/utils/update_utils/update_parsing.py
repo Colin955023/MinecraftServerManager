@@ -10,7 +10,7 @@ from typing import Any
 
 from packaging.version import Version
 
-from src.utils import HTTPClient, get_logger, parse_version_safe
+from src.utils import HashUtils, HTTPClient, get_logger, parse_version_safe
 
 logger = get_logger().bind(component="UpdateParsing")
 
@@ -78,7 +78,6 @@ class UpdateParsing:
             選中的 installer 資源，找不到時回傳空字典
         """
         assets = release.get("assets") or []
-        installer_assets = []
         for asset in assets:
             try:
                 name = (asset.get("name") or "").lower()
@@ -89,13 +88,11 @@ class UpdateParsing:
                     and "installer" not in name
                     and asset.get("browser_download_url")
                 ):
-                    installer_assets.append(asset)
+                    return asset
             except Exception as e:
                 logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
                 continue
-        if not installer_assets:
-            return {}
-        return installer_assets[0]
+        return {}
 
     @staticmethod
     def select_update_asset(release: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -117,17 +114,6 @@ class UpdateParsing:
         return ({}, "none")
 
     @staticmethod
-    def _is_hex_hash(token: str, expected_length: int) -> bool:
-        """檢查 token 是否為指定長度的十六進位雜湊字串"""
-        if len(token) != expected_length:
-            return False
-        try:
-            bytes.fromhex(token)
-            return True
-        except ValueError:
-            return False
-
-    @staticmethod
     def parse_asset_digest(asset: dict[str, Any]) -> tuple[str, str] | None:
         """
         從 GitHub release asset 的 digest 欄位解析 checksum
@@ -146,7 +132,7 @@ class UpdateParsing:
             return None
         algorithm = algorithm.strip().lower()
         checksum = checksum.strip().lower()
-        if algorithm == "sha256" and UpdateParsing._is_hex_hash(checksum, 64):
+        if algorithm == "sha256" and HashUtils.is_valid_expected_hash(checksum, algorithm):
             return (algorithm, checksum)
         return None
 

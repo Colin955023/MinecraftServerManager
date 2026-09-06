@@ -4,7 +4,7 @@
 
 從 [GitHub Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載 `MinecraftServerManager.exe` 後直接執行，僅支援 Windows 10／11 64-bit。
 
-程式免安裝且不建立解除安裝項目。移除時刪除 EXE；若也要清除設定、日誌與快取，再刪除 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。
+程式免安裝且不建立解除安裝項目。移除時刪除 EXE；若也要清除設定、日誌與 onefile 快取，再刪除 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。
 
 ## Java
 
@@ -18,18 +18,24 @@
 ## 快速開始
 
 1. 初次啟動時選擇「伺服器主資料夾」。程式會在其中建立 `servers/`，每台伺服器再使用自己的具名子資料夾。
-2. 到「建立伺服器」輸入名稱、Minecraft 版本、載入器與記憶體。
+2. 到「建立伺服器」輸入名稱、Minecraft 版本、載入器與記憶體。伺服器名稱必須是單一安全的 Windows 資料夾名稱，不能使用 `CON`、`COM1` 等保留裝置名稱、`.msm-` 內部前綴或路徑字元。
 3. 視需要調整 JVM 參數；Java 21+ 預設建議 ZGC，其餘支援版本使用 G1GC。
-4. 按「建立伺服器」，核對已驗證的建立計畫後確認。
+4. 按「建立伺服器」，核對已驗證的建立計畫後確認。建立期間下載可依實際資料量顯示進度；Java Loader installer 若只回傳文字階段，介面會顯示單調遞增的估算百分比而不會清空進度條。
 5. 到「管理伺服器」啟動；按「監控」查看控制台、記憶體、運作時間與玩家。
 
 支援 Vanilla、Fabric、Forge、Quilt、NeoForge。
+
+關閉主程式時會先停止受管理的伺服器與背景工作，再關閉視窗。若伺服器仍在停止中，請讓程式完成清理後再關閉 Windows；管理列表在頁面隱藏時不會持續掃描伺服器目錄，顯示大小也會在短時間內重用結果以降低磁碟負載。
 
 ## 匯入與重新偵測
 
 從主導航的「匯入伺服器」可匯入現有資料夾或 ZIP。程式會檢查伺服器內容、版本、載入器、EULA 與啟動目標，再建立受管登錄。
 
-手動更換核心檔案或載入器後，使用「重新偵測」更新登錄資訊。
+手動更換核心檔案或載入器後，使用「重新偵測」更新登錄資訊。批次「偵測現有伺服器」會分別顯示找到總數、新匯入、已管理、略過與失敗數；因此所有伺服器原本就已受管理時，不會再顯示成「找到 0 個」。
+
+## 刪除伺服器
+
+刪除確認後，程式會先確認伺服器未執行且沒有衝突的維護操作，把目錄安全改名為內部 tombstone，並原子提交登錄移除。大型伺服器目錄的實體檔案清理由背景繼續執行，因此列表與完成訊息不必等待所有檔案逐一刪除；磁碟可用空間可能在背景清理結束後才完全釋放。若程式在 commit 前中斷，重新啟動會優先還原仍受管理的伺服器；commit 後中斷留下的交易 tombstone 則會繼續排程清理。
 
 ## 備份與還原
 
@@ -65,6 +71,10 @@
 - 改用較短且不含特殊字元的路徑。
 - 仍失敗時附上日誌回報；通常不需要以系統管理員身分執行。
 
+### 關閉後仍看得到程序
+
+程式關閉時會依序送出伺服器 `stop`、終止程序並清理子程序樹。若 Java 伺服器沒有回應，清理可能需要幾秒；請先等待程序自行結束，避免直接從工作管理員強制終止造成世界資料未完成寫入。
+
 ### 伺服器無法啟動
 
 - 從監控視窗讀取錯誤。
@@ -85,7 +95,10 @@
 
 - 設定：`%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json`
 - 日誌：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Logs\`
-- 快取：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\`
+- 應用程式快取：`%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\`
+- onefile 解壓快取：`%LOCALAPPDATA%\Programs\MinecraftServerManager\<版本>\`
+
+onefile 快取以程式版本分隔。新版本成功啟動並正常結束後會自動清理舊版本；若檔案仍被鎖定，確認程式已關閉後再刪除保留的舊版本資料夾。
 
 ## 問題回報
 

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -64,6 +66,39 @@ class RuntimePaths:
     def get_log_dir() -> Path:
         """取得應用程式的日誌存放目錄"""
         return RuntimePaths.get_user_data_dir() / "Logs"
+
+    @staticmethod
+    def cleanup_old_onefile_caches(current_version: str) -> None:
+        """
+        程式成功啟動後清理可辨識且不再使用的 onefile 版本目錄
+
+        Args:
+            current_version: 當前程式版本號
+        """
+        if not RuntimePaths.is_packaged():
+            return
+        root = RuntimePaths.get_user_data_dir()
+        current_name = str(current_version or "").strip()
+        if not current_name or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", current_name):
+            return
+        try:
+            entries = tuple(root.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if (
+                not entry.is_dir()
+                or entry.name == current_name
+                or entry.name.startswith(f"{current_name}.")
+                or entry.name.startswith(f"{current_name}-")
+            ):
+                continue
+            if not re.fullmatch(r"\d+(?:\.\d+){1,4}(?:[-._][0-9A-Za-z.-]+)?", entry.name):
+                continue
+            try:
+                shutil.rmtree(entry)
+            except OSError:
+                continue
 
     @staticmethod
     def ensure_dir(p: Path) -> Path:

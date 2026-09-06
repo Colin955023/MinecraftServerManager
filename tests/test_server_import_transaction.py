@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import zipfile
 from pathlib import Path
 
 import pytest
 
-from src.core import ServerCRUD, ServerImportService
+import src.core.server.server_import as server_import_module
+from src.core import ServerConfigChangeSet, ServerCRUD, ServerImportService
 from src.models import ServerConfig
 
 
@@ -14,6 +16,12 @@ def _write_server(path: Path, *, script: str = "java -Xms1G -Xmx2G -jar server.j
     (path / "server.jar").write_bytes(b"not-a-real-jar")
     (path / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     (path / "start.bat").write_text(script, encoding="utf-8")
+
+
+def _register(manager: ServerCRUD, *configs: ServerConfig) -> None:
+    baseline = manager.snapshot()
+    result = manager.commit(ServerConfigChangeSet(upserts=tuple(configs)), expected_revision=baseline.revision)
+    assert result.success, result.message
 
 
 def test_external_directory_import_is_managed_copy_and_source_is_unchanged(tmp_path: Path) -> None:
@@ -29,11 +37,79 @@ def test_external_directory_import_is_managed_copy_and_source_is_unchanged(tmp_p
 
     assert inspection.source_kind == "directory"
     assert result.completed
-    assert result.config is manager.servers["managed"]
+    assert result.config == manager.snapshot().get("managed")
     assert Path(result.config.path) == root / "managed"
     assert (root / "managed" / "start_server.bat").is_file()
     assert (source / "start.bat").read_bytes() == original_script
     assert not list(root.glob(".msm-import-*.staging"))
+
+
+def test_external_directory_import_rejects_same_metadata_jar_swap(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "external"
+    _write_server(source)
+    original_jar = source / "server.jar"
+    original_bytes = original_jar.read_bytes()
+    original_stat = original_jar.stat()
+    root = tmp_path / "servers"
+    service = ServerImportService(ServerCRUD(str(root)))
+    inspection = service.inspect(source, "managed")
+    original_copy_dir = server_import_module.copy_dir
+
+    def tampering_copy_dir(source_path: Path, destination: Path, **kwargs) -> bool:
+        replacement = b"x" * len(original_bytes)
+        original_jar.write_bytes(replacement)
+        os.utime(original_jar, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+        return original_copy_dir(source_path, destination, **kwargs)
+
+    monkeypatch.setattr(server_import_module, "copy_dir", tampering_copy_dir)
+    result = service.execute(inspection)
+
+    assert result.completed is False
+    assert result.status == "failed"
+    assert not (root / "managed").exists()
+    assert original_jar.read_bytes() == b"x" * len(original_bytes)
+
+
+def test_import_replaces_unsafe_startup_command_with_managed_safe_command(tmp_path: Path) -> None:
+    source = tmp_path / "external"
+    _write_server(source, script="java -Xmx2G -jar server.jar & whoami\n")
+    root = tmp_path / "servers"
+    service = ServerImportService(ServerCRUD(str(root)))
+
+    inspection = service.inspect(source, "managed")
+    result = service.execute(inspection)
+
+    assert result.completed
+    generated = (root / "managed" / "start_server.bat").read_text(encoding="utf-8-sig")
+    assert "whoami" not in generated
+    assert "&" not in generated
+
+
+def test_import_rejects_source_junction_before_resolving_target(tmp_path: Path, make_junction) -> None:
+    source = tmp_path / "external"
+    _write_server(source)
+    root = tmp_path / "servers"
+    root.mkdir()
+    link = root / "linked-server"
+    make_junction(link, source)
+    service = ServerImportService(ServerCRUD(str(root)))
+
+    with pytest.raises(ValueError, match="符號連結"):
+        service.inspect(link, "linked-server")
+
+
+def test_discover_skips_root_child_junction(tmp_path: Path, make_junction) -> None:
+    source = tmp_path / "external"
+    _write_server(source)
+    root = tmp_path / "servers"
+    root.mkdir()
+    link = root / "linked-server"
+    make_junction(link, source)
+    service = ServerImportService(ServerCRUD(str(root)))
+
+    report = service.discover()
+    assert report.candidates == ()
+    assert report.issues == ()
 
 
 def test_zip_import_flattens_single_wrapper_without_modifying_archive(tmp_path: Path) -> None:
@@ -77,26 +153,32 @@ def test_conflict_type_distinguishes_disk_config_and_both(tmp_path: Path) -> Non
     assert insp_disk.conflict_type == "disk"
     assert insp_disk.committable is False
 
-    manager.servers["config_only"] = ServerConfig(
-        name="config_only",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=1024,
-        path=str(root / "non_existent_folder"),
+    _register(
+        manager,
+        ServerConfig(
+            name="config_only",
+            minecraft_version="1.20.1",
+            loader_type="vanilla",
+            loader_version="",
+            memory_max_mb=1024,
+            path=str(root / "config_only"),
+        ),
     )
     insp_config = service.inspect(source, "config_only")
     assert insp_config.conflict_type == "config"
     assert insp_config.committable is False
 
     (root / "both_exist").mkdir(parents=True)
-    manager.servers["both_exist"] = ServerConfig(
-        name="both_exist",
-        minecraft_version="1.20.1",
-        loader_type="vanilla",
-        loader_version="",
-        memory_max_mb=1024,
-        path=str(root / "both_exist"),
+    _register(
+        manager,
+        ServerConfig(
+            name="both_exist",
+            minecraft_version="1.20.1",
+            loader_type="vanilla",
+            loader_version="",
+            memory_max_mb=1024,
+            path=str(root / "both_exist"),
+        ),
     )
     insp_both = service.inspect(source, "both_exist")
     assert insp_both.conflict_type == "both"
@@ -152,17 +234,16 @@ def test_in_place_redetect_restores_config_and_managed_script_when_persistence_f
         memory_max_mb=1024,
         path=str(server_path),
     )
-    manager.servers["existing"] = previous
-    assert manager.write_servers_config()
+    _register(manager, previous)
     service = ServerImportService(manager)
     inspection = service.inspect_registered("existing")
-    monkeypatch.setattr(manager, "write_servers_config", lambda: False)
+    monkeypatch.setattr(manager, "_persist_registry_locked", lambda *_args: False)
 
     result = service.execute(inspection)
 
     assert result.status == "failed"
-    assert result.cleanup_complete is False
-    assert manager.servers["existing"] is previous
+    assert result.cleanup_complete is True
+    assert manager.snapshot().get("existing") == previous
     assert managed.read_bytes() == b"original-managed-script"
     assert not (server_path / ".msm-server-import.json").exists()
     assert not (server_path / ".msm-start-server.backup").exists()
@@ -175,15 +256,17 @@ def test_batch_reports_completed_and_skipped_items_independently(tmp_path: Path)
     _write_server(first)
     _write_server(second)
     manager = ServerCRUD(str(root))
-    manager.servers["second"] = ServerConfig(
-        name="second",
-        minecraft_version="unknown",
-        loader_type="vanilla",
-        loader_version="unknown",
-        memory_max_mb=2048,
-        path=str(second),
+    _register(
+        manager,
+        ServerConfig(
+            name="second",
+            minecraft_version="unknown",
+            loader_type="vanilla",
+            loader_version="unknown",
+            memory_max_mb=2048,
+            path=str(second),
+        ),
     )
-    assert manager.write_servers_config()
     service = ServerImportService(manager)
     new_candidate = service.inspect(first, "first")
     conflict = service.inspect(second, "second")
@@ -193,7 +276,7 @@ def test_batch_reports_completed_and_skipped_items_independently(tmp_path: Path)
     assert batch.completed_count == 1
     assert batch.skipped_count == 1
     assert batch.failed_count == 0
-    assert "first" in manager.servers
+    assert "first" in manager.snapshot()
 
 
 def test_orphan_recovery_restores_script_when_redetect_config_was_not_committed(tmp_path: Path) -> None:
@@ -211,8 +294,7 @@ def test_orphan_recovery_restores_script_when_redetect_config_was_not_committed(
         memory_max_mb=1024,
         path=str(server_path),
     )
-    manager.servers["existing"] = previous
-    assert manager.write_servers_config()
+    _register(manager, previous)
     service = ServerImportService(manager)
     inspection = service.inspect_registered("existing")
     (server_path / service._BACKUP_NAME).write_bytes(b"old-script")
@@ -259,3 +341,31 @@ def test_orphan_recovery_removes_unregistered_moved_import(tmp_path: Path) -> No
     ServerImportService(ServerCRUD(str(root)))
 
     assert not candidate.exists()
+
+
+def test_discover_counts_existing_registered_servers_separately_from_new_candidates(tmp_path: Path) -> None:
+    root = tmp_path / "servers"
+    root.mkdir()
+    manager = ServerCRUD(str(root))
+
+    managed_path = root / "managed"
+    new_path = root / "new-server"
+    _write_server(managed_path)
+    _write_server(new_path)
+    _register(
+        manager,
+        ServerConfig(
+            name="managed",
+            minecraft_version="1.20.1",
+            loader_type="vanilla",
+            loader_version="",
+            memory_max_mb=2048,
+            path=str(managed_path),
+        ),
+    )
+
+    report = ServerImportService(manager).discover()
+
+    assert report.managed_count == 1
+    assert [candidate.name for candidate in report.candidates] == ["new-server"]
+    assert report.issues == ()

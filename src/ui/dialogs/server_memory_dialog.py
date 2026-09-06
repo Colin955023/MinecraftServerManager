@@ -21,18 +21,20 @@ from qfluentwidgets import (
     TitleLabel,
 )
 
-from src.core import ServerCRUD
+from src.core import ServerConfigChangeSet, ServerCRUD
 from src.models import ServerConfig
-from src.ui import ModalMSFluentWindow
-from src.utils import (
+from src.ui import (
     Colors,
+    ModalMSFluentWindow,
+    Spacing,
+    UIUtils,
+    resolve_color,
+)
+from src.utils import (
     MemoryUtils,
     ServerCommands,
-    Spacing,
     SystemUtils,
-    UIUtils,
     get_logger,
-    resolve_color,
 )
 
 logger = get_logger().bind(component="ServerMemoryDialog")
@@ -63,7 +65,6 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         layout.setContentsMargins(Spacing.LARGE, Spacing.LARGE, Spacing.LARGE, Spacing.LARGE)
 
         title = TitleLabel("🧠 修改伺服器記憶體", self.widget)
-        title.setStyleSheet("background: transparent;")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(title)
 
@@ -72,30 +73,23 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             "請設定 JVM 堆疊記憶體（單位為 MB，1 GB = 1024 MB）：",
             self.widget,
         )
-        desc.setStyleSheet("background: transparent;")
         layout.addWidget(desc)
 
         total_mb = SystemUtils.get_total_memory_mb()
         if total_mb > 0:
             sys_info = BodyLabel(f"💻 系統實體記憶體總量：{total_mb} MB ({total_mb // 1024} GB)", self.widget)
-            sys_info.setStyleSheet("background: transparent;")
             layout.addWidget(sys_info)
 
         card = CardWidget(self.widget)
-        card.setStyleSheet(
-            "CardWidget { background-color: transparent; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; }"
-        )
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(Spacing.MEDIUM)
         card_layout.setContentsMargins(Spacing.LARGE, Spacing.LARGE, Spacing.LARGE, Spacing.LARGE)
 
         sub_title = SubtitleLabel("記憶體設定 (MB)", card)
-        sub_title.setStyleSheet("background: transparent;")
         card_layout.addWidget(sub_title)
 
         h_max = QHBoxLayout()
         max_label = BodyLabel("最大記憶體 (-Xmx):", card)
-        max_label.setStyleSheet("background: transparent;")
         max_label.setFixedWidth(150)
         self.max_memory_input = LineEdit(card)
         self.max_memory_input.setPlaceholderText("例如: 4096")
@@ -106,7 +100,6 @@ class ServerMemoryDialog(ModalMSFluentWindow):
 
         h_min = QHBoxLayout()
         min_label = BodyLabel("最小記憶體 (-Xms):", card)
-        min_label.setStyleSheet("background: transparent;")
         min_label.setFixedWidth(150)
         self.min_memory_input = LineEdit(card)
         self.min_memory_input.setPlaceholderText("選填，例如: 1024")
@@ -119,7 +112,6 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             "最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
             card,
         )
-        self.memory_tip.setStyleSheet("background: transparent;")
         self.memory_tip.setWordWrap(True)
         card_layout.addWidget(self.memory_tip)
 
@@ -235,12 +227,20 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         )
 
         try:
-            previous_config = self.server_crud.servers.get(self.config.name, self.config)
-            self.server_crud.servers[self.config.name] = updated_config
-            if not self.server_crud.write_servers_config():
-                self.server_crud.servers[self.config.name] = previous_config
+            baseline = self.server_crud.snapshot()
+            if self.config.name not in baseline:
+                UIUtils.show_message("儲存失敗", "找不到伺服器設定，記憶體設定未套用", self, message_level="error")
+                return
+            commit_result = self.server_crud.commit(
+                ServerConfigChangeSet(upserts=(updated_config,)),
+                expected_revision=baseline.revision,
+            )
+            if not commit_result.success:
                 UIUtils.show_message(
-                    "儲存失敗", "無法寫入伺服器設定檔，記憶體設定未套用。", self, message_level="error"
+                    "儲存失敗",
+                    commit_result.message or "無法寫入伺服器設定檔，記憶體設定未套用",
+                    self,
+                    message_level="error",
                 )
                 return
 

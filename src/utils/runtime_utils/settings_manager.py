@@ -406,20 +406,4 @@ class SettingsManager:
         return bool(self.get_window_preferences().get(key, default))
 
 
-_settings_manager = None
-
-
-def get_settings_manager() -> SettingsManager:
-    """
-    取得全域設定管理器的單例實例
-
-    Returns:
-        全域共用的 SettingsManager 實例
-    """
-    global _settings_manager
-    if _settings_manager is None:
-        _settings_manager = SettingsManager()
-    return _settings_manager
-
-
-__all__ = ["get_settings_manager"]
+__all__ = ["SettingsManager"]

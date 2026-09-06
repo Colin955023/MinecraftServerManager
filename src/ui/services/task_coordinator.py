@@ -5,20 +5,21 @@
 
 from __future__ import annotations
 
-import traceback
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from src.ui import (
+    UIUtils,
+    UpdateChecker,
+    is_qobject_alive,
+)
 from src.utils import (
     APP_VERSION,
     GITHUB_OWNER,
     GITHUB_REPO,
     JavaUtils,
-    UIUtils,
-    UpdateChecker,
+    SettingsManager,
     get_logger,
-    get_settings_manager,
-    is_qobject_alive,
 )
 
 if TYPE_CHECKING:
@@ -30,8 +31,9 @@ logger = get_logger().bind(component="TaskCoordinator")
 class TaskCoordinator:
     """背景工作協調器"""
 
-    def __init__(self, main_window: MainWindow):
+    def __init__(self, main_window: MainWindow, settings: SettingsManager):
         self.main_window = main_window
+        self.settings = settings
 
     def preload_java_candidates(self) -> None:
         """啟動時背景掃描本地 Java 並更新快取"""
@@ -44,7 +46,7 @@ class TaskCoordinator:
 
     def handle_startup_tasks(self) -> None:
         """處理啟動時的工作：首次執行提示和自動更新檢查"""
-        settings = get_settings_manager()
+        settings = self.settings
         if not settings.is_first_run_completed():
             self._show_first_run_prompt()
         elif settings.is_auto_update_enabled():
@@ -67,7 +69,7 @@ class TaskCoordinator:
                 work_scope=getattr(self.main_window, "scope", None),
             )
         except Exception as e:
-            logger.error(f"自動更新檢查失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("自動更新檢查失敗")
             if show_msg:
                 UIUtils.show_message("更新檢查失敗", f"無法檢查更新：{e}", self.main_window.root, message_level="error")
 
@@ -87,13 +89,13 @@ class TaskCoordinator:
 
     def _show_first_run_prompt(self) -> None:
         """首次執行時直接啟用自動更新並提示使用者"""
-        settings = get_settings_manager()
+        settings = self.settings
         settings.set_auto_update_enabled(True)
         settings.mark_first_run_completed()
 
         UIUtils.show_message(
             title="歡迎使用 Minecraft 伺服器管理器",
-            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n你可於「關於」視窗中隨時關閉此功能",
+            message="預設已啟用自動檢查更新功能，程式將在啟動時自動檢查新版本\n你可於「關於與設定」頁面中隨時關閉此功能",
             parent=self.main_window.root,
             message_level="info",
         )

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, PushButton, SearchLineEdit, TreeWidget, isDarkTheme
 
-from src.utils import (
+from src.ui import (
     Colors,
     FontManager,
     FontSize,
@@ -23,8 +22,7 @@ from src.utils import (
     resolve_color,
 )
 
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
+from .feature_contexts import ModManagementFeatureContext
 
 
 @dataclass(slots=True)
@@ -36,7 +34,8 @@ class SearchFilter:
     require_all_terms: bool = True
 
     def normalize(self, value: Any) -> str:
-        """正規化搜尋文字
+        """
+        正規化搜尋文字
 
         Args:
             value: 待正規化的任意值
@@ -46,11 +45,12 @@ class SearchFilter:
         """
         text = str(value or "").strip()
         if self.normalize_whitespace:
-            text = re.sub(r"\s+", " ", text)
+            text = " ".join(text.split())
         return text if self.case_sensitive else text.lower()
 
     def matches(self, candidate: Any, query: Any) -> bool:
-        """判斷候選內容是否符合查詢
+        """
+        判斷候選內容是否符合查詢
 
         Args:
             candidate: 被比對的字串、序列或 mapping
@@ -81,8 +81,8 @@ class SearchFilter:
 class OnlineBrowsePresenter:
     """封裝線上模組搜尋列、結果列表與瀏覽事件入口"""
 
-    def __init__(self, controller: ModManagementFrame):
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext):
+        self.controller = context
         self.search_var = TextState()
         self.browse_sort_var = TextState(value="相關性")
         self.browse_sort_options: dict[str, str] = {}
@@ -169,8 +169,10 @@ class OnlineBrowsePresenter:
         if tab_layout is not None:
             tab_layout.addWidget(self.browse_results_label)
 
-        self.controller.queue_ops._refresh_online_filter_hint()
-        self.controller.queue_ops._refresh_online_results_summary()
+        if self.controller.refresh_online_filter_hint is not None:
+            self.controller.refresh_online_filter_hint()
+        if self.controller.refresh_online_results_summary is not None:
+            self.controller.refresh_online_results_summary()
 
     def create_browse_mod_list(self) -> None:
         """建立線上模組列表"""
@@ -220,7 +222,10 @@ class OnlineBrowsePresenter:
 
         tree_layout.addWidget(tree, stretch=1)
 
-        tree.doubleClicked.connect(lambda _index: self.controller.queue_ops.install_online_mod())
+        def install_selected_mod() -> None:
+            self.controller.queue_ops.install_online_mod()
+
+        tree.doubleClicked.connect(install_selected_mod)
         tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         tree.customContextMenuRequested.connect(self.controller.queue_ops.show_browse_context_menu)
 

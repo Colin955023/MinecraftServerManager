@@ -1,6 +1,6 @@
 """
 系統工具模組
-提供系統資訊查詢與行程管理功能，使用 psutil 進行高可靠跨平台與 Windows 行程管理
+提供系統資訊查詢與 Windows 行程管理功能，使用 psutil 進行高可靠行程管理
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import psutil
 
 from src.utils import (
     JavaUtils,
-    SubprocessUtils,
     get_logger,
 )
 
@@ -26,7 +25,7 @@ _PSUTIL_PROCESS_LOOKUP_ERRORS = (psutil.NoSuchProcess, psutil.AccessDenied, psut
 class SystemUtils:
     """系統工具類別"""
 
-    _managed_processes_by_path: ClassVar[dict[str, set[int]]] = {}
+    _managed_processes_by_path: ClassVar[dict[str, set[psutil.Process]]] = {}
     _managed_processes_lock: ClassVar[threading.RLock] = threading.RLock()
 
     @staticmethod
@@ -37,39 +36,50 @@ class SystemUtils:
             return str(path or "").casefold()
 
     @classmethod
-    def register_managed_process(cls, path: Path | str, pid: int) -> None:
+    def register_managed_process(cls, path: Path | str, pid: int) -> psutil.Process | None:
         """
         記錄由本程式啟動、可安全清理的行程
 
         Args:
             path: 行程所屬的伺服器或安裝工作目錄
-            pid: 行程 ID
+            pid: 已啟動程序的作業系統 PID
+
+        Returns:
+            帶有 psutil 行程身分的清理 token；無法取得身分時回傳 None
         """
         try:
             normalized_path = cls._normalize_managed_path(path)
             if not normalized_path:
-                return
+                return None
+            normalized_pid = int(pid)
+            if normalized_pid <= 0:
+                return None
+            managed_process = psutil.Process(normalized_pid)
             with cls._managed_processes_lock:
-                cls._managed_processes_by_path.setdefault(normalized_path, set()).add(int(pid))
+                cls._managed_processes_by_path.setdefault(normalized_path, set()).add(managed_process)
+            return managed_process
         except Exception as e:
             logger.debug(f"記錄受管理行程失敗: {e}")
+            return None
 
     @classmethod
-    def unregister_managed_process(cls, path: Path | str, pid: int) -> None:
+    def unregister_managed_process(cls, path: Path | str, process: psutil.Process | None) -> None:
         """
         移除已結束或已清理的受管理行程
 
         Args:
             path: 行程所屬的伺服器或安裝工作目錄
-            pid: 行程 ID
+            process: register_managed_process 回傳的清理 token
         """
+        if process is None:
+            return
         normalized_path = cls._normalize_managed_path(path)
         with cls._managed_processes_lock:
-            pids = cls._managed_processes_by_path.get(normalized_path)
-            if not pids:
+            processes = cls._managed_processes_by_path.get(normalized_path)
+            if not processes:
                 return
-            pids.discard(int(pid))
-            if not pids:
+            processes.discard(process)
+            if not processes:
                 cls._managed_processes_by_path.pop(normalized_path, None)
 
     @staticmethod
@@ -84,19 +94,19 @@ class SystemUtils:
             至少有一個行程被終止則回傳 True
         """
         killed = False
-        try:
-            normalized_path = SystemUtils._normalize_managed_path(path)
-            with SystemUtils._managed_processes_lock:
-                tracked_pids = set(SystemUtils._managed_processes_by_path.get(normalized_path, set()))
-            for pid in tracked_pids:
-                if not SystemUtils.is_process_running(pid):
-                    SystemUtils.unregister_managed_process(path, pid)
-                    continue
-                if SystemUtils.kill_process_tree(pid):
+        normalized_path = SystemUtils._normalize_managed_path(path)
+        with SystemUtils._managed_processes_lock:
+            tracked_processes = tuple(SystemUtils._managed_processes_by_path.get(normalized_path, set()))
+        for process in tracked_processes:
+            try:
+                if process.is_running() and SystemUtils.kill_process_tree(process):
                     killed = True
-                SystemUtils.unregister_managed_process(path, pid)
-        except Exception as e:
-            logger.error(f"kill_java_processes_in_path 失敗: {e}")
+            except _PSUTIL_PROCESS_LOOKUP_ERRORS:
+                pass
+            except Exception as e:
+                logger.error(f"清理受管理行程失敗: {e}")
+            finally:
+                SystemUtils.unregister_managed_process(path, process)
         return killed
 
     @staticmethod
@@ -199,60 +209,36 @@ class SystemUtils:
             return None
 
     @staticmethod
-    def kill_process_tree(pid: int) -> bool:
+    def kill_process_tree(process: psutil.Process, *, timeout: float = 3.0) -> bool:
         """
         強制結束行程樹
 
         Args:
-            pid: 要結束的行程 ID
+            process: 帶有建立時間身分的 psutil 行程物件
+            timeout: 等待程序結束的秒數；UI 關閉輪詢使用零避免阻塞
 
         Returns:
             成功結束時回傳 True
         """
         try:
-            if not psutil.pid_exists(pid):
+            if not process.is_running():
                 return True
-            parent = psutil.Process(pid)
-            children = parent.children(recursive=True)
+            children = process.children(recursive=True)
             for child in children:
                 with suppress(*_PSUTIL_PROCESS_LOOKUP_ERRORS):
                     child.kill()
             with suppress(*_PSUTIL_PROCESS_LOOKUP_ERRORS):
-                parent.kill()
-            all_procs = [*children, parent]
-            psutil.wait_procs(all_procs, timeout=3.0)
-            return True
+                process.kill()
+            all_procs = [*children, process]
+            wait_result = psutil.wait_procs(all_procs, timeout=timeout)
+            if wait_result is None:
+                return not any(proc.is_running() for proc in all_procs)
+            _gone, alive = wait_result
+            return not alive
         except _PSUTIL_PROCESS_LOOKUP_ERRORS:
             return True
         except Exception as e:
-            logger.debug(f"psutil kill_process_tree 回退至 taskkill: {e}")
-            try:
-                cmd = ["taskkill", "/PID", str(pid), "/T", "/F"]
-                SubprocessUtils.run_checked(cmd, stdout=SubprocessUtils.DEVNULL, stderr=SubprocessUtils.DEVNULL)
-                return True
-            except Exception as e:
-                logger.error(f"無法結束行程樹 {pid}: {e}")
-                return False
-
-    @staticmethod
-    def is_process_running(pid: int) -> bool:
-        """
-        檢查行程是否執行中
-
-        Args:
-            pid: 行程 ID
-
-        Returns:
-            行程仍在執行時回傳 True
-        """
-        try:
-            if not psutil.pid_exists(pid):
-                return False
-            proc = psutil.Process(pid)
-            return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
-        except _PSUTIL_PROCESS_LOOKUP_ERRORS:
-            return False
-        except Exception:
+            logger.error(f"無法結束受管理行程樹: {e}")
             return False
 
 

@@ -26,7 +26,7 @@ def lazy_exports(
         return value
 
     def __dir__() -> list[str]:
-        return sorted(list(module_globals.keys()) + list(exports.keys()))
+        return sorted({*module_globals, *exports})
 
-    __all__ = sorted(exports.keys())
+    __all__ = sorted(exports)
     return (__getattr__, __dir__, __all__)

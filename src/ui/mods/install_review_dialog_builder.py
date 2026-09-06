@@ -8,8 +8,7 @@ from typing import Any
 from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, SubtitleLabel, TextEdit, TreeWidget
 
-from src.ui import ModalMSFluentWindow
-from src.utils import apply_table_header_style
+from src.ui import ModalMSFluentWindow, apply_table_header_style
 
 
 class ReviewDialog(ModalMSFluentWindow):

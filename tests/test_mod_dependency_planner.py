@@ -4,9 +4,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-import src.core.mods.modrinth_planning_adapter as planning_adapter_module
-from src.core import LoaderManagerRulesAdapter, ModPlanning, ModrinthPlanningAdapter
-from src.models import ModrinthVersionLookupResult, OnlineModVersion
+import src.core.mods.modrinth_http as planning_adapter_module
+from src.core import LoaderManagerRulesAdapter, ModPlanning, ModrinthHttpAdapter
+from src.models import ModrinthVersionLookupResult, OnlineModVersion, ProviderCatalogOutcome
 from src.utils import normalize_identifier
 
 
@@ -16,57 +16,66 @@ class _PlanningProviderStub:
     version_details: dict[str, tuple[str, OnlineModVersion | None]] = field(default_factory=dict)
     versions: dict[tuple[str, str, str], list[OnlineModVersion]] = field(default_factory=dict)
 
-    def resolve_project_names(self, project_ids: Iterable[str]) -> dict[str, str]:
+    def find_projects(
+        self,
+        query: str | Iterable[str],
+        *,
+        exact: bool = False,
+        include_details: bool = False,
+        **_search_options: Any,
+    ) -> Any:
+        if isinstance(query, str):
+            if include_details:
+                return None
+            name = self.project_names.get(normalize_identifier(query))
+            if exact:
+                return (
+                    ProviderCatalogOutcome(
+                        "found",
+                        project_id=query,
+                        display_name=name or query,
+                        confidence=100,
+                    )
+                    if name
+                    else ProviderCatalogOutcome("not_found")
+                )
+            return ProviderCatalogOutcome("not_found")
         return {
             normalize_identifier(project_id): self.project_names[normalize_identifier(project_id)]
-            for project_id in project_ids
+            for project_id in query
             if normalize_identifier(project_id) in self.project_names
         }
 
-    def get_version_details(self, version_id: str) -> tuple[str, OnlineModVersion | None]:
-        return self.version_details.get(version_id, ("", None))
-
-    def fetch_project_name(self, project_id: str) -> str | None:
-        return self.project_names.get(normalize_identifier(project_id))
-
-    def get_versions(
+    def resolve_versions(
         self,
-        project_id: str,
+        project_id: str = "",
         minecraft_version: str | None = None,
         loader: str | None = None,
-    ) -> list[OnlineModVersion]:
+        *,
+        version_id: str | None = None,
+        recommended: bool = False,
+    ) -> Any:
+        if version_id is not None:
+            return self.version_details.get(version_id, ("", None))
+        if recommended:
+            return None
         key = (normalize_identifier(project_id), str(minecraft_version or ""), normalize_identifier(loader))
         return list(self.versions.get(key, self.versions.get((key[0], "", ""), [])))
 
-    def get_current_versions_by_hashes(
-        self, hashes: list[str], algorithm: str
-    ) -> dict[str, ModrinthVersionLookupResult]:
-        del hashes, algorithm
-        return {}
-
-    def get_latest_versions_by_hashes(
+    def resolve_files(
         self,
-        hashes: list[str],
-        algorithm: str,
-        minecraft_version: str | None = None,
-        loader: str | None = None,
+        _hashes: Iterable[str],
+        _algorithm: str,
+        *,
+        _latest: bool = False,
+        _minecraft_version: str | None = None,
+        _loader: str | None = None,
     ) -> dict[str, ModrinthVersionLookupResult]:
-        del hashes, algorithm, minecraft_version, loader
         return {}
-
-    def get_recommended_version(
-        self,
-        project_id: str,
-        minecraft_version: str | None,
-        loader: str | None,
-    ) -> OnlineModVersion | None:
-        del project_id, minecraft_version, loader
-        return None
 
 
 class _LoaderRulesStub:
-    def compatible_versions(self, minecraft_version: str, loader: str) -> list[str]:
-        del minecraft_version, loader
+    def compatible_versions(self, _minecraft_version: str, _loader: str) -> list[str]:
         return []
 
 
@@ -128,13 +137,13 @@ def test_mod_planning_resolves_dependency_references_with_per_operation_caches()
             self.version_detail_calls = 0
             self.project_name_calls = 0
 
-        def get_version_details(self, version_id: str) -> tuple[str, OnlineModVersion | None]:
+        def resolve_versions(self, *args: Any, version_id: str | None = None, **kwargs: Any) -> Any:
             self.version_detail_calls += 1
-            return super().get_version_details(version_id)
+            return super().resolve_versions(*args, version_id=version_id, **kwargs)
 
-        def fetch_project_name(self, project_id: str) -> str | None:
+        def find_projects(self, query: str | Iterable[str], **kwargs: Any) -> Any:
             self.project_name_calls += 1
-            return super().fetch_project_name(project_id)
+            return super().find_projects(query, **kwargs)
 
     provider = _CountingProvider()
     root = _version(
@@ -202,21 +211,31 @@ def test_mod_planning_respects_max_depth() -> None:
     assert any("依賴深度超過上限" in message for message in plan.unresolved_required)
 
 
-def test_modrinth_planning_adapter_preserves_provider_project_id_case(monkeypatch) -> None:
+def test_mod_planning_bounds_dependency_edges() -> None:
+    root = _version(
+        "root-v",
+        "1.0.0",
+        dependencies=[{"project_id": "root", "dependency_type": "required"} for _ in range(2050)],
+    )
+    provider = _PlanningProviderStub(project_names={"root": "Root"})
+
+    plan = _planning(provider).build_dependency_plan(root, root_project_id="root", root_project_name="Root")
+
+    assert not plan.items
+    assert any("依賴邊超過安全上限" in message for message in plan.unresolved_required)
+
+
+def test_modrinth_http_adapter_preserves_provider_project_id_case(monkeypatch) -> None:
     calls: list[str] = []
     expected = _version("VersionABC", "1.0.0")
 
-    def get_versions(project_id: str, *_args: Any) -> list[OnlineModVersion]:
+    def resolve_versions(project_id: str, *_args: Any) -> list[OnlineModVersion]:
         calls.append(project_id)
         return [expected]
 
-    monkeypatch.setattr(
-        planning_adapter_module,
-        "get_mod_versions",
-        get_versions,
-    )
+    monkeypatch.setattr(planning_adapter_module, "_get_versions", resolve_versions)
 
-    versions = ModrinthPlanningAdapter().get_versions("ProjectABC", "1.21.1", "fabric")
+    versions = ModrinthHttpAdapter().resolve_versions("ProjectABC", "1.21.1", "fabric")
 
     assert versions == [expected]
     assert calls == ["ProjectABC"]

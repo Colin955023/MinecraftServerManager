@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -14,7 +15,14 @@ from typing import Any
 
 import orjson
 
-from src.utils import get_logger, is_path_within
+from src.utils import get_logger, move_within, stable_directory
+
+from .filesystem_utils import (
+    is_reparse_point,
+    read_bytes_file,
+    resolve_stable_directory,
+    resolve_stable_path,
+)
 
 logger = get_logger().bind(component="AtomicWriter")
 
@@ -67,31 +75,42 @@ def best_effort_fsync(file_obj) -> None:
 
 def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode: str, **open_kwargs) -> bool:
     """以暫存檔與原子替換寫入 payload"""
-    p = Path(path)
-    with _get_path_lock(p):
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            return False
-        for attempt in range(_RETRY_COUNT):
-            tmp_name = f"{p.name}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.{attempt}.tmp"
-            tmp_path = p.with_name(tmp_name)
-            try:
-                with tmp_path.open(mode, **open_kwargs) as file_obj:
-                    writer(file_obj)
-                    file_obj.flush()
-                    best_effort_fsync(file_obj)
-                _replace_file(tmp_path, p)
-                return True
-            except OSError:
+    try:
+        p = resolve_stable_path(path, create_parent=True)
+    except OSError:
+        return False
+    with stable_directory(p.parent) as stable_parent:
+        p = stable_parent / p.name
+        with _get_path_lock(p):
+            if is_reparse_point(p):
+                return False
+            for attempt in range(_RETRY_COUNT):
+                tmp_path: Path | None = None
                 try:
-                    if tmp_path.exists():
-                        tmp_path.unlink()
+                    with tempfile.NamedTemporaryFile(
+                        mode=mode,
+                        delete=False,
+                        dir=stable_parent,
+                        prefix=f".{p.name}.",
+                        suffix=".tmp",
+                        **open_kwargs,
+                    ) as file_obj:
+                        tmp_path = Path(file_obj.name)
+                        writer(file_obj)
+                        file_obj.flush()
+                        best_effort_fsync(file_obj)
+                    if not move_within(stable_parent, tmp_path, p):
+                        raise OSError("無法安全提交原子寫入")
+                    return True
                 except OSError:
-                    logger.debug(f"嘗試移除暫存檔案 {tmp_path} 時失敗；忽略錯誤")
-                if attempt + 1 >= _RETRY_COUNT:
-                    return False
-                time.sleep(_RETRY_DELAY * (attempt + 1))
+                    try:
+                        if tmp_path is not None and tmp_path.exists():
+                            tmp_path.unlink()
+                    except OSError:
+                        logger.debug(f"嘗試移除暫存檔案 {tmp_path} 時失敗；忽略錯誤")
+                    if attempt + 1 >= _RETRY_COUNT:
+                        return False
+                    time.sleep(_RETRY_DELAY * (attempt + 1))
     return False
 
 
@@ -108,20 +127,23 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
     Returns:
         寫入成功時回傳 True，失敗時回傳 False
     """
-    p = Path(path)
     try:
         opt = orjson.OPT_INDENT_2 if indent == 2 else 0
         opt |= orjson.OPT_NON_STR_KEYS
         payload_bytes = orjson.dumps(data, option=opt)
     except TypeError:
         return False
+    try:
+        p = resolve_stable_path(path, create_parent=True)
+    except OSError:
+        return False
 
     with _get_path_lock(p):
         if skip_if_unchanged and p.exists():
-            try:
-                if p.read_bytes() == payload_bytes:
-                    return True
-            except OSError:
+            existing_payload = read_bytes_file(p, max_bytes=len(payload_bytes), allowed_root=p.parent)
+            if existing_payload == payload_bytes:
+                return True
+            if existing_payload is None:
                 logger.debug(f"無法讀取現有檔案以判斷是否相同，將覆寫: {p}")
 
         return atomic_write_bytes(p, payload_bytes)
@@ -138,15 +160,25 @@ def atomic_replace_file(source: Path | str, target: Path | str) -> bool:
     Returns:
         替換成功時回傳 True，失敗時回傳 False
     """
-    source_path = Path(source)
-    target_path = Path(target)
-    with _get_path_lock(target_path):
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            _replace_file(source_path, target_path)
-            return True
-        except OSError:
-            return False
+    try:
+        source_path = resolve_stable_path(source)
+        target_path = resolve_stable_path(target, create_parent=True)
+    except OSError:
+        return False
+    try:
+        with (
+            stable_directory(source_path.parent) as source_parent,
+            stable_directory(target_path.parent, create=True) as target_parent,
+        ):
+            source_path = source_parent / source_path.name
+            target_path = target_parent / target_path.name
+            if source_path.is_dir() or is_reparse_point(source_path) or is_reparse_point(target_path):
+                return False
+            with _get_path_lock(target_path):
+                _replace_file(source_path, target_path)
+                return True
+    except OSError:
+        return False
 
 
 def atomic_replace_file_within(
@@ -166,16 +198,13 @@ def atomic_replace_file_within(
         替換成功時回傳 True，失敗時回傳 False
     """
     try:
-        base_path = Path(base_dir).resolve(strict=True)
-        source_path = Path(source).resolve(strict=True)
-        target_path = Path(target).resolve(strict=False)
-        if source_path.is_dir():
+        base_path = resolve_stable_directory(base_dir)
+        source_path = resolve_stable_path(source)
+        target_path = resolve_stable_path(target, create_parent=True)
+        if source_path.is_dir() or is_reparse_point(source_path) or is_reparse_point(target_path):
             return False
-        if not is_path_within(base_path, source_path, strict=False):
-            return False
-        if not is_path_within(base_path, target_path, strict=False):
-            return False
-        return atomic_replace_file(source_path, target_path)
+        with _get_path_lock(target_path):
+            return move_within(base_path, source_path, target_path)
     except OSError:
         return False
 

@@ -117,6 +117,17 @@ def clean_mod_version(version: str) -> str:
     return re.sub(r"[^\w\d.]+$", "", cleaned).strip()
 
 
+_MINECRAFT_VERSION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"minecraft[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"mc[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"version[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", re.IGNORECASE),
+    re.compile(r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?-(?:pre|rc)[0-9]+)\b", re.IGNORECASE),
+    re.compile(r"\b([0-9]+\.[0-9]+-snapshot-[0-9]+)\b", re.IGNORECASE),
+    re.compile(r"\b(2[0-9]w[0-9]{1,2}[a-z])\b", re.IGNORECASE),
+    re.compile(r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", re.IGNORECASE),
+)
+
+
 def extract_minecraft_version_from_text(text: str) -> str | None:
     """
     從日誌、manifest 或檔名文字擷取 Minecraft 版本
@@ -129,21 +140,10 @@ def extract_minecraft_version_from_text(text: str) -> str | None:
     """
     if not text:
         return None
-    patterns = (
-        (r"minecraft[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
-        (r"mc[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
-        (r"version[-_.:\s]+([0-9]+\.[0-9]+(?:\.[0-9]+)?)", 1),
-        (r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?-(?:pre|rc)[0-9]+)\b", 2),
-        (r"\b([0-9]+\.[0-9]+-snapshot-[0-9]+)\b", 3),
-        (r"\b(2[0-9]w[0-9]{1,2}[a-z])\b", 3),
-        (r"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", 4),
-    )
-    matches = [
-        (match.group(1), priority)
-        for pattern, priority in patterns
-        if (match := re.search(pattern, text, re.IGNORECASE)) is not None
-    ]
-    return min(matches, key=lambda item: item[1])[0] if matches else None
+    for pattern in _MINECRAFT_VERSION_PATTERNS:
+        if match := pattern.search(text):
+            return match.group(1)
+    return None
 
 
 @lru_cache(maxsize=128)

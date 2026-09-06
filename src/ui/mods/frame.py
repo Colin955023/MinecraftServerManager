@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import queue
-import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QSignalBlocker, Qt, Slot
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -32,10 +30,8 @@ from qfluentwidgets import (
 from src.core import LoaderManager, ModManager, ModPlanning
 from src.models import (
     ModStatus,
-    ServerConfig,
 )
-from src.utils import (
-    AppException,
+from src.ui import (
     Colors,
     FloatState,
     ScrollableComboBox,
@@ -44,11 +40,14 @@ from src.utils import (
     TextState,
     UIUtils,
     UIWorkScope,
+    WorkOutcome,
     apply_table_header_style,
     resolve_color,
 )
+from src.utils import AppException
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
 from .install_executor import ModManagementInstallExecutor
 from .local_mod_list_presenter import LocalModListPresenter
 from .mod_management_session import ModManagementSession
@@ -71,29 +70,6 @@ def _is_alive(obj: Any) -> bool:
     return True
 
 
-class _ModManagementSignals(QObject):
-    progress_requested = Signal(float)
-
-    def __init__(
-        self,
-        progress_callback: Callable[[float], None],
-        drain_callback: Callable[[], None],
-        parent: QObject | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._progress_callback = progress_callback
-        self._drain_callback = drain_callback
-        self.progress_requested.connect(self._dispatch_progress)
-
-    @Slot(float)
-    def _dispatch_progress(self, value: float) -> None:
-        self._progress_callback(value)
-
-    @Slot()
-    def drain(self) -> None:
-        self._drain_callback()
-
-
 class ModManagementFrame:
     """模組管理主畫面"""
 
@@ -102,16 +78,30 @@ class ModManagementFrame:
         parent,
         server_manager,
         mod_planning: ModPlanning,
+        mod_provider,
         on_server_selected_callback: Callable | None = None,
         loader_manager: LoaderManager = None,
     ):
         self.parent = parent
         self.server_manager = server_manager
         self.mod_planning = mod_planning
+        self.mod_provider = mod_provider
         self.on_server_selected = on_server_selected_callback
         self.loader_manager = loader_manager
         self.mod_session = ModManagementSession()
         self.mod_manager: ModManager | None = None
+        self.feature_context = ModManagementFeatureContext(
+            parent=parent,
+            server_manager=server_manager,
+            mod_planning=mod_planning,
+            mod_provider=self.mod_provider,
+            loader_manager=loader_manager,
+            mod_session=self.mod_session,
+            status_sink=self.update_status,
+            status_async_sink=self.update_status_safe,
+            progress_sink=self.update_progress_safe,
+            toggle_success_sink=self._apply_local_toggle_success,
+        )
         self.versions: list = []
         self.release_versions: list = []
         self.main_frame: QWidget | None = None
@@ -120,40 +110,38 @@ class ModManagementFrame:
         self.pivot: Pivot | None = None
         self.local_tab: QWidget | None = None
         self.browse_tab: QWidget | None = None
-        self.local_mod_list_presenter = LocalModListPresenter(self)
-        self.online_browse_presenter = OnlineBrowsePresenter(self)
-        self.ui_queue: queue.Queue[Callable[[], Any]] = queue.Queue()
-        self.queue_ops = ModManagementQueueOps(self)
-        self.review_ops = ModManagementReviewOps(self)
-        self.install_executor = ModManagementInstallExecutor(self)
-        self.tree_sync = ModManagementTreeSyncOps(self)
+        self.local_mod_list_presenter = LocalModListPresenter(self.feature_context)
+        self.online_browse_presenter = OnlineBrowsePresenter(self.feature_context)
+        self.queue_ops = ModManagementQueueOps(self.feature_context)
+        self.review_ops = ModManagementReviewOps(self.feature_context)
+        self.install_executor = ModManagementInstallExecutor(self.feature_context)
+        self.tree_sync = ModManagementTreeSyncOps(self.feature_context)
+        self.feature_context.local_mod_list_presenter = self.local_mod_list_presenter
+        self.feature_context.online_browse_presenter = self.online_browse_presenter
+        self.feature_context.queue_ops = self.queue_ops
+        self.feature_context.review_ops = self.review_ops
+        self.feature_context.install_executor = self.install_executor
+        self.feature_context.tree_sync = self.tree_sync
+        self.feature_context.refresh_online_queue = self.queue_ops.refresh_online_queue
+        self.feature_context.refresh_online_filter_hint = self.queue_ops.refresh_online_filter_hint
+        self.feature_context.refresh_online_results_summary = self.queue_ops.refresh_online_results_summary
+        self.feature_context.clear_online_results = self.tree_sync.clear_online_results
+        self.feature_context.format_online_environment = self.tree_sync.format_online_environment_text
+        self.feature_context.open_project_page = self.review_ops.open_project_page
+        self.feature_context.capture_selected_mod_ids = self.tree_sync.capture_selected_mod_ids
+        self.feature_context.get_current_modrinth_context = self.queue_ops.get_current_modrinth_context
 
         self.create_widgets()
 
-        host = self.main_frame if _is_alive(self.main_frame) else self.parent
-        signal_parent = host if isinstance(host, QObject) and _is_alive(host) else None
-        self._signals = _ModManagementSignals(self._apply_progress_value, self._drain_ui_queue, signal_parent)
-        self._ui_queue_timer = QTimer(self._signals)
-        self._ui_queue_timer.timeout.connect(self._signals.drain)
-        self._ui_queue_timer.start(25)
         scope_parent = (
-            self.main_frame if isinstance(self.main_frame, QObject) and _is_alive(self.main_frame) else self._signals
+            self.main_frame if isinstance(self.main_frame, QObject) and _is_alive(self.main_frame) else self.parent
         )
+        if not isinstance(scope_parent, QObject):
+            raise TypeError("ModManagementFrame 需要 QObject parent 或 main_frame")
         self.scope = UIWorkScope(scope_parent)
+        self.feature_context.scope = self.scope
+        self._active_server_identity: tuple[str, str, str, str] | None = None
         self.load_servers()
-        if self.mod_session.server and self.mod_manager:
-            self.local_mod_list_presenter.refresh_mod_list_force()
-
-    def _drain_ui_queue(self) -> None:
-        for _ in range(100):
-            try:
-                callback = self.ui_queue.get_nowait()
-            except queue.Empty:
-                return
-            try:
-                callback()
-            except Exception:
-                logger.error("執行模組管理 UI 工作失敗\n" + traceback.format_exc())
 
     def showEvent(self, event) -> None:
         """
@@ -166,10 +154,6 @@ class ModManagementFrame:
         if callable(_showEvent):
             _showEvent(event)
 
-        if hasattr(self, "server_manager") and hasattr(self.server_manager, "load_servers_config"):
-            self.server_manager.load_servers_config()
-
-        self.load_servers()
         if hasattr(self, "notebook") and self.notebook:
             current_tab = self.notebook.currentIndex()
             if current_tab == 0:
@@ -196,10 +180,10 @@ class ModManagementFrame:
         except (AttributeError, RuntimeError) as e:
             logger.warning(f"更新狀態遇到暫時性問題: {e}")
         except AppException as e:
-            logger.info(f"更新狀態被應用例外攔截: {e}")
+            logger.warning(f"更新狀態被應用例外攔截: {e}")
             self.update_status_safe(str(e))
         except Exception:
-            logger.error("更新狀態失敗: 未知錯誤\n" + traceback.format_exc())
+            logger.exception("更新狀態失敗: 未知錯誤")
 
     def update_status_safe(self, message: str) -> None:
         """
@@ -208,7 +192,7 @@ class ModManagementFrame:
         Args:
             message: 要顯示的狀態訊息
         """
-        self.ui_queue.put(lambda: self.update_status(message))
+        self.scope.schedule(0, lambda: self.update_status(message))
 
     def update_progress_safe(self, value: float) -> None:
         """
@@ -217,15 +201,12 @@ class ModManagementFrame:
         Args:
             value: 進度數值 (0.0 到 1.0)
         """
-        signals = getattr(self, "_signals", None)
-        if signals is not None:
-            signals.progress_requested.emit(float(value))
-            return
-        self.ui_queue.put(lambda: self._apply_progress_value(float(value)))
+        self.scope.schedule(0, lambda: self._apply_progress_value(float(value)))
 
     def create_widgets(self) -> None:
         """建立模組管理頁面的所有 UI 元件"""
         self.main_frame = QWidget(self.parent)
+        self.feature_context.main_frame = self.main_frame
         self.main_layout = QVBoxLayout(self.main_frame)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -261,7 +242,7 @@ class ModManagementFrame:
         self.server_combo = ScrollableComboBox(inner_frame)
         self.server_combo.addItems(["載入中..."])
 
-        def _handle_server_changed(*_args: Any) -> None:
+        def _handle_server_changed() -> None:
             self.server_var.set(self.server_combo.currentText())
             self.on_server_changed()
 
@@ -297,6 +278,7 @@ class ModManagementFrame:
         if not self.notebook or not self.pivot:
             return
         self.local_tab = QWidget()
+        self.feature_context.local_tab = self.local_tab
         tab_layout = QVBoxLayout(self.local_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         self.notebook.addWidget(self.local_tab)
@@ -314,6 +296,7 @@ class ModManagementFrame:
         if not self.notebook or not self.pivot:
             return
         self.browse_tab = QWidget()
+        self.feature_context.browse_tab = self.browse_tab
         tab_layout = QVBoxLayout(self.browse_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         self.notebook.addWidget(self.browse_tab)
@@ -334,6 +317,7 @@ class ModManagementFrame:
         self.main_layout.addWidget(self.pivot, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.notebook = PopUpAniStackedWidget(self.main_frame)
+        self.feature_context.notebook = self.notebook
         self.main_layout.addWidget(self.notebook, 1)
 
         self.create_local_mods_tab()
@@ -360,12 +344,10 @@ class ModManagementFrame:
         if self.online_browse_presenter.browse_tree:
             self.online_browse_presenter.apply_browse_tree_theme()
 
-    def on_tab_changed(self, _event=None) -> None:
+    def on_tab_changed(self) -> None:
         """
         處理分頁切換事件，觸發對應列表的重新整理
 
-        Args:
-            _event: 分頁切換事件
         """
         try:
             if not self.notebook:
@@ -374,10 +356,10 @@ class ModManagementFrame:
             if current_tab == 0:
                 self.tree_sync.refresh_local_list()
             elif current_tab == 1:
-                self.queue_ops._refresh_online_filter_hint()
+                self.queue_ops.refresh_online_filter_hint()
                 self.queue_ops._load_online_mods(show_warning=False)
-        except Exception as e:
-            logger.error(f"處理頁籤切換事件失敗: {e}\n{traceback.format_exc()}")
+        except Exception:
+            logger.exception("處理頁籤切換事件失敗")
 
     def create_status_bar(self) -> None:
         """建立頁面底部的狀態列與進度條"""
@@ -390,6 +372,7 @@ class ModManagementFrame:
         status_layout.setContentsMargins(Spacing.XL, 0, Spacing.XL, Spacing.XL)
 
         self.status_label = SubtitleLabel("請選擇伺服器開始管理模組", self.status_frame)
+        self.feature_context.status_label = self.status_label
         status_layout.addWidget(self.status_label)
 
         status_layout.addStretch(1)
@@ -407,41 +390,39 @@ class ModManagementFrame:
         """從伺服器管理器載入所有伺服器名稱至下拉選單"""
         try:
             prev_selected = self.server_var.get()
-            servers = list(self.server_manager.servers.values())
+            servers = list(self.server_manager.snapshot().values())
             servers = [s for s in servers if (s.loader_type or "").lower() != "vanilla"]
             server_names = [server.name for server in servers]
             if not server_names:
-                self.server_combo.blockSignals(True)
-                self.server_combo.clear()
-                self.server_combo.addItems([""])
-                self.server_combo.setCurrentIndex(0)
-                self.server_combo.blockSignals(False)
+                with QSignalBlocker(self.server_combo):
+                    self.server_combo.clear()
+                    self.server_combo.addItems([""])
+                    self.server_combo.setCurrentIndex(0)
                 self.server_var.set("")
                 self.mod_session.invalidate()
                 self.mod_session = ModManagementSession()
                 self.mod_manager = None
+                self.feature_context.mod_session = self.mod_session
+                self.feature_context.mod_manager = None
                 self.tree_sync.refresh_local_list()
-                self.queue_ops._refresh_online_queue_button()
-                self.queue_ops._refresh_online_filter_hint()
+                self.queue_ops.refresh_online_queue()
+                self.queue_ops.refresh_online_filter_hint()
             else:
                 target_server = prev_selected if prev_selected in server_names else server_names[0]
-                self.server_combo.blockSignals(True)
-                self.server_combo.clear()
-                self.server_combo.addItems(server_names)
-                self.server_combo.setCurrentText(target_server)
-                self.server_combo.blockSignals(False)
+                with QSignalBlocker(self.server_combo):
+                    self.server_combo.clear()
+                    self.server_combo.addItems(server_names)
+                    self.server_combo.setCurrentText(target_server)
                 self.server_var.set(target_server)
                 self.on_server_changed()
         except Exception as e:
-            logger.error(f"載入伺服器列表失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("載入伺服器列表失敗")
             UIUtils.show_message("錯誤", f"載入伺服器列表失敗: {e}", self.parent, message_level="error")
 
-    def on_server_changed(self, _current_server: ServerConfig | None = None) -> None:
+    def on_server_changed(self) -> None:
         """
         處理伺服器切換事件，初始化對應的模組管理器並重新載入列表
 
-        Args:
-            _current_server: 選中的伺服器設定，可選
         """
         if getattr(self, "_is_changing_server", False):
             return
@@ -450,7 +431,7 @@ class ModManagementFrame:
             server_name = self.server_var.get()
             if not server_name:
                 return
-            servers = list(self.server_manager.servers.values())
+            servers = list(self.server_manager.snapshot().values())
             selected_server = None
             for server in servers:
                 if server.name == server_name:
@@ -458,20 +439,54 @@ class ModManagementFrame:
                     break
             if not selected_server:
                 return
+            identity = (
+                str(Path(selected_server.path).resolve(strict=False)).casefold(),
+                str(selected_server.loader_type or "").casefold(),
+                str(selected_server.minecraft_version or ""),
+                str(selected_server.loader_version or ""),
+            )
+            if self.mod_manager is not None and identity == self._active_server_identity:
+                return
             if not self.mod_session.matches_server(selected_server):
                 self.mod_session.invalidate()
                 self.mod_session = ModManagementSession(selected_server)
-            self.mod_manager = ModManager(selected_server.path, selected_server)
-            self.queue_ops._refresh_online_filter_hint()
-            self.queue_ops._refresh_online_queue_button()
-            self.local_mod_list_presenter.load_local_mods()
-            if self.queue_ops._is_browse_tab_active():
-                self.queue_ops._load_online_mods(force=True, show_warning=False)
+                self.feature_context.mod_session = self.mod_session
+            session = self.mod_session
+            self.mod_manager = None
+            self.feature_context.mod_manager = None
+            self._active_server_identity = None
+            self.update_status("正在準備模組列表...")
+
+            def _on_manager_ready(outcome: WorkOutcome) -> None:
+                if not session.matches_server(selected_server) or self.mod_session is not session:
+                    return
+                if not outcome.is_succeeded:
+                    self.update_status(f"載入模組管理器失敗: {outcome.error}")
+                    return
+                self.mod_manager = outcome.value
+                self.feature_context.mod_manager = outcome.value
+                self._active_server_identity = identity
+                self.queue_ops.refresh_online_filter_hint()
+                self.queue_ops.refresh_online_queue()
+                self.local_mod_list_presenter.load_local_mods()
+                if self.queue_ops._is_browse_tab_active():
+                    self.queue_ops._load_online_mods(force=True, show_warning=False)
+
+            self.scope.submit(
+                lambda: ModManager(
+                    selected_server.path,
+                    selected_server,
+                    provider_catalog=self.mod_provider,
+                ),
+                on_done=_on_manager_ready,
+                key="mod_manager_init",
+                replace=True,
+            )
             if self.on_server_selected and getattr(self, "_last_notified_server", None) != server_name:
                 self._last_notified_server = server_name
                 self.on_server_selected(server_name)
         except Exception as e:
-            logger.error(f"切換伺服器失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("切換伺服器失敗")
             UIUtils.show_message("錯誤", f"切換伺服器失敗: {e}", self.parent, message_level="error")
         finally:
             self._is_changing_server = False
@@ -497,16 +512,15 @@ class ModManagementFrame:
             except (AttributeError, RuntimeError) as e:
                 logger.warning(f"更新進度遇到暫時性問題: {e}")
             except AppException as e:
-                logger.info(f"更新進度被應用例外攔截: {e}")
+                logger.warning(f"更新進度被應用例外攔截: {e}")
             except Exception:
-                logger.error("更新進度失敗: 未知錯誤\n" + traceback.format_exc())
+                logger.exception("更新進度失敗: 未知錯誤")
 
     def _apply_local_toggle_success(
         self,
         *,
         tree: TreeWidget | None,
         item_id: str,
-        _mod_id: str,
         mod_obj: Any,
         new_status: ModStatus,
         new_filename: str,

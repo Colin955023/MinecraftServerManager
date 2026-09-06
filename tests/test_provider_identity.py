@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from src.core.mods.modrinth_provider_adapter import ModrinthProviderAdapter
+from src.core import ModrinthHttpAdapter
 from src.core.mods.provider_identity import ProviderIdentityService
 from src.models import (
-    HTTPJSONResponse,
     ProviderCatalogOutcome,
     ProviderIdentityEvidence,
     ProviderIdentitySnapshot,
 )
-from src.utils import HTTPClient
+from src.utils import HTTPClient, HTTPJSONResponse
 
 
 class MemoryIdentityStore:
@@ -37,13 +37,66 @@ class FakeCatalog:
         self.lookups: list[str] = []
         self.searches: list[str] = []
 
-    def lookup(self, identifier: str) -> ProviderCatalogOutcome:
-        self.lookups.append(identifier)
+    def find_projects(
+        self,
+        query: str | Iterable[str],
+        *,
+        exact: bool = False,
+        search: bool = False,
+        include_details: bool = False,
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+        categories: list[str] | None = None,
+        sort_by: str = "relevance",
+        limit: int = 20,
+    ) -> Any:
+        if not isinstance(query, str):
+            return {}
+        if (
+            search
+            or include_details
+            or minecraft_version
+            or loader
+            or categories
+            or sort_by != "relevance"
+            or limit != 20
+        ):
+            return self.outcome
+        if exact:
+            self.lookups.append(query)
+        else:
+            self.searches.append(query)
         return self.outcome
 
-    def search(self, query: str) -> ProviderCatalogOutcome:
-        self.searches.append(query)
-        return self.outcome
+    def resolve_versions(
+        self,
+        project_id: str = "",
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+        *,
+        version_id: str | None = None,
+        recommended: bool = False,
+    ) -> Any:
+        if version_id is not None:
+            return ("", None)
+        if recommended:
+            return None
+        if project_id or minecraft_version or loader:
+            return []
+        return []
+
+    def resolve_files(
+        self,
+        hashes: Iterable[str],
+        algorithm: str,
+        *,
+        latest: bool = False,
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+    ) -> dict[str, Any]:
+        if hashes or algorithm or latest or minecraft_version or loader:
+            return {}
+        return {}
 
 
 def test_legacy_identity_without_timestamp_is_stale() -> None:
@@ -121,21 +174,6 @@ def test_transient_failure_enters_backoff_without_requery(tmp_path: Path) -> Non
     assert catalog.searches == []
 
 
-def test_resolution_batch_caps_catalog_items(tmp_path: Path) -> None:
-    store = MemoryIdentityStore()
-    catalog = FakeCatalog(ProviderCatalogOutcome("not_found"))
-    service = ProviderIdentityService(store=store, catalog=catalog)
-    service.begin_resolution_batch(limit=1)
-
-    first = service.resolve(ProviderIdentityEvidence(file_path=tmp_path / "one.jar", alias_hint="one"))
-    second = service.resolve(ProviderIdentityEvidence(file_path=tmp_path / "two.jar", alias_hint="two"))
-    service.end_resolution_batch()
-
-    assert first.lifecycle == "retrying"
-    assert second.lifecycle == "missing"
-    assert catalog.lookups == ["one"]
-
-
 def test_legacy_stale_journey_retries_then_commits_fresh_and_rescans_offline(tmp_path: Path) -> None:
     file_path = tmp_path / "example.jar"
     store = MemoryIdentityStore({"platform": "modrinth", "project_id": "legacy-id", "slug": "legacy-alias"})
@@ -174,7 +212,7 @@ def test_rate_limit_is_typed_and_does_not_fall_through_to_search(monkeypatch, tm
         "fetch_json_response",
         fake_response,
     )
-    adapter = ModrinthProviderAdapter()
+    adapter = ModrinthHttpAdapter()
     store = MemoryIdentityStore()
     service = ProviderIdentityService(store=store, catalog=adapter)
 
@@ -198,7 +236,7 @@ def test_modrinth_adapter_maps_not_found_without_creating_identity(monkeypatch) 
         lambda *_args, **_kwargs: HTTPJSONResponse(404, error_kind="not_found"),
     )
 
-    outcome = ModrinthProviderAdapter().lookup("missing-project")
+    outcome = ModrinthHttpAdapter().find_projects("missing-project", exact=True)
 
     assert outcome.kind == "not_found"
     assert outcome.canonical is False

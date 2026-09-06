@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import queue
 from typing import Any, cast
 
 from src.ui import ServerMonitorWindow
+from src.ui.windows.server_monitor_parsing import parse_player_list_line, parse_player_presence_event
 
 
 class _FakeLabel:
@@ -24,7 +24,6 @@ class _FakeLabel:
 def _make_monitor() -> ServerMonitorWindow:
     monitor = ServerMonitorWindow.__new__(ServerMonitorWindow)
     monitor.server_name = "minecraft_server"
-    monitor.ui_queue = queue.Queue()
     monitor_any = cast(Any, monitor)
     monitor_any.players_label = _FakeLabel()
     monitor._last_player_count = None
@@ -41,15 +40,15 @@ def _players_label(monitor: ServerMonitorWindow) -> _FakeLabel:
 def test_parse_player_list_line_extracts_count_and_names() -> None:
     line = "[15:45:52] [Server thread/INFO]: There are 1 of a max of 20 players online: Andy"
 
-    assert ServerMonitorWindow._parse_player_list_line(line) == (1, 20, ("Andy",))
+    assert parse_player_list_line(line) == (1, 20, ("Andy",))
 
 
 def test_parse_player_presence_event_extracts_join_and_left() -> None:
     join_line = "[15:45:52] [Server thread/INFO]: Andy joined the game"
     left_line = "[15:50:00] [Server thread/INFO]: Andy left the game"
 
-    assert ServerMonitorWindow._parse_player_presence_event(join_line) == ("Andy", True)
-    assert ServerMonitorWindow._parse_player_presence_event(left_line) == ("Andy", False)
+    assert parse_player_presence_event(join_line) == ("Andy", True)
+    assert parse_player_presence_event(left_line) == ("Andy", False)
 
 
 def test_read_player_list_without_response_preserves_current_list() -> None:
@@ -61,7 +60,7 @@ def test_read_player_list_without_response_preserves_current_list() -> None:
     monitor.read_player_list("[15:45:52] [Server thread/INFO]: unrelated output")
 
     assert captured == []
-    assert monitor.ui_queue.empty()
+    assert monitor._last_player_names == ("Andy",)
 
 
 def test_presence_event_updates_list_immediately() -> None:
@@ -77,15 +76,12 @@ def test_presence_event_updates_list_immediately() -> None:
     assert captured == [["Andy"]]
 
 
-def test_read_player_list_line_queues_authoritative_snapshot() -> None:
+def test_read_player_list_line_applies_authoritative_snapshot() -> None:
     monitor = _make_monitor()
     captured: list[list[str]] = []
     cast(Any, monitor).update_player_list = captured.append
 
     monitor.read_player_list("[INFO]: There are 1 of a max of 20 players online: Andy")
-    callback = monitor.ui_queue.get_nowait()
-    callback()
-
     assert monitor._last_player_count == 1
     assert monitor._last_max_players == 20
     assert _players_label(monitor).text == "👥 玩家數量: 1/20"

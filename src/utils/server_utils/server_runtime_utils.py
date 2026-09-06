@@ -17,10 +17,14 @@ from src.utils import (
     MemoryUtils,
     atomic_write_text,
     get_logger,
+    is_reparse_point,
+    list_bounded_directory,
     read_text_file,
 )
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
+_STARTUP_SCRIPT_MAX_BYTES = 2 * 1024 * 1024
+_UNSAFE_BATCH_COMMAND_CHARS = frozenset("&|<>^%!();\r\n\x00")
 
 
 @dataclass(slots=True)
@@ -30,27 +34,11 @@ class StartupScriptCommand:
     command_line: str = ""
     memory_max_mb: int | None = None
     memory_min_mb: int | None = None
+    unsafe: bool = False
 
     @property
     def has_java_command(self) -> bool:
         return bool(self.command_line)
-
-
-class ServerOperations:
-    """伺服器操作工具類別"""
-
-    @staticmethod
-    def get_status_text(is_running: bool) -> tuple[str, str]:
-        """
-        取得狀態文字和顏色
-
-        Args:
-            is_running: 伺服器是否正在執行
-
-        Returns:
-            狀態文字和顏色的元組，格式為 (文字, 顏色)
-        """
-        return ("🟢 狀態: 執行中", "green") if is_running else ("🔴 狀態: 已停止", "red")
 
 
 class JvmOptionPolicy:
@@ -201,13 +189,16 @@ class ServerCommands:
     )
 
     @staticmethod
-    def expected_main_target(loader_type: str, minecraft_version: str | None = None) -> str:
+    def expected_main_target(
+        loader_type: str, minecraft_version: str | None = None, loader_version: str | None = None
+    ) -> str:
         """
         取得尚未建立檔案時的預期啟動目標
 
         Args:
             loader_type: 目標載入器類型
             minecraft_version: 目標 Minecraft 版本
+            loader_version: 目標載入器版本
 
         Returns:
             建立預覽使用的 JAR 或 args 參照
@@ -219,9 +210,9 @@ class ServerCommands:
                 for v in ("1.7", "1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16")
             ):
                 return "forge-server.jar"
-            return "@libraries/net/minecraftforge/forge/win_args.txt"
+            return f"@libraries/net/minecraftforge/forge/{minecraft_version}-{loader_version}/win_args.txt"
         if normalized_loader == "neoforge":
-            return "@libraries/net/neoforged/neoforge/win_args.txt"
+            return f"@libraries/net/neoforged/neoforge/{loader_version}/win_args.txt"
         if normalized_loader == "fabric":
             return "fabric-server-launch.jar"
         if normalized_loader == "quilt":
@@ -266,6 +257,11 @@ class ServerCommands:
         return f'"{normalized}"' if any(char.isspace() for char in normalized) else normalized
 
     @staticmethod
+    def is_safe_batch_argument(arg: str) -> bool:
+        normalized = str(arg or "")
+        return bool(normalized) and not any(char in _UNSAFE_BATCH_COMMAND_CHARS or char == '"' for char in normalized)
+
+    @staticmethod
     def _strip_wrapping_quotes(arg: str) -> str:
         normalized = str(arg)
         if len(normalized) >= 2 and normalized.startswith('"') and normalized.endswith('"'):
@@ -273,7 +269,7 @@ class ServerCommands:
         return normalized
 
     @staticmethod
-    def _is_full_java_path(java_exe: str) -> bool:
+    def is_full_java_path(java_exe: str) -> bool:
         normalized = str(java_exe or "").strip().strip('"')
         if not normalized:
             return False
@@ -352,6 +348,57 @@ class ServerCommands:
             return [arg for arg in str(command_line).split() if arg]
 
     @staticmethod
+    def parse_safe_java_command_line(command_line: str) -> tuple[bool, list[str]] | None:
+        """
+        解析只含 Java argv 的批次命令，拒絕 cmd 語法與變數展開
+
+        Args:
+            command_line: bat 檔中的單行指令
+
+        Returns:
+            是否包含 call，以及解析後的參數清單；解析失敗時回傳 None
+        """
+        raw = str(command_line or "").strip()
+        if not raw or any(char in _UNSAFE_BATCH_COMMAND_CHARS for char in raw):
+            return None
+        try:
+            tokens = [
+                ServerCommands._strip_wrapping_quotes(arg) for arg in shlex.split(raw, posix=False) if str(arg).strip()
+            ]
+        except ValueError:
+            return None
+        if not tokens:
+            return None
+        has_call = str(tokens[0]).lower() == "call"
+        if has_call:
+            tokens = tokens[1:]
+        if tokens and str(tokens[0]).startswith("@") and ServerCommands._is_java_command_token(tokens[0][1:]):
+            tokens[0] = str(tokens[0])[1:]
+        if not tokens or not ServerCommands._is_java_command_token(tokens[0]):
+            return None
+        if any(any(char in token for char in '"\r\n\x00') for token in tokens):
+            return None
+        return has_call, tokens
+
+    @staticmethod
+    def normalize_imported_java_command(command_line: str) -> str | None:
+        """
+        將外部啟動命令正規化為不含 cmd 語法的 Java 命令
+
+        Args:
+            command_line: 外部匯入的原始 Java 命令列
+
+        Returns:
+            安全的 Java 命令列；輸入含不支援語法時回傳 None
+        """
+        parsed = ServerCommands.parse_safe_java_command_line(command_line)
+        if parsed is None:
+            return None
+        has_call, tokens = parsed
+        prefix = "call " if has_call else ""
+        return prefix + " ".join(ServerCommands._quote_windows_arg(token) for token in tokens)
+
+    @staticmethod
     def _is_java_command_token(token: str) -> bool:
         normalized = ServerCommands._strip_wrapping_quotes(str(token or "").strip()).lower()
         if not normalized:
@@ -363,19 +410,23 @@ class ServerCommands:
     def _java_command_tokens_from_line(line: str) -> list[str]:
         body, _newline = ServerCommands._split_line_ending(line)
         stripped = body.strip()
-        if not stripped:
+        if not stripped or stripped.lower().startswith(("rem ", "::", "echo ", "set ", "title ", "chcp ")):
             return []
-        lower = stripped.lower()
-        if lower.startswith(("rem ", "::", "echo ", "set ", "title ", "chcp ")):
+        parsed = ServerCommands.parse_safe_java_command_line(stripped)
+        if parsed is None:
             return []
-        tokens = ServerCommands.split_windows_command_line(stripped)
-        if tokens and str(tokens[0]).lower() == "call":
-            tokens = tokens[1:]
-        if not tokens:
-            return []
-        if not ServerCommands._is_java_command_token(tokens[0]):
-            return []
-        return tokens
+        return parsed[1]
+
+    @staticmethod
+    def _is_safe_startup_scaffolding(line: str) -> bool:
+        normalized = line.strip().lower()
+        if not normalized:
+            return True
+        if normalized in {"@echo off", "echo off", 'cd /d "%~dp0"', "cd /d %~dp0", "chcp 65001 >nul"}:
+            return True
+        if normalized.startswith(("rem ", "::", "echo ")):
+            return not any(char in _UNSAFE_BATCH_COMMAND_CHARS for char in normalized)
+        return False
 
     @staticmethod
     def extract_startup_script_command(script_path: Path) -> StartupScriptCommand:
@@ -388,18 +439,39 @@ class ServerCommands:
         Returns:
             擷取到的 Java 啟動指令與記憶體設定；找不到時回傳空指令
         """
-        content = read_text_file(script_path, encoding="utf-8", errors="replace") or ""
+        content = (
+            read_text_file(
+                script_path,
+                encoding="utf-8",
+                errors="replace",
+                max_bytes=_STARTUP_SCRIPT_MAX_BYTES,
+            )
+            or ""
+        )
         startup_command = StartupScriptCommand()
         if content.startswith("\ufeff"):
             content = content.removeprefix("\ufeff")
         for line in content.splitlines():
-            tokens = ServerCommands._java_command_tokens_from_line(line)
-            if not tokens:
+            body, _newline = ServerCommands._split_line_ending(line)
+            stripped = body.strip()
+            if ServerCommands._is_safe_startup_scaffolding(stripped):
                 continue
-            startup_command.command_line = line.strip()
-            startup_command.memory_max_mb = MemoryUtils.parse_memory_setting(line, "Xmx")
-            startup_command.memory_min_mb = MemoryUtils.parse_memory_setting(line, "Xms")
-            break
+            raw_tokens = ServerCommands.split_windows_command_line(stripped)
+            if raw_tokens and str(raw_tokens[0]).lower() == "call":
+                raw_tokens = raw_tokens[1:]
+            if raw_tokens and str(raw_tokens[0]).startswith("@"):
+                raw_tokens[0] = str(raw_tokens[0])[1:]
+            if not raw_tokens or not ServerCommands._is_java_command_token(raw_tokens[0]):
+                startup_command.unsafe = True
+                continue
+            normalized = ServerCommands.normalize_imported_java_command(stripped)
+            if normalized is None:
+                startup_command.unsafe = True
+                continue
+            if not startup_command.command_line:
+                startup_command.command_line = normalized
+                startup_command.memory_max_mb = MemoryUtils.parse_memory_setting(line, "Xmx")
+                startup_command.memory_min_mb = MemoryUtils.parse_memory_setting(line, "Xms")
         return startup_command
 
     @staticmethod
@@ -428,16 +500,17 @@ class ServerCommands:
         lower = stripped.lower()
         if lower.startswith(("rem ", "::", "echo ", "set ")):
             return (line, False)
-        match = re.match(
-            r'^(?P<prefix>\s*@?\s*(?:call\s+)?)(?P<java>"[^"]*(?:java|javaw)(?:\.exe)?"|[^\s"]*(?:java|javaw)(?:\.exe)?)(?P<suffix>(?:\s+.*)?)$',
-            body,
-            re.IGNORECASE,
-        )
-        if not match:
+        parsed = ServerCommands.parse_safe_java_command_line(stripped)
+        if parsed is None:
             return (line, False)
-        replacement = (
-            f"{match.group('prefix')}{ServerCommands._quote_windows_arg(java_exe)}{match.group('suffix')}{newline}"
-        )
+        has_call, tokens = parsed
+        prefix = "call " if has_call else ""
+        replacement = f"{prefix}{ServerCommands._quote_windows_arg(java_exe)}"
+        if len(tokens) > 1:
+            replacement += " " + " ".join(ServerCommands._quote_windows_arg(token) for token in tokens[1:])
+        replacement += newline
+        if ServerCommands.normalize_imported_java_command(replacement.rstrip("\r\n")) is None:
+            return (line, False)
         return (replacement, replacement != line)
 
     @staticmethod
@@ -451,12 +524,12 @@ class ServerCommands:
         Returns:
             若原本未包含 nogui 則補上後的指令行
         """
-        raw = str(command_line or "").strip()
-        if not raw:
-            return raw
-        if not re.search(r"(?i)\bnogui\b", raw):
-            return f"{raw} nogui"
-        return raw
+        normalized = ServerCommands.normalize_imported_java_command(command_line)
+        if not normalized:
+            return ""
+        if not re.search(r"(?i)\bnogui\b", normalized):
+            return f"{normalized} nogui"
+        return normalized
 
     @staticmethod
     def is_server_startup_script_file(script_file: Path) -> bool:
@@ -486,7 +559,15 @@ class ServerCommands:
             return True
 
         try:
-            content = read_text_file(script_file, encoding="utf-8", errors="replace") or ""
+            content = (
+                read_text_file(
+                    script_file,
+                    encoding="utf-8",
+                    errors="replace",
+                    max_bytes=_STARTUP_SCRIPT_MAX_BYTES,
+                )
+                or ""
+            )
         except OSError:
             return False
 
@@ -531,16 +612,20 @@ class ServerCommands:
         if not path.is_dir():
             return removed
         managed = ServerCommands.MANAGED_STARTUP_SCRIPT_NAME.lower()
-        patterns = ("*.bat", "*.cmd", "*.ps1", "*.sh")
-        for pattern in patterns:
-            for script_file in path.glob(pattern):
-                if script_file.name.lower() == managed:
-                    continue
-                if not ServerCommands.is_server_startup_script_file(script_file):
-                    continue
-                with suppress(Exception):
-                    script_file.unlink()
-                    removed.append(script_file.name)
+        try:
+            script_files = list_bounded_directory(path, reject_reparse=False)
+        except OSError:
+            return removed
+        for script_file in script_files:
+            if script_file.suffix.lower() not in {".bat", ".cmd", ".ps1", ".sh"}:
+                continue
+            if script_file.name.lower() == managed or is_reparse_point(script_file):
+                continue
+            if not ServerCommands.is_server_startup_script_file(script_file):
+                continue
+            with suppress(Exception):
+                script_file.unlink()
+                removed.append(script_file.name)
         return removed
 
     @staticmethod
@@ -553,11 +638,15 @@ class ServerCommands:
             server_config: 伺服器設定物件
 
         Returns:
-            替換後的啟動指令；無法解析完整 Java 路徑時保留原指令
+            替換後的啟動指令；無法解析完整 Java 路徑時保留已正規化命令
         """
-        java_exe = ServerCommands.resolve_java_executable(server_config)
-        if not ServerCommands._is_full_java_path(java_exe):
-            return command_line.strip()
+        safe_command = ServerCommands.normalize_imported_java_command(command_line)
+        if not safe_command:
+            return ""
+        java_exe = ServerCommands.resolve_java_executable(server_config, fallback="")
+        if not ServerCommands.is_full_java_path(java_exe):
+            logger.warning("找不到可信的完整 Java 路徑，保留正規化命令供後續檢查")
+            return safe_command
         replaced_line, _changed = ServerCommands.replace_java_command_line(command_line.strip(), java_exe)
         return replaced_line.strip()
 
@@ -573,14 +662,22 @@ class ServerCommands:
         Returns:
             腳本有被修改時回傳 True
         """
-        java_exe = ServerCommands.resolve_java_executable(server_config)
-        if not ServerCommands._is_full_java_path(java_exe):
+        java_exe = ServerCommands.resolve_java_executable(server_config, fallback="")
+        if not ServerCommands.is_full_java_path(java_exe):
             logger.warning(
                 f"找不到符合 {getattr(server_config, 'minecraft_version', '')} 的完整 Java 路徑，略過修補 {script_path.name}"
             )
             return False
-        content = read_text_file(script_path, encoding="utf-8", errors="replace")
+        content = read_text_file(
+            script_path,
+            encoding="utf-8",
+            errors="replace",
+            max_bytes=_STARTUP_SCRIPT_MAX_BYTES,
+        )
         if not content:
+            return False
+        if ServerCommands.extract_startup_script_command(script_path).unsafe:
+            logger.warning(f"啟動腳本含不安全 cmd 語法，略過修補: {script_path.name}")
             return False
         changed = content.startswith("\ufeff")
         if changed:
@@ -653,45 +750,44 @@ class ServerCommands:
         jvm_args = [*recommended_jvm_args, *custom_jvm_args]
         java_exe = ServerCommands.resolve_java_executable(server_config)
         main_jar = launch_target or ServerCommands.expected_main_target(
-            loader_type, str(getattr(server_config, "minecraft_version", "") or "")
+            loader_type,
+            str(getattr(server_config, "minecraft_version", "") or ""),
+            str(getattr(server_config, "loader_version", "") or ""),
         )
         if loader_type in ("forge", "neoforge") and main_jar.lower() == "@user_jvm_args.txt":
             main_jar = ServerCommands.expected_main_target(
-                loader_type, str(getattr(server_config, "minecraft_version", "") or "")
+                loader_type,
+                str(getattr(server_config, "minecraft_version", "") or ""),
+                str(getattr(server_config, "loader_version", "") or ""),
             )
+        mem_args = [f"-Xms{memory_min}M"] if memory_min else []
+        mem_args.append(f"-Xmx{memory_max}M")
+        command_args = [java_exe, *jvm_args, *mem_args, main_jar, "nogui"]
+        if not all(ServerCommands.is_safe_batch_argument(arg) for arg in command_args):
+            logger.error("拒絕將含 cmd 特殊字元的啟動參數寫入批次腳本")
+            return [] if return_list else ""
+        quoted_java_exe = ServerCommands._quote_windows_arg(java_exe)
+        quoted_jvm_args = [ServerCommands._quote_windows_arg(arg) for arg in jvm_args]
+        quoted_mem_args = [ServerCommands._quote_windows_arg(arg) for arg in mem_args]
+        quoted_main_jar = ServerCommands._quote_windows_arg(main_jar)
         if loader_type in ("forge", "neoforge") and main_jar.startswith("@"):
             server_path_str = getattr(server_config, "path", "")
             server_path = Path(server_path_str) if server_path_str else None
             if server_path is not None and (server_path / "user_jvm_args.txt").is_file():
                 ServerCommands.update_forge_user_jvm_args(server_path, server_config)
-            mem_args = [f"-Xms{memory_min}M"] if memory_min else []
-            mem_args.append(f"-Xmx{memory_max}M")
             cmd_list = [java_exe, *jvm_args, *mem_args, main_jar, "nogui"]
-            result_cmd = " ".join(
-                [ServerCommands._quote_windows_arg(java_exe), *jvm_args, *mem_args, main_jar, "nogui"]
-            )
+            result_cmd = " ".join([quoted_java_exe, *quoted_jvm_args, *quoted_mem_args, quoted_main_jar, "nogui"])
         else:
             cmd_list = [java_exe, *jvm_args]
             if memory_min:
                 cmd_list.append(f"-Xms{memory_min}M")
             cmd_list.extend([f"-Xmx{memory_max}M", "-jar", main_jar, "nogui"])
-            if " " in java_exe and (not (java_exe.startswith('"') and java_exe.endswith('"'))):
-                java_exe_quoted = f'"{java_exe}"'
-            else:
-                java_exe_quoted = java_exe
-            if " " in main_jar and (not (main_jar.startswith('"') and main_jar.endswith('"'))):
-                main_jar_quoted = f'"{main_jar}"'
-            else:
-                main_jar_quoted = main_jar
-            memory_args = f"-Xms{memory_min}M -Xmx{memory_max}M" if memory_min else f"-Xmx{memory_max}M"
-            jvm_arg_text = " ".join(jvm_args)
-            if jvm_arg_text:
-                result_cmd = f"{java_exe_quoted} {jvm_arg_text} {memory_args} -jar {main_jar_quoted} nogui"
-            else:
-                result_cmd = f"{java_exe_quoted} {memory_args} -jar {main_jar_quoted} nogui"
+            result_cmd = " ".join(
+                [quoted_java_exe, *quoted_jvm_args, *quoted_mem_args, "-jar", quoted_main_jar, "nogui"]
+            )
         if return_list:
             return cmd_list
         return result_cmd
 
 
-__all__ = ["JvmOptionPolicy", "ServerCommands", "ServerOperations"]
+__all__ = ["JvmOptionPolicy", "ServerCommands"]

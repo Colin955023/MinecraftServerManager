@@ -80,12 +80,7 @@ def is_allowed_version_type(version_type: str) -> bool:
     normalized = normalize_identifier(version_type)
     if normalized in {"", "release", "stable", "beta"}:
         return True
-    if "beta" in normalized:
-        return True
-    for marker in ("alpha", "snapshot", "pre", "prerelease", "rc"):
-        if marker in normalized:
-            return False
-    return False
+    return "beta" in normalized
 
 
 def select_best_mod_version(versions: list[Any]) -> Any | None:

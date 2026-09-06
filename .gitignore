@@ -27,6 +27,8 @@ dist/
 .mypy_cache/
 .ruff_cache/
 .import_linter_cache/
+.coverage
+coverage.xml
 
 # VS Code
 .vscode/*

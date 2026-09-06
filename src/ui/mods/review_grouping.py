@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from itertools import chain
 from typing import Any
 
 from src.utils import (
@@ -59,7 +60,7 @@ def get_online_install_review_group_key(entry: PendingInstallReviewEntry) -> str
         return "blocked"
     if not bool(getattr(entry, "selected", False)):
         return "unselected"
-    if list(getattr(entry, "warning_messages", []) or []):
+    if getattr(entry, "warning_messages", None):
         return "advisory"
     return "selected"
 
@@ -257,8 +258,8 @@ def build_online_review_root_extra_segments(review_entry: PendingInstallReviewEn
         依賴、可選依賴、提醒與阻擋數量的文字片段
     """
     auto_count, optional_count = count_dependency_plan_items(getattr(review_entry, "dependency_plan", None))
-    warning_count = len(dedupe_review_messages(list(getattr(review_entry, "warning_messages", []) or [])))
-    blocking_count = len(dedupe_review_messages(list(getattr(review_entry, "blocking_reasons", []) or [])))
+    warning_count = len(dedupe_review_messages(getattr(review_entry, "warning_messages", None) or ()))
+    blocking_count = len(dedupe_review_messages(getattr(review_entry, "blocking_reasons", None) or ()))
     segments = []
     if auto_count:
         segments.append(f"依賴 {auto_count}")
@@ -329,10 +330,12 @@ class ReviewGroupingMixin:
         required_by_map: dict[tuple[str, str], list[str]],
         node_builder: Callable[[int, Any, str, bool, bool, str], ReviewTaskNode],
     ) -> list[ReviewTaskNode]:
-        dependency_entries = [
-            *((item, False) for item in list(getattr(dependency_plan, "items", []) or [])),
-            *((item, True) for item in list(getattr(dependency_plan, "advisory_items", []) or [])),
-        ]
+        dependency_entries = list(
+            chain(
+                ((item, False) for item in getattr(dependency_plan, "items", []) or []),
+                ((item, True) for item in getattr(dependency_plan, "advisory_items", []) or []),
+            )
+        )
         dependency_entries.sort(
             key=lambda entry: (
                 str(getattr(entry[0], "project_name", "") or "").casefold(),

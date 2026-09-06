@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,7 +16,6 @@ from src.models import (
     OnlineModInfo,
     OnlineModVersion,
     ProviderIdentitySnapshot,
-    ResolvedDependencyReference,
 )
 from src.utils import (
     LOCAL_UPDATE_ERROR_METADATA_UNRESOLVED,
@@ -45,10 +44,9 @@ from src.utils import (
     RECOMMENDATION_SOURCE_PROJECT_FALLBACK,
     RECOMMENDATION_SOURCE_STALE_METADATA,
     HashUtils,
+    InstalledModIndex,
+    build_installed_mod_index,
     clean_api_identifier,
-    collect_installed_mod_identifiers,
-    collect_installed_mod_versions,
-    dependency_maybe_installed_by_filename,
     extract_primary_file_hash,
     get_shared_manager,
     is_supported_modrinth_update_loader,
@@ -61,9 +59,195 @@ from src.utils import (
 from .compatibility_analyzer import analyze_local_mod_file_compatibility
 from .mod_planning_ports import (
     LoaderRulesPort,
-    ModPlanningProviderPort,
 )
+from .mod_provider_port import ModProviderPort
 from .mod_search_constants import logger
+
+_MAX_DEPENDENCY_DEPTH = 20
+_MAX_DEPENDENCY_NODES = 512
+_MAX_DEPENDENCY_EDGES = 2048
+_MAX_DEPENDENCY_PROVIDER_QUERIES = 1024
+_MAX_DEPENDENCY_NAME_IDS_PER_QUERY = 64
+_MAX_DEPENDENCY_VERSIONS_PER_QUERY = 128
+
+
+@dataclass(slots=True)
+class LocalMetadataEnsureSummary:
+    """本地更新規劃所擁有的 metadata 識別摘要"""
+
+    total_scanned: int = 0
+    resolved_by_hash: int = 0
+    resolved_by_cached_project: int = 0
+    resolved_by_lookup: int = 0
+    unresolved: int = 0
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class ResolvedDependencyReference:
+    """ModPlanning 內部解析後的依賴參照"""
+
+    project_id: str = ""
+    project_name: str = ""
+    version_id: str = ""
+    version_name: str = ""
+    file_name: str = ""
+    version: OnlineModVersion | None = None
+    resolution_source: str = "project_id"
+    resolution_confidence: str = "direct"
+
+    @property
+    def label(self) -> str:
+        if self.project_name:
+            base = self.project_name
+        elif self.project_id:
+            base = f"未知模組（project id: {self.project_id}）"
+        elif self.file_name:
+            base = self.file_name
+        elif self.version_id:
+            base = f"未知模組（version id: {self.version_id}）"
+        else:
+            base = "未知依賴"
+        if self.version_name:
+            return f"{base}（需求版本：{self.version_name}）"
+        return base
+
+    @property
+    def compare_project_id(self) -> str:
+        return str(self.project_id or "").strip().lower()
+
+
+class _DependencyBudgetExceeded(RuntimeError):
+    """依賴圖資源額度耗盡時的內部控制例外"""
+
+
+@dataclass(slots=True)
+class _DependencyExpansionBudget:
+    """限制單次依賴圖展開的節點、邊與 provider 查詢數量"""
+
+    nodes: int = 0
+    edges: int = 0
+    provider_queries: int = 0
+
+    def consume_node(self) -> None:
+        """消耗一個依賴節點"""
+        if self.nodes >= _MAX_DEPENDENCY_NODES:
+            raise _DependencyBudgetExceeded("依賴節點數超過安全上限")
+        self.nodes += 1
+
+    def consume_edges(self, amount: int) -> None:
+        """
+        消耗指定數量的依賴邊
+
+        Args:
+            amount: 要消耗的依賴邊數量
+        """
+        normalized_amount = max(0, int(amount))
+        if self.edges + normalized_amount > _MAX_DEPENDENCY_EDGES:
+            raise _DependencyBudgetExceeded("依賴邊數超過安全上限")
+        self.edges += normalized_amount
+
+    def consume_provider_query(self, amount: int = 1) -> None:
+        """
+        消耗指定數量的 provider 查詢額度
+
+        Args:
+            amount: 要消耗的 provider 查詢數量
+        """
+        normalized_amount = max(0, int(amount))
+        if self.provider_queries + normalized_amount > _MAX_DEPENDENCY_PROVIDER_QUERIES:
+            raise _DependencyBudgetExceeded("依賴 provider 查詢數超過安全上限")
+        self.provider_queries += normalized_amount
+
+    @property
+    def remaining_edges(self) -> int:
+        return max(0, _MAX_DEPENDENCY_EDGES - self.edges)
+
+
+class _BudgetedDependencyProvider:
+    """為依賴圖查詢套用單次作業的 provider 額度"""
+
+    def __init__(self, provider: ModProviderPort, budget: _DependencyExpansionBudget) -> None:
+        self._provider = provider
+        self._budget = budget
+
+    def find_projects(
+        self,
+        query: str | Iterable[str],
+        **options: Any,
+    ) -> Any:
+        """
+        轉送專案查詢並納入單次規劃額度
+
+        Args:
+            query: 查詢字串或專案 ID 列表
+            options: 查詢模式、版本、載入器、分類、排序與數量選項
+
+        Returns:
+            查詢結果
+        """
+        if isinstance(query, str):
+            self._budget.consume_provider_query()
+            return self._provider.find_projects(query, **options)
+        bounded_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for project_id in query:
+            if project_id not in seen_ids:
+                seen_ids.add(project_id)
+                bounded_ids.append(project_id)
+            if len(bounded_ids) >= _MAX_DEPENDENCY_NAME_IDS_PER_QUERY:
+                break
+        if not bounded_ids:
+            return {}
+        self._budget.consume_provider_query(len(bounded_ids))
+        return self._provider.find_projects(bounded_ids, **options)
+
+    def resolve_versions(
+        self,
+        project_id: str = "",
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+        *,
+        version_id: str | None = None,
+        recommended: bool = False,
+    ) -> Any:
+        """轉送版本查詢並納入單次規劃額度"""
+        self._budget.consume_provider_query()
+        return self._provider.resolve_versions(
+            project_id,
+            minecraft_version,
+            loader,
+            version_id=version_id,
+            recommended=recommended,
+        )
+
+    def resolve_files(
+        self,
+        hashes: Iterable[str],
+        algorithm: str,
+        *,
+        latest: bool = False,
+        minecraft_version: str | None = None,
+        loader: str | None = None,
+    ) -> dict[str, ModrinthVersionLookupResult]:
+        """轉送檔案雜湊查詢並納入單次規劃額度"""
+        self._budget.consume_provider_query()
+        return self._provider.resolve_files(
+            hashes,
+            algorithm,
+            latest=latest,
+            minecraft_version=minecraft_version,
+            loader=loader,
+        )
+
+
+def _project_name_from_provider(provider: ModProviderPort, project_id: str) -> str | None:
+    """以 provider 的專案查詢結果取得顯示名稱"""
+    outcome = provider.find_projects(project_id, exact=True)
+    if getattr(outcome, "canonical", False):
+        name = str(getattr(outcome, "display_name", "") or "").strip()
+        return name or None
+    return None
 
 
 def _resolve_reference(
@@ -71,7 +255,7 @@ def _resolve_reference(
     dependency_names: dict[str, str],
     *,
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] | None = None,
-    provider: ModPlanningProviderPort,
+    provider: ModProviderPort,
 ) -> ResolvedDependencyReference:
     """補上 provider 查詢能力後解析單筆依賴參照"""
     resolved = ResolvedDependencyReference(
@@ -84,7 +268,7 @@ def _resolve_reference(
     if resolved.version_id:
         cache = version_details_cache if version_details_cache is not None else {}
         if resolved.version_id not in cache:
-            cache[resolved.version_id] = provider.get_version_details(resolved.version_id)
+            cache[resolved.version_id] = provider.resolve_versions(version_id=resolved.version_id)
         version_project_id, version_details = cache.get(resolved.version_id, ("", None))
         if version_details is not None:
             resolved.version = version_details
@@ -96,7 +280,7 @@ def _resolve_reference(
     if resolved.project_id:
         resolved.project_name = dependency_names.get(resolved.compare_project_id, "").strip()
         if not resolved.project_name:
-            fetched_name = provider.fetch_project_name(resolved.project_id)
+            fetched_name = _project_name_from_provider(provider, resolved.project_id)
             if fetched_name:
                 dependency_names[resolved.compare_project_id] = fetched_name
                 resolved.project_name = fetched_name
@@ -140,15 +324,16 @@ def _check_loader_version_rule(
 
 def _analyze_version_data(
     version: OnlineModVersion,
-    project_id: str = "",
+    *,
     project_name: str = "",
+    project_id: str = "",
     minecraft_version: str | None = None,
     loader: str | None = None,
     loader_version: str | None = None,
     installed_mods: list[Any] | None = None,
+    installed_index: InstalledModIndex | None = None,
     dependency_names: dict[str, str] | None = None,
-    *,
-    provider: ModPlanningProviderPort,
+    provider: ModProviderPort,
     loader_rules: LoaderRulesPort,
 ) -> OnlineModCompatibilityReport:
     """根據目前伺服器與已安裝模組分析可用版本的相容性"""
@@ -174,11 +359,10 @@ def _analyze_version_data(
     rule_warnings, rule_notes = _check_loader_version_rule(minecraft_version, loader, loader_version, loader_rules)
     report.warnings.extend(rule_warnings)
     report.notes.extend(rule_notes)
-    installed_project_ids, installed_identifiers = collect_installed_mod_identifiers(installed_mods)
-    installed_versions_by_project = collect_installed_mod_versions(installed_mods)
+    installed_index = installed_index or build_installed_mod_index(installed_mods)
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] = {}
     normalized_project_id = normalize_identifier(project_id)
-    if normalized_project_id and normalized_project_id in installed_project_ids:
+    if normalized_project_id and normalized_project_id in installed_index.project_ids:
         existing_name = project_name or normalized_project_id
         report.already_installed.append(existing_name)
         report.warnings.append(f"目前伺服器已安裝 {existing_name}，系統會以安全策略避免重複安裝")
@@ -196,16 +380,14 @@ def _analyze_version_data(
         dependency_label = resolved_dependency.label
         normalized_label = normalize_identifier(dependency_label)
         is_installed = bool(
-            (dependency_project_id and dependency_project_id in installed_project_ids)
-            or (normalized_label and normalized_label in installed_identifiers)
+            (dependency_project_id and dependency_project_id in installed_index.project_ids)
+            or (normalized_label and normalized_label in installed_index.identifiers)
         )
-        maybe_installed = not is_installed and dependency_maybe_installed_by_filename(
-            resolved_dependency, installed_mods
-        )
+        maybe_installed = not is_installed and installed_index.maybe_installed_by_filename(resolved_dependency)
         required_version = normalize_identifier(
             getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
         )
-        installed_versions = sorted(installed_versions_by_project.get(dependency_project_id, set()))
+        installed_versions = sorted(installed_index.versions_by_project.get(dependency_project_id, ()))
         has_required_version = not (is_installed and required_version) or required_version in installed_versions
         if dependency_type == "required" and is_installed and required_version and (not has_required_version):
             installed_version_text = ", ".join(installed_versions) if installed_versions else "未知版本"
@@ -249,7 +431,7 @@ def _resolve_local_update_recommendation_strategy(
 class ModPlanning:
     """集中提供相容性、依賴安裝與本地更新三個完整 use cases"""
 
-    provider: ModPlanningProviderPort
+    provider: ModProviderPort
     loader_rules: LoaderRulesPort
 
     def analyze_version(
@@ -262,6 +444,7 @@ class ModPlanning:
         loader: str | None = None,
         loader_version: str | None = None,
         installed_mods: list[Any] | None = None,
+        installed_index: InstalledModIndex | None = None,
         dependency_names: dict[str, str] | None = None,
     ) -> OnlineModCompatibilityReport:
         """
@@ -275,6 +458,7 @@ class ModPlanning:
             loader: 目標載入器類型
             loader_version: 目標載入器版本
             installed_mods: 已安裝的本地模組
+            installed_index: 已建立的本地模組索引，可供同一批分析重用
             dependency_names: 已解析的依賴名稱對照
 
         Returns:
@@ -286,7 +470,7 @@ class ModPlanning:
                 for dependency in version.dependencies
                 if isinstance(dependency, dict) and str(dependency.get("project_id", "") or "").strip()
             }
-            dependency_names = self.provider.resolve_project_names(dependency_project_ids)
+            dependency_names = self.provider.find_projects(dependency_project_ids)
         return _analyze_version_data(
             version,
             project_id=project_id,
@@ -295,6 +479,7 @@ class ModPlanning:
             loader=loader,
             loader_version=loader_version,
             installed_mods=installed_mods,
+            installed_index=installed_index,
             dependency_names=dependency_names,
             provider=self.provider,
             loader_rules=self.loader_rules,
@@ -329,27 +514,26 @@ class ModPlanning:
             可交由 Review 與安裝流程使用的依賴計畫
         """
         plan = OnlineDependencyInstallPlan()
-        installed_project_ids, _ = collect_installed_mod_identifiers(installed_mods)
-        installed_versions_by_project = collect_installed_mod_versions(installed_mods)
+        installed_index = build_installed_mod_index(installed_mods)
+        dependency_budget = _DependencyExpansionBudget()
         planning_service = _DependencyPlanningService(
-            provider=self.provider,
+            provider=_BudgetedDependencyProvider(self.provider, dependency_budget),
             loader_rules=self.loader_rules,
             minecraft_version=minecraft_version,
             loader=loader,
             loader_version=loader_version,
-            installed_mods=installed_mods,
+            installed_index=installed_index,
+            budget=dependency_budget,
         )
 
         _expand_dependency_plan(
             root_version=version,
             plan=plan,
             planning_service=planning_service,
-            installed_project_ids=installed_project_ids,
-            installed_versions_by_project=installed_versions_by_project,
-            installed_mods=installed_mods,
+            installed_index=installed_index,
             root_project_id=root_project_id,
             root_project_name=root_project_name,
-            max_depth=max_depth,
+            max_depth=min(max(0, int(max_depth)), _MAX_DEPENDENCY_DEPTH),
             log_debug=logger.debug,
             log_info=logger.info,
         )
@@ -386,8 +570,9 @@ class ModPlanning:
         Returns:
             可交由 Review 與執行流程使用的本地更新計畫
         """
-        plan = LocalModUpdatePlan()
+        plan = LocalModUpdatePlan(metadata_summary=LocalMetadataEnsureSummary())
         installed_mods = list(local_mods or [])
+        installed_index = build_installed_mod_index(installed_mods)
         plan.metadata_summary.total_scanned = len(installed_mods)
         normalized_target_loader = normalize_local_loader(loader)
         supports_online_loader_updates = is_supported_modrinth_update_loader(loader)
@@ -448,13 +633,17 @@ class ModPlanning:
         known_hashes = list(local_hashes_by_filename.values())
         if stage_progress_callback:
             stage_progress_callback(0.35, "正在向 Modrinth 查詢線上模組版本資訊...")
-        current_versions_by_hash = self.provider.get_current_versions_by_hashes(known_hashes, hash_algorithm)
+        current_versions_by_hash = self.provider.resolve_files(known_hashes, hash_algorithm)
         latest_versions_by_hash: dict[str, ModrinthVersionLookupResult] = {}
         if supports_online_loader_updates:
             if stage_progress_callback:
                 stage_progress_callback(0.55, "正在查詢最新相容版本與更新清單...")
-            latest_versions_by_hash = self.provider.get_latest_versions_by_hashes(
-                known_hashes, hash_algorithm, minecraft_version=minecraft_version, loader=loader
+            latest_versions_by_hash = self.provider.resolve_files(
+                known_hashes,
+                hash_algorithm,
+                latest=True,
+                minecraft_version=minecraft_version,
+                loader=loader,
             )
         if stage_progress_callback:
             stage_progress_callback(0.75, "正在比對版本差異與分析模組依賴關係...")
@@ -554,7 +743,7 @@ class ModPlanning:
             project_id = clean_api_identifier(getattr(resolved_project_info, "project_id", ""))
             if project_id:
                 project_ids.append(project_id)
-        project_name_map = self.provider.resolve_project_names(project_ids)
+        project_name_map = self.provider.find_projects(project_ids)
         for local_mod in installed_mods:
             filename_key = str(getattr(local_mod, "filename", "") or "").strip()
             resolved_project_info = resolved_project_info_by_filename.get(filename_key)
@@ -576,7 +765,12 @@ class ModPlanning:
             hash_metadata_resolved = bool(local_hash and (current_match is not None or latest_match is not None))
             used_project_fallback = False
             if recommended_version is None and supports_online_loader_updates and (not hash_metadata_resolved):
-                recommended_version = self.provider.get_recommended_version(project_id, minecraft_version, loader)
+                recommended_version = self.provider.resolve_versions(
+                    project_id,
+                    minecraft_version,
+                    loader,
+                    recommended=True,
+                )
                 used_project_fallback = recommended_version is not None
             recommendation_source, recommendation_confidence = _resolve_local_update_recommendation_strategy(
                 used_project_fallback=used_project_fallback, metadata_resolved=True
@@ -595,6 +789,7 @@ class ModPlanning:
                 loader=loader,
                 loader_version=loader_version,
                 installed_mods=installed_mods,
+                installed_index=installed_index,
             )
             dependency_issues = [
                 *list(report.missing_required_dependencies),
@@ -681,12 +876,13 @@ class ModPlanning:
 class _DependencyPlanningService:
     """集中管理必要依賴規劃"""
 
-    provider: ModPlanningProviderPort
+    provider: ModProviderPort
     loader_rules: LoaderRulesPort
+    installed_index: InstalledModIndex
     minecraft_version: str | None = None
     loader: str | None = None
     loader_version: str | None = None
-    installed_mods: list[Any] | None = None
+    budget: _DependencyExpansionBudget = field(default_factory=_DependencyExpansionBudget)
     version_details_cache: dict[str, tuple[str, OnlineModVersion | None]] = field(default_factory=dict)
 
     def select_dependency_best_version(
@@ -700,7 +896,7 @@ class _DependencyPlanningService:
         if resolved_dependency.version is not None:
             dependency_versions = [resolved_dependency.version]
         else:
-            dependency_versions = self.provider.get_versions(
+            dependency_versions = self.provider.resolve_versions(
                 dependency_api_project_id,
                 self.minecraft_version,
                 self.loader,
@@ -710,7 +906,7 @@ class _DependencyPlanningService:
                     logger.warning(
                         f"以目前條件找不到必要依賴版本，回退為未過濾查詢: {resolved_dependency.label} ({resolved_dependency.compare_project_id})"
                     )
-                dependency_versions = self.provider.get_versions(dependency_api_project_id)
+                dependency_versions = self.provider.resolve_versions(dependency_api_project_id)
         return select_best_mod_version(dependency_versions)
 
     def extract_dependency_download_target(self, best_version: OnlineModVersion) -> tuple[str, str] | None:
@@ -803,9 +999,7 @@ def _expand_dependency_plan(
     root_version: OnlineModVersion,
     plan: OnlineDependencyInstallPlan,
     planning_service: _DependencyPlanningService,
-    installed_project_ids: set[str],
-    installed_versions_by_project: dict[str, set[str]],
-    installed_mods: list[Any] | None,
+    installed_index: InstalledModIndex,
     root_project_id: str = "",
     root_project_name: str = "",
     max_depth: int = 20,
@@ -819,9 +1013,7 @@ def _expand_dependency_plan(
         root_version: 起始模組版本
         plan: 要填入結果的依賴安裝計畫
         planning_service: 規劃 implementation 內部協作者
-        installed_project_ids: 已安裝 project id（normalize 後）
-        installed_versions_by_project: 已安裝版本索引
-        installed_mods: 已安裝模組原始清單
+        installed_index: 已安裝模組的單次建立索引
         root_project_id: 根專案 id
         root_project_name: 根專案名稱
         max_depth: 依賴遞迴深度上限
@@ -863,7 +1055,7 @@ def _expand_dependency_plan(
             minecraft_version=planning_service.minecraft_version,
             loader=planning_service.loader,
             loader_version=planning_service.loader_version,
-            installed_mods=planning_service.installed_mods,
+            installed_index=planning_service.installed_index,
             dependency_names=dependency_names,
             provider=planning_service.provider,
             loader_rules=planning_service.loader_rules,
@@ -875,19 +1067,29 @@ def _expand_dependency_plan(
         depth: int,
         active_stack: set[str],
     ) -> None:
+        planning_service.budget.consume_node()
         if depth > max_depth:
             plan.unresolved_required.append(f"{parent_name} 的依賴深度超過上限，系統已先安全略過")
             return
 
+        raw_dependencies = current_version.dependencies
+        if not isinstance(raw_dependencies, list):
+            return
+        bounded_dependency_count = min(len(raw_dependencies), planning_service.budget.remaining_edges)
+        dependency_entries = raw_dependencies[:bounded_dependency_count]
+        planning_service.budget.consume_edges(len(dependency_entries))
+        if len(dependency_entries) < len(raw_dependencies):
+            plan.unresolved_required.append(f"{parent_name} 的依賴邊超過安全上限，系統已停止部分展開")
+
         required_dependencies = [
             dependency
-            for dependency in current_version.dependencies
+            for dependency in dependency_entries
             if isinstance(dependency, dict)
             and normalize_identifier(str(dependency.get("dependency_type", "required") or "required")) == "required"
         ]
         optional_dependencies = [
             dependency
-            for dependency in current_version.dependencies
+            for dependency in dependency_entries
             if isinstance(dependency, dict)
             and normalize_identifier(str(dependency.get("dependency_type", "") or "")) == "optional"
         ]
@@ -899,7 +1101,7 @@ def _expand_dependency_plan(
             for dependency in [*required_dependencies, *optional_dependencies]
             if str(dependency.get("project_id", "") or "").strip()
         }
-        dependency_names = planning_service.provider.resolve_project_names(dependency_project_ids)
+        dependency_names = planning_service.provider.find_projects(dependency_project_ids)
 
         for dependency in required_dependencies:
             resolved_dependency = _resolve_planned_dependency(dependency, dependency_names)
@@ -914,11 +1116,11 @@ def _expand_dependency_plan(
             if dependency_project_id in active_stack:
                 plan.notes.append(f"略過循環依賴：{dependency_label}")
                 continue
-            if dependency_project_id in installed_project_ids:
+            if dependency_project_id in installed_index.project_ids:
                 required_version = normalize_identifier(
                     getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
                 )
-                installed_versions = sorted(installed_versions_by_project.get(dependency_project_id, set()))
+                installed_versions = sorted(installed_index.versions_by_project.get(dependency_project_id, ()))
                 if required_version and required_version not in installed_versions:
                     installed_version_text = ", ".join(installed_versions) if installed_versions else "未知版本"
                     plan.unresolved_required.append(
@@ -928,7 +1130,7 @@ def _expand_dependency_plan(
                 _log_debug(f"必要依賴已存在，略過自動安裝: {dependency_label} ({dependency_project_id})")
                 continue
 
-            maybe_installed = dependency_maybe_installed_by_filename(resolved_dependency, installed_mods)
+            maybe_installed = installed_index.maybe_installed_by_filename(resolved_dependency)
             if dependency_project_id in planned_project_ids:
                 _log_debug(f"必要依賴已加入安裝計畫，略過重複項目: {dependency_label} ({dependency_project_id})")
                 continue
@@ -997,12 +1199,12 @@ def _expand_dependency_plan(
                 continue
             if dependency_project_id == normalized_root_project_id:
                 continue
-            if dependency_project_id in installed_project_ids:
+            if dependency_project_id in installed_index.project_ids:
                 continue
             if dependency_project_id in planned_project_ids:
                 continue
 
-            maybe_installed = dependency_maybe_installed_by_filename(resolved_dependency, installed_mods)
+            maybe_installed = installed_index.maybe_installed_by_filename(resolved_dependency)
             best_version = planning_service.select_dependency_best_version(resolved_dependency, False)
             if best_version is None:
                 plan.notes.append(f"可選依賴目前查無可用版本：{dependency_label}")
@@ -1046,7 +1248,11 @@ def _expand_dependency_plan(
             )
 
     initial_stack: set[str] = {normalized_root_project_id} if normalized_root_project_id else set()
-    walk_dependencies(root_version, root_project_name or root_project_id or "根模組", 0, initial_stack)
+    try:
+        walk_dependencies(root_version, root_project_name or root_project_id or "根模組", 0, initial_stack)
+    except _DependencyBudgetExceeded as e:
+        plan.unresolved_required.append(f"依賴圖已達安全資源上限，系統已停止展開：{e}")
+        logger.warning(f"依賴圖展開已停止：{e}")
 
 
 __all__ = ["ModPlanning"]

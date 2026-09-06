@@ -51,6 +51,7 @@ __all__ = [
     "ImportCancelledError",
     "JavaInstallError",
     "NetworkSecurityError",
+    "OperationCancelledError",
     "ProviderIdentityPersistenceError",
     "ResponseTooLargeError",
 ]

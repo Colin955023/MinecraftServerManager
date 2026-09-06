@@ -3,9 +3,10 @@
 
 強制規則：
 1. `src/` 跨 package 匯入只能使用頂層 facade；同 feature implementation 只能用單層相對匯入
-2. 禁止在 `src/<頂層>/<子資料夾>/` 建立 `__init__.py`
-3. `src/{core,models,ui,utils}/__init__.py` 的 lazy export 目標必須真實存在
-4. 每個 lazy export 必須在 `src/` runtime code 中有實際 consumer
+2. 強制 `ui -> core -> models -> utils`，禁止底層反向匯入
+3. 禁止在 `src/<頂層>/<子資料夾>/` 建立 `__init__.py`
+4. `src/{core,models,ui,utils}/__init__.py` 的 lazy export 目標必須真實存在
+5. 每個 lazy export 必須在 `src/` runtime code 中有實際 consumer
 
 只掃描 `src/`；測試可直接匯入實作模組，以驗證 `src/` 的真實行為
 
@@ -25,28 +26,12 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 TOP_LEVEL = frozenset({"core", "models", "ui", "utils"})
 FACADE_MODULES = tuple(f"src.{name}" for name in sorted(TOP_LEVEL))
-
-
-def _normalize_except_clauses(source: str) -> str:
-    transformed_lines: list[str] = []
-    for line in source.splitlines(keepends=True):
-        stripped = line.strip()
-        if stripped.startswith("except ") and stripped.endswith(":") and "," in stripped and "(" not in stripped:
-            indent = line[: len(line) - len(line.lstrip())]
-            ending = line[len(line.rstrip()) :]
-            expr = stripped.removeprefix("except ").removesuffix(":").strip()
-            transformed_lines.append(f"{indent}except ({expr}):{ending}")
-        else:
-            transformed_lines.append(line)
-    return "".join(transformed_lines)
+LAYER_ORDER = {"utils": 0, "models": 1, "core": 2, "ui": 3}
 
 
 def _parse_source(path: pathlib.Path) -> ast.Module:
     source = path.read_text(encoding="utf-8")
-    try:
-        return ast.parse(source, filename=str(path))
-    except SyntaxError:
-        return ast.parse(_normalize_except_clauses(source), filename=str(path))
+    return ast.parse(source, filename=str(path))
 
 
 def _python_files() -> list[pathlib.Path]:
@@ -80,6 +65,18 @@ def _check_import_file(path: pathlib.Path) -> list[str]:
             if not module.startswith("src."):
                 continue
             mod_parts = module.split(".")
+            source_layer = parts[0] if parts and parts[0] in TOP_LEVEL else None
+            target_layer = mod_parts[1] if len(mod_parts) > 1 and mod_parts[1] in TOP_LEVEL else None
+            if (
+                source_layer is not None
+                and target_layer is not None
+                and source_layer != target_layer
+                and LAYER_ORDER[source_layer] < LAYER_ORDER[target_layer]
+            ):
+                violations.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno}：反向依賴 `{source_layer} -> {target_layer}`，"
+                    "允許方向為 `ui -> core -> models -> utils`"
+                )
             if len(mod_parts) > 2 and mod_parts[1] in TOP_LEVEL:
                 violations.append(
                     f"{path.relative_to(REPO_ROOT)}:{node.lineno}：深層匯入 `{module}`，"
@@ -232,7 +229,7 @@ def main() -> int:
     if violations:
         logging.error("❌ 匯入／公開 facade 邊界檢查失敗：\n" + "\n".join(violations))
         return 1
-    logging.info("✅ 匯入／公開 facade 邊界檢查通過")
+    logging.info("✅ 匯入／公開 facade 邊界檢查通過（掃描 %d 個 Python 檔案）", len(src_files))
     return 0
 
 

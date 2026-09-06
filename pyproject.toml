@@ -12,7 +12,6 @@ dependencies = [
   "httpx[http2]>=0.28.1",
   "defusedxml>=0.7.1",
   "packaging>=26.3",
-  "loguru>=0.7.3",
   "orjson>=3.12.0",
   "psutil>=7.2.2"
 ]
@@ -25,13 +24,13 @@ build = [
 
 test = [
   "pytest>=9.1.1",
+  "pytest-cov>=7.0.0",
 ]
 
 lint = [
   "ruff>=0.16.5",
   "vulture>=2.16",
   "pylint>=4.0.7",
-  "import-linter>=2.13",
 ]
 
 typecheck = [
@@ -45,19 +44,6 @@ security = [
   "detect-secrets>=1.5.0",
 ]
 
-[tool.importlinter]
-root_package = "src"
-
-[[tool.importlinter.contracts]]
-name = "分層依賴方向（右方為底層，禁止反向匯入）"
-type = "layers"
-layers = [
-    "src.ui",
-    "src.core",
-    "src.models",
-    "src.utils",
-]
-
 [tool.mypy]
 files = ["src", "tests", "scripts", "report"]
 python_version = "3.14"
@@ -68,7 +54,7 @@ show_error_codes = true
 platform = "win32"
 
 [[tool.mypy.overrides]]
-module = ["defusedxml", "qfluentwidgets.*"]
+module = ["defusedxml", "defusedxml.*", "qfluentwidgets.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
@@ -113,7 +99,6 @@ paths = ["src", "tests", "scripts", "report"]
 min_confidence = 60
 sort_by_size = true
 ignore_names = [
-  "APP_DESCRIPTION",
   "adaptive_sizing",
   "auto_center",
   "dwFlags",
@@ -135,7 +120,13 @@ required-version = ">=0.12.5"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-  "smoke: minimal smoke coverage for core flows",
-  "integration: focused integration coverage for key UI/business flows",
-]
+tmp_path_retention_policy = "none"
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 55
+show_missing = true
+skip_covered = true

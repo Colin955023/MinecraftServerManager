@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from itertools import chain
 from typing import Any
 
 from .review_state import ReviewTaskNode
@@ -48,10 +49,12 @@ def get_sorted_dependency_review_items(dependency_plan: Any) -> list[Any]:
     Returns:
         已排序的依賴項目清單
     """
-    items = [
-        *list(getattr(dependency_plan, "items", []) or []),
-        *list(getattr(dependency_plan, "advisory_items", []) or []),
-    ]
+    items = list(
+        chain(
+            getattr(dependency_plan, "items", []) or [],
+            getattr(dependency_plan, "advisory_items", []) or [],
+        )
+    )
     items.sort(
         key=lambda item: (
             str(getattr(item, "project_name", "") or "").casefold(),
@@ -76,10 +79,10 @@ def get_selected_dependency_install_items(
     """
     return [
         item
-        for item in [
-            *list(getattr(dependency_plan, "items", []) or []),
-            *list(getattr(dependency_plan, "advisory_items", []) or []),
-        ]
+        for item in chain(
+            getattr(dependency_plan, "items", []) or [],
+            getattr(dependency_plan, "advisory_items", []) or [],
+        )
         if build_dependency_review_key(item) in selected_dependency_keys
     ]
 
@@ -121,9 +124,9 @@ def count_dependency_plan_items(dependency_plan: Any) -> tuple[int, int]:
     Returns:
         必要依賴數量與被標記為可選的依賴數量
     """
-    items = len(list(getattr(dependency_plan, "items", []) or []))
+    items = len(getattr(dependency_plan, "items", None) or ())
     optional = sum(
-        1 for item in list(getattr(dependency_plan, "advisory_items", []) or []) if is_optional_dependency_item(item)
+        1 for item in (getattr(dependency_plan, "advisory_items", None) or ()) if is_optional_dependency_item(item)
     )
     return items, optional
 
@@ -266,15 +269,15 @@ def append_selected_dependency_simulations(
         selected_dependency_keys: Review session 持有的 stable selected keys
         simulation_item_builder: 建立模擬模組物件的函式
     """
-    for dependency_item in get_selected_dependency_install_items(dependency_plan, selected_dependency_keys):
-        simulated_installed_mods.append(
-            simulation_item_builder(
-                getattr(dependency_item, "project_id", ""),
-                getattr(dependency_item, "project_name", ""),
-                getattr(dependency_item, "filename", ""),
-                getattr(dependency_item, "version_name", ""),
-            )
+    simulated_installed_mods.extend(
+        simulation_item_builder(
+            getattr(dependency_item, "project_id", ""),
+            getattr(dependency_item, "project_name", ""),
+            getattr(dependency_item, "filename", ""),
+            getattr(dependency_item, "version_name", ""),
         )
+        for dependency_item in get_selected_dependency_install_items(dependency_plan, selected_dependency_keys)
+    )
 
 
 __all__ = [

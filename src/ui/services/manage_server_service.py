@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,16 +14,16 @@ from typing import Any
 
 from src.core import ServerInspector, ServerRuntime
 from src.models import ServerConfig, ServerInspectionIntent
-from src.utils import format_bytes, get_logger
+from src.utils import format_bytes, get_logger, walk_bounded_tree
 
 logger = get_logger().bind(component="ManageServerService")
+_SERVER_SIZE_CACHE_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
 class ServerRefreshPayload:
     """背景刷新完成後交給 UI callback 的列表資料"""
 
-    signature: tuple[tuple[str, tuple[Any, ...]], ...]
     server_order: list[str]
     server_rows: dict[str, tuple[Any, ...]]
 
@@ -66,12 +67,14 @@ class ManageServerService:
         self._last_accepted_projection: ServerProjection | None = None
         self._current_generation: int = 0
         self._generation_lock = threading.Lock()
+        self._server_size_cache: dict[str, tuple[float, str]] = {}
 
     def clear_cache(self) -> None:
         """清除最後接受的伺服器列表投影"""
         self._last_accepted_projection = None
+        self._server_size_cache.clear()
 
-    def begin_refresh(self, *, reload_config: bool = False) -> int:
+    def begin_refresh(self) -> int:
         """
         開始一輪新的刷新，回傳單調遞增 generation
 
@@ -83,22 +86,16 @@ class ManageServerService:
         """
         with self._generation_lock:
             self._current_generation += 1
-            generation = self._current_generation
-        if reload_config:
-            self.server_crud.load_servers_config()
-        return generation
+        return self._current_generation
 
-    def collect_facts(self, _generation: int = 0) -> ServerRefreshPayload:
+    def collect_facts(self) -> ServerRefreshPayload:
         """
         在背景執行：蒐集所有伺服器事實，回傳不可變 payload
-
-        Args:
-            _generation: 這輪刷新所屬的generation，僅供背景執行使用，UI callback 不應依賴此值
 
         Returns:
             不可變的 ServerRefreshPayload
         """
-        if not self.server_crud.servers:
+        if not self.server_crud.snapshot():
             return self._build_server_refresh_payload([])
         return self._build_server_refresh_payload(self._build_server_display_data())
 
@@ -173,21 +170,33 @@ class ManageServerService:
 
     @staticmethod
     def _get_server_size(path: str) -> str:
-        """計算伺服器目錄下所有檔案的總大小（包含 world 以外的內容）。"""
+        """計算伺服器目錄下所有檔案的總大小"""
         total_bytes = 0
         try:
             server_path = Path(path)
             if not server_path.is_dir():
                 return format_bytes(0)
-            for file_path in server_path.rglob("*"):
-                try:
-                    if file_path.is_file():
-                        total_bytes += max(0, file_path.stat().st_size)
-                except (OSError, ValueError) as e:
-                    logger.warning(f"讀取伺服器檔案大小失敗，略過 {file_path}: {e}")
+            for root_path, _dirs, files in walk_bounded_tree(server_path):
+                for file_name in files:
+                    file_path = root_path / file_name
+                    try:
+                        metadata = file_path.stat(follow_symlinks=False)
+                        total_bytes += max(0, metadata.st_size)
+                    except OSError, ValueError:
+                        continue
         except (OSError, ValueError) as e:
             logger.warning(f"掃描伺服器大小失敗 {path}: {e}")
         return format_bytes(total_bytes)
+
+    def _get_cached_server_size(self, path: str) -> str:
+        """在短時間內重用伺服器大小，避免自動刷新反覆掃描 SSD"""
+        now = time.monotonic()
+        cached = self._server_size_cache.get(path)
+        if cached is not None and now - cached[0] < _SERVER_SIZE_CACHE_SECONDS:
+            return cached[1]
+        size = self._get_server_size(path)
+        self._server_size_cache[path] = (now, size)
+        return size
 
     @classmethod
     def _build_server_display_row(
@@ -211,36 +220,22 @@ class ManageServerService:
             display_path,
         ]
 
-    @staticmethod
-    def _make_server_data_signature(server_data: list[list[Any]]) -> tuple[tuple[str, tuple[Any, ...]], ...]:
-        """建立可比較簽章，避免每次都重建整個列表"""
-        signature: list[tuple[str, tuple[Any, ...]]] = []
-        for row in server_data:
-            if not row:
-                continue
-            name = str(row[0])
-            signature.append((name, tuple(row)))
-        return tuple(signature)
-
     @classmethod
-    def _build_server_tree_payload(cls, server_data: list[list[Any]]) -> tuple[list[str], dict[str, tuple[Any, ...]]]:
-        """將原始 server_data 轉成 Treeview 套用所需的順序與列資料"""
+    def _build_server_refresh_payload(cls, server_data: list[list[Any]]) -> ServerRefreshPayload:
+        """單次巡覽建立刷新流程使用的順序與列資料"""
         server_order: list[str] = []
         server_rows: dict[str, tuple[Any, ...]] = {}
         for row in server_data:
             if not row:
                 continue
             name = str(row[0])
+            row_tuple = tuple(row)
             server_order.append(name)
-            server_rows[name] = tuple(row)
-        return (server_order, server_rows)
-
-    @classmethod
-    def _build_server_refresh_payload(cls, server_data: list[list[Any]]) -> ServerRefreshPayload:
-        """建立刷新流程使用的簽章、順序與列資料"""
-        signature = cls._make_server_data_signature(server_data)
-        server_order, server_rows = cls._build_server_tree_payload(server_data)
-        return ServerRefreshPayload(signature=signature, server_order=server_order, server_rows=server_rows)
+            server_rows[name] = row_tuple
+        return ServerRefreshPayload(
+            server_order=server_order,
+            server_rows=server_rows,
+        )
 
     def get_backup_status(self, server_name: str) -> str:
         """
@@ -252,7 +247,7 @@ class ManageServerService:
         Returns:
             備份狀態文字
         """
-        if not server_name or server_name not in self.server_crud.servers:
+        if not server_name or server_name not in self.server_crud.snapshot():
             return "❓ 無法檢查"
         try:
             backups = self.server_backup.list_backups(server_name)
@@ -327,9 +322,9 @@ class ManageServerService:
     def _build_server_display_data(self) -> list[list[Any]]:
         """從目前狀態建立顯示用列表資料"""
         server_data: list[list[Any]] = []
-        for name, config in self.server_crud.servers.items():
+        for name, config in self.server_crud.snapshot().items():
             status = self.get_server_status_text(name, config)
-            server_size = self._get_server_size(config.path)
+            server_size = self._get_cached_server_size(config.path)
             backup_status = self.get_backup_status(name)
             display_path = self._format_server_path_for_display(config.path)
             server_data.append(

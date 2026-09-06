@@ -7,11 +7,12 @@ import shutil
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from src.core import LoaderManager, ServerCRUD, ServerInspector, ServerPropertiesStore
 from src.models import (
+    ProgressEvent,
     ServerConfig,
     ServerCreationPlan,
     ServerCreationResult,
@@ -19,20 +20,85 @@ from src.models import (
 )
 from src.utils import (
     CreationCancelledError,
-    PropertiesSchema,
+    HashUtils,
     ServerCommands,
     SystemUtils,
     atomic_write_json,
     delete_within,
     get_logger,
     is_path_within,
+    list_bounded_directory,
+    validate_server_name,
 )
+
+from .server_crud import ServerConfigChangeSet, ServerCRUD
+from .server_inspector import ServerInspector
+from .server_properties import ServerPropertiesStore
 
 logger = get_logger().bind(component="ServerCreation")
 
-ProgressCallback = Callable[[int, str], None]
+ProgressCallback = Callable[[ProgressEvent], None]
 CancelCheck = Callable[[], bool]
-_CreationCancelled = CreationCancelledError
+
+_CREATION_PROGRESS_RANGES: dict[str, tuple[float, float]] = {
+    "server_download": (10.0, 65.0),
+    "vanilla_download": (10.0, 40.0),
+    "installer_download": (40.0, 65.0),
+    "installer": (65.0, 90.0),
+}
+_CREATION_PROGRESS_ANCHORS: dict[str, float] = {
+    "vanilla_prepare": 10.0,
+    "server_download": 10.0,
+    "vanilla_download": 10.0,
+    "installer_download": 40.0,
+    "installer": 65.0,
+    "installer_cleanup": 90.0,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ServerCreationConfirmation:
+    """建立計畫提供給 UI 的精確、不可變確認投影"""
+
+    name: str
+    minecraft_version: str
+    loader_type: str
+    loader_version: str
+    memory_max_mb: int
+    memory_min_mb: int | None
+    warnings: tuple[str, ...]
+    java_executable: str
+    jvm_args: tuple[str, ...]
+    launch_target: str
+    command: tuple[str, ...]
+
+
+def _has_verified_installer(artifact: Any) -> bool:
+    return HashUtils.is_valid_expected_hash(
+        getattr(artifact, "expected_hash", ""),
+        getattr(artifact, "hash_algorithm", ""),
+    )
+
+
+class ServerInstallerPort(Protocol):
+    """
+    伺服器建立流程所需的載入器安裝與成品解析介面
+    """
+
+    def resolve_installer_artifact(self, loader_type: str, minecraft_version: str, loader_version: str) -> Any: ...
+
+    def download_server_jar_with_progress(
+        self,
+        loader_type: str,
+        minecraft_version: str,
+        loader_version: str,
+        target_path: str,
+        progress_callback: ProgressCallback | None = None,
+        cancel_check: CancelCheck | None = None,
+        user_java_path: str | None = None,
+        *,
+        installer_artifact: Any | None = None,
+    ) -> bool: ...
 
 
 class CreateServerJourney:
@@ -44,7 +110,7 @@ class CreateServerJourney:
     def __init__(
         self,
         server_crud: ServerCRUD,
-        loader_manager: LoaderManager,
+        loader_manager: ServerInstallerPort,
         server_properties: ServerPropertiesStore | None = None,
     ) -> None:
         self.server_crud = server_crud
@@ -70,14 +136,13 @@ class CreateServerJourney:
         Returns:
             包含 staging、artifact 與警告資訊的不可變計畫
         """
-        name = str(config.name or "")
-        if not name or name != name.strip():
-            raise ValueError("伺服器名稱不可為空白或包含前後空白")
+        name = validate_server_name(config.name)
         root = self._root
         final_path = (root / name).resolve(strict=False)
         if final_path.parent != root or not is_path_within(root, final_path, strict=False):
             raise ValueError("無效的伺服器名稱（路徑穿越偵測）")
-        if name in self.server_crud.servers or final_path.exists():
+        registry_snapshot = self.server_crud.snapshot()
+        if name in registry_snapshot or final_path.exists():
             raise FileExistsError("同名伺服器已存在")
 
         loader_type = str(config.loader_type or "").strip().lower()
@@ -103,24 +168,48 @@ class CreateServerJourney:
             minecraft_version,
             loader_version,
         )
+        if loader_type != "vanilla" and not _has_verified_installer(artifact):
+            raise ValueError(f"{loader_type} installer 缺少可驗證的 SHA-1、SHA-256 或 SHA-512 摘要")
         warnings: list[ServerCreationWarning] = []
-        if artifact is not None and not artifact.expected_hash:
-            warnings.append(
-                ServerCreationWarning(
-                    "installer_checksum_missing",
-                    f"{loader_type} installer 找不到可用的 SHA-1 / SHA-256 / SHA-512 驗證資訊",
-                )
-            )
         total_memory_mb = SystemUtils.get_total_memory_mb()
         if total_memory_mb > 0 and int(config.memory_max_mb) >= total_memory_mb:
             warnings.append(
                 ServerCreationWarning(
-                    "memory_exceeds_system",
-                    f"最大記憶體 {int(config.memory_max_mb)} MB 已達或超過系統總記憶體 {total_memory_mb} MB",
+                    _code="memory_exceeds_system",
+                    message=f"最大記憶體 {int(config.memory_max_mb)} MB 已達或超過系統總記憶體 {total_memory_mb} MB",
                 )
             )
         transaction_id = uuid.uuid4().hex
-        resolved_properties = PropertiesSchema.default_values()
+        projection_config = copy.deepcopy(config)
+        projection_config.name = name
+        projection_config.minecraft_version = minecraft_version
+        projection_config.loader_type = loader_type
+        projection_config.loader_version = loader_version
+        projection_config.memory_max_mb = int(config.memory_max_mb)
+        projection_config.memory_min_mb = int(config.memory_min_mb) if config.memory_min_mb is not None else None
+        projection_config.path = str(final_path)
+        launch_target = ServerCommands.expected_main_target(loader_type, minecraft_version, loader_version)
+        command_value = ServerCommands.build_java_command(
+            projection_config,
+            return_list=True,
+            launch_target=launch_target,
+        )
+        command = [str(value) for value in command_value] if isinstance(command_value, list) else []
+        if normalized_java_path and command:
+            command[0] = normalized_java_path
+        confirmation = ServerCreationConfirmation(
+            name=name,
+            minecraft_version=minecraft_version,
+            loader_type=loader_type,
+            loader_version=loader_version,
+            memory_max_mb=int(config.memory_max_mb),
+            memory_min_mb=int(config.memory_min_mb) if config.memory_min_mb is not None else None,
+            warnings=tuple(warning.message for warning in warnings),
+            java_executable=command[0] if command else (normalized_java_path or ""),
+            jvm_args=tuple(command[1:]),
+            launch_target=launch_target,
+            command=tuple(command),
+        )
         return ServerCreationPlan(
             transaction_id=transaction_id,
             name=name,
@@ -130,19 +219,20 @@ class CreateServerJourney:
             memory_max_mb=int(config.memory_max_mb),
             memory_min_mb=int(config.memory_min_mb) if config.memory_min_mb is not None else None,
             jvm_args=tuple(str(arg) for arg in config.jvm_args),
-            properties=tuple(sorted((str(key), str(value)) for key, value in resolved_properties.items())),
+            properties=(),
             final_path=final_path,
             staging_path=root / f".msm-create-{transaction_id}.staging",
             user_java_path=normalized_java_path,
             installer_artifact=artifact,
             warnings=tuple(warnings),
+            registry_revision=registry_snapshot.revision,
+            confirmation=confirmation,
         )
 
     def execute(
         self,
         plan: ServerCreationPlan,
         *,
-        allow_unverified_installer: bool = False,
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
     ) -> ServerCreationResult:
@@ -151,15 +241,14 @@ class CreateServerJourney:
 
         Args:
             plan: 已完成驗證的建立計畫
-            allow_unverified_installer: 是否接受缺少 checksum 的安裝器
             progress_callback: 接收進度百分比與文字的回呼
             cancel_check: 回傳是否要求取消的檢查函式
 
         Returns:
             明確區分完成、取消、失敗與需確認的結果
         """
-        if plan.requires_unverified_installer_confirmation and not allow_unverified_installer:
-            return ServerCreationResult("confirmation_required", "Loader installer 缺少 checksum，尚未取得允許")
+        if plan.loader_type != "vanilla" and not _has_verified_installer(plan.installer_artifact):
+            return ServerCreationResult("failed", "Loader installer 缺少可驗證的完整性摘要")
         cancel_check = cancel_check or (lambda: False)
         with self._lock:
             return self._execute_locked(plan, progress_callback, cancel_check)
@@ -172,8 +261,8 @@ class CreateServerJourney:
     ) -> ServerCreationResult:
         config = plan.build_config(plan.staging_path)
         moved_to_final = False
-        registered = False
-        previous_config = self.server_crud.servers.get(plan.name)
+        user_facing_failure = ""
+        registry_snapshot = self.server_crud.snapshot()
         try:
             phase = "validate"
             self._check_disk_space()
@@ -182,37 +271,51 @@ class CreateServerJourney:
                 raise RuntimeError("伺服器根目錄已變更，建立計畫已失效")
             if plan.final_path.parent != self._root or plan.staging_path.parent != self._root:
                 raise ValueError("建立計畫路徑不屬於目前伺服器根目錄")
-            if plan.final_path.exists() or plan.name in self.server_crud.servers:
+            if plan.registry_revision and registry_snapshot.revision != plan.registry_revision:
+                raise RuntimeError("伺服器設定已變更，建立計畫已失效")
+            if plan.final_path.exists() or plan.name in registry_snapshot:
                 raise FileExistsError("同名伺服器已存在，建立計畫已失效")
             if plan.staging_path.exists():
                 raise FileExistsError("交易 staging 路徑已存在")
 
             phase = "stage"
-            self._emit(progress_callback, 5, "正在準備交易暫存目錄...")
+            self._emit(progress_callback, ProgressEvent("stage", "正在準備交易暫存目錄...", overall_percent=2))
             plan.staging_path.mkdir()
             self._write_marker(plan.staging_path, plan, "staging")
             self.server_crud.prepare_server_files(config)
             initial_properties = dict(plan.properties)
             initial_properties["motd"] = f"Minecraft 伺服器 - {config.name}"
-            self.server_properties.write_initial(plan.staging_path, initial_properties)
+            self.server_properties.initialize(plan.staging_path, initial_properties)
             self._check_cancel(cancel_check)
 
             phase = "artifact"
-            current_progress = 15
-            self._emit(progress_callback, current_progress, "正在下載並驗證伺服器檔案...")
+            last_loader_message = ""
+            last_overall_progress = 8.0
+            self._emit(
+                progress_callback,
+                ProgressEvent("artifact", "正在下載並驗證伺服器檔案...", overall_percent=last_overall_progress),
+            )
 
-            def loader_progress(*args: Any) -> None:
-                nonlocal current_progress
-                if len(args) == 1:
-                    msg = str(args[0])
-                    if "執行" in msg or "安裝" in msg:
-                        current_progress = max(current_progress, 75)
-                    self._emit(progress_callback, current_progress, msg)
-                elif len(args) == 2 and isinstance(args[0], (int, float)) and isinstance(args[1], (int, float)):
-                    total = float(args[1])
-                    percent = 15 if total <= 0 else int(15 + min(1.0, float(args[0]) / total) * 58)
-                    current_progress = max(current_progress, percent)
-                    self._emit(progress_callback, current_progress, "正在下載伺服器檔案...")
+            def loader_progress(event: ProgressEvent) -> None:
+                nonlocal last_loader_message, last_overall_progress
+                last_loader_message = event.message.strip()
+                phase_percent = event.phase_percent
+                if phase_percent is not None:
+                    start, end = _CREATION_PROGRESS_RANGES.get(event.phase, (last_overall_progress, 90.0))
+                    overall = start + phase_percent / 100.0 * max(0.0, end - start)
+                else:
+                    overall = _CREATION_PROGRESS_ANCHORS.get(event.phase, last_overall_progress)
+                last_overall_progress = max(last_overall_progress, min(90.0, overall))
+                self._emit(
+                    progress_callback,
+                    ProgressEvent(
+                        event.phase,
+                        event.message,
+                        event.completed_units,
+                        event.total_units,
+                        last_overall_progress,
+                    ),
+                )
 
             download_result = self.loader_manager.download_server_jar_with_progress(
                 plan.loader_type,
@@ -226,14 +329,20 @@ class CreateServerJourney:
             )
             self._check_cancel(cancel_check)
             if not download_result:
-                raise RuntimeError("下載、checksum 驗證或 Loader installer 執行失敗")
+                user_facing_failure = last_loader_message or "下載、checksum 驗證或 Loader installer 執行失敗"
+                raise RuntimeError(user_facing_failure)
 
             phase = "launch_script"
-            current_progress = max(current_progress, 82)
-            self._emit(progress_callback, current_progress, "正在建立啟動腳本...")
+            self._emit(
+                progress_callback,
+                ProgressEvent("launch_script", "正在建立啟動腳本...", overall_percent=92),
+            )
             staged_config = copy.deepcopy(config)
             staged_config.path = str(plan.staging_path)
             detected_target = ServerInspector.find_main_jar(plan.staging_path, config.loader_type, staged_config)
+            confirmation = plan.confirmation
+            if confirmation is not None and detected_target != confirmation.launch_target:
+                raise RuntimeError(f"安裝後啟動目標與確認計畫不一致：{detected_target} != {confirmation.launch_target}")
             if not self.server_crud.create_launch_script(staged_config, launch_target=detected_target):
                 raise RuntimeError("建立啟動腳本失敗")
             ServerCommands.cleanup_redundant_startup_scripts(plan.staging_path)
@@ -242,8 +351,7 @@ class CreateServerJourney:
             self._write_marker(plan.staging_path, plan, "prepared")
 
             phase = "commit"
-            current_progress = max(current_progress, 92)
-            self._emit(progress_callback, current_progress, "正在提交伺服器實例...")
+            self._emit(progress_callback, ProgressEvent("commit", "正在提交伺服器實例...", overall_percent=96))
             plan.staging_path.replace(plan.final_path)
             moved_to_final = True
             config.path = str(plan.final_path)
@@ -251,19 +359,21 @@ class CreateServerJourney:
             if (plan.final_path / "user_jvm_args.txt").is_file():
                 ServerCommands.update_forge_user_jvm_args(plan.final_path, config)
             self._write_marker(plan.final_path, plan, "moved")
-            self.server_crud.servers[plan.name] = config
-            registered = True
-            if not self.server_crud.write_servers_config():
-                raise RuntimeError("儲存 servers_config.json 失敗")
+            commit_result = self.server_crud.commit(
+                ServerConfigChangeSet(upserts=(config,)),
+                expected_revision=registry_snapshot.revision,
+            )
+            if not commit_result.success:
+                raise RuntimeError(commit_result.message or "儲存 servers_config.json 失敗")
             marker = plan.final_path / self._MARKER_NAME
             try:
                 marker.unlink(missing_ok=True)
             except OSError as e:
                 logger.warning(f"已提交實例但無法移除 transaction marker: {e}")
-            self._emit(progress_callback, 100, "伺服器建立完成！")
+            self._emit(progress_callback, ProgressEvent("completed", "伺服器建立完成！", 1, 1, 100))
             return ServerCreationResult("completed", f"伺服器 {plan.name} 已建立", config=config)
-        except _CreationCancelled:
-            cleanup_complete = self._compensate(plan, moved_to_final, registered, previous_config)
+        except CreationCancelledError:
+            cleanup_complete = self._compensate(plan, moved_to_final)
             diagnostic_id = self._record_diagnostic(plan, phase, "cancelled")
             return ServerCreationResult(
                 "cancelled",
@@ -272,12 +382,15 @@ class CreateServerJourney:
                 cleanup_complete=cleanup_complete,
             )
         except Exception as e:
-            cleanup_complete = self._compensate(plan, moved_to_final, registered, previous_config)
+            cleanup_complete = self._compensate(plan, moved_to_final)
             diagnostic_id = self._record_diagnostic(plan, phase, e)
             logger.exception(f"伺服器建立交易失敗 [{diagnostic_id}]: {e}")
+            message = f"建立失敗；診斷編號：{diagnostic_id}"
+            if user_facing_failure:
+                message = f"{user_facing_failure}\n診斷編號：{diagnostic_id}"
             return ServerCreationResult(
                 "failed",
-                f"建立失敗；診斷編號：{diagnostic_id}",
+                message,
                 diagnostic_id=diagnostic_id,
                 cleanup_complete=cleanup_complete,
             )
@@ -286,19 +399,28 @@ class CreateServerJourney:
         """清除 crash 後的 staging 與未註冊 final instance"""
         root = self._root
         with self._lock:
-            for staging_path in root.glob(self._STAGING_GLOB):
+            try:
+                root_entries = list_bounded_directory(root, reject_reparse=False)
+            except OSError:
+                return
+            for staging_path in root_entries:
+                if not (staging_path.name.startswith(".msm-create-") and staging_path.name.endswith(".staging")):
+                    continue
                 if staging_path.is_dir():
                     self._cleanup_path(staging_path)
-            for delete_tombstone in root.glob(".msm-delete-*"):
-                if delete_tombstone.is_dir():
-                    self._cleanup_path(delete_tombstone)
-            for restore_staging in root.glob(".*.restore-*"):
+            for restore_staging in root_entries:
+                if (
+                    ".restore-" not in restore_staging.name
+                    or ".restore-rollback-" in restore_staging.name
+                    or not restore_staging.name.startswith(".")
+                ):
+                    continue
                 if restore_staging.is_dir():
                     self._cleanup_path(restore_staging)
-            for candidate in root.iterdir():
+            for candidate in root_entries:
                 if not candidate.is_dir() or not (candidate / self._MARKER_NAME).is_file():
                     continue
-                config = self.server_crud.servers.get(candidate.name)
+                config = self.server_crud.snapshot().get(candidate.name)
                 registered_path = Path(config.path).resolve(strict=False) if config else None
                 if registered_path == candidate.resolve(strict=False):
                     try:
@@ -309,10 +431,10 @@ class CreateServerJourney:
                     self._cleanup_path(candidate)
 
     @staticmethod
-    def _emit(callback: ProgressCallback | None, percent: int, message: str) -> None:
+    def _emit(callback: ProgressCallback | None, event: ProgressEvent) -> None:
         if callback is not None:
             try:
-                callback(percent, message)
+                callback(event)
             except Exception as e:
                 logger.warning(f"忽略 server creation progress callback 例外: {e}")
 
@@ -328,7 +450,7 @@ class CreateServerJourney:
     @staticmethod
     def _check_cancel(cancel_check: CancelCheck) -> None:
         if cancel_check():
-            raise _CreationCancelled
+            raise CreationCancelledError
 
     def _write_marker(self, directory: Path, plan: ServerCreationPlan, state: str) -> None:
         if not atomic_write_json(
@@ -356,15 +478,7 @@ class CreateServerJourney:
         self,
         plan: ServerCreationPlan,
         moved_to_final: bool,
-        registered: bool,
-        previous_config: ServerConfig | None,
     ) -> bool:
-        if registered:
-            if previous_config is None:
-                self.server_crud.servers.pop(plan.name, None)
-            else:
-                self.server_crud.servers[plan.name] = previous_config
-            self.server_crud.write_servers_config()
         targets = [plan.final_path] if moved_to_final else [plan.staging_path]
         return all(self._cleanup_path(path) for path in targets)
 

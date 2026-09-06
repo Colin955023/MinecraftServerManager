@@ -6,22 +6,23 @@ import re
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import isDarkTheme
 
 from src.models import ModStatus
-from src.utils import Colors, resolve_color
+from src.ui import (
+    Colors,
+    resolve_color,
+)
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
 from .mod_management_session import ModListRow
 from .mod_presentation import format_single_line_text
-
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
 
 
 class ModManagementTreeSyncOps:
@@ -29,8 +30,9 @@ class ModManagementTreeSyncOps:
 
     VERSION_PATTERN = re.compile("-([\\dv.]+)(?:\\.jar(?:\\.disabled)?)?$")
 
-    def __init__(self, controller: ModManagementFrame) -> None:
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext) -> None:
+        self.controller = context
+        self._local_items: dict[str, QTreeWidgetItem] = {}
 
     @staticmethod
     def _build_online_browse_key(mod: Any) -> str:
@@ -44,8 +46,16 @@ class ModManagementTreeSyncOps:
         ).strip()
 
     @staticmethod
-    def _format_online_environment_text(mod: Any) -> str:
-        """格式化線上模組的支援環境"""
+    def format_online_environment_text(mod: Any) -> str:
+        """
+        格式化線上模組的支援環境
+
+        Args:
+            mod: 線上模組資料
+
+        Returns:
+            可供 UI 顯示的支援環境文字
+        """
         server_side = str(getattr(mod, "server_side", "") or "").strip()
         client_side = str(getattr(mod, "client_side", "") or "").strip()
         if client_side and server_side:
@@ -58,7 +68,8 @@ class ModManagementTreeSyncOps:
 
     def refresh_browse_list(self) -> None:
         """重新整理線上模組列表"""
-        self.controller.queue_ops._refresh_online_results_summary()
+        if self.controller.refresh_online_results_summary is not None:
+            self.controller.refresh_online_results_summary()
         tree = self.controller.online_browse_presenter.browse_tree
         if not tree:
             return
@@ -102,33 +113,12 @@ class ModManagementTreeSyncOps:
         if not tree:
             return
 
-        selected_mod_ids = self._capture_selected_mod_ids()
-
-        search_var = presenter.local_search_var
-        search_text = search_var.get()
-        search_filter = presenter.local_search_filter
-        filter_status = presenter.local_filter_var.get()
+        selected_mod_ids = self.capture_selected_mod_ids()
 
         projections: list[ModListRow] = []
         seen_mod_ids: set[str] = set()
 
         for mod in self.controller.mod_session.local_mods:
-            mod_name = str(getattr(mod, "name", "") or "")
-            search_candidate = (
-                mod_name,
-                getattr(mod, "filename", ""),
-                getattr(mod, "version", ""),
-                getattr(mod, "author", ""),
-            )
-
-            if search_text and not search_filter.matches(search_candidate, search_text):
-                continue
-            if filter_status != "所有" and (
-                (filter_status == "啟用" and mod.status != ModStatus.ENABLED)
-                or (filter_status == "停用" and mod.status != ModStatus.DISABLED)
-            ):
-                continue
-
             enhanced = self.controller.mod_session.get_provider_cache(mod.filename)
             parsed_version = "未知"
             match = self.VERSION_PATTERN.search(mod.filename)
@@ -136,7 +126,8 @@ class ModManagementTreeSyncOps:
                 parsed_version = match.group(1)
 
             display_name = self._resolve_local_display_name(mod, enhanced)
-            display_author = self._get_enhanced_attr(enhanced, "author", mod.author or "Unknown")
+            local_author = str(mod.author or "").strip()
+            display_author = local_author or self._get_enhanced_attr(enhanced, "author", "Unknown")
 
             if mod.version and mod.version not in ("", "未知"):
                 display_version = mod.version
@@ -160,11 +151,12 @@ class ModManagementTreeSyncOps:
             else:
                 display_version = "未知"
 
-            raw_desc = self._get_enhanced_attr(enhanced, "description", mod.description or "")
+            local_description = str(mod.description or "").strip()
+            raw_desc = local_description or self._get_enhanced_attr(enhanced, "description", "")
             display_description = format_single_line_text(raw_desc)
 
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
-            mod_base_name = mod.filename.replace(".jar.disabled", "").replace(".jar", "")
+            mod_base_name = mod.filename.removesuffix(".jar.disabled").removesuffix(".jar")
 
             size_val = getattr(mod, "file_size", 0)
             if size_val >= 1024 * 1024:
@@ -203,28 +195,50 @@ class ModManagementTreeSyncOps:
             projections.append(ModListRow(mod_base_name, tuple(str(value) for value in values), mod_base_name))
 
         self.controller.mod_session.replace_local_rows(projections)
-
-        tree.clear()
-
-        items = []
+        rows = {row.key: row for row in self.controller.mod_session.snapshot().local_rows}
+        search_text = presenter.local_search_var.get()
+        filter_status = presenter.local_filter_var.get()
         is_dark = isDarkTheme()
         primary_brush = QBrush(QColor(resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)))
         muted_brush = QBrush(QColor(resolve_color(Colors.TEXT_MUTED, dark=is_dark)))
+        tree.setUpdatesEnabled(False)
+        try:
+            with QSignalBlocker(tree):
+                for key in tuple(self._local_items):
+                    if key in rows:
+                        continue
+                    item = self._local_items.pop(key)
+                    index = tree.indexOfTopLevelItem(item)
+                    if index >= 0:
+                        tree.takeTopLevelItem(index)
 
-        for row in self.controller.mod_session.snapshot().local_rows:
-            item = QTreeWidgetItem(list(row.values))
-            item.setData(0, Qt.ItemDataRole.UserRole, row.data)
-            if row.key in selected_mod_ids:
-                item.setSelected(True)
-            brush = muted_brush if (row.values and "已停用" in row.values[0]) else primary_brush
-            for col in range(len(row.values)):
-                item.setForeground(col, brush)
-            items.append(item)
-
-        if items:
-            tree.addTopLevelItems(items)
-
-        self.controller.local_mod_list_presenter.on_tree_selection_changed()
+                for row in rows.values():
+                    row_item = self._local_items.get(row.key)
+                    if row_item is None:
+                        row_item = QTreeWidgetItem(list(row.values))
+                        row_item.setData(0, Qt.ItemDataRole.UserRole, row.data)
+                        self._local_items[row.key] = row_item
+                        tree.addTopLevelItem(row_item)
+                    else:
+                        for column, value in enumerate(row.values):
+                            if row_item.text(column) != value:
+                                row_item.setText(column, value)
+                    row_item.setSelected(row.key in selected_mod_ids)
+                    enabled = bool(row.values and "已啟用" in row.values[0])
+                    status_matches = (
+                        filter_status == "所有"
+                        or (filter_status == "啟用" and enabled)
+                        or (filter_status == "停用" and not enabled)
+                    )
+                    search_matches = not search_text or presenter.local_search_filter.matches(row.values, search_text)
+                    row_item.setHidden(not status_matches or not search_matches)
+                    brush = primary_brush if enabled else muted_brush
+                    for column in range(len(row.values)):
+                        if row_item.foreground(column) != brush:
+                            row_item.setForeground(column, brush)
+        finally:
+            tree.setUpdatesEnabled(True)
+        presenter.on_tree_selection_changed()
 
     def _build_online_browse_row(self, mod: Any) -> tuple[str, str, str, str, str, str]:
         """建立線上瀏覽列表單列顯示內容"""
@@ -234,15 +248,16 @@ class ModManagementTreeSyncOps:
             str(getattr(mod, "author", "?") or "?"),
             f"{downloads:,}" if downloads > 0 else "N/A",
             str(getattr(mod, "source", "modrinth") or "modrinth").title(),
-            self._format_online_environment_text(mod),
+            self.format_online_environment_text(mod),
             format_single_line_text(getattr(mod, "description", "")),
         )
 
-    def _clear_online_mods(self) -> None:
+    def clear_online_results(self) -> None:
         """清空目前線上模組瀏覽結果"""
         self.controller.mod_session.clear_online_results()
-        self.controller.ui_queue.put(self.controller.queue_ops._refresh_online_results_summary)
-        self.controller.ui_queue.put(self.refresh_browse_list)
+        if self.controller.refresh_online_results_summary is not None:
+            self.controller.scope.schedule(0, self.controller.refresh_online_results_summary)
+        self.controller.scope.schedule(0, self.refresh_browse_list)
 
     def _get_enhanced_attr(self, enhanced, attr: str, fallback):
         """屬性值或後備值"""
@@ -269,8 +284,13 @@ class ModManagementTreeSyncOps:
             return enhanced_name or local_name
         return local_name or enhanced_name
 
-    def _capture_selected_mod_ids(self) -> set[str]:
-        """擷取目前選取列對應的 mod id（從 UserData 中取得）"""
+    def capture_selected_mod_ids(self) -> set[str]:
+        """
+        擷取目前選取列對應的 mod id（從 UserData 中取得）
+
+        Returns:
+            目前選取的模組識別碼集合
+        """
         tree = self.controller.local_mod_list_presenter.local_tree
         if not tree:
             return set()

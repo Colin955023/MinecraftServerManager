@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import traceback
+import sys
+from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
 from PySide6 import QtCore
@@ -22,10 +23,7 @@ from qfluentwidgets import (
     setTheme,
 )
 
-from src.utils import (
-    APP_VERSION,
-    GITHUB_OWNER,
-    GITHUB_REPO,
+from src.ui import (
     BoolState,
     Colors,
     ScrollableComboBox,
@@ -33,9 +31,16 @@ from src.utils import (
     Spacing,
     TextState,
     UIUtils,
-    get_logger,
-    get_settings_manager,
     resolve_color,
+)
+from src.utils import (
+    APP_DESCRIPTION,
+    APP_NAME,
+    APP_VERSION,
+    GITHUB_OWNER,
+    GITHUB_REPO,
+    SettingsManager,
+    get_logger,
 )
 
 logger = get_logger().bind(component="AboutPreferencesFrame")
@@ -47,9 +52,9 @@ class AboutPreferencesFrame(QWidget):
     THEME_LABELS: ClassVar[dict[str, str]] = {"system": "依照系統設定", "light": "淺色", "dark": "深色"}
     THEME_MODES: ClassVar[dict[str, str]] = {label: mode for mode, label in THEME_LABELS.items()}
 
-    def __init__(self, parent=None):
+    def __init__(self, parent, settings: SettingsManager):
         super().__init__(parent)
-        self.settings = get_settings_manager()
+        self.settings = settings
 
         self.remember_size_var = BoolState(self.settings.is_remember_size_position_enabled())
         self.auto_center_var = BoolState(self.settings.is_auto_center_enabled())
@@ -104,9 +109,13 @@ class AboutPreferencesFrame(QWidget):
         main_layout.addWidget(prefs_content, 1)
 
     def _create_about_section(self, layout: QVBoxLayout) -> None:
-        title = TitleLabel("🎮 Minecraft 伺服器管理器", self)
+        title = TitleLabel(f"🎮 {APP_NAME}", self)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
+
+        description_lbl = BodyLabel(APP_DESCRIPTION, self)
+        description_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(description_lbl)
 
         self.version_lbl = BodyLabel(f"版本 {APP_VERSION}", self)
         self.version_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -119,10 +128,11 @@ class AboutPreferencesFrame(QWidget):
         layout.addWidget(dev_title)
 
         dev_info = BodyLabel(
-            "• 開發者: Minecraft Server Manager Team\n"
-            "• 技術堆疊: Python 3.14, PySide6 + QFluentWidgets\n"
+            f"• 開發者: {GITHUB_OWNER}\n"
+            f"• 技術堆疊: Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}, "
+            "PySide6 + QFluentWidgets\n"
             "• Java 管理: 自動偵測 Java，支援 winget 自動下載與手動指定\n"
-            "• 架構: 模組化設計, 事件驅動\n"
+            "• 架構: 分層模組化設計、事件驅動 UI\n"
             "• 參考專案: PrismLauncher",
             self,
         )
@@ -133,7 +143,7 @@ class AboutPreferencesFrame(QWidget):
         self.github_url = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
         self.github_lbl = HyperlinkLabel(
             QtCore.QUrl(self.github_url),
-            "GitHub - MinecraftServerManager",
+            f"GitHub - {APP_NAME}",
             self,
         )
         layout.addWidget(self.github_lbl)
@@ -146,7 +156,7 @@ class AboutPreferencesFrame(QWidget):
         license_info = BodyLabel(
             "• 本專案採用 GNU General Public License v3.0 授權條款\n"
             "• 部分設計理念參考 PrismLauncher\n"
-            "• 僅供學習和個人使用\n"
+            "• 可依 GPLv3 條款使用、修改與散布\n"
             "• 請遵守 Minecraft EULA 和當地法律法規\n\n"
             "特別感謝 PrismLauncher 開發團隊的開源貢獻！",
             self,
@@ -157,6 +167,9 @@ class AboutPreferencesFrame(QWidget):
 
         update_title = SubtitleLabel("🔄 更新設定", self)
         layout.addWidget(update_title)
+
+        update_security_note = CaptionLabel("更新檔僅接受 GitHub Release 提供的 SHA-256 digest 驗證", self)
+        layout.addWidget(update_security_note)
 
         self.auto_update_checkbox = CheckBox("自動檢查更新", self)
         self.auto_update_checkbox.setChecked(self.settings.is_auto_update_enabled())
@@ -237,12 +250,12 @@ class AboutPreferencesFrame(QWidget):
 
         self.theme_mode_dropdown.currentIndexChanged.connect(_on_combo)
 
-        def _on_var(*_args):
+        def _on_var():
             val = self.theme_mode_var.get()
             if val in items and self.theme_mode_dropdown.currentIndex() != items.index(val):
                 self.theme_mode_dropdown.setCurrentIndex(items.index(val))
 
-        self.theme_mode_var.trace_add("write", _on_var)
+        self.theme_mode_var.trace_add(_on_var)
 
         theme_layout.addWidget(self.theme_mode_dropdown)
         theme_layout.addStretch(1)
@@ -276,11 +289,11 @@ class AboutPreferencesFrame(QWidget):
 
         checkbox.stateChanged.connect(_on_check)
 
-        def _on_var_changed(*_args):
+        def _on_var_changed():
             if checkbox.isChecked() != variable.get():
                 checkbox.setChecked(variable.get())
 
-        variable.trace_add("write", _on_var_changed)
+        variable.trace_add(_on_var_changed)
 
         layout.addWidget(checkbox)
 
@@ -306,7 +319,7 @@ class AboutPreferencesFrame(QWidget):
             },
         }
 
-    def _restore_window_geometry(self, win: QWidget | None, defaults: dict[str, Any]) -> None:
+    def _restore_window_geometry(self, win: QWidget | None, defaults: Mapping[str, Any]) -> None:
         """重設主視窗大小與位置至螢幕中央"""
         if not win:
             return
@@ -402,7 +415,7 @@ class AboutPreferencesFrame(QWidget):
                 self._apply_theme_to_sub_frames(self.window())
             UIUtils.show_message("設定套用成功", "視窗偏好設定已成功儲存並套用！", self.window(), message_level="info")
         except Exception as e:
-            logger.error(f"套用設定失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("套用設定失敗")
             UIUtils.show_message("儲存失敗", f"無法儲存設定: {e}", self.window(), message_level="error")
 
 

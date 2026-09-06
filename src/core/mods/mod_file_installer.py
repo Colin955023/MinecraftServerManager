@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import tempfile
 import threading
 import time
@@ -18,6 +19,7 @@ from src.utils import (
     copy_file,
     delete_within,
     is_path_within,
+    is_reparse_point,
 )
 
 
@@ -38,6 +40,34 @@ class ModFileInstaller:
         self.download_staging_root = download_staging_root
         self.on_mod_list_changed = on_mod_list_changed
         self.logger = logger
+
+    @staticmethod
+    def _normalize_mod_filename(filename: str | None) -> str:
+        """只保留模組檔名，讓所有安裝路徑使用相同正規化結果"""
+
+        return Path(str(filename or "").strip()).name
+
+    def _is_allowed_existing_target(self, target_path: Path, allowed_path: Path | None) -> bool:
+        """確認既有目標是否為目前本地更新明確授權的原地檔案"""
+
+        if allowed_path is None:
+            return False
+        try:
+            resolved_allowed = Path(allowed_path).resolve(strict=False)
+            return (
+                is_path_within(self.server_path, resolved_allowed, strict=False)
+                and target_path.resolve(strict=False) == resolved_allowed
+            )
+        except OSError, RuntimeError:
+            return False
+
+    def _managed_directories_are_safe(self) -> bool:
+        """確認模組與下載暫存目錄是現有的一般資料夾"""
+
+        return all(
+            path.is_dir() and not is_reparse_point(path)
+            for path in (self.server_path, self.mods_path, self.download_staging_root)
+        )
 
     @staticmethod
     def success_mutation_result(
@@ -90,27 +120,6 @@ class ModFileInstaller:
             message=message,
             missing_ids=missing_ids,
         )
-
-    @staticmethod
-    def normalize_expected_hash(expected_hash: str | None) -> tuple[str, str]:
-        """
-        依雜湊長度推斷可接受的演算法
-
-        Args:
-            expected_hash: 原始預期雜湊字串
-
-        Returns:
-            正規化後的雜湊字串與演算法名稱；無法判定時演算法為空字串
-        """
-
-        normalized_hash = str(expected_hash or "").strip().lower()
-        if not normalized_hash:
-            return ("", "")
-        if len(normalized_hash) == 64:
-            return (normalized_hash, "sha256")
-        if len(normalized_hash) == 128:
-            return (normalized_hash, "sha512")
-        return (normalized_hash, "")
 
     def notify_mod_list_changed(self) -> None:
         """在主執行緒中觸發模組列表變更通知"""
@@ -207,6 +216,7 @@ class ModFileInstaller:
         provider: str | None = "modrinth",
         cancel_check: Callable[[], bool] | None = None,
         notify_change: bool = True,
+        allowed_existing_target: Path | None = None,
     ) -> ModFileOperationResult:
         """
         下載遠端模組並以原子方式安裝到 mods 目錄
@@ -219,6 +229,7 @@ class ModFileInstaller:
             provider: 下載來源 provider 名稱
             cancel_check: 可選的取消檢查回呼
             notify_change: 成功後是否通知模組列表更新
+            allowed_existing_target: 本地更新流程明確授權可原地替換的既有目標
 
         Returns:
             描述安裝結果的檔案操作結果物件
@@ -229,7 +240,7 @@ class ModFileInstaller:
         if not normalized_url or not normalized_filename:
             self.logger.error("安裝遠端模組失敗：download_url 或 filename 為空")
             return ModFileOperationResult(status="failed", message="missing_url_or_filename")
-        safe_filename = Path(normalized_filename).name
+        safe_filename = self._normalize_mod_filename(normalized_filename)
         if not safe_filename.lower().endswith(".jar"):
             self.logger.error(f"安裝遠端模組失敗：不支援的檔案類型 {safe_filename}")
             return ModFileOperationResult(status="failed", message="unsupported_file_type")
@@ -240,19 +251,22 @@ class ModFileInstaller:
             self.logger.info(f"遠端模組安裝在下載前已取消: {safe_filename}")
             return ModFileOperationResult(status="cancelled", message="cancelled_before_download")
         try:
+            if not self._managed_directories_are_safe():
+                self.logger.error("安裝遠端模組失敗：模組或下載暫存目錄不是安全的一般資料夾")
+                return ModFileOperationResult(status="failed", message="unsafe_managed_directory")
             target_path = self.mods_path / safe_filename
-            normalized_expected_hash, expected_hash_algorithm = self.normalize_expected_hash(expected_hash)
+            normalized_expected_hash, expected_hash_algorithm = HashUtils.normalize_expected_hash(expected_hash)
             if not normalized_expected_hash:
                 self.logger.error(f"安裝遠端模組失敗：缺少 SHA-256 以上的預期雜湊，拒絕下載 {safe_filename}")
                 return ModFileOperationResult(status="failed", message="missing_secure_hash")
-            if normalized_expected_hash and not expected_hash_algorithm:
+            if expected_hash_algorithm not in {"sha256", "sha512"}:
                 self.logger.error(
                     f"安裝遠端模組失敗：僅接受 SHA-256 / SHA-512 雜湊（長度 {len(normalized_expected_hash)}）"
                 )
                 return ModFileOperationResult(status="failed", message="unsupported_hash_algorithm")
-            if normalized_expected_hash and target_path.exists():
+            if target_path.exists():
                 current_hash = HashUtils.compute_file_hash_sync(target_path, expected_hash_algorithm)
-                if current_hash and current_hash == normalized_expected_hash:
+                if current_hash and hmac.compare_digest(current_hash, normalized_expected_hash):
                     if progress_callback:
                         try:
                             size = target_path.stat().st_size
@@ -261,6 +275,9 @@ class ModFileInstaller:
                             self.logger.exception(f"更新進度回呼時發生錯誤: {e}")
                     self.logger.info(f"遠端模組已存在且雜湊一致，略過下載: {safe_filename}")
                     return ModFileOperationResult(status="completed", final_path=target_path)
+                if not self._is_allowed_existing_target(target_path, allowed_existing_target):
+                    self.logger.warning(f"遠端模組安裝拒絕覆寫既有目標: {target_path}")
+                    return ModFileOperationResult(status="failed", message="target_conflict")
             verification_note = f"，含雜湊驗證({expected_hash_algorithm})" if normalized_expected_hash else ""
             self.logger.info(f"開始下載遠端模組: {safe_filename} -> {target_path}{verification_note}")
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
@@ -270,6 +287,7 @@ class ModFileInstaller:
                 }
                 if normalized_expected_hash:
                     download_kwargs["expected_hash"] = normalized_expected_hash
+                    download_kwargs["expected_hash_algorithm"] = expected_hash_algorithm
                 if cancel_check is not None:
                     download_kwargs["cancel_check"] = cancel_check
                 download_result = HTTPClient.download_file(normalized_url, str(staging_path), **download_kwargs)
@@ -284,6 +302,14 @@ class ModFileInstaller:
                     delete_within(self.server_path, staging_path)
                     self.logger.info(f"遠端模組安裝在寫入前已取消: {safe_filename}")
                     return ModFileOperationResult(status="cancelled", message="cancelled_before_replace")
+                if target_path.exists():
+                    current_hash = HashUtils.compute_file_hash_sync(target_path, expected_hash_algorithm)
+                    if current_hash and hmac.compare_digest(current_hash, normalized_expected_hash):
+                        self.logger.info(f"遠端模組下載期間目標已完成相同檔案，略過替換: {safe_filename}")
+                        return ModFileOperationResult(status="completed", final_path=target_path)
+                    if not self._is_allowed_existing_target(target_path, allowed_existing_target):
+                        self.logger.warning(f"遠端模組安裝拒絕覆寫下載期間出現的既有目標: {target_path}")
+                        return ModFileOperationResult(status="failed", message="target_conflict")
                 if not atomic_replace_file_within(self.server_path, staging_path, target_path):
                     self.logger.warning(f"遠端模組無法原子寫入目標路徑: {safe_filename}")
                     return ModFileOperationResult(status="failed", message="replace_failed")
@@ -359,6 +385,27 @@ class ModFileInstaller:
             cleanup_backup_context()
 
         try:
+            if not self._managed_directories_are_safe():
+                self.logger.error("更新本地模組失敗：模組或下載暫存目錄不是安全的一般資料夾")
+                return None
+            safe_filename = self._normalize_mod_filename(filename)
+            target_path = self.mods_path / safe_filename
+            allowed_existing_target = (
+                old_path
+                if old_path_is_internal
+                and old_path is not None
+                and self._is_allowed_existing_target(target_path, old_path)
+                else None
+            )
+            if safe_filename.lower().endswith(".jar"):
+                if target_path.exists() and not self._is_allowed_existing_target(target_path, allowed_existing_target):
+                    self.logger.warning(f"更新本地模組拒絕覆寫其他既有目標: {target_path}")
+                    return None
+                if getattr(local_mod, "status", None) == ModStatus.DISABLED:
+                    disabled_path = target_path.with_name(target_path.name + ".disabled")
+                    if disabled_path.exists() and not self._is_allowed_existing_target(disabled_path, old_path):
+                        self.logger.warning(f"更新本地模組拒絕覆寫其他停用目標: {disabled_path}")
+                        return None
             if old_path_is_internal:
                 if old_path is None:
                     self.logger.error(f"更新本地模組失敗：old_path 狀態錯誤 ({old_path})")
@@ -372,15 +419,18 @@ class ModFileInstaller:
                     self.logger.error(f"更新本地模組失敗：無法建立回滾備份 {old_path}")
                     backup_context.cleanup()
                     return None
-            install_result = self.install_remote_mod_file_result(
-                download_url=download_url,
-                filename=filename,
-                progress_callback=progress_callback,
-                expected_hash=expected_hash,
-                provider=provider,
-                cancel_check=cancel_check,
-                notify_change=False,
-            )
+            install_kwargs: dict[str, Any] = {
+                "download_url": download_url,
+                "filename": filename,
+                "progress_callback": progress_callback,
+                "expected_hash": expected_hash,
+                "provider": provider,
+                "cancel_check": cancel_check,
+                "notify_change": False,
+            }
+            if allowed_existing_target is not None:
+                install_kwargs["allowed_existing_target"] = allowed_existing_target
+            install_result = self.install_remote_mod_file_result(**install_kwargs)
             if not install_result.completed or not install_result.final_path:
                 rollback_and_stop(cancelled=False)
                 return None
@@ -519,6 +569,8 @@ class ModFileInstaller:
         if not safe_filename.lower().endswith(".jar"):
             return self.failure_mutation_result("匯入失敗", f"不支援的模組檔案類型: {safe_filename}")
         try:
+            if not self._managed_directories_are_safe():
+                return self.failure_mutation_result("匯入失敗", "模組或下載暫存目錄不是安全的一般資料夾")
             target_path = self.mods_path / safe_filename
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename

@@ -2,7 +2,7 @@
 綜合檢查報告產生器
 
 功能：
-1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import-linter + import/public-facade boundary + compileall）
+1. 程式碼品質（ruff lint + mypy + pylint + bandit + vulture + import/public-facade boundary + compileall + coverage）
 2. 重複程式碼檢查（僅掃描 src 目錄）
 3. UI 硬編碼檢查（尺寸/顏色是否直接寫死，鼓勵使用 ui_utils token）
 4. 隱私與安全檢查（detect-secrets + 內建規則）
@@ -14,7 +14,6 @@
 - pylint: 循環引用與程式風格檢查
 - bandit: 安全性漏洞檢測
 - vulture: 無用程式碼（未使用的程式碼）檢測
-- import-linter: 分層匯入契約檢查
 - check_import_boundaries.py: 專案自訂匯入／lazy export 存在性與 consumer 邊界檢查
 - compileall: Python 語法檢查
 - detect-secrets: 秘密資訊洩漏檢測
@@ -42,10 +41,12 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import batched
 from pathlib import Path
 from typing import Any
 
 import orjson
+from coverage_summary import read_coverage_summary
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = REPO_ROOT / "report"
@@ -64,7 +65,6 @@ IGNORED_SCAN_DIRS = {
     "build",
     "dist",
     "__pycache__",
-    ".import_linter_cache",
     ".mypy_cache",
     ".ruff_cache",
     ".pytest_cache",
@@ -295,11 +295,55 @@ def get_ruff_config_summary() -> str:
     return f"select=[{selected_text}]；ignore=[{ignored_text}]"
 
 
+def collect_coverage_result() -> SectionResult:
+    """讀取 gate 產生的覆蓋率結果並比對門檻"""
+    coverage_config = load_pyproject_config().get("tool", {}).get("coverage", {}).get("report", {})
+    threshold = float(coverage_config.get("fail_under", 0)) if isinstance(coverage_config, dict) else 0.0
+    precision = int(coverage_config.get("precision", 0)) if isinstance(coverage_config, dict) else 0
+    summary = read_coverage_summary(REPO_ROOT / "coverage.xml")
+    if summary is None:
+        return SectionResult(
+            name="coverage",
+            findings=[
+                Finding(
+                    file="coverage.xml",
+                    line=0,
+                    category="coverage",
+                    message="找不到有效的覆蓋率報告，請先執行完整品質門禁",
+                )
+            ],
+            meta={"summary": "無有效報告", "threshold": threshold},
+        )
+
+    reported_total = round(summary.total_percent, precision)
+    findings = []
+    if reported_total < threshold:
+        findings.append(
+            Finding(
+                file="coverage.xml",
+                line=0,
+                category="coverage",
+                message=f"總覆蓋率 {reported_total:.{precision}f}% 低於門檻 {threshold:g}%",
+            )
+        )
+    return SectionResult(
+        name="coverage",
+        findings=findings,
+        meta={
+            "summary": (
+                f"總計 {reported_total:.{precision}f}%｜行 {summary.line_percent:.1f}%｜"
+                f"分支 {summary.branch_percent:.1f}%｜{summary.source_files} 個檔案｜門檻 {threshold:g}%"
+            ),
+            "threshold": threshold,
+        },
+    )
+
+
 def render_category_overview() -> str:
     categories = [
         (
             "程式碼品質",
-            "ruff lint、mypy、pylint、bandit、vulture、import-linter、compileall",
+            "ruff lint、mypy、pylint、bandit、vulture、自訂匯入邊界、compileall、pytest-cov",
             "依 pyproject/CI 執行靜態分析、型別、匯入邊界、安全、無用程式碼與語法檢查",
         ),
         (
@@ -351,11 +395,6 @@ def collect_code_quality_results() -> list[ToolResult]:
             name="vulture",
             tool_name="vulture",
             module_name="vulture",
-            args=[],
-        ),
-        ToolSpec(
-            name="import-linter",
-            tool_name="lint-imports",
             args=[],
         ),
         ToolSpec(
@@ -505,12 +544,10 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
     findings: list[Finding] = []
 
     ignored_files = {
-        src_dir / "utils" / "ui_support" / "ui_utils.py",
-        src_dir / "utils" / "ui_support" / "ui_tokens.py",
-        src_dir / "utils" / "ui_support" / "qt_widgets.py",
-        src_dir / "utils" / "ui_support" / "ui_config.py",
-        src_dir / "utils" / "ui_support" / "font_manager.py",
-        src_dir / "utils" / "ui_support" / "icon_utils.py",
+        src_dir / "ui" / "support" / "ui_utils.py",
+        src_dir / "ui" / "support" / "ui_tokens.py",
+        src_dir / "ui" / "support" / "ui_config.py",
+        src_dir / "ui" / "support" / "font_manager.py",
     }
 
     for file_path in gather_python_files(src_dir):
@@ -553,7 +590,7 @@ def collect_ui_hardcode_findings(src_dir: Path) -> SectionResult:
     return SectionResult(
         name="ui_hardcode",
         findings=findings,
-        meta={"scope": "src/**/*.py (except src/utils/ui_support token/config modules)"},
+        meta={"scope": "src/**/*.py (except src/ui/support token/config modules)"},
     )
 
 
@@ -730,6 +767,15 @@ def _is_property_like_method(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bo
 def _is_ctypes_structure_class(node: ast.ClassDef) -> bool:
     base_names = {_get_dotted_name(base) for base in node.bases}
     return bool(base_names.intersection(CTYPES_CLASS_BASE_NAMES))
+
+
+def _is_protocol_class(node: ast.ClassDef) -> bool:
+    for base in node.bases:
+        target = base.value if isinstance(base, ast.Subscript) else base
+        base_name = _get_dotted_name(target)
+        if base_name == "Protocol" or base_name.endswith(".Protocol"):
+            return True
+    return False
 
 
 def _strip_docstring_statement(statements: list[ast.stmt]) -> list[ast.stmt]:
@@ -919,10 +965,13 @@ def _collect_class_findings(
             )
         )
 
+    is_protocol = _is_protocol_class(node)
     for child in node.body:
         if isinstance(child, ast.ClassDef):
             if _is_public_name(child.name):
                 findings.extend(_collect_class_findings(child, file_path, class_names, owner_lines))
+            continue
+        if is_protocol:
             continue
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_public_name(getattr(child, "name", "")):
             method_name = ".".join([*class_names, child.name])
@@ -1075,12 +1124,11 @@ def collect_privacy_tool_results() -> list[ToolResult]:
     failure_outputs: list[str] = []
 
     batch_specs: list[ToolSpec] = []
-    for batch_index in range(0, len(scannable_files), DETECT_SECRETS_BATCH_SIZE):
-        batch = scannable_files[batch_index : batch_index + DETECT_SECRETS_BATCH_SIZE]
+    for batch_number, batch in enumerate(batched(scannable_files, DETECT_SECRETS_BATCH_SIZE, strict=False), start=1):
         relative_batch = [str(path.relative_to(REPO_ROOT)) for path in batch]
         batch_specs.append(
             ToolSpec(
-                name=f"detect-secrets[{(batch_index // DETECT_SECRETS_BATCH_SIZE) + 1}]",
+                name=f"detect-secrets[{batch_number}]",
                 tool_name="detect-secrets",
                 args=["scan", *relative_batch],
             )
@@ -1347,7 +1395,7 @@ def build_quality_action_items(
         if (result := tools_by_name.get(tool_name)) and _ISSUE_COUNTERS[tool_name](result.output) > 0:
             actions.append(message)
 
-    for tool_name in ("import-linter", "import-boundaries"):
+    for tool_name in ("import-boundaries",):
         if (result := tools_by_name.get(tool_name)) and result.status == "failed":
             actions.append("修正匯入邊界違規：保持 src.ui → src.core → src.models → src.utils 的分層方向")
             break
@@ -1531,6 +1579,7 @@ def build_html_report(
     generated_at: str,
     code_quality_tools: list[ToolResult],
     code_quality_findings: SectionResult,
+    coverage_result: SectionResult,
     cross_file_callable_result: SectionResult,
     duplicate_result: SectionResult,
     hardcode_result: SectionResult,
@@ -1542,7 +1591,9 @@ def build_html_report(
     max_details: int,
     total_runtime_seconds: float,
 ) -> str:
-    combined_code_quality_findings = code_quality_findings.findings + cross_file_callable_result.findings
+    combined_code_quality_findings = (
+        code_quality_findings.findings + coverage_result.findings + cross_file_callable_result.findings
+    )
     code_quality_visible, code_quality_omitted = truncate_findings(combined_code_quality_findings, max_details)
     duplicate_visible, duplicate_omitted = truncate_findings(duplicate_result.findings, max_details)
     hardcode_visible, hardcode_omitted = truncate_findings(hardcode_result.findings, max_details)
@@ -1555,6 +1606,7 @@ def build_html_report(
 
     summary_cards = [
         ("程式碼品質", int(code_quality_findings.meta.get("issue_count", len(code_quality_findings.findings)))),
+        ("覆蓋率門檻", len(coverage_result.findings)),
         ("API 命名", len(cross_file_callable_result.findings)),
         ("重複程式碼", len(duplicate_result.findings)),
         ("UI 硬編碼", len(hardcode_result.findings)),
@@ -1577,6 +1629,8 @@ def build_html_report(
         for title, count in summary_cards
     )
     action_items = build_quality_action_items(code_quality_tools, duplicate_result, cross_file_callable_result)
+    if coverage_result.findings:
+        action_items.insert(0, "補足關鍵流程測試，讓總覆蓋率重新通過門檻")
     action_html = "".join(f"<li>{html.escape(item)}</li>" for item in action_items)
     category_overview_html = render_category_overview()
     summary_meta_html = "".join(
@@ -1588,6 +1642,7 @@ def build_html_report(
         )
         for label, value in [
             ("執行模式", "專案開發環境直跑（非 isolated）"),
+            ("測試覆蓋率", str(coverage_result.meta.get("summary", "無資料"))),
             ("detect-secrets 範圍", "專案檔案，排除 .venv / build / dist / cache"),
             ("總耗時", format_duration(total_runtime_seconds)),
             ("明細上限", str(max_details)),
@@ -1784,7 +1839,7 @@ def build_html_report(
         </section>
 
         <section id=\"code-quality\" class=\"tab-panel\">
-            <h2>程式碼品質（ruff lint / mypy / pylint / bandit / vulture / import/public facade / compileall）</h2>
+            <h2>程式碼品質（ruff lint / mypy / pylint / bandit / vulture / import/public facade / compileall / coverage）</h2>
             <p class=\"section-lead\">先看偵測出的問題，再視需要展開個別工具的命令與完整輸出</p>
             {render_findings_table(code_quality_visible, code_quality_omitted)}
             <h3>工具執行明細</h3>
@@ -1804,7 +1859,7 @@ def build_html_report(
         <section id=\"hardcode\" class=\"tab-panel\">
             <h2>UI 硬編碼檢查</h2>
             <p class=\"section-lead\">重點是找出直接寫死的尺寸、顏色或字體設定，優先收斂到共用 token</p>
-            <p>針對色碼與尺寸常數，建議改用 <code>src/utils/ui_support/ui_utils.py</code> 的 token</p>
+            <p>針對色碼與尺寸常數，建議改用 <code>src/ui/support/ui_tokens.py</code> 的 token</p>
             {render_findings_table(hardcode_visible, hardcode_omitted)}
         </section>
 
@@ -1870,7 +1925,7 @@ def main() -> int:
     src_dir = REPO_ROOT / "src"
     started_at = time.perf_counter()
     step_index = 0
-    total_steps = 9
+    total_steps = 11
 
     def begin_step(title: str) -> tuple[int, float]:
         nonlocal step_index
@@ -1882,6 +1937,18 @@ def main() -> int:
         elapsed = time.perf_counter() - started
         suffix = f" | {detail}" if detail else ""
         logging.info(f"[Step {idx}/{total_steps}] done in {elapsed:.2f}s{suffix}")
+
+    idx, started = begin_step("同步相依套件 (uv sync)")
+    sync_result = run_command(
+        "uv-sync",
+        ["uv", "sync", "--group", "lint", "--group", "typecheck", "--group", "test", "--group", "security"],
+    )
+    if sync_result.status != "passed":
+        logging.warning(
+            "相依同步失敗，後續檢查可能因缺少套件而失敗：%s",
+            (sync_result.output or sync_result.status).splitlines()[:5],
+        )
+    end_step(idx, started, f"status={sync_result.status}")
 
     idx, started = begin_step("程式碼品質檢查 (ruff lint/mypy/pylint/bandit/vulture/import-public-facade/compileall)")
     try:
@@ -1961,6 +2028,10 @@ def main() -> int:
         docstring_result = SectionResult(name="docstrings", findings=[], meta={})
     end_step(idx, started, f"findings={len(docstring_result.findings)}")
 
+    idx, started = begin_step("測試覆蓋率檢查")
+    coverage_result = collect_coverage_result()
+    end_step(idx, started, str(coverage_result.meta.get("summary", "無資料")))
+
     output_html_path = HTML_REPORT_PATH
     output_html_path.parents[0].mkdir(parents=True, exist_ok=True)
 
@@ -1972,6 +2043,7 @@ def main() -> int:
                 generated_at=generated_at,
                 code_quality_tools=code_quality_tools,
                 code_quality_findings=code_quality_findings,
+                coverage_result=coverage_result,
                 cross_file_callable_result=cross_file_callable_result,
                 duplicate_result=duplicate_result,
                 hardcode_result=hardcode_result,

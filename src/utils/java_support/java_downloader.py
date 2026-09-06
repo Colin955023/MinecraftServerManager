@@ -78,7 +78,7 @@ class JavaDownloader:
         except Exception as e:
             logger.exception(f"winget 安裝過程發生錯誤: {e}")
             raise JavaInstallError(
-                f"透過 winget 安裝 {pkg} 失敗。建議手動開啟終端機執行：\nwinget install {pkg}"
+                f"透過 winget 安裝 {pkg} 失敗\n建議手動開啟終端機執行：\nwinget install {pkg}"
             ) from e
 
 

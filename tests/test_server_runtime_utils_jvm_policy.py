@@ -110,12 +110,33 @@ def test_build_java_command_uses_args_file_for_neoforge(monkeypatch: pytest.Monk
     assert command[-1] == "nogui"
 
 
+def test_build_java_command_rejects_batch_metacharacters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    malicious_jar = tmp_path / "server&whoami.jar"
+    malicious_jar.write_bytes(b"jar")
+    config = ServerConfig(
+        name="unsafe",
+        minecraft_version="1.21.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(tmp_path),
+        jvm_args=["-Ddemo=ok&whoami"],
+    )
+    monkeypatch.setattr(
+        runtime_utils_module.JavaUtils, "get_best_java_path", staticmethod(lambda *_args, **_kwargs: None)
+    )
+
+    assert ServerCommands.build_java_command(config, return_list=True, launch_target=malicious_jar.name) == []
+    assert ServerCommands.build_java_command(config, launch_target=malicious_jar.name) == ""
+    assert ServerCRUD(str(tmp_path)).create_launch_script(config, launch_target=malicious_jar.name) is False
+
+
 def test_repair_startup_script_rewrites_bare_java_to_full_versioned_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     script_path = tmp_path / "start.bat"
     script_path.write_text(
-        "@echo off\njava -Xmx2G -jar server.jar\ncall java @user_jvm_args.txt %*\necho java -jar server.jar\n",
+        "@echo off\njava -Xmx2G -jar server.jar\ncall java @user_jvm_args.txt --safe\necho java -jar server.jar\n",
         encoding="utf-8",
     )
     javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
@@ -140,7 +161,7 @@ def test_repair_startup_script_rewrites_bare_java_to_full_versioned_path(
     repaired = script_path.read_text(encoding="utf-8-sig")
     quoted_java = f'"{javaw.with_name("java.exe")}"'
     assert f"{quoted_java} -Xmx2048M -jar server.jar" in repaired
-    assert f"call {quoted_java} @user_jvm_args.txt %*" in repaired
+    assert f"call {quoted_java} @user_jvm_args.txt --safe" in repaired
     assert "echo java -jar server.jar" in repaired
 
 
@@ -188,6 +209,45 @@ def test_extract_startup_script_command_reads_first_java_command_and_memory(tmp_
     )
     assert startup_command.memory_min_mb == 512
     assert startup_command.memory_max_mb == 4096
+
+
+def test_imported_startup_command_rejects_cmd_injection_suffix(tmp_path: Path) -> None:
+    script_path = tmp_path / "start.bat"
+    script_path.write_text("java -Xmx2G -jar server.jar & whoami\n", encoding="utf-8")
+
+    startup_command = ServerCommands.extract_startup_script_command(script_path)
+
+    assert startup_command.command_line == ""
+    assert startup_command.unsafe is True
+    assert ServerCommands.ensure_nogui_in_command("java -jar server.jar & whoami") == ""
+    assert ServerCommands.replace_java_command_line("java -jar server.jar & whoami", "C:/Java/java.exe")[1] is False
+
+
+def test_repair_skips_startup_script_with_cmd_variable_expansion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
+    javaw.parent.mkdir(parents=True)
+    javaw.write_bytes(b"")
+    script_path = tmp_path / "start.bat"
+    script_path.write_text("java -Xmx2G -jar server.jar %*\n", encoding="utf-8")
+    config = ServerConfig(
+        name="alpha",
+        minecraft_version="1.21.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(tmp_path),
+    )
+    monkeypatch.setattr(
+        runtime_utils_module.JavaUtils,
+        "get_best_java_path",
+        staticmethod(lambda *_args, **_kwargs: str(javaw)),
+    )
+    original = script_path.read_bytes()
+
+    assert ServerCommands.repair_startup_script_java_command(script_path, config) is False
+    assert script_path.read_bytes() == original
 
 
 def test_replace_startup_command_java_path_replaces_existing_java_path(
@@ -244,7 +304,8 @@ def test_import_service_builds_managed_startup_script_and_removes_old_script(tmp
     assert "正在啟動" not in generated_content
     assert "模組載入器" not in generated_content
     assert "記憶體設定" not in generated_content
-    assert "java -XX:+UseG1GC -Dfoo=bar -Xms1G -Xmx20G -jar server.jar nogui" in generated_content
+    assert "-XX:+UseG1GC -Dfoo=bar" in generated_content
+    assert "-Xms1G -Xmx20G -jar server.jar nogui" in generated_content
 
 
 def test_find_startup_script_prefers_generated_script_over_imported_leftover(tmp_path: Path) -> None:

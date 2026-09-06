@@ -18,69 +18,26 @@ from src.models import (
 )
 from src.utils import ProviderIdentityPersistenceError, clean_api_identifier
 
+from .mod_provider_port import ModProviderPort
+
 PROVIDER_IDENTITY_TTL_SECONDS = 12 * 60 * 60
 PROVIDER_IDENTITY_MAX_FAILURES = 3
 PROVIDER_IDENTITY_RETRY_BASE_SECONDS = 5 * 60
 PROVIDER_IDENTITY_RETRY_MAX_SECONDS = 6 * 60 * 60
-PROVIDER_IDENTITY_BATCH_LIMIT = 24
-
-
-class ProviderCatalogPort(Protocol):
-    """Provider catalog 精確查詢與模糊搜尋的輸入埠"""
-
-    def lookup(self, identifier: str) -> ProviderCatalogOutcome:
-        """
-        依識別碼查詢單一候選
-
-        Args:
-            identifier: 專案 ID、slug 或已知別名
-
-        Returns:
-            Provider-neutral catalog 結果
-        """
-        ...
-
-    def search(self, query: str) -> ProviderCatalogOutcome:
-        """
-        依文字線索搜尋最相符候選
-
-        Args:
-            query: 名稱或其他搜尋字串
-
-        Returns:
-            Provider-neutral catalog 結果
-        """
-        ...
+PROVIDER_IDENTITY_MAX_IDENTIFIERS = 32
+PROVIDER_IDENTITY_MAX_SEARCH_TERMS = 8
 
 
 class ProviderIdentityStorePort(Protocol):
     """以本地 Mod 檔案為 key 的 identity 持久化埠"""
 
-    def load(self, file_path: Path) -> dict[str, Any] | None:
-        """
-        讀取 Mod 檔案的 identity payload
+    def load(self, file_path: Path) -> dict[str, Any] | None: ...
 
-        Args:
-            file_path: 本地 Mod 檔案路徑
-
-        Returns:
-            已存在的 payload；沒有紀錄時回傳 None
-        """
-        ...
-
-    def replace(self, file_path: Path, payload: dict[str, Any]) -> None:
-        """
-        以完整 payload 取代 Mod 檔案的 identity 紀錄
-
-        Args:
-            file_path: 本地 Mod 檔案路徑
-            payload: 不保留舊欄位的完整快照內容
-        """
-        ...
+    def replace(self, file_path: Path, payload: dict[str, Any]) -> None: ...
 
 
 class ModIndexProviderIdentityStore:
-    """讓 identity owner 使用 ModIndexManager 儲存機制，但不洩漏 policy"""
+    """讓 identity owner 使用模組索引持久化，但不洩漏 schema policy"""
 
     def __init__(self, index_manager: Any) -> None:
         self._index_manager = index_manager
@@ -116,7 +73,7 @@ class ProviderIdentityService:
         self,
         *,
         store: ProviderIdentityStorePort,
-        catalog: ProviderCatalogPort,
+        catalog: ModProviderPort,
         ttl_seconds: int = PROVIDER_IDENTITY_TTL_SECONDS,
         memory_cache_size: int = 512,
     ) -> None:
@@ -126,22 +83,6 @@ class ProviderIdentityService:
         self._memory_cache_size = max(0, int(memory_cache_size))
         self._memory_cache: OrderedDict[str, ProviderIdentitySnapshot] = OrderedDict()
         self._lock = threading.RLock()
-        self._batch_remaining: int | None = None
-
-    def begin_resolution_batch(self, *, limit: int = PROVIDER_IDENTITY_BATCH_LIMIT) -> None:
-        """
-        開始一次 caller-owned 掃描批次，集中限制需觸發 catalog 的項目數
-
-        Args:
-            limit: 本批次允許觸發的 catalog 查詢數上限
-        """
-        with self._lock:
-            self._batch_remaining = max(0, int(limit))
-
-    def end_resolution_batch(self) -> None:
-        """結束目前批次並解除 catalog 查詢額度限制"""
-        with self._lock:
-            self._batch_remaining = None
 
     def load(self, file_path: Path) -> ProviderIdentitySnapshot:
         """
@@ -190,9 +131,6 @@ class ProviderIdentityService:
                 provenance="hash",
                 now_epoch_ms=now_ms,
             )
-        if not self._claim_catalog_resolution():
-            return existing
-
         identifiers = _dedupe(
             (
                 evidence.project_id_hint,
@@ -201,11 +139,11 @@ class ProviderIdentityService:
                 existing.alias,
                 *evidence.jar_aliases,
             )
-        )
+        )[:PROVIDER_IDENTITY_MAX_IDENTIFIERS]
         failure_kinds: list[CatalogOutcomeKind] = []
         for identifier in identifiers:
             cached = self._memory_get(identifier, now_ms)
-            outcome = cached or self._catalog.lookup(identifier)
+            outcome = self._catalog.find_projects(identifier, exact=True) if cached is None else cached
             if outcome.canonical:
                 return self.commit_found(
                     evidence.file_path,
@@ -217,8 +155,8 @@ class ProviderIdentityService:
             if outcome.kind in {"transient_failure", "rate_limited", "invalid_response"}:
                 return self.commit_failure(evidence, existing, failure_kinds, now_epoch_ms=now_ms)
 
-        for term in _dedupe((*evidence.search_terms, evidence.display_name)):
-            outcome = self._catalog.search(term)
+        for term in _dedupe((*evidence.search_terms, evidence.display_name))[:PROVIDER_IDENTITY_MAX_SEARCH_TERMS]:
+            outcome = self._catalog.find_projects(term)
             if outcome.canonical and outcome.confidence >= 70:
                 return self.commit_found(
                     evidence.file_path,
@@ -402,15 +340,6 @@ class ProviderIdentityService:
             while len(self._memory_cache) > self._memory_cache_size:
                 self._memory_cache.popitem(last=False)
 
-    def _claim_catalog_resolution(self) -> bool:
-        with self._lock:
-            if self._batch_remaining is None:
-                return True
-            if self._batch_remaining <= 0:
-                return False
-            self._batch_remaining -= 1
-            return True
-
 
 def _dedupe(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(cleaned for value in values if (cleaned := clean_api_identifier(value))))
@@ -420,8 +349,4 @@ def _provider_cache_key(provider: str, identifier: str) -> str:
     return f"{clean_api_identifier(provider).lower()}:{clean_api_identifier(identifier).lower()}"
 
 
-__all__ = [
-    "ModIndexProviderIdentityStore",
-    "ProviderCatalogPort",
-    "ProviderIdentityService",
-]
+__all__ = ["ModIndexProviderIdentityStore", "ProviderIdentityService"]

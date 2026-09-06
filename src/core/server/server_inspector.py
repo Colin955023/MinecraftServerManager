@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass
@@ -14,13 +15,22 @@ import orjson
 
 from src.models import EulaState, ServerInspection, ServerInspectionIntent, ServerLaunchTarget
 from src.utils import (
+    ARCHIVE_METADATA_MAX_BYTES,
+    SAFE_DIRECTORY_MAX_FILES,
+    SAFE_TEXT_FILE_MAX_BYTES,
     MemoryUtils,
     ServerCommands,
     extract_forge_versions,
     extract_minecraft_version_from_text,
     get_logger,
+    is_path_within,
+    is_reparse_point,
+    list_bounded_directory,
+    open_bounded_zip,
+    read_archive_metadata_bytes,
     read_json,
     read_text_file,
+    walk_bounded_tree,
 )
 
 logger = get_logger().bind(component="ServerInspector")
@@ -53,21 +63,28 @@ class _InspectionEngine:
     def _extract_mc_version_from_jar_file(jar_path: Path) -> str | None:
         """從伺服器 JAR 內的版本 metadata 讀取 Minecraft 版本"""
         try:
-            with zipfile.ZipFile(jar_path) as jar_file:
-                names = set(jar_file.namelist())
-                if "version.json" in names:
-                    with jar_file.open("version.json") as version_file:
-                        payload = orjson.loads(version_file.read())
+            with open_bounded_zip(jar_path) as jar_file:
+                payload = read_archive_metadata_bytes(
+                    jar_file,
+                    "version.json",
+                    max_bytes=ARCHIVE_METADATA_MAX_BYTES,
+                )
+                if payload is not None:
+                    payload = orjson.loads(payload)
                     if isinstance(payload, dict):
                         for key in ("id", "name", "release_target"):
                             detected = extract_minecraft_version_from_text(str(payload.get(key, "")))
                             if detected:
                                 return detected
-                if "META-INF/MANIFEST.MF" in names:
-                    with jar_file.open("META-INF/MANIFEST.MF") as manifest_file:
-                        manifest = manifest_file.read().decode("utf-8", errors="replace")
+                payload = read_archive_metadata_bytes(
+                    jar_file,
+                    "META-INF/MANIFEST.MF",
+                    max_bytes=ARCHIVE_METADATA_MAX_BYTES,
+                )
+                if payload is not None:
+                    manifest = payload.decode("utf-8", errors="replace")
                     return extract_minecraft_version_from_text(manifest)
-        except (OSError, zipfile.BadZipFile, orjson.JSONDecodeError) as e:
+        except (OSError, ValueError, zipfile.BadZipFile, orjson.JSONDecodeError) as e:
             logger.debug(f"讀取 JAR 版本 metadata 失敗 {jar_path}: {e}")
         return None
 
@@ -76,15 +93,37 @@ class _InspectionEngine:
         run_bat = server_path / "run.bat"
         if run_bat.exists():
             with suppress(Exception):
-                text = run_bat.read_text(encoding="utf-8", errors="ignore")
+                text = (
+                    read_text_file(
+                        run_bat,
+                        encoding="utf-8",
+                        errors="ignore",
+                        max_bytes=SAFE_TEXT_FILE_MAX_BYTES,
+                    )
+                    or ""
+                )
                 matches = re.findall(r"@([^\s\"']*\.txt)", text, re.IGNORECASE)
                 for raw_rel in matches:
                     rel_clean = raw_rel.strip().replace("/", os.sep).replace("\\", os.sep)
                     if "user_jvm_args" in rel_clean.lower():
                         continue
-                    candidate = server_path / rel_clean
-                    if candidate.exists():
+                    candidate = (server_path / rel_clean).resolve(strict=False)
+                    if is_path_within(server_path, candidate, strict=False) and not is_reparse_point(candidate):
                         return candidate
+
+        def _find_argument_files(root: Path, names: tuple[str, ...]) -> list[Path]:
+            matches: list[Path] = []
+            try:
+                entries = walk_bounded_tree(root, max_entries=SAFE_DIRECTORY_MAX_FILES)
+                for current_path, _dirs, files in entries:
+                    matches.extend(
+                        current_path / file_name
+                        for file_name in files
+                        if any(file_name.lower().endswith(name) for name in names)
+                    )
+            except OSError:
+                return []
+            return matches
 
         loader_lib_dir = server_path / library_path
         if loader_lib_dir.is_dir():
@@ -99,21 +138,23 @@ class _InspectionEngine:
                 args_path = loader_lib_dir / folder_name / "win_args.txt"
                 if args_path.exists():
                     return args_path
-            arg_files = [p for p in loader_lib_dir.rglob("win_args.txt") if "user_jvm_args" not in p.name.lower()]
+            arg_files = [
+                path
+                for path in _find_argument_files(loader_lib_dir, ("win_args.txt",))
+                if "user_jvm_args" not in path.name.lower()
+            ]
             if arg_files:
-                arg_files.sort(key=lambda p: len(p.parts), reverse=True)
-                return arg_files[0]
+                return max(arg_files, key=lambda p: len(p.parts))
 
         all_libs = server_path / "libraries"
         if all_libs.is_dir():
             all_args = [
-                p
-                for p in (list(all_libs.rglob("*win_args.txt")) or list(all_libs.rglob("*args.txt")))
-                if "user_jvm_args" not in p.name.lower()
+                path
+                for path in _find_argument_files(all_libs, ("win_args.txt", "args.txt"))
+                if "user_jvm_args" not in path.name.lower()
             ]
             if all_args:
-                all_args.sort(key=lambda p: len(p.parts), reverse=True)
-                return all_args[0]
+                return max(all_args, key=lambda p: len(p.parts))
         return None
 
     @staticmethod
@@ -168,41 +209,61 @@ class _InspectionEngine:
             主要 JAR 檔或啟動參照字串
         """
         loader_type = (loader_type or "").lower()
+
+        def _args_target(args_file: Path | None) -> str:
+            if args_file is None or not args_file.exists():
+                return ""
+            try:
+                relative_path = args_file.relative_to(server_path)
+            except ValueError:
+                relative_path = Path(args_file.name)
+            target = f"@{relative_path.as_posix()}"
+            return target if ServerCommands.is_safe_batch_argument(target) else ""
+
+        try:
+            root_entries = list_bounded_directory(server_path)
+        except OSError:
+            root_entries = []
+        jar_files = [entry for entry in root_entries if entry.suffix.lower() == ".jar" and entry.is_file()]
+
         if loader_type == "forge":
             args_file = _InspectionEngine._find_loader_args_file(server_path, FORGE_LIBRARY_PATH, server_config)
-            if args_file and args_file.exists():
-                try:
-                    relative_path = args_file.relative_to(server_path)
-                    return f"@{relative_path.as_posix()}"
-                except ValueError:
-                    return f"@{args_file.name}"
-            for jar_file in server_path.glob("*.jar"):
-                if "forge" in jar_file.name.lower() and "neo" not in jar_file.name.lower():
+            args_target = _args_target(args_file)
+            if args_target:
+                return args_target
+            for jar_file in jar_files:
+                if (
+                    not is_reparse_point(jar_file)
+                    and ServerCommands.is_safe_batch_argument(jar_file.name)
+                    and "forge" in jar_file.name.lower()
+                    and "neo" not in jar_file.name.lower()
+                ):
                     return jar_file.name
         elif loader_type == "neoforge":
             args_file = _InspectionEngine._find_loader_args_file(server_path, NEOFORGE_LIBRARY_PATH, server_config)
-            if args_file and args_file.exists():
-                try:
-                    relative_path = args_file.relative_to(server_path)
-                    return f"@{relative_path.as_posix()}"
-                except ValueError:
-                    return f"@{args_file.name}"
-            for jar_file in server_path.glob("*.jar"):
-                if "neoforge" in jar_file.name.lower().replace("-", "").replace("_", ""):
+            args_target = _args_target(args_file)
+            if args_target:
+                return args_target
+            for jar_file in jar_files:
+                if (
+                    not is_reparse_point(jar_file)
+                    and ServerCommands.is_safe_batch_argument(jar_file.name)
+                    and "neoforge" in jar_file.name.lower().replace("-", "").replace("_", "")
+                ):
                     return jar_file.name
         elif loader_type == "fabric":
             for fabric_jar in FABRIC_JAR_NAMES:
-                if (server_path / fabric_jar).exists():
+                if (server_path / fabric_jar).is_file() and not is_reparse_point(server_path / fabric_jar):
                     return fabric_jar
         elif loader_type == "quilt":
             for quilt_jar in QUILT_JAR_NAMES:
-                if (server_path / quilt_jar).exists():
+                if (server_path / quilt_jar).is_file() and not is_reparse_point(server_path / quilt_jar):
                     return quilt_jar
         for jar_name in ["server.jar", "minecraft_server.jar"]:
-            if (server_path / jar_name).exists():
+            if (server_path / jar_name).is_file() and not is_reparse_point(server_path / jar_name):
                 return jar_name
-        jar_files = list(server_path.glob("*.jar"))
-        return jar_files[0].name if jar_files else "server.jar"
+        safe_jars = [jar_file for jar_file in jar_files if ServerCommands.is_safe_batch_argument(jar_file.name)]
+        return safe_jars[0].name if safe_jars else "server.jar"
 
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
@@ -217,8 +278,10 @@ class _InspectionEngine:
         """
         for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
             candidate_path = server_path / script_name
-            if candidate_path.exists():
-                return candidate_path
+            if candidate_path.is_file() and not is_reparse_point(candidate_path):
+                command = ServerCommands.extract_startup_script_command(candidate_path)
+                if command.has_java_command and not command.unsafe:
+                    return candidate_path
         return None
 
     @staticmethod
@@ -234,14 +297,21 @@ class _InspectionEngine:
         """
         if not folder_path.is_dir():
             return False
-        if any((folder_path / jar_name).exists() for jar_name in SERVER_JAR_CANDIDATES):
+        try:
+            entries = list_bounded_directory(folder_path)
+        except OSError:
+            return False
+        files_by_name = {entry.name.casefold(): entry for entry in entries if entry.is_file()}
+        if any(jar_name.casefold() in files_by_name for jar_name in SERVER_JAR_CANDIDATES):
             return True
-        for file in folder_path.glob("*.jar"):
+        for file in entries:
+            if file.suffix.lower() != ".jar" or not file.is_file():
+                continue
             jar_name = file.name.lower()
             if any(pattern in jar_name for pattern in ["forge", "neoforge", "server", "minecraft"]):
                 return True
         server_indicators = ["server.properties", "eula.txt"]
-        return bool(any((folder_path / indicator).exists() for indicator in server_indicators))
+        return any(indicator.casefold() in files_by_name for indicator in server_indicators)
 
     @staticmethod
     def _get_latest_log_file(server_path: Path) -> Path | None:
@@ -250,18 +320,19 @@ class _InspectionEngine:
         logs_dir = server_path / "logs"
         if not logs_dir.is_dir():
             return None
-        found_logs = []
-        for name in log_candidates:
-            fpath = logs_dir / name
-            if fpath.exists():
-                found_logs.append(fpath)
+        try:
+            log_entries = list_bounded_directory(logs_dir)
+        except OSError:
+            return None
+        files_by_name = {entry.name.casefold(): entry for entry in log_entries if entry.is_file()}
+        found_logs = [files_by_name[name.casefold()] for name in log_candidates if name.casefold() in files_by_name]
         if not found_logs:
-            found_logs = list(logs_dir.glob("*.log"))
+            found_logs = [entry for entry in log_entries if entry.suffix.lower() == ".log" and entry.is_file()]
         if not found_logs:
             return None
-        found_logs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        logger.debug(f"選擇日誌檔: {found_logs[0].name}")
-        return found_logs[0]
+        latest_log = max(found_logs, key=lambda p: p.stat().st_mtime)
+        logger.debug(f"選擇日誌檔: {latest_log.name}")
+        return latest_log
 
     @staticmethod
     def detect_loader_and_version_from_sources(
@@ -278,6 +349,11 @@ class _InspectionEngine:
         """
         if detection_source is None:
             detection_source = {}
+        try:
+            root_entries = list_bounded_directory(server_path)
+        except OSError:
+            root_entries = []
+        jar_files = [entry for entry in root_entries if entry.suffix.lower() == ".jar" and entry.is_file()]
 
         def is_unknown(value: str | None) -> bool:
             return value in (None, "", "unknown", "Unknown", "無")
@@ -331,7 +407,12 @@ class _InspectionEngine:
                 "Server version: (\\d+\\.\\d+(?:\\.\\d+)?)",
             ]
             try:
-                content = read_text_file(log_file, errors="ignore")
+                content = read_text_file(
+                    log_file,
+                    errors="ignore",
+                    max_bytes=SAFE_TEXT_FILE_MAX_BYTES,
+                    allowed_root=server_path,
+                )
                 if content:
                     lines = content.splitlines(keepends=True)[:2000]
                     content = "".join(lines)
@@ -356,16 +437,24 @@ class _InspectionEngine:
             forge_dir = server_path / "libraries" / "net" / "minecraftforge" / "forge"
             if not forge_dir.is_dir():
                 return
-            subdirs = [d for d in forge_dir.iterdir() if d.is_dir()]
+            try:
+                subdirs = [d for d in list_bounded_directory(forge_dir) if d.is_dir()]
+            except OSError:
+                return
             if not subdirs:
                 return
-            folder = subdirs[0].name
+            selected_subdir = min(subdirs, key=lambda path: path.name)
+            folder = selected_subdir.name
             mc, forge_ver = extract_forge_versions(folder)
             if mc and forge_ver:
                 set_if_unknown("minecraft_version", mc)
                 set_if_unknown("loader_version", forge_ver)
             else:
-                for jar in subdirs[0].glob("*.jar"):
+                try:
+                    jars = [jar for jar in list_bounded_directory(selected_subdir) if jar.suffix.lower() == ".jar"]
+                except OSError:
+                    return
+                for jar in jars:
                     m2 = re.match("forge-(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?)-.*\\.jar", jar.name)
                     if m2:
                         mc2, forge_ver2 = m2.groups()
@@ -374,7 +463,7 @@ class _InspectionEngine:
                         break
 
         def detect_from_jars():
-            for jar in server_path.glob("*.jar"):
+            for jar in jar_files:
                 name_lower = jar.name.lower()
                 if is_unknown(config.loader_type):
                     if "fabric" in name_lower:
@@ -411,12 +500,10 @@ class _InspectionEngine:
 
         def detect_from_jar_metadata():
             preferred_names = ["server.jar", "minecraft_server.jar"]
-            preferred_jars = [server_path / name for name in preferred_names if (server_path / name).exists()]
-            other_jars = [
-                jar
-                for jar in server_path.glob("*.jar")
-                if jar not in preferred_jars and "installer" not in jar.name.lower()
+            preferred_jars = [
+                jar for name in preferred_names for jar in jar_files if jar.name.casefold() == name.casefold()
             ]
+            other_jars = [jar for jar in jar_files if jar not in preferred_jars and "installer" not in jar.name.lower()]
             for jar in [*preferred_jars, *other_jars]:
                 mc_ver = _InspectionEngine._extract_mc_version_from_jar_file(jar)
                 if mc_ver:
@@ -427,7 +514,7 @@ class _InspectionEngine:
 
         def detect_from_version_json():
             fp = server_path / "version.json"
-            data = read_json(fp)
+            data = read_json(fp, max_bytes=ARCHIVE_METADATA_MAX_BYTES, allowed_root=server_path)
             if not data:
                 return
             if "id" in data:
@@ -439,11 +526,14 @@ class _InspectionEngine:
             fabric_dir = server_path / "libraries" / "net" / "fabricmc" / "fabric-loader"
             if not fabric_dir.is_dir():
                 return
-            subdirs = [d for d in fabric_dir.iterdir() if d.is_dir()]
+            try:
+                subdirs = [d for d in list_bounded_directory(fabric_dir) if d.is_dir()]
+            except OSError:
+                return
             if not subdirs:
                 return
-            subdirs.sort(key=lambda d: d.name, reverse=True)
-            set_if_unknown("loader_version", subdirs[0].name)
+            selected_subdir = max(subdirs, key=lambda d: d.name)
+            set_if_unknown("loader_version", selected_subdir.name)
             if detection_source:
                 detection_source["loader_version"] = "Fabric 函式庫目錄"
 
@@ -451,11 +541,14 @@ class _InspectionEngine:
             quilt_dir = server_path / "libraries" / "org" / "quiltmc" / "quilt-loader"
             if not quilt_dir.is_dir():
                 return
-            subdirs = [d for d in quilt_dir.iterdir() if d.is_dir()]
+            try:
+                subdirs = [d for d in list_bounded_directory(quilt_dir) if d.is_dir()]
+            except OSError:
+                return
             if not subdirs:
                 return
-            subdirs.sort(key=lambda d: d.name, reverse=True)
-            set_if_unknown("loader_version", subdirs[0].name)
+            selected_subdir = max(subdirs, key=lambda d: d.name)
+            set_if_unknown("loader_version", selected_subdir.name)
             if detection_source:
                 detection_source["loader_version"] = "Quilt 函式庫目錄"
 
@@ -463,11 +556,13 @@ class _InspectionEngine:
             neoforge_dir = server_path / "libraries" / "net" / "neoforged" / "neoforge"
             if not neoforge_dir.is_dir():
                 return
-            subdirs = [d for d in neoforge_dir.iterdir() if d.is_dir()]
+            try:
+                subdirs = [d for d in list_bounded_directory(neoforge_dir) if d.is_dir()]
+            except OSError:
+                return
             if not subdirs:
                 return
-            subdirs.sort(key=lambda d: d.name, reverse=True)
-            folder = subdirs[0].name
+            folder = max(subdirs, key=lambda d: d.name).name
             set_if_unknown("loader_version", folder)
             if detection_source:
                 detection_source["loader_version"] = "NeoForge 函式庫目錄"
@@ -541,7 +636,15 @@ class ServerInspector:
         Returns:
             對應單次磁碟 revision 的完整快照
         """
-        server_path = Path(path).resolve(strict=False)
+        raw_server_path = Path(path)
+        if is_reparse_point(raw_server_path):
+            return ServerInspection(
+                path=raw_server_path,
+                revision="",
+                is_candidate=False,
+                error="伺服器路徑不可為符號連結或 reparse point",
+            )
+        server_path = raw_server_path.resolve(strict=False)
         if not server_path.is_dir():
             return ServerInspection(
                 path=server_path,
@@ -553,9 +656,23 @@ class ServerInspector:
 
         if intent and intent.purpose == "status":
             revision = self._build_status_revision(server_path)
+        elif intent and intent.purpose in {"launch", "redetect"}:
+            revision = ""
         else:
             revision = self._build_revision(server_path)
-        jar_paths = tuple(sorted(server_path.glob("*.jar"), key=lambda item: item.name.lower()))
+        try:
+            jar_paths = tuple(
+                sorted(
+                    (
+                        entry
+                        for entry in list_bounded_directory(server_path)
+                        if entry.suffix.lower() == ".jar" and entry.is_file()
+                    ),
+                    key=lambda item: item.name.lower(),
+                )
+            )
+        except OSError:
+            jar_paths = ()
         jar_names = [jar.name for jar in jar_paths]
         is_candidate = _InspectionEngine.is_valid_server_folder(server_path)
         loader = _InspectionEngine.detect_loader_type(server_path, jar_names)
@@ -568,19 +685,34 @@ class ServerInspector:
         startup_command = ""
         memory_max_mb = 2048
         memory_min_mb: int | None = None
-        for script in scripts:
+        metadata_scripts = list(scripts)
+        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+            candidate = server_path / script_name
+            if candidate.is_file() and not is_reparse_point(candidate) and candidate not in metadata_scripts:
+                metadata_scripts.append(candidate)
+        for script in metadata_scripts:
             command = ServerCommands.extract_startup_script_command(script)
-            if command.has_java_command and not startup_command:
-                startup_command = command.command_line
             memory_max_mb = command.memory_max_mb or memory_max_mb
             memory_min_mb = command.memory_min_mb if command.memory_min_mb is not None else memory_min_mb
+            if command.unsafe:
+                continue
+            if command.has_java_command and not startup_command:
+                startup_command = command.command_line
             if startup_command and command.memory_max_mb is not None:
                 break
         for args_name in ("user_jvm_args.txt", "jvm.args"):
             args_path = server_path / args_name
             if not args_path.is_file():
                 continue
-            content = read_text_file(args_path, errors="ignore") or ""
+            content = (
+                read_text_file(
+                    args_path,
+                    errors="ignore",
+                    max_bytes=SAFE_TEXT_FILE_MAX_BYTES,
+                    allowed_root=server_path,
+                )
+                or ""
+            )
             memory_max_mb = MemoryUtils.parse_memory_setting(content, "Xmx") or memory_max_mb
             memory_min_mb = MemoryUtils.parse_memory_setting(content, "Xms") or memory_min_mb
 
@@ -593,14 +725,18 @@ class ServerInspector:
                 tuple(script.name for script in scripts),
                 "依固定啟動腳本優先序選取",
             )
-        elif main_target.startswith("@") and (server_path / main_target[1:]).is_file():
+        elif (
+            main_target.startswith("@")
+            and (server_path / main_target[1:]).is_file()
+            and not is_reparse_point(server_path / main_target[1:])
+        ):
             launch_target = ServerLaunchTarget(
                 "args",
                 main_target,
                 candidates=tuple(jar_names),
                 reason="依載入器 library args 選取",
             )
-        elif main_target and (server_path / main_target).is_file():
+        elif main_target and (server_path / main_target).is_file() and not is_reparse_point(server_path / main_target):
             launch_target = ServerLaunchTarget(
                 "jar",
                 main_target,
@@ -610,7 +746,10 @@ class ServerInspector:
         else:
             launch_target = ServerLaunchTarget("none", candidates=tuple(jar_names), reason="找不到可執行目標")
 
-        eula_state = self._read_eula_state(server_path / "eula.txt")
+        if intent and intent.purpose in {"launch", "redetect"}:
+            revision = self._build_launch_revision(server_path, launch_target)
+
+        eula_state = self._read_eula_state(server_path / "eula.txt", allowed_root=server_path)
         missing_files: list[str] = []
         if launch_target.kind == "none":
             missing_files.append("可執行的啟動目標")
@@ -653,7 +792,7 @@ class ServerInspector:
     def _build_status_revision(server_path: Path) -> str:
         digest = hashlib.sha256()
         try:
-            for item in sorted(server_path.glob("*"), key=lambda p: p.name.lower()):
+            for item in sorted(list_bounded_directory(server_path), key=lambda p: p.name.lower()):
                 if item.name.startswith(".msm-"):
                     continue
                 stat = item.stat(follow_symlinks=False)
@@ -672,28 +811,69 @@ class ServerInspector:
     def _build_revision(server_path: Path) -> str:
         digest = hashlib.sha256()
         try:
-            entries = sorted(server_path.rglob("*"), key=lambda item: item.relative_to(server_path).as_posix())
-            for entry in entries:
-                relative = entry.relative_to(server_path).as_posix()
-                stat = entry.stat(follow_symlinks=False)
-                digest.update(relative.encode("utf-8", errors="surrogatepass"))
-                digest.update(b"\0")
-                digest.update(str(stat.st_size).encode("ascii"))
-                digest.update(b":")
-                digest.update(str(stat.st_mtime_ns).encode("ascii"))
-                digest.update(b"\n")
+            for root_path, dirs, files in walk_bounded_tree(
+                server_path,
+                max_entries=SAFE_DIRECTORY_MAX_FILES,
+            ):
+                for entry_name in (*dirs, *files):
+                    entry = root_path / entry_name
+                    relative = entry.relative_to(server_path).as_posix()
+                    metadata = entry.stat(follow_symlinks=False)
+                    digest.update(relative.encode("utf-8", errors="surrogatepass"))
+                    digest.update(b"\0")
+                    digest.update(str(metadata.st_size).encode("ascii"))
+                    digest.update(b":")
+                    digest.update(str(metadata.st_mtime_ns).encode("ascii"))
+                    digest.update(b"\n")
         except OSError as e:
             logger.warning(f"建立伺服器檢查 revision 失敗: {e}")
             return ""
         return digest.hexdigest()
 
     @staticmethod
-    def _read_eula_state(eula_path: Path) -> EulaState:
+    def _build_launch_revision(server_path: Path, launch_target: ServerLaunchTarget) -> str:
+        """只追蹤會改變啟動行為的檔案 metadata"""
+        relative_names = {
+            "eula.txt",
+            "server.properties",
+            "jvm.args",
+            "user_jvm_args.txt",
+            *ServerCommands.STARTUP_SCRIPT_CANDIDATES,
+        }
+        if launch_target.value:
+            relative_names.add(launch_target.value.removeprefix("@"))
+        digest = hashlib.sha256()
+        for relative_name in sorted(relative_names, key=str.casefold):
+            candidate = server_path / relative_name
+            try:
+                metadata = candidate.stat(follow_symlinks=False)
+                if is_reparse_point(candidate) or not stat.S_ISREG(metadata.st_mode):
+                    continue
+                digest.update(relative_name.casefold().encode("utf-8", errors="surrogatepass"))
+                digest.update(b"\0")
+                digest.update(str(metadata.st_size).encode("ascii"))
+                digest.update(b":")
+                digest.update(str(metadata.st_mtime_ns).encode("ascii"))
+                digest.update(b"\n")
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                logger.warning(f"建立啟動證據 revision 失敗 {candidate.name}: {e}")
+                return ""
+        return digest.hexdigest()
+
+    @staticmethod
+    def _read_eula_state(eula_path: Path, *, allowed_root: Path | None = None) -> EulaState:
         if not eula_path.exists():
             return "missing"
-        try:
-            content = eula_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        content = read_text_file(
+            eula_path,
+            encoding="utf-8",
+            errors="replace",
+            max_bytes=SAFE_TEXT_FILE_MAX_BYTES,
+            allowed_root=allowed_root,
+        )
+        if content is None:
             return "unreadable"
         for raw_line in content.splitlines():
             line = raw_line.strip()
@@ -710,14 +890,31 @@ class ServerInspector:
         seen: set[Path] = set()
         for name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
             candidate = server_path / name
-            if candidate.is_file():
-                ordered.append(candidate)
-                seen.add(candidate.resolve())
-        for candidate in sorted(server_path.glob("*.bat"), key=lambda item: item.name.lower()):
-            if candidate.resolve() in seen:
+            if candidate.is_file() and not is_reparse_point(candidate):
+                command = ServerCommands.extract_startup_script_command(candidate)
+                if command.has_java_command and not command.unsafe:
+                    resolved_candidate = candidate.resolve()
+                    ordered.append(candidate)
+                    seen.add(resolved_candidate)
+        try:
+            candidates = sorted(
+                (
+                    entry
+                    for entry in list_bounded_directory(server_path)
+                    if entry.suffix.lower() == ".bat" and entry.is_file()
+                ),
+                key=lambda item: item.name.lower(),
+            )
+        except OSError:
+            candidates = []
+        for candidate in candidates:
+            resolved_candidate = candidate.resolve()
+            if resolved_candidate in seen:
                 continue
-            if ServerCommands.extract_startup_script_command(candidate).has_java_command:
+            command = ServerCommands.extract_startup_script_command(candidate)
+            if command.has_java_command and not command.unsafe:
                 ordered.append(candidate)
+                seen.add(resolved_candidate)
         return tuple(ordered)
 
     @staticmethod

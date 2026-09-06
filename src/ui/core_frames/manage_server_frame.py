@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -34,7 +33,7 @@ from qfluentwidgets import (
 )
 
 from src.core import ServerCRUD, ServerImportService, ServerPropertiesStore, ServerRuntime
-from src.models import ServerConfig, ServerImportBatchResult
+from src.models import ProgressEvent, ServerConfig, ServerDiscoveryReport, ServerImportBatchResult
 from src.ui import (
     ManageServerService,
     ProgressDialog,
@@ -43,9 +42,6 @@ from src.ui import (
     ServerMonitorWindow,
     ServerPropertiesDialog,
     ServerRenderPlan,
-)
-from src.utils import (
-    MemoryUtils,
     Sizes,
     Spacing,
     StatusPushButton,
@@ -53,8 +49,11 @@ from src.utils import (
     UIWorkScope,
     WorkOutcome,
     apply_table_header_style,
-    get_logger,
     is_qobject_alive,
+)
+from src.utils import (
+    MemoryUtils,
+    get_logger,
 )
 
 logger = get_logger().bind(component="ManageServerFrame")
@@ -187,7 +186,7 @@ class ManageServerFrame(QWidget):
 
         detect_button = PushButton("🔍 偵測現有伺服器", button_frame)
         detect_button.setMinimumHeight(32)
-        detect_button.clicked.connect(lambda _checked=False: self.detect_servers(show_message=True))
+        detect_button.clicked.connect(self._detect_servers_from_button)
         button_layout.addWidget(detect_button)
 
         add_button = PushButton("➕ 手動新增", button_frame)
@@ -197,11 +196,15 @@ class ManageServerFrame(QWidget):
 
         refresh_button = PushButton("🔄 重新整理", button_frame)
         refresh_button.setMinimumHeight(32)
-        refresh_button.clicked.connect(lambda _=False: self.refresh_servers(True))
+        refresh_button.clicked.connect(self.refresh_servers)
         button_layout.addWidget(refresh_button)
 
         control_layout.addWidget(button_frame)
         main_layout.addWidget(control_frame)
+
+    def _detect_servers_from_button(self) -> None:
+        """由偵測按鈕觸發掃描並顯示結果"""
+        self.detect_servers(show_message=True)
 
     def create_server_list(self, main_layout) -> None:
         """
@@ -341,7 +344,7 @@ class ManageServerFrame(QWidget):
         try:
             UIUtils.open_external(str(backup_dir))
         except Exception as e:
-            logger.error(f"無法開啟備份資料夾: {e}\n{traceback.format_exc()}")
+            logger.exception("無法開啟備份資料夾")
             UIUtils.show_message("錯誤", f"無法開啟備份資料夾: {e}", self.window(), message_level="error")
 
     def create_actions(self, main_layout) -> None:
@@ -405,12 +408,17 @@ class ManageServerFrame(QWidget):
             show_message: 是否顯示偵測結果訊息
         """
 
-        def task() -> ServerImportBatchResult:
-            return self.server_import.execute_batch(self.server_import.discover())
+        def task() -> tuple[ServerDiscoveryReport, ServerImportBatchResult]:
+            report = self.server_import.discover()
+            result = self.server_import.execute_batch(report.candidates)
+            for issue in report.issues:
+                logger.warning(f"略過無法檢查的伺服器候選 {issue.path}: {issue.message}")
+            return report, result
 
         def on_done(outcome: WorkOutcome) -> None:
             if outcome.is_succeeded and outcome.value is not None:
-                self._detect_servers_callback(outcome.value, show_message)
+                report, batch = outcome.value
+                self._detect_servers_callback(report, batch, show_message)
             elif outcome.is_failed and outcome.error is not None:
                 logger.error(f"偵測失敗: {outcome.error}")
                 UIUtils.show_message("錯誤", f"偵測失敗: {outcome.error}", self.window(), message_level="error")
@@ -422,7 +430,7 @@ class ManageServerFrame(QWidget):
         if self.on_navigate_callback:
             self.on_navigate_callback()
 
-    def refresh_servers(self, reload_config: bool = True) -> None:
+    def refresh_servers(self) -> None:
         """
         重新整理伺服器列表：只更新 UI，不自動偵測
 
@@ -431,8 +439,8 @@ class ManageServerFrame(QWidget):
         """
 
         def task():
-            gen = self.service.begin_refresh(reload_config=reload_config)
-            payload = self.service.collect_facts(gen)
+            gen = self.service.begin_refresh()
+            payload = self.service.collect_facts()
             return gen, payload
 
         def on_done(outcome: WorkOutcome) -> None:
@@ -481,19 +489,18 @@ class ManageServerFrame(QWidget):
             self.selected_server = None
         self.update_selection()
 
-    def on_server_double_click(self, _index=None) -> None:
+    def on_server_double_click(self) -> None:
         """
         伺服器雙擊事件
 
-        Args:
-            _index: 雙擊的索引（未使用）
         """
         if self.server_tree and self.selected_server:
             self.configure_server()
 
     def update_selection(self) -> None:
         """更新選擇狀態"""
-        if self.selected_server and self.selected_server not in self.server_crud.servers:
+        registry = self.server_crud.snapshot()
+        if self.selected_server and self.selected_server not in registry:
             self.selected_server = None
 
         has_selection = self.selected_server is not None
@@ -520,8 +527,10 @@ class ManageServerFrame(QWidget):
             if start_stop_key in self.action_buttons:
                 self.action_buttons[start_stop_key].setText("🚀 啟動")
 
-        if has_selection and self.selected_server and self.selected_server in self.server_crud.servers:
-            config = self.server_crud.servers[self.selected_server]
+        if has_selection and self.selected_server and self.selected_server in registry:
+            config = registry.get(self.selected_server)
+            if config is None:
+                return
             is_running = self.server_runtime.observe(self.selected_server).is_running
             status_emoji = "🟢" if is_running else "🔴"
             status_text = "執行中" if is_running else "已停止"
@@ -556,37 +565,56 @@ class ManageServerFrame(QWidget):
         """啟動/停止伺服器"""
         if not self.selected_server:
             return
-        is_running = self.server_runtime.observe(self.selected_server).is_running
+        server_name = self.selected_server
+        is_running = self.server_runtime.observe(server_name).is_running
+        start_button = self.action_buttons.get("start_stop")
+        if start_button is not None:
+            start_button.setEnabled(False)
         if is_running:
-            success = self.server_runtime.stop(self.selected_server)
-            if success:
-                UIUtils.show_message(
-                    "成功", f"伺服器 {self.selected_server} 停止命令已發送", self.window(), message_level="info"
-                )
-            else:
-                UIUtils.show_message(
-                    "錯誤", f"停止伺服器 {self.selected_server} 失敗", self.window(), message_level="error"
-                )
-            self._schedule_post_action_updates(100, 2000)
-        else:
-            start_result = self.server_runtime.start(self.selected_server)
-            if start_result.success:
-                self.monitor_server(bring_to_front=False)
-            else:
-                UIUtils.show_message(
-                    start_result.title or "錯誤",
-                    start_result.message or f"啟動伺服器 {self.selected_server} 失敗",
-                    self.window(),
-                    message_level="error",
-                )
-            self._schedule_post_action_updates(100, 1500)
 
-    def monitor_server(self, *, bring_to_front: bool = True) -> None:
+            def _on_stopped(outcome: WorkOutcome) -> None:
+                if outcome.is_succeeded and outcome.value:
+                    UIUtils.show_message("成功", f"伺服器 {server_name} 已停止", self.window(), message_level="info")
+                else:
+                    UIUtils.show_message("錯誤", f"停止伺服器 {server_name} 失敗", self.window(), message_level="error")
+                self._schedule_post_action_updates(0, 1000)
+
+            self.scope.submit(
+                lambda: self.server_runtime.stop(server_name),
+                on_done=_on_stopped,
+                key=f"server_runtime:{server_name}",
+                critical=True,
+            )
+        else:
+
+            def _on_started(outcome: WorkOutcome) -> None:
+                if outcome.is_succeeded and outcome.value.success:
+                    if self.selected_server == server_name:
+                        self.monitor_server(bring_to_front=False, notify_when_ready=True)
+                else:
+                    result = outcome.value if outcome.is_succeeded else None
+                    UIUtils.show_message(
+                        getattr(result, "title", "") or "錯誤",
+                        getattr(result, "message", "") or f"啟動伺服器 {server_name} 失敗",
+                        self.window(),
+                        message_level="error",
+                    )
+                self._schedule_post_action_updates(0, 1000)
+
+            self.scope.submit(
+                lambda: self.server_runtime.start(server_name),
+                on_done=_on_started,
+                key=f"server_runtime:{server_name}",
+                critical=True,
+            )
+
+    def monitor_server(self, *, bring_to_front: bool = True, notify_when_ready: bool = False) -> None:
         """
         監控伺服器
 
         Args:
             bring_to_front: 是否將監控視窗帶至前景
+            notify_when_ready: 是否為本次新啟動流程啟用 ready 通知
         """
         if not self.selected_server:
             return
@@ -597,6 +625,8 @@ class ManageServerFrame(QWidget):
         if self.selected_server in self._monitor_windows:
             old_win = self._monitor_windows[self.selected_server]
             if old_win and is_qobject_alive(old_win):
+                if notify_when_ready:
+                    old_win.arm_server_ready_notification()
                 self._show_existing_monitor_window(old_win, bring_to_front=bring_to_front)
                 return
 
@@ -608,13 +638,15 @@ class ManageServerFrame(QWidget):
             self.server_properties,
         )
         self._monitor_windows[self.selected_server] = monitor_window
+        if notify_when_ready:
+            monitor_window.arm_server_ready_notification()
         monitor_window.show()
 
     def configure_server(self) -> None:
         """設定伺服器"""
         if not self.selected_server:
             return
-        config = self.server_crud.servers.get(self.selected_server)
+        config = self.server_crud.snapshot().get(self.selected_server)
         if config is None:
             UIUtils.show_message("錯誤", "找不到選取的伺服器設定", self.window(), message_level="error")
             return
@@ -626,12 +658,14 @@ class ManageServerFrame(QWidget):
         """開啟伺服器資料夾"""
         if not self.selected_server:
             return
-        config = self.server_crud.servers[self.selected_server]
+        config = self.server_crud.snapshot().get(self.selected_server)
+        if config is None:
+            return
         path = config.path
         try:
             UIUtils.open_external(path)
         except Exception as e:
-            logger.error(f"無法開啟資料夾: {e}\n{traceback.format_exc()}")
+            logger.exception("無法開啟資料夾")
             UIUtils.show_message("錯誤", f"無法開啟資料夾: {e}", self.window(), message_level="error")
 
     def delete_server(self) -> None:
@@ -656,20 +690,38 @@ class ManageServerFrame(QWidget):
         if not result:
             return
 
-        delete_result = self.server_crud.delete_server_result(
-            self.selected_server,
-            server_runtime=self.server_runtime,
+        server_name = self.selected_server
+        for button in self.action_buttons.values():
+            button.setEnabled(False)
+
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.phase == "delete_committed":
+                self.scope.schedule(0, self.refresh_servers, key=f"delete_refresh:{server_name}")
+
+        def _on_deleted(outcome: WorkOutcome) -> None:
+            delete_result = outcome.value if outcome.is_succeeded else None
+            if delete_result is not None and delete_result.success:
+                UIUtils.show_message("成功", f"伺服器 {server_name} 已刪除", self.window(), message_level="info")
+                self.refresh_servers()
+            else:
+                UIUtils.show_message(
+                    getattr(delete_result, "title", "") or "錯誤",
+                    getattr(delete_result, "message", "") or f"刪除伺服器 {server_name} 失敗",
+                    self.window(),
+                    message_level="error",
+                )
+                self.update_selection()
+
+        self.scope.submit(
+            lambda: self.server_crud.delete_server_result(
+                server_name,
+                server_runtime=self.server_runtime,
+                progress_callback=_on_progress,
+            ),
+            on_done=_on_deleted,
+            key=f"delete_server:{server_name}",
+            critical=True,
         )
-        if delete_result.success:
-            UIUtils.show_message("成功", f"伺服器 {self.selected_server} 已刪除", self.window(), message_level="info")
-            self.refresh_servers()
-        else:
-            UIUtils.show_message(
-                delete_result.title or "錯誤",
-                delete_result.message or f"刪除伺服器 {self.selected_server} 失敗",
-                self.window(),
-                message_level="error",
-            )
 
     def backup_server(self) -> None:
         """備份伺服器檔案"""
@@ -682,6 +734,15 @@ class ManageServerFrame(QWidget):
                 self.window(),
                 message_level="warning",
             )
+            return
+
+        if not UIUtils.ask_yes_no_cancel(
+            "確認備份",
+            "備份會包含 server.properties，其中可能含 RCON 密碼與管理伺服器密鑰。\n"
+            "請妥善保管且不要直接分享未加密備份。是否繼續？",
+            self.window(),
+            show_cancel=False,
+        ):
             return
 
         dialog = ProgressDialog(self.window(), title="備份伺服器", show_cancel=False)
@@ -723,7 +784,7 @@ class ManageServerFrame(QWidget):
 
     def _on_auto_refresh_tick(self) -> None:
         """自動重新整理槽函式"""
-        if getattr(self, "_auto_refresh_enabled", True):
+        if getattr(self, "_auto_refresh_enabled", True) and self.isVisible():
             self.refresh_servers()
 
     def _schedule_post_action_updates(self, immediate_delay_ms: int, delayed_delay_ms: int) -> None:
@@ -741,20 +802,28 @@ class ManageServerFrame(QWidget):
             return None
         server_name = items[0].text(0)
 
-        config = self.server_crud.servers.get(server_name)
+        config = self.server_crud.snapshot().get(server_name)
         if not config:
             if show_warning:
                 UIUtils.show_message("錯誤", f"找不到伺服器設定: {server_name}", self.window(), message_level="error")
             return None
         return config
 
-    def _detect_servers_callback(self, batch: ServerImportBatchResult, show_message: bool) -> None:
+    def _detect_servers_callback(
+        self,
+        report: ServerDiscoveryReport,
+        batch: ServerImportBatchResult,
+        show_message: bool,
+    ) -> None:
         if show_message:
+            failure_count = batch.failed_count + len(report.issues)
+            found_count = report.managed_count + len(report.candidates)
             UIUtils.show_message(
                 "完成",
-                f"完成 {batch.completed_count} 個；略過 {batch.skipped_count} 個；失敗 {batch.failed_count} 個",
+                f"找到 {found_count} 個現有伺服器；新匯入 {batch.completed_count} 個；"
+                f"已管理 {report.managed_count} 個；略過 {batch.skipped_count} 個；失敗 {failure_count} 個",
                 self.window(),
-                message_level="info" if batch.failed_count == 0 else "warning",
+                message_level="info" if failure_count == 0 else "warning",
             )
         self.refresh_servers()
         if self.server_tree:
@@ -778,14 +847,25 @@ class ManageServerFrame(QWidget):
             return
 
         projection = render_plan.projection
-        self.server_tree.clear()
-        items = []
-        for name in projection.server_order:
-            values = projection.server_rows[name]
-            item = QTreeWidgetItem([str(v) for v in values])
-            items.append(item)
-        if items:
-            self.server_tree.addTopLevelItems(items)
+        current_order = [self.server_tree.topLevelItem(i).text(0) for i in range(self.server_tree.topLevelItemCount())]
+        if current_order != list(projection.server_order):
+            self.server_tree.clear()
+            items = [
+                QTreeWidgetItem([str(v) for v in projection.server_rows[name]]) for name in projection.server_order
+            ]
+            if items:
+                self.server_tree.addTopLevelItems(items)
+        else:
+            self.server_tree.setUpdatesEnabled(False)
+            try:
+                for row, name in enumerate(projection.server_order):
+                    item = self.server_tree.topLevelItem(row)
+                    for column, value in enumerate(projection.server_rows[name]):
+                        text = str(value)
+                        if item.text(column) != text:
+                            item.setText(column, text)
+            finally:
+                self.server_tree.setUpdatesEnabled(True)
 
         self.selected_server = projection.selected_server
         if self.selected_server:

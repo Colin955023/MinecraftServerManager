@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.utils import normalize_identifier
 
@@ -55,7 +55,17 @@ def summarize_text(value: str | None, max_length: int) -> str:
     return normalized[: max(0, max_length - 3)].rstrip() + "..."
 
 
-def _summarize_messages(messages: list[str] | tuple[str, ...], max_items: int = 3) -> list[str]:
+def summarize_messages(messages: list[str] | tuple[str, ...], max_items: int = 3) -> list[str]:
+    """
+    將訊息清單去重、裁切並限制顯示數量
+
+    Args:
+        messages: 原始訊息清單
+        max_items: 最大顯示數量
+
+    Returns:
+        去重後的訊息清單；超過最大數量時最後一項會顯示剩餘數量提示
+    """
     values = list(dict.fromkeys(str(message or "").strip() for message in messages if str(message or "").strip()))
     if len(values) <= max_items:
         return values
@@ -76,11 +86,10 @@ def get_online_version_status_text(report: Any | None) -> str:
         return "未分析"
     if not getattr(report, "compatible", True):
         return "不相容"
-    if list(getattr(report, "missing_required_dependencies", []) or []):
+    if getattr(report, "missing_required_dependencies", None):
         return "可安裝，含依賴"
     has_warning = any(
-        list(getattr(report, attr, []) or [])
-        for attr in ("incompatible_installed", "installed_version_mismatches", "warnings")
+        getattr(report, attr, None) for attr in ("incompatible_installed", "installed_version_mismatches", "warnings")
     )
     return "可安裝，需注意" if has_warning else "可安裝"
 
@@ -123,13 +132,6 @@ def sort_online_versions_for_server(
         for index in range(len(versions))
     ]
     rows = list(zip(versions, reports, strict=False))
-    rows.sort(
-        key=lambda row: (
-            _online_version_compatibility_rank(row[1]),
-            _online_version_type_rank(getattr(row[0], "version_type", "")),
-            str(getattr(row[0], "date_published", "") or ""),
-        )
-    )
     grouped: dict[tuple[int, int], list[tuple[Any, Any | None]]] = {}
     for row in rows:
         key = (
@@ -174,7 +176,20 @@ def resolve_project_page_url(*, urls: Any = (), identifiers: Any = ()) -> str:
     """
     for raw_url in urls:
         if clean_url := str(raw_url or "").strip():
-            return clean_url
+            try:
+                parsed = urlsplit(clean_url)
+                scheme = parsed.scheme.lower()
+                if (
+                    scheme in {"http", "https"}
+                    and bool(parsed.hostname)
+                    and not parsed.username
+                    and not parsed.password
+                    and not any(char in clean_url for char in "\\\r\n\x00")
+                ):
+                    _ = parsed.port
+                    return clean_url
+            except ValueError:
+                continue
     for identifier in identifiers:
         if url := build_modrinth_project_page_url(identifier):
             return url
@@ -219,7 +234,7 @@ def format_online_version_report(version: Any, report: Any | None) -> str:
     for title, attr, max_items in sections:
         values = list(getattr(report, attr, []) or [])
         if values:
-            lines.extend(["", title, *[f"- {item}" for item in _summarize_messages(values, max_items=max_items)]])
+            lines.extend(["", title, *[f"- {item}" for item in summarize_messages(values, max_items=max_items)]])
     return "\n".join(lines)
 
 
@@ -280,7 +295,7 @@ def format_single_line_text(value: Any) -> str:
     Returns:
         正規化後的單行文字
     """
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    return " ".join(str(value or "").split())
 
 
 __all__ = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from itertools import chain
 from types import SimpleNamespace
 from typing import Any
 
@@ -104,10 +105,10 @@ def _dependency_step(item: Any, root_key: str) -> ReviewInstallStep:
 def _default_dependency_selected_keys(dependency_plan: Any) -> set[tuple[str, str]]:
     return {
         build_dependency_review_key(item)
-        for item in [
-            *list(getattr(dependency_plan, "items", []) or []),
-            *list(getattr(dependency_plan, "advisory_items", []) or []),
-        ]
+        for item in chain(
+            getattr(dependency_plan, "items", []) or [],
+            getattr(dependency_plan, "advisory_items", []) or [],
+        )
         if bool(getattr(item, "included_by_default", True))
     }
 
@@ -194,7 +195,7 @@ class ModReviewWorkflow:
 
     def _prepare_online_entries(self, pending_items: list[PendingOnlineInstall]) -> list[PendingInstallReviewEntry]:
         minecraft_version, loader_type, loader_version = self._context
-        simulated_installed_mods = deepcopy(self._installed_mods)
+        simulated_installed_mods = list(self._installed_mods)
         entries: list[PendingInstallReviewEntry] = []
         for pending in pending_items:
             report = self._mod_planning.analyze_version(
@@ -215,10 +216,12 @@ class ModReviewWorkflow:
                 root_project_id=pending.project_id,
                 root_project_name=pending.project_name,
             )
-            blocking_reasons = [
-                *list(getattr(report, "hard_errors", []) or []),
-                *list(getattr(dependency_plan, "unresolved_required", []) or []),
-            ]
+            blocking_reasons = list(
+                chain(
+                    getattr(report, "hard_errors", []) or [],
+                    getattr(dependency_plan, "unresolved_required", []) or [],
+                )
+            )
             server_block = build_server_install_blocking_reason(pending.server_side)
             if server_block:
                 blocking_reasons.append(server_block)
@@ -271,7 +274,7 @@ class ModReviewWorkflow:
         dependency_selected_overrides: dict[tuple[str, tuple[str, str]], bool] | None = None,
     ) -> list[LocalUpdateReviewEntry]:
         minecraft_version, loader_type, loader_version = self._context
-        simulated_installed_mods = deepcopy(self._installed_mods)
+        simulated_installed_mods = list(self._installed_mods)
         entries: list[LocalUpdateReviewEntry] = []
         for candidate in update_plan.candidates:
             root_key = build_local_update_review_key(candidate)
@@ -279,8 +282,8 @@ class ModReviewWorkflow:
             blocking_reasons = list(getattr(candidate, "hard_errors", []) or [])
             warnings = dedupe_review_messages(
                 [
-                    *list(getattr(candidate, "current_issues", []) or []),
-                    *list(getattr(candidate, "dependency_issues", []) or []),
+                    *(getattr(candidate, "current_issues", None) or ()),
+                    *(getattr(candidate, "dependency_issues", None) or ()),
                 ]
             )
             target_version = getattr(candidate, "target_version", None)
@@ -305,17 +308,17 @@ class ModReviewWorkflow:
                     if cached_plan is not None and cached_dependency_selected_keys is not None
                     else _default_dependency_selected_keys(dependency_plan)
                 )
-                for item in [
-                    *list(getattr(dependency_plan, "items", []) or []),
-                    *list(getattr(dependency_plan, "advisory_items", []) or []),
-                ]:
+                for item in chain(
+                    getattr(dependency_plan, "items", []) or [],
+                    getattr(dependency_plan, "advisory_items", []) or [],
+                ):
                     override_key = (root_key, build_dependency_review_key(item))
                     if dependency_selected_overrides and override_key in dependency_selected_overrides:
                         if dependency_selected_overrides[override_key]:
                             dependency_selected_keys.add(override_key[1])
                         else:
                             dependency_selected_keys.discard(override_key[1])
-                blocking_reasons.extend(list(getattr(dependency_plan, "unresolved_required", []) or []))
+                blocking_reasons.extend(getattr(dependency_plan, "unresolved_required", None) or ())
             else:
                 dependency_selected_keys = set()
             default_selected = bool(getattr(candidate, "actionable", False)) and not blocking_reasons
@@ -347,7 +350,7 @@ class ModReviewWorkflow:
                     selected_dependency_keys=dependency_selected_keys,
                 )
             if warnings:
-                candidate.notes = dedupe_review_messages([*warnings, *list(getattr(candidate, "notes", []) or [])])
+                candidate.notes = dedupe_review_messages([*warnings, *(getattr(candidate, "notes", None) or ())])
             if entry.actionable:
                 append_selected_dependency_simulations(
                     simulated_installed_mods,
@@ -470,12 +473,8 @@ class OnlineReviewSession:
         completion_notes = format_completion_notes(
             [
                 *[message for entry in actionable for message in entry.warning_messages],
-                *[message for entry in actionable for message in list(getattr(entry.report, "notes", []) or [])],
-                *[
-                    message
-                    for entry in actionable
-                    for message in list(getattr(entry.dependency_plan, "notes", []) or [])
-                ],
+                *[message for entry in actionable for message in (getattr(entry.report, "notes", None) or ())],
+                *[message for entry in actionable for message in (getattr(entry.dependency_plan, "notes", None) or ())],
             ]
         )
         return ReviewExecutionHandoff(
@@ -592,10 +591,10 @@ class LocalReviewSession:
             (root_key, build_dependency_review_key(item)): build_dependency_review_key(item)
             in entry.selected_dependency_keys
             for root_key, entry in zip(root_keys, self._entries, strict=False)
-            for item in [
-                *list(getattr(entry.dependency_plan, "items", []) or []),
-                *list(getattr(entry.dependency_plan, "advisory_items", []) or []),
-            ]
+            for item in chain(
+                getattr(entry.dependency_plan, "items", []) or [],
+                getattr(entry.dependency_plan, "advisory_items", []) or [],
+            )
         }
         self._entries = tuple(
             self._workflow._prepare_local_entries(
@@ -610,7 +609,7 @@ class LocalReviewSession:
         changed = False
         entry_map = {build_local_update_review_key(entry.candidate): entry for entry in self._entries}
         for root_key, entry in entry_map.items():
-            advisory_items = list(getattr(entry.dependency_plan, "advisory_items", []) or [])
+            advisory_items = getattr(entry.dependency_plan, "advisory_items", None) or ()
             if f"{root_key}::optional-dependencies" in selected_node_ids:
                 for item in advisory_items:
                     dependency_key = build_dependency_review_key(item)
@@ -621,7 +620,7 @@ class LocalReviewSession:
                             entry.selected_dependency_keys.discard(dependency_key)
                         changed = True
             dependency_items = [
-                *((item, False) for item in list(getattr(entry.dependency_plan, "items", []) or [])),
+                *((item, False) for item in (getattr(entry.dependency_plan, "items", None) or ())),
                 *((item, True) for item in advisory_items),
             ]
             dependency_items.sort(
@@ -692,14 +691,10 @@ class LocalReviewSession:
                 *[
                     message
                     for entry in actionable
-                    for message in list(getattr(getattr(entry.candidate, "report", None), "warnings", []) or [])
+                    for message in (getattr(getattr(entry.candidate, "report", None), "warnings", None) or ())
                 ],
-                *[message for entry in actionable for message in list(getattr(entry.candidate, "notes", []) or [])],
-                *[
-                    message
-                    for entry in actionable
-                    for message in list(getattr(entry.dependency_plan, "notes", []) or [])
-                ],
+                *[message for entry in actionable for message in (getattr(entry.candidate, "notes", None) or ())],
+                *[message for entry in actionable for message in (getattr(entry.dependency_plan, "notes", None) or ())],
             ]
         )
         return ReviewExecutionHandoff(

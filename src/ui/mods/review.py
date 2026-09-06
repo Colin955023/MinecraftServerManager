@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QTreeWidgetItem
 from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
 from src.models import LocalModUpdatePlan
-from src.utils import (
+from src.ui import (
     Colors,
     Sizes,
     Spacing,
@@ -20,6 +19,7 @@ from src.utils import (
 )
 
 from .constants import logger
+from .feature_contexts import ModManagementFeatureContext
 from .install_review_dialog_builder import InstallReviewDialogBuilder
 from .review_contracts import ReviewViewSnapshot
 from .review_workflow import (
@@ -31,7 +31,7 @@ from .review_workflow import (
 
 def _selected_node_ids(tree: Any) -> set[str]:
     selected_ids: set[str] = set()
-    for item in list(tree.selectedItems() or []):
+    for item in tree.selectedItems() or ():
         node_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "").strip()
         if node_id:
             selected_ids.add(node_id)
@@ -47,15 +47,11 @@ def _selected_root_key(tree: Any, snapshot: ReviewViewSnapshot) -> str:
     return ""
 
 
-if TYPE_CHECKING:
-    from .frame import ModManagementFrame
-
-
 class ModManagementReviewOps:
     """將 workflow snapshot 呈現在 Qt，並把 UI command 送回 session"""
 
-    def __init__(self, controller: ModManagementFrame) -> None:
-        self.controller = controller
+    def __init__(self, context: ModManagementFeatureContext) -> None:
+        self.controller = context
         self._dependency_snapshot_migration_totals = {
             "checked": 0,
             "migrated": 0,
@@ -79,12 +75,10 @@ class ModManagementReviewOps:
             mod_manager=manager,
         )
 
-    def show_online_install_queue(self, _event=None) -> None:
+    def show_online_install_queue(self) -> None:
         """
         建立目前待安裝清單的 Review session 並顯示對話框
 
-        Args:
-            _event: Qt signal 傳入但不使用的事件值
         """
         pending_installs = self.controller.mod_session.pending_online_installs
         if not pending_installs:
@@ -129,18 +123,18 @@ class ModManagementReviewOps:
         )
         self._render_review_task_tree(queue_tree, snapshot)
 
-        def refresh_summary(_event=None) -> None:
+        def refresh_summary() -> None:
             root = snapshot.root(_selected_root_key(queue_tree, snapshot))
             if root:
                 shell.summary_box.setPlainText(root.summary)
 
-        def refresh_project_button(_event=None) -> None:
+        def refresh_project_button() -> None:
             root = snapshot.root(_selected_root_key(queue_tree, snapshot))
             project_button.setEnabled(bool(root and root.project_page_url))
 
         def open_project_page() -> None:
             root = snapshot.root(_selected_root_key(queue_tree, snapshot))
-            self._open_project_page(root.project_page_url if root else "", dialog)
+            self.open_project_page(root.project_page_url if root else "", dialog)
 
         def remove_selected() -> None:
             node_root_map = {node.node_id: node.root_key for node in snapshot.task_nodes}
@@ -181,14 +175,16 @@ class ModManagementReviewOps:
         if removed_count <= 0:
             UIUtils.show_message("提示", "目前選取項目不可移除", dialog, message_level="warning")
             return
-        self.controller.queue_ops._refresh_online_queue_button()
+        if self.controller.refresh_online_queue is not None:
+            self.controller.refresh_online_queue()
         dialog.close()
         if self.controller.mod_session.pending_online_installs:
             QTimer.singleShot(0, self.show_online_install_queue)
 
     def _clear_pending_online_installs(self, dialog: Any) -> None:
         self.controller.mod_session.clear_pending_installs()
-        self.controller.queue_ops._refresh_online_queue_button()
+        if self.controller.refresh_online_queue is not None:
+            self.controller.refresh_online_queue()
         dialog.close()
 
     def _get_dialog_parent(self) -> Any:
@@ -215,7 +211,11 @@ class ModManagementReviewOps:
             UIUtils.show_message("提示", "目前伺服器尚未安裝任何模組", dialog_parent, message_level="info")
             return
 
-        selected_mod_ids = self.controller.tree_sync._capture_selected_mod_ids()
+        selected_mod_ids = (
+            self.controller.capture_selected_mod_ids()
+            if self.controller.capture_selected_mod_ids is not None
+            else set()
+        )
         if not selected_mod_ids:
             target_mods = installed_mods
             scope_text = f"全部 {len(target_mods)} 個模組"
@@ -223,11 +223,15 @@ class ModManagementReviewOps:
             target_mods = [
                 mod
                 for mod in installed_mods
-                if mod.filename.replace(".jar.disabled", "").replace(".jar", "") in selected_mod_ids
+                if mod.filename.removesuffix(".jar.disabled").removesuffix(".jar") in selected_mod_ids
             ]
             scope_text = f"已選取的 {len(target_mods)} 個模組"
 
-        minecraft_version, loader_type, loader_version = self.controller.queue_ops._get_current_modrinth_context()
+        minecraft_version, loader_type, loader_version = (
+            self.controller.get_current_modrinth_context()
+            if self.controller.get_current_modrinth_context is not None
+            else (None, None, None)
+        )
 
         def check_task() -> None:
             try:
@@ -258,7 +262,7 @@ class ModManagementReviewOps:
                     loader_version=loader_version,
                     hash_progress_callback=on_hash_progress,
                     provider_identity_resolver=manager.provider_identity_service.resolve_for_local_mod,
-                    hash_cache_writer=lambda mod, algorithm, file_hash: manager.index_manager.cache_file_hash(
+                    hash_cache_writer=lambda mod, algorithm, file_hash: manager.cache_file_hash(
                         Path(str(getattr(mod, "file_path", "") or "")), algorithm, file_hash
                     ),
                     stage_progress_callback=on_stage_progress,
@@ -267,9 +271,11 @@ class ModManagementReviewOps:
                 self.controller.update_status_safe(
                     f"更新檢查完成：{update_plan.actionable_count} 個可更新，{len(update_plan.candidates)} 個需 Review"
                 )
-                self.controller.ui_queue.put(lambda: self._show_local_update_review_dialog(update_plan, scope_text))
+                self.controller.scope.schedule(
+                    0, lambda: self._show_local_update_review_dialog(update_plan, scope_text)
+                )
             except Exception as e:
-                logger.error(f"檢查本地模組更新失敗: {e}\n{traceback.format_exc()}")
+                logger.exception("檢查本地模組更新失敗")
                 self.controller.update_progress_safe(0)
                 self.controller.update_status_safe(f"檢查本地模組更新失敗: {e}")
                 parent = self._get_dialog_parent()
@@ -278,7 +284,7 @@ class ModManagementReviewOps:
                 def show_error() -> None:
                     UIUtils.show_message("更新檢查失敗", message, parent, message_level="error")
 
-                self.controller.ui_queue.put(show_error)
+                self.controller.scope.schedule(0, show_error)
 
         self.controller.scope.submit(check_task, key="local_update_check", replace=True)
 
@@ -291,12 +297,20 @@ class ModManagementReviewOps:
         return builder
 
     @staticmethod
-    def _open_project_page(url: str, parent: Any, *, title: str = "沒有可開啟的專案頁面") -> None:
+    def open_project_page(url: str, parent: Any, *, title: str = "沒有可開啟的專案頁面") -> None:
+        """
+        開啟指定模組專案頁面
+
+        Args:
+            url: 專案頁面 URL
+            parent: 訊息視窗的父元件
+            title: URL 缺失時的提示標題
+        """
         clean_url = str(url or "").strip()
         if not clean_url:
             UIUtils.show_message(title, "目前無法判定這個項目的專案頁面", parent, message_level="warning")
             return
-        UIUtils.open_external(clean_url)
+        UIUtils.open_external_url(clean_url)
 
     def _create_review_action_button(
         self,
@@ -304,10 +318,7 @@ class ModManagementReviewOps:
         *,
         text: str,
         fg_color: Any = None,
-        _hover_color: Any = None,
         command: Callable[[], None] | None = None,
-        _padx: tuple[int, int] | None = None,
-        _side: str = "left",
         bold: bool = False,
     ) -> Any:
         button = PrimaryPushButton(text) if fg_color == Colors.BUTTON_SUCCESS or bold else PushButton(text)
@@ -333,7 +344,7 @@ class ModManagementReviewOps:
         button_layout = shell.button_frame.layout()
         if button_layout and hasattr(button_layout, "addStretch"):
             button_layout.addStretch(1)
-        self._create_review_action_button(shell.button_frame, text="關閉", command=dialog.accept, _side="right")
+        self._create_review_action_button(shell.button_frame, text="關閉", command=dialog.accept)
         return project_button
 
     @staticmethod
@@ -341,8 +352,9 @@ class ModManagementReviewOps:
         selected_key = _selected_root_key(tree, snapshot)
         tree.clear()
         group_items: dict[str, Any] = {}
+        root_group_keys = {node.group_key for node in snapshot.task_nodes if node.node_kind == "root"}
         for group_key, label in snapshot.group_specs:
-            if not any(node.node_kind == "root" and node.group_key == group_key for node in snapshot.task_nodes):
+            if group_key not in root_group_keys:
                 continue
             item = QTreeWidgetItem(tree)
             item.setText(0, label)
@@ -404,7 +416,7 @@ class ModManagementReviewOps:
             stretch_columns={"status"},
         )
 
-        def refresh_summary(_event=None) -> None:
+        def refresh_summary() -> None:
             root = snapshot.root(_selected_root_key(update_tree, snapshot))
             if root:
                 shell.summary_box.setPlainText(root.summary)
@@ -413,7 +425,7 @@ class ModManagementReviewOps:
             update_button.setText(f"⬇️ 更新 {snapshot.selected_count} 個已選取項目")
             update_button.setEnabled(snapshot.selected_count > 0)
 
-        def refresh_project_button(_event=None) -> None:
+        def refresh_project_button() -> None:
             root = snapshot.root(_selected_root_key(update_tree, snapshot))
             project_button.setEnabled(bool(root and root.project_page_url))
 
@@ -433,7 +445,7 @@ class ModManagementReviewOps:
 
         def open_project_page() -> None:
             root = snapshot.root(_selected_root_key(update_tree, snapshot))
-            self._open_project_page(root.project_page_url if root else "", dialog)
+            self.open_project_page(root.project_page_url if root else "", dialog)
 
         def trigger_local_update() -> None:
             handoff = session.build_handoff()

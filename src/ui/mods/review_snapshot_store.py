@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.utils import (
+from src.core import (
     deserialize_online_dependency_install_plan,
     migrate_online_dependency_install_plan_payload,
     serialize_online_dependency_install_plan,
@@ -61,10 +61,10 @@ class LocalReviewSnapshotStore:
         if not any(snapshot.get(key) for key in ("items", "advisory_items", "unresolved_required", "notes")):
             return
         file_path = Path(file_path_raw)
-        review_metadata = self._manager.index_manager.get_review_metadata(file_path) or {}
+        review_metadata = self._manager.get_review_metadata(file_path) or {}
         review_metadata["dependency_plan_v2"] = snapshot
         review_metadata.pop("dependency_plan_v1", None)
-        self._manager.index_manager.replace_review_metadata(file_path, review_metadata)
+        self._manager.replace_review_metadata(file_path, review_metadata)
 
     def load(self, candidate: Any) -> tuple[Any | None, bool | None, set[tuple[str, str]] | None]:
         """
@@ -80,7 +80,7 @@ class LocalReviewSnapshotStore:
         file_path_raw = str(getattr(local_mod, "file_path", "") or "").strip()
         if not file_path_raw:
             return (None, None, None)
-        review_metadata = self._manager.index_manager.get_review_metadata(Path(file_path_raw)) or {}
+        review_metadata = self._manager.get_review_metadata(Path(file_path_raw)) or {}
         snapshot_raw = review_metadata.get("dependency_plan_v2")
         loaded_legacy_slot = False
         if not isinstance(snapshot_raw, dict):
@@ -97,7 +97,7 @@ class LocalReviewSnapshotStore:
             self._record("migrated")
             review_metadata["dependency_plan_v2"] = migrated_snapshot
             review_metadata.pop("dependency_plan_v1", None)
-            self._manager.index_manager.replace_review_metadata(Path(file_path_raw), review_metadata)
+            self._manager.replace_review_metadata(Path(file_path_raw), review_metadata)
             logger.info(f"已遷移 dependency plan 快照並回寫：{file_path_raw}")
             snapshot_raw = migrated_snapshot
         snapshot_valid, _snapshot_reason = validate_online_dependency_install_plan_payload(snapshot_raw)
@@ -108,7 +108,7 @@ class LocalReviewSnapshotStore:
         snapshot_root_selected = snapshot_root_selected_raw if isinstance(snapshot_root_selected_raw, bool) else None
         selected_dependency_keys = {
             (str(key[0]).strip(), str(key[1]).strip())
-            for key in list(snapshot_raw.get("selected_dependency_keys", []) or [])
+            for key in (snapshot_raw.get("selected_dependency_keys", []) or [])
             if isinstance(key, list) and len(key) == 2
         }
         expected_project_id = str(getattr(candidate, "project_id", "") or "").strip()
@@ -123,8 +123,7 @@ class LocalReviewSnapshotStore:
             return (None, snapshot_root_selected, selected_dependency_keys)
         restored = deserialize_online_dependency_install_plan(snapshot_raw)
         has_content = any(
-            list(getattr(restored, key, []) or [])
-            for key in ("items", "advisory_items", "unresolved_required", "notes")
+            getattr(restored, key, None) for key in ("items", "advisory_items", "unresolved_required", "notes")
         )
         if has_content:
             self._record("replayed")

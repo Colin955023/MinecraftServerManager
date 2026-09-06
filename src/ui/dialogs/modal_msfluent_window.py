@@ -6,11 +6,20 @@ from contextlib import suppress
 from typing import Any
 
 from PySide6.QtCore import QEventLoop, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QIcon
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, MSFluentWindow, PrimaryPushButton, PushButton, TitleLabel, qconfig
 
-from src.utils import Colors, FontManager, FontSize, Sizes, center_window, get_icon_path, resolve_color
+from src.ui import (
+    Colors,
+    FontManager,
+    FontSize,
+    Sizes,
+    apply_window_icon,
+    center_window,
+    resolve_color,
+    themed_surface_stylesheet,
+)
 
 
 class ModalMSFluentWindow(MSFluentWindow):
@@ -28,12 +37,7 @@ class ModalMSFluentWindow(MSFluentWindow):
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.Window)
         self.setMicaEffectEnabled(False)
         self.setCustomBackgroundColor(*Colors.BG_PRIMARY)
-        icon_path = get_icon_path()
-        if icon_path:
-            icon = QIcon(icon_path)
-            self.setWindowIcon(icon)
-            if hasattr(self, "titleBar") and hasattr(self.titleBar, "setIcon"):
-                self.titleBar.setIcon(icon)
+        apply_window_icon(self)
         if is_modal:
             self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.resize(600, 450)
@@ -89,11 +93,8 @@ class ModalMSFluentWindow(MSFluentWindow):
     def _apply_theme_styles(self) -> None:
         """讓 modal 的外框、內容容器與 stacked widget 使用相同主題背景"""
         background = resolve_color(Colors.BG_PRIMARY)
-        foreground = resolve_color(Colors.TEXT_PRIMARY)
         if hasattr(self, "widget"):
-            self.widget.setStyleSheet(
-                f"#ModalMainWidget {{ background-color: {background}; color: {foreground}; border: 0; }}"
-            )
+            self.widget.setStyleSheet(themed_surface_stylesheet("ModalMainWidget"))
         stacked = getattr(self, "stackedWidget", getattr(self, "stacked_widget", None))
         if stacked is not None:
             stacked.setStyleSheet(f"background-color: {background}; border: 0;")

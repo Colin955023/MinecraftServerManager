@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from src.models import ModrinthVersionLookupResult, OnlineModVersion
 
 SUPPORTED_MODRINTH_UPDATE_LOADERS: set[str] = {"fabric", "forge", "quilt", "neoforge"}
 
@@ -115,69 +111,6 @@ def normalize_mod_search_query(raw_query: str) -> str:
     return re.sub("\\s+", " ", normalized).strip() or str(raw_query or "").strip()
 
 
-def parse_modrinth_version(item: dict[str, Any]) -> OnlineModVersion:
-    """
-    將 Modrinth 版本 API payload 轉換為內部版本模型
-
-    Args:
-        item: Modrinth 版本 API 回應，包含版本號、loader、檔案與 dependency 欄位
-
-    Returns:
-        填入 provider、版本資訊、檔案與 dependency 的 OnlineModVersion
-    """
-    from src.models import OnlineModVersion
-
-    game_versions = [str(v) for v in item.get("game_versions", []) if v]
-    loaders = [str(v) for v in item.get("loaders", []) if v]
-    version_number = str(item.get("version_number", "") or "")
-    display_name = version_number or str(item.get("name", "未知版本") or "未知版本")
-    return OnlineModVersion(
-        version_id=str(item.get("id", "") or ""),
-        version_number=version_number,
-        display_name=display_name,
-        game_versions=game_versions,
-        loaders=loaders,
-        version_type=str(item.get("version_type", "") or ""),
-        date_published=str(item.get("date_published", "") or ""),
-        changelog=str(item.get("changelog", "") or item.get("body", "") or ""),
-        provider="modrinth",
-        files=list(item.get("files", []) or []),
-        dependencies=list(item.get("dependencies", []) or []),
-    )
-
-
-def parse_modrinth_version_lookup_response(
-    response: dict[str, Any] | None, algorithm: str
-) -> dict[str, ModrinthVersionLookupResult]:
-    """
-    將 Modrinth 以雜湊查詢的回應轉成 lookup result 對照表
-
-    Args:
-        response: Modrinth 雜湊查詢 API 回應；None 表示查詢沒有結果
-        algorithm: 查詢使用的雜湊演算法名稱，例如 sha1 或 sha512
-
-    Returns:
-        以雜湊值為 key、ModrinthVersionLookupResult 為 value 的字典
-    """
-    from src.models import ModrinthVersionLookupResult
-    from src.utils import normalize_hash_algorithm
-
-    normalized_algorithm = normalize_hash_algorithm(algorithm)
-    if not isinstance(response, dict):
-        return {}
-    resolved: dict[str, ModrinthVersionLookupResult] = {}
-    for file_hash, raw_item in response.items():
-        normalized_hash = str(file_hash or "").strip().lower()
-        if not normalized_hash or not isinstance(raw_item, dict):
-            continue
-        project_id = clean_api_identifier(str(raw_item.get("project_id", "") or ""))
-        version = parse_modrinth_version(raw_item)
-        resolved[normalized_hash] = ModrinthVersionLookupResult(
-            file_hash=normalized_hash, algorithm=normalized_algorithm, project_id=project_id, version=version
-        )
-    return resolved
-
-
 __all__ = [
     "clean_api_identifier",
     "get_modrinth_loader_filters",
@@ -185,6 +118,4 @@ __all__ = [
     "normalize_identifier",
     "normalize_local_loader",
     "normalize_mod_search_query",
-    "parse_modrinth_version",
-    "parse_modrinth_version_lookup_response",
 ]

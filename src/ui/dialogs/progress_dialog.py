@@ -8,12 +8,13 @@ from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import ProgressBar, SubtitleLabel, TitleLabel
 
-from src.ui import ModalMSFluentWindow
-from src.utils import (
+from src.models import ProgressEvent
+from src.ui import (
+    ModalMSFluentWindow,
     Spacing,
-    get_logger,
     is_qobject_alive,
 )
+from src.utils import get_logger
 
 logger = get_logger().bind(component="ProgressDialog")
 
@@ -22,6 +23,7 @@ class ProgressDialog(ModalMSFluentWindow):
     """顯示可取消的進度對話框"""
 
     progress_requested = Signal(float, str)
+    progress_event_requested = Signal(object)
 
     def __init__(self, parent: Any, title: str = "進度", show_cancel: bool = True) -> None:
         super().__init__(parent, is_modal=False)
@@ -49,7 +51,7 @@ class ProgressDialog(ModalMSFluentWindow):
         self.progress = ProgressBar(self)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.progress.setMinimumHeight(38)
+        self.progress.setMinimumHeight(19)
         self.viewLayout.addWidget(self.progress)
 
         if show_cancel:
@@ -66,7 +68,9 @@ class ProgressDialog(ModalMSFluentWindow):
         self.cancelled = False
         self._last_percent: float = -1.0
         self._last_status = ""
+        self._last_determinate_percent: float | None = None
         self.progress_requested.connect(self._apply_progress_update)
+        self.progress_event_requested.connect(self._apply_progress_event)
 
         self.setFixedSize(520, 290 if show_cancel else 230)
 
@@ -111,6 +115,21 @@ class ProgressDialog(ModalMSFluentWindow):
         self.cancelled = True
         self.reject()
 
+    def update_progress_event(self, event: ProgressEvent) -> bool:
+        """
+        更新結構化進度事件
+
+        Args:
+            event: 建立、下載或安裝階段的進度事件
+
+        Returns:
+            對話框仍可接受更新時回傳 True
+        """
+        if self.cancelled:
+            return False
+        self.progress_event_requested.emit(event)
+        return True
+
     def closeEvent(self, event) -> None:
         """
         處理視窗關閉事件，確保在關閉時發送取消通知
@@ -123,16 +142,43 @@ class ProgressDialog(ModalMSFluentWindow):
             self.rejected.emit()
         super().closeEvent(event)
 
+    def _apply_determinate_percent(self, percent: float) -> None:
+        """
+        套用單調遞增的確定式進度
+        """
+        clamped = max(0.0, min(100.0, percent))
+        if self._last_determinate_percent is not None:
+            clamped = max(self._last_determinate_percent, clamped)
+        self._last_determinate_percent = clamped
+        self.progress.setRange(0, 100)
+        self.progress.setValue(round(clamped))
+
     @Slot(float, str)
     def _apply_progress_update(self, percent: float, status_text: str) -> None:
         if self.cancelled or not is_qobject_alive(self):
             return
         try:
-            clamped = max(0.0, min(100.0, percent))
-            self.progress.setValue(round(clamped))
+            self._apply_determinate_percent(percent)
             self.status_label.setText(status_text)
         except Exception as e:
             logger.exception(f"更新進度 UI 失敗: {e}")
+
+    @Slot(object)
+    def _apply_progress_event(self, event: ProgressEvent) -> None:
+        if self.cancelled or not is_qobject_alive(self):
+            return
+        try:
+            percent = event.overall_percent
+            if percent is None:
+                percent = event.phase_percent
+            if percent is None:
+                if self._last_determinate_percent is None:
+                    self.progress.setRange(0, 0)
+            else:
+                self._apply_determinate_percent(percent)
+            self.status_label.setText(event.message)
+        except Exception as e:
+            logger.exception(f"更新結構化進度 UI 失敗: {e}")
 
 
 __all__ = ["ProgressDialog"]

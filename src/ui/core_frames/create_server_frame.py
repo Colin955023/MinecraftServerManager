@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -34,28 +33,36 @@ from qfluentwidgets import (
 
 from src.core import CreateServerJourney, LoaderManager, ServerCRUD, ServerPropertiesStore
 from src.models import ServerConfig
-from src.ui import JvmArgsDialog, ProgressDialog, ServerCreationConfirmDialog
-from src.utils import (
+from src.ui import (
     Colors,
     FontManager,
     FontSize,
-    JavaDownloader,
-    JavaUtils,
-    JvmOptionPolicy,
-    MemoryUtils,
+    JvmArgsDialog,
+    ProgressDialog,
     ScrollableComboBox,
+    ServerCreationConfirmDialog,
     Sizes,
     StatusPushButton,
-    SystemUtils,
     UIUtils,
     UIWorkScope,
     ValueState,
     WorkOutcome,
-    get_logger,
     is_qobject_alive,
     resolve_color,
     run_on_ui_thread,
 )
+from src.utils import (
+    MAX_SERVER_NAME_LENGTH,
+    JavaDownloader,
+    JavaUtils,
+    JvmOptionPolicy,
+    MemoryUtils,
+    SystemUtils,
+    get_logger,
+    validate_server_name,
+)
+
+from .create_server_support import compose_server_name, extract_server_name_suffix, version_names
 
 logger = get_logger().bind(component="CreateServerFrame")
 
@@ -87,6 +94,8 @@ class CreateServerFrame(QWidget):
         self.scope = UIWorkScope(self)
         self.jvm_args_customized = False
         self.selected_jvm_args: list[str] = []
+        self._suggested_java_major: int | None = None
+        self._jvm_suggestion_request: tuple[str, str] | None = None
         self.setObjectName("CreateServerFrame")
         self.create_widgets()
         self.preload_version_data()
@@ -104,32 +113,9 @@ class CreateServerFrame(QWidget):
         try:
             return SystemUtils.get_total_memory_mb()
         except Exception as e:
-            logger.error(f"無法取得系統記憶體資訊: {e}\n{traceback.format_exc()}")
+            logger.exception("無法取得系統記憶體資訊")
             UIUtils.show_message("錯誤", f"無法取得系統記憶體資訊: {e}", message_level="error")
             return 0
-
-    @staticmethod
-    def _compose_server_name(loader_type: str, mc_version: str, suffix: str = "") -> str:
-        """依載入器類型與版本組合標準伺服器名稱"""
-        base_name = f"{mc_version}{suffix}"
-        if loader_type in ("Fabric", "Forge", "Quilt", "NeoForge"):
-            return f"{loader_type} {base_name}"
-        return base_name
-
-    @staticmethod
-    def _extract_server_name_suffix(name: str, version_candidates: tuple[str, ...]) -> str | None:
-        """解析「[載入器前綴] + 版本 + 自訂尾字」中的尾字"""
-        normalized = name.strip()
-        if not normalized:
-            return None
-        for prefix in ("Fabric ", "Forge ", "Quilt ", "NeoForge "):
-            if normalized.startswith(prefix):
-                normalized = normalized[len(prefix) :]
-                break
-        for version in version_candidates:
-            if version and normalized.startswith(version):
-                return normalized[len(version) :]
-        return None
 
     def update_memory_warning(self) -> None:
         """更新記憶體使用警告標籤"""
@@ -160,7 +146,7 @@ class CreateServerFrame(QWidget):
             else:
                 self._set_warning_text("⚠️ 警告：記憶體設定必須為有效的整數", Colors.TEXT_ERROR)
         except Exception as e:
-            logger.error(f"更新記憶體警告失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("更新記憶體警告失敗")
             UIUtils.show_message("錯誤", f"更新記憶體警告失敗: {e}", self.window(), message_level="error")
 
     def create_java_path_field(self, parent, row) -> None:
@@ -369,7 +355,7 @@ class CreateServerFrame(QWidget):
         self.loader_type_combo.setMinimumWidth(Sizes.DROPDOWN_WIDTH)
         self._style_control(self.loader_type_combo)
         content_frame.addWidget(self.loader_type_combo, 2, 1)
-        self.loader_type_var.trace_add("write", lambda *_args: self.update_server_config_ui())
+        self.loader_type_var.trace_add(self.update_server_config_ui)
 
         loader_version_row = 3
         content_frame.addWidget(self._make_label("載入器版本:"), loader_version_row, 0)
@@ -443,8 +429,8 @@ class CreateServerFrame(QWidget):
         max_layout.addWidget(self.max_memory_entry)
         memory_input_layout.addWidget(max_memory_frame, 0, 1)
         memory_layout.addLayout(memory_input_layout)
-        self.max_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
-        self.min_memory_var.trace_add("write", lambda *_args: self.update_memory_warning())
+        self.max_memory_var.trace_add(self.update_memory_warning)
+        self.min_memory_var.trace_add(self.update_memory_warning)
         memory_tip = CaptionLabel(
             "最小記憶體選填，若留空由 Java 決定\n最大記憶體(必填)建議： 2048MB (最低) | 4096MB (一般) | 8192MB (多人遊戲)",
             memory_container,
@@ -478,21 +464,21 @@ class CreateServerFrame(QWidget):
 
         content_frame.addWidget(jvm_container, 6, 1, 1, 2)
 
-        self.max_memory_var.trace_add("write", lambda *_args: self.update_default_jvm_args())
-        self.mc_version_var.trace_add("write", lambda *_args: self.update_default_jvm_args())
+        self.max_memory_var.trace_add(self.update_default_jvm_args)
+        self.mc_version_var.trace_add(self.update_default_jvm_args)
 
-        def _on_loader_changed(*_args):
+        def _on_loader_changed():
             self.jvm_args_customized = False
             self.update_default_jvm_args()
 
-        self.loader_type_var.trace_add("write", _on_loader_changed)
+        self.loader_type_var.trace_add(_on_loader_changed)
 
     def get_suggested_java_version(self) -> int | None:
         """根據目前的 Minecraft 版本取得建議的 Java major version"""
         mc_version = self.mc_version_var.get()
         if not mc_version or "載入" in mc_version or "等待" in mc_version or "請先選擇" in mc_version:
             return None
-        return JavaUtils.get_required_java_major(mc_version)
+        return self._suggested_java_major
 
     def update_default_jvm_args(self) -> None:
         """當記憶體或版本改變時，若玩家未自訂，則自動更新 JVM 參數與 summary"""
@@ -508,8 +494,27 @@ class CreateServerFrame(QWidget):
         max_mem_str = self.max_memory_var.get().strip()
         max_mem = int(max_mem_str) if max_mem_str.isdigit() else 2048
 
-        java_major = self.get_suggested_java_version()
         loader_type = self.loader_type_var.get()
+
+        request = (mc_version, loader_type)
+        if request != self._jvm_suggestion_request:
+            self._jvm_suggestion_request = request
+
+            def fetch_java_major() -> int | None:
+                return JavaUtils.get_required_java_major(mc_version)
+
+            def apply_java_major(outcome: WorkOutcome) -> None:
+                if not outcome.is_succeeded or request != (self.mc_version_var.get(), self.loader_type_var.get()):
+                    return
+                self._suggested_java_major = outcome.value
+                if not self.jvm_args_customized:
+                    self.update_default_jvm_args()
+
+            self.scope.submit(fetch_java_major, on_done=apply_java_major, key="jvm_suggestion", replace=True)
+            self.jvm_summary_label.setText("正在分析 Java 建議...")
+            return
+
+        java_major = self.get_suggested_java_version()
 
         recommended = JvmOptionPolicy.get_recommended_jvm_args_details(
             java_major=java_major, memory_max_mb=max_mem, loader_type=loader_type
@@ -562,8 +567,8 @@ class CreateServerFrame(QWidget):
             run_on_ui_thread(update_mc)
             try:
                 self.loader_manager.preload_loader_versions()
-            except Exception as e:
-                logger.error(f"預載入載入器版本失敗: {e}\n{traceback.format_exc()}")
+            except Exception:
+                logger.exception("預載入載入器版本失敗")
 
         def on_error():
             self._update_combo_state(self.mc_version_combo, self.mc_version_var, "載入失敗", enabled=True)
@@ -609,14 +614,7 @@ class CreateServerFrame(QWidget):
                 if not is_qobject_alive(self.loader_version_combo):
                     return
                 if versions:
-                    v_names = []
-                    for v in versions:
-                        if hasattr(v, "version"):
-                            v_names.append(v.version)
-                        elif isinstance(v, str):
-                            v_names.append(v)
-                        else:
-                            v_names.append(str(v))
+                    v_names = version_names(versions)
                     self.loader_version_combo.clear()
                     self.loader_version_combo.addItems(v_names)
                     if v_names:
@@ -725,7 +723,7 @@ class CreateServerFrame(QWidget):
 
             UIUtils.show_message("重設完成", "表單已重設為預設值", self.window(), message_level="info")
         except Exception as e:
-            logger.error(f"重設表單失敗: {e}\n{traceback.format_exc()}")
+            logger.exception("重設表單失敗")
             UIUtils.show_message("重設失敗", f"重設表單時發生錯誤：\n{e!s}", self.window(), message_level="error")
 
     def update_versions(self, versions: list) -> None:
@@ -750,7 +748,7 @@ class CreateServerFrame(QWidget):
             self.mc_version_combo.addItem("載入中...")
             self.mc_version_var.set("載入中...")
             return
-        display_versions = [v for v in self.release_versions if v.get("server_url")]
+        display_versions = [v for v in self.release_versions if v.get("server_url") and v.get("server_sha1")]
         if not display_versions:
             self.mc_version_combo.clear()
             self.mc_version_combo.addItem("無可用版本")
@@ -766,12 +764,10 @@ class CreateServerFrame(QWidget):
             self.mc_version_var.set(first_version)
         self.update_server_config_ui()
 
-    def update_server_config_ui(self, _event=None) -> None:
+    def update_server_config_ui(self) -> None:
         """
         根據載入器類型與 Minecraft 版本自動更新伺服器名稱與載入器版本選單
 
-        Args:
-            _event: 事件物件，供 trace callback 使用
         """
         mc_version = self.mc_version_var.get()
         loader_type = self.loader_type_var.get()
@@ -779,37 +775,52 @@ class CreateServerFrame(QWidget):
         auto_names = [
             "我的伺服器",
             "",
-            self._compose_server_name("Fabric", mc_version),
-            self._compose_server_name("Forge", mc_version),
-            self._compose_server_name("Vanilla", mc_version),
-            self._compose_server_name("Quilt", mc_version),
-            self._compose_server_name("NeoForge", mc_version),
+            compose_server_name("Fabric", mc_version),
+            compose_server_name("Forge", mc_version),
+            compose_server_name("Vanilla", mc_version),
+            compose_server_name("Quilt", mc_version),
+            compose_server_name("NeoForge", mc_version),
         ]
         old_version = getattr(self, "old_mc_version", None)
         self.old_mc_version = mc_version
         if name in auto_names:
-            self.server_name_var.set(self._compose_server_name(loader_type, mc_version))
+            self.server_name_var.set(compose_server_name(loader_type, mc_version))
         else:
             version_candidates = tuple(v for v in (old_version, mc_version) if v)
-            suffix = self._extract_server_name_suffix(name, version_candidates)
+            suffix = extract_server_name_suffix(name, version_candidates)
             if suffix is not None:
-                self.server_name_var.set(self._compose_server_name(loader_type, mc_version, suffix))
+                self.server_name_var.set(compose_server_name(loader_type, mc_version, suffix))
         if old_version and old_version in name and (name == self.server_name_var.get()):
             self.server_name_var.set(name.replace(old_version, mc_version))
         if loader_type == "Vanilla":
+            if hasattr(self, "_loading_key"):
+                delattr(self, "_loading_key")
             self.loader_version_combo.clear()
             self.loader_version_combo.addItem(mc_version or "無")
             self.loader_version_combo.setEnabled(False)
             self.loader_version_combo.setCurrentText(mc_version or "無")
             self.loader_version_var.set(mc_version or "無")
             return
-        self.loader_version_combo.setEnabled(True)
         if not mc_version:
+            if hasattr(self, "_loading_key"):
+                delattr(self, "_loading_key")
+            self._update_combo_state(
+                self.loader_version_combo,
+                self.loader_version_var,
+                "請先選擇 Minecraft 版本",
+                enabled=False,
+            )
             return
         current_key = f"{loader_type}_{mc_version}"
-        if hasattr(self, "_loading_key") and self._loading_key == current_key:
+        if getattr(self, "_loading_key", None) == current_key:
             return
         self._loading_key = current_key
+        self._update_combo_state(
+            self.loader_version_combo,
+            self.loader_version_var,
+            f"正在載入 {loader_type} 版本...",
+            enabled=False,
+        )
         self.scope.submit(
             lambda: self.load_loader_versions(loader_type, mc_version), key="load_loader_versions", replace=True
         )
@@ -825,12 +836,18 @@ class CreateServerFrame(QWidget):
         try:
 
             def set_loading():
-                if is_qobject_alive(self.loader_version_combo):
+                current_key = f"{loader_type}_{mc_version}"
+                if (
+                    is_qobject_alive(self.loader_version_combo)
+                    and self.loader_type_var.get() == loader_type
+                    and self.mc_version_var.get() == mc_version
+                    and getattr(self, "_loading_key", None) == current_key
+                ):
                     self._update_combo_state(
                         self.loader_version_combo,
                         self.loader_version_var,
                         f"正在載入 {loader_type} 版本...",
-                        enabled=True,
+                        enabled=False,
                     )
 
             run_on_ui_thread(set_loading)
@@ -846,44 +863,43 @@ class CreateServerFrame(QWidget):
                     if loader_type != current_type or mc_version != current_version:
                         return
                     if versions:
-                        version_names = []
-                        for v in versions:
-                            if hasattr(v, "version"):
-                                version_names.append(v.version)
-                            elif isinstance(v, str):
-                                version_names.append(v)
-                            else:
-                                version_names.append(str(v))
+                        loader_version_names = version_names(versions)
                         self.loader_version_combo.clear()
-                        self.loader_version_combo.addItems(version_names)
+                        self.loader_version_combo.addItems(loader_version_names)
                         self.loader_version_combo.setEnabled(True)
-                        if version_names:
-                            self.loader_version_combo.setCurrentText(version_names[0])
-                            self.loader_version_var.set(version_names[0])
+                        if loader_version_names:
+                            self.loader_version_combo.setCurrentText(loader_version_names[0])
+                            self.loader_version_var.set(loader_version_names[0])
                     else:
                         self._update_combo_state(
                             self.loader_version_combo, self.loader_version_var, "無可用版本", enabled=False
                         )
                     if hasattr(self, "_loading_key"):
                         delattr(self, "_loading_key")
-                except Exception as e:
-                    logger.error(f"更新載入器版本 UI 失敗: {e}\n{traceback.format_exc()}")
+                except Exception:
+                    logger.exception("更新載入器版本 UI 失敗")
                     if hasattr(self, "_loading_key"):
                         delattr(self, "_loading_key")
 
             run_on_ui_thread(update_ui)
-        except Exception as e:
-            logger.error(f"載入載入器版本失敗: {e}\n{traceback.format_exc()}")
+        except Exception:
+            logger.exception("載入載入器版本失敗")
 
             def handle_error():
+                current_key = f"{loader_type}_{mc_version}"
                 try:
-                    if is_qobject_alive(self.loader_version_combo):
+                    if (
+                        is_qobject_alive(self.loader_version_combo)
+                        and self.loader_type_var.get() == loader_type
+                        and self.mc_version_var.get() == mc_version
+                        and getattr(self, "_loading_key", None) == current_key
+                    ):
                         self._update_combo_state(
-                            self.loader_version_combo, self.loader_version_var, "載入失敗", enabled=True
+                            self.loader_version_combo, self.loader_version_var, "載入失敗", enabled=False
                         )
                 except Exception as e:
                     logger.exception(f"更新載入器版本失敗狀態 UI 失敗: {e}")
-                if hasattr(self, "_loading_key"):
+                if getattr(self, "_loading_key", None) == current_key:
                     delattr(self, "_loading_key")
 
             run_on_ui_thread(handle_error)
@@ -891,20 +907,10 @@ class CreateServerFrame(QWidget):
     def _capture_creation_request(self) -> tuple[ServerConfig, str | None] | None:
         """一次擷取表單；UI 執行即時完整驗證，不符規範時立即中斷並提示使用者"""
         name = self.server_name_var.get().strip()
-        if not name:
-            UIUtils.show_message("錯誤", "請輸入伺服器名稱", self.window(), message_level="error")
-            return None
-        if len(name) > 100:
-            UIUtils.show_message("錯誤", "伺服器名稱過長（上限 100 字元）", self.window(), message_level="error")
-            return None
-
-        if any(c in name for c in '<>:"/\\|?*') or name.endswith((".", " ")):
-            UIUtils.show_message(
-                "錯誤", "伺服器名稱包含 Windows 不允許的特殊字元或結尾為空格/點", self.window(), message_level="error"
-            )
-            return None
-        if name in {".", ".."} or Path(name).name != name:
-            UIUtils.show_message("錯誤", "無效的伺服器名稱", self.window(), message_level="error")
+        try:
+            name = validate_server_name(name, max_length=MAX_SERVER_NAME_LENGTH)
+        except ValueError as e:
+            UIUtils.show_message("錯誤", str(e), self.window(), message_level="error")
             return None
 
         minecraft_version = self.mc_version_var.get().strip()
@@ -918,10 +924,10 @@ class CreateServerFrame(QWidget):
             loader_type = "Vanilla"
 
         if name == "我的伺服器":
-            name = self._compose_server_name(loader_type, minecraft_version)
+            name = compose_server_name(loader_type, minecraft_version)
             self.server_name_var.set(name)
 
-        if name in self.server_crud.servers or (self.server_crud.servers_root / name).exists():
+        if name in self.server_crud.snapshot() or (self.server_crud.servers_root / name).exists():
             UIUtils.show_message(
                 "錯誤", f"同名伺服器「{name}」已存在，請使用其他名稱", self.window(), message_level="error"
             )
@@ -931,11 +937,42 @@ class CreateServerFrame(QWidget):
             self.loader_version_var.get().strip() if loader_type.lower() != "vanilla" else minecraft_version
         )
         invalid_loader_versions = {"載入中...", "載入失敗", "無可用版本", "無", "unknown", "Unknown", ""}
-        if loader_type.lower() != "vanilla" and (not loader_version or loader_version in invalid_loader_versions):
-            UIUtils.show_message(
-                "錯誤", f"請選擇有效的 {loader_type} 模組載入器版本", self.window(), message_level="error"
-            )
-            return None
+        if loader_type.lower() != "vanilla":
+            if (
+                not loader_version
+                or loader_version in invalid_loader_versions
+                or loader_version.startswith("正在載入 ")
+            ):
+                UIUtils.show_message(
+                    "錯誤", f"請選擇有效的 {loader_type} 模組載入器版本", self.window(), message_level="error"
+                )
+                return None
+
+            expected_loading_key = f"{loader_type}_{minecraft_version}"
+            if getattr(self, "_loading_key", None) == expected_loading_key:
+                UIUtils.show_message(
+                    "請稍候",
+                    f"{loader_type} 載入器版本仍在更新，請等待版本列表載入完成後再建立伺服器",
+                    self.window(),
+                    message_level="warning",
+                )
+                return None
+
+            available_loader_versions = {
+                text
+                for index in range(self.loader_version_combo.count())
+                if (text := self.loader_version_combo.itemText(index).strip())
+                and text not in invalid_loader_versions
+                and not text.startswith("正在載入 ")
+            }
+            if loader_version not in available_loader_versions:
+                UIUtils.show_message(
+                    "版本已變更",
+                    f"目前選取的 {loader_type} 載入器版本已不在最新列表中，請重新選擇後再建立伺服器",
+                    self.window(),
+                    message_level="warning",
+                )
+                return None
 
         max_memory_text = self.max_memory_var.get().strip()
         min_memory_text = self.min_memory_var.get().strip()
@@ -1035,8 +1072,7 @@ class CreateServerFrame(QWidget):
 
             result = self.server_creation.execute(
                 plan,
-                allow_unverified_installer=plan.requires_unverified_installer_confirmation,
-                progress_callback=lambda percent, message: progress_dialog.update_progress(percent, message),
+                progress_callback=progress_dialog.update_progress_event,
                 cancel_check=lambda: bool(progress_dialog.cancelled),
             )
             if result.status == "cancelled":
@@ -1055,7 +1091,7 @@ class CreateServerFrame(QWidget):
 
             self._schedule_ui_job("_create_server_success_job", 1000, on_success)
         except Exception as e:
-            logger.error(f"建立伺服器時發生錯誤: {e}\n{traceback.format_exc()}")
+            logger.exception("建立伺服器時發生錯誤")
 
             def on_error(error=e):
                 if progress_dialog:
@@ -1107,7 +1143,7 @@ class CreateServerFrame(QWidget):
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
         button.setMinimumHeight(30)
-        button.clicked.connect(lambda _checked=False: command())
+        button.clicked.connect(command)
         return button
 
     def _bind_entry(self, entry: LineEdit, variable: ValueState) -> None:

@@ -24,7 +24,7 @@ Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建�
 
 從 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載 `MinecraftServerManager.exe` 後直接執行。程式不內含 Java；需要時會提示安裝符合 Minecraft 版本的 Java。
 
-設定、日誌與快取位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager`。完整操作請見 [使用者手冊](docs/USER_GUIDE.md)。
+設定與日誌位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager`；onefile 解壓快取依版本放在同一目錄下。完整操作請見 [使用者手冊](docs/USER_GUIDE.md)。
 
 ## 開發
 
@@ -32,13 +32,15 @@ Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建�
 
 ```bat
 uv sync
-uv run python -m src.main
+uv run python -m src.main # 啟動主程式
 
 uv sync --group test
-uv run pytest -q
+uv run pytest -q --cov=src --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml # 執行測試與產生覆蓋率報告
 
-scripts\format_lint_check.bat
-uv run report\comprehensive_report.py
+powershell -ExecutionPolicy Bypass -File scripts\build_nuitka.ps1 # 建置單檔可執行檔
+
+scripts\format_lint_fix_gate.bat # 格式化、靜態檢查、修正與測試
+uv run report\comprehensive_report.py # 產生綜合報告
 ```
 
 ## 結構
@@ -47,7 +49,7 @@ uv run report\comprehensive_report.py
 src/core/    伺服器、載入器、模組與 Modrinth 業務邏輯
 src/models/  跨模組共享的領域資料
 src/ui/      主視窗、對話框、模組 Review 與監控
-src/utils/   檔案、網路、Java、日誌、UI 與執行期工具
+src/utils/   檔案、網路、Java、日誌與執行期工具
 tests/       自動化測試
 scripts/     建置與品質檢查
 report/      綜合報告產生器
@@ -57,4 +59,4 @@ report/      綜合報告產生器
 
 ## 貢獻與授權
 
-PR 請聚焦單一主題，提交前執行 `scripts\format_lint_check.bat`。授權條款見 [GPLv3](LICENSE) 與 [COPYING.md](COPYING.md)。
+PR 請聚焦單一主題，提交前執行 `scripts\format_lint_fix_gate.bat`。授權條款見 [GPLv3](LICENSE) 與 [COPYING.md](COPYING.md)。

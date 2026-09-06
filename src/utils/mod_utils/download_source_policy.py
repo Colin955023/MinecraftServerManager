@@ -75,8 +75,7 @@ def build_non_official_source_warning(download_url: str | None, provider: str | 
     if not host:
         return ""
     provider_label = str(provider or "unknown").strip() or "unknown"
-    normalized_url = str(download_url or "").strip()
-    return f"偵測到非官方下載來源：provider={provider_label} host={host} url={normalized_url}"
+    return f"偵測到非官方下載來源：provider={provider_label} host={host}"
 
 
 def build_non_official_source_warning_message(

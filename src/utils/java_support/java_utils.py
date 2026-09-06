@@ -11,6 +11,7 @@ import shutil
 import threading
 from collections.abc import Callable
 from contextlib import suppress
+from functools import lru_cache
 from pathlib import Path
 from typing import ClassVar
 
@@ -21,8 +22,8 @@ from src.utils import (
     SubprocessUtils,
     atomic_write_json,
     get_logger,
+    list_bounded_directory,
     read_json,
-    serialize_json,
 )
 
 logger = get_logger().bind(component="JavaUtils")
@@ -32,9 +33,15 @@ class JavaUtils:
     """提供 Java 偵測、快取與安裝流程的工具集合"""
 
     COMMON_JAVA_PATHS: ClassVar[list[str]] = [
-        "C:\\\\Program Files\\\\Java",
-        "C:\\\\Program Files (x86)\\\\Java",
-        "C:\\\\Program Files\\\\Microsoft",
+        str(Path(base) / subdirectory)
+        for env_var, subdirectory in (
+            ("ProgramFiles", "Java"),
+            ("ProgramFiles(x86)", "Java"),
+            ("ProgramFiles", "Microsoft"),
+            ("ProgramW6432", "Microsoft"),
+        )
+        for base in (os.environ.get(env_var),)
+        if base
     ]
     JAVA_EXECUTABLE_NAMES: ClassVar[frozenset[str]] = frozenset({"java", "java.exe", "javaw", "javaw.exe"})
     ENV_VARS: ClassVar[list[str]] = ["JAVA_HOME"]
@@ -137,7 +144,11 @@ class JavaUtils:
         for base_str in JavaUtils.COMMON_JAVA_PATHS:
             base = Path(base_str)
             if base.exists():
-                for subdir in base.iterdir():
+                try:
+                    subdirectories = list_bounded_directory(base)
+                except OSError:
+                    continue
+                for subdir in subdirectories:
                     if subdir.is_dir():
                         search_paths.add(str(subdir / "bin"))
         for var in JavaUtils.ENV_VARS:
@@ -163,18 +174,11 @@ class JavaUtils:
             if result:
                 candidates.append(result)
         candidates.sort(key=lambda x: (x[1], x[0]), reverse=True)
-        final_results = []
-        seen = set()
-        for c_path, c_major in candidates:
-            if (c_path, c_major) not in seen:
-                seen.add((c_path, c_major))
-                final_results.append((c_path, c_major))
+        final_results = list(dict.fromkeys(candidates))
         final_results.sort(key=lambda x: x[1])
         cache_path = JavaUtils._get_java_cache_path()
         if final_results:
-            cached_items: list[dict[str, object]] = []
-            for java_path_str, major in final_results:
-                cached_items.append({"path": java_path_str, "major": major})
+            cached_items = [{"path": java_path_str, "major": major} for java_path_str, major in final_results]
             atomic_write_json(cache_path, {"candidates": cached_items}, skip_if_unchanged=True)
         else:
             with suppress(OSError):
@@ -220,6 +224,7 @@ class JavaUtils:
             raise FileNotFoundError(f"找不到版本快取 {cache_path}")
 
     @staticmethod
+    @lru_cache(maxsize=256)
     def get_required_java_major(mc_version: str) -> int:
         """
         根據 Minecraft 版本決定所需 Java major 版本
@@ -250,10 +255,6 @@ class JavaUtils:
                     java_info2 = ver_json.get("java_version")
                     if java_info2 and "major" in java_info2:
                         return int(java_info2["major"])
-                    json_str = serialize_json(ver_json)
-                    m = re.search('"major(?:Version)?"\\s*:\\s*(\\d+)', json_str)
-                    if m:
-                        return int(m.group(1))
                 raise ValueError(f"找不到 majorVersion，url: {url}")
         raise ValueError(f"找不到對應 mc_version: {mc_version}")
 

@@ -52,7 +52,7 @@ def build_pending_install_summary_lines(review_entry: PendingInstallReviewEntry)
     if optional_count:
         selected_optional = sum(
             1
-            for item in list(getattr(dependency_plan, "advisory_items", []) or [])
+            for item in (getattr(dependency_plan, "advisory_items", None) or ())
             if is_optional_dependency_item(item)
             and build_dependency_review_key(item) in review_entry.selected_dependency_keys
         )
