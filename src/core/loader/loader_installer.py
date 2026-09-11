@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import locale
 import re
-import threading
 import time
 from collections import deque
 from collections.abc import Callable
@@ -12,7 +11,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from src.models import ProgressEvent
-from src.utils import SubprocessUtils, SystemUtils, get_logger
+from src.utils import SubprocessUtils, SystemUtils, get_logger, get_shared_manager
 
 logger = get_logger().bind(component="LoaderInstaller")
 _MAX_RUNTIME_SECONDS = 15 * 60
@@ -156,11 +155,11 @@ def _decode_stream_line(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def _cleanup_process(process, base_dir: Path, managed_process) -> None:
+def _cleanup_process(process, base_dir: Path, managed_process, *, cancelled: bool = False) -> None:
     if process is None:
         return
     try:
-        if managed_process is not None and (process.poll() is None or bool(getattr(process, "cancelled", False))):
+        if managed_process is not None and (process.poll() is None or cancelled):
             SystemUtils.kill_process_tree(managed_process)
         elif process.poll() is None:
             process.kill()
@@ -211,10 +210,7 @@ def run_installer_process(
         def read_stream(stream, sink: deque[str], is_err: bool = False) -> None:
             try:
                 while True:
-                    try:
-                        line = stream.readline(_MAX_LINE_BYTES + 1)
-                    except TypeError:
-                        line = stream.readline()
+                    line = stream.readline(_MAX_LINE_BYTES + 1)
                     if not line:
                         break
                     text = _decode_stream_line(line[:_MAX_LINE_BYTES]).strip()
@@ -229,34 +225,33 @@ def run_installer_process(
                         if progress_callback and not cancel_check():
                             progress_callback(progress_tracker.update(text))
             except Exception as e:
-                logger.debug(f"讀取安裝程序輸出例外: {e}")
+                logger.debug("讀取安裝程序輸出例外: %s", e)
             finally:
                 with suppress(Exception):
                     stream.close()
 
-        t_out = threading.Thread(target=read_stream, args=(process.stdout, output_lines, False), daemon=True)
-        t_err = threading.Thread(target=read_stream, args=(process.stderr, error_lines, True), daemon=True)
-        t_out.start()
-        t_err.start()
+        worker_manager = get_shared_manager()
+        out_reader = worker_manager.run(read_stream, process.stdout, output_lines, False)
+        err_reader = worker_manager.run(read_stream, process.stderr, error_lines, True)
+
+        def wait_readers() -> None:
+            for reader in (out_reader, err_reader):
+                with suppress(TimeoutError):
+                    reader.result(timeout=2.0)
 
         deadline = time.monotonic() + _MAX_RUNTIME_SECONDS
         while process.poll() is None:
             if cancel_check():
-                process.cancelled = True
-                _cleanup_process(process, base_dir, managed_process)
-                t_out.join(timeout=2.0)
-                t_err.join(timeout=2.0)
+                _cleanup_process(process, base_dir, managed_process, cancelled=True)
+                wait_readers()
                 return False
             if time.monotonic() >= deadline:
-                process.cancelled = True
-                _cleanup_process(process, base_dir, managed_process)
-                t_out.join(timeout=2.0)
-                t_err.join(timeout=2.0)
+                _cleanup_process(process, base_dir, managed_process, cancelled=True)
+                wait_readers()
                 return fail_callback(f"{loader_type} 安裝程序執行逾時，已終止程序")
             time.sleep(0.3)
 
-        t_out.join(timeout=2.0)
-        t_err.join(timeout=2.0)
+        wait_readers()
         if process.returncode != 0:
             out_str = "\n".join(list(output_lines)[-50:])
             err_str = "\n".join(list(error_lines)[-50:])

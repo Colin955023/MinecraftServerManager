@@ -37,7 +37,7 @@ from .mod_index_persistence import ModIndexPersistence
 from .provider_identity import ProviderIdentityService
 
 logger = get_logger().bind(component="LocalModScanner")
-_LOCAL_MOD_SCAN_BATCH_SIZE = 32
+_INVALID_AUTHOR_NAMES = frozenset({"", "unknown", "author", "example author", "example"})
 
 
 class LocalModScanner:
@@ -122,7 +122,7 @@ class LocalModScanner:
         except KeyError, tomllib.TOMLDecodeError, OSError, UnicodeDecodeError:
             return None
         except Exception as e:
-            logger.debug(f"讀取 JAR 中的 TOML 時發生非預期錯誤 {file_path}: {e}")
+            logger.debug("讀取 JAR 中的 TOML 時發生非預期錯誤 %s: %s", file_path, e)
             return None
 
     @staticmethod
@@ -138,10 +138,9 @@ class LocalModScanner:
         """
 
         if isinstance(authors, list) and authors:
+            normalized_authors = (str(author) for author in authors if author)
             return ", ".join(
-                str(author)
-                for author in authors
-                if author and str(author).strip().lower() not in ["", "unknown", "author", "example author", "example"]
+                author for author in normalized_authors if author.strip().lower() not in _INVALID_AUTHOR_NAMES
             )
         if isinstance(authors, str):
             return authors
@@ -251,12 +250,10 @@ class LocalModScanner:
             if file_path.is_file() and (file_path.suffix == ".jar" or file_path.name.endswith(".jar.disabled"))
         ]
         files_to_scan.sort(key=lambda path: path.name.lower())
-        for index, file_path in enumerate(files_to_scan, start=1):
+        for file_path in files_to_scan:
             mod_info = self.create_mod_info_from_file(file_path)
             if mod_info:
                 mods.append(mod_info)
-            if index % _LOCAL_MOD_SCAN_BATCH_SIZE == 0:
-                self.index_manager.flush()
         self.index_manager.flush()
         return mods
 

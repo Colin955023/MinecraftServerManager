@@ -11,8 +11,9 @@ from src.models import ServerCreationPlan
 from src.ui import (
     FontManager,
     FontSize,
-    ModalMSFluentWindow,
 )
+
+from .modal_msfluent_window import ModalMSFluentWindow
 
 
 class ServerCreationConfirmDialog(ModalMSFluentWindow):

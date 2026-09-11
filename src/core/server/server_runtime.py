@@ -108,16 +108,12 @@ class ServerRuntime:
     ):
         self.server_crud = server_crud
         self.server_inspector = server_inspector or ServerInspector()
-        self._process_port_factory = process_factory or self._create_process_port
+        self._process_port_factory = process_factory or SubprocessProcessAdapter
         self._records: dict[str, _RuntimeRecord] = {}
         self._maintenance_servers: set[str] = set()
         self._lock = threading.RLock()
         self._closing = False
         self._shutdown_stages: dict[str, tuple[int, float]] = {}
-
-    @staticmethod
-    def _create_process_port(command: list[str], cwd: str) -> ProcessPort:
-        return SubprocessProcessAdapter(command, cwd)
 
     def start(self, server_name: str, intent: RuntimeIntent = "run") -> ServerOperationResult:
         """
@@ -210,7 +206,7 @@ class ServerRuntime:
                 )
             process = self._process_port_factory(command, str(server_path.resolve()))
             process.start()
-            if not process.wait_for_started(3000):
+            if not process.is_running():
                 self._cleanup_failed_process(server_name, server_path, process, managed_process)
                 return ServerOperationResult(
                     success=False,
@@ -557,7 +553,7 @@ class ServerRuntime:
                 if len(line) > _RUNTIME_EVENT_LINE_MAX_CHARS:
                     line = line[:_RUNTIME_EVENT_LINE_MAX_CHARS] + "…[已截斷]"
                 self._emit(record, "output", line)
-                if "Done (" in line and 'For help, type "help"' in line and record.state != "ready":
+                if ("Done (" in line or "Done in " in line) and record.state != "ready":
                     record.state = "ready"
                     self._emit(record, "ready", "伺服器已完成啟動")
                     process = record.process_port

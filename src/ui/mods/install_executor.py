@@ -16,6 +16,7 @@ from src.ui import ProgressDialog, UIUtils
 from src.utils import (
     ONLINE_INSTALL_NO_ACTIONABLE_MESSAGE,
     CancellationToken,
+    OperationError,
 )
 
 from .constants import logger
@@ -254,7 +255,7 @@ class ModManagementInstallExecutor:
                 if active_token and active_token.is_cancelled():
                     self.controller.update_status_safe(f"{action_label}已取消")
                     return False
-                raise RuntimeError(f"{step.project_name} {action_label}失敗")
+                raise OperationError(f"{step.project_name} {action_label}失敗")
             on_step_completed(step)
         return True
 

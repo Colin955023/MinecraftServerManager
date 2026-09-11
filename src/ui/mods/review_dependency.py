@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from itertools import chain
+from types import SimpleNamespace
 from typing import Any
 
 from .review_state import ReviewTaskNode
@@ -241,8 +242,6 @@ def build_installed_mod_simulation_item(project_id: str, project_name: str, file
     Returns:
         可供依賴規劃器讀取的簡易模組物件
     """
-    from types import SimpleNamespace
-
     normalized_name = str(project_name or project_id or filename or "未知模組").strip() or "未知模組"
     normalized_filename = str(filename or normalized_name).strip() or normalized_name
     return SimpleNamespace(

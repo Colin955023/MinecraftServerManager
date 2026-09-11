@@ -22,6 +22,7 @@ from src.ui import (
 )
 from src.utils import (
     atomic_write_bytes,
+    atomic_write_json,
     atomic_write_text,
     get_logger,
 )
@@ -38,8 +39,8 @@ class LocalModExportDialog(ModalMSFluentWindow):
         self.server = server
         self.scope = UIWorkScope(self)
         self.setWindowTitle("匯出模組列表")
-        self.resize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
-        self.setMinimumSize(Sizes.DIALOG_LARGE_WIDTH, Sizes.DIALOG_LARGE_HEIGHT)
+        self.resize(480, 220)
+        self.setMinimumSize(420, 200)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -78,13 +79,19 @@ class LocalModExportDialog(ModalMSFluentWindow):
             if not file_path:
                 return
 
-            def write_export(export_content: str | bytes) -> None:
-                saved = (
-                    atomic_write_bytes(file_path, export_content)
-                    if isinstance(export_content, bytes)
-                    else atomic_write_text(Path(file_path), export_content)
-                )
-                if not saved:
+            def build_and_write_export() -> bool:
+                export_content = self.mod_manager.export_mod_list(fmt)
+                if fmt == "json":
+                    saved = atomic_write_json(Path(file_path), export_content)
+                elif isinstance(export_content, bytes):
+                    saved = atomic_write_bytes(file_path, export_content)
+                else:
+                    saved = atomic_write_text(Path(file_path), export_content)
+                return saved
+
+            def finish_export(outcome: WorkOutcome) -> None:
+                if not outcome.is_succeeded or not outcome.value:
+                    logger.error(f"匯出模組列表失敗: {outcome.error}")
                     UIUtils.show_message("儲存失敗", f"無法寫入檔案: {file_path}", self, message_level="error")
                     return
                 if UIUtils.ask_yes_no_cancel(
@@ -96,20 +103,7 @@ class LocalModExportDialog(ModalMSFluentWindow):
                         logger.exception("開啟檔案失敗")
                         UIUtils.show_message("開啟檔案失敗", f"無法開啟檔案: {e}", parent=self, message_level="error")
 
-            def build_export() -> str | bytes:
-                return self.mod_manager.export_mod_list(fmt)
-
-            def finish_export(outcome: WorkOutcome) -> None:
-                if not outcome.is_succeeded:
-                    logger.error(f"匯出模組列表失敗: {outcome.error}")
-                    UIUtils.show_message(
-                        "匯出失敗", f"產生匯出內容時發生錯誤: {outcome.error}", self, message_level="error"
-                    )
-                    return
-                content = outcome.value
-                write_export(content)
-
-            self.scope.submit(build_export, on_done=finish_export, key="export_save", replace=True)
+            self.scope.submit(build_and_write_export, on_done=finish_export, key="export_save", replace=True)
 
         save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
         save_btn.clicked.connect(save_export)

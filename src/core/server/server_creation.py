@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import copy
-import shutil
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,6 +19,7 @@ from src.models import (
 from src.utils import (
     CreationCancelledError,
     HashUtils,
+    OperationError,
     ServerCommands,
     SystemUtils,
     atomic_write_json,
@@ -28,6 +27,8 @@ from src.utils import (
     get_logger,
     is_path_within,
     list_bounded_directory,
+    move_within,
+    resolve_stable_directory,
     validate_server_name,
 )
 
@@ -180,14 +181,17 @@ class CreateServerJourney:
                 )
             )
         transaction_id = uuid.uuid4().hex
-        projection_config = copy.deepcopy(config)
-        projection_config.name = name
-        projection_config.minecraft_version = minecraft_version
-        projection_config.loader_type = loader_type
-        projection_config.loader_version = loader_version
-        projection_config.memory_max_mb = int(config.memory_max_mb)
-        projection_config.memory_min_mb = int(config.memory_min_mb) if config.memory_min_mb is not None else None
-        projection_config.path = str(final_path)
+        projection_config = replace(
+            config,
+            name=name,
+            minecraft_version=minecraft_version,
+            loader_type=loader_type,
+            loader_version=loader_version,
+            memory_max_mb=int(config.memory_max_mb),
+            memory_min_mb=int(config.memory_min_mb) if config.memory_min_mb is not None else None,
+            path=str(final_path),
+            jvm_args=list(config.jvm_args),
+        )
         launch_target = ServerCommands.expected_main_target(loader_type, minecraft_version, loader_version)
         command_value = ServerCommands.build_java_command(
             projection_config,
@@ -268,11 +272,11 @@ class CreateServerJourney:
             self._check_disk_space()
             self._check_cancel(cancel_check)
             if self.server_crud.servers_root.resolve() != self._root:
-                raise RuntimeError("伺服器根目錄已變更，建立計畫已失效")
+                raise OperationError("伺服器根目錄已變更，建立計畫已失效")
             if plan.final_path.parent != self._root or plan.staging_path.parent != self._root:
                 raise ValueError("建立計畫路徑不屬於目前伺服器根目錄")
             if plan.registry_revision and registry_snapshot.revision != plan.registry_revision:
-                raise RuntimeError("伺服器設定已變更，建立計畫已失效")
+                raise OperationError("伺服器設定已變更，建立計畫已失效")
             if plan.final_path.exists() or plan.name in registry_snapshot:
                 raise FileExistsError("同名伺服器已存在，建立計畫已失效")
             if plan.staging_path.exists():
@@ -330,21 +334,22 @@ class CreateServerJourney:
             self._check_cancel(cancel_check)
             if not download_result:
                 user_facing_failure = last_loader_message or "下載、checksum 驗證或 Loader installer 執行失敗"
-                raise RuntimeError(user_facing_failure)
+                raise OperationError(user_facing_failure)
 
             phase = "launch_script"
             self._emit(
                 progress_callback,
                 ProgressEvent("launch_script", "正在建立啟動腳本...", overall_percent=92),
             )
-            staged_config = copy.deepcopy(config)
-            staged_config.path = str(plan.staging_path)
+            staged_config = replace(config, path=str(plan.staging_path), jvm_args=list(config.jvm_args))
             detected_target = ServerInspector.find_main_jar(plan.staging_path, config.loader_type, staged_config)
             confirmation = plan.confirmation
             if confirmation is not None and detected_target != confirmation.launch_target:
-                raise RuntimeError(f"安裝後啟動目標與確認計畫不一致：{detected_target} != {confirmation.launch_target}")
+                raise OperationError(
+                    f"安裝後啟動目標與確認計畫不一致：{detected_target} != {confirmation.launch_target}"
+                )
             if not self.server_crud.create_launch_script(staged_config, launch_target=detected_target):
-                raise RuntimeError("建立啟動腳本失敗")
+                raise OperationError("建立啟動腳本失敗")
             ServerCommands.cleanup_redundant_startup_scripts(plan.staging_path)
             self._validate_staged_instance(plan)
             self._check_cancel(cancel_check)
@@ -352,7 +357,8 @@ class CreateServerJourney:
 
             phase = "commit"
             self._emit(progress_callback, ProgressEvent("commit", "正在提交伺服器實例...", overall_percent=96))
-            plan.staging_path.replace(plan.final_path)
+            if not move_within(self._root, plan.staging_path, plan.final_path):
+                raise OSError("無法安全提交伺服器 staging 目錄")
             moved_to_final = True
             config.path = str(plan.final_path)
             ServerCommands.cleanup_redundant_startup_scripts(plan.final_path)
@@ -364,10 +370,10 @@ class CreateServerJourney:
                 expected_revision=registry_snapshot.revision,
             )
             if not commit_result.success:
-                raise RuntimeError(commit_result.message or "儲存 servers_config.json 失敗")
+                raise OperationError(commit_result.message or "儲存 servers_config.json 失敗")
             marker = plan.final_path / self._MARKER_NAME
             try:
-                marker.unlink(missing_ok=True)
+                delete_within(plan.final_path, marker)
             except OSError as e:
                 logger.warning(f"已提交實例但無法移除 transaction marker: {e}")
             self._emit(progress_callback, ProgressEvent("completed", "伺服器建立完成！", 1, 1, 100))
@@ -424,7 +430,7 @@ class CreateServerJourney:
                 registered_path = Path(config.path).resolve(strict=False) if config else None
                 if registered_path == candidate.resolve(strict=False):
                     try:
-                        (candidate / self._MARKER_NAME).unlink(missing_ok=True)
+                        delete_within(candidate, candidate / self._MARKER_NAME)
                     except OSError as e:
                         logger.warning(f"無法移除已註冊 instance 的 orphan marker: {e}")
                 else:
@@ -440,7 +446,7 @@ class CreateServerJourney:
 
     def _check_disk_space(self, required_bytes: int = 500 * 1024 * 1024) -> None:
         try:
-            if shutil.disk_usage(self._root).free < required_bytes:
+            if SystemUtils.get_free_disk_bytes(self._root) < required_bytes:
                 raise OSError(f"可用磁碟空間不足，無法建立伺服器；至少需要 {required_bytes} bytes")
         except OSError:
             raise
@@ -457,7 +463,7 @@ class CreateServerJourney:
             directory / self._MARKER_NAME,
             {"schema_version": 1, "transaction_id": plan.transaction_id, "state": state},
         ):
-            raise RuntimeError("無法寫入 server creation transaction marker")
+            raise OperationError("無法寫入 server creation transaction marker")
 
     @staticmethod
     def _validate_staged_instance(plan: ServerCreationPlan) -> None:
@@ -472,7 +478,7 @@ class CreateServerJourney:
         if plan.loader_type in {"forge", "neoforge"} and not (plan.staging_path / "libraries").is_dir():
             missing.append("libraries 資料夾")
         if missing:
-            raise RuntimeError(f"伺服器建立內容不完整：{', '.join(missing)}")
+            raise OperationError(f"伺服器建立內容不完整：{', '.join(missing)}")
 
     def _compensate(
         self,
@@ -498,8 +504,7 @@ class CreateServerJourney:
             for sensitive in (plan.name, str(plan.final_path), str(plan.staging_path), str(self._root)):
                 if sensitive:
                     detail = detail.replace(sensitive, "<redacted>")
-            issues_dir = self._root / ".issues"
-            issues_dir.mkdir(exist_ok=True)
+            issues_dir = resolve_stable_directory(self._root / ".issues", create=True)
             atomic_write_json(
                 issues_dir / f"{diagnostic_id}.json",
                 {

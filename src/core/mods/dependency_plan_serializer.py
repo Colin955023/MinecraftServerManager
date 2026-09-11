@@ -1,6 +1,6 @@
 """
 依賴計畫序列化工具
-集中處理 dependency plan 的資料模型、序列化、遷移與驗證邏輯，
+集中處理 dependency plan 的資料模型、序列化與驗證邏輯，
 讓 UI 層只保留查詢與流程組裝責任
 """
 
@@ -249,108 +249,6 @@ def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) 
     return (True, "ok")
 
 
-def migrate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str]:
-    """
-    嘗試遷移舊版 dependency plan payload 至可回放格式
-
-    Args:
-        raw: 待遷移的原始 payload
-
-    Returns:
-        (遷移後 payload, 狀態碼) 的結果；失敗時回傳 (None, 原因碼)
-    """
-    if not isinstance(raw, dict):
-        return (None, "payload-not-dict")
-    schema_version = raw.get("schema_version")
-    if schema_version not in {1, _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION}:
-        return (None, "schema-mismatch")
-    migrated_payload: dict[str, Any] = dict(raw)
-    migrated = False
-
-    def _migrate_item_collection(collection_key: str) -> list[dict[str, Any]] | None:
-        nonlocal migrated
-        entries = migrated_payload.get(collection_key, [])
-        if not isinstance(entries, list):
-            return None
-        normalized_entries: list[dict[str, Any]] = []
-        optional_default = collection_key == "advisory_items"
-        for entry in entries:
-            if not isinstance(entry, dict):
-                return None
-            normalized_entry = dict(entry)
-            legacy_enabled = normalized_entry.pop("enabled", None)
-            if "included_by_default" not in normalized_entry:
-                normalized_entry["included_by_default"] = (
-                    legacy_enabled if isinstance(legacy_enabled, bool) else not optional_default
-                )
-                migrated = True
-            elif legacy_enabled is not None:
-                migrated = True
-            if not _normalize_text_value(normalized_entry, "edge_kind"):
-                normalized_entry["edge_kind"] = "optional" if optional_default else "required"
-                migrated = True
-            if not _normalize_text_value(normalized_entry, "edge_source"):
-                normalized_entry["edge_source"] = f"{normalized_entry['edge_kind']}:modrinth_dependency"
-                migrated = True
-            if "graph_depth" not in normalized_entry:
-                normalized_entry["graph_depth"] = 1
-                migrated = True
-            depth = _normalize_positive_int_value(normalized_entry, "graph_depth")
-            if depth != normalized_entry.get("graph_depth", 1):
-                migrated = True
-            normalized_entry["graph_depth"] = depth
-            if not isinstance(normalized_entry.get("required_by", []), list):
-                normalized_entry["required_by"] = _normalize_string_list(normalized_entry.get("required_by", []))
-                migrated = True
-            normalized_entries.append(normalized_entry)
-        return normalized_entries
-
-    normalized_items = _migrate_item_collection("items")
-    normalized_advisory_items = _migrate_item_collection("advisory_items")
-    if normalized_items is None or normalized_advisory_items is None:
-        return (None, "invalid-item-collection")
-    migrated_payload["items"] = normalized_items
-    migrated_payload["advisory_items"] = normalized_advisory_items
-    if schema_version == 1:
-        migrated_payload["schema_version"] = _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION
-        migrated = True
-    if "root_enabled" in migrated_payload:
-        legacy_root_selected = migrated_payload.pop("root_enabled")
-        if isinstance(legacy_root_selected, bool):
-            migrated_payload["root_selected"] = legacy_root_selected
-        migrated = True
-    if "selected_dependency_keys" not in migrated_payload:
-        migrated_payload["selected_dependency_keys"] = [
-            [
-                _normalize_text_value(item_payload, "project_id"),
-                _normalize_text_value(item_payload, "version_id")
-                or _normalize_text_value(item_payload, "version_name"),
-            ]
-            for item_payload in chain(normalized_items, normalized_advisory_items)
-            if bool(item_payload.get("included_by_default", True))
-        ]
-        migrated = True
-    graph_edges = migrated_payload.get("graph_edges")
-    if not isinstance(graph_edges, list):
-        migrated_payload["graph_edges"] = [
-            _build_dependency_graph_edge_payload(item_payload)
-            for item_payload in chain(normalized_items, normalized_advisory_items)
-        ]
-        migrated = True
-    if migrated:
-        notes = _normalize_string_list(migrated_payload.get("notes", []))
-        migration_note = "已遷移 dependency snapshot：分離 planner 預設與 Review 選取狀態"
-        if migration_note not in notes:
-            notes.append(migration_note)
-        migrated_payload["notes"] = notes
-    valid, reason = validate_online_dependency_install_plan_payload(migrated_payload)
-    if not valid:
-        return (None, f"migration-invalid:{reason}")
-    if migrated:
-        return (migrated_payload, "migrated")
-    return (migrated_payload, "not-needed")
-
-
 def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
     """
     從持久化 payload 還原 OnlineDependencyInstallPlan
@@ -376,7 +274,6 @@ def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> On
 
 __all__ = [
     "deserialize_online_dependency_install_plan",
-    "migrate_online_dependency_install_plan_payload",
     "serialize_online_dependency_install_plan",
     "validate_online_dependency_install_plan_payload",
 ]

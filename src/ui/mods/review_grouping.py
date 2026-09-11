@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable
 from itertools import chain
 from typing import Any
@@ -126,9 +127,7 @@ def count_review_groups(
         各群組鍵對應的項目數量
     """
     counts = dict.fromkeys(supported_group_keys, 0)
-    for entry in entries:
-        key = group_key_getter(entry)
-        counts[key] = counts.get(key, 0) + 1
+    counts.update(Counter(map(group_key_getter, entries)))
     return counts
 
 

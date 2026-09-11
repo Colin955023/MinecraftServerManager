@@ -16,6 +16,7 @@ from src.utils import (
     get_logger,
     is_reparse_point,
     read_json,
+    resolve_stable_directory,
 )
 
 logger = get_logger().bind(component="ModIndexPersistence")
@@ -41,7 +42,8 @@ class ModIndexPersistence:
         self.index_file = self.index_dir / "mod_index.json"
         if is_reparse_point(self.index_dir):
             raise ValueError("模組索引目錄不可為符號連結或 reparse point")
-        self.index_dir.mkdir(parents=True, exist_ok=True)
+        self.index_dir = resolve_stable_directory(self.index_dir, create=True)
+        self.index_file = self.index_dir / "mod_index.json"
         if is_reparse_point(self.index_dir) or not self.index_dir.is_dir():
             raise ValueError("模組索引目錄不是安全的一般資料夾")
 
@@ -93,10 +95,6 @@ class ModIndexPersistence:
                 if metadata is not None and (not isinstance(metadata, dict)):
                     normalized_entry.pop("metadata", None)
                     repaired_count += 1
-                provider_metadata = normalized_entry.get("provider_metadata")
-                if provider_metadata is not None and (not isinstance(provider_metadata, dict)):
-                    normalized_entry.pop("provider_metadata", None)
-                    repaired_count += 1
                 for namespace in ("provider_identity", "review_metadata", "issue"):
                     value = normalized_entry.get(namespace)
                     if value is not None and not isinstance(value, dict):
@@ -147,13 +145,13 @@ class ModIndexPersistence:
         if cached:
             metadata = cached.get("metadata")
             if isinstance(metadata, dict) and metadata:
-                logger.debug(f"使用快取中繼資料: {file_path.name}")
+                logger.debug("使用快取中繼資料: %s", file_path.name)
                 return metadata
         return None
 
     def get_provider_identity(self, file_path: Path) -> dict[str, Any] | None:
         """
-        讀取 provider identity；舊 provider_metadata 只作一次性 migration evidence
+        讀取 provider identity
 
         Args:
             file_path: 檔案路徑
@@ -166,9 +164,6 @@ class ModIndexPersistence:
             identity = cached.get("provider_identity")
             if isinstance(identity, dict) and identity:
                 return dict(identity)
-            legacy = cached.get("provider_metadata")
-            if isinstance(legacy, dict) and legacy:
-                return {key: value for key, value in legacy.items() if key != "dependency_plan_v1"}
         return None
 
     def get_review_metadata(self, file_path: Path) -> dict[str, Any] | None:
@@ -187,9 +182,6 @@ class ModIndexPersistence:
         review_metadata = cached.get("review_metadata")
         if isinstance(review_metadata, dict) and review_metadata:
             return dict(review_metadata)
-        legacy = cached.get("provider_metadata")
-        if isinstance(legacy, dict) and isinstance(legacy.get("dependency_plan_v1"), dict):
-            return {"dependency_plan_v1": legacy["dependency_plan_v1"]}
         return None
 
     def get_cached_hash(self, file_path: Path, algorithm: str = MODRINTH_PREFERRED_HASH_ALGORITHM) -> str:
@@ -228,7 +220,7 @@ class ModIndexPersistence:
             if clear_issue:
                 updates["issue"] = {}
             if self._update_entry(file_path, **updates):
-                logger.debug(f"已快取中繼資料: {file_path.name}")
+                logger.debug("已快取中繼資料: %s", file_path.name)
         except Exception as e:
             logger.warning(f"無法快取模組中繼資料: {e}")
 
@@ -254,7 +246,7 @@ class ModIndexPersistence:
 
     def replace_provider_identity(self, file_path: Path, provider_identity: dict[str, Any]) -> bool:
         """
-        原子替換完整 identity payload，並搬移 legacy Review snapshot
+        原子替換完整 identity payload
 
         Args:
             file_path: 檔案路徑
@@ -266,19 +258,15 @@ class ModIndexPersistence:
         try:
             with self._index_lock:
                 cached = self._get_valid_entry(file_path) or {}
-                legacy = cached.get("provider_metadata")
                 review_metadata = dict(cached.get("review_metadata", {})) if isinstance(cached, dict) else {}
-                if isinstance(legacy, dict) and isinstance(legacy.get("dependency_plan_v1"), dict):
-                    review_metadata.setdefault("dependency_plan_v1", legacy["dependency_plan_v1"])
                 updated = self._update_entry(
                     file_path,
                     provider_identity=dict(provider_identity),
-                    provider_metadata={},
                     review_metadata=review_metadata,
                 )
             if not updated:
                 return False
-            logger.debug(f"已替換 provider identity: {file_path.name}")
+            logger.debug("已替換 provider identity: %s", file_path.name)
             return True
         except Exception as e:
             logger.warning(f"無法替換 provider identity: {e}")
@@ -317,7 +305,7 @@ class ModIndexPersistence:
             hashes = dict(cached.get("hashes", {})) if isinstance(cached, dict) else {}
             hashes[normalized_algorithm] = normalized_hash
             if self._update_entry(file_path, hashes=hashes):
-                logger.debug(f"已快取檔案雜湊: {file_path.name} ({normalized_algorithm})")
+                logger.debug("已快取檔案雜湊: %s (%s)", file_path.name, normalized_algorithm)
         except Exception as e:
             logger.warning(f"無法快取檔案雜湊: {e}")
 
@@ -358,7 +346,7 @@ class ModIndexPersistence:
                     files_to_remove.append(file_name)
             for file_name in files_to_remove:
                 del self._index[file_name]
-                logger.debug(f"已清理過期索引: {file_name}")
+                logger.debug("已清理過期索引: %s", file_name)
             if files_to_remove:
                 self._dirty = True
                 self._save_index_if_due(force=True)
@@ -466,7 +454,6 @@ class ModIndexPersistence:
                     for key in (
                         "hashes",
                         "metadata",
-                        "provider_metadata",
                         "provider_identity",
                         "review_metadata",
                         "issue",
@@ -482,7 +469,7 @@ class ModIndexPersistence:
                 if self._index.pop(file_name, None) is not None:
                     self._dirty = True
                     self._save_index_if_due()
-                logger.debug(f"模組檔案已移除，已丟棄過期索引項目: {file_name}")
+                logger.debug("模組檔案已移除，已丟棄過期索引項目: %s", file_name)
                 return False
             except Exception as e:
                 logger.warning(f"無法更新模組索引項目 {file_name}: {e}")

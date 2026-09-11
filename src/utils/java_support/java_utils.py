@@ -12,19 +12,22 @@ import threading
 from collections.abc import Callable
 from contextlib import suppress
 from functools import lru_cache
+from operator import itemgetter
 from pathlib import Path
 from typing import ClassVar
 
 from src.utils import (
     HTTPClient,
-    JavaDownloader,
     RuntimePaths,
     SubprocessUtils,
     atomic_write_json,
+    delete_within,
     get_logger,
     list_bounded_directory,
     read_json,
 )
+
+from .java_downloader import JavaDownloader
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -173,9 +176,9 @@ class JavaUtils:
             result = JavaUtils._resolve_java_candidate(javaw_exe)
             if result:
                 candidates.append(result)
-        candidates.sort(key=lambda x: (x[1], x[0]), reverse=True)
+        candidates.sort(key=itemgetter(1, 0), reverse=True)
         final_results = list(dict.fromkeys(candidates))
-        final_results.sort(key=lambda x: x[1])
+        final_results.sort(key=itemgetter(1))
         cache_path = JavaUtils._get_java_cache_path()
         if final_results:
             cached_items = [{"path": java_path_str, "major": major} for java_path_str, major in final_results]
@@ -183,7 +186,7 @@ class JavaUtils:
         else:
             with suppress(OSError):
                 if cache_path.exists():
-                    cache_path.unlink()
+                    delete_within(cache_path.parent, cache_path)
         return final_results
 
     @staticmethod
@@ -202,14 +205,6 @@ class JavaUtils:
     @staticmethod
     def _ensure_cache_exists(cache_path: Path) -> None:
         """確保快取檔案存在且非空，若不存在則嘗試下載 Mojang version manifest"""
-        legacy_path = RuntimePaths.get_cache_dir() / "mc_versions_cache.json"
-        if legacy_path.exists() and legacy_path != cache_path:
-            if not cache_path.exists() and legacy_path.stat().st_size > 0:
-                with suppress(Exception):
-                    legacy_path.rename(cache_path)
-            else:
-                with suppress(Exception):
-                    legacy_path.unlink(missing_ok=True)
         if cache_path.exists() and cache_path.stat().st_size > 0:
             return
         manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
@@ -219,7 +214,7 @@ class JavaUtils:
                 atomic_write_json(cache_path, data["versions"])
                 return
         except Exception as e:
-            logger.debug(f"無法自動下載 Mojang manifest: {e}")
+            logger.debug("無法自動下載 Mojang manifest: %s", e)
         if not cache_path.exists() or cache_path.stat().st_size == 0:
             raise FileNotFoundError(f"找不到版本快取 {cache_path}")
 
@@ -312,11 +307,7 @@ class JavaUtils:
         if ask_download and confirm_download is not None:
             vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
             title = "Java 未找到"
-            prompt = (
-                f"未找到合適的 Java {required_major}，是否由程式自動安裝 {vendor}？\n\n"
-                "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
-            )
+            prompt = f"未找到 Java {required_major}，是否由系統自動安裝 {vendor}？\n（選擇「否」可自行手動指定路徑）"
             res = confirm_download(title, prompt)
             if res:
                 try:
@@ -332,18 +323,26 @@ class JavaUtils:
                                     "info",
                                 )
                             return path
-                except Exception as e:
-                    logger.exception(f"自動下載 Microsoft JDK {required_major} 失敗：{e}")
+                    err_msg = "已完成安裝程序，但未能自動偵測到 javaw.exe 路徑"
+                    logger.error(f"自動安裝 {vendor} {required_major} 失敗：{err_msg}")
                     if notify is not None:
                         notify(
-                            "Java 下載失敗",
-                            f"自動下載 Microsoft JDK {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
+                            "Java 安裝失敗",
+                            f"自動安裝 {vendor} {required_major} 失敗：{err_msg}\n請手動安裝或指定 Java 路徑",
+                            "error",
+                        )
+                except Exception as e:
+                    logger.exception(f"自動安裝 {vendor} {required_major} 失敗：{e}")
+                    if notify is not None:
+                        notify(
+                            "Java 安裝失敗",
+                            f"自動安裝 {vendor} {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
                             "error",
                         )
             elif notify is not None:
                 notify(
-                    "請手動下載 Java",
-                    f"請手動安裝或指定 Java 路徑\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等",
+                    "手動指定 Java",
+                    f"請手動安裝 Java {required_major} 或指定路徑",
                     "info",
                 )
         return None

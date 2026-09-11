@@ -50,7 +50,7 @@ def read_server_output_history(
     lines = text.splitlines()
     if start > 0 and lines:
         lines = lines[1:]
-    compact_lines = [line.rstrip("\r\n") for line in lines if line.strip()]
+    compact_lines = [line for line in lines if line.strip()]
     truncated = start > 0 or len(compact_lines) > bounded_lines
     return ServerOutputHistory(lines=tuple(compact_lines[-bounded_lines:]), truncated=truncated)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,12 +18,17 @@ class _FixedDateTime(datetime.datetime):
 
 
 def _manager(server_dir: Path) -> backup_module.ServerBackupManager:
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     return backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
 
@@ -63,11 +69,11 @@ def test_backup_failure_keeps_existing_final_backup_and_removes_temp_file(tmp_pa
 
     monkeypatch.setattr(backup_module.datetime, "datetime", _FixedDateTime)
 
-    def fail_copyfileobj(source, target, length=0):
-        _ = source, target, length
+    def fail_open_regular_file(*args, **kwargs):
+        _ = args, kwargs
         raise OSError("simulated source read failure")
 
-    monkeypatch.setattr(backup_module.shutil, "copyfileobj", fail_copyfileobj)
+    monkeypatch.setattr(backup_module, "open_regular_file", fail_open_regular_file)
 
     manager = _manager(server_dir)
     assert manager.backup_server("TestServer") is False
@@ -79,12 +85,17 @@ def test_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=True),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.backup_server("TestServer") is False
@@ -119,12 +130,17 @@ def test_backup_names_are_unique_and_listed_for_literal_server_name(tmp_path: Pa
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
     server_name = "[Forge] 1.21"
-    config = SimpleNamespace(name=server_name, path=str(server_dir))
+    config = SimpleNamespace(name=server_name, path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", ((server_name, config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
     monkeypatch.setattr(backup_module.datetime, "datetime", _FixedDateTime)
 
@@ -146,12 +162,17 @@ def test_restore_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    running_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=True))
+    running_runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=True),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, running_runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is False
@@ -168,12 +189,17 @@ def test_restore_backup_succeeds_when_server_not_running(tmp_path: Path) -> None
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    stopped_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    stopped_runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, stopped_runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
@@ -196,12 +222,17 @@ def test_restore_failure_leaves_live_server_unchanged(tmp_path: Path, monkeypatc
         raise OSError("simulated extraction failure")
 
     monkeypatch.setattr(backup_module, "safe_extract_zip", fail_after_first_write)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is False
@@ -229,12 +260,17 @@ def test_restore_commit_failure_rolls_back_live_server(tmp_path: Path, monkeypat
         return original_replace(path, target)
 
     monkeypatch.setattr(Path, "replace", fail_prepared_commit)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is False
@@ -257,12 +293,17 @@ def test_restore_replaces_snapshot_and_preserves_excluded_directories(tmp_path: 
         zf.writestr("server.properties", "motd=restored\n")
         zf.writestr("logs/injected.log", "discard")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
@@ -289,12 +330,17 @@ def test_managed_backup_restore_keeps_hard_archive_limits(tmp_path: Path, monkey
         (destination / "server.properties").write_text("motd=restored\n", encoding="utf-8")
 
     monkeypatch.setattr(backup_module, "safe_extract_zip", capture_policy)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
@@ -316,12 +362,17 @@ def test_managed_backup_name_does_not_bypass_hard_total_limit(tmp_path: Path, mo
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir))
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
     )
-    runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
     monkeypatch.setattr(
         manager,

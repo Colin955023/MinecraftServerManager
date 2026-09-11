@@ -49,6 +49,33 @@ print(json.dumps({
     $appInfo = $metadataJson | ConvertFrom-Json
     $executablePath = Join-Path $projectRoot "dist\$($appInfo.GITHUB_REPO).exe"
 
+    $exportsCode = @'
+import json
+from src.core import _EXPORTS as core_exports
+from src.models import _EXPORTS as model_exports
+from src.ui import _EXPORTS as ui_exports
+from src.utils import _EXPORTS as utility_exports
+
+modules = sorted(
+    {
+        f"{package}{module}" if module.startswith(".") else module
+        for package, exports in (
+            ("src.core", core_exports),
+            ("src.models", model_exports),
+            ("src.ui", ui_exports),
+            ("src.utils", utility_exports),
+        )
+        for module, _ in exports.values()
+    }
+)
+print(json.dumps(modules))
+'@
+    $exportModulesJson = & $venvPython -c $exportsCode
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to load facade export modules. ExitCode=$LASTEXITCODE"
+    }
+    $exportModules = @($exportModulesJson | ConvertFrom-Json)
+
     Write-Host "Checking whether the build output executable is running..."
     $runningOutputProcesses = @(Get-Process -Name "$($appInfo.GITHUB_REPO)" -ErrorAction SilentlyContinue | ForEach-Object {
         $process = $_
@@ -138,10 +165,8 @@ print(json.dumps({
         '--assume-yes-for-downloads',
         '--output-dir=dist',
         "--output-filename=$($appInfo.GITHUB_REPO).exe",
-        '--include-package=src',
         '--include-data-files=LICENSE=LICENSE',
         '--report=report/nuitka-compilation-report.xml',
-        '--report-diffable',
         '--python-flag=no_docstrings',
         '--python-flag=no_asserts',
         '--python-flag=isolated',
@@ -167,6 +192,10 @@ print(json.dumps({
         '--lto=yes',
         "--jobs=$numJobs"
     )
+
+    foreach ($module in $exportModules) {
+        $nuitkaArgs += "--include-module=$module"
+    }
 
     if (-not $KeepBuildOutput) {
         $nuitkaArgs += '--remove-output'
@@ -257,11 +286,13 @@ print(json.dumps({
     }
 
     $sha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash
+    Write-Host '========================================================'
     Write-Host "建置完成：$($appInfo.APP_NAME) v$($appInfo.APP_VERSION)"
     Write-Host ("執行檔：{0} ({1} MB)" -f $executablePath, $exeSizeMB)
-    Write-Host ("耗時：{0} 分 {1} 秒；Nuitka：{2}" -f $minutes, $seconds, $nuitkaVersion)
+    Write-Host ("耗時：{0} 分 {1} 秒；" -f $minutes, $seconds)
     Write-Host "SHA256：$sha256"
     Write-Host '檢查：onefile、報告、LICENSE 及禁止 DLL 均符合規則'
+    Write-Host '========================================================'
 }
 finally {
     Pop-Location

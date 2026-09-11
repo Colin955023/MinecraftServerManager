@@ -143,17 +143,11 @@ class ModManagementFrame:
         self._active_server_identity: tuple[str, str, str, str] | None = None
         self.load_servers()
 
-    def showEvent(self, event) -> None:
+    def on_page_shown(self) -> None:
         """
-        當元件顯示時，強制刷新列表以解決隱藏時更新導致的繪製問題
-
-        Args:
-            event: 顯示事件
+        當頁面顯示時重新載入伺服器與列表
         """
-        _showEvent = getattr(super(), "showEvent", None)
-        if callable(_showEvent):
-            _showEvent(event)
-
+        self.load_servers()
         if hasattr(self, "notebook") and self.notebook:
             current_tab = self.notebook.currentIndex()
             if current_tab == 0:
@@ -535,9 +529,9 @@ class ModManagementFrame:
             except Exception:
                 mod_obj.file_path = old_file_path.replace(old_filename, new_filename)
         try:
-            mod_obj._cached_mtime = Path(mod_obj.file_path).stat().st_mtime
-        except Exception:
-            mod_obj._cached_mtime = None
+            mod_obj.file_mtime = Path(mod_obj.file_path).stat().st_mtime
+        except OSError:
+            mod_obj.file_mtime = 0.0
         self.mod_session.rename_provider_cache_key(old_filename, new_filename)
         if not tree or not _is_alive(tree):
             return

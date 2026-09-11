@@ -12,7 +12,8 @@ from src.models import (
     ProviderIdentityEvidence,
     ProviderIdentitySnapshot,
 )
-from src.utils import HTTPClient, HTTPJSONResponse
+from src.utils import HTTPClient
+from src.utils.network_utils.http_models import HTTPJSONResponse
 
 
 class MemoryIdentityStore:
@@ -97,15 +98,6 @@ class FakeCatalog:
         if hashes or algorithm or latest or minecraft_version or loader:
             return {}
         return {}
-
-
-def test_legacy_identity_without_timestamp_is_stale() -> None:
-    snapshot = ProviderIdentitySnapshot.from_payload(
-        {"platform": "modrinth", "project_id": "project-old", "slug": "old-alias"}
-    )
-
-    assert snapshot.lifecycle == "stale"
-    assert snapshot.canonical is False
 
 
 def test_service_replaces_identity_payload_with_canonical_catalog_result(tmp_path: Path) -> None:

@@ -12,14 +12,17 @@ from typing import Any
 
 from src.models import LocalModInfo, LocalModMutationResult, ModFileOperationResult, ModStatus
 from src.utils import (
+    SAFE_HASH_FILE_MAX_BYTES,
     HashUtils,
     HTTPClient,
     atomic_replace_file_within,
     build_non_official_source_warning,
     copy_file,
+    copy_within,
     delete_within,
     is_path_within,
     is_reparse_point,
+    move_within,
 )
 
 
@@ -415,7 +418,7 @@ class ModFileInstaller:
                     dir=self.download_staging_root,
                 )
                 backup_path = Path(backup_context.name) / old_path.name
-                if not copy_file(old_path, backup_path):
+                if not copy_within(self.server_path, old_path, backup_path):
                     self.logger.error(f"更新本地模組失敗：無法建立回滾備份 {old_path}")
                     backup_context.cleanup()
                     return None
@@ -438,7 +441,9 @@ class ModFileInstaller:
             if getattr(local_mod, "status", None) == ModStatus.DISABLED and final_path.suffix == ".jar":
                 disabled_path = final_path.with_name(final_path.name + ".disabled")
                 delete_within(self.server_path, disabled_path)
-                final_path.rename(disabled_path)
+                if not move_within(self.server_path, final_path, disabled_path):
+                    rollback_and_stop(cancelled=False)
+                    return None
                 final_path = disabled_path
             if self.is_operation_cancelled(cancel_check):
                 rollback_and_stop(cancelled=True, final_path=final_path)
@@ -507,12 +512,11 @@ class ModFileInstaller:
                     affected_count=1,
                 )
             if dst_file.exists() and src_file.exists():
-                try:
-                    same_size = dst_file.stat().st_size == src_file.stat().st_size
-                except OSError:
-                    same_size = False
-                if same_size:
-                    src_file.unlink(missing_ok=True)
+                source_hash = HashUtils.compute_file_hash_sync(src_file, allowed_root=self.server_path)
+                destination_hash = HashUtils.compute_file_hash_sync(dst_file, allowed_root=self.server_path)
+                if source_hash and hmac.compare_digest(source_hash, destination_hash):
+                    if not delete_within(self.server_path, src_file):
+                        return self.failure_mutation_result("無法清理重複模組檔案", "duplicate_cleanup_failed")
                     return self.success_mutation_result(
                         f"模組已處於目標狀態並已清理重複檔案: {dst_file.name}",
                         final_path=dst_file,
@@ -521,14 +525,16 @@ class ModFileInstaller:
                 bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.bak"
                 if bak.exists():
                     bak = self.mods_path / f"{mod_id}.{conflict_bak_suffix}.{int(time.time())}.bak"
-                src_file.rename(bak)
+                if not move_within(self.server_path, src_file, bak):
+                    return self.failure_mutation_result("無法保留衝突模組檔案", "conflict_backup_failed")
                 return self.success_mutation_result(
                     f"偵測到衝突檔案，已改名保留備份: {bak.name}",
                     final_path=bak,
                     affected_count=1,
                 )
             if src_file.exists():
-                src_file.rename(dst_file)
+                if not move_within(self.server_path, src_file, dst_file):
+                    return self.failure_mutation_result("無法切換模組狀態", "state_move_failed")
                 if notify_change:
                     self.notify_mod_list_changed()
                 return self.success_mutation_result(
@@ -574,7 +580,7 @@ class ModFileInstaller:
             target_path = self.mods_path / safe_filename
             with tempfile.TemporaryDirectory(prefix=f"{safe_filename}.", dir=self.download_staging_root) as staging_dir:
                 staging_path = Path(staging_dir) / safe_filename
-                if not copy_file(normalized_source, staging_path):
+                if not copy_file(normalized_source, staging_path, max_bytes=SAFE_HASH_FILE_MAX_BYTES):
                     return self.failure_mutation_result("匯入失敗", f"無法複製模組檔案: {normalized_source}")
                 if not atomic_replace_file_within(self.server_path, staging_path, target_path):
                     return self.failure_mutation_result("匯入失敗", f"無法寫入目標模組檔案: {target_path}")

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ctypes
+import msvcrt
 import os
 import shutil
 import stat
+import tempfile
 from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from ctypes import wintypes
@@ -26,7 +28,30 @@ _FILE_SHARE_READ = 0x00000001
 _FILE_SHARE_WRITE = 0x00000002
 _FILE_SHARE_ALL = _FILE_SHARE_READ | _FILE_SHARE_WRITE | 0x00000004
 _OPEN_EXISTING = 3
-_CREATE_ALWAYS = 2
+_OPEN_ALWAYS = 4
+
+
+class _FileAttributeTagInfo(ctypes.Structure):
+    _fields_ = [("file_attributes", wintypes.DWORD), ("reparse_tag", wintypes.DWORD)]
+
+
+_KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+_KERNEL32.CreateFileW.argtypes = [
+    wintypes.LPCWSTR,
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.LPVOID,
+    wintypes.DWORD,
+    wintypes.DWORD,
+    wintypes.HANDLE,
+]
+_KERNEL32.CreateFileW.restype = wintypes.HANDLE
+_KERNEL32.CloseHandle.argtypes = [wintypes.HANDLE]
+_KERNEL32.CloseHandle.restype = wintypes.BOOL
+_KERNEL32.GetFileInformationByHandleEx.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
+_KERNEL32.GetFileInformationByHandleEx.restype = wintypes.BOOL
+_KERNEL32.GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+_KERNEL32.GetFinalPathNameByHandleW.restype = wintypes.DWORD
 
 
 def _metadata_is_reparse_point(metadata: os.stat_result) -> bool:
@@ -69,29 +94,18 @@ def _normalize_windows_handle_path(value: str) -> Path:
 
 
 def _windows_handle_is_reparse_point(handle: int) -> bool:
-    class _FileAttributeTagInfo(ctypes.Structure):
-        _fields_ = [("file_attributes", wintypes.DWORD), ("reparse_tag", wintypes.DWORD)]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_info = kernel32.GetFileInformationByHandleEx
-    get_info.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
-    get_info.restype = wintypes.BOOL
     info = _FileAttributeTagInfo()
-    if not get_info(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+    if not _KERNEL32.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
         error = ctypes.get_last_error()
         raise OSError(error, "無法取得檔案 reparse 狀態")
     return bool(info.file_attributes & _FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _windows_handle_path(handle: int) -> Path:
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_path = kernel32.GetFinalPathNameByHandleW
-    get_path.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
-    get_path.restype = wintypes.DWORD
     capacity = 512
     while capacity <= 32 * 1024:
         buffer = ctypes.create_unicode_buffer(capacity)
-        length = get_path(handle, buffer, capacity, 0)
+        length = _KERNEL32.GetFinalPathNameByHandleW(handle, buffer, capacity, 0)
         if length == 0:
             error = ctypes.get_last_error()
             raise OSError(error, "無法取得檔案實際路徑")
@@ -107,32 +121,12 @@ def _open_regular_file_windows(
     *,
     writable: bool = False,
 ) -> BinaryIO:
-    import ctypes
-    import msvcrt
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.LPVOID,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.HANDLE,
-    ]
-    create_file.restype = wintypes.HANDLE
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = [wintypes.HANDLE]
-    close_handle.restype = wintypes.BOOL
-
-    handle = create_file(
+    handle = _KERNEL32.CreateFileW(
         str(target),
         _GENERIC_WRITE if writable else _GENERIC_READ,
         _FILE_SHARE_ALL,
         None,
-        _CREATE_ALWAYS if writable else _OPEN_EXISTING,
+        _OPEN_ALWAYS if writable else _OPEN_EXISTING,
         _FILE_ATTRIBUTE_NORMAL | _FILE_FLAG_OPEN_REPARSE_POINT,
         None,
     )
@@ -154,6 +148,9 @@ def _open_regular_file_windows(
             raise OSError("檔案不是一般檔案")
         if allowed_root is not None and not _path_is_within_resolved(allowed_root, _windows_handle_path(int(handle))):
             raise OSError("檔案實際路徑超出允許根目錄")
+        if writable:
+            file_object.seek(0)
+            file_object.truncate()
         return file_object
     except Exception:
         if file_object is not None:
@@ -161,29 +158,13 @@ def _open_regular_file_windows(
         elif file_descriptor is not None:
             os.close(file_descriptor)
         else:
-            close_handle(handle)
+            _KERNEL32.CloseHandle(handle)
         raise
 
 
 def _open_directory_handle_windows(target: Path, *, share_mode: int = _FILE_SHARE_ALL) -> tuple[int, Path]:
     """開啟資料夾並保留 handle，回傳 handle 與實際路徑"""
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    create_file = kernel32.CreateFileW
-    create_file.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.LPVOID,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        wintypes.HANDLE,
-    ]
-    create_file.restype = wintypes.HANDLE
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = [wintypes.HANDLE]
-    close_handle.restype = wintypes.BOOL
-
-    handle = create_file(
+    handle = _KERNEL32.CreateFileW(
         str(target),
         _GENERIC_READ,
         share_mode,
@@ -205,7 +186,7 @@ def _open_directory_handle_windows(target: Path, *, share_mode: int = _FILE_SHAR
             raise OSError("路徑不是資料夾")
         return handle_value, actual_path
     except Exception:
-        close_handle(handle)
+        _KERNEL32.CloseHandle(handle)
         raise
 
 
@@ -220,10 +201,6 @@ def _stable_directory_handle(path: Path | str, *, create: bool = False) -> Gener
     absolute = _absolute_path(path)
     current = Path(absolute.anchor)
     handles: list[int] = []
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = [wintypes.HANDLE]
-    close_handle.restype = wintypes.BOOL
     try:
         handle, current = _open_directory_handle_windows(
             current,
@@ -245,7 +222,7 @@ def _stable_directory_handle(path: Path | str, *, create: bool = False) -> Gener
         yield current
     finally:
         for handle in reversed(handles):
-            close_handle(handle)
+            _KERNEL32.CloseHandle(handle)
 
 
 def resolve_stable_directory(path: Path | str, *, create: bool = False) -> Path:
@@ -542,29 +519,42 @@ def _copy_regular_file(
     *,
     allowed_root: Path | None = None,
     max_bytes: int | None = None,
-) -> bool:
+) -> int | None:
+    tmp_path: Path | None = None
     try:
         stable_dst = resolve_stable_path(dst, create_parent=True)
-        if is_reparse_point(stable_dst):
-            return False
-        with (
-            open_regular_file(src, allowed_root=allowed_root) as source,
-            open_regular_file_for_write(stable_dst) as target,
-        ):
-            if max_bytes is None:
-                shutil.copyfileobj(source, target, length=_COPY_BUFFER_BYTES)
-            else:
-                remaining = max(0, int(max_bytes))
-                while chunk := source.read(min(_COPY_BUFFER_BYTES, remaining + 1)):
-                    if len(chunk) > remaining:
-                        return False
-                    target.write(chunk)
-                    remaining -= len(chunk)
+        if _absolute_path(src) == stable_dst or is_reparse_point(stable_dst):
+            return None
+        copied_bytes = 0
+        with open_regular_file(src, allowed_root=allowed_root) as source:
+            if max_bytes is not None and os.fstat(source.fileno()).st_size > max(0, int(max_bytes)):
+                return None
+            with tempfile.NamedTemporaryFile(mode="w+b", delete=False, dir=stable_dst.parent) as target:
+                tmp_path = Path(target.name)
+                if max_bytes is None:
+                    while chunk := source.read(_COPY_BUFFER_BYTES):
+                        target.write(chunk)
+                        copied_bytes += len(chunk)
+                else:
+                    remaining = max(0, int(max_bytes))
+                    while chunk := source.read(min(_COPY_BUFFER_BYTES, remaining + 1)):
+                        if len(chunk) > remaining:
+                            return None
+                        target.write(chunk)
+                        remaining -= len(chunk)
+                        copied_bytes += len(chunk)
+            if not move_within(stable_dst.parent, tmp_path, stable_dst):
+                return None
+            tmp_path = None
         with suppress(OSError):
             shutil.copystat(src, stable_dst, follow_symlinks=False)
-        return True
+        return copied_bytes
     except OSError:
-        return False
+        return None
+    finally:
+        if tmp_path is not None:
+            with suppress(OSError):
+                tmp_path.unlink()
 
 
 def list_bounded_directory(
@@ -587,16 +577,14 @@ def list_bounded_directory(
     limit = int(max_entries)
     if limit < 0:
         raise ValueError("目錄項目上限不可為負數")
-    directory = Path(path)
-    if is_reparse_point(directory):
-        raise OSError(f"目錄不可為 reparse point: {directory}")
     entries: list[Path] = []
-    with os.scandir(directory) as iterator:
+    with stable_directory(path) as directory, os.scandir(directory) as iterator:
         for entry in iterator:
             if len(entries) >= limit:
                 raise OSError(f"目錄項目數超過安全上限 {limit}")
             candidate = Path(entry.path)
-            if reject_reparse and is_reparse_point(candidate):
+            metadata = entry.stat(follow_symlinks=False)
+            if reject_reparse and _metadata_is_reparse_point(metadata):
                 raise OSError(f"目錄包含 reparse point: {candidate}")
             entries.append(candidate)
     return entries
@@ -622,33 +610,30 @@ def walk_bounded_tree(
     limit = int(max_entries)
     if limit < 0:
         raise ValueError("目錄項目上限不可為負數")
-    root = Path(path)
-    try:
-        if _metadata_is_reparse_point(root.stat(follow_symlinks=False)):
-            raise OSError(f"目錄包含 reparse point: {root}")
-    except FileNotFoundError as e:
-        raise OSError(f"目錄不存在: {root}") from e
+    root = resolve_stable_directory(path)
     pending = [root]
     visited_entries = 0
     while pending:
         current = pending.pop()
         dirs: list[str] = []
         files: list[str] = []
-        with os.scandir(current) as iterator:
-            for entry in iterator:
-                visited_entries += 1
-                if visited_entries > limit:
-                    raise OSError(f"目錄項目數超過安全上限 {limit}")
-                candidate = Path(entry.path)
-                metadata = entry.stat(follow_symlinks=False)
-                if _metadata_is_reparse_point(metadata):
-                    raise OSError(f"目錄包含 reparse point: {candidate}")
-                if stat.S_ISDIR(metadata.st_mode):
-                    dirs.append(entry.name)
-                elif stat.S_ISREG(metadata.st_mode):
-                    files.append(entry.name)
-                else:
-                    raise OSError(f"目錄包含非一般檔案項目: {candidate}")
+        with stable_directory(current) as stable_current:
+            with os.scandir(stable_current) as iterator:
+                for entry in iterator:
+                    visited_entries += 1
+                    if visited_entries > limit:
+                        raise OSError(f"目錄項目數超過安全上限 {limit}")
+                    candidate = Path(entry.path)
+                    metadata = entry.stat(follow_symlinks=False)
+                    if _metadata_is_reparse_point(metadata):
+                        raise OSError(f"目錄包含 reparse point: {candidate}")
+                    if stat.S_ISDIR(metadata.st_mode):
+                        dirs.append(entry.name)
+                    elif stat.S_ISREG(metadata.st_mode):
+                        files.append(entry.name)
+                    else:
+                        raise OSError(f"目錄包含非一般檔案項目: {candidate}")
+            current = stable_current
         dirs.sort(key=str.casefold)
         files.sort(key=str.casefold)
         if ignore is not None:
@@ -704,18 +689,47 @@ def find_first_reparse_point(
     return None
 
 
-def copy_file(src: Path, dst: Path) -> bool:
+def copy_file(src: Path, dst: Path, *, max_bytes: int | None = None) -> bool:
     """
     複製單一檔案並建立目的目錄
 
     Args:
         src: 來源檔案
         dst: 目的檔案
+        max_bytes: 可複製的最大位元組數
 
     Returns:
         複製成功時回傳 True
     """
-    return _copy_regular_file(src, dst)
+    return _copy_regular_file(src, dst, max_bytes=max_bytes) is not None
+
+
+def copy_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
+    """
+    僅複製同一基準目錄內的一般檔案
+
+    Args:
+        base_dir: 允許複製的基準目錄
+        src: 來源檔案
+        dst: 目的檔案
+
+    Returns:
+        來源與目的地皆受基準目錄限制且複製成功時回傳 True
+    """
+    try:
+        with stable_directory(base_dir) as base:
+            raw_src = _absolute_path(src)
+            raw_dst = _absolute_path(dst)
+            if (
+                raw_src == base
+                or raw_dst == base
+                or not _path_is_within_resolved(base, raw_src)
+                or not _path_is_within_resolved(base, raw_dst)
+            ):
+                return False
+            return _copy_regular_file(raw_src, raw_dst, allowed_root=base) is not None
+    except OSError, ValueError:
+        return False
 
 
 def copy_dir(
@@ -791,15 +805,16 @@ def copy_dir(
                         return False
                     seen_files.add(relative_file)
                 remaining_bytes = SAFE_DIRECTORY_MAX_TOTAL_BYTES - copied_bytes
-                if not _copy_regular_file(
+                copied = _copy_regular_file(
                     file_path,
                     target_root / file_name,
                     allowed_root=src,
                     max_bytes=remaining_bytes,
-                ):
+                )
+                if copied is None:
                     return False
                 copied_files += 1
-                copied_bytes += metadata.st_size
+                copied_bytes += copied
                 if progress_callback is not None and total_files > 0:
                     progress_callback(copied_files, total_files)
         if progress_callback is not None:
@@ -815,6 +830,7 @@ __all__ = [
     "SAFE_TEXT_FILE_MAX_BYTES",
     "copy_dir",
     "copy_file",
+    "copy_within",
     "delete_within",
     "is_path_within",
     "is_reparse_point",

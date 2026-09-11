@@ -28,6 +28,8 @@ def test_validate_server_name_accepts_normal_unicode_name() -> None:
         "con.txt",
         "CONIN$",
         "CONOUT$.log",
+        "CON .txt",
+        "COM1 .txt",
         "LPT1",
         "COM9.log",
         "COM¹",

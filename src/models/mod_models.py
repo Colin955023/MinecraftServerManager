@@ -377,16 +377,16 @@ class ProviderIdentitySnapshot:
             return cls()
         now_ms = int(now_epoch_ms if now_epoch_ms is not None else time.time() * 1000)
         schema_version = _positive_int(raw.get("schema_version"))
-        provider = str(raw.get("provider", raw.get("platform", "local")) or "local").strip().lower()
+        provider = str(raw.get("provider", "local") or "local").strip().lower()
         project_id = str(raw.get("project_id", "") or "").strip()
-        alias = str(raw.get("alias", raw.get("slug", "")) or "").strip()
-        display_name = str(raw.get("display_name", raw.get("project_name", "")) or "").strip()
-        provenance = str(raw.get("provenance", raw.get("resolution_source", "legacy")) or "legacy").strip()
+        alias = str(raw.get("alias", "") or "").strip()
+        display_name = str(raw.get("display_name", "") or "").strip()
+        provenance = str(raw.get("provenance", "") or "").strip()
         resolved_at = _positive_int(raw.get("resolved_at_epoch_ms"))
         observed_at = _positive_int(raw.get("observed_at_epoch_ms")) or resolved_at
-        failure_count = _positive_int(raw.get("failure_count", raw.get("stale_revalidation_failures")))
+        failure_count = _positive_int(raw.get("failure_count"))
         next_retry = _positive_int(raw.get("next_retry_not_before_epoch_ms"))
-        raw_lifecycle = str(raw.get("lifecycle", raw.get("lifecycle_state", "")) or "").strip().lower()
+        raw_lifecycle = str(raw.get("lifecycle", "") or "").strip().lower()
         if provider == "local" and (project_id or alias):
             provider = "modrinth"
         if not project_id:

@@ -10,11 +10,12 @@ from qfluentwidgets import ProgressBar, SubtitleLabel, TitleLabel
 
 from src.models import ProgressEvent
 from src.ui import (
-    ModalMSFluentWindow,
     Spacing,
     is_qobject_alive,
 )
 from src.utils import get_logger
+
+from .modal_msfluent_window import ModalMSFluentWindow
 
 logger = get_logger().bind(component="ProgressDialog")
 

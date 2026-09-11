@@ -37,29 +37,33 @@ class StatusPushButton(PushButton):
             self.setStyleSheet("")
             return
 
+        is_dark = isDarkTheme()
         if self._status == "danger":
-            bg_normal = resolve_color(Colors.BUTTON_DANGER)
-            bg_hover = resolve_color(Colors.BUTTON_DANGER_HOVER)
+            bg_normal = resolve_color(Colors.BUTTON_DANGER, dark=is_dark)
+            bg_hover = resolve_color(Colors.BUTTON_DANGER_HOVER, dark=is_dark)
             text_color = "black"
+            bg_disabled = "rgba(220, 38, 38, 0.45)" if not is_dark else "rgba(185, 28, 28, 0.45)"
+            color_disabled = "rgba(0, 0, 0, 0.5)" if not is_dark else "rgba(255, 255, 255, 0.5)"
+            border_normal = "rgba(0, 0, 0, 0.1)" if not is_dark else "rgba(255, 255, 255, 0.15)"
+            border_disabled = "rgba(220, 38, 38, 0.3)"
         elif self._status == "success":
-            bg_normal = resolve_color(Colors.BUTTON_SUCCESS)
-            bg_hover = resolve_color(Colors.BUTTON_SUCCESS_HOVER)
+            bg_normal = resolve_color(Colors.BUTTON_SUCCESS, dark=is_dark)
+            bg_hover = resolve_color(Colors.BUTTON_SUCCESS_HOVER, dark=is_dark)
             text_color = "white"
+            bg_disabled = "rgba(5, 150, 105, 0.45)" if not is_dark else "rgba(4, 120, 87, 0.45)"
+            color_disabled = "rgba(0, 0, 0, 0.5)" if not is_dark else "rgba(255, 255, 255, 0.5)"
+            border_normal = "rgba(0, 0, 0, 0.1)" if not is_dark else "rgba(255, 255, 255, 0.15)"
+            border_disabled = "rgba(5, 150, 105, 0.3)"
         else:
             self.setStyleSheet("")
             return
-
-        is_dark = isDarkTheme()
-        bg_disabled = "rgba(255, 255, 255, 0.06)" if is_dark else "rgba(0, 0, 0, 0.03)"
-        border_disabled = "rgba(255, 255, 255, 0.04)" if is_dark else "rgba(0, 0, 0, 0.05)"
-        color_disabled = resolve_color(Colors.TEXT_MUTED)
 
         self.setStyleSheet(
             f"""
             StatusPushButton {{
                 background-color: {bg_normal};
                 color: {text_color};
-                border: 1px solid rgba(0, 0, 0, 0.1);
+                border: 1px solid {border_normal};
                 border-radius: 5px;
                 padding: 5px 10px;
             }}

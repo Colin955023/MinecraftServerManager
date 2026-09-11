@@ -17,8 +17,9 @@ from qfluentwidgets import (
     ToolTipPosition,
 )
 
-from src.ui import ModalMSFluentWindow
 from src.utils import JvmOptionPolicy
+
+from .modal_msfluent_window import ModalMSFluentWindow
 
 
 class JvmArgsDialog(ModalMSFluentWindow):

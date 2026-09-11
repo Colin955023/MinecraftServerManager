@@ -6,6 +6,7 @@ from zipfile import ZipFile
 
 from defusedxml import ElementTree
 
+import src.core.mods.mod_file_installer as mod_file_installer_module
 from src.core import ModManager
 from src.models import LocalModInfo, ModStatus
 from src.utils import (
@@ -33,6 +34,19 @@ def test_import_local_mod_file_result_copies_mod_and_notifies(tmp_path: Path) ->
     assert result.final_path == target_path
     assert target_path.read_bytes() == b"jar-bytes"
     assert notifications == ["changed"]
+
+
+def test_import_local_mod_file_result_rejects_oversized_mod(tmp_path: Path, monkeypatch) -> None:
+    server_path = tmp_path / "server"
+    source_path = tmp_path / "downloads" / "example.jar"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_bytes(b"jar-bytes")
+    monkeypatch.setattr(mod_file_installer_module, "SAFE_HASH_FILE_MAX_BYTES", 1)
+
+    result = ModManager(str(server_path)).mod_file_installer.import_local_mod_file_result(source_path)
+
+    assert result.completed is False
+    assert not (server_path / "mods" / "example.jar").exists()
 
 
 def test_quarantine_file_records_issue_in_mod_index(tmp_path: Path) -> None:
@@ -69,6 +83,40 @@ def test_delete_local_mods_result_deletes_existing_files_and_reports_missing(tmp
     assert enabled_mod.exists() is False
     assert disabled_mod.exists() is False
     assert notifications == ["changed"]
+
+
+def test_set_mod_state_keeps_same_size_conflict_as_backup(tmp_path: Path) -> None:
+    server_path = tmp_path / "server"
+    manager = ModManager(str(server_path))
+    mods_dir = server_path / "mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    (mods_dir / "example.jar").write_bytes(b"aaaa")
+    (mods_dir / "example.jar.disabled").write_bytes(b"bbbb")
+
+    result = manager.mod_file_installer.set_mod_state_result("example", enable=False)
+
+    backup = mods_dir / "example.enabled.bak"
+    assert result.completed is True
+    assert result.final_path == backup
+    assert backup.read_bytes() == b"aaaa"
+    assert (mods_dir / "example.jar.disabled").read_bytes() == b"bbbb"
+
+
+def test_set_mod_state_removes_identical_duplicate(tmp_path: Path) -> None:
+    server_path = tmp_path / "server"
+    manager = ModManager(str(server_path))
+    mods_dir = server_path / "mods"
+    mods_dir.mkdir(parents=True, exist_ok=True)
+    (mods_dir / "example.jar").write_bytes(b"same")
+    target = mods_dir / "example.jar.disabled"
+    target.write_bytes(b"same")
+
+    result = manager.mod_file_installer.set_mod_state_result("example", enable=False)
+
+    assert result.completed is True
+    assert result.final_path == target
+    assert target.read_bytes() == b"same"
+    assert not (mods_dir / "example.jar").exists()
 
 
 def test_download_source_policy_flags_non_official_hosts_only() -> None:

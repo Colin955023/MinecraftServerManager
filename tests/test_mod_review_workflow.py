@@ -89,3 +89,40 @@ def test_context_stamp_rejects_changed_installed_mod_revision(tmp_path) -> None:
     mismatch = ModReviewWorkflow.validate_handoff_context(_handoff(context_stamp), _server(), [mod])
 
     assert mismatch == "本地 Mod 清單已變更"
+
+
+def test_build_client_install_reminder_line() -> None:
+    from src.ui.mods.mod_presentation import build_client_install_reminder_line
+
+    line_req = build_client_install_reminder_line("required")
+    assert line_req is not None and "客戶端必須安裝" in line_req
+    line_opt = build_client_install_reminder_line("optional")
+    assert line_opt is not None and "客戶端建議安裝" in line_opt
+    line_uns = build_client_install_reminder_line("unsupported")
+    assert line_uns is not None and "客戶端無需安裝" in line_uns
+    assert build_client_install_reminder_line("") is None
+
+
+def test_local_review_session_replace_plan() -> None:
+    from src.models import LocalModUpdatePlan
+    from src.ui.mods.review_workflow import LocalReviewSession
+
+    mock_workflow = SimpleNamespace(
+        _prepare_local_entries=lambda plan: [SimpleNamespace(candidate="entry1")] if plan.candidates else []
+    )
+    initial_plan = LocalModUpdatePlan(candidates=[], notes=[])
+    session = LocalReviewSession(
+        workflow=cast(Any, mock_workflow),
+        update_plan=initial_plan,
+        scope_text="全部",
+        entries=(),
+    )
+    assert session.empty is True
+
+    new_plan = LocalModUpdatePlan(
+        candidates=[cast(Any, SimpleNamespace(project_id="test_mod"))],
+        notes=[],
+    )
+    session.replace_plan(new_plan)
+    assert session.empty is False
+    assert len(session._entries) == 1

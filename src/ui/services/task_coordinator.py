@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from src.ui import (
     UIUtils,
-    UpdateChecker,
     is_qobject_alive,
 )
 from src.utils import (
@@ -21,6 +20,8 @@ from src.utils import (
     SettingsManager,
     get_logger,
 )
+
+from .update_checker import UpdateChecker
 
 if TYPE_CHECKING:
     from src.ui import MainWindow

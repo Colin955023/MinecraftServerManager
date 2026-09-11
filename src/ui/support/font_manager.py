@@ -8,7 +8,7 @@ from typing import ClassVar
 
 from PySide6 import QtGui
 
-from src.utils import get_logger
+from src.utils import OperationError, get_logger
 
 logger = get_logger().bind(component="FontManager")
 
@@ -101,7 +101,7 @@ class FontManager:
         try:
             return QtGui.QFont(cls._resolve_default_family(), 9)
         except Exception:
-            raise RuntimeError("無法建立任何字體物件") from None
+            raise OperationError("無法建立任何字體物件") from None
 
     @classmethod
     def clear_cache(cls) -> None:

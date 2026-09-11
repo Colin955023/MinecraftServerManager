@@ -11,7 +11,15 @@ import time
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from src.utils import ConfigurationError, RuntimePaths, atomic_write_json, get_logger, read_json
+from src.utils import (
+    ConfigurationError,
+    atomic_write_json,
+    get_logger,
+    read_json,
+    resolve_stable_directory,
+)
+
+from .runtime_paths import RuntimePaths
 
 logger = get_logger().bind(component="SettingsManager")
 
@@ -84,7 +92,9 @@ class SettingsManager:
 
     def __init__(self):
         self._lock = threading.RLock()
-        self.settings_path = RuntimePaths.ensure_dir(RuntimePaths.get_user_data_dir()) / "user_settings.json"
+        self.settings_path = (
+            resolve_stable_directory(RuntimePaths.get_user_data_dir(), create=True) / "user_settings.json"
+        )
         self._settings = self._load_settings()
         self._no_change_skip_count = 0
         self._no_change_last_log_monotonic = 0.0
@@ -211,7 +221,7 @@ class SettingsManager:
         if not create:
             raise ConfigurationError(f"找不到伺服器資料夾： {servers_root}")
         try:
-            servers_root.mkdir(parents=True, exist_ok=True)
+            servers_root = resolve_stable_directory(servers_root, create=True)
         except OSError as e:
             raise ConfigurationError(f"無法建立伺服器資料夾： {servers_root}") from e
         return servers_root

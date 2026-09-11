@@ -102,3 +102,41 @@ def test_checked_subprocess_methods_reject_executable_override(monkeypatch, tmp_
 def test_validate_cmd_rejects_blank_executable() -> None:
     with pytest.raises(ValueError, match="cmd\\[0\\] 不得為空"):
         SubprocessUtils._validate_cmd(["   "])
+
+
+def test_is_trusted_windows_app_alias(monkeypatch, tmp_path) -> None:
+    fake_localappdata = tmp_path / "AppData" / "Local"
+    fake_windows_apps = fake_localappdata / "Microsoft" / "WindowsApps"
+    fake_windows_apps.mkdir(parents=True)
+
+    winget_exe = fake_windows_apps / "winget.exe"
+    winget_exe.write_text("", encoding="utf-8")
+
+    other_exe = fake_windows_apps / "cmd.exe"
+    other_exe.write_text("", encoding="utf-8")
+
+    outside_winget = tmp_path / "winget.exe"
+    outside_winget.write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_localappdata))
+
+    assert SubprocessUtils._is_trusted_windows_app_alias(winget_exe) is True
+    assert SubprocessUtils._is_trusted_windows_app_alias(other_exe) is False
+    assert SubprocessUtils._is_trusted_windows_app_alias(outside_winget) is False
+
+
+def test_validate_cmd_finds_winget_fallback_with_and_without_extension(monkeypatch, tmp_path) -> None:
+    fake_localappdata = tmp_path / "AppData" / "Local"
+    fake_windows_apps = fake_localappdata / "Microsoft" / "WindowsApps"
+    fake_windows_apps.mkdir(parents=True)
+    winget_exe = fake_windows_apps / "winget.exe"
+    winget_exe.write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("LOCALAPPDATA", str(fake_localappdata))
+    monkeypatch.setattr(subprocess_utils_module.shutil, "which", lambda _name: None)
+
+    resolved_winget = SubprocessUtils._validate_cmd(["winget", "--version"])
+    assert resolved_winget[0] == str(winget_exe)
+
+    resolved_winget_exe = SubprocessUtils._validate_cmd(["winget.exe", "--version"])
+    assert resolved_winget_exe[0] == str(winget_exe)

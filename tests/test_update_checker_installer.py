@@ -1,7 +1,7 @@
 from typing import Any
 
 import src.ui.services.update_checker as update_checker_module
-from src.ui import UpdateChecker
+from src.ui.services.update_checker import UpdateChecker
 
 
 class ImmediateUpdateInteraction:

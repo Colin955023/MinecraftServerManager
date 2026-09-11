@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -153,20 +154,26 @@ def test_server_creation_confirmation_renders_canonical_plan(tmp_path) -> None:
 
 def test_import_and_input_dialog_centered_titles() -> None:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QLabel
 
     from src.ui.dialogs.main_window_dialogs import FluentInputDialog, ImportDialog
 
     _ = QApplication.instance() or QApplication([])
     import_dlg = ImportDialog(None)
     assert import_dlg.viewLayout.count() >= 2
-    import_title = import_dlg.viewLayout.itemAt(0).widget()
+    import_title_item = import_dlg.viewLayout.itemAt(0)
+    assert import_title_item is not None
+    import_title = import_title_item.widget()
+    assert isinstance(import_title, QLabel)
     assert import_title.alignment() == Qt.AlignmentFlag.AlignCenter
     import_dlg.close()
 
     input_dlg = FluentInputDialog(None, "測試標題", "測試提示", "預設值")
     assert input_dlg.viewLayout.count() >= 2
-    input_title = input_dlg.viewLayout.itemAt(0).widget()
+    input_title_item = input_dlg.viewLayout.itemAt(0)
+    assert input_title_item is not None
+    input_title = input_title_item.widget()
+    assert isinstance(input_title, QLabel)
     assert input_title.alignment() == Qt.AlignmentFlag.AlignCenter
     input_dlg.close()
 
@@ -406,6 +413,10 @@ def test_server_memory_dialog_validation_and_save(tmp_path: Path, monkeypatch: A
     dialog.min_memory_input.setText("2048")
     monkeypatch.setattr("src.ui.UIUtils.show_message", lambda *_args, **_kwargs: None)
     dialog._save_memory_settings()
+    deadline = time.monotonic() + 2
+    while not dialog.save_btn.isEnabled() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
 
     updated = crud.snapshot().get("demo_srv")
     assert updated is not None
@@ -485,6 +496,10 @@ def test_server_memory_dialog_auto_clamp_to_system_memory(tmp_path: Path, monkey
     dialog.max_memory_input.setText("16384")
     dialog.min_memory_input.setText("10240")
     dialog._save_memory_settings()
+    deadline = time.monotonic() + 2
+    while not dialog.save_btn.isEnabled() and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.01)
 
     assert dialog.max_memory_input.text() == "8192"
     assert dialog.min_memory_input.text() == "8192"

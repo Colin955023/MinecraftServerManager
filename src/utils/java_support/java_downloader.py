@@ -52,13 +52,7 @@ class JavaDownloader:
         """
 
         if not JavaDownloader._is_winget_available():
-            raise JavaInstallError(
-                "無法呼叫 winget 工具，這可能是因為：\n"
-                "1. 系統未安裝「應用程式安裝員 (App Installer)」\n"
-                "2. 你的 Windows 版本過舊\n"
-                "3. 環境變數中缺少 %LocalAppData%\\Microsoft\\WindowsApps\n"
-                "請檢查程式日誌以取得詳細錯誤代碼"
-            )
+            raise JavaInstallError("無法呼叫 winget 工具，請確認系統已安裝「應用程式安裝員 (App Installer)」")
 
         if major == 8:
             pkg = "Oracle.JavaRuntimeEnvironment"
@@ -73,13 +67,33 @@ class JavaDownloader:
                 ["install", "--accept-package-agreements", "--accept-source-agreements", pkg]
             )
             if returncode != 0:
-                raise JavaInstallError(f"winget 安裝程序回傳錯誤代碼 ({returncode})")
+                code_unsigned = returncode & 0xFFFFFFFF
+                code_hex = hex(code_unsigned)
+                error_map = {
+                    1602: "使用者取消安裝",
+                    1603: "安裝過程發生嚴重錯誤",
+                    1618: "另一個安裝程式正在執行中，請稍後重試",
+                    0x800704C7: "使用者取消安裝或拒絕 UAC 驗證",
+                    0x80070005: "存取被拒，需要管理員權限",
+                    0x8A150008: "下載套件失敗",
+                    0x8A15000F: "下載套件逾時或網路連線中斷",
+                    0x8A150011: f"未在來源找到指定的 Java 套件 ({pkg})",
+                    0x8A150014: "套件雜湊值不相符，檔案可能損毀",
+                    0x8A15002B: "授權條款未接受",
+                    0x8A15002C: "系統環境或架構不支援此套件",
+                    0x8A150044: "安裝程式執行失敗",
+                    0x8A150056: f"系統已安裝此版本 ({pkg})",
+                }
+                reason = error_map.get(code_unsigned)
+                if reason:
+                    raise JavaInstallError(f"透過 winget 安裝 {pkg} 失敗：{reason} (代碼: {code_hex})")
+                raise JavaInstallError(f"透過 winget 安裝 {pkg} 失敗 (結束代碼: {code_hex})")
             logger.info(f"Java {major} ({pkg}) 安裝程序已完成")
+        except JavaInstallError:
+            raise
         except Exception as e:
             logger.exception(f"winget 安裝過程發生錯誤: {e}")
-            raise JavaInstallError(
-                f"透過 winget 安裝 {pkg} 失敗\n建議手動開啟終端機執行：\nwinget install {pkg}"
-            ) from e
+            raise JavaInstallError(f"透過 winget 安裝 {pkg} 失敗：{e}") from e
 
 
 __all__ = ["JavaDownloader"]

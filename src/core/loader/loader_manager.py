@@ -23,10 +23,12 @@ from src.utils import (
     OperationResult,
     RuntimePaths,
     atomic_write_json,
+    delete_within,
     get_logger,
     list_bounded_directory,
     parse_version_safe,
     read_json,
+    resolve_stable_directory,
     standardize_loader_type,
 )
 
@@ -41,6 +43,7 @@ from .loader_adapters import (
 from .loader_installer import run_installer_process
 
 logger = get_logger().bind(component="LoaderManager")
+_VERSION_FALLBACK = Version("0.0.0")
 
 
 class LoaderManager:
@@ -59,20 +62,15 @@ class LoaderManager:
         if self._initialized:
             return
 
-        cache_dir = RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir())
+        cache_dir = resolve_stable_directory(RuntimePaths.get_cache_dir(), create=True)
         self.cache_dir = Path(cache_dir)
         self.version_cache_dir = Path(RuntimePaths.get_version_cache_dir())
         self.installer_cache_dir = Path(RuntimePaths.get_installer_cache_dir())
-        self._migrate_legacy_cache()
-
         self._version_cache: dict[str, list[LoaderVersion]] = {}
         self._preload_lock = threading.Lock()
 
         self._adapters = build_loader_adapters(self)
         self._prune_installer_cache()
-        for loader_id, spec in self._adapters.items():
-            setattr(self, f"{loader_id}_cache_file", str(self.version_cache_dir / spec.cache_name))
-
         self._initialized = True
 
     # ------------------------------------------------------------------
@@ -269,7 +267,7 @@ class LoaderManager:
                 except Exception as e:
                     ent["server_url"] = ""
                     ent["server_sha1"] = ""
-                    logger.debug(f"查詢 Minecraft {ent['id']} server URL 失敗: {type(e).__name__}")
+                    logger.debug("查詢 Minecraft %s server URL 失敗: %s", ent["id"], type(e).__name__)
 
             with ThreadPoolExecutor(max_workers=8) as executor:
                 for _ in executor.map(fetch_single_server_download, entries_to_fetch):
@@ -281,22 +279,26 @@ class LoaderManager:
         items = [v for v in data if isinstance(v, dict)]
         return spec.filter_versions(items) if spec.filter_versions is not None else items
 
-    def _sort_version_dict(self, version_dict: dict[str, list[str]], *, parse_fallback_full_version: bool):
+    @staticmethod
+    def _sort_version_dict(
+        version_dict: dict[str, list[str]], *, parse_fallback_full_version: bool = False
+    ) -> dict[str, list[str]]:
         for mc_version, versions in version_dict.items():
-            versions.sort(
+            version_dict[mc_version] = sorted(
+                versions,
                 key=lambda full: (
-                    parse_version_safe(full.split("-", 1)[1], fallback=Version("0.0.0"))
+                    parse_version_safe(full.split("-", 1)[1], fallback=_VERSION_FALLBACK)
                     if "-" in full
                     else (
-                        parse_version_safe(full, fallback=Version("0.0.0"))
+                        parse_version_safe(full, fallback=_VERSION_FALLBACK)
                         if parse_fallback_full_version
-                        else Version("0.0.0")
+                        else _VERSION_FALLBACK
                     ),
                     full,
                 ),
                 reverse=True,
             )
-            version_dict[mc_version] = versions[:5]
+        return version_dict
 
     @staticmethod
     def _compatible_direct_versions(spec: LoaderAdapter, mc_version: str, cache: Any) -> list[LoaderVersion]:
@@ -387,8 +389,8 @@ class LoaderManager:
 
     @staticmethod
     def _normalize_server_sha1(value: Any) -> str:
-        digest = str(value or "").strip().lower()
-        return digest if re.fullmatch(r"[0-9a-f]{40}", digest) else ""
+        digest, _algorithm = HashUtils.normalize_expected_hash(str(value or ""), "sha1")
+        return digest
 
     @classmethod
     def _server_download_info_from_entry(cls, entry: Any) -> tuple[str, str] | None:
@@ -607,7 +609,7 @@ class LoaderManager:
                             self._installer_version_from_url(url),
                         )
                 except Exception as e:
-                    logger.debug(f"讀取 {loader_id} 安裝器 {algorithm} 校驗碼失敗: {type(e).__name__}")
+                    logger.debug("讀取 %s 安裝器 %s 校驗碼失敗: %s", loader_id, algorithm, type(e).__name__)
         return LoaderInstallerArtifact(url, None, None, self._installer_version_from_url(url))
 
     def _download_and_run_installer(
@@ -700,28 +702,6 @@ class LoaderManager:
     # Cache / loader identity / 特殊差異
     # ------------------------------------------------------------------
 
-    def _migrate_legacy_cache(self) -> None:
-        """將舊版扁平 Cache 目錄內的快取檔案自動遷移至子目錄"""
-        try:
-            if not self.cache_dir.exists():
-                return
-            for item in list_bounded_directory(self.cache_dir):
-                if item.is_file():
-                    if item.name.endswith("_cache.json") or item.name.endswith(".json"):
-                        target = self.version_cache_dir / item.name
-                        if not target.exists():
-                            item.rename(target)
-                        else:
-                            item.unlink(missing_ok=True)
-                    elif item.name.endswith("-installer.jar") or item.name.endswith(".jar"):
-                        target = self.installer_cache_dir / item.name
-                        if not target.exists():
-                            item.rename(target)
-                        else:
-                            item.unlink(missing_ok=True)
-        except Exception as e:
-            logger.debug(f"快取檔案遷移跳過或發生例外: {e}")
-
     def _prune_installer_cache(self) -> None:
         """移除可明確識別的舊版安裝器與過期暫存檔"""
         now = time.time()
@@ -732,13 +712,13 @@ class LoaderManager:
                 if not item.is_file():
                     continue
                 if name.endswith(".part") and now - item.stat().st_mtime > 24 * 60 * 60:
-                    item.unlink(missing_ok=True)
+                    delete_within(self.installer_cache_dir, item)
                     continue
                 match = re.fullmatch(r"([a-z]+)-installer-.+\.jar", name)
                 if match and match.group(1) in known:
-                    item.unlink(missing_ok=True)
+                    delete_within(self.installer_cache_dir, item)
         except OSError as e:
-            logger.debug(f"清理舊版安裝器快取失敗: {e}")
+            logger.debug("清理舊版安裝器快取失敗: %s", e)
 
     @staticmethod
     def _installer_version_from_url(url: str) -> str:
@@ -767,18 +747,18 @@ class LoaderManager:
         """
         try:
             for spec in self._adapters.values():
-                Path(self._cache_path(spec.id)).unlink(missing_ok=True)
-                (self.cache_dir / spec.cache_name).unlink(missing_ok=True)
-                (self.version_cache_dir / spec.cache_name).unlink(missing_ok=True)
+                delete_within(self.cache_dir, Path(self._cache_path(spec.id)))
+                delete_within(self.cache_dir, self.cache_dir / spec.cache_name)
+                delete_within(self.cache_dir, self.version_cache_dir / spec.cache_name)
 
             if self.installer_cache_dir.exists():
                 for jar in list_bounded_directory(self.installer_cache_dir):
                     if jar.is_file() and jar.suffix.lower() == ".jar":
-                        jar.unlink(missing_ok=True)
+                        delete_within(self.installer_cache_dir, jar)
             if self.cache_dir.exists():
                 for jar in list_bounded_directory(self.cache_dir):
                     if jar.is_file() and jar.name.lower().endswith("-installer.jar"):
-                        jar.unlink(missing_ok=True)
+                        delete_within(self.cache_dir, jar)
 
             self._version_cache.clear()
             return OperationResult(True, "快取檔案已成功清除")

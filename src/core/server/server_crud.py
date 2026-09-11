@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import threading
 import time
@@ -17,16 +16,17 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
-import orjson
-
 from src.models import ProgressEvent, ServerConfig, ServerOperationResult
 from src.utils import (
     SAFE_TEXT_FILE_MAX_BYTES,
+    HashUtils,
+    OperationError,
     ServerCommands,
     atomic_write_json,
     atomic_write_text,
     delete_within,
     get_logger,
+    get_shared_manager,
     is_path_within,
     is_reparse_point,
     list_bounded_directory,
@@ -35,6 +35,8 @@ from src.utils import (
     open_regular_file,
     read_bytes_file,
     read_json,
+    read_json_with_bytes,
+    resolve_stable_directory,
     validate_server_name,
 )
 
@@ -47,8 +49,7 @@ logger = get_logger().bind(component="ServerManager")
 def _clone_server_config(config: ServerConfig) -> ServerConfig:
     """複製設定的不可變欄位，僅複製唯一可變的 JVM 參數清單"""
     cloned = shallow_copy(config)
-    if hasattr(config, "jvm_args"):
-        cloned.jvm_args = list(config.jvm_args)
+    cloned.jvm_args = list(config.jvm_args)
     return cloned
 
 
@@ -140,8 +141,7 @@ class ServerCRUD:
     def __init__(self, servers_root: str | None = None):
         if not servers_root:
             raise ValueError("ServerManager 必須指定 servers_root 路徑，且不可為空請於 UI 層先處理")
-        self.servers_root = Path(servers_root).resolve()
-        self.servers_root.mkdir(parents=True, exist_ok=True)
+        self.servers_root = resolve_stable_directory(Path(servers_root), create=True)
         self.config_file = self.servers_root / "servers_config.json"
         config_existed = self.config_file.is_file()
 
@@ -161,11 +161,11 @@ class ServerCRUD:
 
     @staticmethod
     def _empty_revision() -> str:
-        return hashlib.sha256(b"{}").hexdigest()
+        return HashUtils.digest_bytes(b"{}")
 
     @staticmethod
     def _revision_for_bytes(payload: bytes) -> str:
-        return hashlib.sha256(payload).hexdigest()
+        return HashUtils.digest_bytes(payload)
 
     def _snapshot_locked(self) -> ServerConfigRegistrySnapshot:
         return ServerConfigRegistrySnapshot(
@@ -233,15 +233,11 @@ class ServerCRUD:
             self._registry_state.configs = {}
             self._registry_state.revision = self._empty_revision()
             return True
-        raw = read_bytes_file(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
-        if raw is None:
+        result = read_json_with_bytes(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
+        if result is None:
             logger.warning("伺服器設定檔為空、超過大小上限或無法讀取")
             return False
-        try:
-            data = orjson.loads(raw)
-        except OSError, TypeError, ValueError, orjson.JSONDecodeError:
-            logger.warning("伺服器設定檔格式無法解析")
-            return False
+        data, raw = result
         decoded = self._decode_registry(data)
         if decoded is None:
             return False
@@ -335,7 +331,7 @@ class ServerCRUD:
         if not server_path.is_dir():
             raise FileNotFoundError("伺服器 staging 目錄不存在")
         if not self._create_eula_file(server_path):
-            raise RuntimeError("建立 EULA 檔案失敗")
+            raise OperationError("建立 EULA 檔案失敗")
         self._create_server_structure(server_path, config.loader_type)
 
     def create_launch_script(
@@ -650,12 +646,7 @@ class ServerCRUD:
                     self._active_delete_cleanups.discard(cleanup_key)
 
         try:
-            worker = threading.Thread(
-                target=_cleanup,
-                name=f"server-delete-{tombstone_path.name[-8:]}",
-                daemon=True,
-            )
-            worker.start()
+            get_shared_manager().run(_cleanup)
             return True
         except RuntimeError as e:
             with self._delete_cleanup_guard:
@@ -711,7 +702,7 @@ class ServerCRUD:
             directories = ["world", "logs"]
             logger.warning(f"未知 loader_type: {loader_type}，使用預設目錄結構")
         for directory in directories:
-            (path / directory).mkdir(exist_ok=True)
+            resolve_stable_directory(path / directory, create=True)
 
 
 __all__ = ["ServerCRUD", "ServerConfigChangeSet"]

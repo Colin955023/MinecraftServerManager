@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
 
 import src.utils.network_utils.http_client as http_client_module
-from src.utils import HTTPClient
+from src.utils import HTTPClient, SystemUtils
 
 # RFC 5737 TEST-NET-3：永久保留給文件／測試，不代表任何可連線的公網主機
 _DOCUMENTATION_IP = "203.0.113.10"
@@ -53,9 +53,9 @@ def test_download_file_without_expected_hash_skips_hashing(tmp_path, monkeypatch
     )
 
     def _unexpected_hash(_algorithm: str):
-        raise AssertionError("hashlib.new should not be called without an expected hash")
+        raise AssertionError("HashUtils.new_hasher should not be called without an expected hash")
 
-    monkeypatch.setattr(http_client_module.hashlib, "new", _unexpected_hash)
+    monkeypatch.setattr(http_client_module.HashUtils, "new_hasher", _unexpected_hash)
 
     result = HTTPClient.download_file("https://example.com/server.jar", str(target))
     assert result.success is True
@@ -71,9 +71,9 @@ def test_download_file_reports_insufficient_disk_space(tmp_path, monkeypatch) ->
         classmethod(lambda _cls, *_args, **_kwargs: _response(b"new-bytes")),
     )
     monkeypatch.setattr(
-        http_client_module.shutil,
-        "disk_usage",
-        lambda _path: SimpleNamespace(total=10, used=9, free=1),
+        SystemUtils,
+        "get_free_disk_bytes",
+        lambda _path: 1,
     )
 
     result = HTTPClient.download_file("https://example.com/server.jar", str(target))
@@ -121,6 +121,28 @@ def test_download_file_accepts_payload_at_size_limit_without_content_length(tmp_
 
     assert result.success is True
     assert target.read_bytes() == b"12345"
+
+
+def test_download_file_rejects_compressed_response_before_decoding(tmp_path: Path, monkeypatch) -> None:
+    target = tmp_path / "server.jar"
+    request = httpx.Request("GET", "https://example.com/server.jar")
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=httpx.ByteStream(gzip.compress(b"compressed-bytes")),
+        request=request,
+    )
+    monkeypatch.setattr(
+        HTTPClient,
+        "_open_stream",
+        classmethod(lambda _cls, *_args, **_kwargs: response),
+    )
+
+    result = HTTPClient.download_file("https://example.com/server.jar", str(target))
+
+    assert result.success is False
+    assert "壓縮" in result.message
+    assert not target.exists()
 
 
 def test_download_file_cleans_temp_file_when_progress_callback_raises(tmp_path: Path, monkeypatch) -> None:

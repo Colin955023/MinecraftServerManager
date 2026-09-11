@@ -234,20 +234,6 @@ def dedupe_review_messages(messages: list[str] | tuple[str, ...]) -> list[str]:
     return list(dict.fromkeys(filter(None, (str(message or "").strip() for message in messages))))
 
 
-def summarize_review_messages(messages: list[str] | tuple[str, ...], max_items: int = 3) -> list[str]:
-    """
-    去重並限制 Review 訊息顯示數量
-
-    Args:
-        messages: 要整理的訊息清單或 tuple
-        max_items: 最多直接顯示的訊息數量
-
-    Returns:
-        摘要訊息清單，超出數量時追加其餘項目提示
-    """
-    return summarize_messages(messages, max_items=max_items)
-
-
 def format_required_by_list(required_by: list[str]) -> str:
     """
     格式化依賴要求者名稱清單
@@ -291,8 +277,6 @@ def build_review_subtitle(
     count_segments: list[tuple[int, str]] | tuple[tuple[int, str], ...],
     blocked_count: int,
     blocked_label: str,
-    migrated_snapshot_count: int = 0,
-    migrated_snapshot_label: str = "快照遷移",
 ) -> str:
     """
     依各類數量組合 Review 子標題
@@ -302,8 +286,6 @@ def build_review_subtitle(
         count_segments: 由數量與標籤組成的可選片段
         blocked_count: 被阻擋項目的數量
         blocked_label: 阻擋數量的顯示標籤
-        migrated_snapshot_count: 自快照遷移的項目數量
-        migrated_snapshot_label: 快照遷移數量的顯示標籤
 
     Returns:
         以分隔符串接的 Review 子標題
@@ -312,8 +294,6 @@ def build_review_subtitle(
     for count, label in count_segments:
         if count:
             segments.append(f"{label} {count} 項")
-    if migrated_snapshot_count:
-        segments.append(f"{migrated_snapshot_label} {migrated_snapshot_count} 項")
     if blocked_count:
         segments.append(f"{blocked_label} {blocked_count} 項")
     return "｜".join(segments)
@@ -329,7 +309,7 @@ def append_review_section(lines: list[str], title: str, messages: list[str], *, 
         messages: 要摘要的訊息清單
         max_items: 最多顯示的訊息數量
     """
-    summarized = summarize_review_messages(messages, max_items=max_items)
+    summarized = summarize_messages(messages, max_items=max_items)
     if not summarized:
         return
     lines.append("")
@@ -357,17 +337,16 @@ def append_plan_note_section(lines: list[str], dependency_plan: Any, *, max_item
 class ReviewFormattingMixin:
     """Review 全域提示與摘要狀態格式化"""
 
-    def _build_dependency_snapshot_migration_note(self) -> str:
+    def _build_dependency_snapshot_note(self) -> str:
         telemetry = getattr(self, "_dependency_snapshot_migration_totals", None)
         if not isinstance(telemetry, dict):
             return ""
         checked_count = telemetry.get("checked", 0)
         if checked_count <= 0:
             return ""
-        migrated_count = telemetry.get("migrated", 0)
         replayed_count = telemetry.get("replayed", 0)
         fallback_rebuild_count = telemetry.get("fallback_rebuild", 0)
-        return f"依賴快照遷移觀測：檢查 {checked_count}、自動遷移 {migrated_count}、成功回放 {replayed_count}" + (
+        return f"依賴快照觀測：檢查 {checked_count}、成功回放 {replayed_count}" + (
             f"、回放失敗改重建 {fallback_rebuild_count}" if fallback_rebuild_count else ""
         )
 
@@ -375,9 +354,9 @@ class ReviewFormattingMixin:
         self, *, base_notes: Iterable[str], review_entries: list[Any], extra_note_groups: Iterable[Iterable[str]] = ()
     ) -> list[str]:
         notes = list(base_notes)
-        migration_note = self._build_dependency_snapshot_migration_note()
-        if migration_note:
-            notes.append(migration_note)
+        snapshot_note = self._build_dependency_snapshot_note()
+        if snapshot_note:
+            notes.append(snapshot_note)
         for note_group in extra_note_groups:
             notes.extend(list(note_group or []))
         for entry in review_entries:

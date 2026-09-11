@@ -12,7 +12,7 @@ from src.models import ModPlatform
 from src.utils import HashUtils
 
 
-def test_mod_index_persistence_preserves_provider_metadata_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
+def test_mod_index_persistence_preserves_provider_identity_and_hashes_when_metadata_updates(tmp_path: Path) -> None:
     manager = ModIndexPersistence(str(tmp_path))
     mods_dir = tmp_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)
@@ -47,7 +47,7 @@ def test_mod_index_persistence_preserves_provider_metadata_and_hashes_when_metad
     assert manager.get_cached_hash(file_path, "sha512") == "abc123"
 
 
-def test_mod_manager_uses_cached_provider_metadata_and_hash_for_scan(tmp_path: Path) -> None:
+def test_mod_manager_uses_cached_provider_identity_and_hash_for_scan(tmp_path: Path) -> None:
     server_path = tmp_path / "server"
     mods_dir = server_path / "mods"
     mods_dir.mkdir(parents=True, exist_ok=True)
@@ -208,7 +208,6 @@ def test_mod_index_persistence_repairs_corrupt_entry_types_on_load(tmp_path: Pat
                         "size": file_path.stat().st_size,
                         "mtime": file_path.stat().st_mtime,
                         "metadata": ["not-a-dict"],
-                        "provider_metadata": "bad",
                         "hashes": "bad",
                     }
                 },

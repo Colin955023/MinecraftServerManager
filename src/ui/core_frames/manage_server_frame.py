@@ -54,6 +54,7 @@ from src.ui import (
 from src.utils import (
     MemoryUtils,
     get_logger,
+    resolve_stable_directory,
 )
 
 logger = get_logger().bind(component="ManageServerFrame")
@@ -110,10 +111,20 @@ class ManageServerFrame(QWidget):
         if bring_to_front:
             is_minimized = getattr(window, "isMinimized", None)
             if callable(is_minimized) and is_minimized():
-                show_normal = getattr(window, "showNormal", None)
-                if callable(show_normal):
-                    with suppress(Exception):
-                        show_normal()
+                window_state = getattr(window, "windowState", None)
+                is_maximized = (
+                    bool(window_state() & Qt.WindowState.WindowMaximized) if callable(window_state) else False
+                )
+                if is_maximized:
+                    show_max = getattr(window, "showMaximized", None)
+                    if callable(show_max):
+                        with suppress(Exception):
+                            show_max()
+                else:
+                    show_normal = getattr(window, "showNormal", None)
+                    if callable(show_normal):
+                        with suppress(Exception):
+                            show_normal()
             else:
                 with suppress(Exception):
                     window.show()
@@ -268,7 +279,7 @@ class ManageServerFrame(QWidget):
         open_backup_action.triggered.connect(self.open_backup_folder)
         menu.addAction(open_backup_action)
 
-        menu.exec(self.server_tree.mapToGlobal(pos))
+        menu.exec(self.server_tree.mapToGlobal(pos), ani=False)
 
     def edit_server_memory(self) -> None:
         """開啟選中伺服器的記憶體設定對話框"""
@@ -337,9 +348,7 @@ class ManageServerFrame(QWidget):
         if not config:
             return
 
-        backup_dir = Path(config.path) / "backups"
-        if not backup_dir.exists():
-            backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir = resolve_stable_directory(Path(config.path) / "backups", create=True)
 
         try:
             UIUtils.open_external(str(backup_dir))
@@ -535,15 +544,13 @@ class ManageServerFrame(QWidget):
             status_emoji = "🟢" if is_running else "🔴"
             status_text = "執行中" if is_running else "已停止"
             memory_info = ""
-            if hasattr(config, "memory_max_mb") and config.memory_max_mb:
+            if config.memory_max_mb:
                 max_mem_str = MemoryUtils.format_memory_mb(config.memory_max_mb)
-                if hasattr(config, "memory_min_mb") and config.memory_min_mb:
+                if config.memory_min_mb:
                     min_mem_str = MemoryUtils.format_memory_mb(config.memory_min_mb)
                     memory_info = f"記憶體: {min_mem_str}-{max_mem_str}"
                 else:
                     memory_info = f"最大記憶體: {max_mem_str}"
-            elif hasattr(config, "memory_mb") and config.memory_mb:
-                memory_info = f"記憶體: {MemoryUtils.format_memory_mb(config.memory_mb)}"
             else:
                 memory_info = "記憶體: 未設定"
             loader_type = (config.loader_type or "").lower()

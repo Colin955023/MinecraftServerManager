@@ -21,7 +21,6 @@ from qfluentwidgets import (
     ListWidget,
     MSFluentWindow,
     PlainTextEdit,
-    PrimaryPushButton,
     PushButton,
     SubtitleLabel,
     TitleLabel,
@@ -33,6 +32,7 @@ from src.ui import (
     FontSize,
     Sizes,
     Spacing,
+    StatusPushButton,
     UIUtils,
     UIWorkScope,
     WorkOutcome,
@@ -137,8 +137,6 @@ class ServerMonitorWindow(MSFluentWindow):
                 f"color: {status_color if status_color != 'red' else resolve_color(Colors.TEXT_ERROR)};"
                 " background: transparent;"
             )
-        if hasattr(self, "stop_button"):
-            self.stop_button.setStyleSheet(f"background-color: {resolve_color(Colors.BUTTON_DANGER)};")
         if hasattr(self, "players_listbox"):
             self.players_listbox.setStyleSheet(
                 f"ListWidget {{ background-color: transparent; border: 1px solid {border}; "
@@ -223,11 +221,11 @@ class ServerMonitorWindow(MSFluentWindow):
         self.start_button.setFixedSize(Sizes.BUTTON_WIDTH_SECONDARY, Sizes.BUTTON_HEIGHT_LARGE)
         h1.addWidget(self.start_button)
 
-        self.stop_button = PrimaryPushButton("⏹️ 停止", control_frame)
+        self.stop_button = StatusPushButton("⏹️ 停止", control_frame)
+        self.stop_button.set_status("danger")
         self.stop_button.clicked.connect(self.stop_server)
         self.stop_button.setEnabled(False)
         self.stop_button.setFixedSize(Sizes.BUTTON_WIDTH_SECONDARY, Sizes.BUTTON_HEIGHT_LARGE)
-        self.stop_button.setStyleSheet(f"background-color: {resolve_color(Colors.BUTTON_DANGER)};")
         h1.addWidget(self.stop_button)
 
         self.refresh_button = PushButton("🔄 刷新", control_frame)

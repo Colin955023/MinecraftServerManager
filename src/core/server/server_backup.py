@@ -7,18 +7,18 @@ from __future__ import annotations
 
 import datetime
 import os
-import shutil
 import stat
 import tempfile
 import uuid
 import zipfile
 from collections.abc import Callable, Iterator
-from contextlib import nullcontext
+from operator import itemgetter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, cast
+from typing import TYPE_CHECKING, Any
 
 from src.models import ServerConfig
 from src.utils import (
+    SystemUtils,
     atomic_replace_file_within,
     bytes_to_mb,
     delete_within,
@@ -28,6 +28,7 @@ from src.utils import (
     list_bounded_directory,
     move_within,
     open_bounded_zip,
+    open_bounded_zip_writer,
     open_regular_file,
     resolve_stable_directory,
     resolve_stable_path,
@@ -55,35 +56,6 @@ _SUPPORTED_TIMESTAMP_FORMATS = {
     14: "%Y%m%d%H%M%S",
     20: _MANAGED_TIMESTAMP_FORMAT,
 }
-
-
-class _BoundedReader:
-    """限制複製來源可讀取的位元組數，避免第二次掃描後來源膨脹"""
-
-    def __init__(self, source: BinaryIO, max_bytes: int) -> None:
-        self._source = source
-        self._remaining = max_bytes
-        self.bytes_read = 0
-
-    def read(self, size: int = -1) -> bytes:
-        """
-        讀取不超過剩餘上限的來源資料
-
-        Args:
-            size: 本次要求讀取的位元組數，負值表示讀取剩餘內容
-
-        Returns:
-            受限制的檔案資料
-        """
-        if size == 0:
-            return b""
-        read_size = self._remaining + 1 if size < 0 else min(size, self._remaining + 1)
-        chunk = self._source.read(read_size)
-        if len(chunk) > self._remaining:
-            raise OSError("備份來源檔案大小超過掃描結果")
-        self._remaining -= len(chunk)
-        self.bytes_read += len(chunk)
-        return chunk
 
 
 class ServerBackupManager:
@@ -128,19 +100,14 @@ class ServerBackupManager:
             備份成功回傳 True，失敗回傳 False
         """
         temp_backup_file: Path | None = None
-        maintenance_acquired = False
         if not self._is_safe_server_name(server_name):
             logger.error("備份失敗：伺服器名稱不是安全的檔名元件")
             return False
-        begin_maintenance = getattr(self.server_runtime, "begin_maintenance", None)
-        if callable(begin_maintenance):
-            maintenance_acquired = bool(begin_maintenance(server_name))
-            if not maintenance_acquired:
-                logger.error(f"備份失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
-                return False
-        lock = getattr(self.server_crud, "operation_lock", nullcontext())
+        if not self.server_runtime.begin_maintenance(server_name):
+            logger.error(f"備份失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
+            return False
         try:
-            with lock:
+            with self.server_crud.operation_lock:
                 if self.server_runtime.observe(server_name).is_running:
                     logger.error(f"備份失敗：伺服器 {server_name} 正在執行中，無法建立一致的備份")
                     return False
@@ -222,7 +189,12 @@ class ServerBackupManager:
 
                 processed_size = 0
                 processed_count = 0
-                with zipfile.ZipFile(temp_backup_file, "w", zipfile.ZIP_DEFLATED) as zf:
+                with open_bounded_zip_writer(
+                    temp_backup_file,
+                    max_members=_BACKUP_MAX_MEMBERS,
+                    max_total_bytes=_BACKUP_MAX_TOTAL_BYTES,
+                    max_member_bytes=_BACKUP_MAX_MEMBER_BYTES,
+                ) as zf:
                     for i, (file_path, file_size) in enumerate(_iter_backup_files()):
                         if i >= file_count or (file_path, file_size) != planned_files[i]:
                             raise ValueError("備份來源在掃描後變更")
@@ -231,14 +203,8 @@ class ServerBackupManager:
                             pct = 5 + (processed_size / total_size * 90 if total_size > 0 else 0)
                             progress_callback(pct, f"正在壓縮: {rel_path.name}")
                         try:
-                            with (
-                                open_regular_file(file_path, allowed_root=server_path) as source,
-                                zf.open(str(rel_path).replace("\\", "/"), "w", force_zip64=True) as target,
-                            ):
-                                bounded_source = _BoundedReader(source, file_size)
-                                shutil.copyfileobj(bounded_source, target, length=1024 * 1024)
-                                if bounded_source.bytes_read != file_size:
-                                    raise OSError("備份來源檔案在複製時縮短")
+                            with open_regular_file(file_path, allowed_root=server_path) as source:
+                                zf.write_file(rel_path.as_posix(), source, expected_bytes=file_size)
                         except Exception as e:
                             raise OSError(f"備份檔案失敗: {file_path}") from e
                         processed_size += file_size
@@ -267,10 +233,7 @@ class ServerBackupManager:
             logger.exception(f"伺服器 {server_name} 備份時發生錯誤: {e}")
             return False
         finally:
-            if maintenance_acquired:
-                end_maintenance = getattr(self.server_runtime, "end_maintenance", None)
-                if callable(end_maintenance):
-                    end_maintenance(server_name)
+            self.server_runtime.end_maintenance(server_name)
 
     def list_backups(self, server_name: str, backup_dir_override: Path | None = None) -> list[dict[str, Any]]:
         """
@@ -333,7 +296,7 @@ class ServerBackupManager:
                 }
             )
 
-        backups.sort(key=lambda x: cast(Any, x["datetime"]), reverse=True)
+        backups.sort(key=itemgetter("datetime"), reverse=True)
         return backups
 
     def restore_backup(
@@ -352,16 +315,11 @@ class ServerBackupManager:
         """
         staging_path: Path | None = None
         rollback_path: Path | None = None
-        maintenance_acquired = False
-        begin_maintenance = getattr(self.server_runtime, "begin_maintenance", None)
-        if callable(begin_maintenance):
-            maintenance_acquired = bool(begin_maintenance(server_name))
-            if not maintenance_acquired:
-                logger.error(f"還原失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
-                return False
-        lock = getattr(self.server_crud, "operation_lock", nullcontext())
+        if not self.server_runtime.begin_maintenance(server_name):
+            logger.error(f"還原失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
+            return False
         try:
-            with lock:
+            with self.server_crud.operation_lock:
                 if self.server_runtime.observe(server_name).is_running:
                     logger.error(f"還原失敗：伺服器 {server_name} 正在執行中，無法還原")
                     return False
@@ -406,7 +364,7 @@ class ServerBackupManager:
                 raise ValueError(f"備份總大小超過安全上限 {_BACKUP_MAX_TOTAL_BYTES} bytes")
             if declared_max_member_bytes > _BACKUP_MAX_MEMBER_BYTES:
                 raise ValueError(f"備份單檔大小超過安全上限 {_BACKUP_MAX_MEMBER_BYTES} bytes")
-            available_bytes = shutil.disk_usage(server_path.parent).free
+            available_bytes = SystemUtils.get_free_disk_bytes(server_path.parent)
             required_bytes = declared_total_bytes + _BACKUP_DISK_RESERVE_BYTES
             if required_bytes > available_bytes:
                 raise OSError(f"還原所需空間不足；需要 {required_bytes} bytes，可用 {available_bytes} bytes")
@@ -485,10 +443,7 @@ class ServerBackupManager:
                 delete_within(staging_path.parent, staging_path)
             if rollback_path is not None:
                 logger.error(f"還原回滾目錄仍存在，為避免資料遺失不自動刪除: {rollback_path}")
-            if maintenance_acquired:
-                end_maintenance = getattr(self.server_runtime, "end_maintenance", None)
-                if callable(end_maintenance):
-                    end_maintenance(server_name)
+            self.server_runtime.end_maintenance(server_name)
 
     @staticmethod
     def _archive_declared_sizes(backup_file: Path) -> tuple[int, int, int]:

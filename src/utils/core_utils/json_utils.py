@@ -10,6 +10,33 @@ import orjson
 from .filesystem_utils import SAFE_TEXT_FILE_MAX_BYTES, read_bytes_file
 
 
+def read_json_with_bytes(
+    path: Path | str,
+    *,
+    max_bytes: int | None = SAFE_TEXT_FILE_MAX_BYTES,
+    allowed_root: Path | str | None = None,
+) -> tuple[object, bytes] | None:
+    """
+    安全讀取並解析 JSON，同時保留同一次讀取的原始位元組
+
+    Args:
+        path: JSON 檔案路徑
+        max_bytes: JSON 檔案大小上限；未指定或傳入 None 時使用安全預設值
+        allowed_root: 可選的實際路徑根目錄
+
+    Returns:
+        (解析後的資料, 原始位元組)；失敗時回傳 None
+    """
+    try:
+        limit = SAFE_TEXT_FILE_MAX_BYTES if max_bytes is None else int(max_bytes)
+        if limit < 0:
+            return None
+        payload = read_bytes_file(path, max_bytes=limit, allowed_root=allowed_root)
+        return (orjson.loads(payload), payload) if payload is not None else None
+    except OSError, TypeError, ValueError, orjson.JSONDecodeError:
+        return None
+
+
 def read_json(
     path: Path | str,
     default: Any = None,
@@ -30,14 +57,9 @@ def read_json(
         解析後的資料，失敗時回傳 default
     """
     try:
-        limit = SAFE_TEXT_FILE_MAX_BYTES if max_bytes is None else int(max_bytes)
-        if limit < 0:
-            return default
-        payload = read_bytes_file(path, max_bytes=limit, allowed_root=allowed_root)
-        if payload is None:
-            return default
-        return orjson.loads(payload)
-    except OSError, TypeError, ValueError, orjson.JSONDecodeError:
+        result = read_json_with_bytes(path, max_bytes=max_bytes, allowed_root=allowed_root)
+        return result[0] if result is not None else default
+    except OSError, TypeError, ValueError:
         return default
 
 
@@ -60,4 +82,4 @@ def serialize_json(data: Any, indent: int | None = None) -> str:
         return ""
 
 
-__all__ = ["read_json", "serialize_json"]
+__all__ = ["read_json", "read_json_with_bytes", "serialize_json"]

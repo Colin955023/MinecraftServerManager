@@ -66,7 +66,7 @@ def summarize_messages(messages: list[str] | tuple[str, ...], max_items: int = 3
     Returns:
         去重後的訊息清單；超過最大數量時最後一項會顯示剩餘數量提示
     """
-    values = list(dict.fromkeys(str(message or "").strip() for message in messages if str(message or "").strip()))
+    values = list(dict.fromkeys(normalized for message in messages if (normalized := str(message or "").strip())))
     if len(values) <= max_items:
         return values
     return [*values[:max_items], f"其餘 {len(values) - max_items} 項請於工作樹查看"]
@@ -84,7 +84,7 @@ def get_online_version_status_text(report: Any | None) -> str:
     """
     if report is None:
         return "未分析"
-    if not getattr(report, "compatible", True):
+    if getattr(report, "hard_errors", ()):
         return "不相容"
     if getattr(report, "missing_required_dependencies", None):
         return "可安裝，含依賴"
@@ -109,7 +109,7 @@ def _online_version_type_rank(version_type: Any) -> int:
 
 
 def _online_version_compatibility_rank(report: Any | None) -> int:
-    return 1 if report is None else (0 if bool(getattr(report, "compatible", True)) else 2)
+    return 1 if report is None else (2 if getattr(report, "hard_errors", ()) else 0)
 
 
 def sort_online_versions_for_server(
@@ -221,7 +221,7 @@ def format_online_version_report(version: Any, report: Any | None) -> str:
         lines.extend(["", "更新內容：", changelog_text])
     if report is None:
         return "\n".join(lines)
-    lines.insert(0, f"相容性結果：{('可安裝' if getattr(report, 'compatible', True) else '不符合目前伺服器條件')}")
+    lines.insert(0, f"相容性結果：{('不符合目前伺服器條件' if getattr(report, 'hard_errors', ()) else '可安裝')}")
     sections = (
         ("阻擋原因：", "hard_errors", 3),
         ("需要安裝的必要依賴：", "missing_required_dependencies", 3),
@@ -238,20 +238,25 @@ def format_online_version_report(version: Any, report: Any | None) -> str:
     return "\n".join(lines)
 
 
-def build_client_install_reminder_line(server_side: Any, client_side: Any) -> str | None:
+def build_client_install_reminder_line(client_side: Any) -> str | None:
     """
     依雙端支援狀態建立玩家端安裝提醒
 
     Args:
-        server_side: Server side 支援狀態
         client_side: Client side 支援狀態
 
     Returns:
-        需要雙端安裝時的提醒；否則回傳 None
+        客戶端安裝提醒文字；若無需提醒或無法判定則回傳 None
     """
-    supported = {"required", "optional"}
-    if normalize_identifier(server_side) in supported and normalize_identifier(client_side) in supported:
-        return "提醒：此模組同時支援 client 端，請提醒玩家端也安裝相同模組版本，以避免連線或功能不一致問題"
+    c_side = normalize_identifier(client_side)
+    if not c_side:
+        return None
+    if c_side == "required":
+        return "⚠️ 【客戶端必須安裝】此模組新增內容或自訂網路協定，玩家端必須安裝相同版本，否則無法連線進入伺服器"
+    if c_side == "optional":
+        return "ℹ️ 【客戶端建議安裝】玩家不安裝亦可連線遊玩；安裝後可享有完整輔助功能"
+    if c_side == "unsupported":
+        return "純伺服端模組，客戶端無需安裝"
     return None
 
 

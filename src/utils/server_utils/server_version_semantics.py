@@ -23,7 +23,7 @@ def _parse_minecraft_version(version: str) -> list[int]:
         return []
     parsed = parse_version_safe(version)
     if parsed is not None and parsed.release:
-        return [int(part) for part in parsed.release]
+        return list(parsed.release)
     matches = re.findall(r"\d+", version)
     return [int(part) for part in matches] if matches else []
 
@@ -112,6 +112,7 @@ def clean_mod_version(version: str) -> str:
     cleaned = re.split(
         r"[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot",
         version,
+        maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
     return re.sub(r"[^\w\d.]+$", "", cleaned).strip()

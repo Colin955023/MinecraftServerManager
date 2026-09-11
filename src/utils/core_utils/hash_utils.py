@@ -1,6 +1,6 @@
 """
 檔案雜湊工具
-提供同步與非同步的檔案雜湊計算，並使用背景工作池避免阻塞主執行緒
+提供同步的檔案與記憶體內容雜湊計算
 """
 
 from __future__ import annotations
@@ -9,11 +9,10 @@ import hashlib
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
-
-from src.utils import get_logger
+from typing import Any
 
 from .filesystem_utils import open_regular_file
+from .logger import get_logger
 
 logger = get_logger().bind(component="HashUtils")
 SAFE_HASH_FILE_MAX_BYTES = 512 * 1024 * 1024
@@ -23,6 +22,24 @@ _HASH_ALGORITHM_BY_LENGTH = {length: name for name, length in _SUPPORTED_HASH_LE
 
 class HashUtils:
     """檔案雜湊工具類別"""
+
+    @staticmethod
+    def digest_bytes(content: bytes, algorithm: str = "sha256") -> str:
+        """
+        計算記憶體中位元組內容的雜湊
+
+        Args:
+            content: 要計算雜湊的位元組內容
+            algorithm: 雜湊演算法名稱
+
+        Returns:
+            計算後的雜湊字串
+        """
+        hasher = HashUtils.new_hasher(algorithm)
+        if hasher is None:
+            return ""
+        hasher.update(content)
+        return hasher.hexdigest()
 
     @staticmethod
     def normalize_expected_hash(
@@ -49,8 +66,10 @@ class HashUtils:
         if expected_length != len(normalized_digest):
             return ("", "")
         try:
-            bytes.fromhex(normalized_digest)
+            decoded = bytes.fromhex(normalized_digest)
         except ValueError:
+            return ("", "")
+        if len(decoded) * 2 != expected_length:
             return ("", "")
         return (normalized_digest, normalized_algorithm)
 
@@ -68,6 +87,40 @@ class HashUtils:
         """
         normalized_digest, normalized_algorithm = cls.normalize_expected_hash(digest, algorithm)
         return bool(normalized_digest and normalized_algorithm)
+
+    @staticmethod
+    def new_hasher(algorithm: str) -> Any | None:
+        """
+        建立受支援的雜湊
+
+        Args:
+            algorithm: 雜湊演算法名稱
+
+        Returns:
+            建立成功的雜湊器，若不支援則回傳 None
+        """
+        try:
+            return hashlib.new(str(algorithm).strip().lower())
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _digest_stream(source: Any, algorithm: str, max_bytes: int) -> str:
+        """在讀取上限內計算已開啟檔案的雜湊"""
+        hasher = HashUtils.new_hasher(algorithm)
+        if hasher is None:
+            raise ValueError(algorithm)
+        remaining = max_bytes
+        buffer = bytearray(min(1024 * 1024, remaining + 1))
+        while remaining >= 0 and buffer:
+            read_size = source.readinto(memoryview(buffer)[: min(len(buffer), remaining + 1)])
+            if not read_size:
+                break
+            if read_size > remaining:
+                return ""
+            hasher.update(memoryview(buffer)[:read_size])
+            remaining -= read_size
+        return hasher.hexdigest()
 
     @staticmethod
     def compute_file_hash_sync(
@@ -101,7 +154,7 @@ class HashUtils:
             with open_regular_file(normalized_path, allowed_root=allowed_root) as source:
                 if os.fstat(source.fileno()).st_size > limit:
                     return ""
-                return hashlib.file_digest(cast(Any, source), normalized_algorithm).hexdigest()
+                return HashUtils._digest_stream(source, normalized_algorithm, limit)
         except ValueError:
             logger.warning(f"不支援的檔案雜湊演算法: {normalized_algorithm}")
             return ""
@@ -122,7 +175,7 @@ class HashUtils:
                     return ""
                 if current_state != (mtime_ns, ctime_ns, size):
                     logger.debug(f"檔案狀態在雜湊前變更: {file_path}")
-                return hashlib.file_digest(cast(Any, source), algorithm).hexdigest()
+                return HashUtils._digest_stream(source, algorithm, max_bytes)
         except ValueError:
             logger.warning(f"不支援的檔案雜湊演算法: {algorithm}")
             return ""

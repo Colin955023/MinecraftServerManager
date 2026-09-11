@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +9,7 @@ from typing import Any, Literal
 
 from src.utils import (
     SAFE_TEXT_FILE_MAX_BYTES,
+    HashUtils,
     atomic_write_text,
     get_logger,
     is_path_within,
@@ -232,7 +232,7 @@ class ServerPropertiesStore:
             return cls._metadata_snapshot(server_name, "unreadable", "", message=str(e))
         except OSError as e:
             return cls._metadata_snapshot(server_name, "unreadable", "", message=str(e))
-        revision = hashlib.sha256(raw).hexdigest()
+        revision = HashUtils.digest_bytes(raw)
         if not raw:
             return cls._metadata_snapshot(server_name, "empty", revision)
         try:
@@ -250,7 +250,7 @@ class ServerPropertiesStore:
         content: str,
         properties: Mapping[str, str],
     ) -> ServerPropertiesSnapshot:
-        revision = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        revision = HashUtils.digest_bytes(content.encode("utf-8"))
         return cls._metadata_snapshot(
             server_name,
             status,

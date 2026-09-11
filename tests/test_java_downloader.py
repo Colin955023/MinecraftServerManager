@@ -77,5 +77,37 @@ def test_install_java_wraps_winget_failure(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(java_downloader.JavaDownloader, "_is_winget_available", staticmethod(lambda: True))
     monkeypatch.setattr(java_downloader.SubprocessUtils, "run_winget_interactive", lambda _command: 17)
 
-    with pytest.raises(JavaInstallError, match=r"透過 winget 安裝 Microsoft\.OpenJDK\.21 失敗"):
+    with pytest.raises(JavaInstallError, match=r"透過 winget 安裝 Microsoft\.OpenJDK\.21 失敗 \(結束代碼: 0x11\)"):
+        java_downloader.JavaDownloader.install_java_with_winget(21)
+
+
+def test_install_java_interprets_uac_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java_downloader.JavaDownloader, "_is_winget_available", staticmethod(lambda: True))
+    monkeypatch.setattr(java_downloader.SubprocessUtils, "run_winget_interactive", lambda _command: 0x800704C7)
+
+    with pytest.raises(JavaInstallError, match="使用者取消安裝或拒絕 UAC 驗證"):
+        java_downloader.JavaDownloader.install_java_with_winget(21)
+
+
+def test_install_java_interprets_access_denied(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java_downloader.JavaDownloader, "_is_winget_available", staticmethod(lambda: True))
+    monkeypatch.setattr(java_downloader.SubprocessUtils, "run_winget_interactive", lambda _command: 0x80070005)
+
+    with pytest.raises(JavaInstallError, match="存取被拒，需要管理員權限"):
+        java_downloader.JavaDownloader.install_java_with_winget(17)
+
+
+def test_install_java_interprets_msi_in_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java_downloader.JavaDownloader, "_is_winget_available", staticmethod(lambda: True))
+    monkeypatch.setattr(java_downloader.SubprocessUtils, "run_winget_interactive", lambda _command: 1618)
+
+    with pytest.raises(JavaInstallError, match="另一個安裝程式正在執行中，請稍後重試"):
+        java_downloader.JavaDownloader.install_java_with_winget(21)
+
+
+def test_install_java_interprets_already_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(java_downloader.JavaDownloader, "_is_winget_available", staticmethod(lambda: True))
+    monkeypatch.setattr(java_downloader.SubprocessUtils, "run_winget_interactive", lambda _command: 0x8A150056)
+
+    with pytest.raises(JavaInstallError, match="系統已安裝此版本"):
         java_downloader.JavaDownloader.install_java_with_winget(21)

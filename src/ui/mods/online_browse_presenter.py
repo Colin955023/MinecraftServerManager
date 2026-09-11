@@ -8,7 +8,14 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, PushButton, SearchLineEdit, TreeWidget, isDarkTheme
+from qfluentwidgets import (
+    BodyLabel,
+    CardWidget,
+    PushButton,
+    SearchLineEdit,
+    SubtitleLabel,
+    TreeWidget,
+)
 
 from src.ui import (
     Colors,
@@ -179,23 +186,16 @@ class OnlineBrowsePresenter:
         browse_tab = self.controller.browse_tab
         if browse_tab is None:
             return
-
-        list_frame = QWidget(browse_tab)
         tab_layout = browse_tab.layout()
-        if tab_layout is not None:
-            tab_layout.addWidget(list_frame)
+        if tab_layout is None:
+            return
 
-        list_layout = QVBoxLayout(list_frame)
-        list_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
-
-        tree_container = QWidget(list_frame)
-        list_layout.addWidget(tree_container, stretch=1)
-
-        tree_layout = QVBoxLayout(tree_container)
-        tree_layout.setContentsMargins(Spacing.SMALL_PLUS, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
+        list_card = CardWidget(browse_tab)
+        list_layout = QVBoxLayout(list_card)
+        list_layout.addWidget(SubtitleLabel("線上模組清單", list_card))
 
         columns = ("name", "author", "downloads", "platform", "environments", "description")
-        self.browse_tree = TreeWidget(tree_container)
+        self.browse_tree = TreeWidget(list_card)
         tree = self.browse_tree
         tree.setColumnCount(len(columns))
 
@@ -220,7 +220,8 @@ class OnlineBrowsePresenter:
         tree.header().setSectionResizeMode(len(columns) - 1, QHeaderView.ResizeMode.Stretch)
         tree.header().setStretchLastSection(True)
 
-        tree_layout.addWidget(tree, stretch=1)
+        list_layout.addWidget(tree, stretch=1)
+        tab_layout.addWidget(list_card, stretch=1)
 
         def install_selected_mod() -> None:
             self.controller.queue_ops.install_online_mod()
@@ -234,13 +235,7 @@ class OnlineBrowsePresenter:
         tree = self.browse_tree
         if not tree:
             return
-        is_dark = isDarkTheme()
-        bg_color = resolve_color((Colors.BG_CARD_LIGHT, Colors.BG_CARD_DARK), dark=is_dark)
-        border_color = resolve_color(Colors.BORDER, dark=is_dark)
-        primary_color = resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)
-        tree.setStyleSheet(
-            f"TreeWidget {{ background-color: {bg_color}; color: {primary_color}; border: 1px solid {border_color}; border-radius: 6px; }}"
-        )
+        apply_table_header_style(tree)
 
 
 __all__ = ["OnlineBrowsePresenter"]

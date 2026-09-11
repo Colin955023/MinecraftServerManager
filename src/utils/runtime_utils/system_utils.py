@@ -20,6 +20,7 @@ from src.utils import (
 logger = get_logger().bind(component="SystemUtils")
 
 _PSUTIL_PROCESS_LOOKUP_ERRORS = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
+_PSUTIL_PROCESS_GONE_ERRORS = (psutil.NoSuchProcess, psutil.ZombieProcess)
 
 
 class SystemUtils:
@@ -98,14 +99,20 @@ class SystemUtils:
         with SystemUtils._managed_processes_lock:
             tracked_processes = tuple(SystemUtils._managed_processes_by_path.get(normalized_path, set()))
         for process in tracked_processes:
+            completed = False
             try:
                 if process.is_running() and SystemUtils.kill_process_tree(process):
                     killed = True
-            except _PSUTIL_PROCESS_LOOKUP_ERRORS:
-                pass
+                    completed = True
+                elif not process.is_running():
+                    completed = True
+            except _PSUTIL_PROCESS_GONE_ERRORS:
+                completed = True
+            except psutil.AccessDenied:
+                logger.warning("無權清理受管理行程，保留追蹤狀態")
             except Exception as e:
                 logger.error(f"清理受管理行程失敗: {e}")
-            finally:
+            if completed:
                 SystemUtils.unregister_managed_process(path, process)
         return killed
 
@@ -122,6 +129,19 @@ class SystemUtils:
         except Exception as e:
             logger.error(f"取得記憶體資訊失敗: {e}")
             return 4096
+
+    @staticmethod
+    def get_free_disk_bytes(path: Path | str) -> int:
+        """
+        取得指定路徑所在磁碟的可用空間
+
+        Args:
+            path: 目標路徑或其父目錄
+
+        Returns:
+            可用空間的位元組數
+        """
+        return int(psutil.disk_usage(str(path)).free)
 
     @staticmethod
     def get_process_name(pid: int) -> str:
@@ -231,12 +251,13 @@ class SystemUtils:
                 process.kill()
             all_procs = [*children, process]
             wait_result = psutil.wait_procs(all_procs, timeout=timeout)
-            if wait_result is None:
-                return not any(proc.is_running() for proc in all_procs)
             _gone, alive = wait_result
             return not alive
-        except _PSUTIL_PROCESS_LOOKUP_ERRORS:
+        except _PSUTIL_PROCESS_GONE_ERRORS:
             return True
+        except psutil.AccessDenied:
+            logger.warning("無權結束受管理行程樹")
+            return False
         except Exception as e:
             logger.error(f"無法結束受管理行程樹: {e}")
             return False

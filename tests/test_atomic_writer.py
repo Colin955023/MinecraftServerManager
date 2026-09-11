@@ -95,3 +95,16 @@ def test_atomic_write_rejects_reparse_parent(tmp_path):
 
     assert atomic_write_text(linked_dir / "state.json", "unsafe") is False
     assert not (outside_dir / "state.json").exists()
+
+
+def test_atomic_write_returns_false_when_stable_directory_cannot_be_opened(tmp_path, monkeypatch):
+    class UnavailableDirectory:
+        def __enter__(self):
+            raise OSError("directory unavailable")
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(atomic_writer_module, "stable_directory", lambda *_args, **_kwargs: UnavailableDirectory())
+
+    assert atomic_write_text(tmp_path / "state.json", "safe") is False

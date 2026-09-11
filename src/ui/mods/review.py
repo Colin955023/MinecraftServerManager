@@ -54,7 +54,6 @@ class ModManagementReviewOps:
         self.controller = context
         self._dependency_snapshot_migration_totals = {
             "checked": 0,
-            "migrated": 0,
             "replayed": 0,
             "fallback_rebuild": 0,
         }
@@ -113,13 +112,13 @@ class ModManagementReviewOps:
             column_specs=[
                 ("run", "執行", Sizes.BUTTON_WIDTH_COMPACT, 45, False, "center"),
                 ("source", "來源", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
-                ("name", "名稱", Sizes.CONSOLE_PANEL_HEIGHT, 120, True, "w"),
+                ("name", "名稱", Sizes.CONSOLE_PANEL_HEIGHT, 120, False, "w"),
                 ("version", "版本", Sizes.DIALOG_SMALL_HEIGHT, 90, False, "w"),
                 ("channel", "類型", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
                 ("status", "狀態", Sizes.SERVER_TREE_COL_LOADER + 10, 98, False, "w"),
             ],
             tree_column_width=Sizes.BUTTON_WIDTH_SECONDARY,
-            stretch_columns={"name"},
+            stretch_columns=set(),
         )
         self._render_review_task_tree(queue_tree, snapshot)
 
@@ -217,15 +216,14 @@ class ModManagementReviewOps:
             else set()
         )
         if not selected_mod_ids:
-            target_mods = installed_mods
-            scope_text = f"全部 {len(target_mods)} 個模組"
-        else:
-            target_mods = [
-                mod
-                for mod in installed_mods
-                if mod.filename.removesuffix(".jar.disabled").removesuffix(".jar") in selected_mod_ids
-            ]
-            scope_text = f"已選取的 {len(target_mods)} 個模組"
+            return
+
+        target_mods = [
+            mod
+            for mod in installed_mods
+            if mod.filename.removesuffix(".jar.disabled").removesuffix(".jar") in selected_mod_ids
+        ]
+        scope_text = f"已選取的 {len(target_mods)} 個模組"
 
         minecraft_version, loader_type, loader_version = (
             self.controller.get_current_modrinth_context()
@@ -452,6 +450,63 @@ class ModManagementReviewOps:
             dialog.accept()
             self.controller.install_executor.execute_local_review(dialog, handoff)
 
+        def trigger_recheck() -> None:
+            recheck_button.setEnabled(False)
+            update_button.setEnabled(False)
+            shell.overview_label.setText("正在強制重新查詢模組線上資訊與相容性...")
+
+            def recheck_task() -> None:
+                try:
+                    manager = self.controller.mod_manager
+                    if not manager:
+                        return
+                    installed_mods = manager.get_mod_list()
+                    current_filenames = {
+                        getattr(c, "filename", "")
+                        for c in getattr(session._update_plan, "candidates", ())
+                        if getattr(c, "filename", "")
+                    }
+                    target_mods = [
+                        m for m in installed_mods if getattr(m, "filename", "") in current_filenames
+                    ] or installed_mods
+
+                    minecraft_version, loader_type, loader_version = (
+                        self.controller.get_current_modrinth_context()
+                        if self.controller.get_current_modrinth_context is not None
+                        else (None, None, None)
+                    )
+
+                    new_plan = self.controller.mod_planning.build_local_update_plan(
+                        target_mods,
+                        minecraft_version=minecraft_version,
+                        loader=loader_type,
+                        loader_version=loader_version,
+                        provider_identity_resolver=manager.provider_identity_service.resolve_for_local_mod,
+                        hash_cache_writer=lambda mod, algorithm, file_hash: manager.cache_file_hash(
+                            Path(str(getattr(mod, "file_path", "") or "")), algorithm, file_hash
+                        ),
+                        force_refresh=True,
+                    )
+
+                    def on_recheck_done() -> None:
+                        session.replace_plan(new_plan)
+                        refresh_all()
+                        recheck_button.setEnabled(True)
+
+                    self.controller.scope.schedule(0, on_recheck_done)
+                except Exception as e:
+                    logger.exception("重新查詢本地模組更新失敗")
+                    err_msg = str(e)
+
+                    def on_recheck_failed() -> None:
+                        recheck_button.setEnabled(True)
+                        refresh_all()
+                        UIUtils.show_message("重新查詢失敗", err_msg, dialog, message_level="error")
+
+                    self.controller.scope.schedule(0, on_recheck_failed)
+
+            self.controller.scope.submit(recheck_task, key="local_update_recheck", replace=True)
+
         update_button = self._create_review_action_button(
             shell.button_frame,
             text="",
@@ -463,6 +518,9 @@ class ModManagementReviewOps:
         )
         self._create_review_action_button(
             shell.button_frame, text="排除選取項目", command=lambda: toggle_selection(False)
+        )
+        recheck_button = self._create_review_action_button(
+            shell.button_frame, text="🔄 重新查詢", command=trigger_recheck
         )
         project_button = self._append_project_and_close_actions(shell, dialog, open_project_page)
         update_tree.itemSelectionChanged.connect(refresh_summary)

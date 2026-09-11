@@ -25,9 +25,10 @@ from src.core import ServerConfigChangeSet, ServerCRUD
 from src.models import ServerConfig
 from src.ui import (
     Colors,
-    ModalMSFluentWindow,
     Spacing,
     UIUtils,
+    UIWorkScope,
+    WorkOutcome,
     resolve_color,
 )
 from src.utils import (
@@ -36,6 +37,8 @@ from src.utils import (
     SystemUtils,
     get_logger,
 )
+
+from .modal_msfluent_window import ModalMSFluentWindow
 
 logger = get_logger().bind(component="ServerMemoryDialog")
 
@@ -52,6 +55,8 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         super().__init__(parent, is_modal=True, show_buttons=False)
         self.config = config
         self.server_crud = server_crud
+        self.scope = UIWorkScope(self)
+        self.total_memory_mb = SystemUtils.get_total_memory_mb()
         self.setWindowTitle(f"修改記憶體設定 - {config.name}")
         self.setMinimumSize(480, 420)
         self.resize(520, 460)
@@ -75,7 +80,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         )
         layout.addWidget(desc)
 
-        total_mb = SystemUtils.get_total_memory_mb()
+        total_mb = self.total_memory_mb
         if total_mb > 0:
             sys_info = BodyLabel(f"💻 系統實體記憶體總量：{total_mb} MB ({total_mb // 1024} GB)", self.widget)
             layout.addWidget(sys_info)
@@ -168,7 +173,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
                 )
                 return
 
-        total_mb = SystemUtils.get_total_memory_mb()
+        total_mb = self.total_memory_mb
         half_total_mb = total_mb // 2 if total_mb > 0 else 0
 
         if max_mb < 1024:
@@ -198,7 +203,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         """驗證並儲存記憶體設定"""
         max_text = self.max_memory_input.text().strip()
         min_text = self.min_memory_input.text().strip()
-        total_mb = SystemUtils.get_total_memory_mb()
+        total_mb = self.total_memory_mb
 
         result = MemoryUtils.validate_and_normalize_server_memory(max_text, min_text, total_memory_mb=total_mb)
         if not result.is_valid:
@@ -226,25 +231,21 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             path=self.config.path,
         )
 
-        try:
+        self.save_btn.setEnabled(False)
+        self.save_btn.setText("儲存中...")
+
+        def persist_settings() -> bool:
             baseline = self.server_crud.snapshot()
-            if self.config.name not in baseline:
-                UIUtils.show_message("儲存失敗", "找不到伺服器設定，記憶體設定未套用", self, message_level="error")
-                return
+            if updated_config.name not in baseline:
+                raise ValueError("找不到伺服器設定，記憶體設定未套用")
             commit_result = self.server_crud.commit(
                 ServerConfigChangeSet(upserts=(updated_config,)),
                 expected_revision=baseline.revision,
             )
             if not commit_result.success:
-                UIUtils.show_message(
-                    "儲存失敗",
-                    commit_result.message or "無法寫入伺服器設定檔，記憶體設定未套用",
-                    self,
-                    message_level="error",
-                )
-                return
+                raise OSError(commit_result.message or "無法寫入伺服器設定檔，記憶體設定未套用")
 
-            server_path = Path(self.config.path)
+            server_path = Path(updated_config.path)
             if server_path.exists():
                 if (
                     str(updated_config.loader_type or "").lower() in ("forge", "neoforge")
@@ -256,7 +257,16 @@ class ServerMemoryDialog(ModalMSFluentWindow):
                     ServerCommands.repair_startup_script_java_command(start_bat, updated_config)
                 else:
                     self.server_crud.create_launch_script(updated_config)
+            return True
 
+        def on_persisted(outcome: WorkOutcome) -> None:
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("儲存變更")
+            if not outcome.is_succeeded:
+                error = outcome.error or "工作已取消"
+                logger.error(f"儲存記憶體設定失敗: {error}")
+                UIUtils.show_message("儲存失敗", f"更新記憶體設定時發生錯誤: {error}", self, message_level="error")
+                return
             self.config = updated_config
             UIUtils.show_message(
                 "設定成功",
@@ -266,9 +276,8 @@ class ServerMemoryDialog(ModalMSFluentWindow):
                 message_level="info",
             )
             self.accept()
-        except Exception as e:
-            logger.exception(f"儲存記憶體設定失敗: {e}")
-            UIUtils.show_message("儲存失敗", f"更新記憶體設定時發生錯誤: {e}", self, message_level="error")
+
+        self.scope.submit(persist_settings, on_done=on_persisted, key="save_memory", replace=True, critical=True)
 
 
 __all__ = ["ServerMemoryDialog"]

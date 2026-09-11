@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from src.utils import normalize_identifier
+from .modrinth_query_utils import normalize_identifier
 
 
 def _normalize_filename_stem(value: str | None) -> str:

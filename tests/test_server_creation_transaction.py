@@ -9,7 +9,7 @@ import src.core.server.server_creation as server_creation_module
 from src.core import CreateServerJourney, ServerConfigChangeSet, ServerCRUD, ServerPropertiesStore
 from src.core.loader.loader_adapters import LoaderInstallerArtifact
 from src.models import ProgressEvent, ServerConfig
-from src.utils import ServerCommands, atomic_write_json
+from src.utils import ServerCommands, SystemUtils, atomic_write_json
 
 
 class _FakeLoader:
@@ -214,16 +214,11 @@ def test_installer_nonzero_exit_rolls_back(tmp_path) -> None:
 
 
 def test_disk_space_insufficient_fails_gracefully(tmp_path, monkeypatch) -> None:
-    import shutil
-
     crud = ServerCRUD(str(tmp_path))
     service = CreateServerJourney(crud, _FakeLoader())
     plan = service.plan(_config())
 
-    class _FakeUsage:
-        free = 100
-
-    monkeypatch.setattr(shutil, "disk_usage", lambda _p: _FakeUsage())
+    monkeypatch.setattr(SystemUtils, "get_free_disk_bytes", lambda _path: 100)
 
     result = service.execute(plan)
 

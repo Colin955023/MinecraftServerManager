@@ -12,10 +12,13 @@ from PySide6.QtGui import QBrush, QColor, QCursor
 from PySide6.QtWidgets import QAbstractItemView, QApplication, QHBoxLayout, QHeaderView, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
+    CardWidget,
     PushButton,
     RoundMenu,
     SearchLineEdit,
+    SubtitleLabel,
     TreeWidget,
+    isDarkTheme,
 )
 
 from src.models import ModStatus
@@ -47,6 +50,7 @@ class LocalModListPresenter:
         self.local_tree: TreeWidget
         self.select_all_btn: PushButton
         self.batch_toggle_btn: PushButton
+        self.update_btn: PushButton
         self.local_search_var = ValueState("")
         self.local_filter_var = ValueState("所有")
         self.local_search_filter = SearchFilter()
@@ -114,7 +118,7 @@ class LocalModListPresenter:
         action_delete = Action("🗑️ 刪除模組", menu)
         action_delete.triggered.connect(self.delete_local_mod)
         menu.addAction(action_delete)
-        menu.exec(QCursor.pos())
+        menu.exec(QCursor.pos(), ani=False)
 
     def import_mod_file(self) -> None:
         """匯入新的模組 JAR 檔"""
@@ -304,7 +308,7 @@ class LocalModListPresenter:
         left_frame = QWidget(toolbar_frame)
         left_layout = QHBoxLayout(left_frame)
         left_layout.setContentsMargins(Spacing.SMALL, 0, 0, 0)
-        left_layout.setSpacing(12)
+        left_layout.setSpacing(Spacing.LARGE)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         toolbar_layout.addWidget(left_frame)
 
@@ -318,10 +322,11 @@ class LocalModListPresenter:
         refresh_mod_list_btn.clicked.connect(self.refresh_mod_list_force)
         left_layout.addWidget(refresh_mod_list_btn)
 
-        update_btn = PushButton("🔄 檢查更新", left_frame)
-        update_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
-        update_btn.clicked.connect(self.controller.review_ops.check_local_mod_updates)
-        left_layout.addWidget(update_btn)
+        self.update_btn = PushButton("🔄 檢查更新", left_frame)
+        self.update_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
+        self.update_btn.setEnabled(False)
+        self.update_btn.clicked.connect(self.controller.review_ops.check_local_mod_updates)
+        left_layout.addWidget(self.update_btn)
 
         self.select_all_btn = PushButton("☑️ 全選", left_frame)
         self.select_all_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
@@ -330,6 +335,7 @@ class LocalModListPresenter:
 
         self.batch_toggle_btn = PushButton("🔄 批次切換", left_frame)
         self.batch_toggle_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
+        self.batch_toggle_btn.setEnabled(False)
         self.batch_toggle_btn.clicked.connect(self.batch_toggle_selected)
         left_layout.addWidget(self.batch_toggle_btn)
 
@@ -353,8 +359,8 @@ class LocalModListPresenter:
         self.local_search_var = ValueState("")
         search_entry = SearchLineEdit(right_frame)
         search_entry.setPlaceholderText("搜尋本地模組")
-        search_entry.textChanged.connect(self.local_search_var.set)
-        self.local_search_var.trace_add(self.filter_local_mods)
+        search_entry.textChanged.connect(self._on_local_search_text_changed)
+        search_entry.searchSignal.connect(self._on_search_submitted)
         search_filter_layout.addWidget(search_entry)
 
         self.local_filter_var = ValueState("所有")
@@ -374,8 +380,14 @@ class LocalModListPresenter:
     def refresh_mod_list_force(self) -> None:
         """
         強制重新掃描本地模組並重繪列表
-
         """
+        if hasattr(self, "local_tree") and self.local_tree:
+            self.local_tree.clearSelection()
+        self.all_selected = False
+        if hasattr(self, "select_all_btn") and hasattr(self.select_all_btn, "setText"):
+            self.select_all_btn.setText("☑️ 全選")
+        if hasattr(self, "update_btn") and self.update_btn:
+            self.update_btn.setEnabled(False)
         if self.controller.mod_manager:
             manager = self.controller.mod_manager
             session = self.controller.mod_session
@@ -390,8 +402,10 @@ class LocalModListPresenter:
                     mods = list(manager.local_mod_scanner.scan_mods())
                     if not session.accept_local_results(scope, mods):
                         return
-                    session.update_local_scan_fingerprint(None, None, None)
-                    self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
+                    session.update_local_scan_fingerprint(None, None)
+                    self.controller.scope.schedule(
+                        0, lambda: self.controller.tree_sync.refresh_local_list(preserve_selection=False)
+                    )
                     self.enhance_local_mods(scope)
                     self.controller.update_status_safe(f"找到 {len(mods)} 個本地模組 (已重新整理)")
                 except Exception as e:
@@ -406,19 +420,15 @@ class LocalModListPresenter:
         local_tab = self.controller.local_tab
         if local_tab is None:
             return
-        list_frame = QWidget(local_tab)
-        list_layout = QVBoxLayout(list_frame)
-        list_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
         tab_layout = local_tab.layout()
-        if tab_layout is not None:
-            tab_layout.addWidget(list_frame)
+        if tab_layout is None:
+            return
 
-        tree_container = QWidget(list_frame)
-        tree_layout = QVBoxLayout(tree_container)
-        tree_layout.setContentsMargins(Spacing.SMALL_PLUS, 0, Spacing.SMALL_PLUS, Spacing.SMALL_PLUS)
-        list_layout.addWidget(tree_container, stretch=1)
+        list_card = CardWidget(local_tab)
+        list_layout = QVBoxLayout(list_card)
+        list_layout.addWidget(SubtitleLabel("本地模組列表", list_card))
 
-        self.local_tree = TreeWidget(tree_container)
+        self.local_tree = TreeWidget(list_card)
         tree = self.local_tree
         tree.setColumnCount(8)
         tree.setHeaderLabels(["狀態", "模組名稱", "版本", "作者", "載入器", "檔案大小", "修改時間", "描述"])
@@ -439,7 +449,8 @@ class LocalModListPresenter:
         tree.customContextMenuRequested.connect(self.show_local_context_menu)
         tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
 
-        tree_layout.addWidget(tree, stretch=1)
+        list_layout.addWidget(tree, stretch=1)
+        tab_layout.addWidget(list_card, stretch=1)
 
     def _on_local_item_double_clicked(self) -> None:
         """只在滑鼠左鍵雙擊時切換模組狀態"""
@@ -452,8 +463,6 @@ class LocalModListPresenter:
         tree = self.local_tree
         if not tree:
             return
-        from qfluentwidgets import isDarkTheme
-
         is_dark = isDarkTheme()
         primary_color = resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)
         muted_color = resolve_color(Colors.TEXT_MUTED, dark=is_dark)
@@ -485,11 +494,7 @@ class LocalModListPresenter:
         def load_thread():
             try:
                 mods_dir_signature = self._build_mods_dir_signature(mods_dir)
-                try:
-                    mods_dir_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
-                except Exception:
-                    mods_dir_mtime = None
-                last_mods_dir, _last_mtime, last_signature = session.local_scan_fingerprint()
+                last_mods_dir, last_signature = session.local_scan_fingerprint()
                 if (
                     mods_dir_key
                     and mods_dir_key == last_mods_dir
@@ -507,10 +512,6 @@ class LocalModListPresenter:
                 for idx, mod in enumerate(mods):
                     if not session.is_scope_current(scope):
                         return
-                    try:
-                        mod._cached_mtime = Path(mod.file_path).stat().st_mtime
-                    except Exception:
-                        mod._cached_mtime = None
                     new_local_mods.append(mod)
                     percent = (idx + 1) / total * 100 if total else 0
                     rounded_percent = int(percent)
@@ -526,11 +527,7 @@ class LocalModListPresenter:
                     return
                 if not session.accept_local_results(scope, new_local_mods):
                     return
-                try:
-                    accepted_mtime = mods_dir.stat().st_mtime if mods_dir and mods_dir.exists() else None
-                except Exception:
-                    accepted_mtime = mods_dir_mtime
-                session.update_local_scan_fingerprint(mods_dir_key, accepted_mtime, current_signature)
+                session.update_local_scan_fingerprint(mods_dir_key, current_signature)
                 self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
                 self.enhance_local_mods(scope)
                 self.controller.update_status_safe(f"找到 {len(mods)} 個本地模組")
@@ -632,9 +629,9 @@ class LocalModListPresenter:
                 return
 
             manager = self.controller.mod_manager
+            self._set_bulk_controls_enabled(False)
 
             def do_toggle() -> None:
-                self._set_bulk_controls_enabled(False)
                 if not manager:
                     return
                 old_filename = found_mod.filename
@@ -673,25 +670,26 @@ class LocalModListPresenter:
                         self._set_bulk_controls_enabled(True)
                         self.update_selection_status()
 
-                apply_ui_update()
+                self.controller.scope.schedule(0, apply_ui_update)
 
-            do_toggle()
+            def run_toggle() -> None:
+                try:
+                    do_toggle()
+                except Exception as e:
+                    logger.exception("切換模組狀態錯誤")
+                    message = f"操作失敗: {e}"
+
+                    def show_failure() -> None:
+                        self.controller.update_status(message)
+                        self._set_bulk_controls_enabled(True)
+                        self.update_selection_status()
+
+                    self.controller.scope.schedule(0, show_failure)
+
+            self.controller.scope.submit(run_toggle, key="local_toggle", replace=True)
         except Exception as e:
             self.controller.update_status(f"操作失敗: {e}")
             logger.exception("切換模組狀態錯誤")
-
-    def filter_local_mods(self) -> None:
-        """
-        篩選本地模組，使用 debounce 避免連續重建 Treeview
-
-        """
-        UIUtils.schedule_debounce(
-            self.controller.parent,
-            "_local_filter_job",
-            60,
-            self._run_debounced_local_filter_refresh,
-            owner=self.controller,
-        )
 
     def apply_local_filter(self) -> None:
         """立即套用離散狀態篩選"""
@@ -756,12 +754,12 @@ class LocalModListPresenter:
                 return
 
             manager = self.controller.mod_manager
+            self._set_bulk_controls_enabled(False)
 
             def do_batch():
                 total = len(selected_pairs)
                 success_count = 0
                 last_percent: float = -1
-                self._set_bulk_controls_enabled(False)
                 self.controller.update_status_safe(f"正在批次切換 {total} 個模組狀態...")
                 for idx, (base_name, row) in enumerate(selected_pairs, start=1):
                     mod = mods_by_base_name.get(base_name)
@@ -804,7 +802,7 @@ class LocalModListPresenter:
                             except Exception as e:
                                 logger.debug(f"批次更新 UI row 失敗: {e}")
 
-                        apply_row_update()
+                        self.controller.scope.schedule(0, apply_row_update)
                     else:
                         self.controller.update_status_safe(result.message or f"{action}模組失敗: {base_name}")
                     percent = idx / total * 100 if total else 0
@@ -818,27 +816,28 @@ class LocalModListPresenter:
                     self.controller.update_status(f"批次操作完成，成功切換 {success_count}/{total} 個模組")
                     self.controller.update_progress_safe(0)
 
-                apply_final_update()
+                self.controller.scope.schedule(0, apply_final_update)
 
-            do_batch()
+            def run_batch() -> None:
+                try:
+                    do_batch()
+                except Exception as e:
+                    logger.exception("批次操作失敗")
+                    message = f"批次操作失敗: {e}"
+
+                    def show_failure() -> None:
+                        self.controller.update_progress_safe(0)
+                        self._set_bulk_controls_enabled(True)
+                        self.update_selection_status()
+                        UIUtils.show_message("錯誤", message, self.controller.parent, message_level="error")
+
+                    self.controller.scope.schedule(0, show_failure)
+
+            self.controller.scope.submit(run_batch, key="local_batch_toggle", replace=True)
         except Exception as e:
             logger.exception("批次操作失敗")
             self.controller.update_progress_safe(0)
             UIUtils.show_message("錯誤", f"批次操作失敗: {e}", self.controller.parent, message_level="error")
-
-    def get_online_version_by_hash(self, file_hash: str) -> dict[str, Any] | None:
-        """
-        根據檔案雜湊值查詢線上版本資訊
-
-        Args:
-            file_hash: 檔案的雜湊值，用於查詢對應的線上版本資訊
-
-        Returns:
-            如果找到對應的線上版本資訊，回傳包含版本資訊的字典；若未找到則回傳 None
-        """
-        if hasattr(self.controller, "get_online_version_by_hash"):
-            return self.controller.get_online_version_by_hash(file_hash)
-        return None
 
     def update_selection_status(self) -> None:
         """更新選擇狀態顯示"""
@@ -849,8 +848,10 @@ class LocalModListPresenter:
             total_count = tree.topLevelItemCount()
             selected_count = len(tree.selectedItems())
 
-            if self.batch_toggle_btn:
-                self.batch_toggle_btn.setEnabled(selected_count > 0)
+            if hasattr(self, "batch_toggle_btn") and self.batch_toggle_btn:
+                self.batch_toggle_btn.setEnabled(selected_count >= 2)
+            if hasattr(self, "update_btn") and self.update_btn:
+                self.update_btn.setEnabled(selected_count > 0)
 
             if selected_count > 0:
                 status_text = f"已選擇 {selected_count} / {total_count} 個模組"
@@ -916,10 +917,22 @@ class LocalModListPresenter:
                 self.select_all_btn.setEnabled(enabled)
         with suppress(Exception):
             if self.batch_toggle_btn:
-                self.batch_toggle_btn.setEnabled(enabled)
+                if not enabled:
+                    self.batch_toggle_btn.setEnabled(False)
+                else:
+                    selected_count = len(self.local_tree.selectedItems()) if self.local_tree else 0
+                    self.batch_toggle_btn.setEnabled(selected_count >= 2)
 
-    def _run_debounced_local_filter_refresh(self) -> None:
-        self.controller.tree_sync.refresh_local_list()
+    def _on_local_search_text_changed(self, text: str) -> None:
+        """輸入文字變化時立即觸發本地模組篩選"""
+        self.local_search_var.set(text)
+        self.apply_local_filter()
+
+    def _on_search_submitted(self, text: str = "") -> None:
+        """處理按下 Enter 或點擊搜尋圖示時立即觸發篩選"""
+        if text:
+            self.local_search_var.set(text)
+        self.apply_local_filter()
 
 
 __all__ = ["LocalModListPresenter"]

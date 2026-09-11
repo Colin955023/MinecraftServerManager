@@ -37,14 +37,6 @@ class ServerConfig:
     path: str = ""
     jvm_args: list[str] = field(default_factory=list)
 
-    @property
-    def memory_mb(self) -> int:
-        return self.memory_max_mb
-
-    @memory_mb.setter
-    def memory_mb(self, value: int) -> None:
-        self.memory_max_mb = value
-
 
 @dataclass(slots=True)
 class ServerOperationResult:

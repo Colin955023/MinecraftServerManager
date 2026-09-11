@@ -16,6 +16,7 @@ import src.ui.support.ui_utils as ui_utils_module
 import src.utils as utils_module
 from src.core import ModPlanning
 from src.models import ModrinthVersionLookupResult
+from src.models.mod_models import OnlineModCompatibilityReport
 from src.ui.mods.frame import ModManagementFrame
 from src.ui.mods.install_executor import ModManagementInstallExecutor
 from src.ui.mods.local_mod_list_presenter import LocalModListPresenter
@@ -364,7 +365,7 @@ def test_refresh_local_list_keeps_full_description(monkeypatch: pytest.MonkeyPat
             file_size=2348810,
             file_path="C:/servers/Alpha/mods/fabric-api-0.141.3+1.21.1.jar",
             description="Core API module providing key hooks and intercompatibility.\nNo truncation should happen.",
-            _cached_mtime=1743494400.0,
+            file_mtime=1743494400.0,
         )
     ]
     session = _mod_session(local_mods=local_mods)
@@ -423,34 +424,16 @@ def test_reveal_in_explorer_uses_windows_select_argument(monkeypatch: pytest.Mon
 def test_get_online_version_status_text_distinguishes_key_states() -> None:
     assert get_online_version_status_text(None) == "未分析"
 
-    incompatible_report = SimpleNamespace(compatible=False)
+    incompatible_report = OnlineModCompatibilityReport(hard_errors=["不支援的載入器"])
     assert get_online_version_status_text(incompatible_report) == "不相容"
 
-    dependency_report = SimpleNamespace(
-        compatible=True,
-        missing_required_dependencies=["Fabric API"],
-        incompatible_installed=[],
-        installed_version_mismatches=[],
-        warnings=[],
-    )
+    dependency_report = OnlineModCompatibilityReport(missing_required_dependencies=["Fabric API"])
     assert get_online_version_status_text(dependency_report) == "可安裝，含依賴"
 
-    warning_report = SimpleNamespace(
-        compatible=True,
-        missing_required_dependencies=[],
-        incompatible_installed=[],
-        installed_version_mismatches=[],
-        warnings=["optional"],
-    )
+    warning_report = OnlineModCompatibilityReport(warnings=["optional"])
     assert get_online_version_status_text(warning_report) == "可安裝，需注意"
 
-    clean_report = SimpleNamespace(
-        compatible=True,
-        missing_required_dependencies=[],
-        incompatible_installed=[],
-        installed_version_mismatches=[],
-        warnings=[],
-    )
+    clean_report = OnlineModCompatibilityReport()
     assert get_online_version_status_text(clean_report) == "可安裝"
 
 
@@ -463,9 +446,9 @@ def test_sort_online_versions_for_server_prefers_compatible_then_stable_then_new
         ),
     ]
     reports = [
-        SimpleNamespace(compatible=True),
-        SimpleNamespace(compatible=True),
-        SimpleNamespace(compatible=False),
+        OnlineModCompatibilityReport(),
+        OnlineModCompatibilityReport(),
+        OnlineModCompatibilityReport(hard_errors=["不支援的載入器"]),
     ]
 
     sorted_versions, _ = sort_online_versions_for_server(versions, reports)
@@ -483,8 +466,8 @@ def test_sort_online_versions_for_server_keeps_reports_aligned() -> None:
         SimpleNamespace(version_id="v2", version_type="release", date_published="2026-03-01T10:00:00Z"),
     ]
     reports = [
-        SimpleNamespace(compatible=True, marker="report-v1"),
-        SimpleNamespace(compatible=True, marker="report-v2"),
+        SimpleNamespace(hard_errors=[], marker="report-v1"),
+        SimpleNamespace(hard_errors=[], marker="report-v2"),
     ]
 
     sorted_versions, sorted_reports = sort_online_versions_for_server(
@@ -1048,281 +1031,3 @@ def test_load_local_mods_discards_stale_scan_results(tmp_path: Path, monkeypatch
     assert controller.mod_session.local_mods == tuple(sentinel_mods)
     assert enhancement_calls == []
     assert queued_items == []
-
-
-def test_prepare_local_update_review_entries_replays_cached_dependency_plan_snapshot() -> None:
-    class _StubIndexManager:
-        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
-            return {
-                "dependency_plan_v1": {
-                    "schema_version": 1,
-                    "plan_source": "local_update_review",
-                    "root_project_id": "AANobbMI",
-                    "root_project_name": "Sodium",
-                    "root_target_version_id": "target-ver-1",
-                    "root_target_version_name": "1.0.0",
-                    "root_enabled": False,
-                    "items": [
-                        {
-                            "project_id": "P7dR8mSH",
-                            "project_name": "Fabric API",
-                            "version_id": "dep-ver-1",
-                            "version_name": "0.100.0",
-                            "filename": "fabric-api.jar",
-                            "download_url": "https://cdn.example/fabric-api.jar",
-                            "provider": "modrinth",
-                            "required_by": ["Sodium"],
-                            "decision_source": "required:auto",
-                            "enabled": True,
-                            "is_optional": False,
-                            "graph_depth": 1,
-                            "edge_kind": "required",
-                            "edge_source": "required:modrinth_dependency",
-                        }
-                    ],
-                    "advisory_items": [],
-                    "graph_edges": [
-                        {
-                            "to_project_id": "P7dR8mSH",
-                            "to_version_id": "dep-ver-1",
-                            "required_by": ["Sodium"],
-                            "edge": "required",
-                            "source": "required:modrinth_dependency",
-                            "depth": 1,
-                            "decision_source": "required:auto",
-                            "is_optional": False,
-                        }
-                    ],
-                    "unresolved_required": [],
-                    "notes": ["restored"],
-                }
-            }
-
-        def replace_review_metadata(self, _file_path: Path, _provider_metadata: dict[str, Any]) -> None:
-            return
-
-    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
-    stub = _StubIndexManager()
-    manager = SimpleNamespace(
-        get_review_metadata=stub.get_review_metadata,
-        replace_review_metadata=stub.replace_review_metadata,
-    )
-    planning = _review_planning(
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should use cached dependency plan snapshot"))
-    )
-    candidate = SimpleNamespace(
-        project_id="AANobbMI",
-        project_name="Sodium",
-        target_version_id="target-ver-1",
-        target_version_name="1.0.0",
-        target_filename="sodium-new.jar",
-        target_version=SimpleNamespace(provider="modrinth"),
-        current_version="0.6.0",
-        metadata_source="cached",
-        metadata_note="",
-        recommendation_source="hash_metadata",
-        recommendation_confidence="high",
-        update_available=True,
-        actionable=True,
-        hard_errors=[],
-        current_issues=[],
-        dependency_issues=[],
-        notes=[],
-        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-        filename="sodium.jar",
-    )
-    session = ModReviewWorkflow(
-        mod_planning=planning,
-        server=_review_server(),
-        installed_mods=[],
-        telemetry=telemetry,
-        mod_manager=manager,
-    ).start_local_update_session(
-        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
-        "全部模組",
-    )
-    snapshot = session.snapshot()
-
-    assert snapshot.selected_count == 0
-    assert "Fabric API" in snapshot.roots[0].summary
-    assert telemetry["replayed"] == 1
-
-
-def test_prepare_local_update_review_entries_rebuilds_when_cached_snapshot_version_mismatch() -> None:
-    class _StubIndexManager:
-        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
-            return {
-                "dependency_plan_v1": {
-                    "schema_version": 1,
-                    "plan_source": "local_update_review",
-                    "root_project_id": "AANobbMI",
-                    "root_project_name": "Sodium",
-                    "root_target_version_id": "another-target-version",
-                    "items": [],
-                    "advisory_items": [],
-                    "graph_edges": [],
-                    "unresolved_required": [],
-                    "notes": ["stale"],
-                }
-            }
-
-        def replace_review_metadata(self, _file_path: Path, _provider_metadata: dict[str, Any]) -> None:
-            return
-
-    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
-    stub = _StubIndexManager()
-    manager = SimpleNamespace(
-        get_review_metadata=stub.get_review_metadata,
-        replace_review_metadata=stub.replace_review_metadata,
-    )
-    calls = {"count": 0}
-
-    def _rebuilt_dependency_plan(*_args, **_kwargs):
-        calls["count"] += 1
-        return SimpleNamespace(
-            items=[
-                SimpleNamespace(
-                    project_id="rebuilt",
-                    project_name="Rebuilt Dependency",
-                    version_id="dep-v1",
-                    version_name="1.0.0",
-                    filename="rebuilt.jar",
-                    download_url="https://example.com/rebuilt.jar",
-                    included_by_default=True,
-                    is_optional=False,
-                )
-            ],
-            advisory_items=[],
-            unresolved_required=[],
-            notes=[],
-        )
-
-    candidate = SimpleNamespace(
-        project_id="AANobbMI",
-        project_name="Sodium",
-        target_version_id="target-ver-1",
-        target_version_name="1.0.0",
-        target_filename="sodium-new.jar",
-        target_version=SimpleNamespace(provider="modrinth"),
-        current_version="0.6.0",
-        metadata_source="cached",
-        metadata_note="",
-        recommendation_source="hash_metadata",
-        recommendation_confidence="high",
-        update_available=True,
-        actionable=True,
-        hard_errors=[],
-        current_issues=[],
-        dependency_issues=[],
-        notes=[],
-        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-        filename="sodium.jar",
-    )
-    session = ModReviewWorkflow(
-        mod_planning=_review_planning(_rebuilt_dependency_plan),
-        server=_review_server(),
-        installed_mods=[],
-        telemetry=telemetry,
-        mod_manager=manager,
-    ).start_local_update_session(
-        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
-        "全部模組",
-    )
-
-    assert calls["count"] == 1
-    assert "Rebuilt Dependency" in session.snapshot().roots[0].summary
-    assert telemetry["fallback_rebuild"] == 1
-
-
-def test_prepare_local_update_review_entries_migrates_legacy_snapshot_and_persists() -> None:
-    captured_writes: list[dict[str, Any]] = []
-
-    class _StubIndexManager:
-        def get_review_metadata(self, _file_path: Path) -> dict[str, Any]:
-            return {
-                "dependency_plan_v1": {
-                    "schema_version": 1,
-                    "plan_source": "local_update_review",
-                    "root_project_id": "AANobbMI",
-                    "root_project_name": "Sodium",
-                    "root_target_version_id": "target-ver-1",
-                    "root_target_version_name": "1.0.0",
-                    "root_enabled": True,
-                    "items": [
-                        {
-                            "project_id": "P7dR8mSH",
-                            "project_name": "Fabric API",
-                            "version_id": "dep-ver-1",
-                            "version_name": "0.100.0",
-                            "filename": "fabric-api.jar",
-                            "download_url": "https://cdn.example/fabric-api.jar",
-                            "required_by": ["Sodium"],
-                            "enabled": True,
-                            "is_optional": False,
-                        }
-                    ],
-                    "advisory_items": [],
-                    "unresolved_required": [],
-                    "notes": ["legacy-snapshot"],
-                }
-            }
-
-        def replace_review_metadata(self, _file_path: Path, provider_metadata: dict[str, Any]) -> None:
-            captured_writes.append(provider_metadata)
-
-    telemetry = {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
-    stub = _StubIndexManager()
-    manager = SimpleNamespace(
-        get_review_metadata=stub.get_review_metadata,
-        replace_review_metadata=stub.replace_review_metadata,
-    )
-    planning = _review_planning(
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("should replay migrated snapshot instead of rebuilding")
-        )
-    )
-    candidate = SimpleNamespace(
-        project_id="AANobbMI",
-        project_name="Sodium",
-        target_version_id="target-ver-1",
-        target_version_name="1.0.0",
-        target_filename="sodium-new.jar",
-        target_version=SimpleNamespace(provider="modrinth"),
-        current_version="0.6.0",
-        metadata_source="cached",
-        metadata_note="",
-        recommendation_source="hash_metadata",
-        recommendation_confidence="high",
-        update_available=True,
-        actionable=True,
-        hard_errors=[],
-        current_issues=[],
-        dependency_issues=[],
-        notes=[],
-        local_mod=SimpleNamespace(file_path="C:/servers/Fabric/mods/sodium.jar"),
-        filename="sodium.jar",
-    )
-    session = ModReviewWorkflow(
-        mod_planning=planning,
-        server=_review_server(),
-        installed_mods=[],
-        telemetry=telemetry,
-        mod_manager=manager,
-    ).start_local_update_session(
-        SimpleNamespace(candidates=[candidate], notes=[], metadata_summary=SimpleNamespace(notes=[])),
-        "全部模組",
-    )
-
-    assert "Fabric API" in session.snapshot().roots[0].summary
-    assert any("dependency_plan_v2" in payload and "dependency_plan_v1" not in payload for payload in captured_writes)
-    migrated_snapshot = captured_writes[0]["dependency_plan_v2"]
-    assert migrated_snapshot["schema_version"] == 2
-    assert "root_enabled" not in migrated_snapshot
-    assert "enabled" not in migrated_snapshot["items"][0]
-    assert migrated_snapshot["items"][0]["included_by_default"] is True
-    assert isinstance(migrated_snapshot.get("graph_edges"), list)
-    assert migrated_snapshot["graph_edges"][0]["edge"] == "required"
-    assert telemetry.get("checked", 0) == 1
-    assert telemetry.get("migrated", 0) == 1
-    assert telemetry.get("replayed", 0) == 1
-    assert telemetry.get("fallback_rebuild", 0) == 0

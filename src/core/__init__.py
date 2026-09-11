@@ -17,10 +17,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         ".mods.dependency_plan_serializer",
         "deserialize_online_dependency_install_plan",
     ),
-    "migrate_online_dependency_install_plan_payload": (
-        ".mods.dependency_plan_serializer",
-        "migrate_online_dependency_install_plan_payload",
-    ),
     "serialize_online_dependency_install_plan": (
         ".mods.dependency_plan_serializer",
         "serialize_online_dependency_install_plan",
@@ -37,6 +33,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ServerImportService": (".server.server_import", "ServerImportService"),
     "ServerInspector": (".server.server_inspector", "ServerInspector"),
     "ServerPropertiesStore": (".server.server_properties", "ServerPropertiesStore"),
+    "ServerPropertiesMigrationService": (".server.server_properties_migration", "ServerPropertiesMigrationService"),
     "ServerRuntime": (".server.server_runtime", "ServerRuntime"),
 }
 __getattr__, __dir__, __all__ = lazy_exports(globals(), __name__, _EXPORTS)

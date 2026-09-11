@@ -10,7 +10,6 @@ from collections.abc import Callable
 from html import escape
 from io import BytesIO
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
 
 from src.models import (
     LocalModInfo,
@@ -19,7 +18,8 @@ from src.models import (
 from src.utils import (
     get_logger,
     is_reparse_point,
-    serialize_json,
+    open_bounded_zip_writer,
+    resolve_stable_directory,
 )
 
 from .local_mod_scanner import LocalModScanner
@@ -99,7 +99,12 @@ def _build_xlsx(rows: list[list[object]], *, sheet_name: str = "Sheet1") -> byte
     )
 
     output = BytesIO()
-    with ZipFile(output, "w", compression=ZIP_DEFLATED, compresslevel=9) as workbook:
+    with open_bounded_zip_writer(
+        output,
+        max_members=5,
+        max_total_bytes=2 * 1024 * 1024,
+        max_member_bytes=2 * 1024 * 1024,
+    ) as workbook:
         workbook.writestr("[Content_Types].xml", content_types)
         workbook.writestr("_rels/.rels", root_rels)
         workbook.writestr("xl/workbook.xml", workbook_xml)
@@ -118,19 +123,17 @@ class ModManager:
         *,
         provider_catalog: ModProviderPort | None = None,
     ) -> None:
-        self.server_path = Path(server_path)
+        self.server_path = resolve_stable_directory(Path(server_path), create=True)
         if is_reparse_point(self.server_path):
             raise ValueError("模組管理伺服器路徑不可為符號連結或 reparse point")
-        self.server_path.mkdir(parents=True, exist_ok=True)
         if is_reparse_point(self.server_path) or not self.server_path.is_dir():
             raise ValueError("模組管理伺服器路徑不是安全的一般資料夾")
-        self.mods_path = self.server_path / "mods"
-        self.download_staging_root = self.server_path / ".download_staging"
+        self.mods_path = resolve_stable_directory(self.server_path / "mods", create=True)
+        self.download_staging_root = resolve_stable_directory(self.server_path / ".download_staging", create=True)
         self.server_config = server_config
         for managed_path in (self.mods_path, self.download_staging_root):
             if is_reparse_point(managed_path):
                 raise ValueError(f"模組管理目錄不可為符號連結或 reparse point: {managed_path.name}")
-            managed_path.mkdir(parents=True, exist_ok=True)
             if is_reparse_point(managed_path) or not managed_path.is_dir():
                 raise ValueError(f"模組管理目錄不是安全的一般資料夾: {managed_path.name}")
         self._index_persistence = ModIndexPersistence(server_path)
@@ -202,7 +205,7 @@ class ModManager:
         )
         return result.final_path if result.completed else None
 
-    def export_mod_list(self, format_type: str = "text") -> str | bytes:
+    def export_mod_list(self, format_type: str = "text") -> str | bytes | list[dict[str, object]]:
         """
         匯出模組列表，支援 text、json、html 格式
 
@@ -210,7 +213,7 @@ class ModManager:
             format_type: 輸出格式，預設為 text
 
         Returns:
-            依指定格式輸出的模組列表字串；格式不支援時回傳空字串
+            依指定格式輸出的模組列表內容；JSON 回傳結構化資料
         """
         mods = self.get_mod_list()
         if format_type == "text":
@@ -223,7 +226,7 @@ class ModManager:
                 lines.append(line)
             return "\n".join(lines)
         if format_type == "json":
-            export_data = [
+            return [
                 {
                     "name": mod.name,
                     "version": mod.version,
@@ -235,7 +238,6 @@ class ModManager:
                 }
                 for mod in mods
             ]
-            return serialize_json(export_data, indent=2)
         if format_type == "html":
 
             def _html(value: object) -> str:

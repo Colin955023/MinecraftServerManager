@@ -84,7 +84,6 @@ class ModManagementSession:
         self._version_generation = 0
         self._latest_online_request: OnlineBrowseRequest | None = None
         self._last_mods_dir: str | None = None
-        self._last_mods_dir_mtime: float | None = None
         self._last_mods_dir_signature: tuple[tuple[str, int, int], ...] | None = None
 
     @staticmethod
@@ -459,7 +458,6 @@ class ModManagementSession:
     def update_local_scan_fingerprint(
         self,
         mods_dir: str | None,
-        mtime: float | None,
         signature: tuple[tuple[str, int, int], ...] | None,
     ) -> None:
         """
@@ -467,25 +465,23 @@ class ModManagementSession:
 
         Args:
             mods_dir: Mods 目錄 identity
-            mtime: 目錄最後修改時間
             signature: 檔名、大小與時間組成的內容簽章
         """
         with self._lock:
             self._last_mods_dir = mods_dir
-            self._last_mods_dir_mtime = mtime
             self._last_mods_dir_signature = signature
 
     def local_scan_fingerprint(
         self,
-    ) -> tuple[str | None, float | None, tuple[tuple[str, int, int], ...] | None]:
+    ) -> tuple[str | None, tuple[tuple[str, int, int], ...] | None]:
         """
         取得上次已接受的本地掃描指紋
 
         Returns:
-            Mods 目錄、mtime 與內容簽章
+            Mods 目錄與內容簽章
         """
         with self._lock:
-            return self._last_mods_dir, self._last_mods_dir_mtime, self._last_mods_dir_signature
+            return self._last_mods_dir, self._last_mods_dir_signature
 
 
 __all__ = ["ModManagementSession"]

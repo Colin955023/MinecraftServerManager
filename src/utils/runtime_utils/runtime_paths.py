@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
-import sys
 from pathlib import Path
 
 
@@ -18,13 +16,7 @@ class RuntimePaths:
     @staticmethod
     def is_packaged() -> bool:
         """檢測是否為打包執行環境"""
-        is_compiled_app = "__compiled__" in globals()
-        return bool(
-            getattr(sys, "frozen", False)
-            or hasattr(sys, "_MEIPASS")
-            or is_compiled_app
-            or getattr(sys, "__compiled__", False)
-        )
+        return "__compiled__" in globals()
 
     @staticmethod
     def is_development_environment() -> bool:
@@ -54,13 +46,27 @@ class RuntimePaths:
 
     @staticmethod
     def get_version_cache_dir() -> Path:
-        """取得版本列表快取檔案存放目錄"""
-        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir() / "versions")
+        """
+        取得版本列表快取檔案存放目錄
+
+        Returns:
+            已建立且經安全驗證的版本快取目錄
+        """
+        from src.utils import resolve_stable_directory
+
+        return resolve_stable_directory(RuntimePaths.get_cache_dir() / "versions", create=True)
 
     @staticmethod
     def get_installer_cache_dir() -> Path:
-        """取得模組安裝器檔案存放目錄"""
-        return RuntimePaths.ensure_dir(RuntimePaths.get_cache_dir() / "installers")
+        """
+        取得模組安裝器檔案存放目錄
+
+        Returns:
+            已建立且經安全驗證的安裝器快取目錄
+        """
+        from src.utils import resolve_stable_directory
+
+        return resolve_stable_directory(RuntimePaths.get_cache_dir() / "installers", create=True)
 
     @staticmethod
     def get_log_dir() -> Path:
@@ -77,12 +83,14 @@ class RuntimePaths:
         """
         if not RuntimePaths.is_packaged():
             return
+        from src.utils import delete_within, list_bounded_directory
+
         root = RuntimePaths.get_user_data_dir()
         current_name = str(current_version or "").strip()
         if not current_name or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", current_name):
             return
         try:
-            entries = tuple(root.iterdir())
+            entries = list_bounded_directory(root)
         except OSError:
             return
         for entry in entries:
@@ -95,24 +103,7 @@ class RuntimePaths:
                 continue
             if not re.fullmatch(r"\d+(?:\.\d+){1,4}(?:[-._][0-9A-Za-z.-]+)?", entry.name):
                 continue
-            try:
-                shutil.rmtree(entry)
-            except OSError:
-                continue
-
-    @staticmethod
-    def ensure_dir(p: Path) -> Path:
-        """
-        確保指定路徑的目錄存在，如果不存在則建立
-
-        Args:
-            p: 要建立的目錄路徑
-
-        Returns:
-            已確認存在的目錄路徑
-        """
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+            delete_within(root, entry)
 
 
 __all__ = ["RuntimePaths"]

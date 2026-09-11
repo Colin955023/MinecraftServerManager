@@ -305,13 +305,28 @@ def _check_loader_version_rule(
     except Exception as e:
         logger.warning(f"讀取 {normalized_loader} 載入器規則失敗: {e}")
         return (warnings, notes)
-    available_versions = {normalize_identifier(version) for version in compatible_versions if version}
+
+    def _strip_version_prefix(v: str) -> str:
+        s = normalize_identifier(v)
+        if normalized_minecraft_version:
+            mc_prefix = f"{normalize_identifier(normalized_minecraft_version)}-"
+            if s.startswith(mc_prefix):
+                s = s[len(mc_prefix) :]
+        if normalized_loader:
+            loader_prefix = f"{normalized_loader}-"
+            if s.startswith(loader_prefix):
+                s = s[len(loader_prefix) :]
+        return s
+
+    raw_available = {normalize_identifier(version) for version in compatible_versions if version}
+    available_versions = raw_available | {_strip_version_prefix(v) for v in raw_available}
+    stripped_loader_version = _strip_version_prefix(normalized_loader_version)
     if not available_versions:
         notes.append(
             f"目前找不到 {normalized_loader} 對 Minecraft {normalized_minecraft_version} 的本地規則快取，因此無法額外驗證 loader 版本 {loader_version}"
         )
         return (warnings, notes)
-    if normalized_loader_version in available_versions:
+    if normalized_loader_version in available_versions or stripped_loader_version in available_versions:
         notes.append(
             f"已使用內建 {normalized_loader.capitalize()} 規則確認 loader 版本 {loader_version} 適用於 Minecraft {normalized_minecraft_version}"
         )
@@ -387,10 +402,10 @@ def _analyze_version_data(
         required_version = normalize_identifier(
             getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
         )
-        installed_versions = sorted(installed_index.versions_by_project.get(dependency_project_id, ()))
+        installed_versions = installed_index.versions_by_project.get(dependency_project_id, frozenset())
         has_required_version = not (is_installed and required_version) or required_version in installed_versions
         if dependency_type == "required" and is_installed and required_version and (not has_required_version):
-            installed_version_text = ", ".join(installed_versions) if installed_versions else "未知版本"
+            installed_version_text = ", ".join(sorted(installed_versions)) if installed_versions else "未知版本"
             mismatch_message = f"{dependency_label} 目前已安裝，但版本為 {installed_version_text}，與需求版本 {resolved_dependency.version_name or required_version} 不符"
             report.installed_version_mismatches.append(mismatch_message)
             report.warnings.append(mismatch_message)
@@ -550,9 +565,10 @@ class ModPlanning:
         loader_version: str | None = None,
         hash_progress_callback: Callable[[int, int], None] | None = None,
         *,
-        provider_identity_resolver: Callable[[Any, str], ProviderIdentitySnapshot],
+        provider_identity_resolver: Callable[..., ProviderIdentitySnapshot],
         hash_cache_writer: Callable[[Any, str, str], None] | None = None,
         stage_progress_callback: Callable[[float, str], None] | None = None,
+        force_refresh: bool = False,
     ) -> LocalModUpdatePlan:
         """
         建立本地模組更新計畫並保留 identity 與 hash owner commands
@@ -566,6 +582,7 @@ class ModPlanning:
             provider_identity_resolver: provider identity 解析 command
             hash_cache_writer: hash 持久化 command
             stage_progress_callback: 整體階段進度回呼
+            force_refresh: 是否強制重新查詢線上資訊
 
         Returns:
             可交由 Review 與執行流程使用的本地更新計畫
@@ -655,7 +672,10 @@ class ModPlanning:
             hash_project_id = clean_api_identifier(
                 getattr(current_match, "project_id", "") or getattr(latest_match, "project_id", "")
             )
-            identity = provider_identity_resolver(local_mod, hash_project_id)
+            try:
+                identity = provider_identity_resolver(local_mod, hash_project_id, force=force_refresh)
+            except TypeError:
+                identity = provider_identity_resolver(local_mod, hash_project_id)
             resolved_project_info: OnlineModInfo | None = None
             metadata_source = identity.provenance
             if identity.canonical:
@@ -1120,9 +1140,9 @@ def _expand_dependency_plan(
                 required_version = normalize_identifier(
                     getattr(resolved_dependency.version, "version_number", "") or resolved_dependency.version_name
                 )
-                installed_versions = sorted(installed_index.versions_by_project.get(dependency_project_id, ()))
+                installed_versions = installed_index.versions_by_project.get(dependency_project_id, frozenset())
                 if required_version and required_version not in installed_versions:
-                    installed_version_text = ", ".join(installed_versions) if installed_versions else "未知版本"
+                    installed_version_text = ", ".join(sorted(installed_versions)) if installed_versions else "未知版本"
                     plan.unresolved_required.append(
                         f"{dependency_label} 已安裝版本不符：需要 {resolved_dependency.version_name or required_version}，目前為 {installed_version_text}"
                     )

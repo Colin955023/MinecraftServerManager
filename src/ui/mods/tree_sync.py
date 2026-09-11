@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import re
-from contextlib import suppress
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QSignalBlocker, Qt
@@ -106,14 +104,19 @@ class ModManagementTreeSyncOps:
         if items:
             tree.addTopLevelItems(items)
 
-    def refresh_local_list(self) -> None:
-        """重新整理本地模組列表"""
+    def refresh_local_list(self, preserve_selection: bool = True) -> None:
+        """
+        重新整理本地模組列表
+
+        Args:
+            preserve_selection: 是否保留目前的選取項目狀態
+        """
         presenter = self.controller.local_mod_list_presenter
         tree = presenter.local_tree
         if not tree:
             return
 
-        selected_mod_ids = self.capture_selected_mod_ids()
+        selected_mod_ids = self.capture_selected_mod_ids() if preserve_selection else set()
 
         projections: list[ModListRow] = []
         seen_mod_ids: set[str] = set()
@@ -133,15 +136,8 @@ class ModManagementTreeSyncOps:
                 display_version = mod.version
             elif enhanced:
                 enhanced_version = getattr(enhanced, "version", None)
-                enhanced_versions = getattr(enhanced, "versions", None)
                 if enhanced_version:
                     display_version = enhanced_version
-                elif enhanced_versions:
-                    display_version = (
-                        enhanced_versions[0]
-                        if isinstance(enhanced_versions, list) and enhanced_versions
-                        else str(enhanced_versions)
-                    )
                 elif parsed_version and parsed_version not in ("", "未知"):
                     display_version = parsed_version
                 else:
@@ -166,16 +162,7 @@ class ModManagementTreeSyncOps:
             else:
                 display_size = f"{size_val} B"
 
-            mtime_val = getattr(mod, "_cached_mtime", None)
-            if mtime_val is None:
-                mtime_val = getattr(mod, "file_mtime", 0.0) or 0.0
-                if not mtime_val and getattr(mod, "file_path", None):
-                    try:
-                        mtime_val = Path(str(mod.file_path)).stat().st_mtime
-                    except Exception:
-                        mtime_val = 0.0
-                with suppress(Exception):
-                    mod._cached_mtime = mtime_val
+            mtime_val = mod.file_mtime or 0.0
             display_mtime = datetime.fromtimestamp(mtime_val).strftime("%Y-%m-%d %H:%M") if mtime_val else "未知"
 
             if mod_base_name in seen_mod_ids:
@@ -230,7 +217,9 @@ class ModManagementTreeSyncOps:
                         or (filter_status == "啟用" and enabled)
                         or (filter_status == "停用" and not enabled)
                     )
-                    search_matches = not search_text or presenter.local_search_filter.matches(row.values, search_text)
+                    search_matches = not search_text or presenter.local_search_filter.matches(
+                        (row.values[1],), search_text
+                    )
                     row_item.setHidden(not status_matches or not search_matches)
                     brush = primary_brush if enabled else muted_brush
                     for column in range(len(row.values)):

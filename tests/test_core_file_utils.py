@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import zipfile
 
 import pytest
@@ -9,8 +10,11 @@ from src.utils import (
     SAFE_TEXT_FILE_MAX_BYTES,
     atomic_write_json,
     copy_dir,
+    copy_file,
+    copy_within,
     delete_within,
     open_bounded_zip,
+    open_bounded_zip_writer,
     read_json,
     read_text_file,
     safe_extract_zip,
@@ -249,6 +253,54 @@ def test_open_bounded_zip_rejects_oversized_archive(tmp_path) -> None:
         open_bounded_zip(zip_path, max_archive_bytes=1),
     ):
         pass
+
+
+def test_open_bounded_zip_rejects_forged_eocd_member_count(tmp_path) -> None:
+    zip_path = tmp_path / "forged-member-count.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        for index in range(2):
+            archive.writestr(f"entry-{index}.txt", b"content")
+
+    payload = bytearray(zip_path.read_bytes())
+    eocd_offset = payload.rfind(b"PK\x05\x06")
+    assert eocd_offset >= 0
+    struct.pack_into("<H", payload, eocd_offset + 10, 0)
+    zip_path.write_bytes(payload)
+
+    with pytest.raises(ValueError, match="成員數量"), open_bounded_zip(zip_path, max_members=1):
+        pass
+
+
+def test_open_bounded_zip_writer_limits_members_and_output_is_readable(tmp_path) -> None:
+    zip_path = tmp_path / "managed.zip"
+
+    with open_bounded_zip_writer(zip_path, max_members=1, max_total_bytes=8, max_member_bytes=8) as writer:
+        writer.writestr("data/info.txt", b"content")
+        with pytest.raises(ValueError, match="成員數量"):
+            writer.writestr("data/other.txt", b"more")
+
+    with open_bounded_zip(zip_path, max_members=1) as archive:
+        assert archive.read("data/info.txt") == b"content"
+
+
+def test_copy_within_rejects_cross_root_source(tmp_path) -> None:
+    base_dir = tmp_path / "base"
+    base_dir.mkdir()
+    source = tmp_path / "outside.txt"
+    source.write_bytes(b"outside")
+
+    assert copy_within(base_dir, source, base_dir / "copied.txt") is False
+    assert not (base_dir / "copied.txt").exists()
+
+
+def test_copy_file_keeps_existing_destination_when_source_exceeds_limit(tmp_path) -> None:
+    source = tmp_path / "source.bin"
+    target = tmp_path / "target.bin"
+    source.write_bytes(b"new payload")
+    target.write_bytes(b"existing payload")
+
+    assert copy_file(source, target, max_bytes=3) is False
+    assert target.read_bytes() == b"existing payload"
 
 
 def test_safe_extract_zip_rejects_excessive_compression_ratio(tmp_path) -> None:

@@ -452,13 +452,10 @@ def is_duplicate_noise_line(normalized: str) -> bool:
 def collect_duplicate_code_findings(src_dir: Path) -> SectionResult:
     window_size = 8
     min_chars = 220
-    ignored_files = {src_dir / "utils" / "network_utils" / "async_http_utils.py"}
 
     block_map: dict[str, list[tuple[Path, int, str]]] = {}
 
     for file_path in gather_python_files(src_dir):
-        if file_path in ignored_files:
-            continue
         raw_lines = get_file_context(file_path).lines
         if len(raw_lines) < window_size:
             continue

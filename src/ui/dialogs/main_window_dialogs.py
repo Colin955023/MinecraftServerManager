@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import suppress
 from typing import Any
 
@@ -14,7 +15,6 @@ from src.ui import (
     Colors,
     FontManager,
     FontSize,
-    ModalMSFluentWindow,
     StatusPushButton,
     UIUtils,
     UIWorkScope,
@@ -22,6 +22,8 @@ from src.ui import (
     center_window,
 )
 from src.utils import get_logger
+
+from .modal_msfluent_window import ModalMSFluentWindow
 
 logger = get_logger().bind(component="MainWindowDialogs")
 
@@ -129,9 +131,12 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         self.completion_callback = completion_callback
         self._completion_scheduled = False
         self.done_detected = False
+        self._started_confirmed = False
         self._runtime_sequence = 0
         self.scope = UIWorkScope(self)
         self._pending_console: list[str] = []
+        self._start_time = 0.0
+        self._last_activity_time = 0.0
 
         self.setWindowTitle(f"初始化伺服器 - {self.server_config.name}")
         self.setMinimumSize(600, 450)
@@ -179,7 +184,10 @@ class ServerInitializationDialog(ModalMSFluentWindow):
 
     def start_initialization(self) -> None:
         """啟動初始化對話框流程"""
-        self._timeout_timer.start(120000)
+        self._start_time = time.monotonic()
+        self._last_activity_time = time.monotonic()
+        self._started_confirmed = False
+        self._timeout_timer.start(5000)
         self._runtime_timer.start(100)
         self._console_timer.start()
         center_window(self, self.parentWidget())
@@ -208,16 +216,23 @@ class ServerInitializationDialog(ModalMSFluentWindow):
         """讀取 runtime 快照並將事件投影到初始化 UI"""
         snapshot = self.server_runtime.observe(self.server_config.name, after_sequence=self._runtime_sequence)
         self._runtime_sequence = snapshot.sequence
+        if snapshot.events or snapshot.state in {"starting", "running"}:
+            self._started_confirmed = True
         for event in snapshot.events:
             if event.kind == "output":
+                self._last_activity_time = time.monotonic()
                 self._update_console(f"{event.message}\n")
                 self._process_server_output(event.message)
             elif event.kind == "ready":
                 self.done_detected = True
                 self.progress_label.setText("狀態: 伺服器完全啟動，正在關閉...")
                 self._update_console("\n[系統] 所有模組載入完成，正在關閉伺服器...\n")
+                self.close_button.setText("完成初始化")
+                self.close_button.set_status("success")
             elif event.kind == "failed":
                 self._handle_server_error(event.message)
+        if not self._started_confirmed and snapshot.state == "stopped" and not snapshot.events:
+            return
         if snapshot.state in {"stopped", "failed"}:
             self._runtime_timer.stop()
             if snapshot.state == "stopped":
@@ -267,7 +282,10 @@ class ServerInitializationDialog(ModalMSFluentWindow):
 
     def _timeout_force_close(self) -> None:
         """超時強制關閉"""
-        if not self.done_detected:
+        if self.done_detected:
+            return
+        now = time.monotonic()
+        if now - self._start_time > 600 or (now - self._last_activity_time > 180 and now - self._start_time > 120):
             self._close_initialization()
 
     def _update_console(self, text: str) -> None:
@@ -307,6 +325,8 @@ class ServerInitializationDialog(ModalMSFluentWindow):
             self._update_console("[系統] 伺服器初始化完成！\n")
             if self.progress_label:
                 self.progress_label.setText("狀態: 初始化完成")
+            self.close_button.setText("完成初始化")
+            self.close_button.set_status("success")
             if self.completion_callback and not self._completion_scheduled:
                 self._completion_scheduled = True
                 QtCore.QTimer.singleShot(2000, lambda: self.completion_callback(self.server_config, self))
@@ -314,6 +334,7 @@ class ServerInitializationDialog(ModalMSFluentWindow):
             self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
             if self.progress_label:
                 self.progress_label.setText("狀態: 啟動錯誤")
+            self._start_failure_countdown(60)
 
     def _handle_server_error(self, err_msg: str) -> None:
         """處理伺服器錯誤並啟動倒數計時強制終止"""

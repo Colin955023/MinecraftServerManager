@@ -33,6 +33,8 @@ _ZIP64_LOCATOR_SIGNATURE = b"PK\x06\x07"
 _ZIP_EOCD_BYTES = 22
 _ZIP_MAX_COMMENT_BYTES = 0xFFFF
 
+_ZIP_COMPRESSION_LEVEL = 6
+
 _ALLOWED_ZIP_COMPRESSION_TYPES = frozenset(
     {
         zipfile.ZIP_STORED,
@@ -141,7 +143,112 @@ def open_bounded_zip(
             max_archive_bytes=max_archive_bytes,
         )
         with zipfile.ZipFile(source, "r") as archive:
+            if max_members is not None and len(archive.infolist()) > max_members:
+                raise ArchiveSecurityError("壓縮檔成員數量超過安全上限")
             yield archive
+
+
+class _BoundedZipWriter:
+    """限制 ZIP 寫入成員名稱、數量與未壓縮大小"""
+
+    def __init__(
+        self,
+        archive: zipfile.ZipFile,
+        *,
+        max_members: int | None,
+        max_total_bytes: int | None,
+        max_member_bytes: int | None,
+    ) -> None:
+        self._archive = archive
+        self._max_members = max_members
+        self._max_total_bytes = max_total_bytes
+        self._max_member_bytes = max_member_bytes
+        self._total_bytes = 0
+        self._member_kinds: dict[tuple[str, ...], bool] = {}
+        self._parent_keys: set[tuple[str, ...]] = set()
+
+    def _prepare_member(self, member_name: str, size: int) -> str:
+        if size < 0:
+            raise ArchiveSecurityError("ZIP 成員大小不可為負數")
+        if self._max_members is not None and len(self._member_kinds) >= self._max_members:
+            raise ArchiveSecurityError("壓縮檔成員數量超過安全上限")
+        if self._max_member_bytes is not None and size > self._max_member_bytes:
+            raise ArchiveSecurityError(f"壓縮檔成員過大: {member_name}")
+        if self._max_total_bytes is not None and self._total_bytes + size > self._max_total_bytes:
+            raise ArchiveSecurityError("壓縮檔總輸出大小超過安全上限")
+        sanitized = _sanitize_archive_member_name(member_name)
+        if sanitized is None:
+            raise ArchiveSecurityError(f"壓縮檔包含不安全的成員名稱: {member_name}")
+        normalized_name = sanitized.as_posix()
+        _validate_member_path_collision(
+            zipfile.ZipInfo(normalized_name),
+            sanitized,
+            member_kinds=self._member_kinds,
+            parent_keys=self._parent_keys,
+        )
+        self._total_bytes += size
+        return normalized_name
+
+    def writestr(self, member_name: str, data: bytes | str) -> None:
+        """寫入已受大小與路徑限制的記憶體內容"""
+        payload = data.encode() if isinstance(data, str) else data
+        normalized_name = self._prepare_member(member_name, len(payload))
+        self._archive.writestr(normalized_name, payload)
+
+    def write_file(self, member_name: str, source: BinaryIO, *, expected_bytes: int) -> int:
+        """串流寫入固定預期大小的來源並拒絕來源成長或縮短"""
+        normalized_name = self._prepare_member(member_name, expected_bytes)
+        copied_bytes = 0
+        with self._archive.open(normalized_name, "w", force_zip64=True) as target:
+            while chunk := source.read(min(1024 * 1024, expected_bytes - copied_bytes + 1)):
+                if copied_bytes + len(chunk) > expected_bytes:
+                    raise ArchiveSecurityError(f"壓縮檔成員實際大小超過預期: {member_name}")
+                target.write(chunk)
+                copied_bytes += len(chunk)
+        if copied_bytes != expected_bytes:
+            raise ArchiveSecurityError(f"壓縮檔成員實際大小小於預期: {member_name}")
+        return copied_bytes
+
+
+@contextmanager
+def open_bounded_zip_writer(
+    target: Path | str | BinaryIO,
+    *,
+    max_members: int | None = SAFE_ZIP_MAX_MEMBERS,
+    max_total_bytes: int | None = SAFE_ZIP_MAX_TOTAL_BYTES,
+    max_member_bytes: int | None = SAFE_ZIP_MAX_MEMBER_BYTES,
+) -> Generator[_BoundedZipWriter]:
+    """
+    建立受限制的 ZIP 寫入器
+
+    Args:
+        target: ZIP 輸出檔案或二進位緩衝區
+        max_members: 成員數量上限
+        max_total_bytes: 總未壓縮輸出大小上限
+        max_member_bytes: 單一成員大小上限
+
+    Returns:
+        已套用成員名稱與大小限制的 ZIP 寫入器
+    """
+    if isinstance(target, Path | str):
+        with (
+            open_regular_file_for_write(target) as output,
+            zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=_ZIP_COMPRESSION_LEVEL) as archive,
+        ):
+            yield _BoundedZipWriter(
+                archive,
+                max_members=max_members,
+                max_total_bytes=max_total_bytes,
+                max_member_bytes=max_member_bytes,
+            )
+        return
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=_ZIP_COMPRESSION_LEVEL) as archive:
+        yield _BoundedZipWriter(
+            archive,
+            max_members=max_members,
+            max_total_bytes=max_total_bytes,
+            max_member_bytes=max_member_bytes,
+        )
 
 
 def read_archive_metadata_bytes(
@@ -345,4 +452,10 @@ def safe_extract_zip(
             progress_callback(total_bytes if total_bytes > 0 else extracted_bytes, total_bytes)
 
 
-__all__ = ["SAFE_ZIP_MAX_ARCHIVE_BYTES", "open_bounded_zip", "read_archive_metadata_bytes", "safe_extract_zip"]
+__all__ = [
+    "SAFE_ZIP_MAX_ARCHIVE_BYTES",
+    "open_bounded_zip",
+    "open_bounded_zip_writer",
+    "read_archive_metadata_bytes",
+    "safe_extract_zip",
+]

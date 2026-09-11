@@ -11,6 +11,10 @@ class ConfigurationError(AppException):
     """設定無效、缺失或無法使用"""
 
 
+class OperationError(AppException, RuntimeError):
+    """應用程式作業無法完成"""
+
+
 class ArchiveSecurityError(AppException, ValueError):
     """壓縮檔內容未通過安全檢查（例如路徑穿越、symlink、大小超限）"""
 
@@ -19,11 +23,11 @@ class JavaInstallError(AppException):
     """Java 自動安裝流程失敗或指定版本不支援"""
 
 
-class NetworkSecurityError(ValueError):
+class NetworkSecurityError(AppException, ValueError):
     """HTTP 請求因 URL 或重新導向安全策略而被拒絕"""
 
 
-class ResponseTooLargeError(ValueError):
+class ResponseTooLargeError(AppException, ValueError):
     """HTTP 回應超過本地允許的記憶體上限"""
 
 
@@ -52,6 +56,7 @@ __all__ = [
     "JavaInstallError",
     "NetworkSecurityError",
     "OperationCancelledError",
+    "OperationError",
     "ProviderIdentityPersistenceError",
     "ResponseTooLargeError",
 ]

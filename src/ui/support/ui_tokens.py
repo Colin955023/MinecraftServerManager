@@ -51,8 +51,6 @@ class Colors:
     BG_CONSOLE: Final[str] = "#000000"
     BG_LISTBOX_LIGHT: Final[str] = "#f8fafc"
     BG_LISTBOX_DARK: Final[str] = "#2b2b2b"
-    BG_CARD_LIGHT: Final[str] = "#ffffff"
-    BG_CARD_DARK: Final[str] = "#2b2b2b"
 
     # --- 邊框與其他元件 ---
     BORDER_LIGHT: Final[tuple[str, str]] = ("#d1d5db", "#374151")

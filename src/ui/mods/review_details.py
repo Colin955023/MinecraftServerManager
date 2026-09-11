@@ -76,7 +76,7 @@ def format_pending_install_review_text(review_entry: PendingInstallReviewEntry) 
     """
     lines = [format_online_version_report(review_entry.pending.version, review_entry.report), ""]
     lines.extend(build_pending_install_summary_lines(review_entry))
-    reminder = build_client_install_reminder_line(review_entry.pending.server_side, review_entry.pending.client_side)
+    reminder = build_client_install_reminder_line(review_entry.pending.client_side)
     if reminder:
         lines.append(reminder)
     lines.extend(
@@ -127,9 +127,7 @@ def format_local_update_review_text(review_entry: LocalUpdateReviewEntry) -> str
     published_text = format_published_at(review_entry.date_published)
     if published_text:
         lines.append(f"發布時間：{published_text}")
-    reminder = build_client_install_reminder_line(
-        getattr(candidate, "server_side", ""), getattr(candidate, "client_side", "")
-    )
+    reminder = build_client_install_reminder_line(getattr(candidate, "client_side", ""))
     if reminder:
         lines.append(reminder)
     lines.extend(

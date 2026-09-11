@@ -62,8 +62,19 @@ class ModIndexProviderIdentityStore:
             file_path: 本地 Mod 檔案路徑
             payload: 要持久化的完整 identity 快照
         """
-        if self._index_manager.replace_provider_identity(file_path, payload) is False:
-            raise ProviderIdentityPersistenceError(f"provider identity persistence failed: {file_path}")
+        target_path = file_path
+        if not target_path.exists():
+            if target_path.suffix == ".disabled" and target_path.with_suffix("").exists():
+                target_path = target_path.with_suffix("")
+            elif target_path.with_name(f"{target_path.name}.disabled").exists():
+                target_path = target_path.with_name(f"{target_path.name}.disabled")
+            else:
+                return
+
+        if self._index_manager.replace_provider_identity(target_path, payload) is False:
+            if not target_path.exists():
+                return
+            raise ProviderIdentityPersistenceError(f"provider identity persistence failed: {target_path}")
 
 
 class ProviderIdentityService:
@@ -170,13 +181,16 @@ class ProviderIdentityService:
 
         return self.commit_failure(evidence, existing, failure_kinds, now_epoch_ms=now_ms)
 
-    def resolve_for_local_mod(self, local_mod: Any, hash_project_id: str = "") -> ProviderIdentitySnapshot:
+    def resolve_for_local_mod(
+        self, local_mod: Any, hash_project_id: str = "", *, force: bool = False
+    ) -> ProviderIdentitySnapshot:
         """
         把 LocalModInfo 轉成 evidence 並解析；不修改 consumer object
 
         Args:
             local_mod: 提供本地路徑、名稱與既有 provider 欄位的 Mod 物件
             hash_project_id: Hash API 已確認的專案 ID
+            force: 是否忽略快取或 backoff 限制強制解析
 
         Returns:
             解析並持久化後的 identity 快照
@@ -185,6 +199,11 @@ class ProviderIdentityService:
         if not raw_file_path:
             raise ValueError("provider identity resolution requires local_mod.file_path")
         file_path = Path(raw_file_path)
+        if not file_path.exists():
+            if file_path.suffix == ".disabled" and file_path.with_suffix("").exists():
+                file_path = file_path.with_suffix("")
+            elif file_path.with_name(f"{file_path.name}.disabled").exists():
+                file_path = file_path.with_name(f"{file_path.name}.disabled")
         filename = str(getattr(local_mod, "filename", "") or "").strip()
         return self.resolve(
             ProviderIdentityEvidence(
@@ -194,7 +213,8 @@ class ProviderIdentityService:
                 display_name=str(getattr(local_mod, "name", "") or "").strip(),
                 search_terms=(filename, str(getattr(local_mod, "name", "") or "")),
                 hash_project_id=clean_api_identifier(hash_project_id),
-            )
+            ),
+            force=force,
         )
 
     def commit_found(

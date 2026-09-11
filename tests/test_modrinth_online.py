@@ -12,7 +12,7 @@ import src.core.mods.dependency_plan_serializer as dependency_serializer_module
 import src.core.mods.mod_file_installer as mod_file_installer_module
 import src.core.mods.mod_manager as mod_manager_module
 import src.core.mods.modrinth_http as mod_search_provider_module
-import src.core.mods.modrinth_http as mod_search_service_module
+import src.core.mods.modrinth_http as modrinth_http_module
 import src.models as models_module
 import src.utils as utils_module
 from src.core import ModManager, ModPlanning
@@ -201,7 +201,7 @@ def test__search_mods_maps_modrinth_hits(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    results = mod_search_service_module._search_mods("sodium", minecraft_version="1.21", loader="fabric")
+    results = modrinth_http_module._search_mods("sodium", minecraft_version="1.21", loader="fabric")
 
     assert len(results) == 1
     assert results[0].project_id == "proj123"
@@ -223,7 +223,7 @@ def test__search_mods_passes_category_facets(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    mod_search_service_module._search_mods(
+    modrinth_http_module._search_mods(
         "sodium",
         minecraft_version="1.21",
         loader="fabric",
@@ -259,7 +259,7 @@ def test__search_mods_supports_browse_mode_without_query(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    results = mod_search_service_module._search_mods(
+    results = modrinth_http_module._search_mods(
         "",
         minecraft_version="1.21",
         loader="fabric",
@@ -298,7 +298,7 @@ def test__search_mods_filters_out_pure_client_hits(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    results = mod_search_service_module._search_mods("", minecraft_version="1.21", loader="fabric")
+    results = modrinth_http_module._search_mods("", minecraft_version="1.21", loader="fabric")
 
     assert [mod.project_id for mod in results] == ["server-mod"]
 
@@ -335,7 +335,7 @@ def test__get_versions_filters_and_selects_primary_file(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    versions = mod_search_service_module._get_versions("proj123", minecraft_version="1.21", loader="fabric")
+    versions = modrinth_http_module._get_versions("proj123", minecraft_version="1.21", loader="fabric")
 
     assert len(versions) == 1
     assert versions[0].version_id == "ver1"
@@ -367,7 +367,7 @@ def test__get_versions_requires_exact_quilt_loader(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    versions = mod_search_service_module._get_versions("proj123", minecraft_version="1.21", loader="quilt")
+    versions = modrinth_http_module._get_versions("proj123", minecraft_version="1.21", loader="quilt")
 
     assert versions == []
 
@@ -395,7 +395,7 @@ def test__get_versions_requires_exact_neoforge_loader(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    versions = mod_search_service_module._get_versions(
+    versions = modrinth_http_module._get_versions(
         "proj123",
         minecraft_version="1.20.1",
         loader="neoforge",
@@ -435,7 +435,7 @@ def test__get_versions_skips_prerelease_entries(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    versions = mod_search_service_module._get_versions("proj123", minecraft_version="1.21", loader="fabric")
+    versions = modrinth_http_module._get_versions("proj123", minecraft_version="1.21", loader="fabric")
 
     assert [version.version_id for version in versions] == ["beta1", "release1"]
 
@@ -461,7 +461,7 @@ def test__get_versions_preserves_project_id_case_for_api(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    mod_search_service_module._get_versions("P7dR8mSH")
+    modrinth_http_module._get_versions("P7dR8mSH")
 
     assert captured_url["value"].endswith("/project/P7dR8mSH/version")
 
@@ -563,7 +563,7 @@ def test__search_mods_uses_exact_quilt_loader_facet(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    mod_search_service_module._search_mods("sodium", minecraft_version="1.21", loader="quilt")
+    modrinth_http_module._search_mods("sodium", minecraft_version="1.21", loader="quilt")
 
     facets_text = str(captured_params.get("facets", ""))
     assert "categories:quilt" in facets_text
@@ -1077,7 +1077,7 @@ def test__search_mods_normalizes_filename_like_query(monkeypatch) -> None:
 
     monkeypatch.setattr(utils_module.HTTPClient, "fetch_json", fake_get_json)
 
-    mod_search_service_module._search_mods("letsdo-API-forge-1.2.15-forge", loader="forge")
+    modrinth_http_module._search_mods("letsdo-API-forge-1.2.15-forge", loader="forge")
 
     assert captured_params["query"] == "letsdo API"
 
@@ -2878,40 +2878,3 @@ def test_dependency_plan_persistence_payload_roundtrip_includes_provider_fields(
     assert restored.items[0].edge_kind == "required"
     assert restored.advisory_items[0].decision_source == "optional:advisory_default_disabled"
     assert restored.advisory_items[0].expected_hash == "b" * 64
-
-
-def test_migrate_online_dependency_install_plan_payload_recovers_missing_graph_edges() -> None:
-    legacy_payload = {
-        "schema_version": 1,
-        "plan_source": "local_update_review",
-        "root_project_id": "root-proj",
-        "root_project_name": "Root Mod",
-        "root_target_version_id": "root-ver",
-        "items": [
-            {
-                "project_id": "AANobbMI",
-                "project_name": "Sodium",
-                "version_id": "ver-1",
-                "version_name": "1.0.0",
-                "filename": "sodium.jar",
-                "download_url": "https://cdn.example/sodium.jar",
-                "required_by": ["Root Mod"],
-                "enabled": True,
-                "is_optional": False,
-            }
-        ],
-        "advisory_items": [],
-        "unresolved_required": [],
-        "notes": [],
-    }
-
-    migrated, state = dependency_serializer_module.migrate_online_dependency_install_plan_payload(legacy_payload)
-
-    assert migrated is not None
-    assert state == "migrated"
-    assert isinstance(migrated.get("graph_edges"), list)
-    assert migrated["graph_edges"][0]["edge"] == "required"
-    assert migrated["graph_edges"][0]["depth"] == 1
-    valid, reason = dependency_serializer_module.validate_online_dependency_install_plan_payload(migrated)
-    assert valid is True
-    assert reason == "ok"

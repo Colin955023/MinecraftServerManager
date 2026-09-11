@@ -11,15 +11,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from shiboken6 import isValid as shiboken_is_valid
 
 from src.utils import OperationCancelledError, RuntimePaths, current_work_token
-
-shiboken_is_valid: Callable[[Any], bool] | None
-
-try:
-    from shiboken6 import isValid as shiboken_is_valid
-except ImportError:
-    shiboken_is_valid = None
 
 _dispatcher: _UiDispatcher | None = None
 _dispatcher_lock = threading.Lock()
@@ -135,16 +129,9 @@ def is_qobject_alive(obj: Any) -> bool:
     if obj is None:
         return False
 
-    if shiboken_is_valid is not None:
-        try:
-            return bool(shiboken_is_valid(obj))
-        except Exception:
-            return False
     try:
-        if isinstance(obj, QtCore.QObject):
-            obj.objectName()
-        return True
-    except RuntimeError:
+        return bool(shiboken_is_valid(obj)) if isinstance(obj, QtCore.QObject) else True
+    except RuntimeError, TypeError:
         return False
 
 

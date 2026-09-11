@@ -54,12 +54,7 @@ from .review_grouping import (
     count_online_install_review_groups,
     get_review_group_specs,
 )
-from .review_prompts import (
-    build_local_update_execution_prompt,
-    build_non_official_source_confirmation_prompt,
-    build_online_install_execution_prompt,
-    collect_non_official_source_warning_messages,
-)
+from .review_prompts import ReviewPrompts
 from .review_selection import (
     collect_review_entry_selected_overrides,
     count_selected_runnable_entries,
@@ -129,9 +124,7 @@ class ModReviewWorkflow:
         self._mod_planning = mod_planning
         self._server = server
         self._installed_mods = deepcopy(installed_mods)
-        self._telemetry = (
-            telemetry if telemetry is not None else {"checked": 0, "migrated": 0, "replayed": 0, "fallback_rebuild": 0}
-        )
+        self._telemetry = telemetry if telemetry is not None else {"checked": 0, "replayed": 0, "fallback_rebuild": 0}
         self._snapshot_store = (
             LocalReviewSnapshotStore(mod_manager, self._telemetry) if mod_manager is not None else None
         )
@@ -243,7 +236,7 @@ class ModReviewWorkflow:
                 changelog=str(getattr(pending.version, "changelog", "") or ""),
             )
             entry.warning_messages = dedupe_review_messages(
-                [*warnings, *collect_non_official_source_warning_messages(entry, selected_only=True)]
+                [*warnings, *ReviewPrompts.collect_non_official_source_warning_messages(entry, selected_only=True)]
             )
             entries.append(entry)
             if entry.actionable:
@@ -340,7 +333,9 @@ class ModReviewWorkflow:
                 date_published=str(getattr(target_version, "date_published", "") or "") if target_version else "",
                 changelog=str(getattr(target_version, "changelog", "") or "") if target_version else "",
             )
-            entry.warning_messages = collect_non_official_source_warning_messages(entry, selected_only=True)
+            entry.warning_messages = ReviewPrompts.collect_non_official_source_warning_messages(
+                entry, selected_only=True
+            )
             entries.append(entry)
             if cached_plan is None and self._snapshot_store:
                 self._snapshot_store.save(
@@ -397,8 +392,6 @@ class OnlineReviewSession:
                 count_segments=((counts.get("advisory", 0), "建議確認"),),
                 blocked_count=counts.get("blocked", 0),
                 blocked_label="待處理",
-                migrated_snapshot_count=self._workflow._telemetry.get("migrated", 0),
-                migrated_snapshot_label="快照自動遷移",
             ),
             overview=format_review_overview_text(
                 entries,
@@ -482,8 +475,10 @@ class OnlineReviewSession:
             context_stamp=self._workflow.context_stamp,
             steps=tuple(steps),
             root_keys=tuple(root_keys),
-            confirmation_prompt=build_online_install_execution_prompt(entries) or "",
-            source_confirmation_prompt=build_non_official_source_confirmation_prompt(actionable, action_label="安裝"),
+            confirmation_prompt=ReviewPrompts.build_online_install_execution_prompt(entries) or "",
+            source_confirmation_prompt=ReviewPrompts.build_non_official_source_confirmation_prompt(
+                actionable, action_label="安裝"
+            ),
             skipped_text="\n略過項目：\n- " + "\n- ".join(skipped) if skipped else "",
             completion_notes=completion_notes,
             unselected_count=counts.get("unselected", 0),
@@ -506,6 +501,17 @@ class LocalReviewSession:
         self._update_plan = update_plan
         self._scope_text = scope_text
         self._entries = entries
+
+    def replace_plan(self, new_plan: LocalModUpdatePlan) -> None:
+        """
+        以重新查詢的更新計畫替換目前 session 內容並重新建立 entries
+
+        Args:
+            new_plan: 重新查詢產生的本地更新計畫
+        """
+        plan = deepcopy(new_plan)
+        self._update_plan = plan
+        self._entries = tuple(self._workflow._prepare_local_entries(plan))
 
     @property
     def empty(self) -> bool:
@@ -545,7 +551,6 @@ class LocalReviewSession:
                 ),
                 blocked_count=counts["blocked"],
                 blocked_label="阻擋",
-                migrated_snapshot_count=self._workflow._telemetry.get("migrated", 0),
             ),
             overview=format_review_overview_text(entries, nodes, action_label="更新", global_notes=notes),
             task_nodes=tuple(_freeze_node(node) for node in nodes),
@@ -702,8 +707,10 @@ class LocalReviewSession:
             context_stamp=self._workflow.context_stamp,
             steps=tuple(steps),
             root_keys=tuple(root_keys),
-            confirmation_prompt=build_local_update_execution_prompt(entries) or "",
-            source_confirmation_prompt=build_non_official_source_confirmation_prompt(actionable, action_label="更新"),
+            confirmation_prompt=ReviewPrompts.build_local_update_execution_prompt(entries) or "",
+            source_confirmation_prompt=ReviewPrompts.build_non_official_source_confirmation_prompt(
+                actionable, action_label="更新"
+            ),
             skipped_text="\n略過項目：\n- " + "\n- ".join(skipped) if skipped else "",
             completion_notes=completion_notes,
             unselected_count=len(unselected),

@@ -27,9 +27,6 @@ class _FakeProcess:
         self.running = True
         self.return_code = None
 
-    def wait_for_started(self, timeout_ms: int) -> bool:
-        return self.running and timeout_ms >= 0
-
     def is_running(self) -> bool:
         return self.running
 

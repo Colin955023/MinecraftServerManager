@@ -259,7 +259,10 @@ def test_installer_checksum_logs_do_not_include_sensitive_url(monkeypatch) -> No
         )
     }
     messages: list[str] = []
-    fake_logger = SimpleNamespace(info=messages.append, debug=messages.append)
+    fake_logger = SimpleNamespace(
+        info=messages.append,
+        debug=lambda message, *args: messages.append(message % args if args else message),
+    )
     attempts = 0
 
     def fetch_checksum(*_args, **_kwargs):
@@ -350,3 +353,36 @@ def test_quilt_installer_uses_prevalidated_server_without_download_flag() -> Non
     )
 
     assert "--download-server" not in args
+
+
+def test_sort_version_dict_preserves_all_versions_descending() -> None:
+    raw_dict = {
+        "1.20.1": [
+            "47.1.0",
+            "47.2.0",
+            "47.3.0",
+            "47.3.29",
+            "47.0.1",
+            "47.3.1",
+            "47.2.19",
+        ]
+    }
+    sorted_dict = LoaderManager._sort_version_dict(raw_dict)
+    assert len(sorted_dict["1.20.1"]) == 7
+    assert sorted_dict["1.20.1"][0] == "47.3.29"
+    assert "47.3.29" in sorted_dict["1.20.1"]
+    assert "47.0.1" in sorted_dict["1.20.1"]
+
+
+def test_filter_quilt_versions_preserves_and_sorts_all_stable_versions() -> None:
+    from src.core.loader.loader_adapters import filter_quilt_versions
+
+    items = [
+        {"version": "0.20.0", "build": 1, "stable": True},
+        {"version": "0.27.0-beta.1", "build": 5, "stable": False},
+        {"version": "0.26.0", "build": 3, "stable": True},
+        {"version": "0.25.0", "build": 2, "stable": True},
+    ]
+    filtered = filter_quilt_versions(items)
+    versions = [item["version"] for item in filtered]
+    assert versions == ["0.26.0", "0.25.0", "0.20.0"]

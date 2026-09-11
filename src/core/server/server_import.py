@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
-import shutil
 import stat
 import time
 import uuid
@@ -39,7 +37,9 @@ from src.utils import (
     HashUtils,
     ImportCancelledError,
     MemoryUtils,
+    OperationError,
     ServerCommands,
+    SystemUtils,
     atomic_write_bytes,
     atomic_write_json,
     copy_dir,
@@ -51,6 +51,8 @@ from src.utils import (
     list_bounded_directory,
     move_within,
     open_bounded_zip,
+    open_regular_file,
+    open_regular_file_for_write,
     read_bytes_file,
     read_json,
     resolve_stable_directory,
@@ -62,6 +64,7 @@ from src.utils import (
 
 from .server_crud import ServerConfigChangeSet, ServerCRUD
 from .server_inspector import ServerInspector
+from .server_properties_migration import ServerPropertiesMigrationService
 
 logger = get_logger().bind(component="ServerImport")
 
@@ -290,6 +293,7 @@ class ServerImportService:
         *,
         progress_callback: ProgressCallback | None = None,
         cancel_check: CancelCheck | None = None,
+        apply_properties_migration: bool = False,
     ) -> ServerImportResult:
         """
         執行單一候選的準備、提交與失敗補償
@@ -298,6 +302,7 @@ class ServerImportService:
             inspection: 由本服務產生的不可變候選
             progress_callback: 接收百分比與狀態文字的選用回呼
             cancel_check: 回傳 True 時要求安全取消的選用回呼
+            apply_properties_migration: 是否自動遷移舊版 server.properties 設定
 
         Returns:
             明確區分完成、略過、取消與失敗的結果
@@ -306,7 +311,12 @@ class ServerImportService:
         if not inspection.committable:
             return ServerImportResult("skipped", "候選有名稱或路徑衝突", inspection.name, warnings=inspection.warnings)
         with self._lock:
-            return self._execute_locked(inspection, progress_callback, cancel)
+            return self._execute_locked(
+                inspection,
+                progress_callback,
+                cancel,
+                apply_properties_migration=apply_properties_migration,
+            )
 
     def execute_batch(
         self,
@@ -337,10 +347,13 @@ class ServerImportService:
         inspection: ServerImportInspection,
         progress_callback: ProgressCallback | None,
         cancel_check: CancelCheck,
+        *,
+        apply_properties_migration: bool = False,
     ) -> ServerImportResult:
         staging = self._root / f".msm-import-{inspection.transaction_id}.staging"
         work_path = inspection.source_path
         moved_to_final = False
+        source_copy: Path | None = None
         registered = False
         script_changed = False
         registry_snapshot = self.server_crud.snapshot()
@@ -355,13 +368,17 @@ class ServerImportService:
                 staging.mkdir(exist_ok=False)
             self._revalidate(inspection, previous)
             self._check_cancel(cancel_check)
+            if inspection.source_kind == "in_place" and apply_properties_migration:
+                self._apply_properties_migration(work_path)
             if inspection.source_kind != "in_place":
                 phase = "materialize"
                 self._check_disk_space(inspection)
                 self._write_marker(staging, inspection, "materializing")
                 if inspection.source_kind == "archive":
+                    source_copy = self._materialize_verified_archive(inspection, cancel_check)
+                    self._check_archive_disk_space(source_copy)
                     safe_extract_zip(
-                        inspection.source_path,
+                        source_copy,
                         staging,
                         progress_callback=lambda done, total: self._emit_units(
                             progress_callback, done, total, 5, 65, "正在解壓縮伺服器..."
@@ -382,10 +399,12 @@ class ServerImportService:
                     else None,
                     cancel_check=cancel_check,
                 ):
-                    raise RuntimeError("複製伺服器資料夾失敗")
+                    raise OperationError("複製伺服器資料夾失敗")
                 if inspection.manifest is not None:
                     self._validate_manifest_hashes(staging, inspection.manifest)
                 work_path = staging
+                if apply_properties_migration:
+                    self._apply_properties_migration(work_path)
                 active = self._inspect_directory(
                     work_path,
                     inspection.name,
@@ -397,7 +416,7 @@ class ServerImportService:
                     build_manifest=False,
                 )
                 if not active.committable:
-                    raise RuntimeError("staging 內容不是有效的 Minecraft 伺服器")
+                    raise OperationError("staging 內容不是有效的 Minecraft 伺服器")
             phase = "prepare_script"
             self._check_cancel(cancel_check)
             self._emit(progress_callback, 72, "正在準備受管啟動腳本...")
@@ -415,7 +434,7 @@ class ServerImportService:
                 if previous_script_existed and not atomic_write_bytes(
                     work_path / self._BACKUP_NAME, previous_script or b""
                 ):
-                    raise RuntimeError("無法保存既有啟動腳本快照")
+                    raise OperationError("無法保存既有啟動腳本快照")
                 self._write_marker(work_path, inspection, "script_preparing")
             override = (
                 ServerCommands.ensure_nogui_in_command(
@@ -429,7 +448,7 @@ class ServerImportService:
                 java_command_override=override,
                 launch_target=active.server.launch_target.value,
             ):
-                raise RuntimeError("建立受管啟動腳本失敗")
+                raise OperationError("建立受管啟動腳本失敗")
             script_changed = True
             self._write_marker(work_path, inspection, "prepared")
 
@@ -450,7 +469,7 @@ class ServerImportService:
                 expected_revision=registry_snapshot.revision,
             )
             if not commit_result.success:
-                raise RuntimeError(commit_result.message or "儲存 servers_config.json 失敗")
+                raise OperationError(commit_result.message or "儲存 servers_config.json 失敗")
             registered = True
             self._write_marker(work_path, inspection, "committed")
             self._remove_transaction_files(work_path)
@@ -508,6 +527,52 @@ class ServerImportService:
                 diagnostic_id=diagnostic_id,
                 cleanup_complete=cleanup,
             )
+        finally:
+            if source_copy is not None:
+                delete_within(self._root, source_copy)
+
+    def _materialize_verified_archive(
+        self,
+        inspection: ServerImportInspection,
+        cancel_check: CancelCheck,
+    ) -> Path:
+        """將已核准的 ZIP 固定為受管理的私有副本"""
+        source_copy = self._root / f".msm-import-{inspection.transaction_id}.source.zip"
+        hasher = HashUtils.new_hasher("sha256")
+        if hasher is None:
+            raise ValueError("無法建立 ZIP 雜湊器")
+        total = 0
+        try:
+            with (
+                open_regular_file(inspection.source_path) as source,
+                open_regular_file_for_write(source_copy) as target,
+            ):
+                while chunk := source.read(1024 * 1024):
+                    self._check_cancel(cancel_check)
+                    total += len(chunk)
+                    if total > SAFE_ZIP_MAX_ARCHIVE_BYTES:
+                        raise ValueError("匯入 ZIP 超過安全大小上限")
+                    hasher.update(chunk)
+                    target.write(chunk)
+                target.flush()
+            if hasher.hexdigest() != inspection.server.revision:
+                raise ValueError("匯入來源已在檢查後變更，請重新檢查候選")
+            return source_copy
+        except Exception:
+            delete_within(self._root, source_copy)
+            raise
+
+    def _check_archive_disk_space(self, source: Path) -> None:
+        with open_bounded_zip(source) as archive:
+            required = 0
+            for info in archive.infolist():
+                if info.is_dir():
+                    continue
+                required += max(0, int(info.file_size))
+                if required > SAFE_DIRECTORY_MAX_TOTAL_BYTES:
+                    raise ValueError(f"匯入內容解壓後大小超過安全上限 {SAFE_DIRECTORY_MAX_TOTAL_BYTES} bytes")
+        if SystemUtils.get_free_disk_bytes(self._root) < required:
+            raise OSError(f"可用磁碟空間不足；至少需要 {required} bytes")
 
     def recover_orphans(self) -> None:
         """清理 crash staging，並完成或回復帶 marker 的實例"""
@@ -521,6 +586,11 @@ class ServerImportService:
                     continue
                 if not is_reparse_point(staging) and staging.is_dir():
                     delete_within(self._root, staging)
+            for source_copy in root_entries:
+                if not (source_copy.name.startswith(".msm-import-") and source_copy.name.endswith(".source.zip")):
+                    continue
+                if not is_reparse_point(source_copy) and source_copy.is_file():
+                    delete_within(self._root, source_copy)
             for candidate in root_entries:
                 marker = candidate / self._MARKER_NAME
                 if is_reparse_point(candidate) or not candidate.is_dir() or not marker.is_file():
@@ -768,7 +838,7 @@ class ServerImportService:
     @classmethod
     def _build_directory_manifest(cls, path: Path) -> ImportManifest | None:
         """建立可供複製階段重用的匯入來源清單"""
-        digest = hashlib.sha256()
+        digest = HashUtils.new_hasher("sha256")
         entries: list[ImportManifestEntry] = []
         total_bytes = 0
         try:
@@ -870,7 +940,10 @@ class ServerImportService:
         if inspection.source_kind == "archive":
             current_revision = self._archive_revision(inspection.source_path)
         elif inspection.source_kind == "directory":
-            current_revision = inspection.server.revision if inspection.manifest is not None else ""
+            current_manifest = self._build_directory_manifest(inspection.source_path)
+            if current_manifest is None:
+                raise ValueError("匯入來源無法重新建立內容完整性快照")
+            current_revision = current_manifest.revision
         else:
             current_revision = self.server_inspector.inspect(
                 inspection.source_path,
@@ -882,46 +955,40 @@ class ServerImportService:
     def _check_disk_space(self, inspection: ServerImportInspection) -> None:
         source = inspection.source_path
         if source.is_file():
-            with open_bounded_zip(source) as archive:
-                required = 0
-                for info in archive.infolist():
-                    if info.is_dir():
-                        continue
-                    required += max(0, int(info.file_size))
-                    if required > SAFE_DIRECTORY_MAX_TOTAL_BYTES:
-                        raise ValueError(f"匯入內容解壓後大小超過安全上限 {SAFE_DIRECTORY_MAX_TOTAL_BYTES} bytes")
-        else:
-            required = inspection.manifest.total_bytes if inspection.manifest is not None else 0
-            file_count = 0
-            try:
-                if inspection.manifest is not None:
-                    file_count = len(inspection.manifest.entries)
-                else:
-                    for root_path, _dirs, files in walk_bounded_tree(source):
-                        for name in files:
-                            candidate = root_path / name
-                            metadata = candidate.stat(follow_symlinks=False)
-                            if not stat.S_ISREG(metadata.st_mode):
-                                raise ValueError(f"匯入來源不是一般檔案：{candidate.name}")
-                            file_count += 1
-                            if file_count > SAFE_DIRECTORY_MAX_FILES:
-                                raise ValueError(f"匯入來源檔案數超過安全上限 {SAFE_DIRECTORY_MAX_FILES}")
-                            required += max(0, metadata.st_size)
-                            if required > SAFE_DIRECTORY_MAX_TOTAL_BYTES:
-                                raise ValueError(f"匯入內容大小超過安全上限 {SAFE_DIRECTORY_MAX_TOTAL_BYTES} bytes")
-            except (OSError, ValueError) as e:
-                raise ValueError(f"匯入來源不可安全巡覽：{e}") from e
-        if shutil.disk_usage(self._root).free < required:
+            self._check_archive_disk_space(source)
+            return
+        required = inspection.manifest.total_bytes if inspection.manifest is not None else 0
+        file_count = 0
+        try:
+            if inspection.manifest is not None:
+                file_count = len(inspection.manifest.entries)
+            else:
+                for root_path, _dirs, files in walk_bounded_tree(source):
+                    for name in files:
+                        candidate = root_path / name
+                        metadata = candidate.stat(follow_symlinks=False)
+                        if not stat.S_ISREG(metadata.st_mode):
+                            raise ValueError(f"匯入來源不是一般檔案：{candidate.name}")
+                        file_count += 1
+                        if file_count > SAFE_DIRECTORY_MAX_FILES:
+                            raise ValueError(f"匯入來源檔案數超過安全上限 {SAFE_DIRECTORY_MAX_FILES}")
+                        required += max(0, metadata.st_size)
+                        if required > SAFE_DIRECTORY_MAX_TOTAL_BYTES:
+                            raise ValueError(f"匯入內容大小超過安全上限 {SAFE_DIRECTORY_MAX_TOTAL_BYTES} bytes")
+        except (OSError, ValueError) as e:
+            raise ValueError(f"匯入來源不可安全巡覽：{e}") from e
+        if SystemUtils.get_free_disk_bytes(self._root) < required:
             raise OSError(f"可用磁碟空間不足；至少需要 {required} bytes")
 
-    @staticmethod
-    def _validate_manifest_hashes(staging: Path, manifest: ImportManifest) -> None:
-        """驗證複製後的安全關鍵檔案內容"""
+    @classmethod
+    def _validate_manifest_hashes(cls, staging: Path, manifest: ImportManifest) -> None:
+        """驗證複製後所有具備雜湊的檔案內容"""
         for entry in manifest.entries:
             if not entry.sha256:
                 continue
+            target_file = staging / entry.relative_path
             digest = HashUtils.compute_file_hash_sync(
-                staging / entry.relative_path,
+                target_file,
                 "sha256",
                 max_bytes=SAFE_HASH_FILE_MAX_BYTES,
                 allowed_root=staging,
@@ -937,8 +1004,9 @@ class ServerImportService:
         for item in list_bounded_directory(wrapper):
             destination = staging / item.name
             if destination.exists() or not move_within(staging, item, destination):
-                raise RuntimeError(f"攤平 ZIP 單層目錄失敗：{item.name}")
-        wrapper.rmdir()
+                raise OperationError(f"攤平 ZIP 單層目錄失敗：{item.name}")
+        if not delete_within(staging, wrapper):
+            raise OperationError("攤平 ZIP 單層目錄後無法安全清除空資料夾")
 
     def _write_marker(self, directory: Path, inspection: ServerImportInspection, state: str) -> None:
         if not atomic_write_json(
@@ -958,7 +1026,7 @@ class ServerImportService:
                 },
             },
         ):
-            raise RuntimeError("無法寫入匯入 transaction marker")
+            raise OperationError("無法寫入匯入 transaction marker")
 
     @staticmethod
     def _config_matches_marker(config: ServerConfig | None, target: Any) -> bool:
@@ -1024,6 +1092,18 @@ class ServerImportService:
                 logger.warning(f"無法移除匯入交易檔案 {name}: {e}")
 
     @staticmethod
+    def _apply_properties_migration(work_path: Path) -> None:
+        """
+        若存在 server.properties 且有遷移項目，套用遷移並建立備份
+        """
+        try:
+            plan = ServerPropertiesMigrationService.inspect_source(work_path)
+            if plan is not None and plan.needs_migration:
+                ServerPropertiesMigrationService.apply_migration_to_directory(work_path, plan, create_backup=True)
+        except Exception as e:
+            logger.warning(f"套用 server.properties 遷移失敗: {e}")
+
+    @staticmethod
     def _emit(callback: ProgressCallback | None, percent: int, message: str) -> None:
         if callback is not None:
             try:
@@ -1063,8 +1143,7 @@ class ServerImportService:
                 str(inspection.final_path),
                 str(self._root),
             )
-            issues_dir = self._root / ".issues"
-            issues_dir.mkdir(exist_ok=True)
+            issues_dir = resolve_stable_directory(self._root / ".issues", create=True)
             atomic_write_json(
                 issues_dir / f"{diagnostic_id}.json",
                 {

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import html
 import re
-import shutil
 import sys
 import tempfile
 import time
@@ -22,6 +21,7 @@ from src.utils import (
     SubprocessUtils,
     UpdateParsing,
     atomic_write_text,
+    delete_within,
     get_logger,
 )
 
@@ -207,10 +207,10 @@ exit /b 1
                     try:
                         if temp_path.exists():
                             if temp_path.is_file():
-                                temp_path.unlink(missing_ok=True)
+                                delete_within(temp_path.parent, temp_path)
                                 logger.debug(f"已刪除暫存檔案: {temp_path}")
                             elif temp_path.is_dir():
-                                shutil.rmtree(temp_path, ignore_errors=True)
+                                delete_within(temp_path.parent, temp_path)
                                 logger.debug(f"已刪除暫存目錄: {temp_path}")
                     except Exception as e:
                         logger.debug(f"清理暫存檔案時發生錯誤 {temp_path}: {e}")

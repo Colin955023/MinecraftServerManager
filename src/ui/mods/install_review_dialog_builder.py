@@ -149,6 +149,12 @@ class InstallReviewDialogBuilder:
             else:
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
 
+        def _on_section_double_clicked(logical_index: int) -> None:
+            header.setSectionResizeMode(logical_index, QHeaderView.ResizeMode.Interactive)
+            tree.resizeColumnToContents(logical_index)
+
+        header.sectionDoubleClicked.connect(_on_section_double_clicked)
+
         layout = tree_container.layout()
         if layout:
             layout.addWidget(tree)

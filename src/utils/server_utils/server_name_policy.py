@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 MAX_SERVER_NAME_LENGTH = 100
@@ -57,7 +58,7 @@ def validate_server_name(name: str, *, max_length: int = MAX_SERVER_NAME_LENGTH)
         raise ValueError("伺服器名稱不可包含路徑片段")
     if any(ord(char) < 32 or char in _WINDOWS_FORBIDDEN_CHARACTERS for char in normalized):
         raise ValueError("伺服器名稱包含 Windows 不允許的字元")
-    if normalized.endswith((".", " ")):
+    if os.path.isreserved(normalized) or normalized.endswith((".", " ")):
         raise ValueError("伺服器名稱不可用空格或句點結尾")
 
     normalized_casefold = normalized.casefold()

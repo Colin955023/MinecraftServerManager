@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from itertools import batched
+from operator import attrgetter
 from typing import Any
 from urllib.parse import quote
 
@@ -391,7 +392,7 @@ def _search_mods(
     mods = [_map_hit_to_online_mod(hit) for hit in response.get("hits", []) if isinstance(hit, dict)]
     mods = [mod for mod in mods if _is_server_compatible_online_mod(mod)]
     if sort_by == "downloads":
-        mods.sort(key=lambda item: item.download_count, reverse=True)
+        mods.sort(key=attrgetter("download_count"), reverse=True)
     elif sort_by == "name":
         mods.sort(key=lambda item: item.name.lower())
     return mods

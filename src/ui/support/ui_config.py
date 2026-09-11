@@ -14,7 +14,7 @@ from PySide6 import QtGui
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QWidget
-from qfluentwidgets import ComboBox, MSFluentWindow, Theme, isDarkTheme, setTheme, setThemeColor
+from qfluentwidgets import ComboBox, Theme, isDarkTheme, setTheme, setThemeColor
 
 from .qt_runtime import ensure_application, is_qobject_alive
 from .ui_tokens import Colors, Sizes
@@ -66,21 +66,39 @@ def themed_surface_stylesheet(object_name: str) -> str:
 class _TableHeaderScrollFilter(QObject):
     """確保表格/樹狀列表的垂直捲軸起始於表頭正下方，不突出版頭"""
 
+    def __init__(self, table: QWidget | None = None):
+        super().__init__(table)
+        self.table = table
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         res = super().eventFilter(watched, event)
-        if (
-            event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.LayoutRequest)
-            and isinstance(watched, QWidget)
-            and hasattr(watched, "header")
-        ):
-            header = watched.header()
-            header_h = header.height() if header and header.isVisible() else 0
-            delegate = getattr(watched, "scrollDelagate", None)
-            vbar = getattr(delegate, "vScrollBar", None) if delegate else None
-            if vbar is not None and is_qobject_alive(vbar):
-                vbar.move(watched.width() - 13, header_h + 1)
-                vbar.resize(12, max(0, watched.height() - header_h - 2))
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.LayoutRequest):
+            target = self.table if self.table is not None else watched
+            if isinstance(target, QWidget):
+                self.adjust_scrollbar(target)
         return res
+
+    @staticmethod
+    def adjust_scrollbar(table: QWidget) -> None:
+        if not is_qobject_alive(table):
+            return
+        delegate = getattr(table, "scrollDelagate", None)
+        vbar = getattr(delegate, "vScrollBar", None) if delegate else None
+        if vbar is None or not is_qobject_alive(vbar):
+            return
+        vp_fn = getattr(table, "viewport", None)
+        viewport = vp_fn() if callable(vp_fn) else None
+        if viewport and viewport.isVisible():
+            vp_geo = viewport.geometry()
+            if vp_geo.isValid() and vp_geo.height() > 0:
+                vbar.move(table.width() - 13, vp_geo.top() + 1)
+                vbar.resize(12, max(0, vp_geo.height() - 2))
+                return
+        hdr_fn = getattr(table, "header", None)
+        header = hdr_fn() if callable(hdr_fn) else None
+        header_h = (header.height() or header.sizeHint().height() or 32) if header and not header.isHidden() else 0
+        vbar.move(table.width() - 13, header_h + 1)
+        vbar.resize(12, max(0, table.height() - header_h - 2))
 
 
 def apply_table_header_style(table: Any) -> None:
@@ -116,9 +134,44 @@ def apply_table_header_style(table: Any) -> None:
     )
     if header.styleSheet() != stylesheet:
         header.setStyleSheet(stylesheet)
-    if isinstance(table, QObject) and not bool(table.property("_msm_header_scroll_filtered")):
-        table.installEventFilter(_TableHeaderScrollFilter())
+    if isinstance(table, QWidget) and not bool(table.property("_msm_header_scroll_filtered")):
+        flt = _TableHeaderScrollFilter(table)
+        table.installEventFilter(flt)
         table.setProperty("_msm_header_scroll_filtered", True)
+        table.setProperty("_msm_header_scroll_filter", flt)
+        if hasattr(table, "header") and table.header():
+            table.header().installEventFilter(flt)
+        if hasattr(table, "viewport") and table.viewport():
+            table.viewport().installEventFilter(flt)
+
+    delegate = getattr(table, "scrollDelagate", None)
+    vbar = getattr(delegate, "vScrollBar", None) if delegate else None
+    if vbar is not None and not bool(vbar.property("_msm_header_pos_patched")):
+
+        def _make_adjust_pos(scroll_bar, parent_table):
+            def _adjust(size):
+                vp_fn = getattr(parent_table, "viewport", None)
+                viewport = vp_fn() if callable(vp_fn) else None
+                if viewport and viewport.isVisible():
+                    vp_geo = viewport.geometry()
+                    if vp_geo.isValid() and vp_geo.height() > 0:
+                        scroll_bar.move(size.width() - 13, vp_geo.top() + 1)
+                        scroll_bar.resize(12, max(0, vp_geo.height() - 2))
+                        return
+                hdr_fn = getattr(parent_table, "header", None)
+                hdr = hdr_fn() if callable(hdr_fn) else None
+                hdr_h = (hdr.height() or hdr.sizeHint().height() or 32) if hdr and not hdr.isHidden() else 0
+                scroll_bar.resize(12, max(0, size.height() - hdr_h - 2))
+                scroll_bar.move(size.width() - 13, hdr_h + 1)
+
+            return _adjust
+
+        vbar._adjustPos = _make_adjust_pos(vbar, table)
+        vbar.setProperty("_msm_header_pos_patched", True)
+        hdr = table.header() if hasattr(table, "header") else None
+        hdr_h = (hdr.height() or hdr.sizeHint().height() or 32) if hdr and not hdr.isHidden() else 0
+        vbar.move(table.width() - 13, hdr_h + 1)
+        vbar.resize(12, max(0, table.height() - hdr_h - 2))
 
 
 def center_window(window: QWidget, parent: QWidget | None = None) -> None:
@@ -129,7 +182,7 @@ def center_window(window: QWidget, parent: QWidget | None = None) -> None:
         window: 要置中的視窗
         parent: 父視窗，若未指定則使用 window.parentWidget()
     """
-    if window is None:
+    if window is None or window.isMaximized() or window.isFullScreen():
         return
     try:
         window.adjustSize()
@@ -167,10 +220,14 @@ class _DialogCenteringFilter(QObject):
             event.type() == QEvent.Type.Show
             and isinstance(watched, QWidget)
             and watched.isWindow()
-            and isinstance(watched, MSFluentWindow)
+            and not bool(watched.property("_centered"))
             and not bool(watched.property("_primary_window"))
         ):
-            center_window(watched, watched.parentWidget())
+            from src.ui import ModalMSFluentWindow
+
+            if isinstance(watched, ModalMSFluentWindow):
+                watched.setProperty("_centered", True)
+                center_window(watched, watched.parentWidget())
         return super().eventFilter(watched, event)
 
 

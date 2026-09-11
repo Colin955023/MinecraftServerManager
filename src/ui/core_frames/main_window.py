@@ -29,6 +29,7 @@ from src.core import (
     ServerCRUD,
     ServerImportService,
     ServerInspector,
+    ServerPropertiesMigrationService,
     ServerPropertiesStore,
     ServerRuntime,
 )
@@ -56,6 +57,7 @@ from src.utils import (
     ConfigurationError,
     SettingsManager,
     get_logger,
+    resolve_stable_directory,
     shutdown_shared_manager,
     validate_server_name,
 )
@@ -138,6 +140,8 @@ class MainWindow(FluentWindow):
         widget = self.stackedWidget.widget(index)
         if widget is getattr(self, "manage_server_frame", None) and self.manage_server_frame:
             QtCore.QTimer.singleShot(60, self.manage_server_frame.refresh_servers)
+        elif widget is getattr(self, "mod_frame", None) and hasattr(self, "mod_frame_controller"):
+            QtCore.QTimer.singleShot(60, self.mod_frame_controller.on_page_shown)
 
     def set_servers_root(self, new_root: str | None = None) -> str:
         """
@@ -451,9 +455,7 @@ class MainWindow(FluentWindow):
         """開啟伺服器資料夾"""
         self._restore_current_navigation_item()
         folder = self.servers_root
-        folder_path = Path(folder)
-        if not folder_path.exists():
-            folder_path.mkdir(parents=True, exist_ok=True)
+        folder_path = resolve_stable_directory(Path(folder), create=True)
         try:
             UIUtils.open_external(str(folder_path))
         except Exception as e:
@@ -637,6 +639,22 @@ class MainWindow(FluentWindow):
 
     def _finalize_import(self, source_path: Path, server_name: str) -> None:
         """將 UI request 交給交易式 core 匯入 owner"""
+        apply_migration = False
+        try:
+            plan = ServerPropertiesMigrationService.inspect_source(source_path)
+            if plan is not None and plan.needs_migration:
+                summary = plan.summary()
+                res = UIUtils.ask_yes_no_cancel(
+                    "舊版設定遷移提示",
+                    f"伺服器設定檔 (server.properties) 包含舊版本格式或已廢棄項目：\n\n{summary}\n\n"
+                    "是否自動將設定遷移至新版標準？（系統將保留 .backup 備份原檔）",
+                    parent=self.root,
+                    show_cancel=False,
+                )
+                apply_migration = bool(res)
+        except Exception as e:
+            logger.warning(f"檢查 server.properties 遷移狀態失敗: {e}")
+
         progress_dialog = ProgressDialog(self.root, f"正在匯入 {server_name}...", show_cancel=False)
         progress_dialog.status_label.setText("正在檢查匯入內容，大型檔案可能需要較長時間，請稍候")
         progress_dialog.show()
@@ -654,6 +672,7 @@ class MainWindow(FluentWindow):
             return inspection, self.server_import.execute(
                 inspection,
                 progress_callback=progress_dialog.update_progress_event,
+                apply_properties_migration=apply_migration,
             )
 
         def _on_done(outcome: WorkOutcome) -> None:

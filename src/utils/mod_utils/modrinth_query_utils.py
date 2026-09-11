@@ -108,7 +108,7 @@ def normalize_mod_search_query(raw_query: str) -> str:
     normalized = re.sub("(?i)\\b(?:fabric|forge|loader)\\b", " ", normalized)
     normalized = re.sub("(?i)\\bmc\\s*\\d+(?:\\.\\d+){1,2}[a-z0-9.-]*\\b", " ", normalized)
     normalized = re.sub("\\b\\d+(?:\\.\\d+){1,3}[a-z0-9.-]*\\b", " ", normalized)
-    return re.sub("\\s+", " ", normalized).strip() or str(raw_query or "").strip()
+    return " ".join(normalized.split()) or str(raw_query or "").strip()
 
 
 __all__ = [

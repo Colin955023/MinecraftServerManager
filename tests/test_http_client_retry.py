@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import orjson
 import pytest
 
 import src.utils.network_utils.http_client as http_client_module
@@ -52,7 +53,7 @@ def test_fetch_json_response_retries_transport_error_raised_while_consuming_resp
         calls += 1
         return _response(200, content=b'{"ok":true}')
 
-    def _read_limited(_cls, response: httpx.Response, _max_bytes: int) -> bytes:
+    def _read_limited(_cls, response: httpx.Response, _max_bytes: int, _deadline: float) -> bytes:
         nonlocal reads
         reads += 1
         if reads == 1:
@@ -111,3 +112,22 @@ def test_non_idempotent_post_does_not_retry_retryable_status(monkeypatch) -> Non
 
     assert exc_info.value.response.status_code == 503
     assert calls == 1
+
+
+def test_send_stream_once_serializes_json_with_orjson_and_sets_content_type(monkeypatch) -> None:
+    captured: list[httpx.Request] = []
+
+    def _capture_request(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return _response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_capture_request))
+    monkeypatch.setattr(HTTPClient, "_validated_url_and_address", classmethod(lambda _cls, url: (url, "8.8.8.8")))
+    monkeypatch.setattr(HTTPClient, "_get_client", classmethod(lambda _cls: client))
+
+    response = HTTPClient._send_stream_once("POST", _TEST_URL, timeout=10, json_body={"中文": "值"})
+    response.close()
+    client.close()
+
+    assert captured[0].headers["Content-Type"] == "application/json"
+    assert captured[0].content == orjson.dumps({"中文": "值"})

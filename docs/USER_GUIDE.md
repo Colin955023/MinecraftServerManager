@@ -13,7 +13,7 @@
 - 選「是」：以 winget 安裝 Oracle JRE 8 或對應 Microsoft OpenJDK，並接受來源與套件授權。
 - 選「否」：自行安裝 JDK／JRE，再指定 Java 路徑。
 
-自動安裝需要 winget，可能出現 UAC、Microsoft Store 或來源提示。
+自動安裝需要 winget，可能出現 UAC、Microsoft Store 或來源提示；這是程式唯一可能要求提高權限或接受來源授權的操作。
 
 ## 快速開始
 

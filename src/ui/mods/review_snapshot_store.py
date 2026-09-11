@@ -7,12 +7,10 @@ from typing import Any
 
 from src.core import (
     deserialize_online_dependency_install_plan,
-    migrate_online_dependency_install_plan_payload,
     serialize_online_dependency_install_plan,
     validate_online_dependency_install_plan_payload,
 )
 
-from .constants import logger
 from .review_state import LocalUpdateReviewEntry
 
 
@@ -63,12 +61,11 @@ class LocalReviewSnapshotStore:
         file_path = Path(file_path_raw)
         review_metadata = self._manager.get_review_metadata(file_path) or {}
         review_metadata["dependency_plan_v2"] = snapshot
-        review_metadata.pop("dependency_plan_v1", None)
         self._manager.replace_review_metadata(file_path, review_metadata)
 
     def load(self, candidate: Any) -> tuple[Any | None, bool | None, set[tuple[str, str]] | None]:
         """
-        載入、必要時遷移並驗證候選的 dependency plan
+        載入並驗證候選的 dependency plan
 
         Args:
             candidate: 要比對 project/version identity 的更新候選
@@ -82,24 +79,9 @@ class LocalReviewSnapshotStore:
             return (None, None, None)
         review_metadata = self._manager.get_review_metadata(Path(file_path_raw)) or {}
         snapshot_raw = review_metadata.get("dependency_plan_v2")
-        loaded_legacy_slot = False
-        if not isinstance(snapshot_raw, dict):
-            snapshot_raw = review_metadata.get("dependency_plan_v1")
-            loaded_legacy_slot = isinstance(snapshot_raw, dict)
         if not isinstance(snapshot_raw, dict):
             return (None, None, None)
         self._record("checked")
-        migrated_snapshot, migration_state = migrate_online_dependency_install_plan_payload(snapshot_raw)
-        if migrated_snapshot is None:
-            self._record("fallback_rebuild")
-            return (None, None, None)
-        if migration_state == "migrated" or loaded_legacy_slot:
-            self._record("migrated")
-            review_metadata["dependency_plan_v2"] = migrated_snapshot
-            review_metadata.pop("dependency_plan_v1", None)
-            self._manager.replace_review_metadata(Path(file_path_raw), review_metadata)
-            logger.info(f"已遷移 dependency plan 快照並回寫：{file_path_raw}")
-            snapshot_raw = migrated_snapshot
         snapshot_valid, _snapshot_reason = validate_online_dependency_install_plan_payload(snapshot_raw)
         if not snapshot_valid:
             self._record("fallback_rebuild")

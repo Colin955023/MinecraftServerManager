@@ -8,7 +8,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.utils import SubprocessUtils
+from src.utils import SubprocessUtils, get_shared_manager
 
 
 class ProcessPort(Protocol):
@@ -18,7 +18,6 @@ class ProcessPort(Protocol):
     def pid(self) -> int: ...
 
     def start(self) -> None: ...
-    def wait_for_started(self, timeout_ms: int) -> bool: ...
     def is_running(self) -> bool: ...
     def returncode(self) -> int | None: ...
     def read_output(self, max_bytes: int) -> str: ...
@@ -44,7 +43,6 @@ class SubprocessProcessAdapter:
         self._on_output: Callable[[], None] | None = None
         self._on_finished: Callable[[int], None] | None = None
         self._on_error: Callable[[str], None] | None = None
-        self._reader: threading.Thread | None = None
 
     @property
     def pid(self) -> int:
@@ -54,6 +52,7 @@ class SubprocessProcessAdapter:
         """啟動子程序，並開始讀取輸出"""
         if self._process is not None:
             return
+        hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
         self._process = SubprocessUtils.popen_checked(
             self._command,
             cwd=str(Path(self._cwd)),
@@ -61,21 +60,9 @@ class SubprocessProcessAdapter:
             stdout=SubprocessUtils.PIPE,
             stderr=SubprocessUtils.STDOUT,
             bufsize=0,
+            **hidden_kwargs,
         )
-        self._reader = threading.Thread(target=self._read_loop, name=f"MSM-server-{self.pid}", daemon=True)
-        self._reader.start()
-
-    def wait_for_started(self, _timeout_ms: int) -> bool:
-        """
-        等待子程序啟動完成
-
-        Args:
-            _timeout_ms: 最長等待時間，單位為毫秒
-
-        Returns:
-            True 表示子程序已啟動，False 表示超時或子程序已退出
-        """
-        return self._process is not None and self._process.poll() is None
+        get_shared_manager().run(self._read_loop)
 
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None

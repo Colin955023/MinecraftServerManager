@@ -41,7 +41,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "TextState": (".support.ui_state", "TextState"),
     "UIUtils": (".support.ui_utils", "UIUtils"),
     "UIWorkScope": (".support.ui_work_scope", "UIWorkScope"),
-    "UpdateChecker": (".services.update_checker", "UpdateChecker"),
     "ValueState": (".support.qt_runtime", "ValueState"),
     "WorkOutcome": (".support.ui_work_scope", "WorkOutcome"),
     "apply_table_header_style": (".support.ui_config", "apply_table_header_style"),

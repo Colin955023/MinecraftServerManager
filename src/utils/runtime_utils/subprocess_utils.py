@@ -49,6 +49,23 @@ class SubprocessUtils:
         return hidden_kwargs
 
     @staticmethod
+    def _is_trusted_windows_app_alias(path: Path) -> bool:
+        """
+        判斷是否為受信任的 WindowsApps 執行別名 (如 winget.exe)
+        """
+        try:
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if not local_app_data:
+                return False
+            windows_apps = (Path(local_app_data) / "Microsoft" / "WindowsApps").resolve()
+            if path.name.lower() not in {"winget.exe"}:
+                return False
+            parent = path.parent.resolve()
+            return os.path.normcase(str(parent)) == os.path.normcase(str(windows_apps))
+        except Exception:
+            return False
+
+    @staticmethod
     def _validate_cmd(cmd: Iterable[str]) -> list[str]:
         if not isinstance(cmd, (list, tuple)):
             raise TypeError("cmd 必須是由字串組成的 list 或 tuple")
@@ -60,20 +77,22 @@ class SubprocessUtils:
             raise ValueError("cmd[0] 不得為空")
         p = Path(exe)
         if p.is_absolute() or os.sep in exe or (os.altsep is not None and os.altsep in exe):
-            if not p.is_file() or is_reparse_point(p):
+            if not p.is_file() or (is_reparse_point(p) and not SubprocessUtils._is_trusted_windows_app_alias(p)):
                 raise FileNotFoundError(f"執行檔路徑不是安全的一般檔案: {exe}")
             return cmd_list
         which = shutil.which(exe)
-        if which is None and exe.lower() == "winget":
+        if which is None and exe.lower() in ("winget", "winget.exe"):
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if local_app_data:
                 winget_path = Path(local_app_data).resolve() / "Microsoft" / "WindowsApps" / "winget.exe"
-                which = str(winget_path) if winget_path.is_file() and not is_reparse_point(winget_path) else None
+                which = str(winget_path) if winget_path.is_file() else None
 
         if which is None:
             raise FileNotFoundError(f"無法在 PATH 找到執行檔: {exe}")
         which_path = Path(which)
-        if not which_path.is_file() or is_reparse_point(which_path):
+        if not which_path.is_file() or (
+            is_reparse_point(which_path) and not SubprocessUtils._is_trusted_windows_app_alias(which_path)
+        ):
             raise FileNotFoundError(f"PATH 執行檔不是安全的一般檔案: {which}")
         cmd_list[0] = which
         return cmd_list

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import errno
-import hashlib
 import hmac
 import ipaddress
-import shutil
 import socket
 import ssl
 import tempfile
@@ -31,18 +29,21 @@ from src.utils import (
     GITHUB_OWNER,
     GITHUB_REPO,
     HashUtils,
-    HTTPJSONResponse,
     NetworkSecurityError,
     OperationCancelledError,
+    OperationError,
     OperationResult,
     ResponseTooLargeError,
     atomic_replace_file,
     current_work_token,
+    delete_within,
     format_bytes,
     get_logger,
+    open_regular_file_for_write,
+    resolve_stable_path,
 )
 
-from .http_models import JSONContainer
+from .http_models import HTTPJSONResponse, JSONContainer
 
 logger = get_logger().bind(component="HTTPClient")
 _PINNED_ADDRESS_EXTENSION = "codex_pinned_address"
@@ -209,7 +210,7 @@ class HTTPClient:
             except OSError as e:
                 raise NetworkSecurityError("URL hostname 無法解析") from e
 
-            addresses: list[str] = []
+            first_address = ""
             for result in resolved:
                 try:
                     candidate = str(result[4][0])
@@ -218,12 +219,11 @@ class HTTPClient:
                     continue
                 if not candidate_address.is_global:
                     raise NetworkSecurityError("URL hostname 解析至非公開位址") from None
-                normalized = str(candidate_address)
-                if normalized not in addresses:
-                    addresses.append(normalized)
-            if not addresses:
+                if not first_address:
+                    first_address = str(candidate_address)
+            if not first_address:
                 raise NetworkSecurityError("URL hostname 沒有可用的公開位址") from None
-            return addresses[0]
+            return first_address
 
         if not address.is_global:
             raise NetworkSecurityError("拒絕非公開 IP URL")
@@ -337,16 +337,27 @@ class HTTPClient:
         url: str,
         *,
         timeout: int,
+        deadline: float | None = None,
         headers: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
     ) -> httpx.Response:
         method = method.upper()
         current_url = url
-        current_headers = headers
+        current_headers = dict(headers or {})
+        current_headers.setdefault("Accept-Encoding", "identity")
+        content = None
+        if json_body is not None:
+            content = orjson.dumps(json_body)
+            current_headers.setdefault("Content-Type", "application/json")
 
         for redirect_count in range(cls.MAX_REDIRECTS + 1):
+            if deadline is not None:
+                cls._check_request_deadline(deadline)
             validated_url, pinned_address = cls._validated_url_and_address(current_url)
+            remaining_timeout = timeout
+            if deadline is not None:
+                remaining_timeout = max(1, min(timeout, int(deadline - time.monotonic())))
 
             client = cls._get_client()
             request = client.build_request(
@@ -354,8 +365,8 @@ class HTTPClient:
                 validated_url,
                 headers=current_headers,
                 params=params,
-                json=json_body,
-                timeout=cls._make_timeout(timeout),
+                content=content,
+                timeout=cls._make_timeout(remaining_timeout),
                 extensions={_PINNED_ADDRESS_EXTENSION: pinned_address},
             )
             response = client.send(request, stream=True, follow_redirects=False)
@@ -378,7 +389,7 @@ class HTTPClient:
             if not cls._is_valid_url(next_url):
                 raise NetworkSecurityError("重新導向目的地不符合 HTTPS/外部網路安全策略")
 
-            current_headers = cls._redirect_headers(current_headers, source_url, next_url)
+            current_headers = cls._redirect_headers(current_headers, source_url, next_url) or {}
             current_url = next_url
             params = None
 
@@ -395,6 +406,7 @@ class HTTPClient:
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
         retry: bool = True,
+        deadline: float | None = None,
     ) -> httpx.Response:
         return cls._request_with_retry(
             method,
@@ -406,6 +418,7 @@ class HTTPClient:
             response_handler=lambda response: response,
             retry=retry,
             close_response=False,
+            deadline=deadline,
         )
 
     @classmethod
@@ -422,12 +435,15 @@ class HTTPClient:
         suppress_status_codes: set[int] | None = None,
         retry: bool = True,
         close_response: bool = True,
+        deadline: float | None = None,
     ) -> ResponseT:
         """執行單一 HTTP retry state machine，並讓 caller 決定如何消費回應"""
         method = method.upper()
         suppressed = suppress_status_codes or set()
         max_attempts = cls.RETRY_TOTAL + 1 if retry and method in cls.RETRY_ALLOWED_METHODS else 1
-        deadline = time.monotonic() + timeout * max_attempts + cls.RETRY_MAX_DELAY_SECONDS * (max_attempts - 1)
+        deadline = deadline or (
+            time.monotonic() + timeout * max_attempts + cls.RETRY_MAX_DELAY_SECONDS * (max_attempts - 1)
+        )
 
         for attempt in range(1, max_attempts + 1):
             cls._check_request_deadline(deadline)
@@ -438,6 +454,7 @@ class HTTPClient:
                     method,
                     url,
                     timeout=timeout,
+                    deadline=deadline,
                     headers=headers,
                     params=params,
                     json_body=json_body,
@@ -464,7 +481,7 @@ class HTTPClient:
             if delay is not None:
                 cls._wait_retry(delay, deadline)
 
-        raise RuntimeError("HTTP retry loop terminated unexpectedly")
+        raise OperationError("HTTP retry loop terminated unexpectedly")
 
     @staticmethod
     def _check_request_deadline(deadline: float) -> None:
@@ -482,7 +499,8 @@ class HTTPClient:
             current_work_token().wait(min(remaining, 0.1) if cancel_check is not None else remaining)
 
     @classmethod
-    def _read_limited(cls, response: httpx.Response, max_bytes: int) -> bytes:
+    def _read_limited(cls, response: httpx.Response, max_bytes: int, deadline: float) -> bytes:
+        cls._ensure_identity_content_encoding(response)
         content_length = response.headers.get("Content-Length", "").strip()
         if content_length:
             try:
@@ -493,7 +511,6 @@ class HTTPClient:
                 raise ResponseTooLargeError(f"HTTP 回應宣告大小超過上限 {format_bytes(max_bytes)}")
 
         payload = bytearray()
-        deadline = time.monotonic() + 120.0
         for chunk in response.iter_bytes(chunk_size=65536):
             cls._check_request_deadline(deadline)
             if len(payload) + len(chunk) > max_bytes:
@@ -502,12 +519,18 @@ class HTTPClient:
         return bytes(payload)
 
     @staticmethod
+    def _ensure_identity_content_encoding(response: httpx.Response) -> None:
+        content_encoding = response.headers.get("Content-Encoding", "").strip().lower()
+        if content_encoding and content_encoding != "identity":
+            raise NetworkSecurityError(f"拒絕未要求的壓縮 HTTP 回應: {content_encoding}")
+
+    @staticmethod
     def _cleanup_temp_file(temp_path: Path | None) -> None:
         if temp_path is None:
             return
         with suppress(OSError):
             if temp_path.exists():
-                temp_path.unlink()
+                delete_within(temp_path.parent, temp_path)
 
     @classmethod
     def _download_failure(
@@ -524,7 +547,7 @@ class HTTPClient:
         if exc is None:
             logger.error(final_log_message)
         else:
-            logger.error(final_log_message, exc_info=(type(exc), exc, exc.__traceback__))
+            logger.error(f"{final_log_message}: {type(exc).__name__}: {cls._describe_request_failure(exc)}")
         return OperationResult(False, message, exc)
 
     @classmethod
@@ -562,11 +585,14 @@ class HTTPClient:
     ) -> bytes | None:
         suppressed = suppress_status_codes or set()
 
+        max_attempts = cls.RETRY_TOTAL + 1 if method.upper() in cls.RETRY_ALLOWED_METHODS else 1
+        deadline = time.monotonic() + timeout * max_attempts + cls.RETRY_MAX_DELAY_SECONDS * (max_attempts - 1)
+
         def _read_response(response: httpx.Response) -> bytes | None:
             if response.status_code in suppressed:
                 return None
             response.raise_for_status()
-            return cls._read_limited(response, max_bytes)
+            return cls._read_limited(response, max_bytes, deadline)
 
         return cls._request_with_retry(
             method,
@@ -577,6 +603,7 @@ class HTTPClient:
             json_body=json_body,
             suppress_status_codes=suppressed,
             response_handler=_read_response,
+            deadline=deadline,
         )
 
     @classmethod
@@ -675,6 +702,8 @@ class HTTPClient:
         if not url or not isinstance(url, str) or not cls._is_valid_url(url):
             return HTTPJSONResponse(None, error_kind="invalid_request")
         timeout = cls._normalize_positive_int(timeout, cls.JSON_TIMEOUT_MIN_SECONDS)
+        max_attempts = cls.RETRY_TOTAL + 1
+        deadline = time.monotonic() + timeout * max_attempts + cls.RETRY_MAX_DELAY_SECONDS * (max_attempts - 1)
 
         def _parse_response(response: httpx.Response) -> HTTPJSONResponse:
             status_code = response.status_code
@@ -685,7 +714,7 @@ class HTTPClient:
             if status_code >= 400:
                 error_kind = "transient" if status_code >= 500 else "invalid_request"
                 return HTTPJSONResponse(status_code, error_kind=error_kind)
-            raw_bytes = cls._read_limited(response, cls.MAX_JSON_RESPONSE_BYTES)
+            raw_bytes = cls._read_limited(response, cls.MAX_JSON_RESPONSE_BYTES, deadline)
             try:
                 payload = orjson.loads(raw_bytes)
             except orjson.JSONDecodeError:
@@ -702,6 +731,7 @@ class HTTPClient:
                 headers=headers,
                 params=params,
                 response_handler=_parse_response,
+                deadline=deadline,
             )
         except httpx.TimeoutException:
             return HTTPJSONResponse(None, error_kind="timeout")
@@ -827,8 +857,15 @@ class HTTPClient:
         timeout = cls._normalize_positive_int(timeout, cls.DOWNLOAD_TIMEOUT_MIN_SECONDS)
         chunk_size = cls._normalize_positive_int(chunk_size, cls.MIN_CHUNK_SIZE)
         max_bytes = cls._normalize_positive_int(max_bytes, 1)
-        local_path_obj = Path(local_path)
-        local_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            local_path_obj = resolve_stable_path(local_path, create_parent=True)
+        except OSError as e:
+            return cls._download_failure(
+                url=url,
+                local_path=local_path,
+                message="無法建立安全下載目錄",
+                exc=e,
+            )
 
         raw_expected_hash = str(expected_hash or "").strip()
         normalized_expected_hash, resolved_hash_algorithm = HashUtils.normalize_expected_hash(
@@ -880,7 +917,7 @@ class HTTPClient:
                     cls._check_request_deadline(deadline)
                     if cancel_check is not None and cancel_check():
                         raise OperationCancelledError("下載已取消")
-                    response = cls._open_stream("GET", url, timeout=timeout, retry=False)
+                    response = cls._open_stream("GET", url, timeout=timeout, retry=False, deadline=deadline)
                     if response.status_code in cls.RETRY_STATUS_CODES and attempt < max_attempts:
                         delay = cls._retry_delay_seconds(response, attempt)
                         response.close()
@@ -888,6 +925,7 @@ class HTTPClient:
                         cls._wait_retry(delay, deadline, cancel_check)
                         continue
                     response.raise_for_status()
+                    cls._ensure_identity_content_encoding(response)
                     total_size = int(response.headers.get("Content-Length", 0) or 0)
 
                     if total_size > max_bytes:
@@ -899,7 +937,9 @@ class HTTPClient:
 
                     if total_size > 0:
                         try:
-                            free_space = shutil.disk_usage(local_path_obj.parent).free
+                            from src.utils import SystemUtils
+
+                            free_space = SystemUtils.get_free_disk_bytes(local_path_obj.parent)
                         except OSError as e:
                             logger.debug(f"無法查詢目的地磁碟空間，略過預檢: {e}")
                         else:
@@ -915,9 +955,15 @@ class HTTPClient:
                                 )
 
                     downloaded = 0
-                    hasher = hashlib.new(resolved_hash_algorithm) if normalized_expected_hash else None
+                    hasher = HashUtils.new_hasher(resolved_hash_algorithm) if normalized_expected_hash else None
+                    if normalized_expected_hash and hasher is None:
+                        return cls._download_failure(
+                            url=url,
+                            local_path=local_path,
+                            message="不支援的下載檔案雜湊演算法",
+                        )
                     failure_result: OperationResult | None = None
-                    with temp_path_obj.open("wb") as file_obj:
+                    with open_regular_file_for_write(temp_path_obj) as file_obj:
                         for chunk in response.iter_bytes(chunk_size=chunk_size):
                             cls._check_request_deadline(deadline)
                             if cancel_check and cancel_check():
@@ -1002,7 +1048,7 @@ class _PinnedHTTPTransport(httpx.BaseTransport):
         http2: bool = False,
         limits: httpx.Limits | None = None,
     ) -> None:
-        self._verify = verify
+        self._verify = ssl.create_default_context() if verify is True and not trust_env else verify
         self._trust_env = trust_env
         self._http1 = http1
         self._http2 = http2

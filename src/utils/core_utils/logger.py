@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import os
 import sys
@@ -10,7 +11,9 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from src.utils import RuntimePaths, list_bounded_directory
+from src.utils import RuntimePaths
+
+from .filesystem_utils import delete_within, list_bounded_directory, move_within, resolve_stable_directory
 
 _LOGGER_NAME = "MinecraftServerManager"
 _LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(component)s | %(message)s"
@@ -71,11 +74,8 @@ def _prune_logs(log_dir: Path, keep: int) -> None:
     """僅保留指定數量的最新日誌，清理失敗不影響程式啟動"""
     logs = _log_files(log_dir)
     limit = max(0, keep)
-    for old in logs[: len(logs) - limit]:
-        try:
-            old.unlink()
-        except OSError:
-            continue
+    for old in logs[: max(0, len(logs) - limit)]:
+        delete_within(log_dir, old)
 
 
 class _RetentionFileHandler(RotatingFileHandler):
@@ -94,11 +94,25 @@ class _RetentionFileHandler(RotatingFileHandler):
 
     def doRollover(self) -> None:
         """
-        執行標準庫日誌檔輪替並清理過量歷史檔案
+        以受限搬移輪替日誌檔並清理過量歷史檔案
 
         此方法不接受額外參數，也不回傳資料
         """
-        super().doRollover()
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        base_path = Path(self.baseFilename)
+        if self.backupCount > 0:
+            for index in range(self.backupCount - 1, 0, -1):
+                source = Path(self.rotation_filename(f"{self.baseFilename}.{index}"))
+                target = Path(self.rotation_filename(f"{self.baseFilename}.{index + 1}"))
+                if source.exists() and not move_within(self._log_dir, source, target):
+                    raise OSError(f"無法安全輪替日誌檔：{source}")
+            rollover_target = Path(self.rotation_filename(f"{self.baseFilename}.1"))
+            if base_path.exists() and not move_within(self._log_dir, base_path, rollover_target):
+                raise OSError(f"無法安全輪替日誌檔：{base_path}")
+        if not self.delay:
+            self.stream = self._open()
         _prune_logs(self._log_dir, _MAX_LOG_FILES)
 
 
@@ -111,8 +125,6 @@ def _should_log_to_stderr() -> bool:
         return True
 
     try:
-        import ctypes
-
         return bool(ctypes.windll.kernel32.GetConsoleCP())
     except AttributeError, OSError:
         return False
@@ -140,8 +152,7 @@ def _setup() -> logging.Logger:
         base.addHandler(console)
 
     try:
-        log_dir = RuntimePaths.get_log_dir()
-        log_dir.mkdir(parents=True, exist_ok=True)
+        log_dir = resolve_stable_directory(RuntimePaths.get_log_dir(), create=True)
         _prune_logs(log_dir, _MAX_LOG_FILES - 1)
 
         log_file = log_dir / datetime.now().strftime(f"%Y-%m-%d-%H-%M-%S-p{os.getpid()}.log")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import stat
@@ -12,12 +11,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import orjson
+from packaging.version import Version
 
 from src.models import EulaState, ServerInspection, ServerInspectionIntent, ServerLaunchTarget
 from src.utils import (
     ARCHIVE_METADATA_MAX_BYTES,
     SAFE_DIRECTORY_MAX_FILES,
     SAFE_TEXT_FILE_MAX_BYTES,
+    HashUtils,
     MemoryUtils,
     ServerCommands,
     extract_forge_versions,
@@ -27,6 +28,7 @@ from src.utils import (
     is_reparse_point,
     list_bounded_directory,
     open_bounded_zip,
+    parse_version_safe,
     read_archive_metadata_bytes,
     read_json,
     read_text_file,
@@ -39,6 +41,7 @@ FABRIC_JAR_NAMES = ("fabric-server-launch.jar", "fabric-server-launcher.jar")
 QUILT_JAR_NAMES = ("quilt-server-launch.jar", "quilt-server-launcher.jar")
 FORGE_LIBRARY_PATH = "libraries/net/minecraftforge/forge"
 NEOFORGE_LIBRARY_PATH = "libraries/net/neoforged/neoforge"
+_VERSION_FALLBACK = Version("0")
 QUILT_LIBRARY_PATH = "libraries/org/quiltmc"
 FABRIC_LIBRARY_PATH = "libraries/net/fabricmc"
 SERVER_JAR_CANDIDATES = (
@@ -362,6 +365,9 @@ class _InspectionEngine:
             if is_unknown(getattr(config, attr_name)):
                 setattr(config, attr_name, value)
 
+        def version_directory_key(path: Path) -> tuple[Version, str]:
+            return (parse_version_safe(path.name, fallback=_VERSION_FALLBACK), path.name.casefold())
+
         def first_match(content: str, patterns: list[str]) -> str | None:
             for pat in patterns:
                 m = re.search(pat, content, re.IGNORECASE)
@@ -443,7 +449,10 @@ class _InspectionEngine:
                 return
             if not subdirs:
                 return
-            selected_subdir = min(subdirs, key=lambda path: path.name)
+            selected_subdir = min(
+                subdirs,
+                key=version_directory_key,
+            )
             folder = selected_subdir.name
             mc, forge_ver = extract_forge_versions(folder)
             if mc and forge_ver:
@@ -532,7 +541,10 @@ class _InspectionEngine:
                 return
             if not subdirs:
                 return
-            selected_subdir = max(subdirs, key=lambda d: d.name)
+            selected_subdir = max(
+                subdirs,
+                key=version_directory_key,
+            )
             set_if_unknown("loader_version", selected_subdir.name)
             if detection_source:
                 detection_source["loader_version"] = "Fabric 函式庫目錄"
@@ -547,7 +559,10 @@ class _InspectionEngine:
                 return
             if not subdirs:
                 return
-            selected_subdir = max(subdirs, key=lambda d: d.name)
+            selected_subdir = max(
+                subdirs,
+                key=version_directory_key,
+            )
             set_if_unknown("loader_version", selected_subdir.name)
             if detection_source:
                 detection_source["loader_version"] = "Quilt 函式庫目錄"
@@ -562,7 +577,10 @@ class _InspectionEngine:
                 return
             if not subdirs:
                 return
-            folder = max(subdirs, key=lambda d: d.name).name
+            folder = max(
+                subdirs,
+                key=version_directory_key,
+            ).name
             set_if_unknown("loader_version", folder)
             if detection_source:
                 detection_source["loader_version"] = "NeoForge 函式庫目錄"
@@ -790,7 +808,9 @@ class ServerInspector:
 
     @staticmethod
     def _build_status_revision(server_path: Path) -> str:
-        digest = hashlib.sha256()
+        digest = HashUtils.new_hasher("sha256")
+        if digest is None:
+            return ""
         try:
             for item in sorted(list_bounded_directory(server_path), key=lambda p: p.name.lower()):
                 if item.name.startswith(".msm-"):
@@ -809,7 +829,9 @@ class ServerInspector:
 
     @staticmethod
     def _build_revision(server_path: Path) -> str:
-        digest = hashlib.sha256()
+        digest = HashUtils.new_hasher("sha256")
+        if digest is None:
+            return ""
         try:
             for root_path, dirs, files in walk_bounded_tree(
                 server_path,
@@ -842,7 +864,9 @@ class ServerInspector:
         }
         if launch_target.value:
             relative_names.add(launch_target.value.removeprefix("@"))
-        digest = hashlib.sha256()
+        digest = HashUtils.new_hasher("sha256")
+        if digest is None:
+            return ""
         for relative_name in sorted(relative_names, key=str.casefold):
             candidate = server_path / relative_name
             try:

@@ -25,7 +25,6 @@ class _RunningProcess(_FinishedProcess):
     def __init__(self) -> None:
         super().__init__(0)
         self.returncode = None
-        self.cancelled = False
         self.killed = False
 
     def poll(self) -> None:
@@ -122,7 +121,6 @@ def test_installer_cancel_terminates_managed_process(monkeypatch: pytest.MonkeyP
     result = _run(tmp_path, cancel_check=lambda: True)
 
     assert result is False
-    assert process.cancelled is True
     assert calls.killed == ["managed"]
     assert calls.java_cleanup == [tmp_path]
 
@@ -136,7 +134,6 @@ def test_installer_timeout_terminates_process(monkeypatch: pytest.MonkeyPatch, t
     result = _run(tmp_path)
 
     assert result == "失敗：Fabric 安裝程序執行逾時，已終止程序"
-    assert process.cancelled is True
     assert calls.killed == ["managed"]
 
 

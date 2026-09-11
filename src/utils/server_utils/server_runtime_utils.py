@@ -14,13 +14,15 @@ from typing import Any, ClassVar
 
 from src.utils import (
     JavaUtils,
-    MemoryUtils,
     atomic_write_text,
+    delete_within,
     get_logger,
     is_reparse_point,
     list_bounded_directory,
     read_text_file,
 )
+
+from .server_memory_utils import MemoryUtils
 
 logger = get_logger().bind(component="ServerRuntimeUtils")
 _STARTUP_SCRIPT_MAX_BYTES = 2 * 1024 * 1024
@@ -205,9 +207,8 @@ class ServerCommands:
         """
         normalized_loader = str(loader_type or "").lower()
         if normalized_loader == "forge":
-            if minecraft_version and any(
-                minecraft_version.startswith(v)
-                for v in ("1.7", "1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16")
+            if minecraft_version and minecraft_version.startswith(
+                ("1.7", "1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16")
             ):
                 return "forge-server.jar"
             return f"@libraries/net/minecraftforge/forge/{minecraft_version}-{loader_version}/win_args.txt"
@@ -230,7 +231,7 @@ class ServerCommands:
         """
         lines: list[str] = []
         custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(config, "jvm_args", []))
-        java_major = getattr(config, "java_major", None) or getattr(config, "java_major_version", None)
+        java_major = None
         lines.extend(
             f"{arg}\n"
             for arg in JvmOptionPolicy.recommend_gc_args(
@@ -312,9 +313,7 @@ class ServerCommands:
         mc_version = str(getattr(server_config, "minecraft_version", "") or "").strip()
         if not mc_version or mc_version.lower() == "unknown":
             return fallback
-        required_major = getattr(server_config, "java_major", None) or getattr(
-            server_config, "java_major_version", None
-        )
+        required_major = None
         try:
             java_path = JavaUtils.get_best_java_path(
                 mc_version,
@@ -448,6 +447,11 @@ class ServerCommands:
             )
             or ""
         )
+        return ServerCommands._extract_startup_script_command_from_text(content)
+
+    @staticmethod
+    def _extract_startup_script_command_from_text(content: str) -> StartupScriptCommand:
+        """從已讀取的啟動腳本文字擷取 Java 指令"""
         startup_command = StartupScriptCommand()
         if content.startswith("\ufeff"):
             content = content.removeprefix("\ufeff")
@@ -624,8 +628,8 @@ class ServerCommands:
             if not ServerCommands.is_server_startup_script_file(script_file):
                 continue
             with suppress(Exception):
-                script_file.unlink()
-                removed.append(script_file.name)
+                if delete_within(path, script_file):
+                    removed.append(script_file.name)
         return removed
 
     @staticmethod
@@ -676,7 +680,7 @@ class ServerCommands:
         )
         if not content:
             return False
-        if ServerCommands.extract_startup_script_command(script_path).unsafe:
+        if ServerCommands._extract_startup_script_command_from_text(content).unsafe:
             logger.warning(f"啟動腳本含不安全 cmd 語法，略過修補: {script_path.name}")
             return False
         changed = content.startswith("\ufeff")
@@ -740,7 +744,7 @@ class ServerCommands:
         if memory_min is not None and (memory_max is None or memory_max < memory_min):
             memory_max = memory_min
         custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(server_config, "jvm_args", []))
-        java_major = getattr(server_config, "java_major", None) or getattr(server_config, "java_major_version", None)
+        java_major = None
         recommended_jvm_args = JvmOptionPolicy.recommend_gc_args(
             memory_max_mb=int(memory_max),
             java_major=int(java_major) if java_major else None,

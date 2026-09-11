@@ -11,6 +11,8 @@ from packaging.version import Version
 
 from src.utils import is_fabric_compatible_version, list_bounded_directory, parse_version_safe
 
+_VERSION_FALLBACK = Version("0.0.0")
+
 
 @dataclass(frozen=True, slots=True)
 class LoaderVersion:
@@ -77,35 +79,43 @@ def filter_fabric_versions(items: list[dict]) -> list[dict]:
     Returns:
         只包含穩定版本的資料列表
     """
-    return [item for item in items if item.get("stable", False)]
+    unstable_markers = ("pre", "prerelease", "beta", "alpha", "snapshot", "rc")
+    return [
+        item
+        for item in items
+        if item.get("version")
+        and (
+            item.get("stable", False) or not any(marker in str(item["version"]).lower() for marker in unstable_markers)
+        )
+    ]
 
 
 def filter_quilt_versions(items: list[dict]) -> list[dict]:
     """
-    挑選 Quilt 最新穩定版本
+    保留 Quilt 穩定版本並依版本排序
 
     Args:
         items: API 回傳的版本資料
 
     Returns:
-        依版本與建置編號排序後的最新版本列表
+        排序後的穩定版本列表
     """
     stable = [item for item in items if item.get("stable", False)]
     if not stable:
-        unstable_markers = ("pre", "prelease", "beta", "alpha", "snapshot", "rc")
+        unstable_markers = ("pre", "prerelease", "beta", "alpha", "snapshot", "rc")
         stable = [
             item
             for item in items
             if item.get("version") and not any(marker in str(item["version"]).lower() for marker in unstable_markers)
         ]
-    stable.sort(
+    return sorted(
+        stable,
         key=lambda item: (
-            parse_version_safe(str(item.get("version", "")), fallback=Version("0.0.0")),
+            parse_version_safe(str(item.get("version", "")), fallback=_VERSION_FALLBACK),
             int(item.get("build", 0) or 0),
         ),
         reverse=True,
     )
-    return stable[:1]
 
 
 def build_neoforge_mc_version_candidates(mc_version: str) -> list[str]:
@@ -261,7 +271,6 @@ def build_loader_adapters(manager: Any) -> dict[str, LoaderAdapter]:
             id="quilt",
             cache_name="quilt_versions_cache.json",
             api_url="https://meta.quiltmc.org/v3/versions/loader",
-            keep_latest=1,
             needs_vanilla=True,
             metadata_loader=manager._fetch_json_versions,
             compatible_version_loader=manager._compatible_json_versions,

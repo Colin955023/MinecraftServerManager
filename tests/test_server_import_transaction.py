@@ -70,6 +70,27 @@ def test_external_directory_import_rejects_same_metadata_jar_swap(tmp_path: Path
     assert original_jar.read_bytes() == b"x" * len(original_bytes)
 
 
+def test_external_directory_import_rejects_same_metadata_nested_jar_swap(tmp_path: Path) -> None:
+    source = tmp_path / "external"
+    _write_server(source)
+    nested_jar = source / "libraries" / "example" / "library.jar"
+    nested_jar.parent.mkdir(parents=True)
+    original_bytes = b"trusted-library"
+    nested_jar.write_bytes(original_bytes)
+    original_stat = nested_jar.stat()
+    root = tmp_path / "servers"
+    service = ServerImportService(ServerCRUD(str(root)))
+    inspection = service.inspect(source, "managed")
+
+    nested_jar.write_bytes(b"x" * len(original_bytes))
+    os.utime(nested_jar, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    result = service.execute(inspection)
+
+    assert result.completed is False
+    assert result.status == "failed"
+    assert not (root / "managed").exists()
+
+
 def test_import_replaces_unsafe_startup_command_with_managed_safe_command(tmp_path: Path) -> None:
     source = tmp_path / "external"
     _write_server(source, script="java -Xmx2G -jar server.jar & whoami\n")
@@ -369,3 +390,37 @@ def test_discover_counts_existing_registered_servers_separately_from_new_candida
     assert report.managed_count == 1
     assert [candidate.name for candidate in report.candidates] == ["new-server"]
     assert report.issues == ()
+
+
+def test_server_import_with_properties_migration(tmp_path: Path) -> None:
+    source = tmp_path / "legacy_external"
+    _write_server(source)
+    props_file = source / "server.properties"
+    props_file.write_text("gamemode=1\ntexture-pack=custom.zip\n", encoding="utf-8")
+
+    root = tmp_path / "servers"
+    manager = ServerCRUD(str(root))
+    service = ServerImportService(manager)
+
+    inspection = service.inspect(source, "migrated")
+    result = service.execute(inspection, apply_properties_migration=True)
+
+    assert result.completed is True
+    target_server = root / "migrated"
+    target_props = target_server / "server.properties"
+    target_backup = target_server / "server.properties.backup"
+
+    assert target_props.is_file()
+    assert target_backup.is_file()
+
+    content = target_props.read_text(encoding="utf-8")
+    assert "gamemode=creative" in content
+    assert "resource-pack=custom.zip" in content
+    assert "texture-pack" not in content
+
+    backup_content = target_backup.read_text(encoding="utf-8")
+    assert "gamemode=1" in backup_content
+    assert "texture-pack=custom.zip" in backup_content
+
+    source_props = props_file.read_text(encoding="utf-8")
+    assert "gamemode=1" in source_props

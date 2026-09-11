@@ -57,6 +57,7 @@ from src.utils import (
     JavaUtils,
     JvmOptionPolicy,
     MemoryUtils,
+    OperationError,
     SystemUtils,
     get_logger,
     validate_server_name,
@@ -202,18 +203,14 @@ class CreateServerFrame(QWidget):
                 vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
                 res = UIUtils.ask_yes_no_cancel(
                     "Java 未找到",
-                    (
-                        f"未找到合適的 Java {required_major}，是否由程式自動安裝 {vendor}？\n\n"
-                        "選擇 [是] 會在背景使用 winget 安裝並自動同意相關授權條款；\n"
-                        "選擇 [否] 則不會安裝，由你自行下載並在程式中指定 Java 路徑"
-                    ),
+                    f"未找到 Java {required_major}，是否由系統自動安裝 {vendor}？\n（選擇「否」可自行手動指定路徑）",
                     parent=self.window(),
                     show_cancel=False,
                 )
                 if not res:
                     UIUtils.show_message(
-                        "請手動下載 Java",
-                        f"請手動安裝或指定 Java 路徑\n建議安裝 Microsoft JDK、Adoptium、Azul、Oracle JDK {required_major} 等",
+                        "手動指定 Java",
+                        f"請手動安裝 Java {required_major} 或指定路徑",
                         self.window(),
                         message_level="info",
                     )
@@ -240,10 +237,13 @@ class CreateServerFrame(QWidget):
                             message_level="info",
                         )
                     else:
-                        err = install_outcome.error if install_outcome.error else "未知錯誤"
+                        if install_outcome.error:
+                            err = str(install_outcome.error)
+                        else:
+                            err = "已完成安裝程序，但未能自動偵測到 javaw.exe 路徑"
                         UIUtils.show_message(
-                            "Java 下載失敗",
-                            f"自動下載 Microsoft JDK {required_major} 失敗：{err}\n請手動安裝或指定 Java 路徑",
+                            "Java 安裝失敗",
+                            f"自動安裝 {vendor} {required_major} 失敗：{err}\n請手動安裝或指定 Java 路徑",
                             parent=self.window(),
                             message_level="error",
                         )
@@ -487,7 +487,7 @@ class CreateServerFrame(QWidget):
             return
 
         mc_version = self.mc_version_var.get()
-        if not mc_version or "載入中" in mc_version:
+        if not mc_version or not mc_version[0].isdigit() or "載入" in mc_version:
             self.jvm_summary_label.setText("等待版本選擇...")
             return
 
@@ -501,7 +501,10 @@ class CreateServerFrame(QWidget):
             self._jvm_suggestion_request = request
 
             def fetch_java_major() -> int | None:
-                return JavaUtils.get_required_java_major(mc_version)
+                try:
+                    return JavaUtils.get_required_java_major(mc_version)
+                except Exception:
+                    return None
 
             def apply_java_major(outcome: WorkOutcome) -> None:
                 if not outcome.is_succeeded or request != (self.mc_version_var.get(), self.loader_type_var.get()):
@@ -1050,7 +1053,7 @@ class CreateServerFrame(QWidget):
 
             progress_dialog = run_on_ui_thread(lambda: _create_progress_dialog("正在規劃伺服器"), timeout=10)
             if progress_dialog is None:
-                raise Exception("建立進度對話框失敗")
+                raise OperationError("建立進度對話框失敗")
 
             progress_dialog.update_progress(2, "正在產生並驗證建立計畫...")
             plan = self.server_creation.plan(
@@ -1068,7 +1071,7 @@ class CreateServerFrame(QWidget):
 
             progress_dialog = run_on_ui_thread(lambda: _create_progress_dialog("正在建立伺服器"), timeout=10)
             if progress_dialog is None:
-                raise Exception("建立進度對話框失敗")
+                raise OperationError("建立進度對話框失敗")
 
             result = self.server_creation.execute(
                 plan,
@@ -1083,7 +1086,7 @@ class CreateServerFrame(QWidget):
                 return
             if not result.completed or result.config is None:
                 run_on_ui_thread(progress_dialog.close)
-                raise RuntimeError(result.message)
+                raise OperationError(result.message)
 
             def on_success():
                 progress_dialog.close()

@@ -42,6 +42,7 @@ from .constants import logger
 from .feature_contexts import ModManagementFeatureContext
 from .mod_management_session import OnlineBrowseRequest
 from .mod_presentation import (
+    build_client_install_reminder_line,
     build_server_install_blocking_reason,
     format_online_version_report,
     format_published_at,
@@ -104,7 +105,7 @@ class ModManagementQueueOps:
         selected_index = version_tree.indexOfTopLevelItem(selected_items[0])
         version = versions[selected_index]
         report = version_reports[selected_index] if version_reports and selected_index < len(version_reports) else None
-        if report is not None and not getattr(report, "compatible", True):
+        if report is not None and bool(getattr(report, "hard_errors", [])):
             UIUtils.show_message(
                 "版本不相容",
                 format_online_version_report(version, report),
@@ -188,7 +189,7 @@ class ModManagementQueueOps:
         action_web.triggered.connect(self.open_mod_webpage)
         menu.addAction(action_web)
 
-        menu.exec(QCursor.pos())
+        menu.exec(QCursor.pos(), ani=False)
 
     def install_online_mod(self) -> None:
         """
@@ -609,17 +610,22 @@ class ModManagementQueueOps:
             if version_reports and selected_row < len(version_reports):
                 report = version_reports[selected_row]
 
+            report_text = format_online_version_report(selected_version, report)
+            reminder = build_client_install_reminder_line(getattr(mod, "client_side", ""))
+            if reminder:
+                report_text = f"{report_text}\n\n{reminder}"
+
             if hasattr(summary_box, "setReadOnly"):
                 summary_box.setReadOnly(False)
                 if hasattr(summary_box, "clear"):
                     summary_box.clear()
                 if hasattr(summary_box, "insertPlainText"):
-                    summary_box.insertPlainText(format_online_version_report(selected_version, report))
+                    summary_box.insertPlainText(report_text)
                 elif hasattr(summary_box, "setText"):
-                    summary_box.setText(format_online_version_report(selected_version, report))
+                    summary_box.setText(report_text)
                 summary_box.setReadOnly(True)
 
-            install_button.setEnabled(report is None or getattr(report, "compatible", True))
+            install_button.setEnabled(report is None or not bool(getattr(report, "hard_errors", [])))
 
         version_tree.itemSelectionChanged.connect(refresh_version_report)
         refresh_version_report()
