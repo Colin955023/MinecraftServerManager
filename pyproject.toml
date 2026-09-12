@@ -82,6 +82,7 @@ select = [
   "ERA",
   "RUF",
   "PTH",
+  "PERF",
 ]
 ignore = ["E501", "RUF001", "RUF002", "RUF003"]
 fixable = ["ALL"]

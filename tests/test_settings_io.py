@@ -46,27 +46,40 @@ def test_window_preferences_defaults_enabled_and_persist_to_user_settings(tmp_pa
     manager = settings_module.SettingsManager()
     assert manager.is_remember_size_position_enabled() is True
     assert manager.is_auto_center_enabled() is True
-    assert manager.is_adaptive_sizing_enabled() is True
     assert manager.get_theme_mode() == "system"
 
     manager.set_remember_size_position(False)
     manager.set_auto_center(False)
-    manager.set_adaptive_sizing(False)
     manager.set_theme_mode("dark")
 
     reloaded = settings_module.SettingsManager()
     assert reloaded.is_remember_size_position_enabled() is False
     assert reloaded.is_auto_center_enabled() is False
-    assert reloaded.is_adaptive_sizing_enabled() is False
     assert reloaded.get_theme_mode() == "dark"
 
     settings_path = user_data_dir / "user_settings.json"
     stored = json.loads(settings_path.read_text(encoding="utf-8"))
     assert stored["window_preferences"]["remember_size_position"] is False
     assert stored["window_preferences"]["auto_center"] is False
-    assert stored["window_preferences"]["adaptive_sizing"] is False
     assert stored["window_preferences"]["theme_mode"] == "dark"
     assert "debug_settings" not in stored
+
+
+def test_window_preferences_remove_obsolete_adaptive_sizing_key(tmp_path, monkeypatch) -> None:
+    user_data_dir = tmp_path / "user_data"
+    user_data_dir.mkdir()
+    settings_path = user_data_dir / "user_settings.json"
+    settings_path.write_text(
+        json.dumps({"window_preferences": {"adaptive_sizing": False, "theme_mode": "dark"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings_module.RuntimePaths, "get_user_data_dir", staticmethod(lambda: user_data_dir))
+
+    manager = settings_module.SettingsManager()
+    manager.set_auto_center(False)
+
+    stored = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "adaptive_sizing" not in stored["window_preferences"]
 
 
 def test_settings_manager_normalizes_servers_folder_and_validates_root(tmp_path, monkeypatch) -> None:

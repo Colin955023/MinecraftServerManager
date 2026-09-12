@@ -107,7 +107,8 @@ class HashUtils:
     @staticmethod
     def _digest_stream(source: Any, algorithm: str, max_bytes: int) -> str:
         """在讀取上限內計算已開啟檔案的雜湊"""
-        hasher = HashUtils.new_hasher(algorithm)
+        normalized_alg = str(algorithm).strip().lower()
+        hasher = HashUtils.new_hasher(normalized_alg)
         if hasher is None:
             raise ValueError(algorithm)
         remaining = max_bytes

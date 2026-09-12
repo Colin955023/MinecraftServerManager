@@ -200,16 +200,10 @@ class PropertiesDocumentCodec:
         """合併 Java properties 續行"""
         logical_lines: list[str] = []
         pending = ""
-        for raw_line in content.splitlines():
-            line = raw_line.rstrip("\r\n")
+        for line in content.splitlines():
             if pending:
                 line = line.lstrip()
-            slash_count = 0
-            for char in reversed(line):
-                if char == "\\":
-                    slash_count += 1
-                else:
-                    break
+            slash_count = len(line) - len(line.rstrip("\\"))
             continued = slash_count % 2 == 1
             if continued:
                 pending += line[:-1]

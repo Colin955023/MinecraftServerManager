@@ -331,8 +331,9 @@ class ModManagementFrame:
         for tree in trees:
             if tree:
                 apply_table_header_style(tree)
-                if hasattr(tree, "apply_theme_style"):
-                    tree.apply_theme_style()
+                apply_style = getattr(tree, "apply_theme_style", None)
+                if callable(apply_style):
+                    apply_style()
         if self.local_mod_list_presenter.local_tree:
             self.local_mod_list_presenter.apply_local_tree_theme()
         if self.online_browse_presenter.browse_tree:
@@ -514,7 +515,7 @@ class ModManagementFrame:
         self,
         *,
         tree: TreeWidget | None,
-        item_id: str,
+        item_id: int,
         mod_obj: Any,
         new_status: ModStatus,
         new_filename: str,

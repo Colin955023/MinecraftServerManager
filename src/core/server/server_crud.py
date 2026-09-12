@@ -552,7 +552,6 @@ class ServerCRUD:
                         },
                     ):
                         move_within_strict(self.servers_root, tombstone_path, server_path)
-                        tombstone_path = None
                         raise OSError("無法建立刪除暫存目錄識別標記")
 
                 commit_result = self.commit(

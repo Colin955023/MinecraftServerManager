@@ -310,12 +310,10 @@ def _check_loader_version_rule(
         s = normalize_identifier(v)
         if normalized_minecraft_version:
             mc_prefix = f"{normalize_identifier(normalized_minecraft_version)}-"
-            if s.startswith(mc_prefix):
-                s = s[len(mc_prefix) :]
+            s = s.removeprefix(mc_prefix)
         if normalized_loader:
             loader_prefix = f"{normalized_loader}-"
-            if s.startswith(loader_prefix):
-                s = s[len(loader_prefix) :]
+            s = s.removeprefix(loader_prefix)
         return s
 
     raw_available = {normalize_identifier(version) for version in compatible_versions if version}

@@ -6,33 +6,14 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
+import ntpath
+from pathlib import PureWindowsPath
 
 MAX_SERVER_NAME_LENGTH = 100
 
-_WINDOWS_RESERVED_BASE_NAMES = frozenset(
-    {
-        "con",
-        "prn",
-        "aux",
-        "nul",
-        "clock$",
-        "conin$",
-        "conout$",
-        *(f"com{index}" for index in range(1, 10)),
-        *(f"lpt{index}" for index in range(1, 10)),
-        "com¹",
-        "com²",
-        "com³",
-        "lpt¹",
-        "lpt²",
-        "lpt³",
-    }
-)
+_LEGACY_WINDOWS_DEVICE_NAMES = frozenset({"clock$"})
 _INTERNAL_EXACT_NAMES = frozenset({".issues", "servers_config.json"})
 _INTERNAL_PREFIXES = (".msm-",)
-_WINDOWS_FORBIDDEN_CHARACTERS = frozenset('<>:"/\\|?*')
 
 
 def validate_server_name(name: str, *, max_length: int = MAX_SERVER_NAME_LENGTH) -> str:
@@ -54,20 +35,17 @@ def validate_server_name(name: str, *, max_length: int = MAX_SERVER_NAME_LENGTH)
         raise ValueError("伺服器名稱不可為空白或包含前後空白")
     if len(normalized) > max(1, int(max_length)):
         raise ValueError(f"伺服器名稱過長（上限 {max(1, int(max_length))} 字元）")
-    if normalized in {".", ".."} or Path(normalized).name != normalized:
+    if normalized in {".", ".."} or PureWindowsPath(normalized).name != normalized:
         raise ValueError("伺服器名稱不可包含路徑片段")
-    if any(ord(char) < 32 or char in _WINDOWS_FORBIDDEN_CHARACTERS for char in normalized):
-        raise ValueError("伺服器名稱包含 Windows 不允許的字元")
-    if os.path.isreserved(normalized) or normalized.endswith((".", " ")):
-        raise ValueError("伺服器名稱不可用空格或句點結尾")
+    if ntpath.isreserved(f"X:\\{normalized}"):
+        raise ValueError("伺服器名稱不符合 Windows 檔名規則")
 
     normalized_casefold = normalized.casefold()
+    base_name = normalized.rstrip(" .").split(".", 1)[0].casefold()
+    if base_name in _LEGACY_WINDOWS_DEVICE_NAMES:
+        raise ValueError("伺服器名稱使用 Windows 保留裝置名稱")
     if normalized_casefold in _INTERNAL_EXACT_NAMES or normalized_casefold.startswith(_INTERNAL_PREFIXES):
         raise ValueError("伺服器名稱與程式內部保留路徑衝突")
-
-    base_name = normalized.rstrip(" .").split(".", 1)[0].casefold()
-    if base_name in _WINDOWS_RESERVED_BASE_NAMES:
-        raise ValueError("伺服器名稱使用 Windows 保留裝置名稱")
     return normalized
 
 

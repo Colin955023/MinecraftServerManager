@@ -104,8 +104,9 @@ class ModManagementReviewOps:
         shell.overview_label.setText(snapshot.overview)
         queue_banner = BodyLabel(f"安裝清單：共 {len(snapshot.roots)} 項（可安裝 {snapshot.actionable_count}）")
         layout = shell.tree_container.layout()
-        if layout and hasattr(layout, "insertWidget"):
-            layout.insertWidget(0, queue_banner)
+        insert_fn = getattr(layout, "insertWidget", None)
+        if callable(insert_fn):
+            insert_fn(0, queue_banner)
         queue_tree = self._get_install_review_dialog_builder().create_review_tree(
             shell.tree_container,
             tree_heading="項目",

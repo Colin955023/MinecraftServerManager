@@ -74,48 +74,57 @@ def best_effort_fsync(file_obj) -> None:
         return
 
 
+def _atomic_write_payload_stable_locked(
+    path: Path,
+    stable_parent: Path,
+    writer: Callable[[Any], None],
+    mode: str,
+    **open_kwargs,
+) -> bool:
+    """在已穩定化目錄與已持有目標鎖的前提下寫入 payload"""
+    if is_reparse_point(path):
+        return False
+    for attempt in range(_RETRY_COUNT):
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode=mode,
+                delete=False,
+                dir=stable_parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                **open_kwargs,
+            ) as file_obj:
+                tmp_path = Path(file_obj.name)
+                writer(file_obj)
+                file_obj.flush()
+                best_effort_fsync(file_obj)
+            if not move_within(stable_parent, tmp_path, path):
+                raise OSError("無法安全提交原子寫入")
+            _best_effort_sync_dir(stable_parent)
+            return True
+        except OSError:
+            try:
+                if tmp_path is not None and tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                logger.debug("嘗試移除暫存檔案 %s 時失敗；忽略錯誤", tmp_path)
+            if attempt + 1 >= _RETRY_COUNT:
+                return False
+            time.sleep(_RETRY_DELAY * (attempt + 1))
+    return False
+
+
 def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode: str, **open_kwargs) -> bool:
     """以暫存檔與原子替換寫入 payload"""
     try:
         p = resolve_stable_path(path, create_parent=True)
-    except OSError:
-        return False
-    try:
         with stable_directory(p.parent) as stable_parent:
             p = stable_parent / p.name
             with _get_path_lock(p):
-                if is_reparse_point(p):
-                    return False
-                for attempt in range(_RETRY_COUNT):
-                    tmp_path: Path | None = None
-                    try:
-                        with tempfile.NamedTemporaryFile(
-                            mode=mode,
-                            delete=False,
-                            dir=stable_parent,
-                            prefix=f".{p.name}.",
-                            suffix=".tmp",
-                            **open_kwargs,
-                        ) as file_obj:
-                            tmp_path = Path(file_obj.name)
-                            writer(file_obj)
-                            file_obj.flush()
-                            best_effort_fsync(file_obj)
-                        if not move_within(stable_parent, tmp_path, p):
-                            raise OSError("無法安全提交原子寫入")
-                        return True
-                    except OSError:
-                        try:
-                            if tmp_path is not None and tmp_path.exists():
-                                tmp_path.unlink()
-                        except OSError:
-                            logger.debug("嘗試移除暫存檔案 %s 時失敗；忽略錯誤", tmp_path)
-                        if attempt + 1 >= _RETRY_COUNT:
-                            return False
-                        time.sleep(_RETRY_DELAY * (attempt + 1))
+                return _atomic_write_payload_stable_locked(p, stable_parent, writer, mode, **open_kwargs)
     except OSError:
         return False
-    return False
 
 
 def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchanged: bool = False) -> bool:
@@ -142,18 +151,25 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
 
     try:
         p = resolve_stable_path(path, create_parent=True)
+        with stable_directory(p.parent) as stable_parent:
+            p = stable_parent / p.name
+            with _get_path_lock(p):
+                if is_reparse_point(p):
+                    return False
+                if p.exists():
+                    existing_payload = read_bytes_file(p, max_bytes=len(payload_bytes), allowed_root=stable_parent)
+                    if existing_payload == payload_bytes:
+                        return True
+                    if existing_payload is None:
+                        logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p)
+                return _atomic_write_payload_stable_locked(
+                    p,
+                    stable_parent,
+                    lambda file_obj: file_obj.write(payload_bytes),
+                    "wb",
+                )
     except OSError:
         return False
-
-    with _get_path_lock(p):
-        if p.exists():
-            existing_payload = read_bytes_file(p, max_bytes=len(payload_bytes), allowed_root=p.parent)
-            if existing_payload == payload_bytes:
-                return True
-            if existing_payload is None:
-                logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p)
-
-        return atomic_write_bytes(p, payload_bytes)
 
 
 def atomic_replace_file(source: Path | str, target: Path | str) -> bool:

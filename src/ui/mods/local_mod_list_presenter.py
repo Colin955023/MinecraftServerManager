@@ -251,7 +251,7 @@ class LocalModListPresenter:
             missing_names = dict(selected_mods)
             if result.missing_ids:
                 summary += "\n找不到檔案：" + ", ".join(
-                    missing_names.get(mod_id, mod_id) for mod_id in result.missing_ids
+                    missing_names.get(mod_id) or mod_id for mod_id in result.missing_ids
                 )
             level = "warning" if result.partial else "info"
             title = result.title or ("部分成功" if result.partial else "成功")
@@ -739,16 +739,11 @@ class LocalModListPresenter:
 
             mods_by_base_name = self._build_mods_by_base_name(self.controller.mod_session.local_mods)
 
-            selected_pairs = []
-            seen = set()
-            for item in selected_items:
-                base_name = item.data(0, Qt.ItemDataRole.UserRole)
-                if base_name and base_name not in seen:
-                    seen.add(base_name)
-                    row = tree.indexOfTopLevelItem(item)
-                    selected_pairs.append((base_name, row))
-
-            selected_pairs = [(b, r) for b, r in selected_pairs if b in mods_by_base_name]
+            selected_pairs = [
+                (base_name, tree.indexOfTopLevelItem(item))
+                for item in dict.fromkeys(selected_items)
+                if (base_name := item.data(0, Qt.ItemDataRole.UserRole)) and base_name in mods_by_base_name
+            ]
             if not selected_pairs:
                 UIUtils.show_message("提示", "找不到對應的模組檔案", self.controller.parent, message_level="warning")
                 return

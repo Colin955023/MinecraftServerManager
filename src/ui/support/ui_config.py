@@ -87,7 +87,7 @@ class _TableHeaderScrollFilter(QObject):
         if vbar is None or not is_qobject_alive(vbar):
             return
         vp_fn = getattr(table, "viewport", None)
-        viewport = vp_fn() if callable(vp_fn) else None
+        viewport: Any = vp_fn() if callable(vp_fn) else None
         if viewport and viewport.isVisible():
             vp_geo = viewport.geometry()
             if vp_geo.isValid() and vp_geo.height() > 0:
@@ -95,7 +95,7 @@ class _TableHeaderScrollFilter(QObject):
                 vbar.resize(12, max(0, vp_geo.height() - 2))
                 return
         hdr_fn = getattr(table, "header", None)
-        header = hdr_fn() if callable(hdr_fn) else None
+        header: Any = hdr_fn() if callable(hdr_fn) else None
         header_h = (header.height() or header.sizeHint().height() or 32) if header and not header.isHidden() else 0
         vbar.move(table.width() - 13, header_h + 1)
         vbar.resize(12, max(0, table.height() - header_h - 2))
@@ -139,10 +139,14 @@ def apply_table_header_style(table: Any) -> None:
         table.installEventFilter(flt)
         table.setProperty("_msm_header_scroll_filtered", True)
         table.setProperty("_msm_header_scroll_filter", flt)
-        if hasattr(table, "header") and table.header():
-            table.header().installEventFilter(flt)
-        if hasattr(table, "viewport") and table.viewport():
-            table.viewport().installEventFilter(flt)
+        hdr_fn = getattr(table, "header", None)
+        header_obj: Any = hdr_fn() if callable(hdr_fn) else None
+        if header_obj:
+            header_obj.installEventFilter(flt)
+        vp_fn = getattr(table, "viewport", None)
+        viewport_obj: Any = vp_fn() if callable(vp_fn) else None
+        if viewport_obj:
+            viewport_obj.installEventFilter(flt)
 
     delegate = getattr(table, "scrollDelagate", None)
     vbar = getattr(delegate, "vScrollBar", None) if delegate else None
@@ -151,7 +155,7 @@ def apply_table_header_style(table: Any) -> None:
         def _make_adjust_pos(scroll_bar, parent_table):
             def _adjust(size):
                 vp_fn = getattr(parent_table, "viewport", None)
-                viewport = vp_fn() if callable(vp_fn) else None
+                viewport: Any = vp_fn() if callable(vp_fn) else None
                 if viewport and viewport.isVisible():
                     vp_geo = viewport.geometry()
                     if vp_geo.isValid() and vp_geo.height() > 0:
@@ -159,7 +163,7 @@ def apply_table_header_style(table: Any) -> None:
                         scroll_bar.resize(12, max(0, vp_geo.height() - 2))
                         return
                 hdr_fn = getattr(parent_table, "header", None)
-                hdr = hdr_fn() if callable(hdr_fn) else None
+                hdr: Any = hdr_fn() if callable(hdr_fn) else None
                 hdr_h = (hdr.height() or hdr.sizeHint().height() or 32) if hdr and not hdr.isHidden() else 0
                 scroll_bar.resize(12, max(0, size.height() - hdr_h - 2))
                 scroll_bar.move(size.width() - 13, hdr_h + 1)
@@ -168,7 +172,8 @@ def apply_table_header_style(table: Any) -> None:
 
         vbar._adjustPos = _make_adjust_pos(vbar, table)
         vbar.setProperty("_msm_header_pos_patched", True)
-        hdr = table.header() if hasattr(table, "header") else None
+        hdr_fn = getattr(table, "header", None)
+        hdr: Any = hdr_fn() if callable(hdr_fn) else None
         hdr_h = (hdr.height() or hdr.sizeHint().height() or 32) if hdr and not hdr.isHidden() else 0
         vbar.move(table.width() - 13, hdr_h + 1)
         vbar.resize(12, max(0, table.height() - hdr_h - 2))
@@ -187,11 +192,10 @@ def center_window(window: QWidget, parent: QWidget | None = None) -> None:
     try:
         window.adjustSize()
         raw_anchor = parent or window.parentWidget()
+        anchor: Any = None
         if raw_anchor is not None:
             win_attr = getattr(raw_anchor, "window", None)
             anchor = win_attr() if callable(win_attr) else raw_anchor
-        else:
-            anchor = None
         screen = anchor.screen() if anchor is not None else window.screen()
         if screen is None:
             screen = ensure_application().primaryScreen()
@@ -309,9 +313,9 @@ def _patch_navigation_push_button_paint_event():
         from qfluentwidgets.common.icon import drawIcon
         from qfluentwidgets.components.navigation.navigation_widget import NavigationPushButton
 
-        def _patched_paint_event(self, event):
+        def _patched_paint_event(self, e):
             painter = QPainter(self)
-            painter.setClipRect(event.rect())
+            painter.setClipRect(e.rect())
             painter.setRenderHints(
                 QPainter.RenderHint.Antialiasing
                 | QPainter.RenderHint.TextAntialiasing

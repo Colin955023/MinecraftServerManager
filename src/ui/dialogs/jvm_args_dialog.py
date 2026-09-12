@@ -133,16 +133,12 @@ class JvmArgsDialog(ModalMSFluentWindow):
         Returns:
             完整的 JVM 參數列表字串
         """
-        args = []
-        for arg, cb in self.checkboxes.items():
-            if cb.isChecked():
-                args.append(arg)
+        args = [arg for arg, checkbox in self.checkboxes.items() if checkbox.isChecked()]
 
         if self.custom_args_cb.isChecked():
             custom_text = self.custom_args_input.text().strip()
             if custom_text:
-                tokens = [t.strip() for t in custom_text.replace(",", " ").split() if t.strip()]
-                args.extend(tokens)
+                args.extend(custom_text.replace(",", " ").split())
 
         return args
 

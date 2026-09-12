@@ -292,6 +292,7 @@ class UIWorkScope(QtCore.QObject):
     def cancel_all(self) -> None:
         """取消所有已排程的工作"""
         with self._gen_lock:
+            # 取消期間會修改字典，必須先建立快照後再迭代。
             for gen, handle in list(self._active_handles.items()):
                 callback_info = self._callbacks.get(gen)
                 if callback_info:

@@ -547,8 +547,9 @@ class ModManagementQueueOps:
             version_tree.addTopLevelItem(item)
 
         if versions and version_tree.topLevelItemCount() > 0:
-            item = version_tree.topLevelItem(0)
-            item.setSelected(True)
+            first_item = version_tree.topLevelItem(0)
+            if first_item is not None:
+                first_item.setSelected(True)
 
         summary_label = SubtitleLabel("版本分析", dialog.widget)
         dialog.viewLayout.addWidget(summary_label)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 from pathlib import Path
 
 from src.utils import HashUtils
@@ -49,6 +50,12 @@ def test_chunked_reading_matches_single_read(tmp_path: Path) -> None:
     hash_default_chunk = HashUtils.compute_file_hash_sync(file_path, algorithm="sha256")
 
     assert hash_default_chunk == hashlib.sha256(content).hexdigest()
+
+
+def test_digest_stream_rejects_content_that_exceeds_limit() -> None:
+    source = BytesIO(b"123456789")
+
+    assert HashUtils._digest_stream(source, "sha256", 8) == ""
 
 
 def test_compute_file_hash_cache_invalidates_when_file_changes(tmp_path) -> None:

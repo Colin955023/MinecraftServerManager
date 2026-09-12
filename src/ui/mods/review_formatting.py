@@ -291,9 +291,7 @@ def build_review_subtitle(
         以分隔符串接的 Review 子標題
     """
     segments = list(prefix_segments)
-    for count, label in count_segments:
-        if count:
-            segments.append(f"{label} {count} 項")
+    segments.extend(f"{label} {count} 項" for count, label in count_segments if count)
     if blocked_count:
         segments.append(f"{blocked_label} {blocked_count} 項")
     return "｜".join(segments)

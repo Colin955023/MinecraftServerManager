@@ -126,7 +126,8 @@ class UIUtils:
             if isinstance(widget, QtCore.QObject) and not is_qobject_alive(widget):
                 setattr(holder, job_attr, None)
                 return False
-            if hasattr(widget, "is_alive") and not widget.is_alive():
+            is_alive_fn = getattr(widget, "is_alive", None)
+            if callable(is_alive_fn) and not is_alive_fn():
                 setattr(holder, job_attr, None)
                 return False
         except Exception:
@@ -257,7 +258,8 @@ class UIUtils:
         try:
             if isinstance(widget, QtCore.QObject) and not is_qobject_alive(widget):
                 return False
-            if hasattr(widget, "is_alive") and (not widget.is_alive()):
+            is_alive_fn = getattr(widget, "is_alive", None)
+            if callable(is_alive_fn) and not is_alive_fn():
                 return False
         except Exception:
             return False

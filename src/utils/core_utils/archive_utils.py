@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ntpath
 import os
 import struct
 import zipfile
@@ -283,9 +284,7 @@ def read_archive_metadata_bytes(
 
 def _is_safe_windows_archive_part(part: str) -> bool:
     """拒絕 NTFS ADS、保留裝置名與 Windows 會重新正規化的危險名稱"""
-    if not part or part.endswith((" ", ".")):
-        return False
-    return not os.path.isreserved(part)
+    return bool(part) and not ntpath.isreserved(f"X:\\{part}")
 
 
 def _sanitize_archive_member_name(member_name: str) -> Path | None:

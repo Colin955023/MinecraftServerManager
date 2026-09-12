@@ -111,10 +111,8 @@ class ManageServerFrame(QWidget):
         if bring_to_front:
             is_minimized = getattr(window, "isMinimized", None)
             if callable(is_minimized) and is_minimized():
-                window_state = getattr(window, "windowState", None)
-                is_maximized = (
-                    bool(window_state() & Qt.WindowState.WindowMaximized) if callable(window_state) else False
-                )
+                is_max_fn = getattr(window, "isMaximized", None)
+                is_maximized = bool(is_max_fn()) if callable(is_max_fn) else False
                 if is_maximized:
                     show_max = getattr(window, "showMaximized", None)
                     if callable(show_max):
@@ -233,8 +231,10 @@ class ManageServerFrame(QWidget):
         self.server_tree.setColumnCount(7)
         self.server_tree.setHeaderLabels(["名稱", "版本", "載入器", "狀態", "伺服器大小", "備份狀態", "路徑"])
         apply_table_header_style(self.server_tree)
-        self.server_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.server_tree.header().setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        header = self.server_tree.header()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.server_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.server_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.server_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -854,7 +854,11 @@ class ManageServerFrame(QWidget):
             return
 
         projection = render_plan.projection
-        current_order = [self.server_tree.topLevelItem(i).text(0) for i in range(self.server_tree.topLevelItemCount())]
+        current_order = [
+            item.text(0)
+            for i in range(self.server_tree.topLevelItemCount())
+            if (item := self.server_tree.topLevelItem(i)) is not None
+        ]
         if current_order != list(projection.server_order):
             self.server_tree.clear()
             items = [
@@ -867,10 +871,11 @@ class ManageServerFrame(QWidget):
             try:
                 for row, name in enumerate(projection.server_order):
                     item = self.server_tree.topLevelItem(row)
-                    for column, value in enumerate(projection.server_rows[name]):
-                        text = str(value)
-                        if item.text(column) != text:
-                            item.setText(column, text)
+                    if item is not None:
+                        for column, value in enumerate(projection.server_rows[name]):
+                            text = str(value)
+                            if item.text(column) != text:
+                                item.setText(column, text)
             finally:
                 self.server_tree.setUpdatesEnabled(True)
 

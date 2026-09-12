@@ -90,6 +90,26 @@ def test_preload_loader_versions_skips_network_when_cache_fresh(
     assert calls == []
 
 
+def test_json_loader_metadata_uses_http_json_helper(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = _build_manager(tmp_path)
+    spec = _adapter(manager, "fabric")
+    calls: list[str] = []
+
+    def fetch_json(url: str, *_args, **_kwargs):
+        calls.append(url)
+        return []
+
+    monkeypatch.setattr(loader_manager_module.HTTPClient, "fetch_json", fetch_json)
+    monkeypatch.setattr(
+        loader_manager_module.HTTPClient,
+        "fetch_bytes",
+        lambda *_args, **_kwargs: pytest.fail("JSON metadata 不應改走 fetch_bytes"),
+    )
+
+    assert manager._fetch_json_versions(spec) == []
+    assert calls == [spec.api_url]
+
+
 def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manager = LoaderManager.__new__(LoaderManager)
     manager._initialized = False
@@ -133,17 +153,24 @@ def test_minecraft_version_cache_refreshes_legacy_entries_without_server_sha1(
         '"time":"2026-08-30T00:00:00Z","server_url":"https://example.com/server.jar"}]',
         encoding="utf-8",
     )
-    manifest = (
-        b'{"versions":[{"id":"1.21.1","type":"release",'
-        b'"url":"https://example.com/version.json","time":"2026-08-30T00:00:00Z",'
-        b'"releaseTime":"2026-08-30T00:00:00Z"}]}'
-    )
+    manifest = {
+        "versions": [
+            {
+                "id": "1.21.1",
+                "type": "release",
+                "url": "https://example.com/version.json",
+                "time": "2026-08-30T00:00:00Z",
+                "releaseTime": "2026-08-30T00:00:00Z",
+            }
+        ]
+    }
     detail_calls = 0
+    manifest_url = _adapter(manager, "vanilla").api_url
 
-    monkeypatch.setattr(loader_manager_module.HTTPClient, "fetch_bytes", lambda *_args, **_kwargs: manifest)
-
-    def fetch_detail(*_args, **_kwargs):
+    def fetch_json(url: str, *_args, **_kwargs):
         nonlocal detail_calls
+        if url == manifest_url:
+            return manifest
         detail_calls += 1
         return {
             "downloads": {
@@ -154,7 +181,7 @@ def test_minecraft_version_cache_refreshes_legacy_entries_without_server_sha1(
             }
         }
 
-    monkeypatch.setattr(loader_manager_module.HTTPClient, "fetch_json", fetch_detail)
+    monkeypatch.setattr(loader_manager_module.HTTPClient, "fetch_json", fetch_json)
 
     versions = manager.get_versions()
     cached = read_json(vanilla_cache)

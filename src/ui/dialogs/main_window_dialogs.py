@@ -329,7 +329,8 @@ class ServerInitializationDialog(ModalMSFluentWindow):
             self.close_button.set_status("success")
             if self.completion_callback and not self._completion_scheduled:
                 self._completion_scheduled = True
-                QtCore.QTimer.singleShot(2000, lambda: self.completion_callback(self.server_config, self))
+                cb = self.completion_callback
+                QtCore.QTimer.singleShot(2000, lambda: cb(self.server_config, self))
         else:
             self._update_console("[系統] 伺服器啟動可能有問題，請檢查輸出\n")
             if self.progress_label:

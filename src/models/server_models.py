@@ -59,7 +59,6 @@ CreationStatus = Literal["completed", "cancelled", "failed"]
 class ServerCreationWarning:
     """建立計畫中需要使用者注意或確認的警告"""
 
-    _code: str
     message: str
 
 

@@ -4,6 +4,7 @@ import hashlib
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -101,16 +102,16 @@ class _PlanningHarness:
         self._planning = ModPlanning(_PlanningProvider(), _EmptyLoaderRules())
         self.provider = self._planning.provider
 
-    def analyze_version(self, *args, **kwargs):
+    def analyze_version(self, *args: Any, **kwargs: Any) -> Any:
         override = _PLANNING_TEST_OVERRIDE.get("analyze_version")
         if callable(override):
             return override(*args, **kwargs)
         return self._planning.analyze_version(*args, **kwargs)
 
-    def build_dependency_plan(self, *args, **kwargs):
+    def build_dependency_plan(self, *args: Any, **kwargs: Any) -> Any:
         return self._planning.build_dependency_plan(*args, **kwargs)
 
-    def build_local_update_plan(self, *args, **kwargs):
+    def build_local_update_plan(self, *args: Any, **kwargs: Any) -> Any:
         kwargs.setdefault("provider_identity_resolver", _test_provider_identity_resolver)
         return self._planning.build_local_update_plan(*args, **kwargs)
 

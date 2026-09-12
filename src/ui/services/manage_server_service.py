@@ -95,9 +95,10 @@ class ManageServerService:
         Returns:
             不可變的 ServerRefreshPayload
         """
-        if not self.server_crud.snapshot():
+        registry = self.server_crud.snapshot()
+        if not registry:
             return self._build_server_refresh_payload([])
-        return self._build_server_refresh_payload(self._build_server_display_data())
+        return self._build_server_refresh_payload(self._build_server_display_data(registry.items()))
 
     def accept_projection(
         self,
@@ -237,7 +238,7 @@ class ManageServerService:
             server_rows=server_rows,
         )
 
-    def get_backup_status(self, server_name: str) -> str:
+    def get_backup_status(self, server_name: str, *, registered_servers: set[str] | None = None) -> str:
         """
         取得伺服器的備份狀態文字
 
@@ -247,7 +248,7 @@ class ManageServerService:
         Returns:
             備份狀態文字
         """
-        if not server_name or server_name not in self.server_crud.snapshot():
+        if not server_name or (registered_servers is not None and server_name not in registered_servers):
             return "❓ 無法檢查"
         try:
             backups = self.server_backup.list_backups(server_name)
@@ -319,13 +320,14 @@ class ManageServerService:
         except Exception:
             return str(raw_path)
 
-    def _build_server_display_data(self) -> list[list[Any]]:
+    def _build_server_display_data(self, configs: tuple[tuple[str, ServerConfig], ...]) -> list[list[Any]]:
         """從目前狀態建立顯示用列表資料"""
         server_data: list[list[Any]] = []
-        for name, config in self.server_crud.snapshot().items():
+        registered_servers = {name for name, _config in configs}
+        for name, config in configs:
             status = self.get_server_status_text(name, config)
             server_size = self._get_cached_server_size(config.path)
-            backup_status = self.get_backup_status(name)
+            backup_status = self.get_backup_status(name, registered_servers=registered_servers)
             display_path = self._format_server_path_for_display(config.path)
             server_data.append(
                 self._build_server_display_row(

@@ -278,7 +278,7 @@ class ServerBackupManager:
                 or not file_path.name.startswith(prefix)
             ):
                 continue
-            timestamp_str, dt = self._parse_backup_timestamp(file_path.stem[len(prefix) :])
+            timestamp_str, dt = self._parse_backup_timestamp(file_path.stem.removeprefix(prefix))
             if dt is None:
                 continue
             try:
@@ -411,7 +411,6 @@ class ServerBackupManager:
                         moved_excludes.append(excluded_name)
                 if not move_within(server_parent, prepared_path, server_path):
                     raise OSError("無法將還原內容移至伺服器目錄")
-                staging_path = None
             except Exception:
                 for excluded_name in reversed(moved_excludes):
                     staged_preserved = prepared_path / excluded_name
@@ -423,12 +422,10 @@ class ServerBackupManager:
                             logger.exception(f"還原失敗時無法復原排除目錄 {excluded_name}: {e}")
                 if not move_within(server_parent, rollback_path, server_path):
                     raise OSError("還原失敗時無法復原伺服器目錄") from None
-                rollback_path = None
                 raise
 
             if rollback_path.exists() and not delete_within(server_path.parent, rollback_path):
                 logger.warning(f"還原成功，但舊伺服器暫存目錄無法清除: {rollback_path}")
-            rollback_path = None
 
             if progress_callback:
                 progress_callback(100, "還原完成！")

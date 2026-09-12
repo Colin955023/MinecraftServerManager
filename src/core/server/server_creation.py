@@ -176,7 +176,6 @@ class CreateServerJourney:
         if total_memory_mb > 0 and int(config.memory_max_mb) >= total_memory_mb:
             warnings.append(
                 ServerCreationWarning(
-                    _code="memory_exceeds_system",
                     message=f"最大記憶體 {int(config.memory_max_mb)} MB 已達或超過系統總記憶體 {total_memory_mb} MB",
                 )
             )

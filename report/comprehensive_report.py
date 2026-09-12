@@ -839,8 +839,8 @@ class _ReturnVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, _node: ast.ClassDef) -> None:
         return
 
-    def visit_Return(self, return_node: ast.Return) -> None:
-        if return_node.value is not None:
+    def visit_Return(self, node: ast.Return) -> None:
+        if node.value is not None:
             self.has_return_value = True
 
 
@@ -1388,9 +1388,11 @@ def build_quality_action_items(
         ("bandit", "優先處理 bandit 安全警示：先修正高風險項目"),
         ("vulture", "處理 vulture 未使用程式碼：可降低維護成本與誤判噪音"),
     )
-    for tool_name, message in issue_actions:
-        if (result := tools_by_name.get(tool_name)) and _ISSUE_COUNTERS[tool_name](result.output) > 0:
-            actions.append(message)
+    actions.extend(
+        message
+        for tool_name, message in issue_actions
+        if (result := tools_by_name.get(tool_name)) and _ISSUE_COUNTERS[tool_name](result.output) > 0
+    )
 
     for tool_name in ("import-boundaries",):
         if (result := tools_by_name.get(tool_name)) and result.status == "failed":

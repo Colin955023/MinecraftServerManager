@@ -286,12 +286,9 @@ class ModManagementTreeSyncOps:
 
         selected_mod_ids = set()
         for item in tree.selectedItems():
-            tags = item.data(0, Qt.ItemDataRole.UserRole)
-            if tags:
-                if isinstance(tags, str):
-                    selected_mod_ids.add(tags)
-                elif isinstance(tags, (tuple, list)) and len(tags) > 0:
-                    selected_mod_ids.add(str(tags[0]))
+            mod_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "").strip()
+            if mod_id:
+                selected_mod_ids.add(mod_id)
         return selected_mod_ids
 
 

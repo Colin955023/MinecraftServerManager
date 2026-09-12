@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ from packaging.version import Version
 from src.utils import is_fabric_compatible_version, list_bounded_directory, parse_version_safe
 
 _VERSION_FALLBACK = Version("0.0.0")
+_UNSTABLE_VERSION_PATTERN = re.compile(r"pre|prerelease|beta|alpha|snapshot|rc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,14 +81,11 @@ def filter_fabric_versions(items: list[dict]) -> list[dict]:
     Returns:
         只包含穩定版本的資料列表
     """
-    unstable_markers = ("pre", "prerelease", "beta", "alpha", "snapshot", "rc")
     return [
         item
         for item in items
         if item.get("version")
-        and (
-            item.get("stable", False) or not any(marker in str(item["version"]).lower() for marker in unstable_markers)
-        )
+        and (item.get("stable", False) or not _UNSTABLE_VERSION_PATTERN.search(str(item["version"]).lower()))
     ]
 
 
@@ -102,11 +101,10 @@ def filter_quilt_versions(items: list[dict]) -> list[dict]:
     """
     stable = [item for item in items if item.get("stable", False)]
     if not stable:
-        unstable_markers = ("pre", "prerelease", "beta", "alpha", "snapshot", "rc")
         stable = [
             item
             for item in items
-            if item.get("version") and not any(marker in str(item["version"]).lower() for marker in unstable_markers)
+            if item.get("version") and not _UNSTABLE_VERSION_PATTERN.search(str(item["version"]).lower())
         ]
     return sorted(
         stable,

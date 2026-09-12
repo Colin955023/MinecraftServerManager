@@ -390,17 +390,11 @@ class ModIndexPersistence:
             if not isinstance(entries, dict):
                 logger.warning("索引 entries 欄位格式錯誤，將忽略並重建")
                 return {}
-            normalized_entries: dict[str, dict[str, Any]] = {}
-            for key, value in entries.items():
-                if isinstance(key, str) and isinstance(value, dict):
-                    normalized_entries[key] = dict(value)
-            return normalized_entries
+            return {
+                key: dict(value) for key, value in entries.items() if isinstance(key, str) and isinstance(value, dict)
+            }
         logger.info(f"偵測到舊版索引格式，將自動遷移至 schema v{INDEX_SCHEMA_VERSION}")
-        normalized_entries = {}
-        for key, value in payload.items():
-            if isinstance(key, str) and isinstance(value, dict):
-                normalized_entries[key] = dict(value)
-        return normalized_entries
+        return {key: dict(value) for key, value in payload.items() if isinstance(key, str) and isinstance(value, dict)}
 
     def _build_persist_payload(self) -> dict[str, Any]:
         """建構落盤 payload，保留 schema metadata 以支援未來演進"""

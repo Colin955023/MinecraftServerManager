@@ -40,11 +40,11 @@ def extract_server_name_suffix(name: str, version_candidates: Iterable[str]) -> 
         return None
     for prefix in ("Fabric ", "Forge ", "Quilt ", "NeoForge "):
         if normalized.startswith(prefix):
-            normalized = normalized[len(prefix) :]
+            normalized = normalized.removeprefix(prefix)
             break
     for version in version_candidates:
         if version and normalized.startswith(version):
-            return normalized[len(version) :]
+            return normalized.removeprefix(version)
     return None
 
 

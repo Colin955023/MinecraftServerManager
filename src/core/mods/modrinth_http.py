@@ -66,7 +66,7 @@ def _resolve_current_versions_by_hashes(
     Returns:
         以雜湊值為 key 的查詢結果字典
     """
-    normalized_hashes = [str(file_hash or "").strip().lower() for file_hash in hashes if str(file_hash or "").strip()]
+    normalized_hashes = [normalized.lower() for file_hash in hashes if (normalized := str(file_hash or "").strip())]
     if not normalized_hashes:
         return {}
     normalized_algorithm = normalize_hash_algorithm(algorithm)
@@ -120,7 +120,7 @@ def _resolve_latest_versions_by_hashes(
     Returns:
         以雜湊值為 key 的查詢結果字典
     """
-    normalized_hashes = [str(file_hash or "").strip().lower() for file_hash in hashes if str(file_hash or "").strip()]
+    normalized_hashes = [normalized.lower() for file_hash in hashes if (normalized := str(file_hash or "").strip())]
     if not normalized_hashes:
         return {}
     json_body: dict[str, Any] = {"hashes": normalized_hashes, "algorithm": normalize_hash_algorithm(algorithm)}

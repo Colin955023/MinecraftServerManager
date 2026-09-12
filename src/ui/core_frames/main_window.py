@@ -214,17 +214,17 @@ class MainWindow(FluentWindow):
         self.servers_root = str(path_obj)
         return self.servers_root
 
-    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+    def closeEvent(self, e: QtGui.QCloseEvent) -> None:
         """
         主視窗關閉處理，儲存視窗狀態並清理快取
 
         Args:
-            event: 關閉事件
+            e: 關閉事件
         """
         if getattr(self, "_shutdown_complete", False):
-            super().closeEvent(event)
+            super().closeEvent(e)
             return
-        event.ignore()
+        e.ignore()
         if getattr(self, "_closing", False):
             return
         self._closing = True
@@ -242,8 +242,8 @@ class MainWindow(FluentWindow):
                 x, y = prev.get("x"), prev.get("y")
             self.settings.set_main_window_settings(w, h, x, y, is_maximized)
 
-        except Exception as e:
-            logger.error(f"關閉時儲存設定失敗: {e}")
+        except Exception as exc:
+            logger.error(f"關閉時儲存設定失敗: {exc}")
         app = QtWidgets.QApplication.instance()
         windows = app.topLevelWidgets() if isinstance(app, QtWidgets.QApplication) else [self]
         self._shutdown_scopes = {scope for widget in windows for scope in widget.findChildren(UIWorkScope)}
@@ -278,12 +278,12 @@ class MainWindow(FluentWindow):
         if app is not None:
             app.quit()
 
-    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+    def eventFilter(self, obj: QtCore.QObject, e: QtCore.QEvent) -> bool:
         """所有退出要求均先經過主視窗的安全關閉流程"""
-        if event.type() == QtCore.QEvent.Type.Quit and not getattr(self, "_shutdown_complete", False):
+        if e.type() == QtCore.QEvent.Type.Quit and not getattr(self, "_shutdown_complete", False):
             self.close()
             return True
-        return super().eventFilter(watched, event)
+        return super().eventFilter(obj, e)
 
     def _queue_surface_refresh(self) -> None:
         """重新取得焦點後只排程 repaint，不在 frameless 過渡狀態強制重算 geometry"""

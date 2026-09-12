@@ -397,7 +397,7 @@ def read_text_file(
         return None
 
 
-def _delete_path(path: Path) -> bool:
+def _delete_path(path: Path, *, max_entries: int = SAFE_DIRECTORY_MAX_FILES) -> bool:
     try:
         if not os.path.lexists(path):
             return True
@@ -405,6 +405,8 @@ def _delete_path(path: Path) -> bool:
         if stat.S_ISLNK(metadata.st_mode) or is_reparse_point(path):
             return False
         if stat.S_ISDIR(metadata.st_mode):
+            for _root, _dirs, _files in walk_bounded_tree(path, max_entries=max_entries):
+                pass
             shutil.rmtree(path)
         else:
             path.unlink()

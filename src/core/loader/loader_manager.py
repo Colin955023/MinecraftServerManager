@@ -5,12 +5,12 @@ from __future__ import annotations
 import re
 import threading
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-import orjson
 from defusedxml import ElementTree as ET
 from packaging.version import Version
 
@@ -83,8 +83,9 @@ class LoaderManager:
             return False
         if callable(cancel_flag):
             return bool(cancel_flag())
-        if hasattr(cancel_flag, "is_cancelled") and callable(cancel_flag.is_cancelled):
-            return bool(cancel_flag.is_cancelled())
+        is_cancelled = getattr(cancel_flag, "is_cancelled", None)
+        if callable(is_cancelled):
+            return bool(is_cancelled())
         if isinstance(cancel_flag, dict):
             return bool(cancel_flag.get("cancelled") or cancel_flag.get("cancel"))
         if hasattr(cancel_flag, "cancelled"):
@@ -164,7 +165,7 @@ class LoaderManager:
 
     @staticmethod
     def _build_version_dict(versions: list[str]) -> dict[str, list[str]]:
-        result: dict[str, list[str]] = {}
+        result: defaultdict[str, list[str]] = defaultdict(list)
         for version in versions:
             if "-" not in version:
                 continue
@@ -172,8 +173,8 @@ class LoaderManager:
             parts = mc_version.split(".")
             if len(parts) == 4:
                 mc_version = ".".join(parts[:3])
-            result.setdefault(mc_version, []).append(version)
-        return result
+            result[mc_version].append(version)
+        return dict(result)
 
     def _build_loader_version_dict_from_metadata(
         self, content: bytes, *, allow_prerelease: bool
@@ -210,10 +211,10 @@ class LoaderManager:
     def _fetch_json_versions(self, spec: LoaderAdapter) -> list[dict]:
         if not spec.api_url:
             return []
-        content = HTTPClient.fetch_bytes(spec.api_url, timeout=30)
-        if not content:
+        data = HTTPClient.fetch_json(spec.api_url, timeout=30)
+        if not isinstance(data, list):
             return []
-        return self._filter_loader_json(spec, orjson.loads(content))
+        return self._filter_loader_json(spec, data)
 
     def _fetch_maven_versions(self, spec: LoaderAdapter) -> dict[str, list[str]]:
         if not spec.api_url:
@@ -226,14 +227,16 @@ class LoaderManager:
         return data
 
     def _fetch_minecraft_versions(self, spec: LoaderAdapter) -> list[dict]:
-        manifest = orjson.loads(HTTPClient.fetch_bytes(spec.api_url, timeout=30) or b"{}")
+        manifest = HTTPClient.fetch_json(spec.api_url, timeout=30)
+        if not isinstance(manifest, dict):
+            manifest = {}
         versions = []
         cached = read_json(Path(self._cache_path(spec.id))) or []
         cache_map = {v["id"]: v for v in cached if isinstance(v, dict) and v.get("id")}
 
         entries_to_fetch = []
         for item in manifest.get("versions", []):
-            if item.get("type") != "release":
+            if not isinstance(item, dict) or item.get("type") != "release":
                 continue
             entry = {
                 "id": item.get("id"),
@@ -258,7 +261,10 @@ class LoaderManager:
             def fetch_single_server_download(ent: dict) -> None:
                 try:
                     detail = HTTPClient.fetch_json(ent["url"], timeout=10)
-                    server = detail.get("downloads", {}).get("server", {}) if detail else {}
+                    if not isinstance(detail, dict):
+                        detail = {}
+                    downloads = detail.get("downloads")
+                    server = downloads.get("server", {}) if isinstance(downloads, dict) else {}
                     if not isinstance(server, dict):
                         server = {}
                     raw_url = server.get("url")
@@ -283,21 +289,25 @@ class LoaderManager:
     def _sort_version_dict(
         version_dict: dict[str, list[str]], *, parse_fallback_full_version: bool = False
     ) -> dict[str, list[str]]:
-        for mc_version, versions in version_dict.items():
-            version_dict[mc_version] = sorted(
-                versions,
-                key=lambda full: (
-                    parse_version_safe(full.split("-", 1)[1], fallback=_VERSION_FALLBACK)
-                    if "-" in full
-                    else (
-                        parse_version_safe(full, fallback=_VERSION_FALLBACK)
-                        if parse_fallback_full_version
-                        else _VERSION_FALLBACK
+        version_dict.update(
+            {
+                mc_version: sorted(
+                    versions,
+                    key=lambda full: (
+                        parse_version_safe(full.split("-", 1)[1], fallback=_VERSION_FALLBACK)
+                        if "-" in full
+                        else (
+                            parse_version_safe(full, fallback=_VERSION_FALLBACK)
+                            if parse_fallback_full_version
+                            else _VERSION_FALLBACK
+                        ),
+                        full,
                     ),
-                    full,
-                ),
-                reverse=True,
-            )
+                    reverse=True,
+                )
+                for mc_version, versions in version_dict.items()
+            }
+        )
         return version_dict
 
     @staticmethod

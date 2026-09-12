@@ -50,18 +50,16 @@ class OnlineModVersion:
     def primary_file(self) -> dict[str, Any] | None:
         if not self.files:
             return None
-        for file_info in self.files:
-            if isinstance(file_info, dict) and file_info.get("primary"):
-                return file_info
-        for file_info in self.files:
-            if isinstance(file_info, dict):
-                filename = str(file_info.get("filename", "") or "")
-                if filename.lower().endswith(".jar"):
-                    return file_info
-        for file_info in self.files:
-            if isinstance(file_info, dict):
-                return file_info
-        return None
+        valid_files = [f for f in self.files if isinstance(f, dict)]
+        if not valid_files:
+            return None
+        return next(
+            (f for f in valid_files if f.get("primary")),
+            next(
+                (f for f in valid_files if str(f.get("filename", "") or "").lower().endswith(".jar")),
+                valid_files[0],
+            ),
+        )
 
 
 @dataclass
@@ -473,7 +471,9 @@ class OnlineDependencyInstallItem:
         if not edge_source:
             edge_source = f"{edge_kind}:modrinth_dependency"
         req_by = payload.get("required_by", [])
-        required_by = [str(x).strip() for x in req_by if str(x).strip()] if isinstance(req_by, list) else []
+        required_by = (
+            [normalized for item in req_by if (normalized := str(item).strip())] if isinstance(req_by, list) else []
+        )
         return cls(
             project_id=_get_str("project_id"),
             project_name=_get_str("project_name"),

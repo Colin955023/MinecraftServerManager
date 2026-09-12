@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$KeepBuildOutput,
     [ValidateSet('disable', 'attach')]
@@ -50,7 +50,6 @@ print(json.dumps({
     $executablePath = Join-Path $projectRoot "dist\$($appInfo.GITHUB_REPO).exe"
 
     $exportsCode = @'
-import json
 from src.core import _EXPORTS as core_exports
 from src.models import _EXPORTS as model_exports
 from src.ui import _EXPORTS as ui_exports
@@ -58,23 +57,23 @@ from src.utils import _EXPORTS as utility_exports
 
 modules = sorted(
     {
-        f"{package}{module}" if module.startswith(".") else module
+        f'{package}{module}' if module.startswith('.') else module
         for package, exports in (
-            ("src.core", core_exports),
-            ("src.models", model_exports),
-            ("src.ui", ui_exports),
-            ("src.utils", utility_exports),
+            ('src.core', core_exports),
+            ('src.models', model_exports),
+            ('src.ui', ui_exports),
+            ('src.utils', utility_exports),
         )
         for module, _ in exports.values()
     }
 )
-print(json.dumps(modules))
+print(chr(10).join(modules))
 '@
     $exportModulesJson = & $venvPython -c $exportsCode
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to load facade export modules. ExitCode=$LASTEXITCODE"
     }
-    $exportModules = @($exportModulesJson | ConvertFrom-Json)
+    $exportModules = @($exportModulesJson)
 
     Write-Host "Checking whether the build output executable is running..."
     $runningOutputProcesses = @(Get-Process -Name "$($appInfo.GITHUB_REPO)" -ErrorAction SilentlyContinue | ForEach-Object {

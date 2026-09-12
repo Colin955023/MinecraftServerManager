@@ -53,6 +53,22 @@ def test_atomic_write_json_if_changed_skips_rewrite_for_same_payload(tmp_path, m
     assert replace_call_count == count_before_change + 1
 
 
+def test_atomic_write_json_if_changed_resolves_target_once(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "state.json"
+    resolve_calls = 0
+    original_resolve = atomic_writer_module.resolve_stable_path
+
+    def _counting_resolve(*args, **kwargs):
+        nonlocal resolve_calls
+        resolve_calls += 1
+        return original_resolve(*args, **kwargs)
+
+    monkeypatch.setattr(atomic_writer_module, "resolve_stable_path", _counting_resolve)
+
+    assert atomic_write_json(target, {"value": 1}, skip_if_unchanged=True) is True
+    assert resolve_calls == 1
+
+
 def test_atomic_write_json_keeps_existing_file_when_new_payload_not_serializable(tmp_path) -> None:
     target = tmp_path / "state.json"
     original = {"ok": True}

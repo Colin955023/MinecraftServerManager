@@ -131,17 +131,17 @@ class ProgressDialog(ModalMSFluentWindow):
         self.progress_event_requested.emit(event)
         return True
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, e) -> None:
         """
         處理視窗關閉事件，確保在關閉時發送取消通知
 
         Args:
-            event: 關閉事件物件
+            e: 關閉事件物件
         """
         if not self.cancelled:
             self.cancelled = True
             self.rejected.emit()
-        super().closeEvent(event)
+        super().closeEvent(e)
 
     def _apply_determinate_percent(self, percent: float) -> None:
         """

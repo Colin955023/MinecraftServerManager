@@ -50,6 +50,12 @@ SERVER_JAR_CANDIDATES = (
     *FABRIC_JAR_NAMES,
     *QUILT_JAR_NAMES,
 )
+_LOADER_LIBRARY_PATHS = {
+    "fabric": FABRIC_LIBRARY_PATH,
+    "quilt": QUILT_LIBRARY_PATH,
+    "forge": FORGE_LIBRARY_PATH,
+    "neoforge": NEOFORGE_LIBRARY_PATH,
+}
 
 
 @dataclass(slots=True)
@@ -119,11 +125,7 @@ class _InspectionEngine:
             try:
                 entries = walk_bounded_tree(root, max_entries=SAFE_DIRECTORY_MAX_FILES)
                 for current_path, _dirs, files in entries:
-                    matches.extend(
-                        current_path / file_name
-                        for file_name in files
-                        if any(file_name.lower().endswith(name) for name in names)
-                    )
+                    matches.extend(current_path / file_name for file_name in files if file_name.lower().endswith(names))
             except OSError:
                 return []
             return matches
@@ -328,7 +330,7 @@ class _InspectionEngine:
         except OSError:
             return None
         files_by_name = {entry.name.casefold(): entry for entry in log_entries if entry.is_file()}
-        found_logs = [files_by_name[name.casefold()] for name in log_candidates if name.casefold() in files_by_name]
+        found_logs = [files_by_name[name] for name in log_candidates if name in files_by_name]
         if not found_logs:
             found_logs = [entry for entry in log_entries if entry.suffix.lower() == ".log" and entry.is_file()]
         if not found_logs:
@@ -943,13 +945,7 @@ class ServerInspector:
 
     @staticmethod
     def _loader_evidence(server_path: Path, loader: str, jar_names: list[str]) -> str:
-        library_paths = {
-            "fabric": FABRIC_LIBRARY_PATH,
-            "quilt": QUILT_LIBRARY_PATH,
-            "forge": FORGE_LIBRARY_PATH,
-            "neoforge": NEOFORGE_LIBRARY_PATH,
-        }
-        library = library_paths.get(loader)
+        library = _LOADER_LIBRARY_PATHS.get(loader)
         if library and (server_path / library).exists():
             return f"目錄 {library}"
         match = next((name for name in jar_names if loader in name.lower().replace("-", "")), "")
@@ -957,16 +953,16 @@ class ServerInspector:
 
     @staticmethod
     def _expected_conflicts(state: _InspectionState, intent: ServerInspectionIntent) -> list[str]:
-        conflicts: list[str] = []
         comparisons = (
             ("loader", intent.expected_loader_type, state.loader_type),
             ("Minecraft", intent.expected_minecraft_version, state.minecraft_version),
             ("loader version", intent.expected_loader_version, state.loader_version),
         )
-        for label, expected, actual in comparisons:
-            if expected and expected.lower() != "unknown" and actual.lower() != "unknown" and expected != actual:
-                conflicts.append(f"已登錄 {label} {expected} 與磁碟證據 {actual} 不一致")
-        return conflicts
+        return [
+            f"已登錄 {label} {expected} 與磁碟證據 {actual} 不一致"
+            for label, expected, actual in comparisons
+            if expected and expected.lower() != "unknown" and actual.lower() != "unknown" and expected != actual
+        ]
 
 
 __all__ = ["ServerInspector"]

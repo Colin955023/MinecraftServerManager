@@ -12,7 +12,6 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
-from concurrent.futures import Future
 from contextlib import suppress
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
@@ -39,6 +38,7 @@ from src.utils import (
     delete_within,
     format_bytes,
     get_logger,
+    get_shared_manager,
     open_regular_file_for_write,
     resolve_stable_path,
 )
@@ -58,17 +58,8 @@ def _resolve_hostname(hostname: str, port: int) -> list[Any]:
         token.check()
         if time.monotonic() >= deadline:
             raise OSError("DNS 解析佇列逾時")
-    future: Future[list[Any]] = Future()
-
-    def resolve() -> None:
-        try:
-            future.set_result(socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM))
-        except Exception as e:
-            future.set_exception(e)
-        finally:
-            _DNS_SLOTS.release()
-
-    threading.Thread(target=resolve, name="MSM-DNS", daemon=True).start()
+    future = get_shared_manager().run(socket.getaddrinfo, hostname, port, type=socket.SOCK_STREAM)
+    future.add_done_callback(lambda _future: _DNS_SLOTS.release())
     while True:
         token.check()
         remaining = deadline - time.monotonic()

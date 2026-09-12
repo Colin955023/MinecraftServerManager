@@ -120,10 +120,11 @@ class ModalMSFluentWindow(MSFluentWindow):
         """
         center_window(self, self.parentWidget())
         self.show()
-        self._loop = QEventLoop()
-        self.destroyed.connect(self._loop.quit)
+        loop = QEventLoop()
+        self._loop = loop
+        self.destroyed.connect(loop.quit)
         try:
-            self._loop.exec()
+            loop.exec()
         finally:
             self._loop = None
         return self._result

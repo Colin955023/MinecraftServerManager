@@ -40,7 +40,6 @@ class WindowPreferences(TypedDict, total=False):
     remember_size_position: bool
     main_window: MainWindowSettings
     auto_center: bool
-    adaptive_sizing: bool
     theme_mode: str
 
 
@@ -48,7 +47,6 @@ DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
     "remember_size_position": True,
     "main_window": {"width": 1350, "height": 820, "x": None, "y": None, "maximized": False},
     "auto_center": True,
-    "adaptive_sizing": True,
     "theme_mode": "system",
 }
 _BOOL_SETTINGS = {"auto_update_enabled": True, "first_run_completed": False}
@@ -56,14 +54,14 @@ _THEME_MODES = {"system", "light", "dark"}
 
 
 def _copy_window_preferences() -> WindowPreferences:
+    main_default = DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
     return cast(
         WindowPreferences,
         {
-            "remember_size_position": DEFAULT_WINDOW_PREFERENCES["remember_size_position"],
-            "main_window": dict(DEFAULT_WINDOW_PREFERENCES["main_window"]),
-            "auto_center": DEFAULT_WINDOW_PREFERENCES["auto_center"],
-            "adaptive_sizing": DEFAULT_WINDOW_PREFERENCES["adaptive_sizing"],
-            "theme_mode": DEFAULT_WINDOW_PREFERENCES["theme_mode"],
+            "remember_size_position": DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True),
+            "main_window": dict(main_default),
+            "auto_center": DEFAULT_WINDOW_PREFERENCES.get("auto_center", True),
+            "theme_mode": DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system"),
         },
     )
 
@@ -149,12 +147,14 @@ class SettingsManager:
         Returns:
             主視窗預設大小設定
         """
-        return cast(MainWindowSettings, dict(DEFAULT_WINDOW_PREFERENCES["main_window"]))
+        main_default = DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
+        return cast(MainWindowSettings, dict(main_default))
 
     @staticmethod
     def _normalize_theme_mode(mode: Any) -> str:
-        normalized = str(mode or DEFAULT_WINDOW_PREFERENCES["theme_mode"]).strip().lower()
-        return normalized if normalized in _THEME_MODES else DEFAULT_WINDOW_PREFERENCES["theme_mode"]
+        default_theme = DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
+        normalized = str(mode or default_theme).strip().lower()
+        return normalized if normalized in _THEME_MODES else default_theme
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -284,12 +284,6 @@ class SettingsManager:
     def set_auto_center(self, enabled: bool) -> None:
         self._update_window_pref("auto_center", enabled)
 
-    def is_adaptive_sizing_enabled(self) -> bool:
-        return self._get_window_bool("adaptive_sizing", True)
-
-    def set_adaptive_sizing(self, enabled: bool) -> None:
-        self._update_window_pref("adaptive_sizing", enabled)
-
     def get_main_window_settings(self) -> MainWindowSettings:
         """
         取得主視窗的大小、位置和狀態設定
@@ -323,9 +317,8 @@ class SettingsManager:
 
     def get_theme_mode(self) -> str:
         """取得 UI 主題模式"""
-        return self._normalize_theme_mode(
-            self.get_window_preferences().get("theme_mode", DEFAULT_WINDOW_PREFERENCES["theme_mode"])
-        )
+        default_theme = DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
+        return self._normalize_theme_mode(self.get_window_preferences().get("theme_mode", default_theme))
 
     def set_theme_mode(self, mode: str) -> None:
         """設定 UI 主題模式"""
@@ -333,31 +326,29 @@ class SettingsManager:
 
     def _normalize_window_preferences(self, window_preferences: dict[str, Any]) -> WindowPreferences:
         normalized_window = _copy_window_preferences()
+        default_rem = DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True)
+        default_center = DEFAULT_WINDOW_PREFERENCES.get("auto_center", True)
         normalized_window["remember_size_position"] = bool(
-            window_preferences.get("remember_size_position", DEFAULT_WINDOW_PREFERENCES["remember_size_position"])
+            window_preferences.get("remember_size_position", default_rem)
         )
-        normalized_window["auto_center"] = bool(
-            window_preferences.get("auto_center", DEFAULT_WINDOW_PREFERENCES["auto_center"])
-        )
-        normalized_window["adaptive_sizing"] = bool(
-            window_preferences.get("adaptive_sizing", DEFAULT_WINDOW_PREFERENCES["adaptive_sizing"])
-        )
+        normalized_window["auto_center"] = bool(window_preferences.get("auto_center", default_center))
+        current_theme = normalized_window.get("theme_mode", "system")
         normalized_window["theme_mode"] = self._normalize_theme_mode(
-            window_preferences.get("theme_mode", normalized_window["theme_mode"])
+            window_preferences.get("theme_mode", current_theme)
         )
         main_window = window_preferences.get("main_window")
         if isinstance(main_window, dict):
-            normalized_window["main_window"]["width"] = self._normalize_int_value(
-                main_window.get("width"), normalized_window["main_window"]["width"]
-            )
-            normalized_window["main_window"]["height"] = self._normalize_int_value(
-                main_window.get("height"), normalized_window["main_window"]["height"]
-            )
-            normalized_window["main_window"]["x"] = main_window.get("x")
-            normalized_window["main_window"]["y"] = main_window.get("y")
-            normalized_window["main_window"]["maximized"] = bool(
-                main_window.get("maximized", normalized_window["main_window"]["maximized"])
-            )
+            current_main = normalized_window.get("main_window") or {}
+            cur_w = current_main.get("width", 1350)
+            cur_h = current_main.get("height", 820)
+            cur_max = current_main.get("maximized", False)
+            normalized_window["main_window"] = {
+                "width": self._normalize_int_value(main_window.get("width"), cur_w),
+                "height": self._normalize_int_value(main_window.get("height"), cur_h),
+                "x": main_window.get("x"),
+                "y": main_window.get("y"),
+                "maximized": bool(main_window.get("maximized", cur_max)),
+            }
         return normalized_window
 
     def _normalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -365,8 +356,7 @@ class SettingsManager:
         normalized["servers_root"] = self.normalize_servers_base_dir(
             str(settings.get("servers_root", "") or "")
         ).strip()
-        for key, default in _BOOL_SETTINGS.items():
-            normalized[key] = bool(settings.get(key, default))
+        normalized.update({key: bool(settings.get(key, default)) for key, default in _BOOL_SETTINGS.items()})
         window_preferences = settings.get("window_preferences")
         if isinstance(window_preferences, dict):
             normalized["window_preferences"] = self._normalize_window_preferences(window_preferences)

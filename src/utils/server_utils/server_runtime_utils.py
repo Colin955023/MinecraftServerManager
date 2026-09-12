@@ -9,7 +9,7 @@ import re
 import shlex
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, ClassVar
 
 from src.utils import (
@@ -68,7 +68,7 @@ class JvmOptionPolicy:
             except ValueError:
                 return [arg for arg in raw_args.split() if arg]
         if isinstance(raw_args, (list, tuple)):
-            return [str(arg).strip() for arg in raw_args if str(arg).strip()]
+            return [normalized for arg in raw_args if (normalized := str(arg).strip())]
         return []
 
     @staticmethod
@@ -276,9 +276,7 @@ class ServerCommands:
             return False
         if normalized.lower() in JavaUtils.JAVA_EXECUTABLE_NAMES:
             return False
-        return bool(
-            Path(normalized).is_absolute() or re.match(r"^[A-Za-z]:[\\/]", normalized) or normalized.startswith("\\\\")
-        )
+        return PureWindowsPath(normalized).is_absolute()
 
     @staticmethod
     def to_console_java_executable(java_path: str | None) -> str | None:
@@ -482,7 +480,7 @@ class ServerCommands:
     def _split_line_ending(line: str) -> tuple[str, str]:
         for newline in ("\r\n", "\n", "\r"):
             if line.endswith(newline):
-                return line[: -len(newline)], newline
+                return line.removesuffix(newline), newline
         return line, ""
 
     @staticmethod

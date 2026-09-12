@@ -164,11 +164,12 @@ class SubprocessUtils:
             subprocess.Popen 實例
         """
         resolved_cmd = SubprocessUtils._validate_cmd(cmd)
-        kwargs: dict[str, Any] = {
+        raw_kwargs: dict[str, Any] = {
             "cwd": str(cwd) if cwd else None,
             "env": env,
+            "creationflags": SubprocessUtils.CREATE_NEW_CONSOLE,
         }
-        kwargs["creationflags"] = SubprocessUtils.CREATE_NEW_CONSOLE
+        kwargs = SubprocessUtils._normalize_subprocess_kwargs(raw_kwargs)
         return subprocess.Popen(resolved_cmd, **kwargs)  # nosec B603
 
     @staticmethod
@@ -201,10 +202,10 @@ class SubprocessUtils:
         Returns:
             Popen 物件
         """
-        DETACHED_PROCESS = 8
-        CREATE_NEW_PROCESS_GROUP = 512
         hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
-        creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | hidden_kwargs.pop("creationflags", 0)
+        creation_flags = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | hidden_kwargs.pop("creationflags", 0)
+        )
         return SubprocessUtils.popen_checked(
             cmd,
             cwd=cwd,

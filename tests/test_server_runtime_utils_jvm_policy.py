@@ -36,6 +36,22 @@ def test_jvm_policy_keeps_existing_gc_option() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("java_path", "expected"),
+    [
+        (r"C:\Program Files\Java\bin\java.exe", True),
+        (r"\\server\share\jdk\bin\java.exe", True),
+        (r"C:java.exe", False),
+        (r"jdk\bin\java.exe", False),
+        ("java", False),
+        ("java.exe", False),
+        ("", False),
+    ],
+)
+def test_is_full_java_path_uses_windows_path_semantics(java_path: str, expected: bool) -> None:
+    assert ServerCommands.is_full_java_path(java_path) is expected
+
+
 def test_build_java_command_includes_recommended_gc(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     server_jar = tmp_path / "server.jar"
     server_jar.write_bytes(b"jar")

@@ -603,19 +603,19 @@ class ServerMonitorWindow(MSFluentWindow):
         else:
             self.add_console_message(f"❌ 指令發送失敗: {command}")
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         """
         過濾指令輸入框事件以支援方向鍵切換歷史指令
 
         Args:
-            watched: 被監視的 QObject 元件
-            event: 傳遞的事件物件
+            obj: 被監視的 QObject 元件
+            e: 傳遞的事件物件
 
         Returns:
             若已攔截並處理該事件則傳回 True，否則傳回 False
         """
-        if watched == getattr(self, "command_entry", None) and event.type() == QEvent.Type.KeyPress:
-            key_event = cast(QKeyEvent, event)
+        if obj == getattr(self, "command_entry", None) and e.type() == QEvent.Type.KeyPress:
+            key_event = cast(QKeyEvent, e)
             key = key_event.key()
             if key == Qt.Key.Key_Up:
                 if self._command_history:
@@ -635,7 +635,7 @@ class ServerMonitorWindow(MSFluentWindow):
                         self._history_index = -1
                         self.command_entry.setText(self._current_typed)
                 return True
-        return super().eventFilter(watched, event)
+        return super().eventFilter(obj, e)
 
     def add_console_message(self, message: str) -> None:
         """
@@ -675,17 +675,17 @@ class ServerMonitorWindow(MSFluentWindow):
         if event.type() in (QEvent.Type.WindowStateChange, QEvent.Type.ActivationChange):
             QTimer.singleShot(0, self._queue_surface_refresh)
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, e) -> None:
         """
         視窗關閉事件處理，確保在關閉時停止監控
 
         Args:
-            event: QCloseEvent 事件物件
+            e: QCloseEvent 事件物件
         """
         self.stop_monitoring()
         with suppress(Exception):
             qconfig.themeChangedFinished.disconnect(self.apply_theme_styles)
-        super().closeEvent(event)
+        super().closeEvent(e)
 
     def show(self) -> None:
         """建立並顯示監控視窗，啟動相關監控服務"""

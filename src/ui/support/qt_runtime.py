@@ -292,22 +292,19 @@ class ValueState(QtCore.QObject):
         self._value = value
         self.changed.emit(value)
 
-    def trace_add(self, callback: Callable[[], Any]) -> str:
+    def trace_add(self, callback: Callable[[], Any]) -> None:
         """
         註冊狀態變更回呼
 
         Args:
             callback: 狀態變更時呼叫的回呼
 
-        Returns:
-            監聽器識別字串
         """
 
         def _run() -> None:
             callback()
 
         self.changed.connect(_run)
-        return str(id(callback))
 
 
 __all__ = [

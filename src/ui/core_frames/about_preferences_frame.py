@@ -58,7 +58,6 @@ class AboutPreferencesFrame(QWidget):
 
         self.remember_size_var = BoolState(self.settings.is_remember_size_position_enabled())
         self.auto_center_var = BoolState(self.settings.is_auto_center_enabled())
-        self.adaptive_sizing_var = BoolState(self.settings.is_adaptive_sizing_enabled())
         self.theme_mode_var = TextState(self._theme_mode_to_label(self.settings.get_theme_mode()))
 
         self._create_widgets()
@@ -210,7 +209,6 @@ class AboutPreferencesFrame(QWidget):
         layout.addWidget(gen_title)
         self._create_checkbox(layout, "記住主視窗大小和位置", self.remember_size_var)
         self._create_checkbox(layout, "自動置中新的對話框視窗", self.auto_center_var)
-        self._create_checkbox(layout, "啟用自適應視窗大小調整", self.adaptive_sizing_var)
         layout.addSpacing(Spacing.MEDIUM)
 
         win_title = SubtitleLabel("🏠 主視窗設定", self)
@@ -300,7 +298,6 @@ class AboutPreferencesFrame(QWidget):
     def _load_current_settings(self) -> None:
         self.remember_size_var.set(self.settings.is_remember_size_position_enabled())
         self.auto_center_var.set(self.settings.is_auto_center_enabled())
-        self.adaptive_sizing_var.set(self.settings.is_adaptive_sizing_enabled())
         self.theme_mode_var.set(self._theme_mode_to_label(self.settings.get_theme_mode()))
 
     def _get_setting_changes(self) -> dict:
@@ -308,13 +305,11 @@ class AboutPreferencesFrame(QWidget):
             "old": {
                 "remember": self.settings.is_remember_size_position_enabled(),
                 "auto_center": self.settings.is_auto_center_enabled(),
-                "adaptive": self.settings.is_adaptive_sizing_enabled(),
                 "theme": self.settings.get_theme_mode(),
             },
             "new": {
                 "remember": self.remember_size_var.get(),
                 "auto_center": self.auto_center_var.get(),
-                "adaptive": self.adaptive_sizing_var.get(),
                 "theme": self._theme_label_to_mode(self.theme_mode_var.get()),
             },
         }
@@ -338,10 +333,12 @@ class AboutPreferencesFrame(QWidget):
         win_layout = win.layout()
         if win_layout is not None:
             win_layout.activate()
-        if hasattr(win, "navigationInterface") and win.navigationInterface:
-            win.navigationInterface.update()
-        if hasattr(win, "stackedWidget") and win.stackedWidget:
-            win.stackedWidget.update()
+        nav = getattr(win, "navigationInterface", None)
+        if nav:
+            nav.update()
+        stacked = getattr(win, "stackedWidget", None)
+        if stacked:
+            stacked.update()
         win.update()
         win.repaint()
 
@@ -381,7 +378,6 @@ class AboutPreferencesFrame(QWidget):
         ):
             self.settings.set_remember_size_position(True)
             self.settings.set_auto_center(True)
-            self.settings.set_adaptive_sizing(True)
             self.settings.set_theme_mode("system")
 
             defaults = self.settings.get_default_main_window_settings()
@@ -401,7 +397,6 @@ class AboutPreferencesFrame(QWidget):
             new_settings = changes["new"]
             self.settings.set_remember_size_position(new_settings["remember"])
             self.settings.set_auto_center(new_settings["auto_center"])
-            self.settings.set_adaptive_sizing(new_settings["adaptive"])
             self.settings.set_theme_mode(new_settings["theme"])
             theme_changed = changes["old"]["theme"] != new_settings["theme"]
             if theme_changed:

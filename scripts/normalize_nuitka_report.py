@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from defusedxml import ElementTree
 
 
-def main() -> None:
+def main(report_path: Path | None = None) -> None:
     """修正 Nuitka 使用的非標準 utf8 編碼別名並驗證 XML"""
-    report_path = Path(__file__).resolve().parents[1] / "report" / "nuitka-compilation-report.xml"
+    if report_path is None:
+        report_path = Path(__file__).resolve().parents[1] / "report" / "nuitka-compilation-report.xml"
     raw = report_path.read_bytes()
     single_quote = bytes([39])
     double_quote = bytes([34])
@@ -35,4 +37,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(Path(sys.argv[1]) if len(sys.argv) == 2 else None)

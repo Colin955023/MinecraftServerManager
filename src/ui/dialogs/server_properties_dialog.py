@@ -353,9 +353,9 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
         layout.addWidget(prop_frame)
 
     def _collect_property_values(self) -> dict[str, str]:
-        properties: dict[str, str] = {}
-        for prop_name, value in self._property_value_cache.items():
-            properties[prop_name] = "" if value is None else str(value)
+        properties = {
+            prop_name: "" if value is None else str(value) for prop_name, value in self._property_value_cache.items()
+        }
         for prop_name, var in self.property_vars.items():
             value = var.get()
             properties[prop_name] = value

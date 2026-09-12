@@ -45,6 +45,23 @@ temp/
 tmp/
 cache/
 
+# 敏感資料 / 本機憑證
+.env
+.env.*
+!.env.example
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+.netrc
+credentials*.json
+secrets*.json
+
 # Binaries
 *.exe
 
