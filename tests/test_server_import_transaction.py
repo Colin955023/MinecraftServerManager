@@ -424,3 +424,34 @@ def test_server_import_with_properties_migration(tmp_path: Path) -> None:
 
     source_props = props_file.read_text(encoding="utf-8")
     assert "gamemode=1" in source_props
+
+
+def test_redetect_preserves_configured_backup_path(tmp_path: Path) -> None:
+    root = tmp_path / "servers"
+    server_dir = root / "demo"
+    _write_server(server_dir)
+    manager = ServerCRUD(str(root))
+    initial_config = ServerConfig(
+        name="demo",
+        path=str(server_dir),
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        memory_min_mb=1024,
+        jvm_args=["-Dcustom=true"],
+        backup_path=str(tmp_path / "custom_backups"),
+    )
+    _register(manager, initial_config)
+    service = ServerImportService(manager)
+
+    inspection = service.inspect(server_dir, "demo", mode="redetect")
+    result = service.execute(inspection)
+
+    assert result.completed is True
+    assert result.config is not None
+    assert result.config.backup_path == str(tmp_path / "custom_backups")
+    assert result.config.jvm_args == ["-Dcustom=true"]
+    committed = manager.snapshot().get("demo")
+    assert committed is not None
+    assert committed.backup_path == str(tmp_path / "custom_backups")

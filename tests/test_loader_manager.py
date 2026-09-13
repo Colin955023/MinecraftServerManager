@@ -22,9 +22,7 @@ def _adapter(manager: LoaderManager, loader_id: str):
 
 
 def test_clear_cache_file_removes_cache_files_and_memory_cache(tmp_path: Path) -> None:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     manager.cache_dir = tmp_path
 
     fabric_cache = tmp_path / _adapter(manager, "fabric").cache_name
@@ -42,9 +40,7 @@ def test_clear_cache_file_removes_cache_files_and_memory_cache(tmp_path: Path) -
 
 
 def _build_manager_for_preload_tests(tmp_path: Path, *, calls: list[str]) -> LoaderManager:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     manager.cache_dir = tmp_path
 
     def mock_preload(spec):
@@ -66,9 +62,7 @@ def test_preload_loader_versions_reloads_when_cache_missing(tmp_path: Path) -> N
 def test_preload_loader_versions_skips_network_when_cache_fresh(
     tmp_path: Path,
 ) -> None:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     manager.cache_dir = tmp_path
 
     fabric_cache = tmp_path / _adapter(manager, "fabric").cache_name
@@ -111,9 +105,7 @@ def test_json_loader_metadata_uses_http_json_helper(tmp_path: Path, monkeypatch:
 
 
 def test_preload_forge_versions_uses_numeric_sort_for_versions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     manager.cache_dir = tmp_path
 
     forge_cache = tmp_path / _adapter(manager, "forge").cache_name
@@ -228,9 +220,7 @@ def test_vanilla_download_paths_pass_mojang_sha1_to_http_client(
 
 
 def _build_manager(tmp_path: Path) -> LoaderManager:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     manager.cache_dir = tmp_path
     return manager
 
@@ -367,9 +357,7 @@ def test_vanilla_compatible_versions_refresh_legacy_cache(tmp_path: Path, monkey
 
 
 def test_quilt_installer_uses_prevalidated_server_without_download_flag() -> None:
-    manager = LoaderManager.__new__(LoaderManager)
-    manager._initialized = False
-    manager.__init__()
+    manager = LoaderManager()
     args = _adapter(manager, "quilt").installer_args(
         InstallerCommandContext(
             java_path="java",
@@ -413,3 +401,17 @@ def test_filter_quilt_versions_preserves_and_sorts_all_stable_versions() -> None
     filtered = filter_quilt_versions(items)
     versions = [item["version"] for item in filtered]
     assert versions == ["0.26.0", "0.25.0", "0.20.0"]
+
+
+def test_multiple_loader_manager_instances_initialize_properly() -> None:
+    first = LoaderManager()
+    second = LoaderManager()
+
+    assert first is not second
+    assert hasattr(first, "cache_dir")
+    assert hasattr(second, "cache_dir")
+    assert hasattr(first, "_adapters")
+    assert hasattr(second, "_adapters")
+    assert hasattr(first, "_version_cache")
+    assert hasattr(second, "_version_cache")
+    assert first._adapters is not second._adapters

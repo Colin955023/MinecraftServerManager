@@ -418,3 +418,38 @@ def test_creation_progress_stays_determinate_and_monotonic_across_loader_stage_m
     assert numeric == sorted(numeric)
     assert numeric[0] == 2
     assert numeric[-1] == 100
+
+
+def test_creation_accepts_legacy_forge_versioned_target(tmp_path) -> None:
+    class _LegacyForgeLoader(_FakeLoader):
+        def download_server_jar_with_progress(self, *args, **_kwargs) -> bool:
+            download_path = Path(args[3])
+            staging_dir = download_path.parent
+            (staging_dir / "forge-1.12.2-14.23.5.2860.jar").write_bytes(b"forge jar")
+            (staging_dir / "libraries").mkdir(exist_ok=True)
+            return True
+
+    crud = ServerCRUD(str(tmp_path))
+    artifact = LoaderInstallerArtifact("https://example.invalid/forge-installer.jar", "a" * 64, "sha256")
+    loader = _LegacyForgeLoader(artifact=artifact)
+    journey = CreateServerJourney(crud, loader)
+    forge_config = ServerConfig(
+        name="legacy-forge",
+        minecraft_version="1.12.2",
+        loader_type="forge",
+        loader_version="14.23.5.2860",
+        memory_max_mb=2048,
+        memory_min_mb=1024,
+        path="",
+    )
+    plan = journey.plan(forge_config)
+    assert plan.confirmation is not None
+    assert plan.confirmation.launch_target == "forge-server.jar"
+
+    result = journey.execute(plan)
+
+    assert result.completed is True
+    assert result.config is not None
+    final_path = tmp_path / "legacy-forge"
+    assert (final_path / "forge-1.12.2-14.23.5.2860.jar").is_file()
+    assert (final_path / ServerCommands.MANAGED_STARTUP_SCRIPT_NAME).is_file()

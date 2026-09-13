@@ -49,7 +49,6 @@ _VERSION_FALLBACK = Version("0.0.0")
 class LoaderManager:
     """五種 Minecraft server 載入器的單一管理入口"""
 
-    _initialized: bool = False
     LOADER_CACHE_TTL_SECONDS: int = 12 * 60 * 60
     SECURE_CHECKSUM_SUFFIXES: tuple[tuple[str, str], ...] = (
         (".sha512", "sha512"),
@@ -59,9 +58,6 @@ class LoaderManager:
     _INSTALLER_METADATA_NAME = "installers.json"
 
     def __init__(self):
-        if self._initialized:
-            return
-
         cache_dir = resolve_stable_directory(RuntimePaths.get_cache_dir(), create=True)
         self.cache_dir = Path(cache_dir)
         self.version_cache_dir = Path(RuntimePaths.get_version_cache_dir())
@@ -71,7 +67,6 @@ class LoaderManager:
 
         self._adapters = build_loader_adapters(self)
         self._prune_installer_cache()
-        self._initialized = True
 
     # ------------------------------------------------------------------
     # 共用基礎：取消、快取、API、版本解析

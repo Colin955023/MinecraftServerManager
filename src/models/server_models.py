@@ -215,7 +215,7 @@ class ServerImportInspection:
 
         Args:
             path: 匯入後的伺服器目錄
-            previous: 可沿用 JVM 參數的既有設定
+            previous: 可沿用 JVM 參數與備份路徑的既有設定
 
         Returns:
             可供持久化的伺服器設定
@@ -229,6 +229,7 @@ class ServerImportInspection:
             memory_max_mb=self.server.memory_max_mb,
             memory_min_mb=self.server.memory_min_mb,
             jvm_args=list(previous.jvm_args) if previous else [],
+            backup_path=previous.backup_path if previous else "",
         )
 
 

@@ -343,7 +343,18 @@ class CreateServerJourney:
             staged_config = replace(config, path=str(plan.staging_path), jvm_args=list(config.jvm_args))
             detected_target = ServerInspector.find_main_jar(plan.staging_path, config.loader_type, staged_config)
             confirmation = plan.confirmation
-            if confirmation is not None and detected_target != confirmation.launch_target:
+            is_legacy_forge_target = (
+                confirmation is not None
+                and config.loader_type.lower() == "forge"
+                and confirmation.launch_target == "forge-server.jar"
+                and "forge" in detected_target.lower()
+                and detected_target.lower().endswith(".jar")
+            )
+            if (
+                confirmation is not None
+                and detected_target != confirmation.launch_target
+                and not is_legacy_forge_target
+            ):
                 raise OperationError(
                     f"安裝後啟動目標與確認計畫不一致：{detected_target} != {confirmation.launch_target}"
                 )
