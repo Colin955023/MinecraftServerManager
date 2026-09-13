@@ -17,6 +17,7 @@ from src.ui import (
     Spacing,
     UIUtils,
 )
+from src.utils import mod_filename_stem
 
 from .constants import logger
 from .feature_contexts import ModManagementFeatureContext
@@ -111,12 +112,12 @@ class ModManagementReviewOps:
             shell.tree_container,
             tree_heading="項目",
             column_specs=[
-                ("run", "執行", Sizes.BUTTON_WIDTH_COMPACT, 45, False, "center"),
-                ("source", "來源", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
-                ("name", "名稱", Sizes.CONSOLE_PANEL_HEIGHT, 120, False, "w"),
-                ("version", "版本", Sizes.DIALOG_SMALL_HEIGHT, 90, False, "w"),
-                ("channel", "類型", Sizes.BUTTON_WIDTH_SMALL, 60, False, "w"),
-                ("status", "狀態", Sizes.SERVER_TREE_COL_LOADER + 10, 98, False, "w"),
+                ("run", "執行", Sizes.BUTTON_WIDTH_COMPACT, False),
+                ("source", "來源", Sizes.BUTTON_WIDTH_SMALL, False),
+                ("name", "名稱", Sizes.CONSOLE_PANEL_HEIGHT, False),
+                ("version", "版本", Sizes.DIALOG_SMALL_HEIGHT, False),
+                ("channel", "類型", Sizes.BUTTON_WIDTH_SMALL, False),
+                ("status", "狀態", Sizes.SERVER_TREE_COL_LOADER + 10, False),
             ],
             tree_column_width=Sizes.BUTTON_WIDTH_SECONDARY,
             stretch_columns=set(),
@@ -219,11 +220,7 @@ class ModManagementReviewOps:
         if not selected_mod_ids:
             return
 
-        target_mods = [
-            mod
-            for mod in installed_mods
-            if mod.filename.removesuffix(".jar.disabled").removesuffix(".jar") in selected_mod_ids
-        ]
+        target_mods = [mod for mod in installed_mods if mod_filename_stem(mod.filename) in selected_mod_ids]
         scope_text = f"已選取的 {len(target_mods)} 個模組"
 
         minecraft_version, loader_type, loader_version = (
@@ -405,11 +402,11 @@ class ModManagementReviewOps:
             shell.tree_container,
             tree_heading="模組",
             column_specs=[
-                ("run", "套用", Spacing.XXL, 36, False, "center"),
-                ("current", "目前版本", Sizes.BUTTON_WIDTH_SECONDARY, 72, False, "w"),
-                ("target", "建議版本", Sizes.SERVER_TREE_COL_LOADER + 3, 90, False, "w"),
-                ("source", "來源 / 識別", Sizes.SERVER_TREE_COL_LOADER + 10, 98, False, "w"),
-                ("status", "檢查狀態", Sizes.INPUT_WIDTH, 180, True, "w"),
+                ("run", "套用", Spacing.XXL, False),
+                ("current", "目前版本", Sizes.BUTTON_WIDTH_SECONDARY, False),
+                ("target", "建議版本", Sizes.SERVER_TREE_COL_LOADER + 3, False),
+                ("source", "來源 / 識別", Sizes.SERVER_TREE_COL_LOADER + 10, False),
+                ("status", "檢查狀態", Sizes.INPUT_WIDTH, True),
             ],
             tree_column_width=Sizes.SERVER_TREE_COL_NAME - 25,
             stretch_columns={"status"},

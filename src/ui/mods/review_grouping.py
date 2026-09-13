@@ -112,7 +112,7 @@ def get_review_group_specs() -> tuple[tuple[str, str], ...]:
     )
 
 
-def count_review_groups(
+def _count_review_groups(
     entries: list[Any], *, supported_group_keys: Iterable[str], group_key_getter: Callable[[Any], str]
 ) -> dict[str, int]:
     """
@@ -141,7 +141,7 @@ def count_local_update_review_groups(entries: list[LocalUpdateReviewEntry]) -> d
     Returns:
         本地更新各群組鍵對應的數量
     """
-    return count_review_groups(
+    return _count_review_groups(
         entries,
         supported_group_keys=("selected", "advisory", "unselected", "retryable", "unknown", "blocked"),
         group_key_getter=get_local_update_review_group_key,
@@ -158,14 +158,14 @@ def count_online_install_review_groups(entries: list[PendingInstallReviewEntry])
     Returns:
         線上安裝各群組鍵對應的數量
     """
-    return count_review_groups(
+    return _count_review_groups(
         entries,
         supported_group_keys=("selected", "advisory", "unselected", "blocked"),
         group_key_getter=get_online_install_review_group_key,
     )
 
 
-def get_review_group_label(group_key: str, label_map: dict[str, str], *, default_label: str = "需先處理") -> str:
+def _get_review_group_label(group_key: str, label_map: dict[str, str], *, default_label: str = "需先處理") -> str:
     """
     依群組鍵取得對應的顯示標籤
 
@@ -190,7 +190,7 @@ def get_local_update_group_status_label(group_key: str) -> str:
     Returns:
         對應的顯示標籤
     """
-    return get_review_group_label(
+    return _get_review_group_label(
         group_key,
         {
             "selected": "可更新",
@@ -213,7 +213,7 @@ def get_online_install_group_status_label(group_key: str) -> str:
     Returns:
         對應的顯示標籤
     """
-    return get_review_group_label(
+    return _get_review_group_label(
         group_key,
         {"selected": "可安裝", "advisory": "建議確認", "unselected": "未選取", "blocked": "需先處理"},
     )
@@ -246,7 +246,7 @@ def build_local_update_review_key(candidate: Any) -> str:
     )
 
 
-def build_online_review_root_extra_segments(review_entry: PendingInstallReviewEntry) -> list[str]:
+def _build_online_review_root_extra_segments(review_entry: PendingInstallReviewEntry) -> list[str]:
     """
     建立線上安裝根節點的依賴與警告數量片段
 
@@ -285,7 +285,7 @@ def build_online_review_root_status_text(review_entry: PendingInstallReviewEntry
         review_entry,
         group_key_getter=get_online_install_review_group_key,
         group_status_getter=get_online_install_group_status_label,
-        extra_segment_getter=build_online_review_root_extra_segments,
+        extra_segment_getter=_build_online_review_root_extra_segments,
     )
 
 

@@ -9,6 +9,21 @@ from typing import ClassVar
 _PROPERTY_VALUE_ESCAPE_TABLE = str.maketrans(
     {"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r", "\x0c": "\\f", "=": "\\=", ":": "\\:"}
 )
+_PROPERTY_KEY_ESCAPE_TABLE = str.maketrans(
+    {
+        "\\": "\\\\",
+        "\t": "\\t",
+        "\n": "\\n",
+        "\r": "\\r",
+        "\x0c": "\\f",
+        "\x0b": "\\\x0b",
+        "=": "\\=",
+        ":": "\\:",
+        "#": "\\#",
+        "!": "\\!",
+        " ": "\\ ",
+    }
+)
 
 
 class PropertiesDocumentCodec:
@@ -293,26 +308,7 @@ class PropertiesDocumentCodec:
     @staticmethod
     def _escape_property_key(raw_key: str) -> str:
         """跳脫 Java properties key"""
-        result: list[str] = []
-        for _, char in enumerate(raw_key):
-            if char == "\\":
-                result.append("\\\\")
-            elif char == "\t":
-                result.append("\\t")
-            elif char == "\n":
-                result.append("\\n")
-            elif char == "\r":
-                result.append("\\r")
-            elif char == "\x0c":
-                result.append("\\f")
-            elif char in {"=", ":", "#", "!"} or char.isspace():
-                if char == " ":
-                    result.append("\\ ")
-                else:
-                    result.append("\\" + char)
-            else:
-                result.append(char)
-        return "".join(result)
+        return raw_key.translate(_PROPERTY_KEY_ESCAPE_TABLE)
 
     @staticmethod
     def _escape_property_value(raw_value: str) -> str:
@@ -599,7 +595,7 @@ class PropertiesSchema:
             is_valid, error_msg = PropertiesSchema.validate_property(prop_name, value)
             if not is_valid:
                 errors.append(error_msg)
-        return (len(errors) == 0, errors)
+        return (not errors, errors)
 
 
 __all__ = ["PropertiesDocumentCodec", "PropertiesSchema"]

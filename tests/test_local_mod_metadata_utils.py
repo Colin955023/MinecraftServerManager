@@ -9,6 +9,7 @@ from src.core.mods.mod_index_persistence import ModIndexPersistence
 from src.utils import (
     ARCHIVE_METADATA_MAX_BYTES,
     build_installed_mod_index,
+    mod_filename_stem,
 )
 
 
@@ -17,6 +18,11 @@ def test_installed_mod_index_matches_normalized_dependency_names() -> None:
     installed_mods = [SimpleNamespace(filename="Cool Mod 1.2.3.jar")]
 
     assert build_installed_mod_index(installed_mods).maybe_installed_by_filename(dependency) is True
+
+
+def test_mod_filename_stem_removes_known_mod_suffixes() -> None:
+    assert mod_filename_stem("Example.jar.disabled") == "Example"
+    assert mod_filename_stem("Example.jar") == "Example"
 
 
 def test_installed_mod_index_deduplicates_identifiers() -> None:

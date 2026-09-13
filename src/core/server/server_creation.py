@@ -283,7 +283,7 @@ class CreateServerJourney:
 
             phase = "stage"
             self._emit(progress_callback, ProgressEvent("stage", "正在準備交易暫存目錄...", overall_percent=2))
-            plan.staging_path.mkdir()
+            resolve_stable_directory(plan.staging_path, create=True)
             self._write_marker(plan.staging_path, plan, "staging")
             self.server_crud.prepare_server_files(config)
             initial_properties = dict(plan.properties)

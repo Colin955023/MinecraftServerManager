@@ -238,7 +238,7 @@ class AboutPreferencesFrame(QWidget):
         theme_layout = QHBoxLayout()
         theme_layout.addWidget(BodyLabel("主題模式:", self))
         self.theme_mode_dropdown = ScrollableComboBox(self)
-        items = list(self.THEME_MODES.keys())
+        items = list(self.THEME_MODES)
         self.theme_mode_dropdown.addItems(items)
         if self.theme_mode_var.get() in items:
             self.theme_mode_dropdown.setCurrentIndex(items.index(self.theme_mode_var.get()))

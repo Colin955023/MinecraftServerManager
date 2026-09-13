@@ -189,7 +189,8 @@ class CreateServerFrame(QWidget):
             auto_btn.setText("偵測中...")
 
             def _detect_task() -> str | None:
-                return JavaUtils.get_best_java_path(mc_version, ask_download=False)
+                JavaUtils.validate_java_candidates()
+                return JavaUtils.get_best_java_path(mc_version)
 
             def _on_done(outcome: WorkOutcome) -> None:
                 auto_btn.setEnabled(True)
@@ -222,7 +223,7 @@ class CreateServerFrame(QWidget):
                 def _install_task() -> str | None:
                     JavaDownloader.install_java_with_winget(required_major)
                     JavaUtils.refresh_java_candidates_cache()
-                    return JavaUtils.get_best_java_path(mc_version, ask_download=False)
+                    return JavaUtils.get_best_java_path(mc_version)
 
                 def _on_install_done(install_outcome: WorkOutcome) -> None:
                     auto_btn.setEnabled(True)

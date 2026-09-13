@@ -112,6 +112,7 @@ def normalize_mod_search_query(raw_query: str) -> str:
 
 
 __all__ = [
+    "SUPPORTED_MODRINTH_UPDATE_LOADERS",
     "clean_api_identifier",
     "get_modrinth_loader_filters",
     "is_supported_modrinth_update_loader",

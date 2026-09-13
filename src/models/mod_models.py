@@ -388,7 +388,10 @@ class ProviderIdentitySnapshot:
         if provider == "local" and (project_id or alias):
             provider = "modrinth"
         if not project_id:
-            lifecycle: ProviderLifecycle = "retrying" if alias else "missing"
+            if raw_lifecycle in {"retrying", "invalidated"} and now_ms < next_retry:
+                lifecycle = cast(ProviderLifecycle, raw_lifecycle)
+            else:
+                lifecycle = "retrying" if alias else "missing"
         elif schema_version < PROVIDER_IDENTITY_SCHEMA_VERSION or resolved_at <= 0:
             lifecycle = "stale"
         elif raw_lifecycle in {"retrying", "invalidated"} and now_ms < next_retry:

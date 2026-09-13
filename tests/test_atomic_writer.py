@@ -108,3 +108,19 @@ def test_atomic_write_returns_false_when_stable_directory_cannot_be_opened(tmp_p
     monkeypatch.setattr(atomic_writer_module, "stable_directory", lambda *_args, **_kwargs: UnavailableDirectory())
 
     assert atomic_write_text(tmp_path / "state.json", "safe") is False
+
+
+def test_atomic_write_bytes_and_text_skip_if_unchanged(tmp_path):
+    bytes_file = tmp_path / "data.bin"
+    assert atomic_write_bytes(bytes_file, b"sample_bytes", skip_if_unchanged=True) is True
+    assert bytes_file.read_bytes() == b"sample_bytes"
+    mtime_before = bytes_file.stat().st_mtime_ns
+    assert atomic_write_bytes(bytes_file, b"sample_bytes", skip_if_unchanged=True) is True
+    assert bytes_file.stat().st_mtime_ns == mtime_before
+
+    text_file = tmp_path / "data.txt"
+    assert atomic_write_text(text_file, "sample_text", skip_if_unchanged=True) is True
+    assert text_file.read_text(encoding="utf-8") == "sample_text"
+    text_mtime_before = text_file.stat().st_mtime_ns
+    assert atomic_write_text(text_file, "sample_text", skip_if_unchanged=True) is True
+    assert text_file.stat().st_mtime_ns == text_mtime_before

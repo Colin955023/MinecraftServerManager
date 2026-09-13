@@ -86,7 +86,7 @@ def _build_dependency_graph_edge_payload(item_payload: Any, *, default_edge_kind
     }
 
 
-def serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
+def _serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
     """
     將依賴安裝項目正規化為可持久化 payload
 
@@ -152,9 +152,9 @@ def serialize_online_dependency_install_plan(
     Returns:
         可寫入快取或檔案的計畫 payload
     """
-    serialized_items = [serialize_online_dependency_install_item(item) for item in getattr(plan, "items", []) or []]
+    serialized_items = [_serialize_online_dependency_install_item(item) for item in getattr(plan, "items", []) or []]
     serialized_advisory_items = [
-        serialize_online_dependency_install_item(item) for item in getattr(plan, "advisory_items", []) or []
+        _serialize_online_dependency_install_item(item) for item in getattr(plan, "advisory_items", []) or []
     ]
     graph_edges = [
         _build_dependency_graph_edge_payload(item_payload)

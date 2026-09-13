@@ -468,7 +468,7 @@ class ServerRuntime:
             process.kill()
             process.wait(1)
             return not self._record_is_running(record)
-        except (OSError, BrokenPipeError) as e:
+        except OSError as e:
             logger.warning(f"停止伺服器 {server_name} 時改用強制終止: {e}")
             if record.managed_process is not None:
                 SystemUtils.kill_process_tree(record.managed_process)

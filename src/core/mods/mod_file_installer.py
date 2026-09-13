@@ -547,7 +547,7 @@ class ModFileInstaller:
                 f"找不到對應的模組檔案: {src_file.name}",
                 missing_ids=(mod_id,),
             )
-        except (OSError, PermissionError) as e:
+        except OSError as e:
             self.logger.exception(f"{action}模組失敗（IO/權限）: {e}")
             return self.failure_mutation_result(f"{action}失敗", f"{action}模組失敗: {e}")
         except Exception as e:

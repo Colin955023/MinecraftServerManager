@@ -114,7 +114,7 @@ class InstallReviewDialogBuilder:
         tree_container: QWidget,
         *,
         tree_heading: str,
-        column_specs: list[tuple[str, str, int, int, bool, str]],
+        column_specs: list[tuple[str, str, int, bool]],
         tree_column_width: int,
         stretch_columns: set[str],
     ) -> TreeWidget:
@@ -124,7 +124,7 @@ class InstallReviewDialogBuilder:
         Args:
             tree_container: 樹狀列表的容器
             tree_heading: 樹狀列表的標題
-            column_specs: 欄位規格的列表，每個元素包含欄位名稱、顯示文字、寬度、最小寬度、是否伸縮與對齊方式
+            column_specs: 欄位規格的列表，每個元素包含欄位名稱、顯示文字、寬度與是否伸縮
             tree_column_width: 樹狀列表的主要欄位寬度
             stretch_columns: 需要伸縮的欄位名稱集合
 
@@ -132,7 +132,7 @@ class InstallReviewDialogBuilder:
             配置完成的樹狀列表元件
         """
         tree = TreeWidget()
-        headers = [tree_heading] + [text for _, text, _, _, _, _ in column_specs]
+        headers = [tree_heading] + [text for _, text, _, _ in column_specs]
         tree.setHeaderLabels(headers)
         apply_table_header_style(tree)
         tree.setRootIsDecorated(True)
@@ -142,7 +142,7 @@ class InstallReviewDialogBuilder:
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         tree.setColumnWidth(0, tree_column_width)
 
-        for i, (column_name, _text, width, _minwidth, stretch, _anchor) in enumerate(column_specs, start=1):
+        for i, (column_name, _text, width, stretch) in enumerate(column_specs, start=1):
             tree.setColumnWidth(i, width)
             if stretch or column_name in stretch_columns:
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)

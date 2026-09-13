@@ -8,6 +8,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
+from itertools import islice
 from pathlib import Path
 
 from src.models import ProgressEvent
@@ -45,7 +46,7 @@ class InstallerProgressTracker:
         Returns:
             total_units 固定為 100 的單調遞增事件
         """
-        parsed = parse_installer_progress(self.loader_type, text)
+        parsed = _parse_installer_progress(self.loader_type, text)
         explicit = parsed.phase_percent
         if explicit is not None:
             self._progress = max(self._progress, min(99.0, explicit))
@@ -118,7 +119,7 @@ class InstallerProgressTracker:
         return min(94.0, self._progress + 0.25)
 
 
-def parse_installer_progress(loader_type: str, text: str) -> ProgressEvent:
+def _parse_installer_progress(loader_type: str, text: str) -> ProgressEvent:
     """
     將 Loader installer 輸出轉成可判定或不定進度事件
 
@@ -253,8 +254,8 @@ def run_installer_process(
 
         wait_readers()
         if process.returncode != 0:
-            out_str = "\n".join(list(output_lines)[-50:])
-            err_str = "\n".join(list(error_lines)[-50:])
+            out_str = "\n".join(reversed(tuple(islice(reversed(output_lines), 50))))
+            err_str = "\n".join(reversed(tuple(islice(reversed(error_lines), 50))))
             logger.error(
                 f"{loader_type} 安裝程序失敗 (代碼 {process.returncode})\nSTDOUT: {out_str}\nSTDERR: {err_str}"
             )

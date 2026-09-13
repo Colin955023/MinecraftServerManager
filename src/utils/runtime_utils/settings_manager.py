@@ -24,7 +24,7 @@ from .runtime_paths import RuntimePaths
 logger = get_logger().bind(component="SettingsManager")
 
 
-class MainWindowSettings(TypedDict, total=False):
+class _MainWindowSettings(TypedDict, total=False):
     """主視窗位置與大小的持久化 schema"""
 
     width: int
@@ -34,16 +34,16 @@ class MainWindowSettings(TypedDict, total=False):
     maximized: bool
 
 
-class WindowPreferences(TypedDict, total=False):
+class _WindowPreferences(TypedDict, total=False):
     """視窗偏好設定的持久化 schema"""
 
     remember_size_position: bool
-    main_window: MainWindowSettings
+    main_window: _MainWindowSettings
     auto_center: bool
     theme_mode: str
 
 
-DEFAULT_WINDOW_PREFERENCES: WindowPreferences = {
+_DEFAULT_WINDOW_PREFERENCES: _WindowPreferences = {
     "remember_size_position": True,
     "main_window": {"width": 1350, "height": 820, "x": None, "y": None, "maximized": False},
     "auto_center": True,
@@ -53,15 +53,15 @@ _BOOL_SETTINGS = {"auto_update_enabled": True, "first_run_completed": False}
 _THEME_MODES = {"system", "light", "dark"}
 
 
-def _copy_window_preferences() -> WindowPreferences:
-    main_default = DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
+def _copy_window_preferences() -> _WindowPreferences:
+    main_default = _DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
     return cast(
-        WindowPreferences,
+        _WindowPreferences,
         {
-            "remember_size_position": DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True),
+            "remember_size_position": _DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True),
             "main_window": dict(main_default),
-            "auto_center": DEFAULT_WINDOW_PREFERENCES.get("auto_center", True),
-            "theme_mode": DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system"),
+            "auto_center": _DEFAULT_WINDOW_PREFERENCES.get("auto_center", True),
+            "theme_mode": _DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system"),
         },
     )
 
@@ -140,19 +140,19 @@ class SettingsManager:
             return default
 
     @staticmethod
-    def get_default_main_window_settings() -> MainWindowSettings:
+    def get_default_main_window_settings() -> _MainWindowSettings:
         """
         取得主視窗預設大小，供重設與顯示目前值共用
 
         Returns:
             主視窗預設大小設定
         """
-        main_default = DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
-        return cast(MainWindowSettings, dict(main_default))
+        main_default = _DEFAULT_WINDOW_PREFERENCES.get("main_window") or {}
+        return cast(_MainWindowSettings, dict(main_default))
 
     @staticmethod
     def _normalize_theme_mode(mode: Any) -> str:
-        default_theme = DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
+        default_theme = _DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
         normalized = str(mode or default_theme).strip().lower()
         return normalized if normalized in _THEME_MODES else default_theme
 
@@ -259,7 +259,7 @@ class SettingsManager:
         """標記首次啟動流程已完成"""
         self.set("first_run_completed", True)
 
-    def get_window_preferences(self) -> WindowPreferences:
+    def get_window_preferences(self) -> _WindowPreferences:
         """
         取得視窗偏好設定
 
@@ -284,7 +284,7 @@ class SettingsManager:
     def set_auto_center(self, enabled: bool) -> None:
         self._update_window_pref("auto_center", enabled)
 
-    def get_main_window_settings(self) -> MainWindowSettings:
+    def get_main_window_settings(self) -> _MainWindowSettings:
         """
         取得主視窗的大小、位置和狀態設定
 
@@ -293,7 +293,7 @@ class SettingsManager:
         """
         with self._lock:
             return cast(
-                MainWindowSettings,
+                _MainWindowSettings,
                 dict(self.get_window_preferences().get("main_window", self.get_default_main_window_settings())),
             )
 
@@ -317,17 +317,17 @@ class SettingsManager:
 
     def get_theme_mode(self) -> str:
         """取得 UI 主題模式"""
-        default_theme = DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
+        default_theme = _DEFAULT_WINDOW_PREFERENCES.get("theme_mode", "system")
         return self._normalize_theme_mode(self.get_window_preferences().get("theme_mode", default_theme))
 
     def set_theme_mode(self, mode: str) -> None:
         """設定 UI 主題模式"""
         self._update_window_pref("theme_mode", self._normalize_theme_mode(mode))
 
-    def _normalize_window_preferences(self, window_preferences: dict[str, Any]) -> WindowPreferences:
+    def _normalize_window_preferences(self, window_preferences: dict[str, Any]) -> _WindowPreferences:
         normalized_window = _copy_window_preferences()
-        default_rem = DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True)
-        default_center = DEFAULT_WINDOW_PREFERENCES.get("auto_center", True)
+        default_rem = _DEFAULT_WINDOW_PREFERENCES.get("remember_size_position", True)
+        default_center = _DEFAULT_WINDOW_PREFERENCES.get("auto_center", True)
         normalized_window["remember_size_position"] = bool(
             window_preferences.get("remember_size_position", default_rem)
         )

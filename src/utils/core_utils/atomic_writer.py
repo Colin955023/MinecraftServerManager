@@ -16,6 +16,8 @@ from typing import Any
 import orjson
 
 from .filesystem_utils import (
+    SAFE_TEXT_FILE_MAX_BYTES,
+    delete_within,
     is_reparse_point,
     move_within,
     read_bytes_file,
@@ -61,7 +63,7 @@ def _replace_file(source: Path, target: Path) -> None:
     _best_effort_sync_dir(target.parent)
 
 
-def best_effort_fsync(file_obj) -> None:
+def _best_effort_fsync(file_obj) -> None:
     """
     對檔案描述元執行 fsync，不將平台限制視為錯誤
 
@@ -98,15 +100,15 @@ def _atomic_write_payload_stable_locked(
                 tmp_path = Path(file_obj.name)
                 writer(file_obj)
                 file_obj.flush()
-                best_effort_fsync(file_obj)
+                _best_effort_fsync(file_obj)
             if not move_within(stable_parent, tmp_path, path):
                 raise OSError("無法安全提交原子寫入")
             _best_effort_sync_dir(stable_parent)
             return True
         except OSError:
             try:
-                if tmp_path is not None and tmp_path.exists():
-                    tmp_path.unlink()
+                if tmp_path is not None:
+                    delete_within(stable_parent, tmp_path)
             except OSError:
                 logger.debug("嘗試移除暫存檔案 %s 時失敗；忽略錯誤", tmp_path)
             if attempt + 1 >= _RETRY_COUNT:
@@ -123,6 +125,49 @@ def _atomic_write_payload(path: Path | str, writer: Callable[[Any], None], mode:
             p = stable_parent / p.name
             with _get_path_lock(p):
                 return _atomic_write_payload_stable_locked(p, stable_parent, writer, mode, **open_kwargs)
+    except OSError:
+        return False
+
+
+def atomic_write_bytes(path: Path | str, content: bytes, *, skip_if_unchanged: bool = False) -> bool:
+    """
+    以原子方式寫入二進位檔案
+
+    Args:
+        path: 目標檔案路徑
+        content: 要寫入的位元組內容
+        skip_if_unchanged: 若內容相同則略過寫入
+
+    Returns:
+        寫入成功時回傳 True，失敗時回傳 False
+    """
+    if not skip_if_unchanged:
+        return _atomic_write_payload(path, lambda f: f.write(content), "wb")
+
+    try:
+        p = resolve_stable_path(path, create_parent=True)
+        with stable_directory(p.parent) as stable_parent:
+            p = stable_parent / p.name
+            with _get_path_lock(p):
+                if is_reparse_point(p):
+                    return False
+                if p.exists():
+                    try:
+                        file_size = p.stat().st_size
+                    except OSError:
+                        file_size = -1
+                    if file_size == len(content):
+                        existing_payload = read_bytes_file(p, max_bytes=len(content), allowed_root=stable_parent)
+                        if existing_payload == content:
+                            return True
+                        if existing_payload is None:
+                            logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p)
+                return _atomic_write_payload_stable_locked(
+                    p,
+                    stable_parent,
+                    lambda file_obj: file_obj.write(content),
+                    "wb",
+                )
     except OSError:
         return False
 
@@ -146,30 +191,7 @@ def atomic_write_json(path: Path | str, data, indent: int = 2, *, skip_if_unchan
         payload_bytes = orjson.dumps(data, option=opt)
     except TypeError:
         return False
-    if not skip_if_unchanged:
-        return atomic_write_bytes(path, payload_bytes)
-
-    try:
-        p = resolve_stable_path(path, create_parent=True)
-        with stable_directory(p.parent) as stable_parent:
-            p = stable_parent / p.name
-            with _get_path_lock(p):
-                if is_reparse_point(p):
-                    return False
-                if p.exists():
-                    existing_payload = read_bytes_file(p, max_bytes=len(payload_bytes), allowed_root=stable_parent)
-                    if existing_payload == payload_bytes:
-                        return True
-                    if existing_payload is None:
-                        logger.debug("無法讀取現有檔案以判斷是否相同，將覆寫: %s", p)
-                return _atomic_write_payload_stable_locked(
-                    p,
-                    stable_parent,
-                    lambda file_obj: file_obj.write(payload_bytes),
-                    "wb",
-                )
-    except OSError:
-        return False
+    return atomic_write_bytes(path, payload_bytes, skip_if_unchanged=skip_if_unchanged)
 
 
 def atomic_replace_file(source: Path | str, target: Path | str) -> bool:
@@ -239,6 +261,7 @@ def atomic_write_text(
     encoding: str = "utf-8",
     errors: str | None = None,
     newline: str | None = None,
+    skip_if_unchanged: bool = False,
 ) -> bool:
     """
     以原子方式寫入文字檔案
@@ -249,10 +272,41 @@ def atomic_write_text(
         encoding: 文字編碼
         errors: 編碼錯誤處理方式
         newline: 換行處理方式
+        skip_if_unchanged: 若內容相同則略過寫入
 
     Returns:
         寫入成功時回傳 True，失敗時回傳 False
     """
+    if skip_if_unchanged:
+        try:
+            p = resolve_stable_path(path, create_parent=True)
+            with stable_directory(p.parent) as stable_parent:
+                p = stable_parent / p.name
+                with _get_path_lock(p):
+                    if is_reparse_point(p):
+                        return False
+                    if p.exists():
+                        existing_payload = read_bytes_file(
+                            p, max_bytes=SAFE_TEXT_FILE_MAX_BYTES, allowed_root=stable_parent
+                        )
+                        if existing_payload is not None:
+                            try:
+                                if existing_payload.decode(encoding, errors=errors or "strict") == content:
+                                    return True
+                            except UnicodeError, LookupError:
+                                pass
+                    return _atomic_write_payload_stable_locked(
+                        p,
+                        stable_parent,
+                        lambda file_obj: file_obj.write(content),
+                        "w",
+                        encoding=encoding,
+                        errors=errors,
+                        newline=newline,
+                    )
+        except OSError:
+            return False
+
     return _atomic_write_payload(
         path,
         lambda file_obj: file_obj.write(content),
@@ -261,20 +315,6 @@ def atomic_write_text(
         errors=errors,
         newline=newline,
     )
-
-
-def atomic_write_bytes(path: Path | str, content: bytes) -> bool:
-    """
-    以原子方式寫入二進位檔案
-
-    Args:
-        path: 目標檔案路徑
-        content: 要寫入的位元組內容
-
-    Returns:
-        寫入成功時回傳 True，失敗時回傳 False
-    """
-    return _atomic_write_payload(path, lambda f: f.write(content), "wb")
 
 
 __all__ = [

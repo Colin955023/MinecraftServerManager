@@ -147,7 +147,7 @@ def sort_online_versions_for_server(
     return [row[0] for row in sorted_rows], None if version_reports is None else [row[1] for row in sorted_rows]
 
 
-def build_modrinth_project_page_url(identifier: str | None) -> str:
+def _build_modrinth_project_page_url(identifier: str | None) -> str:
     """
     由 Modrinth ID 或 slug 建立專案頁面網址
 
@@ -191,7 +191,7 @@ def resolve_project_page_url(*, urls: Any = (), identifiers: Any = ()) -> str:
             except ValueError:
                 continue
     for identifier in identifiers:
-        if url := build_modrinth_project_page_url(identifier):
+        if url := _build_modrinth_project_page_url(identifier):
             return url
     return ""
 

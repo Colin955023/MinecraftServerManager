@@ -16,7 +16,11 @@ from src.models import (
     ProviderIdentitySnapshot,
     ProviderLifecycle,
 )
-from src.utils import ProviderIdentityPersistenceError, clean_api_identifier
+from src.utils import (
+    ProviderIdentityPersistenceError,
+    clean_api_identifier,
+    normalize_mod_search_query,
+)
 
 from .mod_provider_port import ModProviderPort
 
@@ -152,6 +156,7 @@ class ProviderIdentityService:
             )
         )[:PROVIDER_IDENTITY_MAX_IDENTIFIERS]
         failure_kinds: list[CatalogOutcomeKind] = []
+        saw_transport_error = False
         for identifier in identifiers:
             cached = self._memory_get(identifier, now_ms)
             outcome = self._catalog.find_projects(identifier, exact=True) if cached is None else cached
@@ -164,20 +169,22 @@ class ProviderIdentityService:
                 )
             failure_kinds.append(outcome.kind)
             if outcome.kind in {"transient_failure", "rate_limited", "invalid_response"}:
-                return self.commit_failure(evidence, existing, failure_kinds, now_epoch_ms=now_ms)
-
-        for term in _dedupe((*evidence.search_terms, evidence.display_name))[:PROVIDER_IDENTITY_MAX_SEARCH_TERMS]:
-            outcome = self._catalog.find_projects(term)
-            if outcome.canonical and outcome.confidence >= 70:
-                return self.commit_found(
-                    evidence.file_path,
-                    outcome,
-                    provenance="search",
-                    now_epoch_ms=now_ms,
-                )
-            failure_kinds.append(outcome.kind)
-            if outcome.kind in {"transient_failure", "rate_limited", "invalid_response"}:
+                saw_transport_error = True
                 break
+
+        if not saw_transport_error:
+            for term in _dedupe((*evidence.search_terms, evidence.display_name))[:PROVIDER_IDENTITY_MAX_SEARCH_TERMS]:
+                outcome = self._catalog.find_projects(term)
+                if outcome.canonical and outcome.confidence >= 70:
+                    return self.commit_found(
+                        evidence.file_path,
+                        outcome,
+                        provenance="search",
+                        now_epoch_ms=now_ms,
+                    )
+                failure_kinds.append(outcome.kind)
+                if outcome.kind in {"transient_failure", "rate_limited", "invalid_response"}:
+                    break
 
         return self.commit_failure(evidence, existing, failure_kinds, now_epoch_ms=now_ms)
 
@@ -205,13 +212,20 @@ class ProviderIdentityService:
             elif file_path.with_name(f"{file_path.name}.disabled").exists():
                 file_path = file_path.with_name(f"{file_path.name}.disabled")
         filename = str(getattr(local_mod, "filename", "") or "").strip()
+        mod_name = str(getattr(local_mod, "name", "") or "").strip()
+        normalized_filename = normalize_mod_search_query(filename)
+        normalized_mod_name = normalize_mod_search_query(mod_name) if mod_name else ""
+        slug_candidate = normalized_filename.lower().replace(" ", "-") if normalized_filename else ""
+        jar_aliases = (slug_candidate,) if slug_candidate else ()
+        search_terms = tuple(term for term in (filename, mod_name, normalized_filename, normalized_mod_name) if term)
         return self.resolve(
             ProviderIdentityEvidence(
                 file_path=file_path,
                 project_id_hint=str(getattr(local_mod, "platform_id", "") or "").strip(),
                 alias_hint=str(getattr(local_mod, "platform_slug", "") or "").strip(),
-                display_name=str(getattr(local_mod, "name", "") or "").strip(),
-                search_terms=(filename, str(getattr(local_mod, "name", "") or "")),
+                display_name=mod_name,
+                jar_aliases=jar_aliases,
+                search_terms=search_terms,
                 hash_project_id=clean_api_identifier(hash_project_id),
             ),
             force=force,

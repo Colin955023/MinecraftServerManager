@@ -228,8 +228,6 @@ class ServerPropertiesStore:
                     "",
                     message=f"server.properties 超過安全大小上限 {SAFE_TEXT_FILE_MAX_BYTES} bytes 或不是一般檔案",
                 )
-        except PermissionError as e:
-            return cls._metadata_snapshot(server_name, "unreadable", "", message=str(e))
         except OSError as e:
             return cls._metadata_snapshot(server_name, "unreadable", "", message=str(e))
         revision = HashUtils.digest_bytes(raw)

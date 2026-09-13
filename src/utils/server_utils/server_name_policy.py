@@ -41,7 +41,7 @@ def validate_server_name(name: str, *, max_length: int = MAX_SERVER_NAME_LENGTH)
         raise ValueError("伺服器名稱不符合 Windows 檔名規則")
 
     normalized_casefold = normalized.casefold()
-    base_name = normalized.rstrip(" .").split(".", 1)[0].casefold()
+    base_name = normalized.rstrip(" .").partition(".")[0].casefold()
     if base_name in _LEGACY_WINDOWS_DEVICE_NAMES:
         raise ValueError("伺服器名稱使用 Windows 保留裝置名稱")
     if normalized_casefold in _INTERNAL_EXACT_NAMES or normalized_casefold.startswith(_INTERNAL_PREFIXES):

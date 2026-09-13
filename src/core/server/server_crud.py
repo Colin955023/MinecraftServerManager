@@ -188,6 +188,7 @@ class ServerCRUD:
                 "memory_max_mb": config.memory_max_mb,
                 "memory_min_mb": config.memory_min_mb,
                 "path": config.path,
+                "backup_path": config.backup_path,
                 "jvm_args": list(config.jvm_args),
             }
         return data

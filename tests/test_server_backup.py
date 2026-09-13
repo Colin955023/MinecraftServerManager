@@ -8,7 +8,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import src.core.server.server_backup as backup_module
-from src.core.server.server_crud import ServerConfigRegistrySnapshot
+from src.core.server.server_crud import ServerConfigChangeSet, ServerConfigRegistrySnapshot, ServerCRUD
+from src.models import ServerConfig
 
 
 class _FixedDateTime(datetime.datetime):
@@ -18,7 +19,9 @@ class _FixedDateTime(datetime.datetime):
 
 
 def _manager(server_dir: Path) -> backup_module.ServerBackupManager:
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    backup_dir = server_dir.parent / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -48,11 +51,11 @@ def test_backup_is_committed_atomically_and_excludes_runtime_directories(tmp_pat
     manager = _manager(server_dir)
     assert manager.backup_server("TestServer") is True
 
-    backup_files = list((server_dir / "backups").glob("TestServer_*.zip"))
+    backup_files = list((tmp_path / "backups").glob("TestServer_*.zip"))
     assert len(backup_files) == 1
     backup_file = backup_files[0]
     assert backup_file.is_file()
-    assert not list((server_dir / "backups").glob("*.tmp"))
+    assert not list((tmp_path / "backups").glob("*.tmp"))
 
     with zipfile.ZipFile(backup_file) as archive:
         assert set(archive.namelist()) == {"server.properties", "world/level.dat"}
@@ -62,7 +65,7 @@ def test_backup_failure_keeps_existing_final_backup_and_removes_temp_file(tmp_pa
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_202608241350.zip"
     backup_file.write_bytes(b"existing-backup")
@@ -85,7 +88,9 @@ def test_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(
+        name="TestServer", path=str(server_dir), backup_path=str(tmp_path / "backups"), jvm_args=[]
+    )
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -99,7 +104,88 @@ def test_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
 
     assert manager.backup_server("TestServer") is False
+    assert not (tmp_path / "backups").exists()
+
+
+def test_backup_requires_configured_external_directory(tmp_path: Path) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path="", jvm_args=[])
+    crud = SimpleNamespace(
+        snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
+        servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
+    )
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
+
+    assert (
+        backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime)).backup_server(
+            "TestServer"
+        )
+        is False
+    )
     assert not (server_dir / "backups").exists()
+
+
+def test_external_backup_directory_is_persisted_in_server_config(tmp_path: Path) -> None:
+    server_dir = tmp_path / "TestServer"
+    server_dir.mkdir()
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    crud = ServerCRUD(str(tmp_path))
+    config = ServerConfig(
+        "TestServer", "1.21.1", "vanilla", "", 2048, path=str(server_dir), backup_path=str(backup_dir)
+    )
+    baseline = crud.snapshot()
+
+    assert crud.commit(ServerConfigChangeSet(upserts=(config,)), expected_revision=baseline.revision).success
+    saved_config = ServerCRUD(str(tmp_path)).snapshot().get("TestServer")
+    assert saved_config is not None
+    assert saved_config.backup_path == str(backup_dir)
+
+
+def test_delete_backups_only_removes_managed_files(tmp_path: Path) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    managed_backup = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
+    managed_backup.write_bytes(b"backup")
+    other_backup = backup_dir / "OtherServer_20260824135000000000-deadbeef.zip"
+    other_backup.write_bytes(b"other")
+
+    assert _manager(server_dir).delete_backups("TestServer", backup_dir) is True
+    assert not managed_backup.exists()
+    assert other_backup.is_file()
+
+
+def test_backup_rejects_directory_inside_server(tmp_path: Path) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    backup_dir = server_dir / "backup"
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
+    crud = SimpleNamespace(
+        snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
+        servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
+    )
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
+
+    assert (
+        backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime)).backup_server(
+            "TestServer"
+        )
+        is False
+    )
+    assert not backup_dir.exists()
 
 
 def test_backup_rejects_junction_source(tmp_path: Path, make_junction) -> None:
@@ -111,7 +197,7 @@ def test_backup_rejects_junction_source(tmp_path: Path, make_junction) -> None:
     make_junction(server_dir / "linked", outside)
 
     assert _manager(server_dir).backup_server("TestServer") is False
-    assert not list((server_dir / "backups").glob("*.zip"))
+    assert not list((tmp_path / "backups").glob("*.zip"))
 
 
 def test_backup_rejects_junction_backup_directory(tmp_path: Path, make_junction) -> None:
@@ -119,9 +205,27 @@ def test_backup_rejects_junction_backup_directory(tmp_path: Path, make_junction)
     server_dir.mkdir()
     outside_dir = tmp_path / "outside-backups"
     outside_dir.mkdir()
-    make_junction(server_dir / "backups", outside_dir)
+    backup_dir = tmp_path / "backups"
+    make_junction(backup_dir, outside_dir)
 
-    assert _manager(server_dir).backup_server("TestServer") is False
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
+    crud = SimpleNamespace(
+        snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
+        servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
+    )
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
+
+    assert (
+        backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime)).backup_server(
+            "TestServer"
+        )
+        is False
+    )
     assert not list(outside_dir.glob("*.zip"))
 
 
@@ -130,7 +234,9 @@ def test_backup_names_are_unique_and_listed_for_literal_server_name(tmp_path: Pa
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
     server_name = "[Forge] 1.21"
-    config = SimpleNamespace(name=server_name, path=str(server_dir), jvm_args=[])
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    config = SimpleNamespace(name=server_name, path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", ((server_name, config),)),
         servers_root=server_dir.parent,
@@ -156,13 +262,13 @@ def test_restore_backup_rejected_when_server_is_running(tmp_path: Path) -> None:
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "test_backup.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -183,13 +289,13 @@ def test_restore_backup_succeeds_when_server_not_running(tmp_path: Path) -> None
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "test_backup.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -211,7 +317,7 @@ def test_restore_failure_leaves_live_server_unchanged(tmp_path: Path, monkeypatc
     server_dir.mkdir()
     original = server_dir / "server.properties"
     original.write_text("motd=old\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
@@ -222,7 +328,7 @@ def test_restore_failure_leaves_live_server_unchanged(tmp_path: Path, monkeypatc
         raise OSError("simulated extraction failure")
 
     monkeypatch.setattr(backup_module, "safe_extract_zip", fail_after_first_write)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -246,7 +352,7 @@ def test_restore_commit_failure_rolls_back_live_server(tmp_path: Path, monkeypat
     server_dir.mkdir()
     original = server_dir / "server.properties"
     original.write_text("motd=old\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
@@ -260,7 +366,7 @@ def test_restore_commit_failure_rolls_back_live_server(tmp_path: Path, monkeypat
         return original_replace(path, target)
 
     monkeypatch.setattr(Path, "replace", fail_prepared_commit)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -279,21 +385,21 @@ def test_restore_commit_failure_rolls_back_live_server(tmp_path: Path, monkeypat
     assert not list(tmp_path.glob(".server.restore-*"))
 
 
-def test_restore_replaces_snapshot_and_preserves_excluded_directories(tmp_path: Path) -> None:
+def test_restore_replaces_snapshot_and_preserves_excluded_directories(tmp_path: Path, monkeypatch) -> None:
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "stale.txt").write_text("stale", encoding="utf-8")
     logs_dir = server_dir / "logs"
     logs_dir.mkdir()
     (logs_dir / "latest.log").write_text("keep", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
         zf.writestr("logs/injected.log", "discard")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -305,6 +411,8 @@ def test_restore_replaces_snapshot_and_preserves_excluded_directories(tmp_path: 
         end_maintenance=lambda _name: None,
     )
     manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
+    errors: list[str] = []
+    monkeypatch.setattr(backup_module.logger, "error", errors.append)
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
     assert (server_dir / "server.properties").read_text(encoding="utf-8") == "motd=restored\n"
@@ -312,12 +420,13 @@ def test_restore_replaces_snapshot_and_preserves_excluded_directories(tmp_path: 
     assert (server_dir / "logs" / "latest.log").read_text(encoding="utf-8") == "keep"
     assert not (server_dir / "logs" / "injected.log").exists()
     assert backup_file.is_file()
+    assert errors == []
 
 
 def test_managed_backup_restore_keeps_hard_archive_limits(tmp_path: Path, monkeypatch) -> None:
     server_dir = tmp_path / "server"
     server_dir.mkdir()
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
@@ -330,7 +439,7 @@ def test_managed_backup_restore_keeps_hard_archive_limits(tmp_path: Path, monkey
         (destination / "server.properties").write_text("motd=restored\n", encoding="utf-8")
 
     monkeypatch.setattr(backup_module, "safe_extract_zip", capture_policy)
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,
@@ -356,13 +465,13 @@ def test_managed_backup_name_does_not_bypass_hard_total_limit(tmp_path: Path, mo
     server_dir.mkdir()
     original = server_dir / "server.properties"
     original.write_text("motd=old\n", encoding="utf-8")
-    backup_dir = server_dir / "backups"
+    backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     backup_file = backup_dir / "TestServer_20260824135000000000-deadbeef.zip"
     with zipfile.ZipFile(backup_file, "w") as zf:
         zf.writestr("server.properties", "motd=restored\n")
 
-    config = SimpleNamespace(name="TestServer", path=str(server_dir), jvm_args=[])
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
     crud = SimpleNamespace(
         snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
         servers_root=server_dir.parent,

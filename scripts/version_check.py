@@ -7,16 +7,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[1]
-project_root_str = str(project_root)
-if project_root_str not in sys.path:
-    sys.path.insert(0, project_root_str)
-from src.utils import APP_VERSION
+_APP_INFO_PATH = Path(__file__).resolve().parents[1] / "src" / "utils" / "runtime_utils" / "app_info.py"
 
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
@@ -40,9 +38,21 @@ class ReleaseNotesNotFoundError(RuntimeError):
     """找不到指定版本的 CHANGELOG 章節"""
 
 
+@lru_cache(maxsize=1)
 def get_app_version() -> str:
-    """回傳應用程式版本字串"""
-    return str(APP_VERSION)
+    """從 app_info 原始碼讀取應用程式版本字串"""
+    tree = ast.parse(_APP_INFO_PATH.read_text(encoding="utf-8"), filename=str(_APP_INFO_PATH))
+    for statement in tree.body:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and statement.targets[0].id == "APP_VERSION"
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        ):
+            return statement.value.value
+    raise ValueError("app_info.py 缺少字串常數 APP_VERSION")
 
 
 def validate_release_tag() -> None:

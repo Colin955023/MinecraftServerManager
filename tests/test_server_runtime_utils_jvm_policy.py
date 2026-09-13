@@ -82,7 +82,7 @@ def test_build_java_command_uses_version_specific_full_java_path(
     javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
     javaw.parent.mkdir(parents=True)
     javaw.write_bytes(b"")
-    calls: list[tuple[str, int | None, bool]] = []
+    calls: list[tuple[str, int | None]] = []
     config = ServerConfig(
         name="alpha",
         minecraft_version="1.21.1",
@@ -92,8 +92,8 @@ def test_build_java_command_uses_version_specific_full_java_path(
         path=str(tmp_path),
     )
 
-    def _get_best_java_path(mc_version: str, required_major=None, ask_download=True, **_kwargs) -> str:
-        calls.append((mc_version, required_major, ask_download))
+    def _get_best_java_path(mc_version: str, required_major=None, **_kwargs) -> str:
+        calls.append((mc_version, required_major))
         return str(javaw)
 
     monkeypatch.setattr(runtime_utils_module.JavaUtils, "get_best_java_path", staticmethod(_get_best_java_path))
@@ -101,7 +101,7 @@ def test_build_java_command_uses_version_specific_full_java_path(
     command = ServerCommands.build_java_command(config, return_list=True)
 
     assert command[0] == str(javaw.with_name("java.exe"))
-    assert calls == [("1.21.1", None, False)]
+    assert calls == [("1.21.1", None)]
 
 
 def test_build_java_command_uses_args_file_for_neoforge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

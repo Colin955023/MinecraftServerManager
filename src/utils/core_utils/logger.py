@@ -24,7 +24,7 @@ _INITIALIZED = False
 
 
 class _ComponentLogger(logging.LoggerAdapter):
-    """提供與既有logger.bind(component=...)相容的輕量介面"""
+    """提供可附加元件內容的輕量 logger adapter"""
 
     def __init__(self, logger: logging.Logger, extra: dict[str, Any] | None = None) -> None:
         self._context: dict[str, Any] = {"component": "Global"} if extra is None else extra.copy()

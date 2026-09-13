@@ -129,7 +129,6 @@ class HTTPClient:
             trust_env=False,
             transport=_PinnedHTTPTransport(
                 http1=True,
-                http2=True,
                 verify=True,
                 trust_env=False,
                 limits=httpx.Limits(
@@ -1036,13 +1035,11 @@ class _PinnedHTTPTransport(httpx.BaseTransport):
         verify: ssl.SSLContext | str | bool = True,
         trust_env: bool = True,
         http1: bool = True,
-        http2: bool = False,
         limits: httpx.Limits | None = None,
     ) -> None:
         self._verify = ssl.create_default_context() if verify is True and not trust_env else verify
         self._trust_env = trust_env
         self._http1 = http1
-        self._http2 = http2
         self._limits = limits or httpx.Limits()
         self._max_origins = max(1, self._limits.max_connections or HTTPClient.CONNECTION_POOL_SIZE)
         self._origin_transports: OrderedDict[tuple[str, str, int], _OriginTransport] = OrderedDict()
@@ -1060,7 +1057,6 @@ class _PinnedHTTPTransport(httpx.BaseTransport):
             verify=self._verify,
             trust_env=self._trust_env,
             http1=self._http1,
-            http2=self._http2,
             limits=self._limits,
         )
 

@@ -9,7 +9,7 @@ OFFICIAL_DOWNLOAD_HOSTS: dict[str, frozenset[str]] = {
 }
 
 
-def normalize_download_provider(provider: str | None) -> str:
+def _normalize_download_provider(provider: str | None) -> str:
     """
     正規化下載來源 provider 名稱
 
@@ -54,7 +54,7 @@ def get_non_official_download_host(download_url: str | None, provider: str | Non
     """
 
     host = _extract_download_host(download_url)
-    if not host or host in OFFICIAL_DOWNLOAD_HOSTS.get(normalize_download_provider(provider), frozenset()):
+    if not host or host in OFFICIAL_DOWNLOAD_HOSTS.get(_normalize_download_provider(provider), frozenset()):
         return ""
     return host
 

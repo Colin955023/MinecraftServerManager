@@ -77,6 +77,7 @@ class ModManagementSession:
         self._pending_online_installs: list[PendingOnlineInstall] = []
         self._selected_mod_ids: set[str] = set()
         self._provider_cache: dict[str, Any] = {}
+        self._provider_enrichment_completed: set[str] = set()
         self._status_message = ""
         self._local_generation = 0
         self._online_generation = 0
@@ -257,6 +258,7 @@ class ModManagementSession:
             self._local_mods = list(mods)
             self._local_rows = ()
             self._provider_cache.clear()
+            self._provider_enrichment_completed.clear()
             return True
 
     def accept_online_results(
@@ -441,7 +443,37 @@ class ModManagementSession:
             if scope.kind != "local_scan" or not self.is_scope_current(scope):
                 return False
             self._provider_cache[filename] = value
+            self._provider_enrichment_completed.add(filename)
             return True
+
+    def mark_provider_enrichment_completed(self, scope: ModOperationScope, filename: str) -> bool:
+        """
+        標記本地模組的 Provider 增強查詢已完成
+
+        Args:
+            scope: 本地掃描工作範圍
+            filename: 本地 Mod 檔名
+
+        Returns:
+            工作範圍有效且標記成功時回傳 True
+        """
+        with self._lock:
+            if scope.kind != "local_scan" or not self.is_scope_current(scope):
+                return False
+            self._provider_enrichment_completed.add(filename)
+            return True
+
+    def has_pending_provider_enhancements(self) -> bool:
+        """
+        確認目前本地模組是否仍有未完成的 Provider 增強查詢
+
+        Returns:
+            尚有未完成查詢時回傳 True
+        """
+        with self._lock:
+            return any(
+                str(getattr(mod, "filename", "")) not in self._provider_enrichment_completed for mod in self._local_mods
+            )
 
     def rename_provider_cache_key(self, old_filename: str, new_filename: str) -> None:
         """
@@ -454,6 +486,9 @@ class ModManagementSession:
         with self._lock:
             if old_filename in self._provider_cache and new_filename not in self._provider_cache:
                 self._provider_cache[new_filename] = self._provider_cache.pop(old_filename)
+            if old_filename in self._provider_enrichment_completed:
+                self._provider_enrichment_completed.discard(old_filename)
+                self._provider_enrichment_completed.add(new_filename)
 
     def update_local_scan_fingerprint(
         self,

@@ -34,7 +34,7 @@ from .review_grouping import (
 from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry
 
 
-def build_pending_install_summary_lines(review_entry: PendingInstallReviewEntry) -> list[str]:
+def _build_pending_install_summary_lines(review_entry: PendingInstallReviewEntry) -> list[str]:
     """
     建立線上安裝 root 的精簡摘要行
 
@@ -75,7 +75,7 @@ def format_pending_install_review_text(review_entry: PendingInstallReviewEntry) 
         包含版本、依賴、阻擋與提醒的多行文字
     """
     lines = [format_online_version_report(review_entry.pending.version, review_entry.report), ""]
-    lines.extend(build_pending_install_summary_lines(review_entry))
+    lines.extend(_build_pending_install_summary_lines(review_entry))
     reminder = build_client_install_reminder_line(review_entry.pending.client_side)
     if reminder:
         lines.append(reminder)

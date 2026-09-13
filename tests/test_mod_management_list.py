@@ -10,6 +10,7 @@ import pytest
 
 import src.models as models_module
 import src.ui as ui_module
+import src.ui.mods.local_mod_list_presenter as local_mod_list_presenter_module
 import src.ui.mods.online_mod_queue as online_mod_queue_module
 import src.ui.mods.tree_sync as tree_sync_module
 import src.ui.support.ui_utils as ui_utils_module
@@ -1031,3 +1032,30 @@ def test_load_local_mods_discards_stale_scan_results(tmp_path: Path, monkeypatch
     assert controller.mod_session.local_mods == tuple(sentinel_mods)
     assert enhancement_calls == []
     assert queued_items == []
+
+
+def test_enhance_local_mods_ignores_cancelled_provider_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    local_mod = SimpleNamespace(filename="cancelled.jar")
+    session = _mod_session(_review_server(), local_mods=[local_mod])
+    logged_errors: list[str] = []
+    controller = SimpleNamespace(
+        mod_session=session,
+        mod_manager=SimpleNamespace(
+            provider_identity_service=SimpleNamespace(
+                resolve_for_local_mod=lambda _mod: (_ for _ in ()).throw(
+                    utils_module.OperationCancelledError("工作已取消")
+                )
+            )
+        ),
+        mod_provider=SimpleNamespace(),
+        tree_sync=SimpleNamespace(refresh_local_list=lambda: None),
+        scope=SimpleNamespace(
+            submit=lambda work, **_kwargs: work(),
+            schedule=lambda *_args, **_kwargs: None,
+        ),
+    )
+    monkeypatch.setattr(local_mod_list_presenter_module.logger, "exception", logged_errors.append)
+
+    LocalModListPresenter(cast(Any, controller)).enhance_local_mods()
+
+    assert logged_errors == []

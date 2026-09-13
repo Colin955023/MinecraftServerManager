@@ -27,6 +27,7 @@ from src.utils import (
     detect_loader_from_text,
     get_logger,
     list_bounded_directory,
+    mod_filename_stem,
     normalize_minecraft_version,
     open_bounded_zip,
     open_regular_file,
@@ -71,7 +72,7 @@ class LocalModScanner:
         """
         filename = file_path.name
         enabled = not filename.endswith(".jar.disabled")
-        base_name = filename.removesuffix(".jar.disabled").removesuffix(".jar")
+        base_name = mod_filename_stem(filename)
         return (filename, enabled, base_name)
 
     @staticmethod
@@ -362,7 +363,7 @@ class LocalModScanner:
             if payload is not None:
                 for line in payload.decode(errors="ignore").splitlines():
                     if line.startswith("Implementation-Version:"):
-                        version = line.split(":", 1)[1].strip()
+                        version = line.partition(":")[2].strip()
                         if version and version != "${projectversion}":
                             return version
         except (zipfile.BadZipFile, OSError) as e:

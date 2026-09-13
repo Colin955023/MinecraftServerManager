@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from itertools import batched
 from operator import attrgetter
@@ -133,7 +134,7 @@ def _resolve_latest_versions_by_hashes(
     def _request_chunk(hash_chunk: list[str]) -> dict[str, Any] | None:
         response = HTTPClient.post_json(
             url=MODRINTH_VERSION_FILES_UPDATE_URL,
-            json_body={**json_body, "hashes": hash_chunk},
+            json_body=json_body | {"hashes": hash_chunk},
             timeout=MODRINTH_VERSION_FILES_TIMEOUT_SECONDS,
         )
         return response if isinstance(response, dict) else None
@@ -469,6 +470,9 @@ def _get_recommended_version(
     return select_best_mod_version(versions)
 
 
+_RE_NON_ALNUM = re.compile(r"[^a-z0-9]")
+
+
 class ModrinthHttpAdapter:
     """集中擁有 Modrinth transport、fallback 與 response mapping"""
 
@@ -619,7 +623,7 @@ class ModrinthHttpAdapter:
             if best is None or score > best[0]:
                 best = (score, hit)
         if best is None:
-            return ProviderCatalogOutcome("invalid_response")
+            return ProviderCatalogOutcome("not_found")
         return self._map_catalog_project(best[1], confidence=best[0])
 
     @staticmethod
@@ -650,7 +654,7 @@ class ModrinthHttpAdapter:
 
     @staticmethod
     def _catalog_key(value: Any) -> str:
-        return "".join(char for char in str(value or "").strip().lower() if char.isalnum())
+        return _RE_NON_ALNUM.sub("", str(value or "").strip().lower())
 
 
 __all__ = ["ModrinthHttpAdapter"]

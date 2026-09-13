@@ -441,6 +441,8 @@ class ModManagementFrame:
                 str(selected_server.loader_version or ""),
             )
             if self.mod_manager is not None and identity == self._active_server_identity:
+                if self.mod_session.has_pending_provider_enhancements():
+                    self.local_mod_list_presenter.enhance_local_mods()
                 return
             if not self.mod_session.matches_server(selected_server):
                 self.mod_session.invalidate()

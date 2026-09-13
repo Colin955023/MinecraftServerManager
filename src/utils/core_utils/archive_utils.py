@@ -51,9 +51,11 @@ def _read_zip_directory_limits(
     max_central_directory_bytes: int | None,
     max_archive_bytes: int | None,
 ) -> None:
-    """在建立 ZipFile 前，以固定尾端讀取限制 ZIP central directory"""
-    source.seek(0, os.SEEK_END)
-    file_size = source.tell()
+    try:
+        file_size = os.fstat(source.fileno()).st_size
+    except AttributeError, OSError:
+        source.seek(0, os.SEEK_END)
+        file_size = source.tell()
     if max_archive_bytes is not None and file_size > max_archive_bytes:
         raise ArchiveSecurityError("ZIP 檔案大小超過安全上限")
     tail_size = min(file_size, _ZIP_EOCD_BYTES + _ZIP_MAX_COMMENT_BYTES)
@@ -427,7 +429,7 @@ def safe_extract_zip(
             progress_callback(0, total_bytes)
         for member, sanitized in sanitized_members:
             member_path = dest_dir / sanitized
-            if member.is_dir() or member.filename.endswith("/"):
+            if member.is_dir():
                 resolve_stable_directory(member_path, create=True)
                 continue
             member_path = resolve_stable_path(member_path, create_parent=True)

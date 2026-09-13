@@ -66,7 +66,19 @@ class SearchFilter:
         Returns:
             候選內容符合目前比對政策時為 True
         """
-        normalized_query = self.normalize(query)
+        return self.matches_normalized(candidate, self.normalize(query))
+
+    def matches_normalized(self, candidate: Any, normalized_query: str) -> bool:
+        """
+        以已正規化的查詢比對候選內容
+
+        Args:
+            candidate: 被比對的字串、序列或 mapping
+            normalized_query: 已正規化的查詢字串
+
+        Returns:
+            候選內容符合已正規化查詢時為 True
+        """
         if not normalized_query:
             return True
         candidate_text = " ".join(self.normalize(value) for value in self._candidate_values(candidate))
@@ -136,7 +148,7 @@ class OnlineBrowsePresenter:
         search_layout.addWidget(search_entry)
 
         sort_dropdown = ScrollableComboBox(search_frame)
-        sort_dropdown.addItems(list(self.browse_sort_options.keys()))
+        sort_dropdown.addItems(list(self.browse_sort_options))
         sort_dropdown.setCurrentText(self.browse_sort_var.get())
         sort_dropdown.currentTextChanged.connect(self.browse_sort_var.set)
         sort_dropdown.currentTextChanged.connect(self.controller.queue_ops.on_online_browse_filters_changed)

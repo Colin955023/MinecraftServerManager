@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-from io import BytesIO
 from pathlib import Path
 
 from src.utils import HashUtils
@@ -52,10 +51,24 @@ def test_chunked_reading_matches_single_read(tmp_path: Path) -> None:
     assert hash_default_chunk == hashlib.sha256(content).hexdigest()
 
 
-def test_digest_stream_rejects_content_that_exceeds_limit() -> None:
-    source = BytesIO(b"123456789")
+def test_compute_file_hash_sync_locks_file_before_fast_digest(tmp_path: Path, monkeypatch) -> None:
+    file_path = tmp_path / "locked.bin"
+    content = b"locked content"
+    file_path.write_bytes(content)
+    original_file_digest = hashlib.file_digest
 
-    assert HashUtils._digest_stream(source, "sha256", 8) == ""
+    def verify_locked(source, algorithm):
+        try:
+            file_path.write_bytes(b"changed")
+        except OSError:
+            pass
+        else:
+            raise AssertionError("快速雜湊期間必須拒絕並行寫入")
+        return original_file_digest(source, algorithm)
+
+    monkeypatch.setattr(hashlib, "file_digest", verify_locked)
+
+    assert HashUtils.compute_file_hash_sync(file_path) == hashlib.sha256(content).hexdigest()
 
 
 def test_compute_file_hash_cache_invalidates_when_file_changes(tmp_path) -> None:

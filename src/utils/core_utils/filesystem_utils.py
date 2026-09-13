@@ -120,11 +120,12 @@ def _open_regular_file_windows(
     allowed_root: Path | None,
     *,
     writable: bool = False,
+    deny_write_sharing: bool = False,
 ) -> BinaryIO:
     handle = _KERNEL32.CreateFileW(
         str(target),
         _GENERIC_WRITE if writable else _GENERIC_READ,
-        _FILE_SHARE_ALL,
+        _FILE_SHARE_READ if deny_write_sharing else _FILE_SHARE_ALL,
         None,
         _OPEN_ALWAYS if writable else _OPEN_EXISTING,
         _FILE_ATTRIBUTE_NORMAL | _FILE_FLAG_OPEN_REPARSE_POINT,
@@ -288,18 +289,24 @@ def open_regular_file_for_write(path: Path | str) -> BinaryIO:
     return _open_regular_file_windows(target, target.parent, writable=True)
 
 
-def open_regular_file(path: Path | str, *, allowed_root: Path | str | None = None) -> BinaryIO:
+def open_regular_file(
+    path: Path | str,
+    *,
+    allowed_root: Path | str | None = None,
+    deny_write_sharing: bool = False,
+) -> BinaryIO:
     """
     以不跟隨 reparse point 的方式開啟一般檔案，並可限制實際路徑根目錄
 
     Args:
         path: 要開啟的檔案路徑
         allowed_root: 可選的實際路徑根目錄
+        deny_write_sharing: 開啟期間是否拒絕其他程序寫入或刪除
 
     Returns:
         已開啟的二進位唯讀檔案物件
     """
-    target = Path(path)
+    target = _absolute_path(path)
     if is_reparse_point(target):
         raise OSError("檔案是符號連結或 reparse point")
     try:
@@ -315,7 +322,7 @@ def open_regular_file(path: Path | str, *, allowed_root: Path | str | None = Non
         if not _path_is_within_resolved(root, target):
             raise OSError("檔案路徑超出允許根目錄")
 
-    return _open_regular_file_windows(target, root)
+    return _open_regular_file_windows(target, root, deny_write_sharing=deny_write_sharing)
 
 
 def is_path_within(base_dir: Path, target_path: Path, *, strict: bool = True) -> bool:
@@ -397,6 +404,26 @@ def read_text_file(
         return None
 
 
+def _delete_directory_tree(path: Path, remaining_entries: list[int]) -> None:
+    """在固定目錄 handle 下逐層刪除，不跟隨 reparse point"""
+    with stable_directory(path) as directory, os.scandir(directory) as iterator:
+        for entry in iterator:
+            remaining_entries[0] -= 1
+            if remaining_entries[0] < 0:
+                raise OSError("目錄項目數超過安全上限")
+            metadata = entry.stat(follow_symlinks=False)
+            if _metadata_is_reparse_point(metadata):
+                raise OSError(f"目錄包含 reparse point: {entry.path}")
+            entry_path = Path(entry.path)
+            if stat.S_ISDIR(metadata.st_mode):
+                _delete_directory_tree(entry_path, remaining_entries)
+            elif stat.S_ISREG(metadata.st_mode):
+                entry_path.unlink()
+            else:
+                raise OSError(f"目錄包含非一般檔案項目: {entry.path}")
+    path.rmdir()
+
+
 def _delete_path(path: Path, *, max_entries: int = SAFE_DIRECTORY_MAX_FILES) -> bool:
     try:
         if not os.path.lexists(path):
@@ -407,7 +434,7 @@ def _delete_path(path: Path, *, max_entries: int = SAFE_DIRECTORY_MAX_FILES) -> 
         if stat.S_ISDIR(metadata.st_mode):
             for _root, _dirs, _files in walk_bounded_tree(path, max_entries=max_entries):
                 pass
-            shutil.rmtree(path)
+            _delete_directory_tree(path, [max_entries])
         else:
             path.unlink()
         return True
@@ -556,7 +583,7 @@ def _copy_regular_file(
     finally:
         if tmp_path is not None:
             with suppress(OSError):
-                tmp_path.unlink()
+                delete_within(stable_dst.parent, tmp_path)
 
 
 def list_bounded_directory(
@@ -625,16 +652,15 @@ def walk_bounded_tree(
                     visited_entries += 1
                     if visited_entries > limit:
                         raise OSError(f"目錄項目數超過安全上限 {limit}")
-                    candidate = Path(entry.path)
                     metadata = entry.stat(follow_symlinks=False)
                     if _metadata_is_reparse_point(metadata):
-                        raise OSError(f"目錄包含 reparse point: {candidate}")
+                        raise OSError(f"目錄包含 reparse point: {entry.path}")
                     if stat.S_ISDIR(metadata.st_mode):
                         dirs.append(entry.name)
                     elif stat.S_ISREG(metadata.st_mode):
                         files.append(entry.name)
                     else:
-                        raise OSError(f"目錄包含非一般檔案項目: {candidate}")
+                        raise OSError(f"目錄包含非一般檔案項目: {entry.path}")
             current = stable_current
         dirs.sort(key=str.casefold)
         files.sort(key=str.casefold)
@@ -834,6 +860,7 @@ __all__ = [
     "copy_file",
     "copy_within",
     "delete_within",
+    "find_first_reparse_point",
     "is_path_within",
     "is_reparse_point",
     "list_bounded_directory",

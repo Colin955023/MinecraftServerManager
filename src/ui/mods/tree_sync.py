@@ -16,6 +16,7 @@ from src.ui import (
     Colors,
     resolve_color,
 )
+from src.utils import mod_filename_stem
 
 from .constants import logger
 from .feature_contexts import ModManagementFeatureContext
@@ -152,7 +153,7 @@ class ModManagementTreeSyncOps:
             display_description = format_single_line_text(raw_desc)
 
             status_text = "✅ 已啟用" if mod.status == ModStatus.ENABLED else "❌ 已停用"
-            mod_base_name = mod.filename.removesuffix(".jar.disabled").removesuffix(".jar")
+            mod_base_name = mod_filename_stem(mod.filename)
 
             size_val = getattr(mod, "file_size", 0)
             if size_val >= 1024 * 1024:
@@ -183,7 +184,7 @@ class ModManagementTreeSyncOps:
 
         self.controller.mod_session.replace_local_rows(projections)
         rows = {row.key: row for row in self.controller.mod_session.snapshot().local_rows}
-        search_text = presenter.local_search_var.get()
+        search_text = presenter.local_search_filter.normalize(presenter.local_search_var.get())
         filter_status = presenter.local_filter_var.get()
         is_dark = isDarkTheme()
         primary_brush = QBrush(QColor(resolve_color(Colors.TEXT_PRIMARY, dark=is_dark)))
@@ -217,7 +218,7 @@ class ModManagementTreeSyncOps:
                         or (filter_status == "啟用" and enabled)
                         or (filter_status == "停用" and not enabled)
                     )
-                    search_matches = not search_text or presenter.local_search_filter.matches(
+                    search_matches = not search_text or presenter.local_search_filter.matches_normalized(
                         (row.values[1],), search_text
                     )
                     row_item.setHidden(not status_matches or not search_matches)

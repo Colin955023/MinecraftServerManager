@@ -229,6 +229,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             memory_min_mb=min_mb,
             jvm_args=list(self.config.jvm_args),
             path=self.config.path,
+            backup_path=self.config.backup_path,
         )
 
         self.save_btn.setEnabled(False)

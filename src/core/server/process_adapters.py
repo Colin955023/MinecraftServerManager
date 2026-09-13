@@ -8,7 +8,9 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.utils import SubprocessUtils, get_shared_manager
+from src.utils import BackgroundTaskManager, SubprocessUtils
+
+_MAX_OUTPUT_BUFFER_BYTES = 4 * 1024 * 1024
 
 
 class ProcessPort(Protocol):
@@ -38,6 +40,7 @@ class SubprocessProcessAdapter:
         self._command = command
         self._cwd = cwd
         self._process: Any | None = None
+        self._reader_manager: BackgroundTaskManager | None = None
         self._buffer = bytearray()
         self._lock = threading.Lock()
         self._on_output: Callable[[], None] | None = None
@@ -62,7 +65,8 @@ class SubprocessProcessAdapter:
             bufsize=0,
             **hidden_kwargs,
         )
-        get_shared_manager().run(self._read_loop)
+        self._reader_manager = BackgroundTaskManager(max_workers=1)
+        self._reader_manager.run(self._read_loop)
 
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
@@ -167,6 +171,9 @@ class SubprocessProcessAdapter:
                 with suppress(OSError):
                     stream.close()
         self._process = None
+        if self._reader_manager is not None:
+            self._reader_manager.shutdown(wait=False)
+            self._reader_manager = None
 
     def _read_loop(self) -> None:
         process = self._process
@@ -176,6 +183,9 @@ class SubprocessProcessAdapter:
             while chunk := process.stdout.read(64 * 1024):
                 with self._lock:
                     self._buffer.extend(chunk)
+                    overflow = len(self._buffer) - _MAX_OUTPUT_BUFFER_BYTES
+                    if overflow > 0:
+                        del self._buffer[:overflow]
                 if self._on_output is not None:
                     self._on_output()
             code = process.wait()

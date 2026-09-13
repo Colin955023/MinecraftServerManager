@@ -136,7 +136,7 @@ class ServerPropertiesMigrationService:
                 changes.append(f"移除廢棄屬性：{dep_key} ({reason})")
 
         return MigrationPlan(
-            needs_migration=len(changes) > 0,
+            needs_migration=bool(changes),
             changes=tuple(changes),
             migrated_properties=new_props,
         )

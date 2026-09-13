@@ -148,8 +148,6 @@ class ServerBackupManager:
                 ):
                     for file in files:
                         file_path = root_path / file
-                        if backup_dir in file_path.parents:
-                            continue
                         try:
                             metadata = file_path.stat(follow_symlinks=False)
                             if not stat.S_ISREG(metadata.st_mode):
@@ -299,6 +297,25 @@ class ServerBackupManager:
         backups.sort(key=itemgetter("datetime"), reverse=True)
         return backups
 
+    def delete_backups(self, server_name: str, backup_dir: Path) -> bool:
+        """
+        刪除指定伺服器位於外部目錄的所有受管理備份
+
+        Args:
+            server_name: 伺服器名稱
+            backup_dir: 外部備份資料夾
+
+        Returns:
+            全部備份刪除成功時回傳 True
+        """
+        if not self._is_safe_server_name(server_name) or is_reparse_point(backup_dir):
+            return False
+        for backup in self.list_backups(server_name, backup_dir_override=backup_dir):
+            if not delete_within(backup_dir, Path(backup["path"])):
+                logger.warning(f"刪除備份失敗: {backup['filename']}")
+                return False
+        return True
+
     def restore_backup(
         self, server_name: str, backup_path_str: str, progress_callback: Callable[[float, str], None] | None = None
     ) -> bool:
@@ -438,7 +455,7 @@ class ServerBackupManager:
         finally:
             if staging_path is not None:
                 delete_within(staging_path.parent, staging_path)
-            if rollback_path is not None:
+            if rollback_path is not None and rollback_path.exists():
                 logger.error(f"還原回滾目錄仍存在，為避免資料遺失不自動刪除: {rollback_path}")
             self.server_runtime.end_maintenance(server_name)
 
@@ -459,19 +476,22 @@ class ServerBackupManager:
         return total_bytes, max_member_bytes, member_count
 
     def _get_backup_dir(self, config: ServerConfig) -> Path:
-        """取得伺服器的備份存放目錄"""
+        """取得設定的外部備份存放目錄"""
         server_path = self._validated_server_path(config)
-        if not server_path.is_dir():
-            raise OSError("伺服器路徑不是安全的一般資料夾")
-        backup_dir = resolve_stable_directory(server_path / "backups", create=True)
+        backup_path = str(config.backup_path or "").strip()
+        if not backup_path:
+            raise OSError("尚未設定備份目錄")
+        backup_dir = resolve_stable_directory(backup_path)
         if is_reparse_point(backup_dir) or not backup_dir.is_dir():
             raise OSError("備份目錄不是安全的一般資料夾")
+        if backup_dir == server_path or is_path_within(server_path, backup_dir, strict=False):
+            raise OSError("備份目錄不得位於伺服器資料夾內")
         return backup_dir
 
     @staticmethod
     def _parse_backup_timestamp(value: str) -> tuple[str, datetime.datetime | None]:
         """解析目前與既有備份檔名中的時間戳"""
-        timestamp_str = value.split("-", 1)[0]
+        timestamp_str = value.partition("-")[0]
         timestamp_format = _SUPPORTED_TIMESTAMP_FORMATS.get(len(timestamp_str))
         if timestamp_format is None or not timestamp_str.isdigit():
             return timestamp_str, None

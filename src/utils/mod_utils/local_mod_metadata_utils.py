@@ -2,34 +2,39 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
 from .modrinth_query_utils import normalize_identifier
 
+_LAX_SEP_TRANS = str.maketrans("-+._", "    ")
+_LAX_SEP_DIGIT_TRANS = str.maketrans("-+._0123456789", "              ")
 
-def _normalize_filename_stem(value: str | None) -> str:
-    """將檔名正規化為可比對的 stem"""
 
-    filename = str(value or "").strip().lower()
-    if filename.endswith(".jar.disabled"):
-        filename = filename.removesuffix(".jar.disabled")
-    elif filename.endswith(".jar"):
-        filename = filename.removesuffix(".jar")
-    return filename
+def mod_filename_stem(value: str | None) -> str:
+    """
+    移除模組檔名的已知副檔名
+
+    Args:
+        value: 原始模組檔名
+
+    Returns:
+        移除 .jar 或 .jar.disabled 後的檔名
+    """
+
+    filename = str(value or "").strip()
+    return filename.removesuffix(".jar.disabled").removesuffix(".jar")
 
 
 def _normalize_lax_filename(value: str | None, *, exclude_digits: bool = False) -> str:
     """將檔名正規化為較寬鬆的比對格式"""
 
-    normalized = _normalize_filename_stem(value)
+    normalized = mod_filename_stem(value).lower()
     if not normalized:
         return ""
-    allowed_pattern = "[-+._0-9]" if exclude_digits else "[-+._]"
-    normalized = re.sub(allowed_pattern, " ", normalized)
-    return " ".join(normalized.split())
+    table = _LAX_SEP_DIGIT_TRANS if exclude_digits else _LAX_SEP_TRANS
+    return " ".join(normalized.translate(table).split())
 
 
 def _dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
@@ -40,7 +45,7 @@ def _dependency_candidate_filenames(resolved_dependency: Any) -> list[str]:
     primary_file = getattr(version, "primary_file", None)
     if isinstance(primary_file, dict):
         candidates.append(str(primary_file.get("filename", "") or "").strip())
-    return [candidate for candidate in candidates if str(candidate or "").strip()]
+    return [candidate for candidate in candidates if candidate]
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,7 +99,7 @@ def build_installed_mod_index(installed_mods: Iterable[Any] | None) -> Installed
             if normalized_value:
                 installed_identifiers.add(normalized_value)
         filename = getattr(mod, "filename", "")
-        stem = _normalize_filename_stem(filename)
+        stem = mod_filename_stem(filename).lower()
         if stem:
             installed_identifiers.add(stem)
         lax_filename = _normalize_lax_filename(filename, exclude_digits=True)
@@ -111,4 +116,4 @@ def build_installed_mod_index(installed_mods: Iterable[Any] | None) -> Installed
     )
 
 
-__all__ = ["InstalledModIndex", "build_installed_mod_index"]
+__all__ = ["InstalledModIndex", "build_installed_mod_index", "mod_filename_stem"]

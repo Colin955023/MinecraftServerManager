@@ -510,12 +510,18 @@ class _InspectionEngine:
                     break
 
         def detect_from_jar_metadata():
-            preferred_names = ["server.jar", "minecraft_server.jar"]
-            preferred_jars = [
-                jar for name in preferred_names for jar in jar_files if jar.name.casefold() == name.casefold()
-            ]
-            other_jars = [jar for jar in jar_files if jar not in preferred_jars and "installer" not in jar.name.lower()]
-            for jar in [*preferred_jars, *other_jars]:
+            preferred_map = {"server.jar": 0, "minecraft_server.jar": 1}
+            preferred_jars: list[tuple[int, Path]] = []
+            other_jars: list[Path] = []
+            for jar in jar_files:
+                name_lower = jar.name.casefold()
+                rank = preferred_map.get(name_lower)
+                if rank is not None:
+                    preferred_jars.append((rank, jar))
+                elif "installer" not in name_lower:
+                    other_jars.append(jar)
+            preferred_jars.sort(key=lambda item: item[0])
+            for jar in [j for _, j in preferred_jars] + other_jars:
                 mc_ver = _InspectionEngine._extract_mc_version_from_jar_file(jar)
                 if mc_ver:
                     set_if_unknown("minecraft_version", mc_ver)
@@ -903,9 +909,9 @@ class ServerInspector:
             return "unreadable"
         for raw_line in content.splitlines():
             line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+            key, sep, value = line.partition("=")
+            if not sep or not key or key.startswith("#"):
                 continue
-            key, value = line.split("=", 1)
             if key.strip().lower() == "eula":
                 return "accepted" if value.strip().lower() == "true" else "rejected"
         return "rejected"

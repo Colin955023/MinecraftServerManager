@@ -66,7 +66,7 @@ class JvmOptionPolicy:
             try:
                 return [arg for arg in shlex.split(raw_args) if arg]
             except ValueError:
-                return [arg for arg in raw_args.split() if arg]
+                return raw_args.split()
         if isinstance(raw_args, (list, tuple)):
             return [normalized for arg in raw_args if (normalized := str(arg).strip())]
         return []
@@ -316,7 +316,6 @@ class ServerCommands:
             java_path = JavaUtils.get_best_java_path(
                 mc_version,
                 required_major=int(required_major) if required_major else None,
-                ask_download=False,
             )
         except Exception as e:
             logger.warning(f"無法依 Minecraft {mc_version} 解析 Java 執行檔，將使用 {fallback}: {e}")
@@ -342,7 +341,7 @@ class ServerCommands:
                 if str(arg).strip()
             ]
         except ValueError:
-            return [arg for arg in str(command_line).split() if arg]
+            return str(command_line).split()
 
     @staticmethod
     def parse_safe_java_command_line(command_line: str) -> tuple[bool, list[str]] | None:
@@ -451,8 +450,7 @@ class ServerCommands:
     def _extract_startup_script_command_from_text(content: str) -> StartupScriptCommand:
         """從已讀取的啟動腳本文字擷取 Java 指令"""
         startup_command = StartupScriptCommand()
-        if content.startswith("\ufeff"):
-            content = content.removeprefix("\ufeff")
+        content = content.removeprefix("\ufeff")
         for line in content.splitlines():
             body, _newline = ServerCommands._split_line_ending(line)
             stripped = body.strip()
@@ -461,8 +459,8 @@ class ServerCommands:
             raw_tokens = ServerCommands.split_windows_command_line(stripped)
             if raw_tokens and str(raw_tokens[0]).lower() == "call":
                 raw_tokens = raw_tokens[1:]
-            if raw_tokens and str(raw_tokens[0]).startswith("@"):
-                raw_tokens[0] = str(raw_tokens[0])[1:]
+            if raw_tokens:
+                raw_tokens[0] = str(raw_tokens[0]).removeprefix("@")
             if not raw_tokens or not ServerCommands._is_java_command_token(raw_tokens[0]):
                 startup_command.unsafe = True
                 continue

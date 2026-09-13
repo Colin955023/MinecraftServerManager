@@ -157,6 +157,9 @@ uv run report\comprehensive_report.py
 powershell -ExecutionPolicy Bypass -File scripts\build_nuitka.ps1
 ```
 
+若需保留 Nuitka 產生的 C 原始碼以供檢閱，使用 `-KeepCSource`。腳本會只保留
+`dist\main.c-source`，並移除可由下次建置重新產生的 OBJ、`main.dist` 與 onefile 暫存目錄。
+
 `dist\<repository>.exe` 是發佈檔；`dist\main.dist` 只作建置檢查與問題診斷，不應直接當作安裝內容。
 
 onefile 預設使用 Nuitka 的版本化快取規格 `{CACHE_DIR}/Programs/MinecraftServerManager/{VERSION}`，Windows 實際位置為 `%LOCALAPPDATA%\Programs\MinecraftServerManager\<版本>`。新版本完成啟動後會清理舊版本目錄；若舊版本仍被鎖定則保留至下次啟動再清理。

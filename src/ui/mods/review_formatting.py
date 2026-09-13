@@ -58,9 +58,9 @@ def format_local_update_source_text(review_entry: LocalUpdateReviewEntry) -> str
     metadata_source = str(getattr(review_entry.candidate, "metadata_source", "") or "").strip()
     recommendation_source = str(getattr(review_entry.candidate, "recommendation_source", "") or "").strip()
     if metadata_source:
-        segments.append(format_metadata_source_short_label(metadata_source))
+        segments.append(_format_metadata_source_short_label(metadata_source))
     if recommendation_source:
-        segments.append(format_recommendation_source_short_label(recommendation_source))
+        segments.append(_format_recommendation_source_short_label(recommendation_source))
     return "｜".join(segments)
 
 
@@ -169,7 +169,7 @@ def format_metadata_source_label(source: str | None) -> str:
     return METADATA_SOURCE_LABELS.get(str(source or "").strip().lower(), "未知")
 
 
-def format_metadata_source_short_label(source: str | None) -> str:
+def _format_metadata_source_short_label(source: str | None) -> str:
     """
     將 metadata 來源識別值轉為短顯示標籤
 
@@ -195,7 +195,7 @@ def format_recommendation_source_label(source: str | None) -> str:
     return RECOMMENDATION_SOURCE_LABELS.get(str(source or "").strip().lower(), "未知")
 
 
-def format_recommendation_source_short_label(source: str | None) -> str:
+def _format_recommendation_source_short_label(source: str | None) -> str:
     """
     將更新推薦來源識別值轉為短顯示標籤
 

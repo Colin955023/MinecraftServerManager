@@ -1,6 +1,6 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
-    [switch]$KeepBuildOutput,
+    [switch]$KeepCSource,
     [ValidateSet('disable', 'attach')]
     [string]$ConsoleMode = 'disable'
 )
@@ -10,6 +10,8 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir '..'))
 $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$reportPath = Join-Path $projectRoot 'report\nuitka-compilation-report.xml'
+$pendingReportPath = Join-Path $projectRoot "report\nuitka-compilation-report.$PID.pending.xml"
 
 Push-Location $projectRoot
 try {
@@ -139,6 +141,15 @@ print(chr(10).join(modules))
         'imaplib',
         'poplib',
         'smtplib',
+        'socketserver',
+        'graphlib',
+        'filecmp',
+        'fileinput',
+        'sched',
+        'colorsys',
+        'configparser',
+        'html.parser',
+        'pprint',
         'pstats',
         'timeit',
         'trace',
@@ -149,7 +160,14 @@ print(chr(10).join(modules))
         'symtable',
         'rlcompleter',
         'cmd',
-        'quopri'
+        'quopri',
+        'httpcore._sync.http2',
+        'httpcore._sync.socks_proxy',
+        '__hello__',
+        '__phello__',
+        'pickletools',
+        'fractions',
+        'statistics'
     )
 
     $numJobs = [Math]::Max(1, [System.Environment]::ProcessorCount - 1)
@@ -165,7 +183,7 @@ print(chr(10).join(modules))
         '--output-dir=dist',
         "--output-filename=$($appInfo.GITHUB_REPO).exe",
         '--include-data-files=LICENSE=LICENSE',
-        '--report=report/nuitka-compilation-report.xml',
+        "--report=$pendingReportPath",
         '--python-flag=no_docstrings',
         '--python-flag=no_asserts',
         '--python-flag=isolated',
@@ -196,15 +214,10 @@ print(chr(10).join(modules))
         $nuitkaArgs += "--include-module=$module"
     }
 
-    if (-not $KeepBuildOutput) {
+    if (-not $KeepCSource) {
         $nuitkaArgs += '--remove-output'
     }
-    
-    foreach ($dll in @('qdirect2d.dll', 'qminimal.dll', 'qoffscreen.dll')) {
-        # Nuitka 比對完整 dest_path，僅傳檔名無法排除 Qt plugin
-        $nuitkaArgs += "--noinclude-dlls=*${dll}"
-    }
-    
+
     foreach ($module in $qtUnusedModules) {
         $nuitkaArgs += "--nofollow-import-to=$module"
     }
@@ -215,10 +228,26 @@ print(chr(10).join(modules))
 
     $nuitkaArgs += 'src/main.py'
 
-    $buildStart = Get-Date
-    & $venvPython @nuitkaArgs
-    $buildExitCode = $LASTEXITCODE
-    $elapsed = (Get-Date) - $buildStart
+    $origLinkEnv = $env:LINK
+    $origClcacheHardlink = $env:CLCACHE_HARDLINK
+    $origClcacheMaxsize = $env:CLCACHE_MAXSIZE
+    $linkFlags = '/cgthreads:8 /OPT:REF /OPT:ICF /DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA'
+    $env:LINK = if ($origLinkEnv) { "$origLinkEnv $linkFlags" } else { $linkFlags }
+    $env:CLCACHE_HARDLINK = '1'
+    if (-not $env:CLCACHE_MAXSIZE) {
+        $env:CLCACHE_MAXSIZE = '5368709120'
+    }
+    try {
+        $buildStart = Get-Date
+        & $venvPython @nuitkaArgs
+        $buildExitCode = $LASTEXITCODE
+        $elapsed = (Get-Date) - $buildStart
+    }
+    finally {
+        $env:LINK = $origLinkEnv
+        $env:CLCACHE_HARDLINK = $origClcacheHardlink
+        $env:CLCACHE_MAXSIZE = $origClcacheMaxsize
+    }
 
     if ($buildExitCode -ne 0) {
         throw "Nuitka build failed. ExitCode=$buildExitCode"
@@ -227,20 +256,19 @@ print(chr(10).join(modules))
     if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
         throw "找不到建置輸出執行檔：$executablePath"
     }
-    $reportPath = Join-Path $projectRoot 'report\nuitka-compilation-report.xml'
-    if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
-        throw "找不到 Nuitka 建置報告：$reportPath"
+    if (-not (Test-Path -LiteralPath $pendingReportPath -PathType Leaf)) {
+        throw "找不到 Nuitka 建置報告：$pendingReportPath"
     }
 
     $reportNormalizer = Join-Path $projectRoot 'scripts\normalize_nuitka_report.py'
-    & $venvPython $reportNormalizer
+    & $venvPython $reportNormalizer $pendingReportPath
     if ($LASTEXITCODE -ne 0) {
-        throw "Nuitka XML 報告不是有效 XML，請保留報告以供診斷。"
+        throw 'Nuitka 暫存 XML 報告不是有效 XML'
     }
 
     $reportXml = [System.Xml.XmlDocument]::new()
     $reportXml.XmlResolver = $null
-    $reportXml.Load($reportPath)
+    $reportXml.Load($pendingReportPath)
 
     $reportRoot = $reportXml.DocumentElement
     if ($null -eq $reportRoot -or $reportRoot.Name -ne 'nuitka-compilation-report') {
@@ -256,15 +284,7 @@ print(chr(10).join(modules))
     if ($null -eq $reportXml.SelectSingleNode("//data_file[@name='LICENSE']")) {
         throw 'Nuitka 建置產物缺少必要檔案：LICENSE'
     }
-    $forbiddenDlls = @('qdirect2d.dll', 'qminimal.dll', 'qoffscreen.dll')
-    $forbiddenReportNodes = @($reportXml.SelectNodes('//included_dll') | Where-Object {
-        $name = [System.IO.Path]::GetFileName($_.GetAttribute('dest_path'))
-        $forbiddenDlls -contains $name.ToLowerInvariant() -and $_.GetAttribute('ignored') -ne 'yes'
-    })
-    if ($forbiddenReportNodes.Count -gt 0) {
-        $paths = ($forbiddenReportNodes | ForEach-Object { $_.GetAttribute('dest_path') }) -join ', '
-        throw "建置報告包含禁止的 Qt platform DLL：$paths"
-    }
+    [System.IO.File]::Move($pendingReportPath, $reportPath, $true)
 
     $minutes = [Math]::Floor($elapsed.TotalMinutes)
     $seconds = $elapsed.Seconds
@@ -272,27 +292,18 @@ print(chr(10).join(modules))
     $exeSizeBytes = (Get-Item $executablePath).Length
     $exeSizeMB = [Math]::Round($exeSizeBytes / 1MB, 2)
 
-    $distDir = Join-Path $projectRoot "dist\main.dist"
-    if (Test-Path -LiteralPath $distDir -PathType Container) {
-        $distFiles = @(Get-ChildItem -LiteralPath $distDir -Recurse -File)
-        $forbiddenDistFiles = @($distFiles | Where-Object {
-            $forbiddenDlls -contains $_.Name.ToLowerInvariant()
-        })
-        if ($forbiddenDistFiles.Count -gt 0) {
-            $paths = ($forbiddenDistFiles | ForEach-Object FullName) -join ', '
-            throw "建置目錄包含禁止的 Qt platform DLL：$paths"
-        }
-    }
-
     $sha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash
     Write-Host '========================================================'
     Write-Host "建置完成：$($appInfo.APP_NAME) v$($appInfo.APP_VERSION)"
     Write-Host ("執行檔：{0} ({1} MB)" -f $executablePath, $exeSizeMB)
     Write-Host ("耗時：{0} 分 {1} 秒；" -f $minutes, $seconds)
     Write-Host "SHA256：$sha256"
-    Write-Host '檢查：onefile、報告、LICENSE 及禁止 DLL 均符合規則'
+    Write-Host '檢查：onefile、報告與 LICENSE 均符合規則'
     Write-Host '========================================================'
 }
 finally {
+    if (Test-Path -LiteralPath $pendingReportPath -PathType Leaf) {
+        Remove-Item -LiteralPath $pendingReportPath -Force
+    }
     Pop-Location
 }

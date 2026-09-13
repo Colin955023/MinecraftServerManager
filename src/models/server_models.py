@@ -36,6 +36,7 @@ class ServerConfig:
     memory_min_mb: int | None = None
     path: str = ""
     jvm_args: list[str] = field(default_factory=list)
+    backup_path: str = ""
 
 
 @dataclass(slots=True)

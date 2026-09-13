@@ -32,7 +32,7 @@ from src.ui import (
     apply_table_header_style,
     resolve_color,
 )
-from src.utils import list_bounded_directory
+from src.utils import OperationCancelledError, list_bounded_directory, mod_filename_stem
 
 from .constants import logger
 from .feature_contexts import ModManagementFeatureContext
@@ -68,7 +68,7 @@ class LocalModListPresenter:
         """
         dedup: dict[str, Any] = {}
         for mod in mods:
-            base_name = mod.filename.removesuffix(".jar.disabled").removesuffix(".jar")
+            base_name = mod_filename_stem(mod.filename)
             existing = dedup.get(base_name)
             if existing is None or mod.status == ModStatus.ENABLED:
                 dedup[base_name] = mod
@@ -339,7 +339,7 @@ class LocalModListPresenter:
         self.batch_toggle_btn.clicked.connect(self.batch_toggle_selected)
         left_layout.addWidget(self.batch_toggle_btn)
 
-        folder_btn = PushButton("📂 開啟資料夾", left_frame)
+        folder_btn = PushButton("📂 開啟模組資料夾", left_frame)
         folder_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
         folder_btn.clicked.connect(self.open_mods_folder)
         left_layout.addWidget(folder_btn)
@@ -503,6 +503,8 @@ class LocalModListPresenter:
                 ):
                     self.controller.update_status_safe(f"找到 {len(session.local_mods)} 個本地模組")
                     self.controller.scope.schedule(0, self.controller.tree_sync.refresh_local_list)
+                    if session.has_pending_provider_enhancements():
+                        self.enhance_local_mods(scope)
                     return
                 self.controller.update_status_safe("正在掃描本地模組...")
                 mods = list(self._build_mods_by_base_name(manager.local_mod_scanner.scan_mods()).values())
@@ -564,9 +566,11 @@ class LocalModListPresenter:
                 identity = manager.provider_identity_service.resolve_for_local_mod(mod)
                 manager.provider_identity_service.project(mod, identity)
                 if session.get_provider_cache(mod.filename) is not None:
+                    session.mark_provider_enrichment_completed(scope, mod.filename)
                     return
                 project_id = identity.project_id if identity.canonical else ""
                 if not project_id:
+                    session.mark_provider_enrichment_completed(scope, mod.filename)
                     return
                 enhanced = self.controller.mod_provider.find_projects(project_id, exact=True, include_details=True)
                 if enhanced:
@@ -579,6 +583,10 @@ class LocalModListPresenter:
                         self.controller.tree_sync.refresh_local_list,
                         key="local_enhance_refresh",
                     )
+                else:
+                    session.mark_provider_enrichment_completed(scope, mod.filename)
+            except OperationCancelledError:
+                return
             except Exception:
                 logger.exception(f"模組 {mod.filename} 資訊失敗")
 

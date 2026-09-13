@@ -386,6 +386,58 @@ def test_backup_requires_secret_content_confirmation(monkeypatch) -> None:
     assert "不要直接分享未加密備份" in prompts[0][1]
 
 
+def test_backup_reuses_saved_backup_path_without_prompting(monkeypatch, tmp_path: Path) -> None:
+    server_path = tmp_path / "server"
+    backup_path = tmp_path / "backups"
+    server_path.mkdir()
+    backup_path.mkdir()
+    config = ServerConfig(
+        name="Alpha",
+        minecraft_version="1.21",
+        loader_type="fabric",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_path),
+        backup_path=str(backup_path),
+    )
+    submitted: list[str] = []
+
+    class _Dialog:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def update_progress(self, *_args) -> None:
+            pass
+
+        def exec(self) -> None:
+            pass
+
+    class _BackupFrame:
+        selected_server = "Alpha"
+        server_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+        server_crud = SimpleNamespace(snapshot=lambda: _snapshot(config), commit=lambda *_args, **_kwargs: None)
+        server_backup = SimpleNamespace(backup_server=lambda *_args, **_kwargs: True)
+        scope = SimpleNamespace(submit=lambda _task, **_kwargs: submitted.append("backup"))
+
+        @staticmethod
+        def window():
+            return None
+
+    monkeypatch.setattr(
+        "src.ui.core_frames.manage_server_frame.UIUtils.ask_yes_no_cancel",
+        lambda *_args, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "src.ui.core_frames.manage_server_frame.UIUtils.get_existing_directory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("不應詢問已儲存的備份路徑")),
+    )
+    monkeypatch.setattr("src.ui.core_frames.manage_server_frame.ProgressDialog", _Dialog)
+
+    ManageServerFrame.backup_server(cast(Any, _BackupFrame()))
+
+    assert submitted == ["backup"]
+
+
 def test_work_outcome_statuses() -> None:
     s = WorkOutcome.succeeded(42)
     assert s.is_succeeded is True

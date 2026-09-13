@@ -114,7 +114,7 @@ class LoaderManager:
 
         for version in versions:
             if "-" in version:
-                mc_part, suffix_part = version.split("-", 1)
+                mc_part, _, suffix_part = version.partition("-")
                 mc_clean = re.sub(r"[^0-9.]", "", mc_part).rstrip(".")
                 suffix_clean = re.sub(r"[^0-9.]", "", suffix_part).rstrip(".")
                 mc_parts = [p for p in mc_clean.split(".") if p]
@@ -169,7 +169,7 @@ class LoaderManager:
         for version in versions:
             if "-" not in version:
                 continue
-            mc_version = version.split("-", 1)[0]
+            mc_version = version.partition("-")[0]
             parts = mc_version.split(".")
             if len(parts) == 4:
                 mc_version = ".".join(parts[:3])
@@ -294,7 +294,7 @@ class LoaderManager:
                 mc_version: sorted(
                     versions,
                     key=lambda full: (
-                        parse_version_safe(full.split("-", 1)[1], fallback=_VERSION_FALLBACK)
+                        parse_version_safe(full.partition("-")[2], fallback=_VERSION_FALLBACK)
                         if "-" in full
                         else (
                             parse_version_safe(full, fallback=_VERSION_FALLBACK)
@@ -346,7 +346,7 @@ class LoaderManager:
         for full in cache[matched]:
             if "-" not in str(full):
                 continue
-            loader_version = str(full).split("-", 1)[1]
+            loader_version = str(full).partition("-")[2]
             if spec.normalize_loader_version is not None:
                 loader_version = spec.normalize_loader_version(matched, loader_version)
             versions.append(LoaderVersion(version=loader_version))
@@ -528,7 +528,7 @@ class LoaderManager:
         java_path = (
             user_java_path
             if user_java_path and Path(user_java_path).exists()
-            else JavaUtils.get_best_java_path(minecraft_version, ask_download=False)
+            else JavaUtils.get_best_java_path(minecraft_version)
         )
         if not java_path:
             return False
@@ -772,7 +772,7 @@ class LoaderManager:
 
             self._version_cache.clear()
             return OperationResult(True, "快取檔案已成功清除")
-        except (PermissionError, OSError) as e:
+        except OSError as e:
             logger.exception(f"清除 Loader 快取檔案失敗: {e}")
             return OperationResult(False, f"清除 Loader 快取檔案失敗: {e}")
 

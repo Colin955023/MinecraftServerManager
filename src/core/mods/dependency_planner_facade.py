@@ -68,7 +68,6 @@ _MAX_DEPENDENCY_NODES = 512
 _MAX_DEPENDENCY_EDGES = 2048
 _MAX_DEPENDENCY_PROVIDER_QUERIES = 1024
 _MAX_DEPENDENCY_NAME_IDS_PER_QUERY = 64
-_MAX_DEPENDENCY_VERSIONS_PER_QUERY = 128
 
 
 @dataclass(slots=True)
@@ -670,10 +669,7 @@ class ModPlanning:
             hash_project_id = clean_api_identifier(
                 getattr(current_match, "project_id", "") or getattr(latest_match, "project_id", "")
             )
-            try:
-                identity = provider_identity_resolver(local_mod, hash_project_id, force=force_refresh)
-            except TypeError:
-                identity = provider_identity_resolver(local_mod, hash_project_id)
+            identity = provider_identity_resolver(local_mod, hash_project_id, force=force_refresh)
             resolved_project_info: OnlineModInfo | None = None
             metadata_source = identity.provenance
             if identity.canonical:

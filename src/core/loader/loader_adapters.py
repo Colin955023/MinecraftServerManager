@@ -71,7 +71,7 @@ class LoaderAdapter:
     compatible_version_loader: Callable[[LoaderAdapter, str, Any], list[LoaderVersion]] | None = None
 
 
-def filter_fabric_versions(items: list[dict]) -> list[dict]:
+def _filter_fabric_versions(items: list[dict]) -> list[dict]:
     """
     保留 Fabric 穩定版本
 
@@ -116,7 +116,7 @@ def filter_quilt_versions(items: list[dict]) -> list[dict]:
     )
 
 
-def build_neoforge_mc_version_candidates(mc_version: str) -> list[str]:
+def _build_neoforge_mc_version_candidates(mc_version: str) -> list[str]:
     """
     建立 NeoForge 查詢 Minecraft 版本的候選鍵
 
@@ -155,7 +155,7 @@ def build_neoforge_mc_version_candidates(mc_version: str) -> list[str]:
     return list(dict.fromkeys(candidates))
 
 
-def normalize_neoforge_loader_version(matched_key: str, loader_version: str) -> str:
+def _normalize_neoforge_loader_version(matched_key: str, loader_version: str) -> str:
     """
     依匹配到的 Minecraft 鍵補齊 NeoForge 版本前綴
 
@@ -169,7 +169,7 @@ def normalize_neoforge_loader_version(matched_key: str, loader_version: str) -> 
     return loader_version if "." in loader_version else f"{matched_key}.{loader_version}"
 
 
-def resolve_forge_install_result(base_dir: Path, loader_type: str) -> str | None:
+def _resolve_forge_install_result(base_dir: Path, loader_type: str) -> str | None:
     """
     解析 Forge 類 installer 完成後可用的啟動目標
 
@@ -191,7 +191,8 @@ def resolve_forge_install_result(base_dir: Path, loader_type: str) -> str | None
     normalized_loader_type = loader_type.lower()
     loader_jars = [entry for entry in jar_entries if entry.name.lower().startswith(normalized_loader_type)]
     for jar in loader_jars or jar_entries:
-        if normalized_loader_type in jar.name.lower() and "installer" not in jar.name.lower():
+        normalized_name = jar.name.lower()
+        if normalized_loader_type in normalized_name and "installer" not in normalized_name:
             return jar.name
     if (base_dir / "win_args.txt").exists() or (base_dir / "user_jvm_args.txt").exists():
         return "run.bat"
@@ -246,7 +247,7 @@ def build_loader_adapters(manager: Any) -> dict[str, LoaderAdapter]:
             needs_vanilla=True,
             metadata_loader=manager._fetch_json_versions,
             compatible_version_loader=manager._compatible_json_versions,
-            filter_versions=filter_fabric_versions,
+            filter_versions=_filter_fabric_versions,
             compatibility_guard=is_fabric_compatible_version,
             installer_url_factory=manager._fabric_installer_url,
             installer_args=lambda context: [
@@ -307,7 +308,7 @@ def build_loader_adapters(manager: Any) -> dict[str, LoaderAdapter]:
                 context.installer_path,
                 "--installServer",
             ],
-            post_install_result=resolve_forge_install_result,
+            post_install_result=_resolve_forge_install_result,
         ),
         "neoforge": LoaderAdapter(
             id="neoforge",
@@ -330,9 +331,9 @@ def build_loader_adapters(manager: Any) -> dict[str, LoaderAdapter]:
                 context.installer_path,
                 "--installServer",
             ],
-            post_install_result=resolve_forge_install_result,
-            candidate_keys=build_neoforge_mc_version_candidates,
-            normalize_loader_version=normalize_neoforge_loader_version,
+            post_install_result=_resolve_forge_install_result,
+            candidate_keys=_build_neoforge_mc_version_candidates,
+            normalize_loader_version=_normalize_neoforge_loader_version,
         ),
     }
 

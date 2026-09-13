@@ -360,7 +360,7 @@ def test_http_transport_isolates_connection_pools_by_original_origin(monkeypatch
         return httpx.Response(200, content=b"ok", request=request)
 
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", _fake_handle)
-    transport = http_client_module._PinnedHTTPTransport(verify=False, trust_env=False, http2=True)
+    transport = http_client_module._PinnedHTTPTransport(verify=False, trust_env=False)
 
     requests = [
         httpx.Request(

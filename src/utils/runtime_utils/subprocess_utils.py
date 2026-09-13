@@ -10,7 +10,7 @@ import shutil
 import subprocess  # nosec B404
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from src.utils import get_logger, is_reparse_point
 
@@ -30,6 +30,20 @@ class SubprocessUtils:
     SW_HIDE = subprocess.SW_HIDE
     CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
     CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE
+    _windows_apps_dir: ClassVar[Path | None] = None
+    _windows_apps_dir_resolved: ClassVar[bool] = False
+
+    @classmethod
+    def _get_windows_apps_dir(cls) -> Path | None:
+        if not cls._windows_apps_dir_resolved:
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                try:
+                    cls._windows_apps_dir = (Path(local_app_data) / "Microsoft" / "WindowsApps").resolve()
+                except OSError:
+                    cls._windows_apps_dir = None
+            cls._windows_apps_dir_resolved = True
+        return cls._windows_apps_dir
 
     @staticmethod
     def get_hidden_windows_kwargs() -> dict:
@@ -53,16 +67,15 @@ class SubprocessUtils:
         """
         判斷是否為受信任的 WindowsApps 執行別名 (如 winget.exe)
         """
+        if path.name.lower() not in {"winget.exe"}:
+            return False
+        windows_apps = SubprocessUtils._get_windows_apps_dir()
+        if windows_apps is None:
+            return False
         try:
-            local_app_data = os.environ.get("LOCALAPPDATA", "")
-            if not local_app_data:
-                return False
-            windows_apps = (Path(local_app_data) / "Microsoft" / "WindowsApps").resolve()
-            if path.name.lower() not in {"winget.exe"}:
-                return False
             parent = path.parent.resolve()
             return os.path.normcase(str(parent)) == os.path.normcase(str(windows_apps))
-        except Exception:
+        except OSError:
             return False
 
     @staticmethod

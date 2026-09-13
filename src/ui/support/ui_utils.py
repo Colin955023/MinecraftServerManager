@@ -429,12 +429,6 @@ class UIUtils:
                     return
             except Exception as e:
                 logger.debug(f"檢查路徑存在性時發生例外: {e}")
-            try:
-                # 僅開啟已存在且已解析的 Windows 路徑
-                os.startfile(target_str)  # nosec B606
-                return
-            except OSError as e:
-                logger.debug(f"os.startfile 失敗，嘗試 subprocess: {e}")
             explorer = _find_explorer_path()
             if explorer is None:
                 logger.error("找不到 Windows 檔案總管")

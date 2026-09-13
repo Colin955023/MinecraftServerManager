@@ -30,13 +30,12 @@ def format_bytes(size: int) -> str:
         格式化後的單位文字
     """
     size = max(0, int(size))
-    units = ["B", "KiB", "MiB", "GiB", "TiB"]
     value = float(size)
-    for unit in units:
-        if value < 1024 or unit == units[-1]:
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024:
             return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024
-    return f"{size} B"
+    return f"{value:.1f} TiB"
 
 
 __all__ = ["bytes_to_mb", "format_bytes"]

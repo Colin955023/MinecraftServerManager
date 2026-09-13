@@ -6,6 +6,7 @@ import zipfile
 import pytest
 
 import src.utils.core_utils.atomic_writer as atomic_writer_module
+import src.utils.core_utils.filesystem_utils as filesystem_utils_module
 from src.utils import (
     SAFE_TEXT_FILE_MAX_BYTES,
     atomic_write_json,
@@ -15,6 +16,7 @@ from src.utils import (
     delete_within,
     open_bounded_zip,
     open_bounded_zip_writer,
+    open_regular_file,
     read_json,
     read_text_file,
     safe_extract_zip,
@@ -27,6 +29,15 @@ def test_atomic_write_json_roundtrip_immediate(tmp_path) -> None:
 
     assert atomic_write_json(target, payload) is True
     assert read_json(target) == payload
+
+
+def test_open_regular_file_allows_relative_path_within_allowed_root(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "state.bin"
+    target.write_bytes(b"safe")
+    monkeypatch.chdir(tmp_path)
+
+    with open_regular_file("state.bin", allowed_root=tmp_path) as source:
+        assert source.read() == b"safe"
 
 
 def test_atomic_write_json_if_changed_skips_rewrite_for_same_payload(tmp_path, monkeypatch) -> None:
@@ -402,3 +413,22 @@ def test_delete_within_blocks_base_directory_itself(tmp_path) -> None:
 
     assert delete_within(base_dir, base_dir) is False
     assert base_dir.is_dir()
+
+
+def test_delete_within_rejects_junction_added_after_preflight(tmp_path, make_junction, monkeypatch) -> None:
+    base_dir = tmp_path / "servers_root"
+    target = base_dir / "alpha"
+    outside = tmp_path / "outside"
+    target.mkdir(parents=True)
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep", encoding="utf-8")
+    original_walk = filesystem_utils_module.walk_bounded_tree
+
+    def inject_junction_after_walk(*args, **kwargs):
+        yield from original_walk(*args, **kwargs)
+        make_junction(target / "late-link", outside)
+
+    monkeypatch.setattr(filesystem_utils_module, "walk_bounded_tree", inject_junction_after_walk)
+
+    assert delete_within(base_dir, target) is False
+    assert (outside / "keep.txt").read_text(encoding="utf-8") == "keep"

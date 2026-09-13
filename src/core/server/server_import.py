@@ -365,7 +365,9 @@ class ServerImportService:
         try:
             with stable_directory(self._root) as staging_parent:
                 staging = staging_parent / f".msm-import-{inspection.transaction_id}.staging"
-                staging.mkdir(exist_ok=False)
+                if staging.exists():
+                    raise FileExistsError(f"匯入交易 staging 路徑已存在: {staging}")
+                resolve_stable_directory(staging, create=True)
             self._revalidate(inspection, previous)
             self._check_cancel(cancel_check)
             if inspection.source_kind == "in_place" and apply_properties_migration:

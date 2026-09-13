@@ -119,7 +119,8 @@ class _PlanningHarness:
 _TEST_PLANNING = _PlanningHarness()
 
 
-def _test_provider_identity_resolver(local_mod: object, hash_project_id: str):
+def _test_provider_identity_resolver(local_mod: object, hash_project_id: str, *, force: bool = False):
+    del force
     override = _IDENTITY_TEST_OVERRIDE.get("resolver")
     if callable(override):
         resolved = override(local_mod)

@@ -185,7 +185,7 @@ def extract_forge_versions(path_text: str) -> tuple[str | None, str | None]:
     ):
         if match := re.match(pattern, value):
             minecraft_version, forge_version = match.groups()
-            if len(minecraft_version.split(".")) >= 2 and len(forge_version.split(".")) >= 2:
+            if "." in minecraft_version and "." in forge_version:
                 return (minecraft_version, forge_version)
     return (None, None)
 

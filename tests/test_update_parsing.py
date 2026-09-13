@@ -31,6 +31,15 @@ def test_get_latest_release_can_include_prerelease(monkeypatch) -> None:
     assert latest["tag_name"] == "v1.7.0-rc1"
 
 
+def test_get_latest_release_skips_non_mapping_entries(monkeypatch) -> None:
+    payload = ["invalid", 1, {"tag_name": "v1.6.7", "draft": False, "prerelease": False}]
+    monkeypatch.setattr(HTTPClient, "fetch_json", lambda *_args, **_kwargs: payload)
+
+    latest = UpdateParsing.get_latest_release("owner", "repo")
+
+    assert latest == payload[-1]
+
+
 def test_select_update_asset_prefers_executable() -> None:
     release = {
         "assets": [
@@ -44,6 +53,21 @@ def test_select_update_asset_prefers_executable() -> None:
     }
 
     asset, mode = UpdateParsing.select_update_asset(release)
+    assert mode == "installer"
+    assert asset["name"].endswith(".exe")
+
+
+def test_select_update_asset_skips_non_mapping_entries() -> None:
+    asset, mode = UpdateParsing.select_update_asset(
+        {
+            "assets": [
+                "invalid",
+                1,
+                {"name": "MinecraftServerManager.exe", "browser_download_url": "https://example/app.exe"},
+            ]
+        }
+    )
+
     assert mode == "installer"
     assert asset["name"].endswith(".exe")
 

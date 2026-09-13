@@ -9,7 +9,7 @@ license = { file = "LICENSE" }
 dependencies = [
   "PySide6>=6.11.2",
   "PySide6-Fluent-Widgets>=1.11.3",
-  "httpx[http2]>=0.28.1",
+  "httpx>=0.28.1",
   "defusedxml>=0.7.1",
   "packaging>=26.3",
   "orjson>=3.12.0",
@@ -101,7 +101,6 @@ min_confidence = 60
 sort_by_size = true
 ignore_names = [
   "_adjustPos",
-  "adaptive_sizing",
   "doRollover",
   "auto_center",
   "dwFlags",

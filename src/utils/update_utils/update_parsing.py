@@ -58,40 +58,34 @@ class UpdateParsing:
         if not data or isinstance(data, dict):
             return None
         for rel in data:
-            try:
-                if rel and (not rel.get("draft")) and (include_prerelease or not rel.get("prerelease")):
-                    return rel
-            except Exception as e:
-                logger.debug(f"檢查 release 資料時發生錯誤: {e}")
-                continue
+            if isinstance(rel, dict) and not rel.get("draft") and (include_prerelease or not rel.get("prerelease")):
+                return rel
         return None
 
     @staticmethod
     def choose_installer_asset(release: dict[str, Any]) -> dict[str, Any]:
         """
-        挑選 installer.exe 更新檔
+        挑選應用程式可執行檔更新資產
 
         Args:
             release: GitHub release 資料
 
         Returns:
-            選中的 installer 資源，找不到時回傳空字典
+            選中的更新資源，找不到時回傳空字典
         """
         assets = release.get("assets") or []
         for asset in assets:
-            try:
-                name = (asset.get("name") or "").lower()
-                if (
-                    name.endswith(".exe")
-                    and "minecraftservermanager" in name
-                    and "setup" not in name
-                    and "installer" not in name
-                    and asset.get("browser_download_url")
-                ):
-                    return asset
-            except Exception as e:
-                logger.debug(f"檢查 asset 資料時發生錯誤: {e}")
+            if not isinstance(asset, dict):
                 continue
+            name = str(asset.get("name") or "").lower()
+            if (
+                name.endswith(".exe")
+                and "minecraftservermanager" in name
+                and "setup" not in name
+                and "installer" not in name
+                and asset.get("browser_download_url")
+            ):
+                return asset
         return {}
 
     @staticmethod

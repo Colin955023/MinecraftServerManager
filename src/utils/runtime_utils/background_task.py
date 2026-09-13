@@ -19,9 +19,7 @@ from typing import Any
 
 from PySide6 import QtCore
 
-from src.utils import OperationCancelledError, get_logger
-
-logger = get_logger().bind(component="BackgroundTask")
+from src.utils import OperationCancelledError
 
 DEFAULT_WORKER_COUNT = min(16, (os.cpu_count() or 4) + 4)
 _shared_manager_lock = threading.Lock()
@@ -90,32 +88,8 @@ def work_cancellation(token: CancellationToken):
         _work_context.token = previous
 
 
-def _make_done_callback(
-    callback: Callable[[Any], None],
-    task_label: str = "Background task",
-) -> Callable[[concurrent.futures.Future[Any]], None]:
-    """建立統一的工作完成回呼包裝器"""
-
-    def _on_done(future) -> None:
-        try:
-            result = future.result()
-        except Exception as e:
-            logger.exception(f"{task_label} failed: {e}")
-            try:
-                callback(None)
-            except Exception:
-                logger.exception(f"{task_label} callback failed while handling exception")
-            return
-        try:
-            callback(result)
-        except Exception:
-            logger.exception(f"{task_label} callback raised an exception")
-
-    return _on_done
-
-
 class BackgroundTaskManager:
-    """簡單的背景工作執行器，支援取消 token 與回呼"""
+    """簡單的背景工作執行器，支援協作式取消"""
 
     def __init__(self, max_workers: int = DEFAULT_WORKER_COUNT):
         self._pool = QtCore.QThreadPool()
@@ -129,8 +103,6 @@ class BackgroundTaskManager:
         self,
         fn: Callable[..., Any],
         *args,
-        callback: Callable[[Any], None] | None = None,
-        cancel_token: CancellationToken | None = None,
         **kwargs,
     ) -> concurrent.futures.Future:
         """
@@ -139,17 +111,13 @@ class BackgroundTaskManager:
         Args:
             fn: 要執行的函式
             *args: 傳入函式的位置參數
-            callback: 工作完成後的回呼，會在背景執行緒被呼叫
-            cancel_token: 協作式取消標記
             **kwargs: 傳入函式的關鍵字參數
 
         Returns:
             提交到執行器後的 Future
         """
-        if cancel_token is not None and "cancel_token" not in kwargs:
-            kwargs["cancel_token"] = cancel_token
         future: concurrent.futures.Future[Any] = concurrent.futures.Future()
-        runnable = _QtRunnable(future, functools.partial(fn, *args, **kwargs), cancel_token or current_work_token())
+        runnable = _QtRunnable(future, functools.partial(fn, *args, **kwargs), current_work_token())
         with self._lock:
             if self._closing:
                 future.cancel()
@@ -158,8 +126,6 @@ class BackgroundTaskManager:
             self._future_tokens[future] = runnable.token
             future.add_done_callback(self._forget_future)
             self._pool.start(runnable)
-        if callback:
-            future.add_done_callback(_make_done_callback(callback))
         return future
 
     def _forget_future(self, future: concurrent.futures.Future[Any]) -> None:
@@ -256,6 +222,7 @@ def shutdown_shared_manager(wait: bool = True) -> bool:
 
 
 __all__ = [
+    "BackgroundTaskManager",
     "CancellationToken",
     "current_work_token",
     "get_shared_manager",

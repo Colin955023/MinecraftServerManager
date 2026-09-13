@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import threading
-from collections.abc import Callable
 from contextlib import suppress
 from functools import lru_cache
 from operator import itemgetter
@@ -26,8 +25,6 @@ from src.utils import (
     list_bounded_directory,
     read_json,
 )
-
-from .java_downloader import JavaDownloader
 
 logger = get_logger().bind(component="JavaUtils")
 
@@ -203,6 +200,34 @@ class JavaUtils:
         return final_results
 
     @staticmethod
+    def validate_java_candidates() -> list[tuple[str, int]]:
+        """
+        快速驗證快取的 Java 候選項目仍可執行並更新快取
+
+        Returns:
+            通過執行驗證的 Java 路徑與主要版本清單
+        """
+        verified_candidates: list[tuple[str, int]] = []
+        for java_path, _major in JavaUtils.get_all_local_java_candidates():
+            result = JavaUtils._resolve_java_candidate(Path(java_path))
+            if result:
+                verified_candidates.append(result)
+
+        verified_candidates = list(dict.fromkeys(verified_candidates))
+        verified_candidates.sort(key=itemgetter(1, 0))
+        cache_path = JavaUtils._get_java_cache_path()
+        if verified_candidates:
+            cached_items = [{"path": path, "major": major} for path, major in verified_candidates]
+            atomic_write_json(cache_path, {"candidates": cached_items}, skip_if_unchanged=True)
+        else:
+            with suppress(OSError):
+                if cache_path.exists():
+                    delete_within(cache_path.parent, cache_path)
+        with JavaUtils._java_cache_lock:
+            JavaUtils._cached_java_candidates = list(verified_candidates)
+        return verified_candidates
+
+    @staticmethod
     def _ensure_cache_exists(cache_path: Path) -> None:
         """確保快取檔案存在且非空，若不存在則嘗試下載 Mojang version manifest"""
         if cache_path.exists() and cache_path.stat().st_size > 0:
@@ -281,10 +306,6 @@ class JavaUtils:
     def get_best_java_path(
         mc_version: str,
         required_major: int | None = None,
-        ask_download: bool = True,
-        *,
-        confirm_download: Callable[[str, str], bool] | None = None,
-        notify: Callable[[str, str, str], None] | None = None,
     ) -> str | None:
         """
         為指定 Minecraft 版本選擇最合適的 javaw.exe 路徑
@@ -292,9 +313,6 @@ class JavaUtils:
         Args:
             mc_version: Minecraft 版本字串
             required_major: 指定的 Java major 版本；未提供時會自動推導
-            ask_download: 找不到符合版本時是否詢問自動安裝
-            confirm_download: 詢問是否自動安裝的回呼函式
-            notify: 通知安裝進度或結果的回呼函式
 
         Returns:
             找到時回傳 javaw.exe 路徑，否則回傳 None
@@ -304,47 +322,6 @@ class JavaUtils:
         for path, major in candidates:
             if major == required_major:
                 return path
-        if ask_download and confirm_download is not None:
-            vendor = "Oracle jre" if required_major == 8 else "Microsoft JDK"
-            title = "Java 未找到"
-            prompt = f"未找到 Java {required_major}，是否由系統自動安裝 {vendor}？\n（選擇「否」可自行手動指定路徑）"
-            res = confirm_download(title, prompt)
-            if res:
-                try:
-                    JavaDownloader.install_java_with_winget(required_major)
-                    JavaUtils.refresh_java_candidates_cache()
-                    candidates = JavaUtils.get_all_local_java_candidates()
-                    for path, major in candidates:
-                        if major == required_major:
-                            if notify is not None:
-                                notify(
-                                    f"Java {required_major} 安裝成功",
-                                    f"Java {required_major} 已成功安裝並偵測到 javaw.exe",
-                                    "info",
-                                )
-                            return path
-                    err_msg = "已完成安裝程序，但未能自動偵測到 javaw.exe 路徑"
-                    logger.error(f"自動安裝 {vendor} {required_major} 失敗：{err_msg}")
-                    if notify is not None:
-                        notify(
-                            "Java 安裝失敗",
-                            f"自動安裝 {vendor} {required_major} 失敗：{err_msg}\n請手動安裝或指定 Java 路徑",
-                            "error",
-                        )
-                except Exception as e:
-                    logger.exception(f"自動安裝 {vendor} {required_major} 失敗：{e}")
-                    if notify is not None:
-                        notify(
-                            "Java 安裝失敗",
-                            f"自動安裝 {vendor} {required_major} 失敗：{e}\n請手動安裝或指定 Java 路徑",
-                            "error",
-                        )
-            elif notify is not None:
-                notify(
-                    "手動指定 Java",
-                    f"請手動安裝 Java {required_major} 或指定路徑",
-                    "info",
-                )
         return None
 
 
