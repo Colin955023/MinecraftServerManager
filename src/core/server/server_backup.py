@@ -20,6 +20,7 @@ from src.models import ServerConfig
 from src.utils import (
     SystemUtils,
     atomic_replace_file_within,
+    atomic_write_json,
     bytes_to_mb,
     delete_within,
     get_logger,
@@ -332,6 +333,7 @@ class ServerBackupManager:
         """
         staging_path: Path | None = None
         rollback_path: Path | None = None
+        journal_path: Path | None = None
         if not self.server_runtime.begin_maintenance(server_name):
             logger.error(f"還原失敗：伺服器 {server_name} 正在執行或進行其他維護操作")
             return False
@@ -416,6 +418,17 @@ class ServerBackupManager:
 
             prepared_path = staging_path
             rollback_path = server_parent / f".{server_path.name}.restore-rollback-{uuid.uuid4().hex}"
+            journal_path = server_parent / f"{rollback_path.name}.json"
+            if not atomic_write_json(
+                journal_path,
+                {
+                    "schema_version": 1,
+                    "server_name": server_name,
+                    "server_path": str(server_path),
+                    "prepared_path": str(prepared_path),
+                },
+            ):
+                raise OSError("無法建立還原交易識別標記")
             if not move_within(server_parent, server_path, rollback_path):
                 raise OSError("無法將原伺服器目錄移至還原回滾位置")
             moved_excludes: list[str] = []
@@ -439,10 +452,14 @@ class ServerBackupManager:
                             logger.exception(f"還原失敗時無法復原排除目錄 {excluded_name}: {e}")
                 if not move_within(server_parent, rollback_path, server_path):
                     raise OSError("還原失敗時無法復原伺服器目錄") from None
+                if journal_path is not None:
+                    delete_within(server_parent, journal_path)
                 raise
 
             if rollback_path.exists() and not delete_within(server_path.parent, rollback_path):
                 logger.warning(f"還原成功，但舊伺服器暫存目錄無法清除: {rollback_path}")
+            if not delete_within(server_parent, journal_path):
+                logger.warning(f"還原成功，但交易識別標記無法清除: {journal_path}")
 
             if progress_callback:
                 progress_callback(100, "還原完成！")

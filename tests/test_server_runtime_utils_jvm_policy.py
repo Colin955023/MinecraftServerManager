@@ -210,6 +210,23 @@ def test_repair_startup_script_removes_bom_from_already_versioned_script(
     assert repaired_bytes.decode("utf-8").startswith(f'"{javaw.with_name("java.exe")}"')
 
 
+def test_repair_startup_script_removes_stale_minimum_memory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    javaw = tmp_path / "jdk 21" / "bin" / "javaw.exe"
+    javaw.parent.mkdir(parents=True)
+    javaw.write_bytes(b"")
+    script_path = tmp_path / "start.bat"
+    script_path.write_text("java -Xms1G -Xmx2G -jar server.jar\n", encoding="utf-8")
+    config = ServerConfig("alpha", "1.21.1", "vanilla", "", 2048, path=str(tmp_path))
+    monkeypatch.setattr(
+        runtime_utils_module.JavaUtils,
+        "get_best_java_path",
+        staticmethod(lambda *_args, **_kwargs: str(javaw)),
+    )
+
+    assert ServerCommands.repair_startup_script_java_command(script_path, config) is True
+    assert "-Xms" not in script_path.read_text(encoding="utf-8")
+
+
 def test_extract_startup_script_command_reads_first_java_command_and_memory(tmp_path: Path) -> None:
     script_path = tmp_path / "start.bat"
     script_path.write_text(

@@ -135,6 +135,7 @@ class ServerCRUD:
 
     _DELETE_PREFIX = ".msm-delete-"
     _DELETE_MARKER = ".msm-delete.json"
+    _RESTORE_EXCLUDES: ClassVar[set[str]] = {"logs", "crash-reports", "backups", ".git"}
 
     STARTUP_CHECK_DELAY = 0.1
 
@@ -158,6 +159,7 @@ class ServerCRUD:
                 self._persist_registry_locked(self._registry_state.configs)
             if registry_loaded and config_existed:
                 self._recover_delete_tombstones_locked()
+                self._recover_restore_transactions_locked()
 
     @staticmethod
     def _empty_revision() -> str:
@@ -426,6 +428,9 @@ class ServerCRUD:
 
             marker = candidate / self._DELETE_MARKER
             payload = read_json(marker, {}, allowed_root=candidate)
+            journal_path = self.servers_root / f"{candidate.name}.json"
+            if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+                payload = read_json(journal_path, {}, allowed_root=self.servers_root)
             if not isinstance(payload, dict) or payload.get("schema_version") != 1:
                 logger.warning(f"保留無法驗證的刪除 tombstone，避免誤刪資料: {candidate}")
                 continue
@@ -438,6 +443,7 @@ class ServerCRUD:
             config = self._registry_state.configs.get(server_name)
             if config is None:
                 self._schedule_delete_cleanup(candidate)
+                delete_within(self.servers_root, journal_path)
                 continue
 
             try:
@@ -452,9 +458,52 @@ class ServerCRUD:
                 move_within_strict(self.servers_root, candidate, original_path)
                 if not delete_within(original_path, original_path / self._DELETE_MARKER):
                     logger.warning(f"已恢復伺服器但無法移除刪除交易標記: {server_name}")
+                delete_within(self.servers_root, journal_path)
                 logger.warning(f"偵測到未提交完成的刪除交易，已恢復伺服器目錄: {server_name}")
             except OSError as e:
                 logger.exception(f"恢復刪除 tombstone 失敗 {candidate.name}: {e}")
+
+    def _recover_restore_transactions_locked(self) -> None:
+        """恢復中斷的還原目錄交換，優先還原原始伺服器資料"""
+        for server_name, config in self._registry_state.configs.items():
+            try:
+                server_path = self._resolve_registered_server_path(server_name, config.path)
+                parent = resolve_stable_directory(server_path.parent)
+                candidates = list_bounded_directory(parent, reject_reparse=False)
+            except (OSError, ValueError) as e:
+                logger.warning(f"無法掃描還原交易暫存目錄 {server_name}: {e}")
+                continue
+            prefix = f".{server_path.name}.restore-rollback-"
+            for journal_path in candidates:
+                if not journal_path.name.startswith(prefix) or journal_path.suffix != ".json":
+                    continue
+                payload = read_json(journal_path, {}, allowed_root=parent)
+                if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+                    continue
+                rollback_path = parent / journal_path.name.removesuffix(".json")
+                prepared_path = Path(str(payload.get("prepared_path", "")))
+                if not rollback_path.is_dir() or is_reparse_point(rollback_path):
+                    if server_path.exists():
+                        delete_within(parent, journal_path)
+                    continue
+                try:
+                    if server_path.exists():
+                        delete_within(parent, rollback_path)
+                        delete_within(parent, journal_path)
+                        continue
+                    if prepared_path.is_dir() and is_path_within(parent, prepared_path, strict=False):
+                        for excluded_name in self._RESTORE_EXCLUDES:
+                            preserved_path = prepared_path / excluded_name
+                            if preserved_path.exists() and not move_within(
+                                parent, preserved_path, rollback_path / excluded_name
+                            ):
+                                raise OSError(f"無法恢復排除目錄: {excluded_name}")
+                    if not move_within(parent, rollback_path, server_path):
+                        raise OSError("無法恢復中斷還原前的伺服器目錄")
+                    delete_within(parent, journal_path)
+                    logger.warning(f"已恢復中斷的伺服器還原交易: {server_name}")
+                except OSError as e:
+                    logger.exception(f"恢復中斷還原交易失敗 {server_name}: {e}")
 
     def delete_server_result(
         self,
@@ -473,6 +522,7 @@ class ServerCRUD:
             刪除流程結果
         """
         tombstone_path: Path | None = None
+        delete_journal_path: Path | None = None
         server_path: Path | None = None
         maintenance_acquired = False
         begin_maintenance = getattr(server_runtime, "begin_maintenance", None)
@@ -525,6 +575,16 @@ class ServerCRUD:
 
                 if server_path.exists():
                     tombstone_path = self.servers_root / f"{self._DELETE_PREFIX}{uuid.uuid4().hex}"
+                    delete_journal_path = self.servers_root / f"{tombstone_path.name}.json"
+                    if not atomic_write_json(
+                        delete_journal_path,
+                        {
+                            "schema_version": 1,
+                            "server_name": server_name,
+                            "created_epoch_ms": int(time.time() * 1000),
+                        },
+                    ):
+                        raise OSError("無法建立刪除交易識別標記")
                     self._emit_progress(progress_callback, "delete_move", "正在準備安全刪除...")
                     last_error: OSError | None = None
                     for delay in (0.0, 0.1, 0.25, 0.5, 0.75):
@@ -544,16 +604,10 @@ class ServerCRUD:
                             getattr(last_error, "winerror", None) or 0,
                             f"無法將伺服器目錄移至刪除暫存位置：{last_error}",
                         ) from last_error
-                    if not atomic_write_json(
-                        tombstone_path / self._DELETE_MARKER,
-                        {
-                            "schema_version": 1,
-                            "server_name": server_name,
-                            "created_epoch_ms": int(time.time() * 1000),
-                        },
-                    ):
+                    if not move_within(self.servers_root, delete_journal_path, tombstone_path / self._DELETE_MARKER):
                         move_within_strict(self.servers_root, tombstone_path, server_path)
-                        raise OSError("無法建立刪除暫存目錄識別標記")
+                        raise OSError("無法移入刪除交易識別標記")
+                    delete_journal_path = None
 
                 commit_result = self.commit(
                     ServerConfigChangeSet(removals=(server_name,)),
@@ -597,6 +651,8 @@ class ServerCRUD:
                         logger.warning(f"已復原伺服器但無法移除刪除交易標記: {server_name}")
                 except OSError as e:
                     logger.exception(f"刪除失敗後無法復原伺服器目錄: {e}")
+            if delete_journal_path is not None:
+                delete_within(self.servers_root, delete_journal_path)
             logger.exception(f"刪除伺服器失敗: {error_message}")
             return ServerOperationResult(
                 success=False,

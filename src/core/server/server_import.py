@@ -964,6 +964,8 @@ class ServerImportService:
         try:
             if inspection.manifest is not None:
                 file_count = len(inspection.manifest.entries)
+                if file_count > SAFE_DIRECTORY_MAX_FILES:
+                    raise ValueError(f"匯入來源檔案數超過安全上限 {SAFE_DIRECTORY_MAX_FILES}")
             else:
                 for root_path, _dirs, files in walk_bounded_tree(source):
                     for name in files:
@@ -1098,12 +1100,13 @@ class ServerImportService:
         """
         若存在 server.properties 且有遷移項目，套用遷移並建立備份
         """
-        try:
-            plan = ServerPropertiesMigrationService.inspect_source(work_path)
-            if plan is not None and plan.needs_migration:
-                ServerPropertiesMigrationService.apply_migration_to_directory(work_path, plan, create_backup=True)
-        except Exception as e:
-            logger.warning(f"套用 server.properties 遷移失敗: {e}")
+        plan = ServerPropertiesMigrationService.inspect_source(work_path)
+        if (
+            plan is not None
+            and plan.needs_migration
+            and not ServerPropertiesMigrationService.apply_migration_to_directory(work_path, plan, create_backup=True)
+        ):
+            raise OperationError("無法套用 server.properties 遷移")
 
     @staticmethod
     def _emit(callback: ProgressCallback | None, percent: int, message: str) -> None:

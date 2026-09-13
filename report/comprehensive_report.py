@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any
 
 import orjson
-from coverage_summary import read_coverage_summary
+from defusedxml import ElementTree
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = REPO_ROOT / "report"
@@ -105,6 +105,28 @@ class SectionResult:
     name: str
     findings: list[Finding]
     meta: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageSummary:
+    total_percent: float
+    line_percent: float
+    branch_percent: float
+    source_files: int
+
+
+def read_coverage_summary(path: Path) -> CoverageSummary | None:
+    """讀取 coverage.py 產生的 Cobertura XML 摘要"""
+    try:
+        root = ElementTree.parse(path).getroot()
+        return CoverageSummary(
+            total_percent=float(root.attrib["line-rate"]) * 100,
+            line_percent=float(root.attrib["line-rate"]) * 100,
+            branch_percent=float(root.attrib["branch-rate"]) * 100,
+            source_files=len(root.findall(".//class")),
+        )
+    except ElementTree.ParseError, KeyError, OSError, ValueError:
+        return None
 
 
 @dataclass(slots=True)

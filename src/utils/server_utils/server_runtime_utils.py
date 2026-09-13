@@ -689,14 +689,13 @@ class ServerCommands:
             new_line, line_changed = ServerCommands.replace_java_command_line(line, java_exe)
             if line_changed or ServerCommands._java_command_tokens_from_line(line):
                 body, newline = ServerCommands._split_line_ending(new_line)
-                if memory_min:
-                    body, min_count = re.subn(
-                        r"(?i)(?<!\S)-Xms\d+(?:[KMG])?",
-                        f"-Xms{int(memory_min)}M",
-                        body,
-                        count=1,
-                    )
-                    line_changed = line_changed or min_count > 0
+                body, min_count = re.subn(
+                    r"(?i)(?<!\S)-Xms\d+(?:[KMG])?",
+                    f"-Xms{int(memory_min)}M" if memory_min else "",
+                    body,
+                    count=1,
+                )
+                line_changed = line_changed or min_count > 0
                 if memory_max:
                     body, max_count = re.subn(
                         r"(?i)(?<!\S)-Xmx\d+(?:[KMG])?",

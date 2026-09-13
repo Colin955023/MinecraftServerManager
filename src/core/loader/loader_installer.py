@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import locale
 import re
 import time
 from collections import deque
@@ -146,7 +145,7 @@ def _decode_stream_line(raw: bytes) -> str:
         return ""
     with suppress(UnicodeDecodeError):
         return raw.decode("utf-8")
-    for encoding in ("cp950", "big5", "gbk", "cp936", locale.getpreferredencoding(False)):
+    for encoding in ("cp950", "big5", "gbk", "cp936"):
         if not encoding:
             continue
         try:
