@@ -589,7 +589,9 @@ def test_build_java_command_forge_with_user_jvm_args(tmp_path: Path) -> None:
 
     server_dir = tmp_path / "forge_srv"
     server_dir.mkdir()
-    (server_dir / "user_jvm_args.txt").write_text("# user args\n", encoding="utf-8")
+    user_args_path = server_dir / "user_jvm_args.txt"
+    original_user_args = "# user args\n-Dimported=true\n"
+    user_args_path.write_text(original_user_args, encoding="utf-8")
 
     config = ServerConfig(
         name="forge_srv",
@@ -607,8 +609,7 @@ def test_build_java_command_forge_with_user_jvm_args(tmp_path: Path) -> None:
     assert "-Xmx4096M" in cmd
     assert "@libraries/net/minecraftforge/forge/26.2-65.1.2/win_args.txt" in cmd
     assert cmd.endswith("nogui")
-    user_args_content = (server_dir / "user_jvm_args.txt").read_text(encoding="utf-8")
-    assert "-Xmx4096M" in user_args_content
+    assert user_args_path.read_text(encoding="utf-8") == original_user_args
 
 
 def test_progress_dialog_does_not_clear_after_determinate_progress() -> None:
