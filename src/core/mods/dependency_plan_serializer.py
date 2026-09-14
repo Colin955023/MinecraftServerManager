@@ -1,0 +1,279 @@
+"""
+依賴計畫序列化工具
+集中處理 dependency plan 的資料模型、序列化與驗證邏輯，
+讓 UI 層只保留查詢與流程組裝責任
+"""
+
+from itertools import chain
+from typing import Any
+
+from src.models import OnlineDependencyInstallItem, OnlineDependencyInstallPlan
+from src.utils import get_logger
+
+logger = get_logger().bind(component="DependencyPlanSerializer")
+
+_DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION = 2
+
+
+def _get_source_value(source: Any, key: str, default: Any = None) -> Any:
+    if isinstance(source, dict):
+        return source.get(key, default)
+    return getattr(source, key, default)
+
+
+def _normalize_string_list(raw_values: Any) -> list[str]:
+    if not isinstance(raw_values, list):
+        return []
+    normalized: list[str] = []
+    for value in raw_values:
+        text = str(value or "").strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _normalize_required_by(item: Any) -> list[str]:
+    if isinstance(item, dict):
+        required_by = _normalize_string_list(item.get("required_by", []))
+        if required_by:
+            return required_by
+        parent_name = str(item.get("parent_name", "") or "").strip()
+        return [parent_name] if parent_name else []
+    required_by = _normalize_string_list(getattr(item, "required_by", []))
+    if required_by:
+        return required_by
+    parent_name = str(getattr(item, "parent_name", "") or "").strip()
+    return [parent_name] if parent_name else []
+
+
+def _normalize_text_value(source: Any, key: str, default: str = "", *, lowercase: bool = False) -> str:
+    """正規化物件或映射中的文字欄位"""
+    raw_value = _get_source_value(source, key, default)
+    value = str(raw_value or default).strip()
+    if lowercase:
+        return value.lower()
+    return value
+
+
+def _normalize_positive_int_value(source: Any, key: str, default: int = 1, min_value: int = 1) -> int:
+    """正規化物件或映射中的正整數欄位"""
+    raw_value = _get_source_value(source, key, default)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as e:
+        logger.debug(f"解析 {key} 為整數失敗 (值: {raw_value}): {e}")
+        value = default
+    if value < min_value:
+        return min_value
+    return value
+
+
+def _build_dependency_graph_edge_payload(item_payload: Any, *, default_edge_kind: str = "required") -> dict[str, Any]:
+    """將 dependency item 正規化為 graph edge payload"""
+    edge_kind = _normalize_text_value(item_payload, "edge_kind", default_edge_kind, lowercase=True) or default_edge_kind
+    edge_source = _normalize_text_value(item_payload, "edge_source", "", lowercase=True)
+    if not edge_source:
+        edge_source = f"{edge_kind}:modrinth_dependency"
+    return {
+        "to_project_id": _normalize_text_value(item_payload, "project_id"),
+        "to_version_id": _normalize_text_value(item_payload, "version_id"),
+        "required_by": _normalize_string_list(_get_source_value(item_payload, "required_by", [])),
+        "edge": edge_kind,
+        "source": edge_source,
+        "depth": _normalize_positive_int_value(item_payload, "graph_depth"),
+        "decision_source": _normalize_text_value(item_payload, "decision_source") or "required:auto",
+        "is_optional": bool(_get_source_value(item_payload, "is_optional", False)),
+    }
+
+
+def _serialize_online_dependency_install_item(item: Any) -> dict[str, Any]:
+    """
+    將依賴安裝項目正規化為可持久化 payload
+
+    Args:
+        item: 原始依賴安裝項目，可以是物件或映射
+
+    Returns:
+        可直接序列化與持久化的標準化字典
+    """
+    graph_depth = _normalize_positive_int_value(item, "graph_depth")
+    edge_kind = _normalize_text_value(item, "edge_kind", "required", lowercase=True) or "required"
+    edge_source = _normalize_text_value(item, "edge_source", f"{edge_kind}:modrinth_dependency", lowercase=True)
+    if not edge_source:
+        edge_source = f"{edge_kind}:modrinth_dependency"
+    return {
+        "provider": _normalize_text_value(item, "provider", "modrinth") or "modrinth",
+        "project_id": _normalize_text_value(item, "project_id"),
+        "project_name": _normalize_text_value(item, "project_name"),
+        "version_id": _normalize_text_value(item, "version_id"),
+        "version_name": _normalize_text_value(item, "version_name"),
+        "filename": _normalize_text_value(item, "filename"),
+        "download_url": _normalize_text_value(item, "download_url"),
+        "parent_name": _normalize_text_value(item, "parent_name"),
+        "expected_hash": _normalize_text_value(item, "expected_hash"),
+        "required_by": _normalize_required_by(item),
+        "maybe_installed": bool(_get_source_value(item, "maybe_installed", False)),
+        "status_note": _normalize_text_value(item, "status_note"),
+        "resolution_source": _normalize_text_value(item, "resolution_source", "project_id"),
+        "resolution_confidence": _normalize_text_value(item, "resolution_confidence", "direct"),
+        "decision_source": _normalize_text_value(item, "decision_source") or "required:auto",
+        "included_by_default": bool(_get_source_value(item, "included_by_default", True)),
+        "is_optional": bool(_get_source_value(item, "is_optional", False)),
+        "graph_depth": graph_depth,
+        "edge_kind": edge_kind,
+        "edge_source": edge_source,
+    }
+
+
+def serialize_online_dependency_install_plan(
+    plan: Any,
+    *,
+    root_project_id: str = "",
+    root_project_name: str = "",
+    root_target_version_id: str = "",
+    root_target_version_name: str = "",
+    root_selected: bool | None = None,
+    selected_dependency_keys: set[tuple[str, str]] | None = None,
+    plan_source: str = "review",
+) -> dict[str, Any]:
+    """
+    將依賴安裝計畫轉為可持久化 payload
+
+    Args:
+        plan: 原始依賴安裝計畫
+        root_project_id: 根專案 ID
+        root_project_name: 根專案名稱
+        root_target_version_id: 根目標版本 ID
+        root_target_version_name: 根目標版本名稱
+        root_selected: 根專案是否納入本次變更
+        selected_dependency_keys: Review 已選取的 dependency stable keys
+        plan_source: 計畫來源標記
+
+    Returns:
+        可寫入快取或檔案的計畫 payload
+    """
+    serialized_items = [_serialize_online_dependency_install_item(item) for item in getattr(plan, "items", []) or []]
+    serialized_advisory_items = [
+        _serialize_online_dependency_install_item(item) for item in getattr(plan, "advisory_items", []) or []
+    ]
+    graph_edges = [
+        _build_dependency_graph_edge_payload(item_payload)
+        for item_payload in chain(serialized_items, serialized_advisory_items)
+    ]
+    payload: dict[str, Any] = {
+        "schema_version": _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION,
+        "plan_source": str(plan_source or "review").strip() or "review",
+        "root_project_id": str(root_project_id or "").strip(),
+        "root_project_name": str(root_project_name or "").strip(),
+        "root_target_version_id": str(root_target_version_id or "").strip(),
+        "root_target_version_name": str(root_target_version_name or "").strip(),
+        "items": serialized_items,
+        "advisory_items": serialized_advisory_items,
+        "graph_edges": graph_edges,
+        "unresolved_required": _normalize_string_list(getattr(plan, "unresolved_required", [])),
+        "notes": _normalize_string_list(getattr(plan, "notes", [])),
+        "selected_dependency_keys": [list(key) for key in sorted(selected_dependency_keys or set())],
+    }
+    if root_selected is not None:
+        payload["root_selected"] = bool(root_selected)
+    return payload
+
+
+def validate_online_dependency_install_plan_payload(raw: dict[str, Any] | None) -> tuple[bool, str]:
+    """
+    驗證 dependency plan 快照是否符合 replay 契約
+
+    Args:
+        raw: 待驗證的原始 payload
+
+    Returns:
+        (是否通過, 原因碼) 的驗證結果
+    """
+    if not isinstance(raw, dict):
+        return (False, "payload-not-dict")
+    schema_version = raw.get("schema_version")
+    if schema_version != _DEPENDENCY_PLAN_PERSISTENCE_SCHEMA_VERSION:
+        return (False, "schema-mismatch")
+    graph_edges = raw.get("graph_edges")
+    if not isinstance(graph_edges, list):
+        return (False, "missing-graph-edges")
+    for edge_payload in graph_edges:
+        if not isinstance(edge_payload, dict):
+            return (False, "invalid-graph-edge")
+        try:
+            depth = int(edge_payload.get("depth", 0) or 0)
+        except (TypeError, ValueError) as e:
+            logger.debug(f"反序列化 Modrinth graph_depth 失敗: {e}")
+            return (False, "invalid-graph-depth")
+        if depth < 1:
+            return (False, "invalid-graph-depth")
+        edge_kind = str(edge_payload.get("edge", "") or "").strip().lower()
+        edge_source = str(edge_payload.get("source", "") or "").strip().lower()
+        if edge_kind not in {"required", "optional", "incompatible", "embedded", "unknown"}:
+            return (False, "invalid-edge-kind")
+        if not edge_source:
+            return (False, "invalid-edge-source")
+        required_by = edge_payload.get("required_by", [])
+        if required_by is not None and (not isinstance(required_by, list)):
+            return (False, "invalid-required-by")
+    for collection_key in ("items", "advisory_items"):
+        entries = raw.get(collection_key, [])
+        if not isinstance(entries, list):
+            return (False, f"invalid-{collection_key}")
+        for item_payload in entries:
+            if not isinstance(item_payload, dict):
+                return (False, f"invalid-{collection_key}-entry")
+            try:
+                item_depth = int(item_payload.get("graph_depth", 0) or 0)
+            except (TypeError, ValueError) as e:
+                logger.debug(f"反序列化 Modrinth 依賴項目失敗: {e}")
+                return (False, "invalid-item-depth")
+            if item_depth < 1:
+                return (False, "invalid-item-depth")
+            item_edge_kind = str(item_payload.get("edge_kind", "") or "").strip().lower()
+            item_edge_source = str(item_payload.get("edge_source", "") or "").strip().lower()
+            if not item_edge_kind:
+                return (False, "missing-item-edge-kind")
+            if not item_edge_source:
+                return (False, "missing-item-edge-source")
+            if not isinstance(item_payload.get("included_by_default"), bool):
+                return (False, "invalid-included-by-default")
+    selected_dependency_keys = raw.get("selected_dependency_keys", [])
+    if not isinstance(selected_dependency_keys, list) or any(
+        not isinstance(key, list) or len(key) != 2 or not all(isinstance(value, str) for value in key)
+        for key in selected_dependency_keys
+    ):
+        return (False, "invalid-selected-dependency-keys")
+    if "root_selected" in raw and not isinstance(raw["root_selected"], bool):
+        return (False, "invalid-root-selected")
+    return (True, "ok")
+
+
+def deserialize_online_dependency_install_plan(raw: dict[str, Any] | None) -> OnlineDependencyInstallPlan:
+    """
+    從持久化 payload 還原 OnlineDependencyInstallPlan
+
+    Args:
+        raw: 已序列化的原始 payload
+
+    Returns:
+        還原後的 OnlineDependencyInstallPlan
+    """
+    if not isinstance(raw, dict):
+        return OnlineDependencyInstallPlan()
+
+    items = [OnlineDependencyInstallItem.from_dict(item) for item in raw.get("items", []) or []]
+    advisory_items = [OnlineDependencyInstallItem.from_dict(item) for item in raw.get("advisory_items", []) or []]
+    return OnlineDependencyInstallPlan(
+        items=[item for item in items if item is not None],
+        advisory_items=[item for item in advisory_items if item is not None],
+        unresolved_required=_normalize_string_list(raw.get("unresolved_required", [])),
+        notes=_normalize_string_list(raw.get("notes", [])),
+    )
+
+
+__all__ = [
+    "deserialize_online_dependency_install_plan",
+    "serialize_online_dependency_install_plan",
+    "validate_online_dependency_install_plan_payload",
+]

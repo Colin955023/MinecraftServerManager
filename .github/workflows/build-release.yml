@@ -4,29 +4,34 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.repository }}
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build and Release
+    name: Build, Sign and Attest
+    if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
+    timeout-minutes: 45
+    outputs:
+      tag_name: ${{ steps.release_tag.outputs.tag_name }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      RELEASE_TAG: ''
+      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
 
     permissions:
-      contents: write
-      discussions: write
+      contents: read
+      attestations: write
+      artifact-metadata: write
       id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Setup Environment
@@ -35,6 +40,15 @@ jobs:
         with:
           python-version: '3.14'
           uv-sync: 'false'
+
+      - name: Restore Nuitka compilation cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-${{ github.run_id }}
+          restore-keys: |
+            nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-
+            nuitka-cache-windows-
 
       - name: Resolve release tag
         id: release_tag
@@ -45,36 +59,130 @@ jobs:
             Write-Error "取得版本資訊與驗證失敗"
             exit $LASTEXITCODE
           }
-          
+
           $output = $json | ConvertFrom-Json
           $tag = $output.Tag
           $version = $output.Version
 
           "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build executable and installer
+      - name: Build executable
         shell: pwsh
-        run: python scripts\build_installer_nuitka.py
+        run: .\scripts\build_nuitka.ps1 -ConsoleMode disable
 
       - name: Extract release notes
         id: release_notes
         shell: pwsh
         run: |
-          python .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
+          .\.venv\Scripts\python.exe .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
           if ($LASTEXITCODE -ne 0) {
             Write-Error "提取 release notes 失敗"
             exit $LASTEXITCODE
           }
 
-      - name: Sign release artifacts
+      - name: Attest release executable provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: 'dist/*.exe'
+
+      - name: Verify generated attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+              gh attestation verify $_.FullName --repo $env:GITHUB_REPOSITORY
+              if ($LASTEXITCODE -ne 0) { throw "Artifact attestation verification failed: $($_.Name)" }
+          }
+
+      - name: Export SLSA provenance for GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+              $exe = $_
+              $tempDir = Join-Path $env:RUNNER_TEMP ("attestation-" + [guid]::NewGuid().ToString("N"))
+              New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+              Push-Location $tempDir
+              try {
+                  gh attestation download $exe.FullName `
+                    --repo $env:GITHUB_REPOSITORY `
+                    --predicate-type 'https://slsa.dev/provenance/v1' `
+                    --limit 1
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Failed to download SLSA provenance: $($exe.Name)"
+                  }
+
+                  $bundles = @(Get-ChildItem -Path $tempDir -Filter '*.jsonl' -File)
+                  if ($bundles.Count -ne 1) {
+                      throw "Expected exactly one SLSA provenance bundle for $($exe.Name), found $($bundles.Count)"
+                  }
+
+                  $destination = Join-Path $exe.DirectoryName ($exe.Name + '.intoto.jsonl')
+                  Copy-Item -Path $bundles[0].FullName -Destination $destination -Force
+              }
+              finally {
+                  Pop-Location
+                  Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+          }
+
+      - name: Sign release executable with Sigstore
         uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
         with:
           inputs: |
             dist/*.exe
 
-      - name: Create and push release tag
+      - name: Save Nuitka compilation cache
+        if: success()
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-${{ github.run_id }}
+
+      - name: Upload release payload
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release_payload
+          path: |
+            dist/
+            release_notes.md
+            report/nuitka-compilation-report.xml
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    name: Publish Release
+    needs: build
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download release payload
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release_payload
+          path: .
+
+      - name: Create release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           if ($env:GITHUB_REF_NAME -ne 'master') {
@@ -83,19 +191,16 @@ jobs:
           }
 
           git fetch --tags --force
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
           $tag = $env:RELEASE_TAG
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $headCommit) {
+              Write-Error "無法取得目前 commit"
+              exit 1
+          }
+
           $existingTagCommit = git rev-parse -q --verify "refs/tags/$tag^{commit}"
           if ($LASTEXITCODE -eq 0) {
-              $headCommit = git rev-parse HEAD
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "無法取得目前 commit"
-                  exit $LASTEXITCODE
-              }
-
-              if ($existingTagCommit.Trim() -ne $headCommit.Trim()) {
+              if ($existingTagCommit.Trim() -ne $headCommit) {
                   Write-Error "Tag $tag 已存在，但指向不同 commit；請改用新版本號"
                   exit 1
               }
@@ -104,17 +209,35 @@ jobs:
               exit 0
           }
 
-          git tag -a $tag -m $tag
+          $tagRequest = @{
+              tag = $tag
+              message = $tag
+              object = $headCommit
+              type = 'commit'
+          } | ConvertTo-Json -Compress
+          $tagResponseJson = $tagRequest | gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/tags" --input -
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "建立 tag 失敗：$tag"
+              Write-Error "建立 annotated tag object 失敗：$tag"
               exit $LASTEXITCODE
           }
 
-          git push origin "refs/tags/$tag"
+          $tagResponse = $tagResponseJson | ConvertFrom-Json
+          if (-not $tagResponse.sha) {
+              Write-Error "GitHub API 未回傳 tag object SHA：$tag"
+              exit 1
+          }
+
+          $refRequest = @{
+              ref = "refs/tags/$tag"
+              sha = $tagResponse.sha
+          } | ConvertTo-Json -Compress
+          $null = $refRequest | gh api --method POST "repos/$env:GITHUB_REPOSITORY/git/refs" --input -
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "推送 tag 失敗：$tag"
+              Write-Error "建立 tag ref 失敗：$tag"
               exit $LASTEXITCODE
           }
+
+          Write-Host "Created annotated tag: $tag -> $headCommit"
 
       - name: Create Release and Upload Assets
         env:
@@ -123,33 +246,25 @@ jobs:
         run: |
           $tag = $env:RELEASE_TAG
           $prereleaseArgs = @()
-          if ($tag -match '-pre') { $prereleaseArgs += '--prerelease' }
+          if ($tag -match '^\d+\.\d+\.\d+-') { $prereleaseArgs += '--prerelease' }
           $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
-              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe$' -or
-              $_.Name -match '^(MinecraftServerManager|.*-Setup-).*\.exe\.sigstore\.json$'
+              $_.Name -match '^MinecraftServerManager.*\.exe$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.sigstore\.json$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.intoto\.jsonl$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
-              Write-Host 'No release assets found in dist; aborting release creation'
+              Write-Error "No release executable was found in dist."
               exit 1
           }
           $args = @('release', 'create', $tag) + $assets + @(
-              '--title', "Minecraft Server Manager $tag", 
-              '--notes-file', 'release_notes.md', 
+              '--title', "Minecraft Server Manager $tag",
+              '--notes-file', 'release_notes.md',
               '--verify-tag'
           ) + $prereleaseArgs
-          
+
           Write-Host "Executing: gh $args"
           & gh @args
           if ($LASTEXITCODE -ne 0) {
               Write-Error "GitHub CLI failed with exit code $LASTEXITCODE"
               exit $LASTEXITCODE
           }
-
-      - name: Upload build artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: build_artifacts
-          path: dist/
-          if-no-files-found: error
-          retention-days: 2

@@ -1,6 +1,6 @@
-Minecraft Server Manager - Enhanced Minecraft Server Management Tool
-Copyright (C) 2025 Minecraft Server Manager Team
-Copyright (C) 2025 Colin955023 <colin960924@gmail.com>
+Minecraft Server Manager
+Copyright (C) 2025-2026 Minecraft Server Manager Team
+Copyright (C) 2025-2026 Colin955023 <colin960924@gmail.com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

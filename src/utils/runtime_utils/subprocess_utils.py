@@ -1,96 +1,112 @@
 """
 安全的 subprocess 包裝器
-提供驗證可執行檔存在或可在 PATH 中找到的 run/popen 包裝函式，強制使用 shell=False。
+提供驗證可執行檔存在或可在 PATH 中找到的 run/popen 包裝函式，強制使用 shell=False
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess  # nosec B404
-import time
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar
 
-from PySide6 import QtCore, QtWidgets
-
-from .. import PathUtils, get_logger
+from src.utils import get_logger, is_reparse_point
 
 logger = get_logger().bind(component="SubprocessUtils")
 
 
-@dataclass(slots=True)
-class QProcessResult:
-    """QProcess 執行結果封裝。"""
-
-    args: list[str]
-    returncode: int
-    stdout: str = ""
-    pid: int = 0
-    cancelled: bool = False
-    error_text: str = ""
-
-    def poll(self) -> int:
-        """
-        模擬 subprocess.CompletedProcess 的 poll 方法。
-
-        Returns:
-            QProcess 結束代碼。
-        """
-        return self.returncode
-
-
 class SubprocessUtils:
-    """提供安全的 subprocess 包裝，強制使用 shell=False。"""
+    """提供安全的 subprocess 包裝，強制使用 shell=False"""
 
     PIPE = subprocess.PIPE
     STDOUT = subprocess.STDOUT
     DEVNULL = subprocess.DEVNULL
     CalledProcessError = subprocess.CalledProcessError
     TimeoutExpired = subprocess.TimeoutExpired
-    STARTUPINFO = getattr(subprocess, "STARTUPINFO", None)
-    STARTF_USESHOWWINDOW = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
-    SW_HIDE = 0
-    CREATE_NO_WINDOW = 134217728
+    STARTUPINFO = subprocess.STARTUPINFO
+    STARTF_USESHOWWINDOW = subprocess.STARTF_USESHOWWINDOW
+    SW_HIDE = subprocess.SW_HIDE
+    CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+    CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE
+    _windows_apps_dir: ClassVar[Path | None] = None
+    _windows_apps_dir_resolved: ClassVar[bool] = False
+
+    @classmethod
+    def _get_windows_apps_dir(cls) -> Path | None:
+        if not cls._windows_apps_dir_resolved:
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            if local_app_data:
+                try:
+                    cls._windows_apps_dir = (Path(local_app_data) / "Microsoft" / "WindowsApps").resolve()
+                except OSError:
+                    cls._windows_apps_dir = None
+            cls._windows_apps_dir_resolved = True
+        return cls._windows_apps_dir
 
     @staticmethod
     def get_hidden_windows_kwargs() -> dict:
-        """回傳 Windows 隱藏視窗所需參數；非 Windows 平台回傳空 dict。"""
-        if os.name != "nt":
-            return {}
-        hidden_kwargs: dict = {"creationflags": SubprocessUtils.CREATE_NO_WINDOW}
-        if SubprocessUtils.STARTUPINFO is not None:
-            startupinfo = SubprocessUtils.STARTUPINFO()
-            startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
-            hidden_kwargs["startupinfo"] = startupinfo
+        """
+        回傳 Windows 隱藏視窗所需參數
+
+        Returns:
+            Windows 隱藏視窗所需參數
+        """
+        startupinfo = SubprocessUtils.STARTUPINFO()
+        startupinfo.dwFlags |= SubprocessUtils.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = SubprocessUtils.SW_HIDE
+        hidden_kwargs: dict[str, Any] = {
+            "creationflags": SubprocessUtils.CREATE_NO_WINDOW,
+            "startupinfo": startupinfo,
+        }
         return hidden_kwargs
+
+    @staticmethod
+    def _is_trusted_windows_app_alias(path: Path) -> bool:
+        """
+        判斷是否為受信任的 WindowsApps 執行別名 (如 winget.exe)
+        """
+        if path.name.lower() not in {"winget.exe"}:
+            return False
+        windows_apps = SubprocessUtils._get_windows_apps_dir()
+        if windows_apps is None:
+            return False
+        try:
+            parent = path.parent.resolve()
+            return os.path.normcase(str(parent)) == os.path.normcase(str(windows_apps))
+        except OSError:
+            return False
 
     @staticmethod
     def _validate_cmd(cmd: Iterable[str]) -> list[str]:
         if not isinstance(cmd, (list, tuple)):
             raise TypeError("cmd 必須是由字串組成的 list 或 tuple")
         cmd_list = [str(x) for x in cmd]
-        if len(cmd_list) == 0:
+        if not cmd_list:
             raise ValueError("cmd 不得為空")
         exe = cmd_list[0]
         if not exe.strip():
             raise ValueError("cmd[0] 不得為空")
         p = Path(exe)
-        if p.is_absolute() or os.sep in exe or ("/" in exe and os.sep != "/"):
-            if not p.exists():
-                raise FileNotFoundError(f"執行檔路徑不存在: {exe}")
+        if p.is_absolute() or os.sep in exe or (os.altsep is not None and os.altsep in exe):
+            if not p.is_file() or (is_reparse_point(p) and not SubprocessUtils._is_trusted_windows_app_alias(p)):
+                raise FileNotFoundError(f"執行檔路徑不是安全的一般檔案: {exe}")
             return cmd_list
-        which = PathUtils.find_executable(exe)
-        if which is None and os.name == "nt" and exe.lower() == "winget":
+        which = shutil.which(exe)
+        if which is None and exe.lower() in ("winget", "winget.exe"):
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if local_app_data:
                 winget_path = Path(local_app_data).resolve() / "Microsoft" / "WindowsApps" / "winget.exe"
-                which = str(winget_path) if getattr(winget_path, "exists", lambda: False)() else None
+                which = str(winget_path) if winget_path.is_file() else None
 
         if which is None:
             raise FileNotFoundError(f"無法在 PATH 找到執行檔: {exe}")
+        which_path = Path(which)
+        if not which_path.is_file() or (
+            is_reparse_point(which_path) and not SubprocessUtils._is_trusted_windows_app_alias(which_path)
+        ):
+            raise FileNotFoundError(f"PATH 執行檔不是安全的一般檔案: {which}")
         cmd_list[0] = which
         return cmd_list
 
@@ -111,179 +127,86 @@ class SubprocessUtils:
     @staticmethod
     def run_checked(cmd: Iterable[str], **kwargs) -> subprocess.CompletedProcess:
         """
-        像 subprocess.run，但先驗證 `cmd` 並強制 `shell=False`。
+        像 subprocess.run，但先驗證 cmd 並強制 shell=False
 
         Args:
-            cmd: 命令列參數序列。
-            **kwargs: 傳遞給 `subprocess.run` 的其他參數。
+            cmd: 命令列參數序列
+            **kwargs: 傳遞給 subprocess.run 的其他參數
 
         Returns:
-            `subprocess.run` 的執行結果。
+            subprocess.run 的執行結果
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
-        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
+        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False
         return subprocess.run(cmd_list, **kwargs)  # nosec B603
 
     @staticmethod
     def popen_checked(cmd: Iterable[str], **kwargs) -> subprocess.Popen:
         """
-        像 `subprocess.Popen`，但先驗證 `cmd` 並強制 `shell=False`。
+        像 subprocess.Popen，但先驗證 cmd 並強制 shell=False
 
         Args:
-            cmd: 命令列參數序列。
-            **kwargs: 傳遞給 `subprocess.Popen` 的其他參數。
+            cmd: 命令列參數序列
+            **kwargs: 傳遞給 subprocess.Popen 的其他參數
 
         Returns:
-            建立完成的 `subprocess.Popen` 物件。
+            建立完成的 subprocess.Popen 物件
         """
         kwargs = SubprocessUtils._normalize_subprocess_kwargs(kwargs)
         cmd_list = SubprocessUtils._validate_cmd(cmd)
-        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False。
+        # Bandit B603: argv 已先驗證，且 wrapper 會強制 shell=False
         return subprocess.Popen(cmd_list, **kwargs)  # nosec B603
 
     @staticmethod
-    def create_qprocess_checked(
+    def create_console_process(
         cmd: Iterable[str],
         *,
-        cwd: str | None = None,
-        merged_channels: bool = True,
-        parent: QtCore.QObject | None = None,
-    ) -> QtCore.QProcess:
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.Popen:
         """
-        建立已驗證 argv 的 QProcess。
+        在獨立控制台視窗中啟動子行程 (Windows CREATE_NEW_CONSOLE)
 
         Args:
-            cmd: 命令列參數序列。
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
-            merged_channels: 是否合併 stdout/stderr。
-            parent: QProcess 的 Qt parent。
+            cmd: 要執行的命令清單
+            cwd: 工作目錄
+            env: 環境變數
 
         Returns:
-            已設定 program、arguments 與 channel mode 的 QProcess。
+            subprocess.Popen 實例
         """
-
-        cmd_list = SubprocessUtils._validate_cmd(cmd)
-        process = QtCore.QProcess(parent)
-        process.setProgram(cmd_list[0])
-        process.setArguments(cmd_list[1:])
-        if cwd:
-            process.setWorkingDirectory(str(cwd))
-        if merged_channels:
-            process.setProcessChannelMode(QtCore.QProcess.ProcessChannelMode.MergedChannels)
-        return process
+        resolved_cmd = SubprocessUtils._validate_cmd(cmd)
+        raw_kwargs: dict[str, Any] = {
+            "cwd": str(cwd) if cwd else None,
+            "env": env,
+            "creationflags": SubprocessUtils.CREATE_NEW_CONSOLE,
+        }
+        kwargs = SubprocessUtils._normalize_subprocess_kwargs(raw_kwargs)
+        return subprocess.Popen(resolved_cmd, **kwargs)  # nosec B603
 
     @staticmethod
-    def run_qprocess_checked(
-        cmd: Iterable[str],
-        *,
-        cwd: str | None = None,
-        encoding: str = "utf-8",
-        on_stdout: Callable[[str], Any] | None = None,
-        on_started: Callable[[int], Any] | None = None,
-        cancel_check: Callable[[], bool] | None = None,
-        cancel_poll_ms: int = 100,
-        timeout_ms: int | None = None,
-    ) -> QProcessResult:
+    def run_winget_interactive(args: list[str]) -> int:
         """
-        以 QProcess signal 同步執行命令並收集輸出。
+        在獨立終端機視窗中執行 winget 指令，並等待其結束回傳結束代碼
 
         Args:
-            cmd: 命令列參數序列。
-            cwd: 工作目錄；未提供時沿用目前程序工作目錄。
-            encoding: stdout 解碼使用的文字編碼。
-            on_stdout: 每次收到 stdout 片段時呼叫的回呼。
-            on_started: QProcess 啟動後以 PID 呼叫的回呼。
-            cancel_check: 輪詢取消狀態的回呼。
-            cancel_poll_ms: 取消與 stdout 輪詢間隔毫秒數。
-            timeout_ms: 執行逾時毫秒數；未提供時不限制。
+            args: winget 參數清單
 
         Returns:
-            QProcess 的結束代碼、輸出與取消狀態。
+            行程結束代碼
         """
-
-        app = QtWidgets.QApplication.instance()
-        if not isinstance(app, QtWidgets.QApplication):
-            app = QtWidgets.QApplication([])
-
-        process = SubprocessUtils.create_qprocess_checked(cmd, cwd=cwd)
-        stdout_chunks: list[str] = []
-        state: dict[str, Any] = {
-            "returncode": -1,
-            "pid": 0,
-            "cancelled": False,
-            "error_text": "",
-            "finished": False,
-        }
-
-        def _decode(data: QtCore.QByteArray) -> str:
-            return bytes(cast(Any, data)).decode(encoding, errors="replace")
-
-        def _drain_stdout() -> None:
-            text = _decode(process.readAllStandardOutput())
-            if not text:
-                return
-            stdout_chunks.append(text)
-            if on_stdout is not None:
-                on_stdout(text)
-
-        def _finish(exit_code: int, _status: QtCore.QProcess.ExitStatus) -> None:
-            _drain_stdout()
-            state["returncode"] = int(exit_code)
-            state["finished"] = True
-
-        def _error(_error: QtCore.QProcess.ProcessError) -> None:
-            state["error_text"] = process.errorString()
-
-        process.readyReadStandardOutput.connect(_drain_stdout)
-        process.finished.connect(_finish)
-        process.errorOccurred.connect(_error)
-        process.start()
-        if not process.waitForStarted(10000):
-            raise OSError(process.errorString() or "QProcess 啟動失敗")
-        state["pid"] = int(process.processId())
-        if on_started is not None:
-            on_started(int(state["pid"]))
-
-        deadline = None if timeout_ms is None else time.monotonic() + max(0, int(timeout_ms)) / 1000
-        poll_ms = max(25, int(cancel_poll_ms))
-        while process.state() != QtCore.QProcess.ProcessState.NotRunning:
-            if cancel_check is not None:
-                try:
-                    should_cancel = bool(cancel_check())
-                except Exception:
-                    should_cancel = False
-                if should_cancel:
-                    state["cancelled"] = True
-                    process.kill()
-            if deadline is not None and time.monotonic() >= deadline:
-                state["error_text"] = f"QProcess 執行逾時 ({timeout_ms} ms)"
-                process.kill()
-            if process.waitForReadyRead(poll_ms):
-                _drain_stdout()
-            else:
-                _drain_stdout()
-        process.waitForFinished(1000)
-        _drain_stdout()
-        if not state["finished"]:
-            state["returncode"] = int(process.exitCode())
-        return QProcessResult(
-            args=SubprocessUtils._validate_cmd(cmd),
-            returncode=int(state["returncode"]),
-            stdout="".join(stdout_chunks),
-            pid=int(state["pid"]),
-            cancelled=bool(state["cancelled"]),
-            error_text=str(state["error_text"] or ""),
-        )
+        proc = SubprocessUtils.create_console_process(["winget", *args])
+        return proc.wait()
 
     @staticmethod
     def popen_detached(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
         """
-        啟動分離的子進程，隔離 I/O 和生命周期，不顯示控制台視窗。
+        啟動分離的子行程，隔離 I/O 和生命週期，不顯示控制台視窗
 
-        用於重啟/更新等場景，避免主進程退出時留下孤兒進程。
-        Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗。
-        自動配置 DEVNULL、close_fds 和平台相關的分離旗標。
+        用於重新啟動/更新等場景，避免主行程結束時留下孤兒行程
+        Windows 下自動隱藏控制台視窗，避免出現額外的命令提示字元視窗
+        自動設定 DEVNULL、close_fds 和 Windows 分離旗標
 
         Args:
             cmd: 命令列表
@@ -292,10 +215,10 @@ class SubprocessUtils:
         Returns:
             Popen 物件
         """
-        DETACHED_PROCESS = 8
-        CREATE_NEW_PROCESS_GROUP = 512
         hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
-        creation_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | hidden_kwargs.pop("creationflags", 0)
+        creation_flags = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | hidden_kwargs.pop("creationflags", 0)
+        )
         return SubprocessUtils.popen_checked(
             cmd,
             cwd=cwd,
@@ -306,3 +229,28 @@ class SubprocessUtils:
             creationflags=creation_flags,
             **hidden_kwargs,
         )
+
+    @staticmethod
+    def create_no_window_process(cmd: Iterable[str], cwd: str | None = None) -> subprocess.Popen:
+        """
+        建立背景執行且不顯示控制台視窗的 Popen 行程
+
+        Args:
+            cmd: 命令列表
+            cwd: 工作目錄（可選）
+
+        Returns:
+            Popen 物件
+        """
+        hidden_kwargs = SubprocessUtils.get_hidden_windows_kwargs()
+        return SubprocessUtils.popen_checked(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=SubprocessUtils.DEVNULL,
+            **hidden_kwargs,
+        )
+
+
+__all__ = ["SubprocessUtils"]

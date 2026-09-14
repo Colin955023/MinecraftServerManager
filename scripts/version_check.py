@@ -1,29 +1,26 @@
 """
-版本與發行說明檢查工具。
+版本與發行說明檢查工具
 
-集中管理版本解析、標籤驗證與 CHANGELOG 提取邏輯，
-避免在 GitHub Actions workflow 內重複維護字串與正則處理。
+集中管理版本解析、標籤驗證與 CHANGELOG 提取邏輯，以便在 CI/CD 流程中使用。
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parents[1]
-project_root_str = str(project_root)
-if project_root_str not in sys.path:
-    sys.path.insert(0, project_root_str)
-from src.utils.runtime_utils.app_info import APP_VERSION
+_APP_INFO_PATH = Path(__file__).resolve().parents[1] / "src" / "utils" / "runtime_utils" / "app_info.py"
 
 _VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
 def _configure_stdio_utf8() -> None:
-    """讓 CLI 在 Windows CI 的非 UTF-8 預設編碼下仍能輸出中文。"""
+    """讓 CLI 在 Windows CI 的非 UTF-8 預設編碼下仍能輸出中文"""
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
@@ -31,30 +28,42 @@ def _configure_stdio_utf8() -> None:
 
 
 def _ensure_non_empty_str(parser: argparse.ArgumentParser, opt_name: str, value: object) -> str:
-    """確保參數值為非空字串。"""
+    """確保參數值為非空字串"""
     if not isinstance(value, str) or not value.strip():
         parser.error(f"參數 --{opt_name} 必須為非空字串")
     return value
 
 
 class ReleaseNotesNotFoundError(RuntimeError):
-    """找不到指定版本的 CHANGELOG 章節。"""
+    """找不到指定版本的 CHANGELOG 章節"""
 
 
+@lru_cache(maxsize=1)
 def get_app_version() -> str:
-    """回傳應用程式版本字串。"""
-    return str(APP_VERSION)
+    """從 app_info 原始碼讀取應用程式版本字串"""
+    tree = ast.parse(_APP_INFO_PATH.read_text(encoding="utf-8"), filename=str(_APP_INFO_PATH))
+    for statement in tree.body:
+        if (
+            isinstance(statement, ast.Assign)
+            and len(statement.targets) == 1
+            and isinstance(statement.targets[0], ast.Name)
+            and statement.targets[0].id == "APP_VERSION"
+            and isinstance(statement.value, ast.Constant)
+            and isinstance(statement.value.value, str)
+        ):
+            return statement.value.value
+    raise ValueError("app_info.py 缺少字串常數 APP_VERSION")
 
 
 def validate_release_tag() -> None:
-    """驗證發行標籤是否合法。"""
+    """驗證發行標籤是否合法"""
     version = get_app_version()
     if not _VERSION_PATTERN.fullmatch(version):
         raise ValueError(f"版本格式不合法：{version}")
 
 
 def extract_release_notes(changelog_path: Path, *, strict: bool = False) -> str:
-    """從 CHANGELOG 依版本標題提取發行說明內容。"""
+    """從 CHANGELOG 依版本標題提取發行說明內容"""
     content = changelog_path.read_text(encoding="utf-8-sig") if changelog_path.exists() else ""
 
     version = get_app_version()
@@ -73,7 +82,7 @@ def extract_release_notes(changelog_path: Path, *, strict: bool = False) -> str:
 
 
 def write_release_notes(changelog_path: Path, output_path: Path, *, strict: bool = False) -> None:
-    """提取發行說明並寫入指定檔案。"""
+    """提取發行說明並寫入指定檔案"""
     notes = extract_release_notes(changelog_path, strict=strict)
     output_path.write_text(notes, encoding="utf-8")
 

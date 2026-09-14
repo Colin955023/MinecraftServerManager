@@ -26,22 +26,13 @@ dist/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# OS
-.DS_Store
-Thumbs.db
-ehthumbs.db
-ehthumbs_vista.db
-*.stackdump
-[Dd]esktop.ini
-$RECYCLE.BIN/
-*.lnk
+.import_linter_cache/
+.coverage
+coverage.xml
 
 # VS Code
 .vscode/*
 !.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
 
@@ -54,27 +45,31 @@ temp/
 tmp/
 cache/
 
-# Binaries (do not commit)
-*.exe
-*.msi
-*.msix
-*.msm
-*.msp
+# 敏感資料 / 本機憑證
+.env
+.env.*
+!.env.example
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_ed25519
+.netrc
+credentials*.json
+secrets*.json
 
-# =====================
-# Report directory
-# =====================
-report/*
-!report/comprehensive_report.py
-*.xml
-.vscode/tasks.json
+# Binaries
+*.exe
 
 # other
 *.egg-info
-
-#文件
 docs/*
 !docs/USER_GUIDE.md
-!docs/PORTABLE_INSTALLER_MATRIX.md
 !docs/TECHNICAL_OVERVIEW.md
 .github/skills
+report/*
+!report/comprehensive_report.py

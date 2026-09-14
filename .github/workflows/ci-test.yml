@@ -20,6 +20,7 @@ jobs:
   bandit-scan:
     name: CI-Tests / Bandit Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       security-events: write
@@ -36,10 +37,11 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group security'
 
       - name: Run Bandit security scan
         run: |
-          uv run bandit -r src tests -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
+          uv run bandit -r src tests scripts report -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
 
       - name: Upload Bandit SARIF
         if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -53,6 +55,7 @@ jobs:
   detect-secrets-scan:
     name: CI-Tests / detect-secrets
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -67,37 +70,19 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group security'
 
       - name: Run detect-secrets privacy scan
-        run: |
-          EXCLUDE_PATTERN='(\.git|\.venv|\.pytest_cache|__pycache__|\.github|\.tox)'
-          if [ -f .secrets.baseline ]; then
-            uv run detect-secrets scan --baseline .secrets.baseline --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
-          else
-            uv run detect-secrets scan --only-verified --all-files --exclude-files "$EXCLUDE_PATTERN" > detect-secrets-results.json
-          fi
-          uv run python -c "import json,sys; data=json.load(open('detect-secrets-results.json', encoding='utf-8')); sys.exit(1 if data.get('results') else 0)"
+        run: >-
+          git ls-files -z
+          | xargs -0 uv run detect-secrets-hook
+          --baseline scripts/.secrets.baseline
+          --exclude-files 'scripts[\\/]\.secrets\.baseline'
 
-      - name: Upload detect-secrets report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: detect_secrets_report
-          path: detect-secrets-results.json
-          retention-days: 2
-
-  lint-and-test:
-    name: CI-Tests / ${{ matrix.task }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - task: lint
-            os: windows-latest
-          - task: test
-            os: windows-latest
-
+  lint:
+    name: CI-Tests / lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -109,27 +94,78 @@ jobs:
         uses: ./.github/actions/setup-python-env
         with:
           uv-sync: 'true'
+          uv-groups: '--group lint --group typecheck --group test'
+
+      - name: Cache Ruff
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ruff_cache
+          key: ruff-${{ runner.os }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ruff-${{ runner.os }}-${{ hashFiles('uv.lock') }}-
+
+      - name: Cache Mypy
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-
 
       - name: Run Ruff (Lint & Format)
-        if: matrix.task == 'lint'
-        run: uv run ruff check src tests quick_test.py && uv run ruff format --check src tests quick_test.py
+        run: uv run ruff check src tests scripts report && uv run ruff format --check src tests scripts report
 
       - name: Run mypy
-        if: matrix.task == 'lint'
-        run: uv run mypy src tests quick_test.py
+        run: uv run mypy
 
       - name: Run Pylint (cyclic import check)
-        if: matrix.task == 'lint'
         run: uv run pylint --disable=all --enable=cyclic-import src
 
+      - name: Run import architecture checks
+        run: uv run python scripts/check_import_boundaries.py
+
+      - name: Compile first-party Python sources
+        run: uv run python -m compileall -q src tests scripts report
+
+  test:
+    name: CI-Tests / test
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Python Environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          uv-sync: 'true'
+          uv-groups: '--group test'
+
       - name: Run tests (pytest)
-        if: matrix.task == 'test'
-        run: uv run pytest -q --junitxml=pytest-results.xml
+        run: >-
+          uv run pytest -q
+          --junitxml=pytest-results.xml
+          --cov=src
+          --cov-branch
+          --cov-report=term-missing
+          --cov-report=xml:coverage.xml
 
       - name: Upload pytest JUnit report
-        if: always() && matrix.task == 'test'
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pytest_junit_report_windows
           path: pytest-results.xml
+          retention-days: 2
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: coverage_report_windows
+          path: coverage.xml
+          if-no-files-found: error
           retention-days: 2

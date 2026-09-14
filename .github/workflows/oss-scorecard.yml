@@ -1,9 +1,9 @@
-name: "Google OSS 安全性打分"
+name: "OpenSSF Scorecard 安全性評分"
 
 on:
-  workflow_run:
-    workflows: ["CI-Tests"]
-    types: [completed]
+  push:
+    branches:
+      - master
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1'
@@ -14,7 +14,6 @@ permissions:
 jobs:
   analysis:
     name: Scorecard analyze
-    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master') }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write
@@ -29,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: "執行 Scorecard 分析"
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4 (Scorecard v5.5.0)
         with:
           results_file: openossf_scorecard_report.sarif
           results_format: sarif

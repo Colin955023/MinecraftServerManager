@@ -1,193 +1,167 @@
 # 技術手冊
 
-## 1. 技術棧
+## 技術棧
 
-| 類別 | 使用套件／工具 |
-|------|----------------|
-| 語言 | Python 3.14 |
-| GUI | PySide6 / Qt Widgets |
-| 打包 | Nuitka（可執行檔）、Inno Setup（安裝精靈） |
-| 網路 | requests + urllib3 Retry（集中 timeout / retry policy） |
-| 版本解析 | packaging |
-| XML 解析 | defusedxml（防止 XXE 攻擊） |
-| Release Notes 清理 | 內建正規表示式與 HTML entity 解碼，轉為純文字後顯示 |
-| 測試 | pytest（smoke、integration） |
-| 靜態檢查 | ruff、mypy、bandit、import-linter |
+| 類別 | 工具 |
+|---|---|
+| 執行環境 | Python `>=3.14,<3.15`、Windows 10／11 |
+| GUI | PySide6、PySide6-Fluent-Widgets |
+| 網路／資料 | httpx、orjson、packaging、defusedxml |
+| 系統／日誌 | psutil、Python `logging` |
+| 打包 | Nuitka onefile |
+| 品質 | pytest-cov、Ruff、Mypy、Pylint、Bandit、Vulture、detect-secrets、自訂匯入邊界檢查 |
 
----
+相依套件與最低版本以 `pyproject.toml`、鎖定版本以 `uv.lock` 為準。
 
-## 2. 架構概覽
+## 架構
 
-```
+```text
 src/main.py
- └── ui/main_window.py            主視窗、頁面組裝、背景工作排程
-     ├── core/server_manager.py   伺服器生命週期（建立／啟動／停止／備份）
-     ├── core/mod_manager.py      模組協調層（委派掃描／安裝／provider 辨識）
-     ├── core/local_mod_scanner.py 本地模組掃描、JAR metadata 解析
-     ├── core/mod_file_installer.py 模組檔案安裝、替換、回滾與刪改
-     ├── core/mod_provider_resolver.py provider metadata 與 Modrinth 身分解析
-     ├── core/version_manager.py  Minecraft 版本查詢
-     ├── core/loader_manager.py   Fabric／Forge／Quilt／NeoForge 版本查詢與快取
-     ├── ui/mod_management/*      本地模組列表、Review、安裝清單與同步顯示
-     ├── ui/mod_search_service/*  Modrinth 搜尋、相容性分析、依賴規劃
-     └── utils/update_utils/*     更新檢查、資產選擇、下載與套用流程
+└─ ui/core_frames/main_window.py        唯一 production composition root
+   ├─ core/server/                      建立、匯入、檢查、執行、屬性、備份
+   ├─ core/mods/                        掃描、安裝、Provider、Modrinth、規劃
+   ├─ core/loader/                      載入器版本、安裝與適配
+   ├─ ui/core_frames|dialogs|mods|...   Qt／Fluent UI adapters
+   ├─ models/mod_models.py              模組共享領域資料
+   ├─ models/server_models.py           伺服器共享領域資料
+   └─ utils/                            檔案、網路、Java、日誌、執行期工具
 ```
 
-> 上圖為典型呼叫關係示意，非嚴格依賴方向規則。`models/` 為 core 與 ui 共用的資料結構層，未在上圖逐一標出所有引用點；完整的分層依賴方向與匯入邊界規則見第 3 節。
+依賴方向由 `scripts/check_import_boundaries.py` 對全部 `src/**/*.py` 強制：
 
----
-
-## 3. 模組邊界與依賴方向
-
-為避免跨層誤用（例如 UI 直接繞過 core 存取底層工具、或子模組彼此耦合），專案採單向分層依賴，並以工具強制檢查，不僅靠文件約束。
-
-### 分層方向
-
-```
+```text
 ui → core → models → utils
 ```
 
-左方可依賴右方，右方不可反向匯入左方。此規則以 `import-linter` 定義於 `pyproject.toml` 的 `[tool.importlinter]`，執行 `uv run lint-imports` 檢查。
+### 主要 owner
 
-### 匯入邊界規則
+| 領域 | 唯一 owner／外部 seam |
+|---|---|
+| 建立伺服器 | `CreateServerJourney`：plan → 確認同一 plan → execute |
+| 伺服器內容 | `ServerInspector.inspect()`：版本、載入器、EULA、缺檔、啟動目標 |
+| 執行中程序 | `ServerRuntime`：process、PID、輸出、狀態、命令、停止與清理 |
+| 伺服器屬性 | `ServerPropertiesStore`：`server.properties`、revision conflict、原子提交 |
+| 模組規劃 | application-scoped `ModPlanning`：相容性、遞迴依賴、本地更新 |
+| 模組 UI 狀態 | `ModManagementSession`；各 Presenter 擁有自己的 widget／view state |
+| Review | `ModReviewWorkflow`、immutable snapshot、`ReviewExecutionHandoff` |
+| UI 背景工作 | `UIWorkScope` |
 
-- 跨資料夾一律經由該資料夾 `__init__.py` 的匯出匯入，禁止深入子模組（例如禁止 `from src.core.mod_manager import X`，應寫 `from src.core import X`）。
-- `__init__.py` 只允許出現在 `src/` 與 `src/<子資料夾>/`；二層子資料夾（如 `src/ui/mod_management/`）禁止建立 `__init__.py`。
-- 每個 `__init__.py` 只匯出自己資料夾內的內容；`src/ui/__init__.py` 例外，可跨子資料夾匯出同一頂層套件內的模組。
+## 匯入邊界
 
-以上規則由 `scripts/check_import_boundaries.py`（AST 掃描）自動檢查，與 `lint-imports` 一併整合進 `scripts/format_lint_check.bat`，作為強制關卡而非人工稽核。
+自訂邊界只掃描 `src/`。測試可深層匯入，以直接測試或替換 `src` implementation dependency；測試引用不會使未被 production 使用的 facade export 合法化。
 
----
+- `src/` 跨頂層 package 必須從 `src.core`、`src.models`、`src.ui`、`src.utils` 匯入。
+- 同一 feature 目錄的內部協作使用單層相對匯入；禁止父層 traversal。
+- 只允許 `src/__init__.py` 與 `src/{core,models,ui,utils}/__init__.py`。
+- facade 使用 `lazy_exports`，只能匯出自己頂層 package 內且有 `src/` runtime consumer 的符號。
+- `src.models` 只公開共享領域資料；UI／workflow internal 型別留在 owner。
 
-## 4. 模組簡介
+執行：
 
-### `src/models/`
+```bat
+uv run scripts\check_import_boundaries.py
+```
 
-| 檔案 | 簡介 |
-|------|------|
-| `models.py` | 核心資料結構：`ServerConfig`、`ModrinthVersionLookupResult`、`LoaderVersion`、`OnlineModVersion`、`ResolvedDependencyReference` |
+## 目錄職責
 
-### `src/core/`
+### `src/core/server/`
 
-| 檔案 | 簡介 |
-|------|------|
-| `server_manager.py` | 伺服器 CRUD、啟動／停止、備份 |
-| `mod_manager.py` | 模組 orchestration，整合掃描／安裝／provider 辨識 |
-| `local_mod_scanner.py` | 本地模組掃描、JAR metadata 解析與快取回填 |
-| `mod_file_installer.py` | 模組下載、原子替換、回滾、匯入、刪除、啟停 |
-| `mod_provider_resolver.py` | provider metadata、slug / project id 正規化與搜尋 fallback |
-| `version_manager.py` | Minecraft 版本列表查詢 |
-| `loader_manager.py` | Fabric／Forge／Quilt／NeoForge 版本查詢與 TTL 快取 |
+| 檔案 | 職責 |
+|---|---|
+| `server_crud.py` | 伺服器登錄、設定檔與刪除 tombstone 背景清理 |
+| `server_creation.py` | 交易式建立、整體進度映射與補償 |
+| `server_import.py` | 資料夾／ZIP 匯入、探索、已管理項目計數與重新偵測 |
+| `server_inspector.py` | 唯讀內容檢查 |
+| `server_runtime.py` | 統一啟動與首次初始化生命週期；協調備份、還原、刪除期間的維護保留 |
+| `server_output_history.py` | 安全讀取受限大小的輸出尾端，保留重複訊息與截斷狀態 |
+| `server_properties.py` | `server.properties` 唯一真相來源 |
+| `server_backup.py` | 原子 ZIP 備份、交易式快照還原與失敗回滾 |
+
+### `src/core/mods/`
+
+| 檔案 | 職責 |
+|---|---|
+| `mod_manager.py` | 掃描、安裝與 provider orchestration |
+| `local_mod_scanner.py` | JAR metadata 與快取回填 |
+| `mod_file_installer.py` | 下載、安裝、替換、回滾、刪除 |
+| `provider_identity.py` | provider 身分與生命週期 |
+| `modrinth_http.py` | Modrinth HTTP 查詢與 `ModrinthHttpAdapter` |
+| `dependency_planner_facade.py` | `ModPlanning` 唯一 use-case interface |
+| `compatibility_analyzer.py` | 內部純相容性分析 |
+| `mod_planning_ports.py` | loader rules port 與 production adapter |
+| `mod_provider_port.py` | provider 窄 port |
+
+### `src/core/loader/`
+
+| 檔案 | 職責 |
+|---|---|
+| `loader_manager.py` | 載入器中繼資料、版本解析與查詢 |
+| `loader_installer.py` | 載入器安裝執行、文字進度解析／估算與檔案配置 |
+| `loader_adapters.py` | 載入器外部資料來源適配 |
 
 ### `src/ui/`
 
-| 檔案 | 簡介 |
-|------|------|
-| `main_window.py` | 主視窗框架、頁面切換 |
-| `create_server_frame.py` | 建立伺服器精靈 |
-| `manage_server_frame.py` | 伺服器清單與操作面板 |
-| `progress_dialog.py` | 進度對話框 |
-| `server_properties_dialog.py` | 伺服器屬性對話框 |
-| `window_preferences_dialog.py` | 視窗偏好設定對話框 |
-| `server_monitor_window.py` | 即時監控視窗 |
-| `mod_management/` | 模組管理頁面、Review、樹狀列表同步與安裝執行 |
-| `mod_search_service/` | Modrinth 搜尋、相容性分析、依賴規劃與 provider 轉接 |
+- `core_frames/`：主視窗、建立、管理、偏好與導航。
+- `dialogs/`：建立確認、屬性、JVM、還原及進度對話框。
+- `mods/`：具名 feature、Session、Review workflow、install executor、tree projection。
+- `services/`：管理頁狀態計算與跨頁工作協調。
+- `support/`：Fluent 主題、UI tokens、狀態、`UIUtils`、`UIWorkScope`。
+- `windows/`：伺服器監控。
+
+`ModManagementFrame` 只負責根組裝與生命週期，不代理 feature command。`review_dependency.py`、`review_details.py`、`review_formatting.py`、`review_grouping.py`、`review_prompts.py`、`review_selection.py`、`review_snapshot_store.py` 與 `review_state.py` 是內部 implementation；外部 seam 維持 `review_workflow.py` 與 `review_contracts.py`。
 
 ### `src/utils/`
 
-| 子目錄 | 簡介 |
-|--------|------|
-| `core_utils/` | `logger`、`path_utils`、`atomic_writer`、`exception_utils`、`hash_utils` |
-| `network_utils/` | `http_utils` (集中 timeout/retry)、`request_retry_utils` |
-| `java_support/` | Java 自動偵測、winget 安裝支援 |
-| `ui_support/` | Fluent theme、window manager、DPI handling、dialog_utils、font_manager、icon_utils、qt_runtime、qt_widgets、task_utils、tree_utils、ui_config、ui_tokens、ui_utils、custom_dropdown |
-| `runtime_utils/` | 延遲匯出、版本資訊、環境檢查、OS 判斷、Python 版本檢查、app_info、app_restart、background_task、runtime_paths、settings_manager、singleton、subprocess_utils、worker_pool |
-| `mod_utils/` | 依賴規劃序列化、下載來源策略、本地模組 metadata 工具、Modrinth 查詢工具、Modrinth 版本查詢、模組依賴規劃、模組依賴參考工具、模組索引管理、模組 provider metadata、模組重新驗證批次工具、模組語意、模組版本過濾 |
-| `server_utils/` | 伺服器常數、伺服器偵測工具、伺服器偵測版本工具、伺服器記憶體工具、伺服器屬性工具、伺服器執行期工具 |
-| `update_utils/` | 更新檢查、更新解析、更新檢查適配器 |
+- `core_utils/`：原子寫入、路徑、雜湊、例外、日誌、單位、版本。
+- `network_utils/`：集中 HTTP timeout、retry、URL 驗證及一般回應內容上限；URL 靜態政策檢查不觸發 DNS，實際 request attempt 才解析一次並固定公開 IP；原始 HTTPS origin 各自使用隔離的 connection pool，保留 Host/SNI 並避免不同 hostname 因共用 IP 而誤用同一連線。一般 request 使用單一 private retry state machine，完整檔案下載則由完整下載交易擁有唯一 retry budget，避免開流與串流層重試乘積化。
+- `java_support/`：Java 偵測與 winget 安裝。
+- `runtime_utils/`：路徑、設定、背景工作、subprocess、系統狀態。
+- `mod_utils/`：下載政策、metadata、語意與版本過濾。
+- `server_utils/`：記憶體、啟動命令、版本語意與共用伺服器名稱安全政策。
+- `update_utils/`：更新資料解析。
 
----
+## 進度、主題與刪除交易
 
-## 5. 視窗生命週期
+- `ProgressEvent` 的 `overall_percent` 是建立伺服器 UI 的穩定整體進度來源。下載階段優先使用實際 byte／unit 比例；Java Loader installer 若只提供 `stage`／`message` 文字，`InstallerProgressTracker` 依已知階段做**估算**，不可視為安裝器官方百分比。明確 `%` 或 `x/y` 輸出仍優先採用。`ProgressDialog` 一旦取得可判定進度即維持 determinate 模式，並拒絕延遲事件造成百分比倒退。
+- 共用 Fluent modal 與監控 surface 由 `themed_surface_stylesheet()` 依 `Colors` token 套用背景、主要／次要文字及邊框；不要在個別 Label 只覆寫 transparent background 而遺失主題文字色。
+- Qt 視窗圖示由 `qt_runtime.apply_window_icon()` 統一處理。開發環境讀取 `assets/icon.ico`；Nuitka 封裝環境在 `QApplication.windowIcon()` 缺失時從目前 EXE 的 Windows icon resource 取得，再同步至主視窗、modal、監控視窗與 Fluent title bar。
+- 刪除伺服器的同步 commit point 是「原目錄改名為 `.msm-delete-*` tombstone + 原子移除登錄」。commit 成功後才回報列表已移除，實體遞迴刪除在背景執行並對暫時性檔案鎖做有限重試。`ServerCRUD` 是刪除 tombstone 的唯一恢復 owner：重新啟動時，若 marker 對應的伺服器仍在登錄且原路徑消失，視為尚未 commit 並 fail-safe 還原；若已不在登錄，才排程背景清理。其他 transaction owner 不可直接刪除 `.msm-delete-*`。
 
-主視窗與大多數對話框採 Qt 視窗生命週期，避免在元件尚未完成佈局時顯示：
+## 重要實作規則
 
-1. 建立 Qt widget 與 layout。
-2. 透過 `WindowManager` 計算螢幕、尺寸與置中位置。
-3. 呼叫 `resize()`、`move()`、`setMinimumSize()` 套用視窗幾何。
-4. 元件完成後再呼叫 `show()`；需要最大化時延後呼叫 `showMaximized()`。
+- JSON／文字寫入使用原子寫入；不要直接覆寫正式檔。
+- GUI 可見控制項使用 QFluentWidgets；PySide6 保留基礎設施，檔案選擇器集中於 `UIUtils`。
+- UI 背景工作經 `UIWorkScope`；主視窗關閉時保存設定、停止計時器，以非阻塞流程停止 runtime 與背景工作，再關閉其餘視窗。
+- `server.properties` 不複製到 `ServerConfig`。
+- production 與 tests 應驗證同一外部 seam；不得為測試新增 production API。
+- 測試必須全自動且不得觸發真實網路、互動視窗或外部程式；必要檔案只能建立於 pytest `tmp_path` 並在測試後清除。
 
-視窗偏好（位置、大小與最大化狀態）由 `ui_support/window_manager.py` 持久化至設定檔。可調整視窗不強制設定最大尺寸；主視窗狀態僅在視窗有效且非最小化時追蹤。模組相關 `qt.Treeview` 支援雙擊欄位標題自動調整欄寬。
+## 開發命令
 
-高解析度顯示縮放交由 Qt 6 與 Windows 原生設定處理。Qt Widgets 使用 device-independent pixels，Qt 6 在 Windows 會自動套用使用者的顯示比例，因此專案內不再保存或套用額外的 UI 縮放倍率。
-
----
-
-## 6. 效能設計
-
-- **減少啟動網路請求**：loader 版本快取採 TTL（預設 12 小時），快取有效期間略過預抓。
-- **為何是 12 小時**：在「資料新鮮度」與「API 請求量」間折衷；Minecraft 伺服器管理情境通常是長時間運行、重啟頻率低，12 小時可避免每次啟動都重新查詢，同時仍能在每日維運節奏內更新版本資訊。
-- **快取失效自動重抓**：快取缺失或過期時 preload guard 自動解除，無需重啟程式。
-- **列表差異更新**：Treeview 只更新變動列，不整批重繪。
-- **Lazy re-export**：`__init__.py` 採延遲匯出，降低啟動 import 成本。
-
-## 7. 支援的伺服器類型與載入器
-
-本專案支援原版伺服器與四種模組載入器：
-
-| 載入器 | 支援版本 | 說明 |
-|---|---|---|
-| Vanilla（原版） | 所有版本 | 官方 Minecraft 伺服器，無模組載入器 |
-| Fabric | 1.14+ | 輕量級模組載入器，廣泛支援 1.16+ 版本 |
-| Quilt | 1.14+ | 與 Fabric 生態相近的模組載入器，使用 Quilt Meta API 查詢版本 |
-| Forge | 1.5+ | 老牌模組載入器；可用版本以 Maven metadata 可解析結果為準 |
-| NeoForge | 1.20.1+ | Forge 生態的現代分支；可用版本以 NeoForge Maven metadata 為準 |
-
-### 版本管理
-
-- **Fabric / Quilt**：從官方 Fabric / Quilt Meta API 取得穩定版本清單，支援依 Minecraft 版本過濾
-- **Forge / NeoForge**：從 Maven metadata 解析版本，每個 Minecraft 版本保留最新 10 個版本
-
-## 8. 資料與設定路徑
-
-| 模式 | 設定 | 日誌 | 快取 |
-|------|------|------|------|
-| 一般安裝 | `%LOCALAPPDATA%\Programs\MinecraftServerManager\user_settings.json` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\log\` | `%LOCALAPPDATA%\Programs\MinecraftServerManager\Cache\` |
-| 可攜式安裝 | `<exe_dir>\.config\user_settings.json` | `<exe_dir>\.log\` | `<exe_dir>\.config\Cache\` |
-
-設定由 `runtime_utils/settings_manager.py` 統一讀寫並持久化，對外主要透過 `get_settings_manager()` 提供共享實例。
-
-## 9. 開發指令
-
-```bash
-# 安裝依賴
+```bat
 uv sync
-
-# 啟動程式
 uv run python -m src.main
 
-# 快速 test
-uv run quick_test.py
+uv sync --group test
+uv run pytest -q --cov=src --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
 
-# 匯入邊界檢查（分層方向 + 深層匯入 + __init__.py 規則）
-uv run lint-imports
-uv run scripts/check_import_boundaries.py
-
-# 完整格式／型別／測試門禁（已包含上述所有檢查）
-scripts/format_lint_check.bat
-
-# 產生綜合報告
+scripts\format_lint_fix_gate.bat
 uv run report\comprehensive_report.py
 ```
 
-## 10. 建議閱讀順序
+### Nuitka 建置
 
-想快速理解整體架構，建議依此順序閱讀：
+正式輸出使用 `scripts\build_nuitka.ps1` 建立 onefile 執行檔。腳本會先同步 build 群組、拒絕在輸出執行檔仍執行時覆寫、產生 `report\nuitka-compilation-report.xml`，並驗證 onefile 狀態、必要的 `LICENSE` 及禁止的 Qt platform DLL。建置報告若需供工具解析，請以 UTF-8 位元組讀取後再交給 XML parser，避免 XML 宣告編碼與 PowerShell 字串轉換不一致。
 
-1. `src/main.py` — 進入點，環境初始化
-2. `src/models/models.py` — 核心資料結構，貫穿全專案
-3. `src/ui/main_window.py` — 整體 UI 框架與頁面切換
-4. `src/core/server_manager.py` — 伺服器核心邏輯
-5. `src/core/mod_manager.py` — 模組服務
-6. `src/ui/mod_search_service/` — Modrinth 整合（最複雜的模組）
-7. `src/utils/ui_support/window_manager.py` — 視窗管理慣例
+```bat
+powershell -ExecutionPolicy Bypass -File scripts\build_nuitka.ps1
+```
+
+若需保留 Nuitka 產生的 C 原始碼以供檢閱，使用 `-KeepCSource`。腳本會只保留
+`dist\main.c-source`，並移除可由下次建置重新產生的 OBJ、`main.dist` 與 onefile 暫存目錄。
+
+`dist\<repository>.exe` 是發佈檔；`dist\main.dist` 只作建置檢查與問題診斷，不應直接當作安裝內容。
+
+onefile 預設使用 Nuitka 的版本化快取規格 `{CACHE_DIR}/Programs/MinecraftServerManager/{VERSION}`，Windows 實際位置為 `%LOCALAPPDATA%\Programs\MinecraftServerManager\<版本>`。新版本完成啟動後會清理舊版本目錄；若舊版本仍被鎖定則保留至下次啟動再清理。
+
+使用方式見 [USER_GUIDE.md](USER_GUIDE.md)。

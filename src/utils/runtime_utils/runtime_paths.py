@@ -1,78 +1,35 @@
 """
-運行時路徑管理工具
-提供應用程式運行時所需的路徑配置與管理功能。
+執行時路徑管理工具
+提供應用程式執行時所需的路徑設定與管理功能
 """
 
+from __future__ import annotations
+
 import os
-import sys
+import re
 from pathlib import Path
 
 
 class RuntimePaths:
-    """運行時路徑管理工具類"""
+    """執行時路徑管理工具類別"""
 
     @staticmethod
     def is_packaged() -> bool:
-        """檢測是否為打包執行環境。"""
-        is_compiled_app = "__compiled__" in globals()
-        return bool(
-            getattr(sys, "frozen", False)
-            or hasattr(sys, "_MEIPASS")
-            or is_compiled_app
-            or getattr(sys, "__compiled__", False)
-        )
-
-    @staticmethod
-    def is_portable_mode() -> bool:
-        """檢測是否為便攜模式（可執行檔旁有 .portable 標記檔或 .config 資料夾）"""
-        exe_dir = RuntimePaths.get_exe_dir()
-        portable_marker = exe_dir / ".portable"
-        config_dir = exe_dir / ".config"
-        return portable_marker.exists() or config_dir.exists()
+        """檢測是否為打包執行環境"""
+        return "__compiled__" in globals()
 
     @staticmethod
     def is_development_environment() -> bool:
-        """回傳目前是否為非打包且非便攜的開發環境。"""
-        return not RuntimePaths.is_packaged() and not RuntimePaths.is_portable_mode()
+        """回傳目前是否為非打包的開發環境"""
+        return not RuntimePaths.is_packaged()
 
     @staticmethod
     def _get_localappdata() -> Path:
-        """取得 Windows 系統的本機應用程式資料目錄路徑"""
+        """取得 Windows 系統的本地應用程式資料目錄路徑"""
         base = os.environ.get("LOCALAPPDATA")
         if not base:
             base = str(Path.home() / "AppData" / "Local")
         return Path(base)
-
-    @staticmethod
-    def get_portable_base_dir() -> Path:
-        """取得便攜模式的基礎目錄（可執行檔所在目錄）"""
-        return RuntimePaths.get_exe_dir()
-
-    @staticmethod
-    def get_exe_dir() -> Path:
-        """
-        取得當前執行檔或專案根目錄的基礎目錄。
-
-        Returns:
-            執行環境對應的基礎目錄 Path。
-        """
-        if RuntimePaths.is_packaged():
-            executable = getattr(sys, "executable", "")
-            if executable:
-                try:
-                    return Path(executable).resolve().parents[0]
-                except OSError:
-                    return Path(executable).parents[0]
-        try:
-            from ..core_utils.path_utils import PathUtils
-
-            return PathUtils.get_project_root()
-        except Exception:
-            current_file = Path(__file__).resolve()
-            for parent in current_file.parents:
-                if (parent / "pyproject.toml").exists():
-                    return parent
-            return current_file.parents[3]
 
     @staticmethod
     def get_user_data_dir() -> Path:
@@ -80,8 +37,6 @@ class RuntimePaths:
         override = os.environ.get("MSM_USER_DATA_DIR")
         if override:
             return Path(override)
-        if RuntimePaths.is_portable_mode():
-            return RuntimePaths.get_portable_base_dir() / ".config"
         return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager"
 
     @staticmethod
@@ -90,24 +45,65 @@ class RuntimePaths:
         return RuntimePaths.get_user_data_dir() / "Cache"
 
     @staticmethod
-    def get_log_dir() -> Path:
-        """取得應用程式的日誌存放目錄"""
-        override = os.environ.get("MSM_LOG_DIR")
-        if override:
-            return Path(override)
-        if RuntimePaths.is_portable_mode():
-            return RuntimePaths.get_portable_base_dir() / ".log"
-        return RuntimePaths._get_localappdata() / "Programs" / "MinecraftServerManager" / "log"
-
-    @staticmethod
-    def ensure_dir(p: Path) -> Path:
-        """確保指定路徑的目錄存在，如果不存在則建立。
-
-        Args:
-            p: 要建立的目錄路徑。
+    def get_version_cache_dir() -> Path:
+        """
+        取得版本列表快取檔案存放目錄
 
         Returns:
-            已確認存在的目錄路徑。
+            已建立且經安全驗證的版本快取目錄
         """
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+        from src.utils import resolve_stable_directory
+
+        return resolve_stable_directory(RuntimePaths.get_cache_dir() / "versions", create=True)
+
+    @staticmethod
+    def get_installer_cache_dir() -> Path:
+        """
+        取得模組安裝器檔案存放目錄
+
+        Returns:
+            已建立且經安全驗證的安裝器快取目錄
+        """
+        from src.utils import resolve_stable_directory
+
+        return resolve_stable_directory(RuntimePaths.get_cache_dir() / "installers", create=True)
+
+    @staticmethod
+    def get_log_dir() -> Path:
+        """取得應用程式的日誌存放目錄"""
+        return RuntimePaths.get_user_data_dir() / "Logs"
+
+    @staticmethod
+    def cleanup_old_onefile_caches(current_version: str) -> None:
+        """
+        程式成功啟動後清理可辨識且不再使用的 onefile 版本目錄
+
+        Args:
+            current_version: 當前程式版本號
+        """
+        if not RuntimePaths.is_packaged():
+            return
+        from src.utils import delete_within, list_bounded_directory
+
+        root = RuntimePaths.get_user_data_dir()
+        current_name = str(current_version or "").strip()
+        if not current_name or not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]*", current_name):
+            return
+        try:
+            entries = list_bounded_directory(root)
+        except OSError:
+            return
+        for entry in entries:
+            if (
+                not entry.is_dir()
+                or entry.name == current_name
+                or entry.name.startswith(f"{current_name}.")
+                or entry.name.startswith(f"{current_name}-")
+            ):
+                continue
+            if not re.fullmatch(r"\d+(?:\.\d+){1,4}(?:[-._][0-9A-Za-z.-]+)?", entry.name):
+                continue
+            delete_within(root, entry)
+
+
+__all__ = ["RuntimePaths"]

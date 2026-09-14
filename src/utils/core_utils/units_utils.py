@@ -1,0 +1,41 @@
+"""
+單位換算工具模組
+提供共用的位元組（bytes）單位換算與格式化功能
+"""
+
+from __future__ import annotations
+
+
+def bytes_to_mb(size: int | float) -> float:
+    """
+    將位元組數轉換為 MiB
+
+    Args:
+        size: 位元組數
+
+    Returns:
+        轉換後的 MiB 數
+    """
+    return float(size) / (1024 * 1024)
+
+
+def format_bytes(size: int) -> str:
+    """
+    將位元組數格式化為適合顯示的二進位單位文字
+
+    Args:
+        size: 位元組數
+
+    Returns:
+        格式化後的單位文字
+    """
+    size = max(0, int(size))
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024:
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TiB"
+
+
+__all__ = ["bytes_to_mb", "format_bytes"]
