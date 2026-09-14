@@ -67,7 +67,8 @@ def parse_player_presence_event(line: str) -> tuple[str, bool] | None:
         玩家名稱與是否加入，無法解析時回傳 None
     """
     clean = clean_text(line)
-    message = clean.rsplit("]:", 1)[-1].strip() if "]:" in clean else clean
+    _, sep, tail = clean.rpartition("]:")
+    message = tail.strip() if sep else clean
     match_join = _PLAYER_JOIN_PATTERN.search(message)
     if match_join:
         return match_join.group(1), True

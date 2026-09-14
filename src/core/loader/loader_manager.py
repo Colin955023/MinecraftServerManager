@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from defusedxml import ElementTree as ET
-from packaging.version import Version
 
 from src.models import ProgressEvent
 from src.utils import (
+    VERSION_ZERO,
     CancellationToken,
     HashUtils,
     HTTPClient,
@@ -43,7 +43,6 @@ from .loader_adapters import (
 from .loader_installer import run_installer_process
 
 logger = get_logger().bind(component="LoaderManager")
-_VERSION_FALLBACK = Version("0.0.0")
 
 
 class LoaderManager:
@@ -289,12 +288,12 @@ class LoaderManager:
                 mc_version: sorted(
                     versions,
                     key=lambda full: (
-                        parse_version_safe(full.partition("-")[2], fallback=_VERSION_FALLBACK)
+                        parse_version_safe(full.partition("-")[2], fallback=VERSION_ZERO)
                         if "-" in full
                         else (
-                            parse_version_safe(full, fallback=_VERSION_FALLBACK)
+                            parse_version_safe(full, fallback=VERSION_ZERO)
                             if parse_fallback_full_version
-                            else _VERSION_FALLBACK
+                            else VERSION_ZERO
                         ),
                         full,
                     ),

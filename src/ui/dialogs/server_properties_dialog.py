@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CheckBox,
+    ComboBox,
     LineEdit,
     Pivot,
     PopUpAniStackedWidget,
@@ -28,7 +29,6 @@ from src.models import ServerConfig
 from src.ui import (
     Colors,
     ModalMSFluentWindow,
-    ScrollableComboBox,
     Sizes,
     Spacing,
     TextState,
@@ -190,7 +190,7 @@ class ServerPropertiesDialog(ModalMSFluentWindow):
             var.trace_add(_on_var_changed)
 
         elif prop_name in self.CHOICE_PROPS:
-            widget = ScrollableComboBox(parent)
+            widget = ComboBox(parent)
             items = list(self.CHOICE_PROPS[prop_name])
             widget.addItems(items)
 

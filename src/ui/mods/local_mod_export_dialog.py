@@ -107,7 +107,7 @@ class LocalModExportDialog(ModalMSFluentWindow):
 
         save_btn = PrimaryPushButton("儲存到檔案", btn_frame)
         save_btn.clicked.connect(save_export)
-        save_btn.setMinimumWidth(Sizes.MOD_EXPORT_SAVE_BUTTON_WIDTH)
+        save_btn.setMinimumWidth(Sizes.DIALOG_BUTTON_WIDTH)
         save_btn.setFixedHeight(Sizes.BUTTON_HEIGHT_LARGE)
         btn_layout.addWidget(save_btn)
 

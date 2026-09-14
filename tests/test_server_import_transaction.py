@@ -161,6 +161,20 @@ def test_zip_import_flattens_single_wrapper_without_modifying_archive(tmp_path: 
     assert archive.read_bytes() == original_archive
 
 
+def test_zip_import_accepts_loader_script_without_root_jar(tmp_path: Path) -> None:
+    archive = tmp_path / "neoforge.zip"
+    with zipfile.ZipFile(archive, "w") as payload:
+        payload.writestr("run.bat", "java @user_jvm_args.txt @libraries/net/neoforged/neoforge/21.1.0/win_args.txt\n")
+        payload.writestr("user_jvm_args.txt", "-Xmx2G\n")
+        payload.writestr("libraries/net/neoforged/neoforge/21.1.0/win_args.txt", "-cp libraries\n")
+        payload.writestr("eula.txt", "eula=true\n")
+
+    inspection = ServerImportService(ServerCRUD(str(tmp_path / "servers"))).inspect(archive, "neoforge")
+
+    assert inspection.committable is True
+    assert inspection.server.launch_target.kind == "script"
+
+
 def test_conflict_type_distinguishes_disk_config_and_both(tmp_path: Path) -> None:
     root = tmp_path / "servers"
     manager = ServerCRUD(str(root))
@@ -268,6 +282,25 @@ def test_in_place_redetect_restores_config_and_managed_script_when_persistence_f
     assert managed.read_bytes() == b"original-managed-script"
     assert not (server_path / ".msm-server-import.json").exists()
     assert not (server_path / ".msm-start-server.backup").exists()
+
+
+def test_in_place_migration_restores_properties_when_cancelled(tmp_path: Path) -> None:
+    root = tmp_path / "servers"
+    server_path = root / "existing"
+    _write_server(server_path)
+    props_file = server_path / "server.properties"
+    original = "gamemode=1\n"
+    props_file.write_text(original, encoding="utf-8")
+    service = ServerImportService(ServerCRUD(str(root)))
+    inspection = service.inspect(server_path, "existing")
+    checks = iter((False, True))
+
+    result = service.execute(inspection, apply_properties_migration=True, cancel_check=lambda: next(checks))
+
+    assert result.status == "cancelled"
+    assert result.cleanup_complete is True
+    assert props_file.read_text(encoding="utf-8") == original
+    assert not (server_path / "server.properties.backup").exists()
 
 
 def test_batch_reports_completed_and_skipped_items_independently(tmp_path: Path) -> None:

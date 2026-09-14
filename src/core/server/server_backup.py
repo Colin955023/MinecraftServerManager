@@ -503,6 +503,9 @@ class ServerBackupManager:
             raise OSError("備份目錄不是安全的一般資料夾")
         if backup_dir == server_path or is_path_within(server_path, backup_dir, strict=False):
             raise OSError("備份目錄不得位於伺服器資料夾內")
+        servers_root = resolve_stable_directory(self.server_crud.servers_root)
+        if backup_dir == servers_root:
+            raise OSError("備份目錄不得為伺服器根目錄")
         return backup_dir
 
     @staticmethod

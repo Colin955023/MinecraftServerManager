@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import shutil
 import threading
 from contextlib import suppress
 from pathlib import Path
@@ -141,7 +142,7 @@ class SystemUtils:
         Returns:
             可用空間的位元組數
         """
-        return int(psutil.disk_usage(str(path)).free)
+        return int(shutil.disk_usage(str(path)).free)
 
     @staticmethod
     def get_process_name(pid: int) -> str:

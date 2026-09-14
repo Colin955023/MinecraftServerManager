@@ -616,15 +616,7 @@ class ModManagementQueueOps:
             if reminder:
                 report_text = f"{report_text}\n\n{reminder}"
 
-            if hasattr(summary_box, "setReadOnly"):
-                summary_box.setReadOnly(False)
-                if hasattr(summary_box, "clear"):
-                    summary_box.clear()
-                if hasattr(summary_box, "insertPlainText"):
-                    summary_box.insertPlainText(report_text)
-                elif hasattr(summary_box, "setText"):
-                    summary_box.setText(report_text)
-                summary_box.setReadOnly(True)
+            summary_box.setPlainText(report_text)
 
             install_button.setEnabled(report is None or not bool(getattr(report, "hard_errors", [])))
 

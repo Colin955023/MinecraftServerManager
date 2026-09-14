@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,9 +51,13 @@ def read_server_output_history(
     lines = text.splitlines()
     if start > 0 and lines:
         lines = lines[1:]
-    compact_lines = [line for line in lines if line.strip()]
-    truncated = start > 0 or len(compact_lines) > bounded_lines
-    return ServerOutputHistory(lines=tuple(compact_lines[-bounded_lines:]), truncated=truncated)
+    compact_iter = (line for line in lines if line.strip())
+    recent_lines = deque(compact_iter, maxlen=bounded_lines + 1)
+    has_more = len(recent_lines) > bounded_lines
+    if has_more:
+        recent_lines.popleft()
+    truncated = start > 0 or has_more
+    return ServerOutputHistory(lines=tuple(recent_lines), truncated=truncated)
 
 
 __all__ = ["ServerOutputHistory", "read_server_output_history"]

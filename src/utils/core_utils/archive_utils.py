@@ -392,9 +392,6 @@ def safe_extract_zip(
     dest_dir = resolve_stable_directory(dest_dir, create=True)
     with open_bounded_zip(zip_path, max_members=max_members, max_archive_bytes=max_archive_bytes) as archive:
         members = archive.infolist()
-        if max_members is not None and len(members) > max_members:
-            raise ArchiveSecurityError("壓縮檔成員數量超過安全上限")
-
         total_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
         if max_total_uncompressed_bytes is not None and total_bytes > max_total_uncompressed_bytes:
             raise ArchiveSecurityError("壓縮檔解壓後大小超過安全上限")

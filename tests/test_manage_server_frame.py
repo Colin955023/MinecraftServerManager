@@ -25,6 +25,11 @@ class _DummyFrame:
         self.server_runtime: Any = None
         self.action_buttons: dict[str, Any] = {}
         self.info_label: Any = None
+        self._get_selected_server_config: Any = None
+        self.window: Any = None
+        self.refresh_servers: Any = None
+        self.scope: Any = None
+        self.server_backup: Any = None
 
     def _show_existing_monitor_window(self, win, bring_to_front=True):
         target = getattr(win, "window", win)
@@ -510,3 +515,188 @@ def test_manage_server_frame_update_selection_disables_restore_when_running() ->
     assert delete_btn.enabled is True
     assert start_stop_btn.enabled is True
     assert start_stop_btn.text == "🚀 啟動"
+
+
+def test_edit_backup_path_saves_valid_directory(tmp_path: Path, monkeypatch) -> None:
+    """
+    驗證修改備份路徑在選擇合法外部目錄時可成功儲存
+    """
+    servers_root = tmp_path / "servers"
+    servers_root.mkdir()
+    server_dir = servers_root / "Alpha"
+    server_dir.mkdir()
+    custom_backup_dir = tmp_path / "my_backups"
+    custom_backup_dir.mkdir()
+
+    config = ServerConfig(
+        name="Alpha",
+        minecraft_version="1.21.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+        backup_path="",
+    )
+
+    committed_changes = []
+    messages = []
+    refreshed = []
+
+    frame = _DummyFrame()
+    frame.selected_server = "Alpha"
+    frame._get_selected_server_config = lambda: config
+    frame.window = lambda: None
+    frame.refresh_servers = lambda: refreshed.append(True)
+
+    def mock_commit(cs: Any, **_kwargs: Any) -> Any:
+        committed_changes.append(cs)
+        return SimpleNamespace(success=True)
+
+    frame.server_crud = SimpleNamespace(
+        snapshot=lambda: _snapshot(config),
+        servers_root=servers_root,
+        commit=mock_commit,
+    )
+
+    from src.ui import UIUtils
+
+    monkeypatch.setattr(UIUtils, "get_existing_directory", lambda *_args, **_kwargs: str(custom_backup_dir))
+    monkeypatch.setattr(UIUtils, "show_message", lambda *args, **_kwargs: messages.append(args))
+
+    ManageServerFrame.edit_backup_path(cast(Any, frame))
+
+    assert len(committed_changes) == 1
+    assert config.backup_path == str(custom_backup_dir)
+    assert len(refreshed) == 1
+    assert any("設定成功" in str(m) for m in messages)
+
+
+def test_edit_backup_path_rejects_servers_root_and_server_dir(tmp_path: Path, monkeypatch) -> None:
+    """
+    驗證修改備份路徑若選在伺服器目錄或根目錄會被安全拒絕
+    """
+    servers_root = tmp_path / "servers"
+    servers_root.mkdir()
+    server_dir = servers_root / "Alpha"
+    server_dir.mkdir()
+
+    config = ServerConfig(
+        name="Alpha",
+        minecraft_version="1.21.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+        backup_path="",
+    )
+
+    committed_changes = []
+    messages = []
+
+    frame = _DummyFrame()
+    frame.selected_server = "Alpha"
+    frame._get_selected_server_config = lambda: config
+    frame.window = lambda: None
+    frame.refresh_servers = lambda: None
+
+    def mock_commit_rejected(cs: Any, **_kwargs: Any) -> Any:
+        committed_changes.append(cs)
+        return SimpleNamespace(success=True)
+
+    frame.server_crud = SimpleNamespace(
+        snapshot=lambda: _snapshot(config),
+        servers_root=servers_root,
+        commit=mock_commit_rejected,
+    )
+
+    from src.ui import UIUtils
+
+    monkeypatch.setattr(UIUtils, "get_existing_directory", lambda *_args, **_kwargs: str(server_dir))
+    monkeypatch.setattr(UIUtils, "show_message", lambda *args, **_kwargs: messages.append(args))
+
+    ManageServerFrame.edit_backup_path(cast(Any, frame))
+    assert len(committed_changes) == 0
+    assert any("備份資料夾不得位於伺服器資料夾內" in str(m) for m in messages)
+
+    messages.clear()
+    monkeypatch.setattr(UIUtils, "get_existing_directory", lambda *_args, **_kwargs: str(servers_root))
+    ManageServerFrame.edit_backup_path(cast(Any, frame))
+    assert len(committed_changes) == 0
+    assert any("備份資料夾不得為伺服器根目錄" in str(m) for m in messages)
+
+
+def test_delete_server_single_dialog_decision_handling(tmp_path: Path, monkeypatch) -> None:
+    """
+    驗證刪除伺服器單一對話框對取消、僅刪除伺服器與連備份刪除的決策分流
+    """
+    servers_root = tmp_path / "servers"
+    servers_root.mkdir()
+    server_dir = servers_root / "Alpha"
+    server_dir.mkdir()
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+
+    config = ServerConfig(
+        name="Alpha",
+        minecraft_version="1.21.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+        backup_path=str(backup_dir),
+    )
+
+    submitted_tasks = []
+
+    class _FakeScope:
+        def submit(self, task, on_done=None, key=None, critical=False):
+            _ = (on_done, key, critical)
+            submitted_tasks.append(task)
+
+    frame = _DummyFrame()
+    frame.selected_server = "Alpha"
+    frame.window = lambda: None
+    frame.scope = _FakeScope()
+    frame.server_runtime = SimpleNamespace(observe=lambda _name: SimpleNamespace(is_running=False))
+    frame.server_crud = SimpleNamespace(
+        snapshot=lambda: _snapshot(config),
+        servers_root=servers_root,
+    )
+    frame.server_backup = SimpleNamespace(
+        list_backups=lambda _name: [{"filename": "Alpha_1.zip", "path": str(backup_dir / "Alpha_1.zip")}],
+        delete_backups=lambda _name, _dir: True,
+    )
+
+    from src.ui import UIUtils
+
+    # 1. 測試 cancel
+    monkeypatch.setattr(UIUtils, "ask_delete_server", lambda *_args, **_kwargs: "cancel")
+    ManageServerFrame.delete_server(cast(Any, frame))
+    assert len(submitted_tasks) == 0
+
+    # 2. 測試 server_only
+    monkeypatch.setattr(UIUtils, "ask_delete_server", lambda *_args, **_kwargs: "server_only")
+    frame.server_crud.delete_server_result = lambda _name, **_kwargs: SimpleNamespace(success=True)
+    ManageServerFrame.delete_server(cast(Any, frame))
+    assert len(submitted_tasks) == 1
+    delete_task = submitted_tasks.pop()
+    res, backups_deleted = delete_task()
+    assert res.success is True
+    assert backups_deleted is True  # delete_backups is False, backups_deleted = not delete_backups = True
+
+    # 3. 測試 all
+    backup_delete_called = []
+
+    def mock_delete_backups(_name: Any, _dir: Any) -> bool:
+        backup_delete_called.append(True)
+        return True
+
+    frame.server_backup.delete_backups = mock_delete_backups
+    monkeypatch.setattr(UIUtils, "ask_delete_server", lambda *_args, **_kwargs: "all")
+    ManageServerFrame.delete_server(cast(Any, frame))
+    assert len(submitted_tasks) == 1
+    delete_task = submitted_tasks.pop()
+    res, backups_deleted = delete_task()
+    assert res.success is True
+    assert backups_deleted is True
+    assert len(backup_delete_called) == 1

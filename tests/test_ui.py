@@ -681,3 +681,92 @@ def test_apply_window_icon_updates_qt_window_and_fluent_title_bar() -> None:
     assert not window.windowIcon().isNull()
     assert received and not received[0].isNull()
     window.close()
+
+
+def test_delete_server_dialog_options_and_decisions() -> None:
+    """
+    驗證 DeleteServerDialog 在有備份與無備份情境下的介面元件與決策狀態
+    """
+    from src.ui import DeleteServerDialog, ensure_application
+
+    ensure_application()
+
+    # 有備份情境
+    dialog_with_backups = DeleteServerDialog("TestServer", 3)
+    assert dialog_with_backups.cancel_btn.text() == "取消"
+    assert dialog_with_backups.no_btn.text() == "否（只刪除伺服器）"
+    assert dialog_with_backups.yes_btn.text() == "是（連備份一併刪除）"
+    assert "3 個外部備份檔案" in dialog_with_backups.content_label.text()
+
+    dialog_with_backups._choose_all()
+    assert dialog_with_backups.decision == "all"
+    dialog_with_backups._choose_server_only()
+    assert dialog_with_backups.decision == "server_only"
+    dialog_with_backups._choose_cancel()
+    assert dialog_with_backups.decision == "cancel"
+    dialog_with_backups.close()
+
+    # 無備份情境
+    dialog_no_backups = DeleteServerDialog("TestServer", 0)
+    assert dialog_no_backups.cancel_btn.text() == "取消"
+    assert dialog_no_backups.confirm_btn.text() == "確定刪除"
+    assert "外部備份檔案" not in dialog_no_backups.content_label.text()
+
+    dialog_no_backups._choose_server_only()
+    assert dialog_no_backups.decision == "server_only"
+    dialog_no_backups._choose_cancel()
+    assert dialog_no_backups.decision == "cancel"
+    dialog_no_backups.close()
+
+
+def test_server_memory_dialog_shows_and_persists_backup_path(tmp_path: Path, monkeypatch) -> None:
+    """
+    驗證 ServerMemoryDialog 介面包含備份路徑欄位並在儲存時寫入設定
+    """
+
+    from src.core import ServerCRUD
+    from src.models import ServerConfig
+    from src.ui import ServerMemoryDialog, WorkOutcome, ensure_application
+
+    ensure_application()
+    servers_root = tmp_path / "servers_root"
+    servers_root.mkdir()
+    server_dir = servers_root / "Demo"
+    server_dir.mkdir()
+    (server_dir / "start_server.bat").write_text("java -Xmx2048M -jar server.jar\n", encoding="utf-8")
+    backup_dir = tmp_path / "my_backups"
+    backup_dir.mkdir()
+
+    crud = ServerCRUD(str(servers_root))
+    config = ServerConfig(
+        name="Demo",
+        minecraft_version="1.20.1",
+        loader_type="vanilla",
+        loader_version="",
+        memory_max_mb=2048,
+        path=str(server_dir),
+        backup_path="",
+    )
+    _register(crud, config)
+
+    dialog = ServerMemoryDialog(config, crud)
+    assert hasattr(dialog, "backup_path_input")
+    assert dialog.backup_path_input.text() == ""
+
+    # 同步執行以避免背景執行緒與測試目錄清理競爭
+    def _sync_submit(task, on_done=None, **_kwargs):
+        res = task()
+        if on_done:
+            on_done(WorkOutcome.succeeded(res))
+
+    dialog.scope.submit = _sync_submit
+
+    dialog.backup_path_input.setText(str(backup_dir))
+    monkeypatch.setattr("src.ui.UIUtils.show_message", lambda *_args, **_kwargs: None)
+
+    dialog._save_memory_settings()
+
+    updated = crud.snapshot().get("Demo")
+    assert updated is not None
+    assert updated.backup_path == str(backup_dir)
+    dialog.close()

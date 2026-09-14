@@ -11,7 +11,7 @@ from src.utils import SAFE_TEXT_FILE_MAX_BYTES
 
 def test_plan_migration_renames_texture_pack() -> None:
     props = {"texture-pack": "legacy_pack.zip", "server-port": "25565"}
-    plan = ServerPropertiesMigrationService.plan_migration(props)
+    plan = ServerPropertiesMigrationService.plan_migration(props, "1.21.1")
 
     assert plan.needs_migration is True
     assert "texture-pack" not in plan.migrated_properties
@@ -24,7 +24,7 @@ def test_plan_migration_removes_duplicate_texture_pack_when_resource_pack_exists
         "texture-pack": "old.zip",
         "resource-pack": "new.zip",
     }
-    plan = ServerPropertiesMigrationService.plan_migration(props)
+    plan = ServerPropertiesMigrationService.plan_migration(props, "1.21.1")
 
     assert plan.needs_migration is True
     assert "texture-pack" not in plan.migrated_properties
@@ -34,7 +34,7 @@ def test_plan_migration_removes_duplicate_texture_pack_when_resource_pack_exists
 
 def test_plan_migration_renames_hellworld() -> None:
     props = {"hellworld": "false"}
-    plan = ServerPropertiesMigrationService.plan_migration(props)
+    plan = ServerPropertiesMigrationService.plan_migration(props, "1.21.1")
 
     assert plan.needs_migration is True
     assert "hellworld" not in plan.migrated_properties
@@ -49,7 +49,7 @@ def test_plan_migration_converts_numeric_gamemode() -> None:
         ("3", "spectator"),
     ]
     for raw, expected in cases:
-        plan = ServerPropertiesMigrationService.plan_migration({"gamemode": raw})
+        plan = ServerPropertiesMigrationService.plan_migration({"gamemode": raw}, "1.21.1")
         assert plan.needs_migration is True
         assert plan.migrated_properties["gamemode"] == expected
 
@@ -62,7 +62,7 @@ def test_plan_migration_converts_numeric_difficulty() -> None:
         ("3", "hard"),
     ]
     for raw, expected in cases:
-        plan = ServerPropertiesMigrationService.plan_migration({"difficulty": raw})
+        plan = ServerPropertiesMigrationService.plan_migration({"difficulty": raw}, "1.21.1")
         assert plan.needs_migration is True
         assert plan.migrated_properties["difficulty"] == expected
 
@@ -77,7 +77,7 @@ def test_plan_migration_converts_level_type() -> None:
         ("amplified", "minecraft:amplified"),
     ]
     for raw, expected in cases:
-        plan = ServerPropertiesMigrationService.plan_migration({"level-type": raw})
+        plan = ServerPropertiesMigrationService.plan_migration({"level-type": raw}, "1.19")
         assert plan.needs_migration is True
         assert plan.migrated_properties["level-type"] == expected
 
@@ -89,7 +89,7 @@ def test_plan_migration_removes_deprecated_keys() -> None:
         "announce-player-achievements": "true",
         "motd": "Test Server",
     }
-    plan = ServerPropertiesMigrationService.plan_migration(props)
+    plan = ServerPropertiesMigrationService.plan_migration(props, "1.21.1")
 
     assert plan.needs_migration is True
     assert "max-build-height" not in plan.migrated_properties
@@ -107,7 +107,7 @@ def test_plan_migration_no_changes_needed() -> None:
         "allow-nether": "true",
         "resource-pack": "https://example.invalid/pack.zip",
     }
-    plan = ServerPropertiesMigrationService.plan_migration(props)
+    plan = ServerPropertiesMigrationService.plan_migration(props, "1.21.1")
 
     assert plan.needs_migration is False
     assert len(plan.changes) == 0
@@ -120,7 +120,7 @@ def test_inspect_source_and_apply_migration_directory(tmp_path: Path) -> None:
     props_file = server_dir / "server.properties"
     props_file.write_text("gamemode=1\ndifficulty=2\nlevel-type=default\nmax-build-height=256\n", encoding="utf-8")
 
-    plan = ServerPropertiesMigrationService.inspect_source(server_dir)
+    plan = ServerPropertiesMigrationService.inspect_source(server_dir, "1.21.1")
     assert plan is not None
     assert plan.needs_migration is True
     assert len(plan.changes) == 4
@@ -150,7 +150,7 @@ def test_inspect_source_zip(tmp_path: Path) -> None:
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("server.properties", "gamemode=0\ntexture-pack=pack.zip\n")
 
-    plan = ServerPropertiesMigrationService.inspect_source(zip_path)
+    plan = ServerPropertiesMigrationService.inspect_source(zip_path, "1.21.1")
     assert plan is not None
     assert plan.needs_migration is True
     assert plan.migrated_properties["gamemode"] == "survival"
@@ -162,4 +162,11 @@ def test_inspect_source_zip_ignores_oversized_server_properties(tmp_path: Path) 
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("server.properties", b"x" * (SAFE_TEXT_FILE_MAX_BYTES + 1))
 
-    assert ServerPropertiesMigrationService.inspect_source(zip_path) is None
+    assert ServerPropertiesMigrationService.inspect_source(zip_path, "1.21.1") is None
+
+
+def test_plan_migration_preserves_legacy_level_type() -> None:
+    plan = ServerPropertiesMigrationService.plan_migration({"level-type": "flat"}, "1.18.2")
+
+    assert plan.needs_migration is False
+    assert plan.migrated_properties["level-type"] == "flat"

@@ -56,6 +56,7 @@ _CONSOLE_MAX_BUFFER_LINES = 2000
 _CONSOLE_MAX_BUFFER_CHARS = 2 * 1024 * 1024
 _CONSOLE_MAX_LINE_CHARS = 64 * 1024
 _CONSOLE_MAX_DOCUMENT_BLOCKS = 5000
+_STOP_COMMANDS: frozenset[str] = frozenset({"stop", "end", "exit"})
 
 
 class ServerMonitorWindow(MSFluentWindow):
@@ -598,7 +599,7 @@ class ServerMonitorWindow(MSFluentWindow):
         success = self.server_runtime.send_command(self.server_name, command)
         if success:
             self.add_console_message(f"✅ 指令已發送: {command}")
-            if command.lower() in ["stop", "end", "exit"]:
+            if command.lower() in _STOP_COMMANDS:
                 self._schedule_window_job("_command_status_job", 1000, self.update_status)
         else:
             self.add_console_message(f"❌ 指令發送失敗: {command}")

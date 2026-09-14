@@ -8,11 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from packaging.version import Version
+from src.utils import VERSION_ZERO, is_fabric_compatible_version, list_bounded_directory, parse_version_safe
 
-from src.utils import is_fabric_compatible_version, list_bounded_directory, parse_version_safe
-
-_VERSION_FALLBACK = Version("0.0.0")
 _UNSTABLE_VERSION_PATTERN = re.compile(r"pre|prerelease|beta|alpha|snapshot|rc")
 
 
@@ -109,7 +106,7 @@ def filter_quilt_versions(items: list[dict]) -> list[dict]:
     return sorted(
         stable,
         key=lambda item: (
-            parse_version_safe(str(item.get("version", "")), fallback=_VERSION_FALLBACK),
+            parse_version_safe(str(item.get("version", "")), fallback=VERSION_ZERO),
             int(item.get("build", 0) or 0),
         ),
         reverse=True,

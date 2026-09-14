@@ -187,4 +187,117 @@ class MessageDialog(ModalMSFluentWindow):
             self.yesButton.setText("確定")
 
 
-__all__ = ["MessageDialog", "ModalMSFluentWindow"]
+class DeleteServerDialog(ModalMSFluentWindow):
+    """
+    刪除伺服器確認對話框
+    整合伺服器檔案刪除確認與外部備份清理選項
+    """
+
+    def __init__(
+        self,
+        server_name: str,
+        backup_count: int,
+        parent: Any = None,
+    ) -> None:
+        super().__init__(parent, is_modal=True, show_buttons=False)
+        self.server_name = server_name
+        self.backup_count = backup_count
+        self.decision: str = "cancel"
+
+        self.setWindowTitle("確認刪除伺服器")
+        self.setFixedSize(540, 290 if backup_count > 0 else 240)
+
+        if hasattr(self, "titleBar"):
+            if hasattr(self.titleBar, "minBtn"):
+                self.titleBar.minBtn.hide()
+            if hasattr(self.titleBar, "maxBtn"):
+                self.titleBar.maxBtn.hide()
+
+        self.title_label = TitleLabel("🗑️ 確認刪除伺服器", self.widget)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.viewLayout.addWidget(self.title_label)
+
+        if backup_count > 0:
+            msg = (
+                f"確定要刪除伺服器「{server_name}」嗎？\n\n"
+                "⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n"
+                f"偵測到此伺服器有 {backup_count} 個外部備份檔案，是否一併永久刪除？"
+            )
+        else:
+            msg = f"確定要刪除伺服器「{server_name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！"
+
+        self.content_label = BodyLabel(msg, self.widget)
+        self.content_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.content_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.content_label.setWordWrap(True)
+        self.content_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.viewLayout.addWidget(self.content_label, 1)
+
+        custom_buttons = QWidget(self.widget)
+        btn_layout = QHBoxLayout(custom_buttons)
+        btn_layout.setContentsMargins(24, 8, 24, 20)
+        btn_layout.setSpacing(12)
+        btn_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        btn_font = FontManager.get_font(size=FontSize.NORMAL_PLUS, weight="bold")
+
+        if backup_count > 0:
+            self.cancel_btn = PushButton("取消", custom_buttons)
+            self.no_btn = PushButton("否（只刪除伺服器）", custom_buttons)
+            self.yes_btn = PrimaryPushButton("是（連備份一併刪除）", custom_buttons)
+
+            for btn in (self.cancel_btn, self.no_btn, self.yes_btn):
+                btn.setMinimumSize(Sizes.DIALOG_BUTTON_WIDTH, Sizes.DIALOG_BUTTON_HEIGHT)
+                btn.setFont(btn_font)
+
+            btn_layout.addStretch(1)
+            btn_layout.addWidget(self.cancel_btn)
+            btn_layout.addWidget(self.no_btn)
+            btn_layout.addWidget(self.yes_btn)
+            btn_layout.addStretch(1)
+
+            self.cancel_btn.clicked.connect(self._choose_cancel)
+            self.no_btn.clicked.connect(self._choose_server_only)
+            self.yes_btn.clicked.connect(self._choose_all)
+        else:
+            self.cancel_btn = PushButton("取消", custom_buttons)
+            self.confirm_btn = PrimaryPushButton("確定刪除", custom_buttons)
+
+            for btn in (self.cancel_btn, self.confirm_btn):
+                btn.setMinimumSize(Sizes.DIALOG_BUTTON_WIDTH, Sizes.DIALOG_BUTTON_HEIGHT)
+                btn.setFont(btn_font)
+
+            btn_layout.addStretch(1)
+            btn_layout.addWidget(self.cancel_btn)
+            btn_layout.addWidget(self.confirm_btn)
+            btn_layout.addStretch(1)
+
+            self.cancel_btn.clicked.connect(self._choose_cancel)
+            self.confirm_btn.clicked.connect(self._choose_server_only)
+
+        self.windowLayout.addWidget(custom_buttons)
+
+    def _choose_all(self) -> None:
+        self.decision = "all"
+        self.accept()
+
+    def _choose_server_only(self) -> None:
+        self.decision = "server_only"
+        self.accept()
+
+    def _choose_cancel(self) -> None:
+        self.decision = "cancel"
+        self.reject()
+
+    def exec_decision(self) -> str:
+        """
+        顯示視窗並回傳使用者選擇的刪除決策
+
+        Returns:
+            all 代表連備份一併刪除，server_only 代表只刪除伺服器，cancel 代表取消
+        """
+        self.exec()
+        return self.decision
+
+
+__all__ = ["DeleteServerDialog", "MessageDialog", "ModalMSFluentWindow"]

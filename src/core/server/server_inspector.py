@@ -18,6 +18,7 @@ from src.utils import (
     ARCHIVE_METADATA_MAX_BYTES,
     SAFE_DIRECTORY_MAX_FILES,
     SAFE_TEXT_FILE_MAX_BYTES,
+    VERSION_ZERO,
     HashUtils,
     MemoryUtils,
     ServerCommands,
@@ -41,7 +42,6 @@ FABRIC_JAR_NAMES = ("fabric-server-launch.jar", "fabric-server-launcher.jar")
 QUILT_JAR_NAMES = ("quilt-server-launch.jar", "quilt-server-launcher.jar")
 FORGE_LIBRARY_PATH = "libraries/net/minecraftforge/forge"
 NEOFORGE_LIBRARY_PATH = "libraries/net/neoforged/neoforge"
-_VERSION_FALLBACK = Version("0")
 QUILT_LIBRARY_PATH = "libraries/org/quiltmc"
 FABRIC_LIBRARY_PATH = "libraries/net/fabricmc"
 SERVER_JAR_CANDIDATES = (
@@ -368,7 +368,7 @@ class _InspectionEngine:
                 setattr(config, attr_name, value)
 
         def version_directory_key(path: Path) -> tuple[Version, str]:
-            return (parse_version_safe(path.name, fallback=_VERSION_FALLBACK), path.name.casefold())
+            return (parse_version_safe(path.name, fallback=VERSION_ZERO), path.name.casefold())
 
         def first_match(content: str, patterns: list[str]) -> str | None:
             for pat in patterns:
@@ -824,12 +824,9 @@ class ServerInspector:
                 if item.name.startswith(".msm-"):
                     continue
                 stat = item.stat(follow_symlinks=False)
-                digest.update(item.name.encode("utf-8", errors="surrogatepass"))
-                digest.update(b"\0")
-                digest.update(str(stat.st_size).encode("ascii"))
-                digest.update(b":")
-                digest.update(str(stat.st_mtime_ns).encode("ascii"))
-                digest.update(b"\n")
+                digest.update(
+                    f"{item.name}\0{stat.st_size}:{stat.st_mtime_ns}\n".encode("utf-8", errors="surrogatepass")
+                )
         except OSError as e:
             logger.warning(f"建立伺服器狀態 revision 失敗: {e}")
             return ""
@@ -849,12 +846,11 @@ class ServerInspector:
                     entry = root_path / entry_name
                     relative = entry.relative_to(server_path).as_posix()
                     metadata = entry.stat(follow_symlinks=False)
-                    digest.update(relative.encode("utf-8", errors="surrogatepass"))
-                    digest.update(b"\0")
-                    digest.update(str(metadata.st_size).encode("ascii"))
-                    digest.update(b":")
-                    digest.update(str(metadata.st_mtime_ns).encode("ascii"))
-                    digest.update(b"\n")
+                    digest.update(
+                        f"{relative}\0{metadata.st_size}:{metadata.st_mtime_ns}\n".encode(
+                            "utf-8", errors="surrogatepass"
+                        )
+                    )
         except OSError as e:
             logger.warning(f"建立伺服器檢查 revision 失敗: {e}")
             return ""
@@ -881,12 +877,11 @@ class ServerInspector:
                 metadata = candidate.stat(follow_symlinks=False)
                 if is_reparse_point(candidate) or not stat.S_ISREG(metadata.st_mode):
                     continue
-                digest.update(relative_name.casefold().encode("utf-8", errors="surrogatepass"))
-                digest.update(b"\0")
-                digest.update(str(metadata.st_size).encode("ascii"))
-                digest.update(b":")
-                digest.update(str(metadata.st_mtime_ns).encode("ascii"))
-                digest.update(b"\n")
+                digest.update(
+                    f"{relative_name.casefold()}\0{metadata.st_size}:{metadata.st_mtime_ns}\n".encode(
+                        "utf-8", errors="surrogatepass"
+                    )
+                )
             except FileNotFoundError:
                 continue
             except OSError as e:
@@ -895,7 +890,27 @@ class ServerInspector:
         return digest.hexdigest()
 
     @staticmethod
-    def _read_eula_state(eula_path: Path, *, allowed_root: Path | None = None) -> EulaState:
+    def parse_eula_text(content: str) -> EulaState:
+        """
+        解析 EULA 文字內容的同意狀態
+
+        Args:
+            content: eula.txt 的文字內容
+
+        Returns:
+            accepted 或 rejected
+        """
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            key, sep, value = line.partition("=")
+            if not sep or not key or key.startswith("#"):
+                continue
+            if key.strip().lower() == "eula":
+                return "accepted" if value.strip().lower() == "true" else "rejected"
+        return "rejected"
+
+    @classmethod
+    def _read_eula_state(cls, eula_path: Path, *, allowed_root: Path | None = None) -> EulaState:
         if not eula_path.exists():
             return "missing"
         content = read_text_file(
@@ -907,14 +922,7 @@ class ServerInspector:
         )
         if content is None:
             return "unreadable"
-        for raw_line in content.splitlines():
-            line = raw_line.strip()
-            key, sep, value = line.partition("=")
-            if not sep or not key or key.startswith("#"):
-                continue
-            if key.strip().lower() == "eula":
-                return "accepted" if value.strip().lower() == "true" else "rejected"
-        return "rejected"
+        return cls.parse_eula_text(content)
 
     @staticmethod
     def _startup_scripts(server_path: Path) -> tuple[Path, ...]:

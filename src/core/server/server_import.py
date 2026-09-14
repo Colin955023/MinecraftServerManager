@@ -360,6 +360,11 @@ class ServerImportService:
         previous = registry_snapshot.get(inspection.name)
         previous_script: bytes | None = None
         previous_script_existed = False
+        previous_properties: bytes | None = None
+        previous_properties_existed = False
+        previous_properties_backup: bytes | None = None
+        previous_properties_backup_existed = False
+        properties_changed = False
         phase = "validate"
         active = inspection
         try:
@@ -371,7 +376,13 @@ class ServerImportService:
             self._revalidate(inspection, previous)
             self._check_cancel(cancel_check)
             if inspection.source_kind == "in_place" and apply_properties_migration:
-                self._apply_properties_migration(work_path)
+                previous_properties_existed, previous_properties = self._read_optional_file(
+                    work_path / "server.properties"
+                )
+                previous_properties_backup_existed, previous_properties_backup = self._read_optional_file(
+                    work_path / "server.properties.backup"
+                )
+                properties_changed = self._apply_properties_migration(work_path, inspection.server.minecraft_version)
             if inspection.source_kind != "in_place":
                 phase = "materialize"
                 self._check_disk_space(inspection)
@@ -406,7 +417,7 @@ class ServerImportService:
                     self._validate_manifest_hashes(staging, inspection.manifest)
                 work_path = staging
                 if apply_properties_migration:
-                    self._apply_properties_migration(work_path)
+                    self._apply_properties_migration(work_path, inspection.server.minecraft_version)
                 active = self._inspect_directory(
                     work_path,
                     inspection.name,
@@ -495,6 +506,11 @@ class ServerImportService:
                 script_changed,
                 previous_script_existed,
                 previous_script,
+                properties_changed,
+                previous_properties_existed,
+                previous_properties,
+                previous_properties_backup_existed,
+                previous_properties_backup,
             )
             return ServerImportResult("cancelled", "使用者已取消匯入", inspection.name, cleanup_complete=cleanup)
         except FileExistsError as e:
@@ -507,6 +523,11 @@ class ServerImportService:
                 script_changed,
                 previous_script_existed,
                 previous_script,
+                properties_changed,
+                previous_properties_existed,
+                previous_properties,
+                previous_properties_backup_existed,
+                previous_properties_backup,
             )
             return ServerImportResult("skipped", str(e), inspection.name, cleanup_complete=cleanup)
         except Exception as e:
@@ -519,6 +540,11 @@ class ServerImportService:
                 script_changed,
                 previous_script_existed,
                 previous_script,
+                properties_changed,
+                previous_properties_existed,
+                previous_properties,
+                previous_properties_backup_existed,
+                previous_properties_backup,
             )
             diagnostic_id = self._record_diagnostic(inspection, phase, e)
             logger.exception(f"伺服器匯入交易失敗 [{diagnostic_id}]: {e}")
@@ -704,7 +730,7 @@ class ServerImportService:
         try:
             with open_bounded_zip(archive_path) as archive:
                 files = [info for info in archive.infolist() if not info.is_dir()]
-                parts = [Path(info.filename.replace("\\", "/")).parts for info in files]
+                parts = [info.filename.replace("\\", "/").strip("/").split("/") for info in files]
                 wrapper = (
                     parts[0][0] if parts and all(len(value) > 1 and value[0] == parts[0][0] for value in parts) else ""
                 )
@@ -728,7 +754,7 @@ class ServerImportService:
                 )
                 for pattern in patterns:
                     if match := re.search(pattern, combined, re.IGNORECASE):
-                        minecraft_version, loader_version = match.group(1), match.group(2)
+                        minecraft_version, loader_version = match.groups()
                         break
 
                 script_name = next(
@@ -768,8 +794,8 @@ class ServerImportService:
                     eula_info := entries.get("eula.txt")
                 ) is not None and eula_info.file_size <= SAFE_TEXT_FILE_MAX_BYTES:
                     eula_text = archive.read(eula_info).decode("utf-8", errors="replace")
-                    eula_state = "accepted" if re.search(r"(?im)^\s*eula\s*=\s*true\s*$", eula_text) else "rejected"
-                is_candidate = bool(jar_names and launch_target.value)
+                    eula_state = ServerInspector.parse_eula_text(eula_text)
+                is_candidate = bool(launch_target.value)
                 server_warnings = []
                 if minecraft_version == "unknown":
                     server_warnings.append("無法從 ZIP 檔名判斷 Minecraft 版本，匯入後會再次檢測")
@@ -1057,6 +1083,11 @@ class ServerImportService:
         script_changed: bool,
         previous_script_existed: bool,
         previous_script: bytes | None,
+        properties_changed: bool,
+        previous_properties_existed: bool,
+        previous_properties: bytes | None,
+        previous_properties_backup_existed: bool,
+        previous_properties_backup: bytes | None,
     ) -> bool:
         clean = True
         if registered:
@@ -1071,6 +1102,21 @@ class ServerImportService:
         if inspection.source_kind == "in_place":
             if script_changed:
                 clean = self._restore_script(inspection.final_path, previous_script_existed, previous_script) and clean
+            if properties_changed:
+                clean = (
+                    self._restore_optional_file(
+                        inspection.final_path / "server.properties", previous_properties_existed, previous_properties
+                    )
+                    and clean
+                )
+                clean = (
+                    self._restore_optional_file(
+                        inspection.final_path / "server.properties.backup",
+                        previous_properties_backup_existed,
+                        previous_properties_backup,
+                    )
+                    and clean
+                )
             self._remove_transaction_files(inspection.final_path)
         else:
             target = inspection.final_path if moved_to_final else staging
@@ -1088,6 +1134,22 @@ class ServerImportService:
         except OSError:
             return False
 
+    @staticmethod
+    def _read_optional_file(path: Path) -> tuple[bool, bytes | None]:
+        if not path.is_file():
+            return False, None
+        content = read_bytes_file(path, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
+        if content is None:
+            raise ValueError(f"交易檔案超過安全大小上限或不是一般檔案：{path.name}")
+        return True, content
+
+    @staticmethod
+    def _restore_optional_file(path: Path, existed: bool, content: bytes | None) -> bool:
+        try:
+            return atomic_write_bytes(path, content or b"") if existed else delete_within(path.parent, path)
+        except OSError:
+            return False
+
     def _remove_transaction_files(self, path: Path) -> None:
         for name in (self._MARKER_NAME, self._BACKUP_NAME):
             try:
@@ -1096,17 +1158,18 @@ class ServerImportService:
                 logger.warning(f"無法移除匯入交易檔案 {name}: {e}")
 
     @staticmethod
-    def _apply_properties_migration(work_path: Path) -> None:
+    def _apply_properties_migration(work_path: Path, minecraft_version: str) -> bool:
         """
         若存在 server.properties 且有遷移項目，套用遷移並建立備份
         """
-        plan = ServerPropertiesMigrationService.inspect_source(work_path)
+        plan = ServerPropertiesMigrationService.inspect_source(work_path, minecraft_version)
         if (
             plan is not None
             and plan.needs_migration
             and not ServerPropertiesMigrationService.apply_migration_to_directory(work_path, plan, create_backup=True)
         ):
             raise OperationError("無法套用 server.properties 遷移")
+        return plan is not None and plan.needs_migration
 
     @staticmethod
     def _emit(callback: ProgressCallback | None, percent: int, message: str) -> None:

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QAbstractItemView, QApplication, QHBoxLayout, QHea
 from qfluentwidgets import (
     Action,
     CardWidget,
+    ComboBox,
     PushButton,
     RoundMenu,
     SearchLineEdit,
@@ -24,7 +25,6 @@ from qfluentwidgets import (
 from src.models import ModStatus
 from src.ui import (
     Colors,
-    ScrollableComboBox,
     Sizes,
     Spacing,
     UIUtils,
@@ -364,7 +364,7 @@ class LocalModListPresenter:
         search_filter_layout.addWidget(search_entry)
 
         self.local_filter_var = ValueState("所有")
-        filter_combo = ScrollableComboBox(right_frame)
+        filter_combo = ComboBox(right_frame)
         filter_combo.addItems(["所有", "啟用", "停用"])
         filter_combo.currentTextChanged.connect(self.local_filter_var.set)
         self.local_filter_var.trace_add(self.apply_local_filter)
@@ -888,28 +888,14 @@ class LocalModListPresenter:
 
             total_items = tree.topLevelItemCount()
             selected_items_count = len(selected_items)
-
-            if selected_items_count == 0:
-                self.all_selected = False
-                try:
-                    if hasattr(self.select_all_btn, "setText"):
-                        self.select_all_btn.setText("☑️ 全選")
-                except Exception as e:
-                    logger.exception(f"更新全選按鈕文字失敗: {e}")
-            elif selected_items_count == total_items and total_items > 0:
-                self.all_selected = True
-                try:
-                    if hasattr(self.select_all_btn, "setText"):
-                        self.select_all_btn.setText("❌ 取消全選")
-                except Exception as e:
-                    logger.exception(f"更新全選按鈕文字失敗: {e}")
-            else:
-                self.all_selected = False
-                try:
-                    if hasattr(self.select_all_btn, "setText"):
-                        self.select_all_btn.setText("☑️ 全選")
-                except Exception as e:
-                    logger.exception(f"更新全選按鈕文字失敗: {e}")
+            is_all_selected = selected_items_count == total_items and total_items > 0
+            self.all_selected = is_all_selected
+            btn_text = "❌ 取消全選" if is_all_selected else "☑️ 全選"
+            try:
+                if hasattr(self.select_all_btn, "setText"):
+                    self.select_all_btn.setText(btn_text)
+            except Exception as e:
+                logger.exception(f"更新全選按鈕文字失敗: {e}")
         except Exception:
             logger.exception("處理選擇變化失敗")
 

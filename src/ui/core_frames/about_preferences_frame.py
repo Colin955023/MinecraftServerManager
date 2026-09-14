@@ -13,6 +13,7 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CheckBox,
+    ComboBox,
     HyperlinkLabel,
     PrimaryPushButton,
     PushButton,
@@ -26,7 +27,6 @@ from qfluentwidgets import (
 from src.ui import (
     BoolState,
     Colors,
-    ScrollableComboBox,
     Sizes,
     Spacing,
     TextState,
@@ -195,7 +195,7 @@ class AboutPreferencesFrame(QWidget):
     def apply_theme_styles(self) -> None:
         """套用主題樣式"""
         if hasattr(self, "vertical_separator") and self.vertical_separator:
-            self.vertical_separator.setStyleSheet(f"background-color: {resolve_color(Colors.BORDER_LIGHT)};")
+            self.vertical_separator.setStyleSheet(f"background-color: {resolve_color(Colors.BORDER)};")
         if hasattr(self, "version_lbl") and self.version_lbl:
             self.version_lbl.setStyleSheet(f"color: {resolve_color(Colors.TEXT_TERTIARY)};")
 
@@ -237,7 +237,7 @@ class AboutPreferencesFrame(QWidget):
 
         theme_layout = QHBoxLayout()
         theme_layout.addWidget(BodyLabel("主題模式:", self))
-        self.theme_mode_dropdown = ScrollableComboBox(self)
+        self.theme_mode_dropdown = ComboBox(self)
         items = list(self.THEME_MODES)
         self.theme_mode_dropdown.addItems(items)
         if self.theme_mode_var.get() in items:

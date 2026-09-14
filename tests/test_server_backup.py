@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 import src.core.server.server_backup as backup_module
 from src.core.server.server_crud import ServerConfigChangeSet, ServerConfigRegistrySnapshot, ServerCRUD
 from src.models import ServerConfig
@@ -496,3 +498,31 @@ def test_managed_backup_name_does_not_bypass_hard_total_limit(tmp_path: Path, mo
 
     assert manager.restore_backup("TestServer", str(backup_file)) is False
     assert original.read_text(encoding="utf-8") == "motd=old\n"
+
+
+def test_backup_dir_rejects_servers_root(tmp_path: Path) -> None:
+    """
+    驗證外部備份路徑若設為 servers_root 會被安全拒絕
+    """
+    servers_root = tmp_path / "servers"
+    servers_root.mkdir()
+    server_dir = servers_root / "TestServer"
+    server_dir.mkdir()
+    (server_dir / "server.properties").write_text("motd=test\n", encoding="utf-8")
+
+    config_root = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(servers_root), jvm_args=[])
+    crud_root = SimpleNamespace(
+        snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config_root),)),
+        servers_root=servers_root,
+        operation_lock=threading.RLock(),
+    )
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
+    manager = backup_module.ServerBackupManager(cast(Any, crud_root), server_runtime=cast(Any, runtime))
+
+    with pytest.raises(OSError, match="備份目錄不得為伺服器根目錄"):
+        manager._get_backup_dir(cast(Any, config_root))
+    assert manager.backup_server("TestServer") is False

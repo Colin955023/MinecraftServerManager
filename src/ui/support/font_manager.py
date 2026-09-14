@@ -13,14 +13,17 @@ from src.utils import OperationError, get_logger
 logger = get_logger().bind(component="FontManager")
 
 
+PREFERRED_FONT_FAMILIES: tuple[str, ...] = (
+    "Microsoft JhengHei UI",
+    "Microsoft JhengHei",
+    "Noto Sans CJK TC",
+)
+
+
 class FontManager:
     """字體管理器類別，負責 UI 字體快取"""
 
-    _default_family_candidates: ClassVar[tuple[str, ...]] = (
-        "Microsoft JhengHei UI",
-        "Microsoft JhengHei",
-        "Noto Sans CJK TC",
-    )
+    _default_family_candidates: ClassVar[tuple[str, ...]] = PREFERRED_FONT_FAMILIES
     _default_family = ""
 
     @classmethod
@@ -113,4 +116,4 @@ class FontManager:
         cls._build_font.cache_clear()
 
 
-__all__ = ["FontManager"]
+__all__ = ["PREFERRED_FONT_FAMILIES", "FontManager"]

@@ -19,15 +19,14 @@ from urllib.parse import urlsplit
 
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import (
-    ComboBox,
-    qconfig,
-)
+from qfluentwidgets import qconfig
 
-from src.ui import MessageDialog
+from src.ui import DeleteServerDialog, MessageDialog
 from src.utils import (
     SubprocessUtils,
     get_logger,
+    is_path_within,
+    resolve_stable_directory,
 )
 
 from .qt_runtime import cancel_timer, invoke_later, is_qobject_alive, run_on_ui_thread
@@ -372,6 +371,30 @@ class UIUtils:
         return UIUtils._dispatch_dialog(_show)
 
     @staticmethod
+    def ask_delete_server(server_name: str, backup_count: int = 0, parent=None) -> str:
+        """
+        顯示刪除伺服器整合確認對話框
+
+        Args:
+            server_name: 伺服器名稱
+            backup_count: 偵測到的外部備份數量
+            parent: 父層視窗
+
+        Returns:
+            all 代表連同備份刪除，server_only 代表只刪除伺服器，cancel 代表取消
+        """
+
+        def _show():
+            nonlocal parent
+            if parent is None:
+                parent = QApplication.activeWindow()
+            w = DeleteServerDialog(server_name, backup_count, parent)
+            return w.exec_decision()
+
+        result = UIUtils._dispatch_dialog(_show)
+        return str(result or "cancel")
+
+    @staticmethod
     def reveal_in_explorer(target) -> None:
         """
         在檔案總管中顯示指定路徑
@@ -551,29 +574,32 @@ class UIUtils:
 
         return UIUtils._dispatch_dialog(_save) or ""
 
-
-class ScrollableComboBox(ComboBox):
-    """支援滾輪切換選項的下拉選單"""
-
-    def wheelEvent(self, event):
+    @staticmethod
+    def validate_backup_directory(
+        selected_path: str | Path,
+        server_path: str | Path,
+        servers_root: str | Path | None = None,
+    ) -> Path:
         """
-        處理滾輪事件以切換下拉選單選項
+        驗證外部備份資料夾是否安全合法
 
         Args:
-            event: 滾輪事件物件
+            selected_path: 使用者選取的備份資料夾路徑
+            server_path: 伺服器所在目錄
+            servers_root: 伺服器根目錄（可選）
+
+        Returns:
+            通過驗證的穩定資料夾路徑
         """
-        delta = event.angleDelta().y()
-        if delta == 0:
-            return
-
-        step = -1 if delta > 0 else 1
-        current_index = self.currentIndex()
-        new_index = current_index + step
-
-        if 0 <= new_index < self.count():
-            self.setCurrentIndex(new_index)
-
-        event.accept()
+        backup_dir = resolve_stable_directory(Path(selected_path))
+        resolved_server = resolve_stable_directory(Path(server_path))
+        if backup_dir == resolved_server or is_path_within(resolved_server, backup_dir, strict=False):
+            raise ValueError("備份資料夾不得位於伺服器資料夾內")
+        if servers_root is not None:
+            resolved_root = resolve_stable_directory(servers_root)
+            if backup_dir == resolved_root:
+                raise ValueError("備份資料夾不得為伺服器根目錄")
+        return backup_dir
 
 
-__all__ = ["ScrollableComboBox", "UIUtils"]
+__all__ = ["UIUtils"]

@@ -346,7 +346,13 @@ class CreateServerJourney:
             is_legacy_forge_target = (
                 confirmation is not None
                 and config.loader_type.lower() == "forge"
-                and confirmation.launch_target == "forge-server.jar"
+                and (
+                    confirmation.launch_target == "forge-server.jar"
+                    or (
+                        "forge" in confirmation.launch_target.lower()
+                        and confirmation.launch_target.lower().endswith(".jar")
+                    )
+                )
                 and "forge" in detected_target.lower()
                 and detected_target.lower().endswith(".jar")
             )

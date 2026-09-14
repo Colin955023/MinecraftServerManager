@@ -46,6 +46,7 @@ class JavaUtils:
     JAVA_EXECUTABLE_NAMES: ClassVar[frozenset[str]] = frozenset({"java", "java.exe", "javaw", "javaw.exe"})
     ENV_VARS: ClassVar[list[str]] = ["JAVA_HOME"]
     JAVA_CACHE_FILE_NAME: ClassVar[str] = "java_candidates_cache.json"
+    JAVA_REQUIREMENTS_CACHE_FILE_NAME: ClassVar[str] = "mc_java_requirements_cache.json"
     _java_cache_lock: ClassVar[threading.Lock] = threading.Lock()
     _cached_java_candidates: ClassVar[list[tuple[str, int]] | None] = None
 
@@ -257,6 +258,13 @@ class JavaUtils:
         """
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
+        requirements_path = RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_REQUIREMENTS_CACHE_FILE_NAME
+        cached_requirements = read_json(requirements_path)
+        if isinstance(cached_requirements, dict):
+            cached_major = cached_requirements.get(mc_version)
+            if isinstance(cached_major, int) and cached_major > 0:
+                return cached_major
+
         cache_path = RuntimePaths.get_version_cache_dir() / "mc_versions_cache.json"
         JavaUtils._ensure_cache_exists(cache_path)
         data = read_json(cache_path)
@@ -271,10 +279,14 @@ class JavaUtils:
                 if ver_json:
                     java_info = ver_json.get("javaVersion")
                     if java_info and "majorVersion" in java_info:
-                        return int(java_info["majorVersion"])
-                    java_info2 = ver_json.get("java_version")
-                    if java_info2 and "major" in java_info2:
-                        return int(java_info2["major"])
+                        major = int(java_info["majorVersion"])
+                    else:
+                        java_info2 = ver_json.get("java_version")
+                        major = int(java_info2["major"]) if java_info2 and "major" in java_info2 else 0
+                    if major > 0:
+                        requirements = cached_requirements if isinstance(cached_requirements, dict) else {}
+                        atomic_write_json(requirements_path, {**requirements, mc_version: major})
+                        return major
                 raise ValueError(f"找不到 majorVersion，url: {url}")
         raise ValueError(f"找不到對應 mc_version: {mc_version}")
 

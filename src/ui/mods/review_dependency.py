@@ -9,6 +9,11 @@ from typing import Any
 
 from .review_state import ReviewTaskNode
 
+_RESOLUTION_SOURCE_LABELS: dict[str, str] = {
+    "version_detail": "版本詳情回補",
+    "version_id": "version id 線索",
+}
+
 
 def build_dependency_review_key(dependency_item: Any) -> tuple[str, str]:
     """
@@ -164,10 +169,7 @@ def build_dependency_status_text(
     """
     resolved_required_by = required_by_text or parent_name
     source = str(getattr(dependency_item, "resolution_source", "project_id") or "").strip().lower()
-    source_label = {
-        "version_detail": "版本詳情回補",
-        "version_id": "version id 線索",
-    }.get(source, "project id 直連")
+    source_label = _RESOLUTION_SOURCE_LABELS.get(source, "project id 直連")
     confidence = str(getattr(dependency_item, "resolution_confidence", "direct") or "").strip().lower()
     confidence_label = "需確認" if confidence in {"heuristic", "manual"} else "中" if confidence == "fallback" else "高"
     if is_advisory and is_selected:

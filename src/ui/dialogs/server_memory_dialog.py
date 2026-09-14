@@ -57,9 +57,9 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         self.server_crud = server_crud
         self.scope = UIWorkScope(self)
         self.total_memory_mb = SystemUtils.get_total_memory_mb()
-        self.setWindowTitle(f"修改記憶體設定 - {config.name}")
-        self.setMinimumSize(480, 420)
-        self.resize(520, 460)
+        self.setWindowTitle(f"修改記憶體與設定 - {config.name}")
+        self.setMinimumSize(480, 460)
+        self.resize(540, 520)
 
         self._init_ui()
 
@@ -124,6 +124,19 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         self.memory_warning_label.setStyleSheet(f"color: {resolve_color(Colors.TEXT_ERROR)}; background: transparent;")
         self.memory_warning_label.setWordWrap(True)
         card_layout.addWidget(self.memory_warning_label)
+
+        h_backup = QHBoxLayout()
+        backup_label = BodyLabel("外部備份資料夾:", card)
+        backup_label.setFixedWidth(150)
+        self.backup_path_input = LineEdit(card)
+        self.backup_path_input.setPlaceholderText("尚未設定（留空時由首次備份時指定）")
+        self.backup_path_input.setText(str(self.config.backup_path or ""))
+        self.browse_backup_btn = PushButton("瀏覽...", card)
+        self.browse_backup_btn.clicked.connect(self._browse_backup_dir)
+        h_backup.addWidget(backup_label)
+        h_backup.addWidget(self.backup_path_input)
+        h_backup.addWidget(self.browse_backup_btn)
+        card_layout.addLayout(h_backup)
 
         self.max_memory_input.textChanged.connect(self._update_memory_warning)
         self.min_memory_input.textChanged.connect(self._update_memory_warning)
@@ -199,6 +212,29 @@ class ServerMemoryDialog(ModalMSFluentWindow):
         else:
             self.memory_warning_label.setText("")
 
+    def _browse_backup_dir(self) -> None:
+        """
+        開啟檔案對話框選取外部備份資料夾
+        """
+        initial_dir = self.backup_path_input.text().strip()
+        selected = UIUtils.get_existing_directory(
+            self,
+            f"選擇伺服器「{self.config.name}」的外部備份資料夾",
+            initial_dir,
+        )
+        if not selected:
+            return
+        try:
+            backup_dir = UIUtils.validate_backup_directory(
+                selected,
+                self.config.path,
+                self.server_crud.servers_root,
+            )
+        except (OSError, ValueError) as e:
+            UIUtils.show_message("備份位置無效", str(e), self, message_level="warning")
+            return
+        self.backup_path_input.setText(str(backup_dir))
+
     def _save_memory_settings(self) -> None:
         """驗證並儲存記憶體設定"""
         max_text = self.max_memory_input.text().strip()
@@ -229,7 +265,7 @@ class ServerMemoryDialog(ModalMSFluentWindow):
             memory_min_mb=min_mb,
             jvm_args=list(self.config.jvm_args),
             path=self.config.path,
-            backup_path=self.config.backup_path,
+            backup_path=self.backup_path_input.text().strip(),
         )
 
         self.save_btn.setEnabled(False)

@@ -15,6 +15,7 @@ from src.utils import (
     copy_within,
     get_logger,
     open_bounded_zip,
+    parse_version_safe,
     read_archive_metadata_bytes,
     read_bytes_file,
 )
@@ -62,12 +63,6 @@ class ServerPropertiesMigrationService:
         "3": "hard",
     }
 
-    _LEVEL_TYPE_MAP: ClassVar[dict[str, str]] = {
-        "default": "minecraft:normal",
-        "flat": "minecraft:flat",
-        "largebiomes": "minecraft:large_biomes",
-        "amplified": "minecraft:amplified",
-    }
     _LEVEL_TYPE_NORMALIZED_MAP: ClassVar[dict[str, str]] = {
         "default": "minecraft:normal",
         "flat": "minecraft:flat",
@@ -82,12 +77,13 @@ class ServerPropertiesMigrationService:
     }
 
     @classmethod
-    def plan_migration(cls, properties: dict[str, str]) -> MigrationPlan:
+    def plan_migration(cls, properties: dict[str, str], minecraft_version: str) -> MigrationPlan:
         """
         分析既有屬性字典並產生遷移計畫
 
         Args:
             properties: 現有 server.properties 的鍵值字典
+            minecraft_version: 已偵測的 Minecraft 版本
 
         Returns:
             包含所有變更項目的遷移計畫
@@ -123,7 +119,11 @@ class ServerPropertiesMigrationService:
                 new_props["difficulty"] = mapped_diff
                 changes.append(f"遊戲難度轉換：difficulty={raw_diff} ➔ {mapped_diff} (1.14+)")
 
-        if "level-type" in new_props:
+        if (
+            parse_version_safe(minecraft_version) is not None
+            and parse_version_safe(minecraft_version) >= parse_version_safe("1.19")
+            and "level-type" in new_props
+        ):
             raw_lt = str(new_props["level-type"]).strip()
             lookup_key = raw_lt.lower().replace("_", "")
             if (mapped_lt := cls._LEVEL_TYPE_NORMALIZED_MAP.get(lookup_key)) and raw_lt != mapped_lt:
@@ -142,7 +142,7 @@ class ServerPropertiesMigrationService:
         )
 
     @classmethod
-    def inspect_source(cls, source_path: Path | str) -> MigrationPlan | None:
+    def inspect_source(cls, source_path: Path | str, minecraft_version: str) -> MigrationPlan | None:
         """
         唯讀檢查匯入來源中的 server.properties
 
@@ -188,7 +188,7 @@ class ServerPropertiesMigrationService:
             return None
 
         properties = PropertiesDocumentCodec.parse(content)
-        return cls.plan_migration(properties)
+        return cls.plan_migration(properties, minecraft_version)
 
     @classmethod
     def apply_migration_to_directory(

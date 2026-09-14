@@ -315,4 +315,5 @@ __all__ = [
     "invoke_later",
     "is_qobject_alive",
     "run_on_ui_thread",
+    "set_ui_closing",
 ]

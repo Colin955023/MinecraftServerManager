@@ -16,6 +16,7 @@ from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import ComboBox, Theme, isDarkTheme, setTheme, setThemeColor
 
+from .font_manager import PREFERRED_FONT_FAMILIES
 from .qt_runtime import ensure_application, is_qobject_alive
 from .ui_tokens import Colors, Sizes
 
@@ -236,7 +237,7 @@ class _DialogCenteringFilter(QObject):
 
 
 def _preferred_ui_font(point_size: int = 12) -> QtGui.QFont:
-    candidates = ("Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC")
+    candidates = PREFERRED_FONT_FAMILIES
     try:
         families = set(QtGui.QFontDatabase.families())
         family = next((candidate for candidate in candidates if candidate in families), "")

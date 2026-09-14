@@ -21,6 +21,7 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CardWidget,
+    ComboBox,
     HyperlinkLabel,
     LineEdit,
     PrimaryPushButton,
@@ -39,7 +40,6 @@ from src.ui import (
     FontSize,
     JvmArgsDialog,
     ProgressDialog,
-    ScrollableComboBox,
     ServerCreationConfirmDialog,
     Sizes,
     StatusPushButton,
@@ -350,7 +350,7 @@ class CreateServerFrame(QWidget):
         self.create_java_path_field(content_frame, 1)
         content_frame.addWidget(self._make_label("模組載入器:"), 2, 0)
         self.loader_type_var = ValueState("Vanilla")
-        self.loader_type_combo = ScrollableComboBox(self.form_panel)
+        self.loader_type_combo = ComboBox(self.form_panel)
         self.loader_type_combo.addItems(["Vanilla", "Fabric", "Forge", "Quilt", "NeoForge"])
         self._bind_combo(self.loader_type_combo, self.loader_type_var)
         self.loader_type_combo.setMinimumWidth(Sizes.DROPDOWN_WIDTH)
@@ -361,7 +361,7 @@ class CreateServerFrame(QWidget):
         loader_version_row = 3
         content_frame.addWidget(self._make_label("載入器版本:"), loader_version_row, 0)
         self.loader_version_var = ValueState("無")
-        self.loader_version_combo = ScrollableComboBox(self.form_panel)
+        self.loader_version_combo = ComboBox(self.form_panel)
         self.loader_version_combo.addItem("無")
         self._bind_combo(self.loader_version_combo, self.loader_version_var)
         self.loader_version_combo.setEnabled(False)
@@ -374,7 +374,7 @@ class CreateServerFrame(QWidget):
 
         content_frame.addWidget(self._make_label("Minecraft 版本:"), 4, 0)
         self.mc_version_var = ValueState("")
-        self.mc_version_combo = ScrollableComboBox(self.form_panel)
+        self.mc_version_combo = ComboBox(self.form_panel)
         self.mc_version_combo.addItem("載入中...")
         self._bind_combo(self.mc_version_combo, self.mc_version_var)
         self.mc_version_combo.currentTextChanged.connect(self.update_server_config_ui)
@@ -1161,7 +1161,7 @@ class CreateServerFrame(QWidget):
 
         variable.changed.connect(_sync_from_var)
 
-    def _bind_combo(self, combo: ScrollableComboBox, variable: ValueState) -> None:
+    def _bind_combo(self, combo: ComboBox, variable: ValueState) -> None:
         combo.currentTextChanged.connect(variable.set)
 
         def _sync_from_var(value: object) -> None:
@@ -1186,7 +1186,7 @@ class CreateServerFrame(QWidget):
         for job_attr in ("_create_server_progress_job", "_create_server_success_job", "_create_server_error_job"):
             UIUtils.cancel_scheduled_job(self, job_attr, owner=self)
 
-    def _update_combo_state(self, combo: ScrollableComboBox, var=None, message="載入中...", enabled=False) -> None:
+    def _update_combo_state(self, combo: ComboBox, var=None, message="載入中...", enabled=False) -> None:
         """統一更新下拉選單狀態"""
         combo.clear()
         combo.addItem(message)
@@ -1195,7 +1195,7 @@ class CreateServerFrame(QWidget):
             var.set(message)
         combo.setEnabled(enabled)
 
-    def _get_combo_items(self, combo: ScrollableComboBox) -> list[str]:
+    def _get_combo_items(self, combo: ComboBox) -> list[str]:
         return [combo.itemText(i) for i in range(combo.count())]
 
     def _run_background_task(self, task_func: Callable, error_msg: str, error_callback: Callable | None = None) -> None:

@@ -10,6 +10,8 @@ from contextlib import suppress
 
 from packaging.version import InvalidVersion, Version
 
+VERSION_ZERO: Version = Version("0.0.0")
+
 
 def parse_version_safe(
     version_str: str | None,
@@ -47,4 +49,4 @@ def parse_version_safe(
         return fallback
 
 
-__all__ = ["parse_version_safe"]
+__all__ = ["VERSION_ZERO", "parse_version_safe"]

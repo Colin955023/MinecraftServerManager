@@ -94,18 +94,21 @@ def get_online_version_status_text(report: Any | None) -> str:
     return "可安裝，需注意" if has_warning else "可安裝"
 
 
+_ONLINE_VERSION_TYPE_RANKS: dict[str, int] = {
+    "release": 0,
+    "stable": 0,
+    "beta": 1,
+    "pre": 1,
+    "preview": 1,
+    "rc": 1,
+    "alpha": 2,
+    "snapshot": 2,
+}
+
+
 def _online_version_type_rank(version_type: Any) -> int:
     normalized = str(version_type or "").strip().lower()
-    return {
-        "release": 0,
-        "stable": 0,
-        "beta": 1,
-        "pre": 1,
-        "preview": 1,
-        "rc": 1,
-        "alpha": 2,
-        "snapshot": 2,
-    }.get(normalized, 3)
+    return _ONLINE_VERSION_TYPE_RANKS.get(normalized, 3)
 
 
 def _online_version_compatibility_rank(report: Any | None) -> int:

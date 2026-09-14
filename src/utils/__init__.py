@@ -267,6 +267,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "normalize_mod_search_query": (".mod_utils.modrinth_query_utils", "normalize_mod_search_query"),
     "parse_version_safe": (".core_utils.version_utils", "parse_version_safe"),
+    "VERSION_ZERO": (".core_utils.version_utils", "VERSION_ZERO"),
     "select_best_mod_version": (".mod_utils.mod_version_filtering", "select_best_mod_version"),
     "standardize_loader_type": (
         ".server_utils.server_version_semantics",

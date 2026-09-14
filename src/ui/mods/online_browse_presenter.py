@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QVBox
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    ComboBox,
     PushButton,
     SearchLineEdit,
     SubtitleLabel,
@@ -21,7 +22,6 @@ from src.ui import (
     Colors,
     FontManager,
     FontSize,
-    ScrollableComboBox,
     Sizes,
     Spacing,
     TextState,
@@ -147,7 +147,7 @@ class OnlineBrowsePresenter:
         search_entry.returnPressed.connect(self.controller.queue_ops.search_online_mods)
         search_layout.addWidget(search_entry)
 
-        sort_dropdown = ScrollableComboBox(search_frame)
+        sort_dropdown = ComboBox(search_frame)
         sort_dropdown.addItems(list(self.browse_sort_options))
         sort_dropdown.setCurrentText(self.browse_sort_var.get())
         sort_dropdown.currentTextChanged.connect(self.browse_sort_var.set)

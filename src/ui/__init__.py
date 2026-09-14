@@ -11,6 +11,7 @@ from src import lazy_exports
 _EXPORTS: dict[str, tuple[str, str]] = {
     "BoolState": (".support.ui_state", "BoolState"),
     "Colors": (".support.ui_tokens", "Colors"),
+    "DeleteServerDialog": (".dialogs.modal_msfluent_window", "DeleteServerDialog"),
     "FloatState": (".support.ui_state", "FloatState"),
     "FontManager": (".support.font_manager", "FontManager"),
     "FontSize": (".support.ui_tokens", "FontSize"),
@@ -23,7 +24,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "ModManagementFrame": (".mods.frame", "ModManagementFrame"),
     "ModalMSFluentWindow": (".dialogs.modal_msfluent_window", "ModalMSFluentWindow"),
     "ProgressDialog": (".dialogs.progress_dialog", "ProgressDialog"),
-    "ScrollableComboBox": (".support.ui_utils", "ScrollableComboBox"),
     "RestoreBackupDialog": (".dialogs.restore_backup_dialog", "RestoreBackupDialog"),
     "ServerCreationConfirmDialog": (
         ".dialogs.server_creation_confirm_dialog",

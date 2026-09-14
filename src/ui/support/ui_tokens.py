@@ -53,7 +53,6 @@ class Colors:
     BG_LISTBOX_DARK: Final[str] = "#2b2b2b"
 
     # --- 邊框與其他元件 ---
-    BORDER_LIGHT: Final[tuple[str, str]] = ("#d1d5db", "#374151")
     BORDER: Final[tuple[str, str]] = ("#d1d5db", "#374151")
     TABLE_HEADER_BORDER: Final[tuple[str, str]] = ("#d1d5db", "#475569")
     CONSOLE_TEXT: Final[str] = "#00ff00"
@@ -104,7 +103,6 @@ class Sizes:
     SERVER_PROPERTIES_DIALOG_MIN_WIDTH: Final[int] = 900
     SERVER_PROPERTIES_DIALOG_MIN_HEIGHT: Final[int] = 600
     CONSOLE_PANEL_HEIGHT: Final[int] = 180
-    MOD_EXPORT_SAVE_BUTTON_WIDTH: Final[int] = 135
     MOD_EXPORT_CLOSE_BUTTON_WIDTH: Final[int] = 113
     MOD_PROGRESS_HEIGHT: Final[int] = 15
     TABLE_HEADER_BORDER_WIDTH: Final[int] = 1

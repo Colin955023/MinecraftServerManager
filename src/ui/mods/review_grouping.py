@@ -32,6 +32,22 @@ from .review_formatting import (
 )
 from .review_state import LocalUpdateReviewEntry, PendingInstallReviewEntry, ReviewTaskNode
 
+_ONLINE_REVIEW_GROUP_RANKS: dict[str, int] = {
+    "blocked": 0,
+    "advisory": 1,
+    "unselected": 2,
+    "selected": 3,
+}
+
+_LOCAL_UPDATE_GROUP_RANKS: dict[str, int] = {
+    "blocked": 0,
+    "advisory": 1,
+    "retryable": 2,
+    "unknown": 3,
+    "unselected": 4,
+    "selected": 5,
+}
+
 
 def build_pending_install_review_key(project_id: str, version_id: str) -> str:
     """
@@ -443,9 +459,7 @@ class ReviewGroupingMixin:
             pending = getattr(entry, "pending", None)
             version = getattr(pending, "version", None)
             return (
-                {"blocked": 0, "advisory": 1, "unselected": 2, "selected": 3}.get(
-                    get_online_install_review_group_key(entry), 99
-                ),
+                _ONLINE_REVIEW_GROUP_RANKS.get(get_online_install_review_group_key(entry), 99),
                 str(getattr(pending, "project_name", "") or "").casefold(),
                 str(getattr(version, "display_name", "") or "").casefold(),
             )
@@ -529,9 +543,7 @@ class ReviewGroupingMixin:
         return self._build_flat_review_task_nodes(
             review_entries,
             lambda entry: (
-                {"blocked": 0, "advisory": 1, "retryable": 2, "unknown": 3, "unselected": 4, "selected": 5}.get(
-                    get_local_update_review_group_key(entry), 99
-                ),
+                _LOCAL_UPDATE_GROUP_RANKS.get(get_local_update_review_group_key(entry), 99),
                 str(getattr(getattr(entry, "candidate", None), "project_name", "") or "").casefold(),
             ),
             lambda entry: build_local_update_review_key(entry.candidate),

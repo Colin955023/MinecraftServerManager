@@ -348,15 +348,16 @@ class MainWindow(FluentWindow):
         self.setMinimumSize(min_width, min_height)
         self.resize(width, height)
 
-        if hasattr(self, "settings") and self.settings.is_remember_size_position_enabled():
+        has_settings = hasattr(self, "settings")
+        moved = False
+        if has_settings and self.settings.is_remember_size_position_enabled():
             win_settings = self.settings.get_main_window_settings()
             x = win_settings.get("x")
             y = win_settings.get("y")
             if x is not None and y is not None:
                 self.move(x, y)
-            elif hasattr(self, "settings") and self.settings.is_auto_center_enabled():
-                center_window(self)
-        elif hasattr(self, "settings") and self.settings.is_auto_center_enabled():
+                moved = True
+        if not moved and has_settings and self.settings.is_auto_center_enabled():
             center_window(self)
 
     def create_widgets(self) -> None:
@@ -445,7 +446,7 @@ class MainWindow(FluentWindow):
         dialog.exec()
 
         selected_choice = dialog.choice
-        if selected_choice in [None, "cancel"]:
+        if selected_choice in (None, "cancel"):
             self._restore_current_navigation_item()
             return
         QtWidgets.QApplication.processEvents()

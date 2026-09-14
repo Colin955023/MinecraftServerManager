@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CardWidget,
+    ComboBox,
     Pivot,
     PopUpAniStackedWidget,
     ProgressBar,
@@ -34,7 +35,6 @@ from src.models import (
 from src.ui import (
     Colors,
     FloatState,
-    ScrollableComboBox,
     Sizes,
     Spacing,
     TextState,
@@ -233,7 +233,7 @@ class ModManagementFrame:
         inner_layout.addWidget(lbl)
 
         self.server_var = TextState()
-        self.server_combo = ScrollableComboBox(inner_frame)
+        self.server_combo = ComboBox(inner_frame)
         self.server_combo.addItems(["載入中..."])
 
         def _handle_server_changed() -> None:
@@ -426,12 +426,10 @@ class ModManagementFrame:
             server_name = self.server_var.get()
             if not server_name:
                 return
-            servers = list(self.server_manager.snapshot().values())
-            selected_server = None
-            for server in servers:
-                if server.name == server_name:
-                    selected_server = server
-                    break
+            selected_server = next(
+                (server for server in self.server_manager.snapshot().values() if server.name == server_name),
+                None,
+            )
             if not selected_server:
                 return
             identity = (

@@ -111,12 +111,12 @@ class SettingsManager:
         """
         if not path_str or str(path_str).strip() == "":
             return ""
-        normalized = str(Path(path_str).expanduser().resolve())
-        if Path(normalized).name.lower() == "servers":
-            parent = str(Path(normalized).parents[0])
+        resolved_path = Path(path_str).expanduser().resolve()
+        if resolved_path.name.lower() == "servers":
+            parent = str(resolved_path.parent)
             if parent:
                 return parent
-        return normalized
+        return str(resolved_path)
 
     @staticmethod
     def build_servers_root_path(base_dir: str | Path) -> Path:

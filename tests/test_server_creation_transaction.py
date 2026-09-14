@@ -444,7 +444,7 @@ def test_creation_accepts_legacy_forge_versioned_target(tmp_path) -> None:
     )
     plan = journey.plan(forge_config)
     assert plan.confirmation is not None
-    assert plan.confirmation.launch_target == "forge-server.jar"
+    assert plan.confirmation.launch_target == "forge-1.12.2-14.23.5.2860.jar"
 
     result = journey.execute(plan)
 

@@ -54,7 +54,6 @@ from src.ui import (
 from src.utils import (
     MemoryUtils,
     get_logger,
-    is_path_within,
     resolve_stable_directory,
 )
 
@@ -280,7 +279,68 @@ class ManageServerFrame(QWidget):
         open_backup_action.triggered.connect(self.open_backup_folder)
         menu.addAction(open_backup_action)
 
+        edit_backup_action = Action("📁 修改備份路徑")
+        edit_backup_action.triggered.connect(self.edit_backup_path)
+        menu.addAction(edit_backup_action)
+
         menu.exec(self.server_tree.mapToGlobal(pos), ani=False)
+
+    def edit_backup_path(self) -> None:
+        """
+        修改選中伺服器的外部備份路徑
+        """
+        config = self._get_selected_server_config()
+        if not config:
+            return
+
+        server_name = config.name
+        initial_dir = str(config.backup_path or "").strip()
+        selected = UIUtils.get_existing_directory(
+            self.window(),
+            f"選擇伺服器「{server_name}」的外部備份資料夾",
+            initial_dir,
+        )
+        if not selected:
+            return
+
+        try:
+            backup_dir = UIUtils.validate_backup_directory(
+                selected,
+                config.path,
+                getattr(self.server_crud, "servers_root", None),
+            )
+        except (OSError, ValueError) as e:
+            UIUtils.show_message("備份位置無效", str(e), self.window(), message_level="warning")
+            return
+
+        config.backup_path = str(backup_dir)
+        baseline = self.server_crud.snapshot()
+        current_config = baseline.get(server_name)
+        if current_config is None:
+            UIUtils.show_message("錯誤", "找不到選取的伺服器設定", self.window(), message_level="error")
+            return
+
+        current_config.backup_path = str(backup_dir)
+        commit_result = self.server_crud.commit(
+            ServerConfigChangeSet(upserts=(current_config,)),
+            expected_revision=baseline.revision,
+        )
+        if not commit_result.success:
+            UIUtils.show_message(
+                "儲存失敗",
+                commit_result.message or "無法寫入伺服器設定檔",
+                self.window(),
+                message_level="error",
+            )
+            return
+
+        UIUtils.show_message(
+            "設定成功",
+            f"伺服器「{server_name}」的外部備份路徑已更新為：\n{backup_dir}",
+            self.window(),
+            message_level="info",
+        )
+        self.refresh_servers()
 
     def edit_server_memory(self) -> None:
         """開啟選中伺服器的記憶體設定對話框"""
@@ -481,17 +541,12 @@ class ManageServerFrame(QWidget):
             if self.server_tree:
                 self.server_tree.clearSelection()
             return
-        found = False
-        for i in range(self.server_tree.topLevelItemCount()):
-            item = self.server_tree.topLevelItem(i)
-            if item and item.text(0) == server_name:
-                self.server_tree.clearSelection()
-                item.setSelected(True)
-                self.server_tree.scrollToItem(item)
-                found = True
-                break
-        if not found:
-            self.server_tree.clearSelection()
+        matches = self.server_tree.findItems(server_name, Qt.MatchFlag.MatchExactly, 0)
+        self.server_tree.clearSelection()
+        if matches:
+            item = matches[0]
+            item.setSelected(True)
+            self.server_tree.scrollToItem(item)
 
     def on_server_select(self) -> None:
         """伺服器選擇事件"""
@@ -699,24 +754,13 @@ class ManageServerFrame(QWidget):
             return
         config = self.server_crud.snapshot().get(server_name)
         backups = self.server_backup.list_backups(server_name) if config and config.backup_path else []
-        result = UIUtils.ask_yes_no_cancel(
-            "確認刪除",
-            f"確定要刪除伺服器 '{server_name}' 嗎？\n\n" + "⚠️ 這將永久刪除伺服器檔案，無法復原！",
-            self.window(),
-            show_cancel=False,
-        )
-        if not result:
+        backup_dir = Path(config.backup_path) if config and config.backup_path else None
+
+        decision = UIUtils.ask_delete_server(server_name, len(backups), parent=self.window())
+        if decision == "cancel":
             return
 
-        delete_backups = False
-        backup_dir = Path(config.backup_path) if config else None
-        if backups:
-            delete_backups = UIUtils.ask_yes_no_cancel(
-                "刪除外部備份",
-                f"找到 {len(backups)} 個外部備份檔案，是否一併永久刪除？",
-                self.window(),
-                show_cancel=False,
-            )
+        delete_backups = decision == "all"
 
         for button in self.action_buttons.values():
             button.setEnabled(False)
@@ -803,10 +847,11 @@ class ManageServerFrame(QWidget):
             if not backup_path:
                 return
         try:
-            backup_dir = resolve_stable_directory(Path(backup_path))
-            server_path = resolve_stable_directory(Path(config.path))
-            if backup_dir == server_path or is_path_within(server_path, backup_dir, strict=False):
-                raise ValueError("備份資料夾不得位於伺服器資料夾內")
+            backup_dir = UIUtils.validate_backup_directory(
+                backup_path,
+                config.path,
+                getattr(self.server_crud, "servers_root", None),
+            )
         except (OSError, ValueError) as e:
             UIUtils.show_message("備份位置無效", str(e), self.window(), message_level="warning")
             return

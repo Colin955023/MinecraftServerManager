@@ -396,9 +396,7 @@ class ServerCRUD:
                 existing_bytes = read_bytes_file(start_script_path, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
                 if existing_bytes is None:
                     existing_bytes = b""
-                existing_has_bom = existing_bytes.startswith(b"\xef\xbb\xbf")
-                existing_content = existing_bytes.decode("utf-8-sig", errors="ignore")
-                if existing_content == bat_content and not existing_has_bom:
+                if existing_bytes == bat_content.encode("utf-8"):
                     return True
         except Exception as e:
             logger.warning(f"比較啟動腳本時發生錯誤 (將強制覆寫): {e}")
@@ -750,9 +748,10 @@ class ServerCRUD:
 
     def _create_server_structure(self, path: Path, loader_type: str) -> None:
         """建立伺服器檔案結構"""
-        if loader_type.lower() == "vanilla":
+        normalized_loader = loader_type.lower()
+        if normalized_loader == "vanilla":
             directories = ["world", "logs"]
-        elif loader_type.lower() in ["forge", "fabric", "quilt", "neoforge"]:
+        elif normalized_loader in {"forge", "fabric", "quilt", "neoforge"}:
             directories = ["world", "plugins", "mods", "config", "logs"]
         else:
             directories = ["world", "logs"]

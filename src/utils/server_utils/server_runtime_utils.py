@@ -210,6 +210,8 @@ class ServerCommands:
             if minecraft_version and minecraft_version.startswith(
                 ("1.7", "1.8", "1.9", "1.10", "1.11", "1.12", "1.13", "1.14", "1.15", "1.16")
             ):
+                if loader_version:
+                    return f"forge-{minecraft_version}-{loader_version}.jar"
                 return "forge-server.jar"
             return f"@libraries/net/minecraftforge/forge/{minecraft_version}-{loader_version}/win_args.txt"
         if normalized_loader == "neoforge":
@@ -231,12 +233,11 @@ class ServerCommands:
         """
         lines: list[str] = []
         custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(config, "jvm_args", []))
-        java_major = None
         lines.extend(
             f"{arg}\n"
             for arg in JvmOptionPolicy.recommend_gc_args(
                 memory_max_mb=int(config.memory_max_mb or 0),
-                java_major=int(java_major) if java_major else None,
+                java_major=None,
                 loader_type=str(getattr(config, "loader_type", "") or ""),
                 existing_args=custom_jvm_args,
             )
@@ -739,10 +740,9 @@ class ServerCommands:
         if memory_min is not None and (memory_max is None or memory_max < memory_min):
             memory_max = memory_min
         custom_jvm_args = JvmOptionPolicy.normalize_jvm_args(getattr(server_config, "jvm_args", []))
-        java_major = None
         recommended_jvm_args = JvmOptionPolicy.recommend_gc_args(
             memory_max_mb=int(memory_max),
-            java_major=int(java_major) if java_major else None,
+            java_major=None,
             loader_type=loader_type,
             existing_args=custom_jvm_args,
         )
