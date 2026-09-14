@@ -181,19 +181,21 @@ def count_online_install_review_groups(entries: list[PendingInstallReviewEntry])
     )
 
 
-def _get_review_group_label(group_key: str, label_map: dict[str, str], *, default_label: str = "需先處理") -> str:
-    """
-    依群組鍵取得對應的顯示標籤
+_LOCAL_UPDATE_GROUP_STATUS_LABELS = {
+    "selected": "可更新",
+    "advisory": "建議確認",
+    "unselected": "未選取",
+    "retryable": "可重試",
+    "unknown": "需先識別",
+    "blocked": "需先處理",
+}
 
-    Args:
-        group_key: 群組鍵
-        label_map: 群組鍵與顯示標籤的對應字典
-        default_label: 預設顯示標籤
-
-    Returns:
-        對應的顯示標籤
-    """
-    return label_map.get(group_key, default_label)
+_ONLINE_INSTALL_GROUP_STATUS_LABELS = {
+    "selected": "可安裝",
+    "advisory": "建議確認",
+    "unselected": "未選取",
+    "blocked": "需先處理",
+}
 
 
 def get_local_update_group_status_label(group_key: str) -> str:
@@ -206,17 +208,7 @@ def get_local_update_group_status_label(group_key: str) -> str:
     Returns:
         對應的顯示標籤
     """
-    return _get_review_group_label(
-        group_key,
-        {
-            "selected": "可更新",
-            "advisory": "建議確認",
-            "unselected": "未選取",
-            "retryable": "可重試",
-            "unknown": "需先識別",
-            "blocked": "需先處理",
-        },
-    )
+    return _LOCAL_UPDATE_GROUP_STATUS_LABELS.get(group_key, "需先處理")
 
 
 def get_online_install_group_status_label(group_key: str) -> str:
@@ -229,10 +221,7 @@ def get_online_install_group_status_label(group_key: str) -> str:
     Returns:
         對應的顯示標籤
     """
-    return _get_review_group_label(
-        group_key,
-        {"selected": "可安裝", "advisory": "建議確認", "unselected": "未選取", "blocked": "需先處理"},
-    )
+    return _ONLINE_INSTALL_GROUP_STATUS_LABELS.get(group_key, "需先處理")
 
 
 def build_local_update_review_key(candidate: Any) -> str:

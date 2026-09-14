@@ -83,7 +83,7 @@ class SubprocessUtils:
         if not isinstance(cmd, (list, tuple)):
             raise TypeError("cmd 必須是由字串組成的 list 或 tuple")
         cmd_list = [str(x) for x in cmd]
-        if len(cmd_list) == 0:
+        if not cmd_list:
             raise ValueError("cmd 不得為空")
         exe = cmd_list[0]
         if not exe.strip():

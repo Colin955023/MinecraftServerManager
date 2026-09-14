@@ -29,19 +29,19 @@ _PROPERTY_KEY_ESCAPE_TABLE = str.maketrans(
 class PropertiesDocumentCodec:
     """server.properties 說明助手：提供屬性說明、分類、載入/儲存等功能"""
 
-    _property_descriptions_cache: dict[str, str] | None = None
+    _property_descriptions_proxy: ClassVar[types.MappingProxyType[str, str] | None] = None
 
     @classmethod
-    def get_property_descriptions(cls) -> types.MappingProxyType:
+    def get_property_descriptions(cls) -> types.MappingProxyType[str, str]:
         """
         取得所有屬性說明的不可修改視圖（帶快取）
 
         Returns:
             屬性名稱對應說明文字的不可修改視圖
         """
-        if cls._property_descriptions_cache is not None:
-            return types.MappingProxyType(cls._property_descriptions_cache)
-        cls._property_descriptions_cache = {
+        if cls._property_descriptions_proxy is not None:
+            return cls._property_descriptions_proxy
+        raw_descriptions = {
             "accepts-transfers": "是否允許伺服器端接受以 Transfer 封包作為登入請求的傳入連線 (false/true)",
             "allow-flight": "是否允許玩家在生存模式下飛行 (false/true) 若設為 true，安裝了飛行模組的玩家可以飛行",
             "allow-nether": "是否允許玩家進入地獄 (下界) (true/false) false - 玩家將無法通過地獄傳送門",
@@ -114,101 +114,104 @@ class PropertiesDocumentCodec:
             "management-server-tls-keystore-password": "TLS 金鑰庫密碼",  # pragma: allowlist secret
             "management-server-allowed-origins": "管理伺服器允許的來源清單",
         }
-        return types.MappingProxyType(cls._property_descriptions_cache)
+        cls._property_descriptions_proxy = types.MappingProxyType(raw_descriptions)
+        return cls._property_descriptions_proxy
 
-    @staticmethod
-    def get_property_categories() -> dict[str, list]:
+    _PROPERTY_CATEGORIES: ClassVar[dict[str, list[str]]] = {
+        "基本設定": [
+            "server-port",
+            "server-ip",
+            "motd",
+            "max-players",
+            "gamemode",
+            "difficulty",
+            "hardcore",
+            "pvp",
+            "online-mode",
+            "white-list",
+            "enforce-whitelist",
+            "force-gamemode",
+            "enable-status",
+            "hide-online-players",
+            "enable-code-of-conduct",
+        ],
+        "世界設定": [
+            "level-name",
+            "level-seed",
+            "level-type",
+            "generator-settings",
+            "generate-structures",
+            "spawn-protection",
+            "max-world-size",
+            "initial-enabled-packs",
+            "initial-disabled-packs",
+        ],
+        "玩家設定": ["player-idle-timeout", "pause-when-empty-seconds", "allow-flight", "allow-nether"],
+        "生物設定": ["spawn-monsters"],
+        "功能設定": [
+            "enable-command-block",
+            "enable-query",
+            "enable-rcon",
+            "debug",
+            "enable-jmx-monitoring",
+            "use-native-transport",
+            "sync-chunk-writes",
+        ],
+        "網路設定": [
+            "network-compression-threshold",
+            "rate-limit",
+            "prevent-proxy-connections",
+            "enforce-secure-profile",
+            "log-ips",
+        ],
+        "管理設定": [
+            "op-permission-level",
+            "function-permission-level",
+            "rcon.port",
+            "rcon.password",
+            "query.port",
+            "broadcast-console-to-ops",
+            "broadcast-rcon-to-ops",
+            "text-filtering-config",
+            "text-filtering-version",
+        ],
+        "管理伺服器設定": [
+            "management-server-enabled",
+            "management-server-host",
+            "management-server-port",
+            "management-server-secret",
+            "management-server-tls-enabled",
+            "management-server-tls-keystore",
+            "management-server-tls-keystore-password",
+            "management-server-allowed-origins",
+            "status-heartbeat-interval",
+        ],
+        "效能設定": [
+            "view-distance",
+            "simulation-distance",
+            "entity-broadcast-range-percentage",
+            "max-tick-time",
+            "max-chained-neighbor-updates",
+        ],
+        "資源包設定": [
+            "resource-pack",
+            "resource-pack-sha1",
+            "require-resource-pack",
+            "resource-pack-prompt",
+            "resource-pack-id",
+        ],
+        "進階設定": ["bug-report-link", "region-file-compression", "accepts-transfers"],
+    }
+
+    @classmethod
+    def get_property_categories(cls) -> dict[str, list[str]]:
         """
         取得屬性按功能分類的組織結構，方便 UI 顯示分組
 
         Returns:
             分類名稱對應屬性名稱列表的字典
         """
-        return {
-            "基本設定": [
-                "server-port",
-                "server-ip",
-                "motd",
-                "max-players",
-                "gamemode",
-                "difficulty",
-                "hardcore",
-                "pvp",
-                "online-mode",
-                "white-list",
-                "enforce-whitelist",
-                "force-gamemode",
-                "enable-status",
-                "hide-online-players",
-                "enable-code-of-conduct",
-            ],
-            "世界設定": [
-                "level-name",
-                "level-seed",
-                "level-type",
-                "generator-settings",
-                "generate-structures",
-                "spawn-protection",
-                "max-world-size",
-                "initial-enabled-packs",
-                "initial-disabled-packs",
-            ],
-            "玩家設定": ["player-idle-timeout", "pause-when-empty-seconds", "allow-flight", "allow-nether"],
-            "生物設定": ["spawn-monsters"],
-            "功能設定": [
-                "enable-command-block",
-                "enable-query",
-                "enable-rcon",
-                "debug",
-                "enable-jmx-monitoring",
-                "use-native-transport",
-                "sync-chunk-writes",
-            ],
-            "網路設定": [
-                "network-compression-threshold",
-                "rate-limit",
-                "prevent-proxy-connections",
-                "enforce-secure-profile",
-                "log-ips",
-            ],
-            "管理設定": [
-                "op-permission-level",
-                "function-permission-level",
-                "rcon.port",
-                "rcon.password",
-                "query.port",
-                "broadcast-console-to-ops",
-                "broadcast-rcon-to-ops",
-                "text-filtering-config",
-                "text-filtering-version",
-            ],
-            "管理伺服器設定": [
-                "management-server-enabled",
-                "management-server-host",
-                "management-server-port",
-                "management-server-secret",
-                "management-server-tls-enabled",
-                "management-server-tls-keystore",
-                "management-server-tls-keystore-password",
-                "management-server-allowed-origins",
-                "status-heartbeat-interval",
-            ],
-            "效能設定": [
-                "view-distance",
-                "simulation-distance",
-                "entity-broadcast-range-percentage",
-                "max-tick-time",
-                "max-chained-neighbor-updates",
-            ],
-            "資源包設定": [
-                "resource-pack",
-                "resource-pack-sha1",
-                "require-resource-pack",
-                "resource-pack-prompt",
-                "resource-pack-id",
-            ],
-            "進階設定": ["bug-report-link", "region-file-compression", "accepts-transfers"],
-        }
+        return cls._PROPERTY_CATEGORIES
 
     @staticmethod
     def _logical_property_lines(content: str) -> list[str]:

@@ -453,8 +453,7 @@ class ServerCommands:
         startup_command = StartupScriptCommand()
         content = content.removeprefix("\ufeff")
         for line in content.splitlines():
-            body, _newline = ServerCommands._split_line_ending(line)
-            stripped = body.strip()
+            stripped = line.strip()
             if ServerCommands._is_safe_startup_scaffolding(stripped):
                 continue
             raw_tokens = ServerCommands.split_windows_command_line(stripped)

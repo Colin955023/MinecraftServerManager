@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from contextlib import suppress
 from functools import lru_cache
-from typing import ClassVar
 
 from PySide6 import QtGui
 
@@ -13,7 +12,7 @@ from src.utils import OperationError, get_logger
 logger = get_logger().bind(component="FontManager")
 
 
-PREFERRED_FONT_FAMILIES: tuple[str, ...] = (
+_PREFERRED_FONT_FAMILIES: tuple[str, ...] = (
     "Microsoft JhengHei UI",
     "Microsoft JhengHei",
     "Noto Sans CJK TC",
@@ -23,7 +22,6 @@ PREFERRED_FONT_FAMILIES: tuple[str, ...] = (
 class FontManager:
     """字體管理器類別，負責 UI 字體快取"""
 
-    _default_family_candidates: ClassVar[tuple[str, ...]] = PREFERRED_FONT_FAMILIES
     _default_family = ""
 
     @classmethod
@@ -31,7 +29,7 @@ class FontManager:
         if cls._default_family:
             return cls._default_family
         try:
-            for family in cls._default_family_candidates:
+            for family in _PREFERRED_FONT_FAMILIES:
                 if QtGui.QFontDatabase.hasFamily(family):
                     cls._default_family = family
                     return family
@@ -116,4 +114,4 @@ class FontManager:
         cls._build_font.cache_clear()
 
 
-__all__ = ["PREFERRED_FONT_FAMILIES", "FontManager"]
+__all__ = ["FontManager"]

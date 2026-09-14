@@ -44,6 +44,9 @@ from .loader_installer import run_installer_process
 
 logger = get_logger().bind(component="LoaderManager")
 
+_NON_DIGIT_DOT_RE = re.compile(r"[^0-9.]")
+_ASCII_LETTER_RE = re.compile(r"[A-Za-z]")
+
 
 class LoaderManager:
     """五種 Minecraft server 載入器的單一管理入口"""
@@ -109,11 +112,11 @@ class LoaderManager:
         for version in versions:
             if "-" in version:
                 mc_part, _, suffix_part = version.partition("-")
-                mc_clean = re.sub(r"[^0-9.]", "", mc_part).rstrip(".")
-                suffix_clean = re.sub(r"[^0-9.]", "", suffix_part).rstrip(".")
+                mc_clean = _NON_DIGIT_DOT_RE.sub("", mc_part).rstrip(".")
+                suffix_clean = _NON_DIGIT_DOT_RE.sub("", suffix_part).rstrip(".")
                 mc_parts = [p for p in mc_clean.split(".") if p]
                 suffix_text = suffix_part.strip().rstrip(".")
-                suffix_has_label = bool(re.search(r"[A-Za-z]", suffix_text))
+                suffix_has_label = bool(_ASCII_LETTER_RE.search(suffix_text))
 
                 if mc_clean and mc_parts:
                     if mc_parts[0] == "1" and len(mc_parts) <= 3:
@@ -137,7 +140,7 @@ class LoaderManager:
                     result.append(version)
                 continue
 
-            clean = re.sub(r"[^0-9.]", "", version).rstrip(".")
+            clean = _NON_DIGIT_DOT_RE.sub("", version).rstrip(".")
             if not clean:
                 continue
             parts = clean.split(".")

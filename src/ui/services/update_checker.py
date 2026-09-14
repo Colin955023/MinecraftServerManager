@@ -27,6 +27,20 @@ from src.utils import (
 
 logger = get_logger().bind(component="UpdateChecker")
 
+_UPDATE_AUTHOR_RE = re.compile(r"\s+by\s+@[\w\-]+")
+_UPDATE_PR_LINK_RE = re.compile(r"\s+in\s+https://\S+")
+
+_MD_CODEBLOCK_RE = re.compile(r"```[^\n]*\n?(.*?)```", flags=re.DOTALL)
+_MD_INLINE_CODE_RE = re.compile(r"`([^`]*)`")
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MD_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", flags=re.MULTILINE)
+_MD_BLOCKQUOTE_RE = re.compile(r"^\s{0,3}>\s?", flags=re.MULTILINE)
+_MD_UNORDERED_LIST_RE = re.compile(r"^\s*[-*+]\s+", flags=re.MULTILINE)
+_MD_ORDERED_LIST_RE = re.compile(r"^\s*\d+[.)]\s+", flags=re.MULTILINE)
+_MD_EMPHASIS_RE = re.compile(r"[*_~]{1,3}")
+
 
 class UpdateChecker:
     """集中處理 GitHub Releases 更新檢查與安裝流程"""
@@ -146,8 +160,8 @@ exit /b 1
                     ignoring = False
                 else:
                     continue
-            clean_line = re.sub("\\s+by\\s+@[\\w\\-]+", "", line)
-            clean_line = re.sub("\\s+in\\s+https://\\S+", "", clean_line)
+            clean_line = _UPDATE_AUTHOR_RE.sub("", line)
+            clean_line = _UPDATE_PR_LINK_RE.sub("", clean_line)
             if not clean_line.strip():
                 continue
             kept_lines.append(clean_line)
@@ -164,16 +178,16 @@ exit /b 1
         """將遠端 Markdown 轉為純文字，避免引入 HTML 渲染面"""
         if not text:
             return ""
-        safe_text = re.sub(r"```[^\n]*\n?(.*?)```", r"\1", text, flags=re.DOTALL)
-        safe_text = re.sub(r"`([^`]*)`", r"\1", safe_text)
-        safe_text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", safe_text)
-        safe_text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", safe_text)
-        safe_text = re.sub(r"<[^>]+>", "", safe_text)
-        safe_text = re.sub(r"^\s{0,3}#{1,6}\s*", "", safe_text, flags=re.MULTILINE)
-        safe_text = re.sub(r"^\s{0,3}>\s?", "", safe_text, flags=re.MULTILINE)
-        safe_text = re.sub(r"^\s*[-*+]\s+", "- ", safe_text, flags=re.MULTILINE)
-        safe_text = re.sub(r"^\s*\d+[.)]\s+", "- ", safe_text, flags=re.MULTILINE)
-        safe_text = re.sub(r"[*_~]{1,3}", "", safe_text)
+        safe_text = _MD_CODEBLOCK_RE.sub(r"\1", text)
+        safe_text = _MD_INLINE_CODE_RE.sub(r"\1", safe_text)
+        safe_text = _MD_IMAGE_RE.sub(r"\1", safe_text)
+        safe_text = _MD_LINK_RE.sub(r"\1", safe_text)
+        safe_text = _MD_HTML_TAG_RE.sub("", safe_text)
+        safe_text = _MD_HEADING_RE.sub("", safe_text)
+        safe_text = _MD_BLOCKQUOTE_RE.sub("", safe_text)
+        safe_text = _MD_UNORDERED_LIST_RE.sub("- ", safe_text)
+        safe_text = _MD_ORDERED_LIST_RE.sub("- ", safe_text)
+        safe_text = _MD_EMPHASIS_RE.sub("", safe_text)
         return html.unescape(safe_text)
 
     @staticmethod

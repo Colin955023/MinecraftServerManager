@@ -9,13 +9,15 @@ import os
 import re
 import shutil
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from functools import lru_cache
 from operator import itemgetter
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from src.utils import (
+    VERSION_ZERO,
     HTTPClient,
     RuntimePaths,
     SubprocessUtils,
@@ -23,10 +25,16 @@ from src.utils import (
     delete_within,
     get_logger,
     list_bounded_directory,
+    parse_version_safe,
     read_json,
 )
 
 logger = get_logger().bind(component="JavaUtils")
+
+_MC_VERSION_PATTERN = re.compile(
+    r"^(?:\d+\.\d+(?:\.\d+)*|\d{2}w\d{2}[a-z]|\d+\.\d+(?:\.\d+)*-(?:pre|rc|snapshot)\d*)$",
+    re.IGNORECASE,
+)
 
 
 class JavaUtils:
@@ -245,6 +253,173 @@ class JavaUtils:
             raise FileNotFoundError(f"找不到版本快取 {cache_path}")
 
     @staticmethod
+    def _sort_requirements(requirements: dict[str, int]) -> dict[str, int]:
+        """
+        按照 Minecraft 版本由新到舊排序
+
+        Args:
+            requirements: 版本字串與 Java major 版本的映射字典
+
+        Returns:
+            由新到舊排序後的字典
+        """
+        sorted_keys = sorted(
+            requirements.keys(),
+            key=lambda v: (parse_version_safe(v, fallback=VERSION_ZERO), v),
+            reverse=True,
+        )
+        return {k: requirements[k] for k in sorted_keys}
+
+    @staticmethod
+    def _is_valid_mc_version(mc_version: str, allowed_versions: set[str] | None = None) -> bool:
+        if not isinstance(mc_version, str) or not mc_version.strip():
+            return False
+        cleaned = mc_version.strip()
+        if allowed_versions:
+            return cleaned in allowed_versions
+        return bool(_MC_VERSION_PATTERN.match(cleaned))
+
+    @staticmethod
+    def _clean_requirements_cache(
+        raw_data: Any,
+        allowed_versions: set[str] | None = None,
+    ) -> dict[str, int]:
+        """
+        過濾並清理 Java major 需求快取，只保留合法的 Minecraft 版本及其對應的 Java major 版本
+
+        Args:
+            raw_data: 原始快取字典或資料
+            allowed_versions: 允許的合法 Minecraft 版本集合（選填）
+
+        Returns:
+            由新到舊排序的乾淨快取字典
+        """
+        if not isinstance(raw_data, dict):
+            return {}
+        cleaned: dict[str, int] = {}
+        for k, v in raw_data.items():
+            if isinstance(k, str) and JavaUtils._is_valid_mc_version(k, allowed_versions) and type(v) is int and v > 0:
+                cleaned[k.strip()] = v
+        return JavaUtils._sort_requirements(cleaned)
+
+    @staticmethod
+    def _load_requirements_cache(
+        requirements_path: Path,
+        allowed_versions: set[str] | None = None,
+    ) -> dict[str, int]:
+        """
+        讀取 Java major 需求快取，若含有多餘或不合格項目則自動剔除並回寫磁碟
+
+        Args:
+            requirements_path: 快取檔案路徑
+            allowed_versions: 允許的合法 Minecraft 版本集合（選填）
+
+        Returns:
+            清洗後且由新到舊排序的字典
+        """
+        raw_data = read_json(requirements_path)
+        cleaned = JavaUtils._clean_requirements_cache(raw_data, allowed_versions)
+        if isinstance(raw_data, dict) and (
+            len(raw_data) != len(cleaned) or any(raw_data.get(k) != v for k, v in cleaned.items())
+        ):
+            atomic_write_json(requirements_path, cleaned)
+        return cleaned
+
+    @staticmethod
+    def _fetch_version_java_major_from_url(url: str) -> int | None:
+        """
+        從指定 Minecraft 版本的 package JSON URL 解析其 Java major 版本
+
+        Args:
+            url: 版本 manifest 的 JSON 連結
+
+        Returns:
+            Java major 版本，解析失敗則回傳 None
+        """
+        try:
+            ver_json = HTTPClient.fetch_json(url, timeout=10)
+            if not ver_json or not isinstance(ver_json, dict):
+                return None
+            java_info = ver_json.get("javaVersion")
+            if isinstance(java_info, dict) and "majorVersion" in java_info:
+                with suppress(ValueError, TypeError):
+                    return int(java_info["majorVersion"])
+            java_info2 = ver_json.get("java_version")
+            if isinstance(java_info2, dict) and "major" in java_info2:
+                with suppress(ValueError, TypeError):
+                    return int(java_info2["major"])
+        except Exception as e:
+            logger.debug("抓取版本 JSON 失敗: %s", e)
+        return None
+
+    @staticmethod
+    def preload_all_java_requirements(force: bool = False) -> dict[str, int]:
+        """
+        初次啟動或快取缺失時平行抓取全版本之 Java major 版本並寫入快取
+
+        Args:
+            force: 是否強制重新抓取全版本，預設為 False
+
+        Returns:
+            由新到舊排序的 Java major 版本映射字典
+        """
+        requirements_path = RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_REQUIREMENTS_CACHE_FILE_NAME
+        cache_path = RuntimePaths.get_version_cache_dir() / "mc_versions_cache.json"
+        JavaUtils._ensure_cache_exists(cache_path)
+        versions_data = read_json(cache_path)
+        if isinstance(versions_data, dict):
+            versions_data = [versions_data]
+        elif not isinstance(versions_data, list):
+            versions_data = []
+
+        candidates = [
+            v
+            for v in versions_data
+            if isinstance(v, dict)
+            and v.get("id")
+            and v.get("url")
+            and (v.get("type") == "release" or not v.get("type"))
+        ]
+        if not candidates:
+            candidates = [v for v in versions_data if isinstance(v, dict) and v.get("id") and v.get("url")]
+
+        known_versions = {str(c["id"]) for c in candidates if isinstance(c, dict) and c.get("id")}
+        cached_requirements = JavaUtils._load_requirements_cache(
+            requirements_path,
+            allowed_versions=known_versions if known_versions else None,
+        )
+        if not force and cached_requirements and all(c["id"] in cached_requirements for c in candidates):
+            return cached_requirements
+
+        results: dict[str, int] = dict(cached_requirements)
+        to_fetch = [c for c in candidates if c["id"] not in results]
+        if to_fetch:
+
+            def _worker(entry: dict) -> tuple[str, int | None]:
+                vid = str(entry["id"])
+                url = str(entry["url"])
+                major = JavaUtils._fetch_version_java_major_from_url(url)
+                return vid, major
+
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_entry = {executor.submit(_worker, entry): entry for entry in to_fetch}
+                for future in as_completed(future_to_entry):
+                    try:
+                        vid, major = future.result()
+                        if major and major > 0:
+                            results[vid] = major
+                    except Exception as exc:
+                        logger.debug("平行抓取版本 Java major 失敗: %s", exc)
+
+        cleaned_results = JavaUtils._clean_requirements_cache(
+            results,
+            allowed_versions=known_versions if known_versions else None,
+        )
+        if cleaned_results:
+            atomic_write_json(requirements_path, cleaned_results)
+        return cleaned_results
+
+    @staticmethod
     @lru_cache(maxsize=256)
     def get_required_java_major(mc_version: str) -> int:
         """
@@ -258,37 +433,71 @@ class JavaUtils:
         """
         if not isinstance(mc_version, str) or not mc_version:
             raise ValueError("mc_version 必須為非空字串")
-        requirements_path = RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_REQUIREMENTS_CACHE_FILE_NAME
-        cached_requirements = read_json(requirements_path)
-        if isinstance(cached_requirements, dict):
-            cached_major = cached_requirements.get(mc_version)
-            if isinstance(cached_major, int) and cached_major > 0:
-                return cached_major
 
+        requirements_path = RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_REQUIREMENTS_CACHE_FILE_NAME
         cache_path = RuntimePaths.get_version_cache_dir() / "mc_versions_cache.json"
+
+        versions_data = read_json(cache_path) if cache_path.exists() else None
+        valid_ids: set[str] | None = None
+        if isinstance(versions_data, list):
+            valid_ids = {str(v["id"]) for v in versions_data if isinstance(v, dict) and v.get("id")}
+        elif isinstance(versions_data, dict) and versions_data.get("id"):
+            valid_ids = {str(versions_data["id"])}
+
+        cached_requirements = JavaUtils._load_requirements_cache(
+            requirements_path,
+            allowed_versions=valid_ids if valid_ids else None,
+        )
+        cached_major = cached_requirements.get(mc_version)
+        if isinstance(cached_major, int) and cached_major > 0:
+            return cached_major
+
+        if not cached_requirements:
+            fresh_requirements = JavaUtils.preload_all_java_requirements()
+            if mc_version in fresh_requirements:
+                return fresh_requirements[mc_version]
+            cached_requirements = fresh_requirements
+
         JavaUtils._ensure_cache_exists(cache_path)
         data = read_json(cache_path)
-        if data is None:
-            raise ValueError(f"無法解析 {cache_path} 內容")
         if isinstance(data, dict):
             data = [data]
+        elif not isinstance(data, list):
+            data = []
+
+        matched_url = None
         for v in data:
-            if v.get("id") == mc_version and "url" in v:
-                url = v["url"]
-                ver_json = HTTPClient.fetch_json(url, timeout=10)
-                if ver_json:
-                    java_info = ver_json.get("javaVersion")
-                    if java_info and "majorVersion" in java_info:
-                        major = int(java_info["majorVersion"])
-                    else:
-                        java_info2 = ver_json.get("java_version")
-                        major = int(java_info2["major"]) if java_info2 and "major" in java_info2 else 0
-                    if major > 0:
-                        requirements = cached_requirements if isinstance(cached_requirements, dict) else {}
-                        atomic_write_json(requirements_path, {**requirements, mc_version: major})
-                        return major
-                raise ValueError(f"找不到 majorVersion，url: {url}")
-        raise ValueError(f"找不到對應 mc_version: {mc_version}")
+            if isinstance(v, dict) and v.get("id") == mc_version and "url" in v:
+                matched_url = v["url"]
+                break
+
+        if not matched_url:
+            try:
+                manifest_url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+                manifest_data = HTTPClient.fetch_json(manifest_url, timeout=10)
+                if manifest_data and isinstance(manifest_data, dict) and "versions" in manifest_data:
+                    atomic_write_json(cache_path, manifest_data["versions"])
+                    for v in manifest_data["versions"]:
+                        if isinstance(v, dict) and v.get("id") == mc_version and "url" in v:
+                            matched_url = v["url"]
+                            break
+            except Exception as exc:
+                logger.debug("重新整理 Mojang manifest 失敗: %s", exc)
+
+        if not matched_url:
+            raise ValueError(f"找不到對應 mc_version: {mc_version}")
+
+        major = JavaUtils._fetch_version_java_major_from_url(matched_url)
+        if major and major > 0:
+            allowed = (valid_ids | {mc_version}) if valid_ids else None
+            updated = JavaUtils._clean_requirements_cache(
+                {**cached_requirements, mc_version: major},
+                allowed_versions=allowed,
+            )
+            atomic_write_json(requirements_path, updated)
+            return major
+
+        raise ValueError(f"找不到 majorVersion，url: {matched_url}")
 
     @staticmethod
     def get_all_local_java_candidates() -> list:

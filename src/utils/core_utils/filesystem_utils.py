@@ -81,15 +81,13 @@ def is_reparse_point(path: Path | str) -> bool:
         return True
 
 
-def _path_is_within_resolved(base_dir: Path, target_path: Path) -> bool:
-    return target_path.is_relative_to(base_dir)
-
-
 def _normalize_windows_handle_path(value: str) -> Path:
     if value.startswith("\\\\?\\UNC\\"):
-        value = "\\\\" + value[8:]
-    elif value.startswith(("\\\\?\\", "\\\\.\\")):
-        value = value[4:]
+        return Path("\\\\" + value.removeprefix("\\\\?\\UNC\\"))
+    if value.startswith("\\\\?\\"):
+        return Path(value.removeprefix("\\\\?\\"))
+    if value.startswith("\\\\.\\"):
+        return Path(value.removeprefix("\\\\.\\"))
     return Path(value)
 
 
@@ -147,7 +145,7 @@ def _open_regular_file_windows(
             raise OSError("檔案是 reparse point")
         if not stat.S_ISREG(os.fstat(file_object.fileno()).st_mode):
             raise OSError("檔案不是一般檔案")
-        if allowed_root is not None and not _path_is_within_resolved(allowed_root, _windows_handle_path(int(handle))):
+        if allowed_root is not None and not _windows_handle_path(int(handle)).is_relative_to(allowed_root):
             raise OSError("檔案實際路徑超出允許根目錄")
         if writable:
             file_object.seek(0)
@@ -319,7 +317,7 @@ def open_regular_file(
     root = None
     if allowed_root is not None:
         root = resolve_stable_directory(allowed_root)
-        if not _path_is_within_resolved(root, target):
+        if not target.is_relative_to(root):
             raise OSError("檔案路徑超出允許根目錄")
 
     return _open_regular_file_windows(target, root, deny_write_sharing=deny_write_sharing)
@@ -456,11 +454,11 @@ def delete_within(base_dir: Path | str, path: Path | str) -> bool:
     try:
         with _stable_directory_handle(base_dir) as base:
             raw_target = _absolute_path(path)
-            if raw_target == base or not _path_is_within_resolved(base, raw_target):
+            if raw_target == base or not raw_target.is_relative_to(base):
                 return False
             with _stable_directory_handle(raw_target.parent) as target_parent:
                 target = target_parent / raw_target.name
-                if target == base or not _path_is_within_resolved(base, target) or is_reparse_point(target):
+                if target == base or not target.is_relative_to(base) or is_reparse_point(target):
                     return False
                 return _delete_path(target)
     except OSError, ValueError:
@@ -495,7 +493,7 @@ def move_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
             raw_dst = _absolute_path(dst)
             if raw_src == base or raw_dst == base:
                 return False
-            if not _path_is_within_resolved(base, raw_src) or not _path_is_within_resolved(base, raw_dst):
+            if not raw_src.is_relative_to(base) or not raw_dst.is_relative_to(base):
                 return False
             with (
                 _stable_directory_handle(raw_src.parent) as src_parent,
@@ -506,8 +504,8 @@ def move_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
                 if (
                     src_resolved == base
                     or dst_resolved == base
-                    or not _path_is_within_resolved(base, src_resolved)
-                    or not _path_is_within_resolved(base, dst_resolved)
+                    or not src_resolved.is_relative_to(base)
+                    or not dst_resolved.is_relative_to(base)
                     or is_reparse_point(dst_resolved)
                 ):
                     return False
@@ -531,8 +529,8 @@ def move_within_strict(base_dir: Path | str, src: Path, dst: Path) -> None:
         if (
             raw_source == base
             or raw_destination == base
-            or not _path_is_within_resolved(base, raw_source)
-            or not _path_is_within_resolved(base, raw_destination)
+            or not raw_source.is_relative_to(base)
+            or not raw_destination.is_relative_to(base)
             or raw_source.parent != base
             or raw_destination.parent != base
         ):
@@ -751,8 +749,8 @@ def copy_within(base_dir: Path | str, src: Path, dst: Path) -> bool:
             if (
                 raw_src == base
                 or raw_dst == base
-                or not _path_is_within_resolved(base, raw_src)
-                or not _path_is_within_resolved(base, raw_dst)
+                or not raw_src.is_relative_to(base)
+                or not raw_dst.is_relative_to(base)
             ):
                 return False
             return _copy_regular_file(raw_src, raw_dst, allowed_root=base) is not None

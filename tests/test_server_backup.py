@@ -12,6 +12,7 @@ import pytest
 import src.core.server.server_backup as backup_module
 from src.core.server.server_crud import ServerConfigChangeSet, ServerConfigRegistrySnapshot, ServerCRUD
 from src.models import ServerConfig
+from src.utils import SAFE_ZIP_MAX_COMPRESSION_RATIO, SAFE_ZIP_MAX_MEMBERS
 
 
 class _FixedDateTime(datetime.datetime):
@@ -456,10 +457,10 @@ def test_managed_backup_restore_keeps_hard_archive_limits(tmp_path: Path, monkey
 
     assert manager.restore_backup("TestServer", str(backup_file)) is True
     assert callable(captured["progress_callback"])
-    assert captured["max_members"] == backup_module._BACKUP_MAX_MEMBERS
+    assert captured["max_members"] == SAFE_ZIP_MAX_MEMBERS
     assert captured["max_total_uncompressed_bytes"] == backup_module._BACKUP_MAX_TOTAL_BYTES
     assert captured["max_member_uncompressed_bytes"] == backup_module._BACKUP_MAX_MEMBER_BYTES
-    assert captured["max_compression_ratio"] == backup_module._BACKUP_MAX_COMPRESSION_RATIO
+    assert captured["max_compression_ratio"] == SAFE_ZIP_MAX_COMPRESSION_RATIO
 
 
 def test_managed_backup_name_does_not_bypass_hard_total_limit(tmp_path: Path, monkeypatch) -> None:

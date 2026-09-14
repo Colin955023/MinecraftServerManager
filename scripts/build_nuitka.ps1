@@ -179,6 +179,7 @@ print(chr(10).join(modules))
         '--mode=onefile',
         '--onefile-tempdir-spec={CACHE_DIR}/Programs/MinecraftServerManager/{VERSION}',
         '--enable-plugin=pyside6',
+        '--plugin-no-detection',
         '--assume-yes-for-downloads',
         '--output-dir=dist',
         "--output-filename=$($appInfo.GITHUB_REPO).exe",

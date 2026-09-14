@@ -10,13 +10,12 @@ from __future__ import annotations
 from contextlib import suppress
 from typing import Any
 
-from PySide6 import QtGui
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import ComboBox, Theme, isDarkTheme, setTheme, setThemeColor
 
-from .font_manager import PREFERRED_FONT_FAMILIES
+from .font_manager import FontManager
 from .qt_runtime import ensure_application, is_qobject_alive
 from .ui_tokens import Colors, Sizes
 
@@ -236,22 +235,6 @@ class _DialogCenteringFilter(QObject):
         return super().eventFilter(watched, event)
 
 
-def _preferred_ui_font(point_size: int = 12) -> QtGui.QFont:
-    candidates = PREFERRED_FONT_FAMILIES
-    try:
-        families = set(QtGui.QFontDatabase.families())
-        family = next((candidate for candidate in candidates if candidate in families), "")
-        font = (
-            QtGui.QFont(family, point_size)
-            if family
-            else QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.GeneralFont)
-        )
-        font.setPointSize(point_size)
-        return font
-    except Exception:
-        return QtGui.QFont("Arial", point_size)
-
-
 def initialize_ui_theme(mode: str = "light") -> None:
     """
     初始化 UI 主題設定
@@ -279,7 +262,7 @@ def initialize_ui_theme(mode: str = "light") -> None:
 
     setThemeColor("#2563eb")
 
-    ui_font = _preferred_ui_font(12)
+    ui_font = FontManager.get_font(size=12)
     app.setFont(ui_font)
 
     _patch_combobox_wheel_event()
@@ -288,7 +271,7 @@ def initialize_ui_theme(mode: str = "light") -> None:
 
 def _patch_combobox_wheel_event():
     def _combo_wheel_event(self, event: QWheelEvent):
-        if not self.hasFocus():
+        if not self.isEnabled() or self.count() <= 1:
             event.ignore()
             return
         delta = event.angleDelta().y()
@@ -302,6 +285,9 @@ def _patch_combobox_wheel_event():
     if not hasattr(ComboBox, "_original_wheel_event"):
         ComboBox._original_wheel_event = ComboBox.wheelEvent
         ComboBox.wheelEvent = _combo_wheel_event
+
+
+_patch_combobox_wheel_event()
 
 
 def _patch_navigation_push_button_paint_event():

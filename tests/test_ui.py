@@ -695,9 +695,10 @@ def test_delete_server_dialog_options_and_decisions() -> None:
     # 有備份情境
     dialog_with_backups = DeleteServerDialog("TestServer", 3)
     assert dialog_with_backups.cancel_btn.text() == "取消"
-    assert dialog_with_backups.no_btn.text() == "否（只刪除伺服器）"
-    assert dialog_with_backups.yes_btn.text() == "是（連備份一併刪除）"
+    assert dialog_with_backups.no_btn.text() == "否"
+    assert dialog_with_backups.yes_btn.text() == "是"
     assert "3 個外部備份檔案" in dialog_with_backups.content_label.text()
+    assert "是：連備份一併刪除 / 否：只刪除伺服器" in dialog_with_backups.content_label.text()
 
     dialog_with_backups._choose_all()
     assert dialog_with_backups.decision == "all"
@@ -771,3 +772,45 @@ def test_server_memory_dialog_shows_and_persists_backup_path(tmp_path: Path, mon
     assert updated is not None
     assert updated.backup_path == str(backup_dir)
     dialog.close()
+
+
+def test_combobox_wheel_event_switches_item_without_focus() -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QWheelEvent
+    from qfluentwidgets import ComboBox
+
+    from src.ui import ensure_application
+
+    ensure_application()
+    combo = ComboBox()
+    combo.addItems(["選項A", "選項B", "選項C"])
+    assert combo.currentIndex() == 0
+    assert not combo.hasFocus()
+
+    # 模擬滾輪向下滾動 (delta < 0)，應切換到下一個選項
+    event_down = QWheelEvent(
+        QPoint(10, 10),
+        QPoint(10, 10),
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    combo.wheelEvent(event_down)
+    assert combo.currentIndex() == 1
+
+    # 模擬滾輪向上滾動 (delta > 0)，應切換到上一個選項
+    event_up = QWheelEvent(
+        QPoint(10, 10),
+        QPoint(10, 10),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    combo.wheelEvent(event_up)
+    assert combo.currentIndex() == 0

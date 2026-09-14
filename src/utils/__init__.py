@@ -138,6 +138,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "SAFE_TEXT_FILE_MAX_BYTES": (".core_utils.filesystem_utils", "SAFE_TEXT_FILE_MAX_BYTES"),
     "SAFE_DIRECTORY_MAX_FILES": (".core_utils.filesystem_utils", "SAFE_DIRECTORY_MAX_FILES"),
     "SAFE_DIRECTORY_MAX_TOTAL_BYTES": (".core_utils.filesystem_utils", "SAFE_DIRECTORY_MAX_TOTAL_BYTES"),
+    "SAFE_ZIP_MAX_MEMBERS": (".core_utils.archive_utils", "SAFE_ZIP_MAX_MEMBERS"),
+    "SAFE_ZIP_MAX_COMPRESSION_RATIO": (".core_utils.archive_utils", "SAFE_ZIP_MAX_COMPRESSION_RATIO"),
     "copy_dir": (".core_utils.filesystem_utils", "copy_dir"),
     "copy_file": (".core_utils.filesystem_utils", "copy_file"),
     "copy_within": (".core_utils.filesystem_utils", "copy_within"),

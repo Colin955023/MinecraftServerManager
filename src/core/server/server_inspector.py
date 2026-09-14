@@ -57,6 +57,12 @@ _LOADER_LIBRARY_PATHS = {
     "neoforge": NEOFORGE_LIBRARY_PATH,
 }
 
+_TXT_ARG_RE = re.compile(r"@([^\s\"']*\.txt)", re.IGNORECASE)
+_FORGE_SUBDIR_JAR_RE = re.compile(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?)-.*\.jar")
+_FORGE_JAR_RE = re.compile(r"forge-(\d+\.\d+(?:\.\d+)?)-(\d+\.\d+(?:\.\d+)?).*\.jar")
+_LOADER_STEM_RE = re.compile(r"(?:loader|fabric|quilt|neoforge)[-_.]?(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)
+_NEOFORGE_DIR_VERSION_RE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?")
+
 
 @dataclass(slots=True)
 class _InspectionState:
@@ -111,7 +117,7 @@ class _InspectionEngine:
                     )
                     or ""
                 )
-                matches = re.findall(r"@([^\s\"']*\.txt)", text, re.IGNORECASE)
+                matches = _TXT_ARG_RE.findall(text)
                 for raw_rel in matches:
                     rel_clean = raw_rel.strip().replace("/", os.sep).replace("\\", os.sep)
                     if "user_jvm_args" in rel_clean.lower():
@@ -199,95 +205,6 @@ class _InspectionEngine:
             if "fabric" in name:
                 return "fabric"
         return "vanilla"
-
-    @staticmethod
-    def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
-        """
-        尋找主要 JAR 檔案，根據載入器類型和伺服器設定進行優先順序檢測
-
-        Args:
-            server_path: 伺服器資料夾路徑
-            loader_type: 載入器類型
-            server_config: 伺服器設定物件
-
-        Returns:
-            主要 JAR 檔或啟動參照字串
-        """
-        loader_type = (loader_type or "").lower()
-
-        def _args_target(args_file: Path | None) -> str:
-            if args_file is None or not args_file.exists():
-                return ""
-            try:
-                relative_path = args_file.relative_to(server_path)
-            except ValueError:
-                relative_path = Path(args_file.name)
-            target = f"@{relative_path.as_posix()}"
-            return target if ServerCommands.is_safe_batch_argument(target) else ""
-
-        try:
-            root_entries = list_bounded_directory(server_path)
-        except OSError:
-            root_entries = []
-        jar_files = [entry for entry in root_entries if entry.suffix.lower() == ".jar" and entry.is_file()]
-
-        if loader_type == "forge":
-            args_file = _InspectionEngine._find_loader_args_file(server_path, FORGE_LIBRARY_PATH, server_config)
-            args_target = _args_target(args_file)
-            if args_target:
-                return args_target
-            for jar_file in jar_files:
-                if (
-                    not is_reparse_point(jar_file)
-                    and ServerCommands.is_safe_batch_argument(jar_file.name)
-                    and "forge" in jar_file.name.lower()
-                    and "neo" not in jar_file.name.lower()
-                ):
-                    return jar_file.name
-        elif loader_type == "neoforge":
-            args_file = _InspectionEngine._find_loader_args_file(server_path, NEOFORGE_LIBRARY_PATH, server_config)
-            args_target = _args_target(args_file)
-            if args_target:
-                return args_target
-            for jar_file in jar_files:
-                if (
-                    not is_reparse_point(jar_file)
-                    and ServerCommands.is_safe_batch_argument(jar_file.name)
-                    and "neoforge" in jar_file.name.lower().replace("-", "").replace("_", "")
-                ):
-                    return jar_file.name
-        elif loader_type == "fabric":
-            for fabric_jar in FABRIC_JAR_NAMES:
-                if (server_path / fabric_jar).is_file() and not is_reparse_point(server_path / fabric_jar):
-                    return fabric_jar
-        elif loader_type == "quilt":
-            for quilt_jar in QUILT_JAR_NAMES:
-                if (server_path / quilt_jar).is_file() and not is_reparse_point(server_path / quilt_jar):
-                    return quilt_jar
-        for jar_name in ["server.jar", "minecraft_server.jar"]:
-            if (server_path / jar_name).is_file() and not is_reparse_point(server_path / jar_name):
-                return jar_name
-        safe_jars = [jar_file for jar_file in jar_files if ServerCommands.is_safe_batch_argument(jar_file.name)]
-        return safe_jars[0].name if safe_jars else "server.jar"
-
-    @staticmethod
-    def find_startup_script(server_path: Path) -> Path | None:
-        """
-        尋找伺服器啟動腳本
-
-        Args:
-            server_path: 伺服器資料夾路徑
-
-        Returns:
-            找到時回傳啟動腳本 Path，否則回傳 None
-        """
-        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
-            candidate_path = server_path / script_name
-            if candidate_path.is_file() and not is_reparse_point(candidate_path):
-                command = ServerCommands.extract_startup_script_command(candidate_path)
-                if command.has_java_command and not command.unsafe:
-                    return candidate_path
-        return None
 
     @staticmethod
     def is_valid_server_folder(folder_path: Path) -> bool:
@@ -466,7 +383,7 @@ class _InspectionEngine:
                 except OSError:
                     return
                 for jar in jars:
-                    m2 = re.match("forge-(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?)-.*\\.jar", jar.name)
+                    m2 = _FORGE_SUBDIR_JAR_RE.match(jar.name)
                     if m2:
                         mc2, forge_ver2 = m2.groups()
                         set_if_unknown("minecraft_version", mc2)
@@ -483,7 +400,7 @@ class _InspectionEngine:
                         config.loader_type = "forge"
                     elif name_lower in {"server.jar", "minecraft_server.jar"}:
                         config.loader_type = "vanilla"
-                m = re.search("forge-(\\d+\\.\\d+(?:\\.\\d+)?)-(\\d+\\.\\d+(?:\\.\\d+)?).*\\.jar", jar.name)
+                m = _FORGE_JAR_RE.search(jar.name)
                 if m:
                     mc, forge_ver = m.groups()
                     set_if_unknown("minecraft_version", mc)
@@ -493,11 +410,7 @@ class _InspectionEngine:
                     set_if_unknown("minecraft_version", mc_version)
                     if detection_source and "mc_version" not in detection_source:
                         detection_source["mc_version"] = f"JAR 檔名 {jar.name}"
-                loader_match = re.search(
-                    r"(?:loader|fabric|quilt|neoforge)[-_.]?(\d+\.\d+(?:\.\d+)?)",
-                    jar.stem,
-                    re.IGNORECASE,
-                )
+                loader_match = _LOADER_STEM_RE.search(jar.stem)
                 if loader_match:
                     set_if_unknown("loader_version", loader_match.group(1))
                     if detection_source and "loader_version" not in detection_source:
@@ -592,7 +505,7 @@ class _InspectionEngine:
             set_if_unknown("loader_version", folder)
             if detection_source:
                 detection_source["loader_version"] = "NeoForge 函式庫目錄"
-            m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", folder)
+            m = _NEOFORGE_DIR_VERSION_RE.match(folder)
             if m:
                 major, minor, _patch = m.groups()
                 mc_ver = f"1.{major}.{minor}" if minor else f"1.{major}"
@@ -626,17 +539,72 @@ class ServerInspector:
     @staticmethod
     def find_main_jar(server_path: Path, loader_type: str, server_config=None) -> str:
         """
-        尋找主要 JAR 或 args 啟動參照
+        尋找主要 JAR 檔案，根據載入器類型和伺服器設定進行優先順序檢測
 
         Args:
             server_path: 伺服器資料夾路徑
-            loader_type: 模組載入器類型
-            server_config: 伺服器設定物件（選填）
+            loader_type: 載入器類型
+            server_config: 伺服器設定物件
 
         Returns:
-            主要 JAR 檔名或 @args.txt 參照字串
+            主要 JAR 檔或啟動參照字串
         """
-        return _InspectionEngine.find_main_jar(server_path, loader_type, server_config)
+        loader_type = (loader_type or "").lower()
+
+        def _args_target(args_file: Path | None) -> str:
+            if args_file is None or not args_file.exists():
+                return ""
+            try:
+                relative_path = args_file.relative_to(server_path)
+            except ValueError:
+                relative_path = Path(args_file.name)
+            target = f"@{relative_path.as_posix()}"
+            return target if ServerCommands.is_safe_batch_argument(target) else ""
+
+        try:
+            root_entries = list_bounded_directory(server_path)
+        except OSError:
+            root_entries = []
+        jar_files = [entry for entry in root_entries if entry.suffix.lower() == ".jar" and entry.is_file()]
+
+        if loader_type == "forge":
+            args_file = _InspectionEngine._find_loader_args_file(server_path, FORGE_LIBRARY_PATH, server_config)
+            args_target = _args_target(args_file)
+            if args_target:
+                return args_target
+            for jar_file in jar_files:
+                if (
+                    not is_reparse_point(jar_file)
+                    and ServerCommands.is_safe_batch_argument(jar_file.name)
+                    and "forge" in jar_file.name.lower()
+                    and "neo" not in jar_file.name.lower()
+                ):
+                    return jar_file.name
+        elif loader_type == "neoforge":
+            args_file = _InspectionEngine._find_loader_args_file(server_path, NEOFORGE_LIBRARY_PATH, server_config)
+            args_target = _args_target(args_file)
+            if args_target:
+                return args_target
+            for jar_file in jar_files:
+                if (
+                    not is_reparse_point(jar_file)
+                    and ServerCommands.is_safe_batch_argument(jar_file.name)
+                    and "neoforge" in jar_file.name.lower().replace("-", "").replace("_", "")
+                ):
+                    return jar_file.name
+        elif loader_type == "fabric":
+            for fabric_jar in FABRIC_JAR_NAMES:
+                if (server_path / fabric_jar).is_file() and not is_reparse_point(server_path / fabric_jar):
+                    return fabric_jar
+        elif loader_type == "quilt":
+            for quilt_jar in QUILT_JAR_NAMES:
+                if (server_path / quilt_jar).is_file() and not is_reparse_point(server_path / quilt_jar):
+                    return quilt_jar
+        for jar_name in ["server.jar", "minecraft_server.jar"]:
+            if (server_path / jar_name).is_file() and not is_reparse_point(server_path / jar_name):
+                return jar_name
+        safe_jars = [jar_file for jar_file in jar_files if ServerCommands.is_safe_batch_argument(jar_file.name)]
+        return safe_jars[0].name if safe_jars else "server.jar"
 
     @staticmethod
     def find_startup_script(server_path: Path) -> Path | None:
@@ -647,9 +615,15 @@ class ServerInspector:
             server_path: 伺服器資料夾路徑
 
         Returns:
-            啟動腳本路徑，若不存在則回傳 None
+            找到時回傳啟動腳本 Path，否則回傳 None
         """
-        return _InspectionEngine.find_startup_script(server_path)
+        for script_name in ServerCommands.STARTUP_SCRIPT_CANDIDATES:
+            candidate_path = server_path / script_name
+            if candidate_path.is_file() and not is_reparse_point(candidate_path):
+                command = ServerCommands.extract_startup_script_command(candidate_path)
+                if command.has_java_command and not command.unsafe:
+                    return candidate_path
+        return None
 
     def inspect(self, path: Path | str, intent: ServerInspectionIntent) -> ServerInspection:
         """
@@ -707,7 +681,7 @@ class ServerInspector:
         _InspectionEngine.detect_loader_and_version_from_sources(server_path, state, loader, evidence)
 
         scripts = self._startup_scripts(server_path)
-        selected_script = _InspectionEngine.find_startup_script(server_path)
+        selected_script = ServerInspector.find_startup_script(server_path)
         startup_command = ""
         memory_max_mb = 2048
         memory_min_mb: int | None = None
@@ -742,7 +716,7 @@ class ServerInspector:
             memory_max_mb = MemoryUtils.parse_memory_setting(content, "Xmx") or memory_max_mb
             memory_min_mb = MemoryUtils.parse_memory_setting(content, "Xms") or memory_min_mb
 
-        main_target = _InspectionEngine.find_main_jar(server_path, state.loader_type, state)
+        main_target = ServerInspector.find_main_jar(server_path, state.loader_type, state)
         if selected_script is not None:
             launch_target = ServerLaunchTarget(
                 "script",

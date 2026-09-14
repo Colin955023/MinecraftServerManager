@@ -534,6 +534,7 @@ class MainWindow(FluentWindow):
                 )
             self.task_coordinator = TaskCoordinator(self, self.settings)
             self.task_coordinator.preload_java_candidates()
+            self.task_coordinator.preload_java_requirements()
             UIUtils.schedule_debounce(
                 self.root, "_startup_tasks_job", 1200, self.task_coordinator.handle_startup_tasks, owner=self
             )

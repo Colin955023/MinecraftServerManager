@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from src.models import ServerConfig
 from src.utils import (
+    SAFE_ZIP_MAX_COMPRESSION_RATIO,
+    SAFE_ZIP_MAX_MEMBERS,
     SystemUtils,
     atomic_replace_file_within,
     atomic_write_json,
@@ -46,10 +48,8 @@ if TYPE_CHECKING:
 logger = get_logger().bind(component="ServerBackup")
 
 _BACKUP_EXCLUDES = {"logs", "crash-reports", "backups", ".git"}
-_BACKUP_MAX_MEMBERS = 100_000
 _BACKUP_MAX_TOTAL_BYTES = 128 * 1024 * 1024 * 1024
 _BACKUP_MAX_MEMBER_BYTES = 16 * 1024 * 1024 * 1024
-_BACKUP_MAX_COMPRESSION_RATIO = 200
 _BACKUP_DISK_RESERVE_BYTES = 1024 * 1024 * 1024
 _MANAGED_TIMESTAMP_FORMAT = "%Y%m%d%H%M%S%f"
 _SUPPORTED_TIMESTAMP_FORMATS = {
@@ -145,7 +145,7 @@ class ServerBackupManager:
                 for root_path, _dirs, files in walk_bounded_tree(
                     server_path,
                     ignore=_ignore,
-                    max_entries=_BACKUP_MAX_MEMBERS,
+                    max_entries=SAFE_ZIP_MAX_MEMBERS,
                 ):
                     for file in files:
                         file_path = root_path / file
@@ -164,16 +164,16 @@ class ServerBackupManager:
                 planned_files.append((file_path, file_size))
                 file_count = len(planned_files)
                 total_size += file_size
-                if file_count > _BACKUP_MAX_MEMBERS:
-                    raise ValueError(f"備份檔案數超過安全上限 {_BACKUP_MAX_MEMBERS}")
+                if file_count > SAFE_ZIP_MAX_MEMBERS:
+                    raise ValueError(f"備份檔案數超過安全上限 {SAFE_ZIP_MAX_MEMBERS}")
                 if total_size > _BACKUP_MAX_TOTAL_BYTES:
                     raise ValueError(f"備份總大小超過安全上限 {_BACKUP_MAX_TOTAL_BYTES} bytes")
                 if file_size > _BACKUP_MAX_MEMBER_BYTES:
                     raise ValueError(f"備份單檔大小超過安全上限 {_BACKUP_MAX_MEMBER_BYTES} bytes")
 
             file_count = len(planned_files)
-            if file_count > _BACKUP_MAX_MEMBERS:
-                raise ValueError(f"備份檔案數超過安全上限 {_BACKUP_MAX_MEMBERS}")
+            if file_count > SAFE_ZIP_MAX_MEMBERS:
+                raise ValueError(f"備份檔案數超過安全上限 {SAFE_ZIP_MAX_MEMBERS}")
             if total_size > _BACKUP_MAX_TOTAL_BYTES:
                 raise ValueError(f"備份總大小超過安全上限 {_BACKUP_MAX_TOTAL_BYTES} bytes")
 
@@ -190,7 +190,7 @@ class ServerBackupManager:
                 processed_count = 0
                 with open_bounded_zip_writer(
                     temp_backup_file,
-                    max_members=_BACKUP_MAX_MEMBERS,
+                    max_members=SAFE_ZIP_MAX_MEMBERS,
                     max_total_bytes=_BACKUP_MAX_TOTAL_BYTES,
                     max_member_bytes=_BACKUP_MAX_MEMBER_BYTES,
                 ) as zf:
@@ -377,8 +377,8 @@ class ServerBackupManager:
             declared_total_bytes, declared_max_member_bytes, declared_members = self._archive_declared_sizes(
                 backup_file
             )
-            if declared_members > _BACKUP_MAX_MEMBERS:
-                raise ValueError(f"備份檔案數超過安全上限 {_BACKUP_MAX_MEMBERS}")
+            if declared_members > SAFE_ZIP_MAX_MEMBERS:
+                raise ValueError(f"備份檔案數超過安全上限 {SAFE_ZIP_MAX_MEMBERS}")
             if declared_total_bytes > _BACKUP_MAX_TOTAL_BYTES:
                 raise ValueError(f"備份總大小超過安全上限 {_BACKUP_MAX_TOTAL_BYTES} bytes")
             if declared_max_member_bytes > _BACKUP_MAX_MEMBER_BYTES:
@@ -405,10 +405,10 @@ class ServerBackupManager:
                 backup_file,
                 staging_path,
                 progress_callback=_on_extract_progress,
-                max_members=_BACKUP_MAX_MEMBERS,
+                max_members=SAFE_ZIP_MAX_MEMBERS,
                 max_total_uncompressed_bytes=_BACKUP_MAX_TOTAL_BYTES,
                 max_member_uncompressed_bytes=_BACKUP_MAX_MEMBER_BYTES,
-                max_compression_ratio=_BACKUP_MAX_COMPRESSION_RATIO,
+                max_compression_ratio=SAFE_ZIP_MAX_COMPRESSION_RATIO,
                 max_archive_bytes=_BACKUP_MAX_TOTAL_BYTES,
             )
 
@@ -485,7 +485,7 @@ class ServerBackupManager:
         member_count = 0
         with open_bounded_zip(
             backup_file,
-            max_members=_BACKUP_MAX_MEMBERS,
+            max_members=SAFE_ZIP_MAX_MEMBERS,
             max_archive_bytes=_BACKUP_MAX_TOTAL_BYTES,
         ) as archive:
             for member in archive.infolist():

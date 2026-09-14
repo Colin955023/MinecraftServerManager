@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from PySide6 import QtCore, QtGui
+from PySide6 import QtCore
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -66,10 +66,6 @@ from src.utils import (
 from .create_server_support import compose_server_name, extract_server_name_suffix, version_names
 
 logger = get_logger().bind(component="CreateServerFrame")
-
-
-def _qt_font(font: Any) -> QtGui.QFont:
-    return getattr(font, "font", font)
 
 
 class CreateServerFrame(QWidget):
@@ -279,7 +275,7 @@ class CreateServerFrame(QWidget):
 
         title_label = TitleLabel("建立新伺服器", self.content_widget)
         self.title_label = title_label
-        title_label.setFont(_qt_font(FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold")))
+        title_label.setFont(FontManager.get_font(size=FontSize.HEADING_LARGE, weight="bold"))
         content_layout.addWidget(title_label)
 
         eula_frame = CardWidget(self.content_widget)
@@ -291,7 +287,7 @@ class CreateServerFrame(QWidget):
         eula_icon = BodyLabel("⚠️", eula_frame)
         self.eula_icon = eula_icon
         eula_icon.setStyleSheet("background: transparent;")
-        eula_icon.setFont(_qt_font(FontManager.get_font(size=FontSize.LARGE, weight="bold")))
+        eula_icon.setFont(FontManager.get_font(size=FontSize.LARGE, weight="bold"))
         eula_layout.addWidget(eula_icon, 0, QtCore.Qt.AlignmentFlag.AlignTop)
         eula_link = HyperlinkLabel(
             QtCore.QUrl("https://aka.ms/MinecraftEULA"),
@@ -300,7 +296,7 @@ class CreateServerFrame(QWidget):
             eula_frame,
         )
         self.eula_link = eula_link
-        self.eula_link.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
+        self.eula_link.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold"))
         eula_layout.addWidget(eula_link, 1, QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignVCenter)
         content_layout.addWidget(eula_frame)
 
@@ -403,7 +399,7 @@ class CreateServerFrame(QWidget):
         min_layout.setSpacing(3)
         min_label = CaptionLabel("最小記憶體:", min_memory_frame)
         self.min_label = min_label
-        min_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
+        min_label.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         min_layout.addWidget(min_label)
         self.min_memory_entry = LineEdit(min_memory_frame)
         self.min_memory_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -420,7 +416,7 @@ class CreateServerFrame(QWidget):
         max_layout.setSpacing(3)
         max_label = CaptionLabel("最大記憶體:", max_memory_frame)
         self.max_label = max_label
-        max_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
+        max_label.setFont(FontManager.get_font(size=FontSize.MEDIUM))
         max_layout.addWidget(max_label)
         self.max_memory_entry = LineEdit(max_memory_frame)
         self.max_memory_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -454,7 +450,7 @@ class CreateServerFrame(QWidget):
         jvm_layout.setSpacing(10)
 
         self.jvm_summary_label = BodyLabel("載入中...", jvm_container)
-        self.jvm_summary_label.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM)))
+        self.jvm_summary_label.setFont(FontManager.get_font(size=FontSize.MEDIUM))
 
         self.jvm_config_btn = PrimaryPushButton("JVM參數設定...", jvm_container)
         self.jvm_config_btn.clicked.connect(self.open_jvm_args_dialog)
@@ -1145,7 +1141,7 @@ class CreateServerFrame(QWidget):
         button = PrimaryPushButton(text, btn_parent) if kind == "primary" else PushButton(text, btn_parent)
         button.setProperty("msm_button_kind", kind)
         button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
-        button.setFont(_qt_font(FontManager.get_font(size=FontSize.MEDIUM, weight="bold")))
+        button.setFont(FontManager.get_font(size=FontSize.MEDIUM, weight="bold"))
         button.setMinimumHeight(30)
         button.clicked.connect(command)
         return button

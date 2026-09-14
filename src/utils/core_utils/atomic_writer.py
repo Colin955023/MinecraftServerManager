@@ -16,7 +16,6 @@ from typing import Any
 import orjson
 
 from .filesystem_utils import (
-    SAFE_TEXT_FILE_MAX_BYTES,
     delete_within,
     is_reparse_point,
     move_within,
@@ -43,24 +42,9 @@ def _get_path_lock(path: Path) -> threading.RLock:
     return _PATH_LOCKS[hash(key) % len(_PATH_LOCKS)]
 
 
-def _best_effort_sync_dir(path: Path) -> None:
-    """盡力同步目錄 metadata；平台不支援時忽略錯誤"""
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        return
-    finally:
-        os.close(fd)
-
-
 def _replace_file(source: Path, target: Path) -> None:
-    """以原子替換提交檔案，並盡力同步目標目錄"""
+    """以原子替換提交檔案"""
     source.replace(target)
-    _best_effort_sync_dir(target.parent)
 
 
 def _best_effort_fsync(file_obj) -> None:
@@ -103,7 +87,6 @@ def _atomic_write_payload_stable_locked(
                 _best_effort_fsync(file_obj)
             if not move_within(stable_parent, tmp_path, path):
                 raise OSError("無法安全提交原子寫入")
-            _best_effort_sync_dir(stable_parent)
             return True
         except OSError:
             try:
@@ -277,44 +260,16 @@ def atomic_write_text(
     Returns:
         寫入成功時回傳 True，失敗時回傳 False
     """
-    if skip_if_unchanged:
-        try:
-            p = resolve_stable_path(path, create_parent=True)
-            with stable_directory(p.parent) as stable_parent:
-                p = stable_parent / p.name
-                with _get_path_lock(p):
-                    if is_reparse_point(p):
-                        return False
-                    if p.exists():
-                        existing_payload = read_bytes_file(
-                            p, max_bytes=SAFE_TEXT_FILE_MAX_BYTES, allowed_root=stable_parent
-                        )
-                        if existing_payload is not None:
-                            try:
-                                if existing_payload.decode(encoding, errors=errors or "strict") == content:
-                                    return True
-                            except UnicodeError, LookupError:
-                                pass
-                    return _atomic_write_payload_stable_locked(
-                        p,
-                        stable_parent,
-                        lambda file_obj: file_obj.write(content),
-                        "w",
-                        encoding=encoding,
-                        errors=errors,
-                        newline=newline,
-                    )
-        except OSError:
-            return False
-
-    return _atomic_write_payload(
-        path,
-        lambda file_obj: file_obj.write(content),
-        "w",
-        encoding=encoding,
-        errors=errors,
-        newline=newline,
-    )
+    normalized_content = content
+    if newline is not None:
+        normalized_content = content.replace("\r\n", "\n").replace("\r", "\n")
+        if newline != "\n":
+            normalized_content = normalized_content.replace("\n", newline)
+    try:
+        payload_bytes = normalized_content.encode(encoding, errors=errors or "strict")
+    except UnicodeError, LookupError:
+        return False
+    return atomic_write_bytes(path, payload_bytes, skip_if_unchanged=skip_if_unchanged)
 
 
 __all__ = [

@@ -45,6 +45,8 @@ from .server_runtime import ServerRuntime
 
 logger = get_logger().bind(component="ServerManager")
 
+_EMPTY_REGISTRY_REVISION = HashUtils.digest_bytes(b"{}")
+
 
 def _clone_server_config(config: ServerConfig) -> ServerConfig:
     """複製設定的不可變欄位，僅複製唯一可變的 JVM 參數清單"""
@@ -151,7 +153,7 @@ class ServerCRUD:
             self.operation_lock = self._operation_locks.setdefault(key, threading.RLock())
         self._registry_state = ServerCRUD._shared_registry_states.setdefault(
             key,
-            _RegistryState(configs={}, revision=self._empty_revision()),
+            _RegistryState(configs={}, revision=_EMPTY_REGISTRY_REVISION),
         )
         with self.operation_lock:
             registry_loaded = self._refresh_registry_locked()
@@ -160,14 +162,6 @@ class ServerCRUD:
             if registry_loaded and config_existed:
                 self._recover_delete_tombstones_locked()
                 self._recover_restore_transactions_locked()
-
-    @staticmethod
-    def _empty_revision() -> str:
-        return HashUtils.digest_bytes(b"{}")
-
-    @staticmethod
-    def _revision_for_bytes(payload: bytes) -> str:
-        return HashUtils.digest_bytes(payload)
 
     def _snapshot_locked(self) -> ServerConfigRegistrySnapshot:
         return ServerConfigRegistrySnapshot(
@@ -202,7 +196,7 @@ class ServerCRUD:
                 logger.error("儲存伺服器設定失敗：無法寫入檔案")
                 return False
             raw = read_bytes_file(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
-            self._registry_state.revision = self._revision_for_bytes(raw) if raw is not None else self._empty_revision()
+            self._registry_state.revision = HashUtils.digest_bytes(raw) if raw is not None else _EMPTY_REGISTRY_REVISION
             logger.info("伺服器設定已原子提交到 servers_config.json")
             return True
         except Exception as e:
@@ -234,7 +228,7 @@ class ServerCRUD:
     def _refresh_registry_locked(self) -> bool:
         if not self.config_file.exists():
             self._registry_state.configs = {}
-            self._registry_state.revision = self._empty_revision()
+            self._registry_state.revision = _EMPTY_REGISTRY_REVISION
             return True
         result = read_json_with_bytes(self.config_file, max_bytes=SAFE_TEXT_FILE_MAX_BYTES)
         if result is None:
@@ -245,7 +239,7 @@ class ServerCRUD:
         if decoded is None:
             return False
         self._registry_state.configs = decoded
-        self._registry_state.revision = self._revision_for_bytes(raw)
+        self._registry_state.revision = HashUtils.digest_bytes(raw)
         return True
 
     def snapshot(self) -> ServerConfigRegistrySnapshot:

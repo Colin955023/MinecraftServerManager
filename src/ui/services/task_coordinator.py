@@ -17,6 +17,7 @@ from src.utils import (
     GITHUB_OWNER,
     GITHUB_REPO,
     JavaUtils,
+    RuntimePaths,
     SettingsManager,
     get_logger,
 )
@@ -44,6 +45,23 @@ class TaskCoordinator:
 
         if hasattr(self.main_window, "scope") and self.main_window.scope:
             self.main_window.scope.submit(refresh_java_cache, key="preload_java", replace=True)
+
+    def preload_java_requirements(self) -> None:
+        """
+        初次啟動時若尚未建立 Java major 快取則在背景平行抓取全版本並儲存
+        """
+        requirements_path = RuntimePaths.get_version_cache_dir() / JavaUtils.JAVA_REQUIREMENTS_CACHE_FILE_NAME
+        if requirements_path.exists() and requirements_path.stat().st_size > 0:
+            return
+
+        def _job():
+            try:
+                JavaUtils.preload_all_java_requirements()
+            except Exception as exc:
+                logger.debug("初次啟動背景抓取 Java major 快取失敗: %s", exc)
+
+        if hasattr(self.main_window, "scope") and self.main_window.scope:
+            self.main_window.scope.submit(_job, key="preload_java_requirements", replace=True)
 
     def handle_startup_tasks(self) -> None:
         """處理啟動時的工作：首次執行提示和自動更新檢查"""

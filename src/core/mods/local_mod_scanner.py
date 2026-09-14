@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import stat
 import tomllib
 import zipfile
 from collections.abc import Callable
@@ -25,6 +24,7 @@ from src.utils import (
     SAFE_HASH_FILE_MAX_BYTES,
     clean_mod_version,
     detect_loader_from_text,
+    extract_minecraft_version_from_text,
     get_logger,
     list_bounded_directory,
     mod_filename_stem,
@@ -206,12 +206,8 @@ class LocalModScanner:
             推測出的 Minecraft 版本；無法判定時回傳"未知"
         """
 
-        patterns = [r"mc(\d+\.\d+\.\d+)", r"(\d+\.\d+\.\d+)", r"mc(\d+\.\d+)", r"(\d+\.\d+)"]
-        for pattern in patterns:
-            match = re.search(pattern, base_name, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return "未知"
+        version = extract_minecraft_version_from_text(base_name)
+        return version if version is not None else "未知"
 
     @staticmethod
     def clean_author(author: str) -> str:
@@ -270,11 +266,9 @@ class LocalModScanner:
         """
         try:
             with open_regular_file(file_path) as source:
-                if os.fstat(source.fileno()).st_size > SAFE_HASH_FILE_MAX_BYTES:
+                stat_result = os.fstat(source.fileno())
+                if stat_result.st_size > SAFE_HASH_FILE_MAX_BYTES:
                     return None
-            file_stat = file_path.stat(follow_symlinks=False)
-            if not stat.S_ISREG(file_stat.st_mode):
-                return None
             filename, enabled, base_name = self.parse_file_info(file_path)
             mod_data = {
                 "name": base_name,
@@ -327,8 +321,8 @@ class LocalModScanner:
                 platform_slug=platform_slug,
                 status=ModStatus.ENABLED if enabled else ModStatus.DISABLED,
                 file_path=str(file_path),
-                file_size=file_stat.st_size,
-                file_mtime=file_stat.st_mtime,
+                file_size=stat_result.st_size,
+                file_mtime=stat_result.st_mtime,
                 current_hash=current_hash,
                 hash_algorithm=hash_algorithm,
                 provider_identity=identity,

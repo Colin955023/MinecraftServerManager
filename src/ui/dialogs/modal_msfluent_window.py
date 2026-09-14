@@ -205,7 +205,7 @@ class DeleteServerDialog(ModalMSFluentWindow):
         self.decision: str = "cancel"
 
         self.setWindowTitle("確認刪除伺服器")
-        self.setFixedSize(540, 290 if backup_count > 0 else 240)
+        self.setFixedSize(540, 310 if backup_count > 0 else 240)
 
         if hasattr(self, "titleBar"):
             if hasattr(self.titleBar, "minBtn"):
@@ -221,7 +221,8 @@ class DeleteServerDialog(ModalMSFluentWindow):
             msg = (
                 f"確定要刪除伺服器「{server_name}」嗎？\n\n"
                 "⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n"
-                f"偵測到此伺服器有 {backup_count} 個外部備份檔案，是否一併永久刪除？"
+                f"偵測到此伺服器有 {backup_count} 個外部備份檔案，是否一併永久刪除？\n"
+                "（是：連備份一併刪除 / 否：只刪除伺服器）"
             )
         else:
             msg = f"確定要刪除伺服器「{server_name}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！"
@@ -243,8 +244,8 @@ class DeleteServerDialog(ModalMSFluentWindow):
 
         if backup_count > 0:
             self.cancel_btn = PushButton("取消", custom_buttons)
-            self.no_btn = PushButton("否（只刪除伺服器）", custom_buttons)
-            self.yes_btn = PrimaryPushButton("是（連備份一併刪除）", custom_buttons)
+            self.no_btn = PushButton("否", custom_buttons)
+            self.yes_btn = PrimaryPushButton("是", custom_buttons)
 
             for btn in (self.cancel_btn, self.no_btn, self.yes_btn):
                 btn.setMinimumSize(Sizes.DIALOG_BUTTON_WIDTH, Sizes.DIALOG_BUTTON_HEIGHT)

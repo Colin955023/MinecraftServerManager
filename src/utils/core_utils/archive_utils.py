@@ -452,6 +452,8 @@ def safe_extract_zip(
 
 __all__ = [
     "SAFE_ZIP_MAX_ARCHIVE_BYTES",
+    "SAFE_ZIP_MAX_COMPRESSION_RATIO",
+    "SAFE_ZIP_MAX_MEMBERS",
     "open_bounded_zip",
     "open_bounded_zip_writer",
     "read_archive_metadata_bytes",
