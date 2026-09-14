@@ -526,3 +526,46 @@ def test_backup_dir_rejects_servers_root(tmp_path: Path) -> None:
     with pytest.raises(OSError, match="備份目錄不得為伺服器根目錄"):
         manager._get_backup_dir(cast(Any, config_root))
     assert manager.backup_server("TestServer") is False
+
+
+def test_restore_uses_backup_archive_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    server_dir = tmp_path / "server"
+    server_dir.mkdir()
+    (server_dir / "server.properties").write_text("motd=old\n", encoding="utf-8")
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    backup_file = backup_dir / "test_backup.zip"
+    with zipfile.ZipFile(backup_file, "w") as zf:
+        zf.writestr("server.properties", "motd=restored\n")
+
+    config = SimpleNamespace(name="TestServer", path=str(server_dir), backup_path=str(backup_dir), jvm_args=[])
+    crud = SimpleNamespace(
+        snapshot=lambda: ServerConfigRegistrySnapshot("test-revision", (("TestServer", config),)),
+        servers_root=server_dir.parent,
+        operation_lock=threading.RLock(),
+    )
+    runtime = SimpleNamespace(
+        observe=lambda _name: SimpleNamespace(is_running=False),
+        begin_maintenance=lambda _name: True,
+        end_maintenance=lambda _name: None,
+    )
+    manager = backup_module.ServerBackupManager(cast(Any, crud), server_runtime=cast(Any, runtime))
+    archive_limits: list[int | None] = []
+    extract_limits: list[int | None] = []
+    original_open = backup_module.open_bounded_zip
+    original_extract = backup_module.safe_extract_zip
+
+    def _open(*args: Any, **kwargs: Any) -> Any:
+        archive_limits.append(kwargs.get("max_archive_bytes"))
+        return original_open(*args, **kwargs)
+
+    def _extract(*args: Any, **kwargs: Any) -> None:
+        extract_limits.append(kwargs.get("max_archive_bytes"))
+        original_extract(*args, **kwargs)
+
+    monkeypatch.setattr(backup_module, "open_bounded_zip", _open)
+    monkeypatch.setattr(backup_module, "safe_extract_zip", _extract)
+
+    assert manager.restore_backup("TestServer", str(backup_file)) is True
+    assert archive_limits == [backup_module._BACKUP_MAX_TOTAL_BYTES]
+    assert extract_limits == [backup_module._BACKUP_MAX_TOTAL_BYTES]

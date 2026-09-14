@@ -589,6 +589,9 @@ class ServerRuntime:
     def _mark_failed(self, record: _RuntimeRecord, message: str) -> None:
         with self._lock:
             if record.state not in {"stopped", "failed"}:
+                if self._record_is_running(record):
+                    self._emit(record, "output", f"[輸出讀取錯誤] {message}")
+                    return
                 record.state = "failed"
                 self._emit(record, "failed", message)
 
@@ -632,11 +635,6 @@ class ServerRuntime:
         server_path: Path,
         inspection: ServerInspection,
     ) -> list[str] | None:
-        if (
-            str(config.loader_type or "").lower() in ("forge", "neoforge")
-            and (server_path / "user_jvm_args.txt").exists()
-        ):
-            ServerCommands.update_forge_user_jvm_args(server_path, config)
         if inspection.launch_target.kind == "script":
             parsed = ServerCommands.parse_safe_java_command_line(inspection.launch_target.command)
             command = parsed[1] if parsed is not None else None

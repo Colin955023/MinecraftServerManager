@@ -126,6 +126,29 @@ def test_build_java_command_uses_args_file_for_neoforge(monkeypatch: pytest.Monk
     assert command[-1] == "nogui"
 
 
+def test_build_java_command_preserves_imported_forge_jvm_args(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    args_file = tmp_path / "user_jvm_args.txt"
+    original_args = "-Dimported=true\n-XX:+UseZGC\n"
+    args_file.write_text(original_args, encoding="utf-8")
+    config = ServerConfig("neo", "1.21.1", "neoforge", "26.1.2.36-beta", 2048, path=str(tmp_path))
+    monkeypatch.setattr(
+        runtime_utils_module.JavaUtils, "get_best_java_path", staticmethod(lambda *_args, **_kwargs: None)
+    )
+    monkeypatch.setattr(
+        runtime_utils_module.ServerCommands,
+        "update_forge_user_jvm_args",
+        staticmethod(lambda *_args, **_kwargs: pytest.fail("不得在啟動前覆寫匯入的 JVM 參數")),
+    )
+
+    ServerCommands.build_java_command(
+        config,
+        return_list=True,
+        launch_target="@libraries/net/neoforged/neoforge/26.1.2.36-beta/win_args.txt",
+    )
+
+    assert args_file.read_text(encoding="utf-8") == original_args
+
+
 def test_build_java_command_rejects_batch_metacharacters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     malicious_jar = tmp_path / "server&whoami.jar"
     malicious_jar.write_bytes(b"jar")

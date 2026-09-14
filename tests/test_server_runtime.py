@@ -180,7 +180,7 @@ def test_initialization_uses_same_runtime_and_stops_after_ready(tmp_path: Path, 
     assert snapshot.state == "stopped"
 
 
-def test_runtime_process_error_is_recorded(tmp_path: Path, monkeypatch: Any) -> None:
+def test_runtime_process_error_preserves_live_process_state(tmp_path: Path, monkeypatch: Any) -> None:
     runtime, process = _make_runtime(tmp_path, monkeypatch)
 
     assert runtime.start("demo").success
@@ -188,8 +188,10 @@ def test_runtime_process_error_is_recorded(tmp_path: Path, monkeypatch: Any) -> 
 
     snapshot = runtime.observe("demo")
 
-    assert snapshot.state == "failed"
-    assert any(event.kind == "failed" and event.message == "模擬程序錯誤" for event in snapshot.events)
+    assert snapshot.is_running is True
+    assert snapshot.state != "failed"
+    assert runtime.begin_maintenance("demo") is False
+    assert any(event.kind == "output" and "模擬程序錯誤" in event.message for event in snapshot.events)
 
 
 def test_runtime_rejects_server_path_outside_root(tmp_path: Path) -> None:

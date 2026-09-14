@@ -770,10 +770,6 @@ class ServerCommands:
         quoted_mem_args = [ServerCommands._quote_windows_arg(arg) for arg in mem_args]
         quoted_main_jar = ServerCommands._quote_windows_arg(main_jar)
         if loader_type in ("forge", "neoforge") and main_jar.startswith("@"):
-            server_path_str = getattr(server_config, "path", "")
-            server_path = Path(server_path_str) if server_path_str else None
-            if server_path is not None and (server_path / "user_jvm_args.txt").is_file():
-                ServerCommands.update_forge_user_jvm_args(server_path, server_config)
             cmd_list = [java_exe, *jvm_args, *mem_args, main_jar, "nogui"]
             result_cmd = " ".join([quoted_java_exe, *quoted_jvm_args, *quoted_mem_args, quoted_main_jar, "nogui"])
         else:

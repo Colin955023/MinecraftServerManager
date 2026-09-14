@@ -409,6 +409,7 @@ class ServerBackupManager:
                 max_total_uncompressed_bytes=_BACKUP_MAX_TOTAL_BYTES,
                 max_member_uncompressed_bytes=_BACKUP_MAX_MEMBER_BYTES,
                 max_compression_ratio=_BACKUP_MAX_COMPRESSION_RATIO,
+                max_archive_bytes=_BACKUP_MAX_TOTAL_BYTES,
             )
 
             for excluded_name in _BACKUP_EXCLUDES:
@@ -482,7 +483,11 @@ class ServerBackupManager:
         total_bytes = 0
         max_member_bytes = 0
         member_count = 0
-        with open_bounded_zip(backup_file, max_members=_BACKUP_MAX_MEMBERS) as archive:
+        with open_bounded_zip(
+            backup_file,
+            max_members=_BACKUP_MAX_MEMBERS,
+            max_archive_bytes=_BACKUP_MAX_TOTAL_BYTES,
+        ) as archive:
             for member in archive.infolist():
                 if member.is_dir():
                     continue
