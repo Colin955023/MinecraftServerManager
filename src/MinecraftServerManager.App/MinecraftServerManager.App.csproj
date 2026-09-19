@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>MinecraftServerManager.App</AssemblyName>
+    <RootNamespace>MinecraftServerManager.App</RootNamespace>
+    <RepoRootDir Condition="'$(RepoRootDir)' == '' and Exists('$(MSBuildProjectDirectory)\..\..\..\assets\icon.ico')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..'))</RepoRootDir>
+    <RepoRootDir Condition="'$(RepoRootDir)' == '' and Exists('$(MSBuildProjectDirectory)\..\..\assets\icon.ico')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</RepoRootDir>
+    <ApplicationIcon>$(RepoRootDir)\assets\icon.ico</ApplicationIcon>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
+    <Product>Minecraft Server Manager</Product>
+    <Company>Colin955023</Company>
+    <Copyright>GPL-3.0 License</Copyright>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="$(RepoRootDir)\assets\icon.ico" Link="assets\icon.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MinecraftServerManager.Core\MinecraftServerManager.Core.csproj" />
+    <ProjectReference Include="..\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

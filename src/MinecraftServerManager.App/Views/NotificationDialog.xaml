@@ -1,0 +1,49 @@
+<Window x:Class="MinecraftServerManager.App.Views.NotificationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="系統提示"
+        Width="460"
+        SizeToContent="Height"
+        MinWidth="380"
+        MaxWidth="560"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource WindowBrush}"
+        Foreground="{DynamicResource TextBrush}">
+  <Border Padding="22" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="12" CornerRadius="8">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <!-- 標題與圖示 -->
+      <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,14" VerticalAlignment="Center">
+        <TextBlock x:Name="IconText" FontSize="22" Margin="0,0,10,0" VerticalAlignment="Center" />
+        <TextBlock x:Name="TitleText" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+      </StackPanel>
+
+      <!-- 訊息內容 -->
+      <TextBlock Grid.Row="1"
+                 x:Name="MessageText"
+                 TextWrapping="Wrap"
+                 FontSize="13"
+                 LineHeight="20"
+                 Foreground="{DynamicResource TextBrush}"
+                 Margin="0,0,0,20" />
+
+      <!-- 按鈕區 -->
+      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button x:Name="OkButton"
+                Content="確定"
+                Style="{DynamicResource PrimaryButtonStyle}"
+                MinWidth="85"
+                Height="32"
+                Click="OkButton_Click"
+                IsDefault="True" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</Window>

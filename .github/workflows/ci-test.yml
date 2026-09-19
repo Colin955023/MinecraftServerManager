@@ -1,4 +1,4 @@
-name: CI-Tests
+name: CI
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -8,7 +8,29 @@ on:
   push:
     branches:
       - master
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - '*.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '.editorconfig'
+      - '.github/workflows/ci-test.yml'
   pull_request:
+    branches:
+      - master
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - '*.sln'
+      - 'Directory.Build.props'
+      - 'Directory.Packages.props'
+      - 'global.json'
+      - '.editorconfig'
+      - '.github/workflows/ci-test.yml'
   workflow_dispatch:
   merge_group:
     types: [checks_requested]
@@ -17,155 +39,48 @@ permissions:
   contents: read
 
 jobs:
-  bandit-scan:
-    name: CI-Tests / Bandit Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup Python Environment
-        uses: ./.github/actions/setup-python-env
-        with:
-          uv-sync: 'true'
-          uv-groups: '--group security'
-
-      - name: Run Bandit security scan
-        run: |
-          uv run bandit -r src tests scripts report -f sarif -o bandit-results.sarif --severity-level medium --confidence-level high
-
-      - name: Upload Bandit SARIF
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
-        with:
-          sarif_file: bandit-results.sarif
-          category: bandit
-          ref: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.head_ref) || github.ref }}
-          sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-
-  detect-secrets-scan:
-    name: CI-Tests / detect-secrets
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup Python Environment
-        uses: ./.github/actions/setup-python-env
-        with:
-          uv-sync: 'true'
-          uv-groups: '--group security'
-
-      - name: Run detect-secrets privacy scan
-        run: >-
-          git ls-files -z
-          | xargs -0 uv run detect-secrets-hook
-          --baseline scripts/.secrets.baseline
-          --exclude-files 'scripts[\\/]\.secrets\.baseline'
-
-  lint:
-    name: CI-Tests / lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Setup Python Environment
-        uses: ./.github/actions/setup-python-env
-        with:
-          uv-sync: 'true'
-          uv-groups: '--group lint --group typecheck --group test'
-
-      - name: Cache Ruff
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .ruff_cache
-          key: ruff-${{ runner.os }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: |
-            ruff-${{ runner.os }}-${{ hashFiles('uv.lock') }}-
-
-      - name: Cache Mypy
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .mypy_cache
-          key: mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
-          restore-keys: |
-            mypy-${{ runner.os }}-${{ hashFiles('uv.lock') }}-
-
-      - name: Run Ruff (Lint & Format)
-        run: uv run ruff check src tests scripts report && uv run ruff format --check src tests scripts report
-
-      - name: Run mypy
-        run: uv run mypy
-
-      - name: Run Pylint (cyclic import check)
-        run: uv run pylint --disable=all --enable=cyclic-import src
-
-      - name: Run import architecture checks
-        run: uv run python scripts/check_import_boundaries.py
-
-      - name: Compile first-party Python sources
-        run: uv run python -m compileall -q src tests scripts report
-
-  test:
-    name: CI-Tests / test
+  quality:
+    name: C# Quality & Tests (.NET 10)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      DOTNET_CLI_FORCE_UTF8_ENCODING: '1'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          fetch-depth: 1
           persist-credentials: false
+          fetch-depth: 1
 
-      - name: Setup Python Environment
-        uses: ./.github/actions/setup-python-env
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          uv-sync: 'true'
-          uv-groups: '--group test'
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            Directory.Packages.props
+            src/**/*.csproj
+            tests/**/*.csproj
 
-      - name: Run tests (pytest)
-        run: >-
-          uv run pytest -q
-          --junitxml=pytest-results.xml
-          --cov=src
-          --cov-branch
-          --cov-report=term-missing
-          --cov-report=xml:coverage.xml
+      - name: 隱私與機密資訊檢查 (Gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload pytest JUnit report
+      - name: C# 品質門禁 (Restore, Format, Build, Tests)
+        run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1
+
+      - name: 雙版本單一 EXE 發布驗證
+        run: pwsh -NoProfile -File scripts/dotnet_publish.ps1 -Configuration Release -Runtime win-x64
+
+      - name: Upload Test Results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: pytest_junit_report_windows
-          path: pytest-results.xml
-          retention-days: 2
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: coverage_report_windows
-          path: coverage.xml
-          if-no-files-found: error
+          name: dotnet-test-results
+          path: |
+            tests/**/TestResults/*.trx
+          if-no-files-found: ignore
           retention-days: 2

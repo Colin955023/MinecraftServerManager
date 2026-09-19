@@ -1,0 +1,155 @@
+<Window x:Class="MinecraftServerManager.App.Views.ServerPropertiesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels"
+        Title="{Binding WindowTitle}"
+        Width="720"
+        Height="640"
+        MinWidth="600"
+        MinHeight="500"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+
+    <DataTemplate DataType="{x:Type vm:PropertyEditItem}">
+      <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="230" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <!-- 屬性鍵名與提示說明 -->
+          <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,12,0">
+            <TextBlock Text="{Binding Key}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis">
+              <TextBlock.ToolTip>
+                <ToolTip>
+                  <StackPanel MaxWidth="360">
+                    <TextBlock Text="{Binding Key}" FontWeight="Bold" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding DefaultValue, StringFormat='預設值：{0}'}" Foreground="{DynamicResource MutedTextBrush}" />
+                  </StackPanel>
+                </ToolTip>
+              </TextBlock.ToolTip>
+            </TextBlock>
+            <TextBlock Text="{Binding Description}" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0">
+              <TextBlock.ToolTip>
+                <ToolTip Content="{Binding Description}" />
+              </TextBlock.ToolTip>
+            </TextBlock>
+          </StackPanel>
+
+          <!-- 編輯器控制項（依屬性型別動態切換） -->
+          <Grid Grid.Column="1" VerticalAlignment="Center">
+            <TextBox x:Name="TxtBox" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" />
+            <CheckBox x:Name="ChkBox" Content="啟用" IsChecked="{Binding BoolValue}" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Visibility="Collapsed" />
+            <ComboBox x:Name="CmbBox" ItemsSource="{Binding Options}" SelectedItem="{Binding Value}" VerticalAlignment="Center" Visibility="Collapsed" />
+          </Grid>
+
+          <!-- 重設單項預設值按鈕 -->
+          <Button Grid.Column="2"
+                  Command="{Binding ResetToDefaultCommand}"
+                  ToolTip="{Binding DefaultValue, StringFormat='還原為預設值：{0}'}"
+                  Margin="10,0,0,0"
+                  Padding="8,4"
+                  Content="預設"
+                  FontSize="11"
+                  VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <DataTemplate.Triggers>
+        <DataTrigger Binding="{Binding IsBoolean}" Value="True">
+          <Setter TargetName="TxtBox" Property="Visibility" Value="Collapsed" />
+          <Setter TargetName="ChkBox" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding IsOptions}" Value="True">
+          <Setter TargetName="TxtBox" Property="Visibility" Value="Collapsed" />
+          <Setter TargetName="CmbBox" Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </DataTemplate.Triggers>
+    </DataTemplate>
+  </Window.Resources>
+
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 標題與說明 -->
+    <StackPanel Grid.Row="0" Margin="0,0,0,14">
+      <TextBlock Text="編輯伺服器屬性" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" />
+      <TextBlock Text="修改 server.properties 設定檔，支援 60+ 項官方設定、中文說明與預設值還原"
+                 Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,4,0,0" />
+    </StackPanel>
+
+    <!-- 搜尋與分類過濾列 -->
+    <Grid Grid.Row="1" Margin="0,0,0,12">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="140" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 快速搜尋輸入框 -->
+      <TextBox Grid.Column="0"
+               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+               Margin="0,0,10,0"
+               VerticalContentAlignment="Center"
+               Padding="8,4" />
+
+      <!-- 分類下拉選單 -->
+      <ComboBox Grid.Column="1"
+                ItemsSource="{Binding Categories}"
+                SelectedItem="{Binding SelectedCategory}"
+                Margin="0,0,10,0"
+                VerticalAlignment="Center" />
+
+      <!-- 全部還原預設值按鈕 -->
+      <Button Grid.Column="2"
+              Content="全部還原預設值"
+              Command="{Binding ResetAllToDefaultCommand}"
+              Padding="12,5"
+              VerticalAlignment="Center" />
+    </Grid>
+
+    <!-- 屬性列表區域 -->
+    <Border Grid.Row="2"
+            Background="{DynamicResource CardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            Margin="0,0,0,14">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ItemsControl ItemsSource="{Binding DisplayItems}" />
+      </ScrollViewer>
+    </Border>
+
+    <!-- 狀態訊息 -->
+    <TextBlock Grid.Row="3"
+               Text="{Binding StatusMessage}"
+               Foreground="{DynamicResource DangerBrush}"
+               FontSize="12"
+               Margin="0,0,0,12" />
+
+    <!-- 底部動作按鈕 -->
+    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="取消"
+              Command="{Binding CancelCommand}"
+              Margin="0,0,10,0"
+              Padding="16,6" />
+      <Button Content="儲存變更"
+              Command="{Binding SaveCommand}"
+              Style="{DynamicResource PrimaryButtonStyle}"
+              Padding="20,6"
+              IsEnabled="{Binding IsNotSaving}" />
+    </StackPanel>
+  </Grid>
+</Window>

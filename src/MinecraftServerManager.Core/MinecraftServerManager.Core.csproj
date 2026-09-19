@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MinecraftServerManager.Core</AssemblyName>
+    <RootNamespace>MinecraftServerManager.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MinecraftServerManager.Domain\MinecraftServerManager.Domain.csproj" />
+  </ItemGroup>
+</Project>

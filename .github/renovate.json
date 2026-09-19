@@ -7,22 +7,24 @@
   "prConcurrentLimit": 5,
   "packageRules": [
     {
-      "matchCategories": [
-        "python"
-      ],
-      "matchFileNames": [
-        "/(^|/)pyproject\\.toml$/"
-      ]
-    },
-    {
       "matchUpdateTypes": ["minor", "patch"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true,
       "labels": ["dependencies", "automerge"]
     },
     {
-      "groupName": "Pytest ecosystem",
-      "matchPackageNames": ["pytest", "pytest-cov", "pytest-mock"]
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "breaking-change"]
+    },
+    {
+      "groupName": ".NET ecosystem",
+      "matchManagers": ["nuget"],
+      "matchFileNames": ["Directory.Packages.props", "src/**", "tests/**"]
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"]
     }
   ],
   "dependencyDashboard": true,

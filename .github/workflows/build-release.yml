@@ -11,15 +11,16 @@ permissions:
 
 jobs:
   build:
-    name: Build, Sign and Attest
+    name: Publish and Attest (.NET 10)
     if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     outputs:
-      tag_name: ${{ steps.release_tag.outputs.tag_name }}
+      tag_name: ${{ steps.release_info.outputs.tag_name }}
+      version: ${{ steps.release_info.outputs.version }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      NUITKA_CACHE_DIR: ${{ github.workspace }}\.nuitka-cache
+      DOTNET_CLI_FORCE_UTF8_ENCODING: '1'
 
     permissions:
       contents: read
@@ -34,64 +35,61 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Setup Environment
-        id: setup-python
-        uses: ./.github/actions/setup-python-env
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          python-version: '3.14'
-          uv-sync: 'false'
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: |
+            Directory.Packages.props
+            src/**/*.csproj
+            tests/**/*.csproj
 
-      - name: Restore Nuitka compilation cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
-          key: nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-${{ github.run_id }}
-          restore-keys: |
-            nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-
-            nuitka-cache-windows-
-
-      - name: Resolve release tag
-        id: release_tag
+      - name: Extract version and release notes
+        id: release_info
         shell: pwsh
         run: |
-          $json = python .\scripts\version_check.py get-all
+          .\scripts\extract_release_notes.ps1 -Strict
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "取得版本資訊與驗證失敗"
+            Write-Error "提取版本資訊與發行說明失敗"
             exit $LASTEXITCODE
           }
 
-          $output = $json | ConvertFrom-Json
-          $tag = $output.Tag
-          $version = $output.Version
+      - name: 隱私與機密資訊檢查 (Gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          "tag_name=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Build executable
+      - name: Run C# Quality Gate
         shell: pwsh
-        run: .\scripts\build_nuitka.ps1 -ConsoleMode disable
+        run: .\scripts\dotnet_quality_gate.ps1
 
-      - name: Extract release notes
-        id: release_notes
+      - name: Publish Dual Executables (Self-contained & Framework-dependent)
+        shell: pwsh
+        run: .\scripts\dotnet_publish.ps1 -Configuration Release -Runtime win-x64
+
+      - name: Verify Release Artifacts in output
         shell: pwsh
         run: |
-          .\.venv\Scripts\python.exe .\scripts\version_check.py extract-release-notes --changelog CHANGELOG.md --output release_notes.md --strict
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "提取 release notes 失敗"
-            exit $LASTEXITCODE
+          $outputDir = "output"
+          if (-not (Test-Path $outputDir)) {
+              throw "輸出目錄不存在: $outputDir"
           }
+
+          Write-Host "發布目錄驗證完成，檔案列表："
+          Get-ChildItem -Path $outputDir | Select-Object Name, Length | Format-Table -AutoSize
 
       - name: Attest release executable provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: 'dist/*.exe'
+          subject-path: 'output/*.exe'
 
       - name: Verify generated attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+          Get-ChildItem -Path 'output' -Filter '*.exe' -File | ForEach-Object {
               gh attestation verify $_.FullName --repo $env:GITHUB_REPOSITORY
               if ($LASTEXITCODE -ne 0) { throw "Artifact attestation verification failed: $($_.Name)" }
           }
@@ -101,7 +99,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          Get-ChildItem -Path 'dist' -Filter '*.exe' -File | ForEach-Object {
+          Get-ChildItem -Path 'output' -Filter '*.exe' -File | ForEach-Object {
               $exe = $_
               $tempDir = Join-Path $env:RUNNER_TEMP ("attestation-" + [guid]::NewGuid().ToString("N"))
               New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
@@ -129,29 +127,14 @@ jobs:
                   Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
               }
           }
-
-      - name: Sign release executable with Sigstore
-        uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
-        with:
-          inputs: |
-            dist/*.exe
-
-      - name: Save Nuitka compilation cache
-        if: success()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
-          key: nuitka-cache-windows-${{ hashFiles('uv.lock', 'scripts/build_nuitka.ps1') }}-${{ github.run_id }}
-
       - name: Upload release payload
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release_payload
           path: |
-            dist/
+            output/
             release_notes.md
-            report/nuitka-compilation-report.xml
           if-no-files-found: error
           retention-days: 2
 
@@ -247,13 +230,13 @@ jobs:
           $tag = $env:RELEASE_TAG
           $prereleaseArgs = @()
           if ($tag -match '^\d+\.\d+\.\d+-') { $prereleaseArgs += '--prerelease' }
-          $assets = Get-ChildItem -Path 'dist' -File | Where-Object {
+          $assets = Get-ChildItem -Path 'output' -File | Where-Object {
               $_.Name -match '^MinecraftServerManager.*\.exe$' -or
-              $_.Name -match '^MinecraftServerManager.*\.exe\.sigstore\.json$' -or
+              $_.Name -match '^MinecraftServerManager.*\.exe\.sha256$' -or
               $_.Name -match '^MinecraftServerManager.*\.exe\.intoto\.jsonl$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
-              Write-Error "No release executable was found in dist."
+              Write-Error "No release executable was found in output."
               exit 1
           }
           $args = @('release', 'create', $tag) + $assets + @(

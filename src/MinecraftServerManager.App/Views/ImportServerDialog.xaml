@@ -1,0 +1,76 @@
+<Window x:Class="MinecraftServerManager.App.Views.ImportServerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="匯入 Minecraft 伺服器"
+        Width="580"
+        Height="430"
+        MinWidth="500"
+        MinHeight="380"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVis" />
+  </Window.Resources>
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 標題與說明 -->
+    <StackPanel Grid.Row="0" Margin="0,0,0,16">
+      <TextBlock Text="匯入外部伺服器" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" />
+      <TextBlock Text="支援從本機資料夾或 ZIP 備份檔匯入既有 Minecraft 伺服器"
+                 Foreground="{DynamicResource MutedTextBrush}" FontSize="12" Margin="0,4,0,0" />
+    </StackPanel>
+
+    <!-- 表單 -->
+    <StackPanel Grid.Row="1">
+      <TextBlock Text="來源路徑 (目錄或 .zip 檔)" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+      <Grid Margin="0,0,0,14">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBox Grid.Column="0" Text="{Binding SourcePath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" />
+        <Button Grid.Column="1" Content="瀏覽 ZIP" Command="{Binding BrowseZipCommand}" Margin="0,0,6,0" Padding="10,6" />
+        <Button Grid.Column="2" Content="瀏覽資料夾" Command="{Binding BrowseFolderCommand}" Padding="10,6" />
+      </Grid>
+
+      <TextBlock Text="匯入後的伺服器名稱" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+      <TextBox Text="{Binding ServerName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,14" />
+
+      <TextBlock Text="傳輸模式" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+      <ComboBox ItemsSource="{Binding Modes}" SelectedIndex="{Binding SelectedModeIndex}" />
+    </StackPanel>
+
+    <!-- 狀態提示與進度條 -->
+    <StackPanel Grid.Row="2" Margin="0,0,0,12">
+      <ProgressBar Height="4"
+                   IsIndeterminate="True"
+                   Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
+                   Margin="0,0,0,8" />
+      <TextBlock Text="{Binding StatusMessage}"
+                 Foreground="{DynamicResource DangerBrush}"
+                 FontSize="12" />
+    </StackPanel>
+
+    <!-- 底部按鈕區 -->
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+      <Button Content="取消"
+              Command="{Binding CancelCommand}"
+              IsEnabled="{Binding IsNotBusy}"
+              Margin="0,0,10,0"
+              Padding="16,6" />
+      <Button Content="開始匯入"
+              Command="{Binding ImportCommand}"
+              IsEnabled="{Binding IsNotBusy}"
+              Style="{DynamicResource PrimaryButtonStyle}"
+              Padding="20,6" />
+    </StackPanel>
+  </Grid>
+</Window>

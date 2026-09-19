@@ -3,9 +3,13 @@
 # Auto detect text files and normalize line endings to LF
 * text=auto
 
-# Python：LF（Unix 標準）
-*.py text eol=lf
-*.pyw text eol=lf
+# C# / .NET / Visual Studio：CRLF（Windows 原生 WPF 專案）
+*.cs text eol=crlf
+*.sln text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
+*.xaml text eol=crlf
 
 # Batch / PowerShell：CRLF（Windows 標準）
 *.bat text eol=crlf
@@ -43,5 +47,6 @@
 *.jpeg binary
 *.gif binary
 *.pdb binary
-*.pyo binary
-*.pyc binary
+*.jar binary
+*.zip binary
+*.7z binary

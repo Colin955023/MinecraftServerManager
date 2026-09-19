@@ -1,62 +1,75 @@
 # Minecraft 伺服器管理器
 
 [![Platform](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
-[![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![WPF](https://img.shields.io/badge/UI-WPF-512BD4)](https://learn.microsoft.com/dotnet/desktop/wpf/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/11917/badge)](https://www.bestpractices.dev/projects/11917)
 
-Windows 10／11（64-bit）的 Minecraft 伺服器 GUI 管理工具，支援建立、匯入、啟停、監控、備份、`server.properties` 與 Modrinth 模組管理。
+專為 Windows 10／11（64 位元）打造的 Minecraft 伺服器管理工具，採用 C#、.NET 10 與 WPF 技術建置，提供流暢操作體驗、高安全性邊界與極致啟動效能。
 
-## 功能
+## 主要特色
 
-- 建立 Vanilla、Fabric、Forge、Quilt、NeoForge 伺服器
-- 自動偵測 Java；缺少時引導 winget 或手動安裝
-- 集中管理伺服器狀態、控制台、玩家與記憶體
-- 匯入資料夾或 ZIP，支援批次探索與重新偵測
-- 原子建立備份；交易式快照還原與失敗回滾
-- 視覺化編輯 `server.properties`
-- 掃描本地模組、搜尋 Modrinth、規劃依賴及 Review 後安裝／更新
-- 匯出模組清單為 XLSX、JSON、HTML 或純文字
+- **載入器支援**：支援 Vanilla、Fabric、Quilt、Forge、NeoForge 官方核心之一鍵下載與伺服器建立
+- **獨立即時監控**：獨立主控台視窗、50ms 批次聚合緩衝、ANSI 色碼清洗、在線玩家解析、指令發送與優雅停止
+- **安全交易式還原**：備份還原具備暫存解壓、自動快照與失敗回復（Rollback）機制，自動保留最新 10 份備份
+- **模組與 Modrinth 整合**：本地模組智慧啟用／停用、Modrinth 線上搜尋下載、雜湊完整性校驗與 4 種格式清單匯出
+- **安全屬性編輯**：`server.properties` 設定調整內建樂觀鎖保護，防止檔案並行修改衝突
+- **官方原生安全壓縮**：產出原生單一執行檔（Single-File EXE），無第三方加殼，杜絕防毒軟體誤判
 
-## 使用
+## 使用方法
 
-從 [Releases](https://github.com/Colin955023/MinecraftServerManager/releases) 下載 `MinecraftServerManager.exe` 後直接執行。程式不內含 Java；需要時會提示安裝符合 Minecraft 版本的 Java。
+### 下載與執行
 
-設定與日誌位於 `%LOCALAPPDATA%\Programs\MinecraftServerManager`；onefile 解壓快取依版本放在同一目錄下。完整操作請見 [使用者手冊](docs/USER_GUIDE.md)。
+專案提供兩種單一可執行檔（Single-File EXE），可依您的環境需求選擇：
 
-## 開發
+| 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 62 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 Runtime 與所有依賴庫，開箱即用，絕不因缺少環境而報錯 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.6 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
 
-需求：Windows、Python `>=3.14,<3.15`、[uv](https://docs.astral.sh/uv/)。
+> [!TIP]
+> 如果您不確定電腦是否已安裝 .NET 10，請一律下載 **`MinecraftServerManager-self-contained.exe`** 即可順暢使用。
 
+### 從原始碼開發與建置
+
+需求環境：Windows 10／11、.NET 10 SDK、PowerShell 7（`pwsh`）。
+
+#### 本機開發與執行
 ```bat
-uv sync
-uv run python -m src.main # 啟動主程式
-
-uv sync --group test
-uv run pytest -q --cov=src --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml # 執行測試與產生覆蓋率報告
-
-powershell -ExecutionPolicy Bypass -File scripts\build_nuitka.ps1 # 建置單檔可執行檔
-
-scripts\format_lint_fix_gate.bat # 格式化、靜態檢查、修正與測試
-uv run report\comprehensive_report.py # 產生綜合報告
+dotnet run --project src\MinecraftServerManager.App\MinecraftServerManager.App.csproj
 ```
 
-## 結構
+#### 執行品質門禁（檢查、格式化、建置與全量測試）
+```bat
+pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
+```
+
+#### 發布單一執行檔
+```bat
+pwsh -NoProfile -File scripts\dotnet_publish.ps1 -Configuration Release
+```
+
+## 專案結構
 
 ```text
-src/core/    伺服器、載入器、模組與 Modrinth 業務邏輯
-src/models/  跨模組共享的領域資料
-src/ui/      主視窗、對話框、模組 Review 與監控
-src/utils/   檔案、網路、Java、日誌與執行期工具
-tests/       自動化測試
-scripts/     建置與品質檢查
-report/      綜合報告產生器
+src/
+├─ MinecraftServerManager.App/             WPF 視窗、View、ViewModel 與應用程式進入點
+├─ MinecraftServerManager.Core/            工作流程、用例與服務合約
+├─ MinecraftServerManager.Domain/          核心領域模型、值物件與業務規則
+└─ MinecraftServerManager.Infrastructure/  檔案系統、HTTP、程序管理與 Java 整合
+tests/
+├─ MinecraftServerManager.UnitTests/       全量單元測試套件
+└─ MinecraftServerManager.IntegrationTests/系統整合與流程測試套件
+scripts/                                   自動化建置、發布與品質檢驗腳本
+output/                                    發布建置成品輸出目錄
 ```
 
-架構與開發規則請見 [技術手冊](docs/TECHNICAL_OVERVIEW.md) 及 [AGENTS.md](AGENTS.md)。
+## 說明文件
 
-## 貢獻與授權
+- [技術手冊](docs/TECHNICAL_OVERVIEW.md)：架構分層、安全機制與實作技術細節
+- [使用手冊](docs/USER_GUIDE.md)：詳細介面操作指南與常見問題排除
 
-PR 請聚焦單一主題，提交前執行 `scripts\format_lint_fix_gate.bat`。授權條款見 [GPLv3](LICENSE) 與 [COPYING.md](COPYING.md)。
+## 授權條款
+
+本專案採用 GNU General Public License v3.0（GPLv3）授權，詳見 [LICENSE](LICENSE)。

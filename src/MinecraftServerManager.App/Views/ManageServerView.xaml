@@ -1,0 +1,185 @@
+<UserControl x:Class="MinecraftServerManager.App.Views.ManageServerView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels">
+  <Grid Margin="0,0,16,16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 頂部標題 -->
+    <TextBlock Grid.Row="0" Text="⚙️ 管理伺服器" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,16" />
+
+    <!-- 頂部控制區 -->
+    <StackPanel Grid.Row="1" Margin="0,0,0,14">
+      <Grid Margin="0,0,0,10">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Text="偵測路徑:" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,10,0" />
+        <TextBox Grid.Column="1" Text="{Binding DetectPath, Mode=OneWay}" IsReadOnly="True" />
+      </Grid>
+
+      <StackPanel Orientation="Horizontal">
+        <Button Command="{Binding DetectServersCommand}"
+                Height="32"
+                Margin="0,0,8,0">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconSearch}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="偵測現有伺服器" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding AddServerCommand}"
+                Height="32"
+                Margin="0,0,8,0">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconCreateServer}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="手動新增" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding RefreshServersCommand}"
+                Height="32">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconRefresh}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="重新整理" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </StackPanel>
+        </Button>
+      </StackPanel>
+    </StackPanel>
+
+    <!-- 中間卡片：伺服器列表 (自動填滿 X 軸) -->
+    <Border Grid.Row="2"
+            Background="{DynamicResource CardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16"
+            Margin="0,0,0,14">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="伺服器列表" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,12" />
+
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Servers}"
+                  SelectedItem="{Binding SelectedServer}"
+                  AutoGenerateColumns="False"
+                  CanUserResizeColumns="True"
+                  HeadersVisibility="Column"
+                  HorizontalAlignment="Stretch"
+                  MinHeight="180">
+          <DataGrid.ContextMenu>
+            <ContextMenu>
+              <MenuItem Header="啟動伺服器" Command="{Binding StartServerCommand}" />
+              <MenuItem Header="停止伺服器" Command="{Binding StopServerCommand}" />
+              <MenuItem Header="開啟主控台與效能監控" Command="{Binding MonitorServerCommand}" />
+              <Separator />
+              <MenuItem Header="開啟伺服器資料夾" Command="{Binding OpenServerFolderCommand}" />
+              <MenuItem Header="伺服器屬性設定 (server.properties)" Command="{Binding ConfigureServerCommand}" />
+              <MenuItem Header="建立備份" Command="{Binding BackupServerCommand}" />
+              <MenuItem Header="還原備份" Command="{Binding RestoreBackupCommand}" />
+              <Separator />
+              <MenuItem Header="刪除伺服器" Command="{Binding DeleteServerCommand}" Foreground="{DynamicResource DangerBrush}" />
+            </ContextMenu>
+          </DataGrid.ContextMenu>
+          <DataGrid.Columns>
+            <DataGridTextColumn Header="名稱" Binding="{Binding Name}" Width="180" />
+            <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="90" />
+            <DataGridTextColumn Header="載入器" Binding="{Binding Loader}" Width="100" />
+            <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="90" />
+            <DataGridTextColumn Header="伺服器大小" Binding="{Binding Size}" Width="100" />
+            <DataGridTextColumn Header="備份狀態" Binding="{Binding BackupStatus}" Width="100" />
+            <DataGridTextColumn Header="路徑" Binding="{Binding Path}" Width="*" />
+          </DataGrid.Columns>
+        </DataGrid>
+      </Grid>
+    </Border>
+
+    <!-- 底部操作區 -->
+    <StackPanel Grid.Row="3">
+      <TextBlock Text="操作" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,4" />
+      <TextBlock Text="{Binding SelectedServerInfo}" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,10" />
+
+      <WrapPanel>
+        <Button Command="{Binding StartServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Style="{DynamicResource PrimaryButtonStyle}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconStart}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="啟動" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding MonitorServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconConsole}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="監控" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding ConfigureServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconServerSettings}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="設定" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding OpenServerFolderCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconFolder}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="開啟資料夾" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding BackupServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconBackup}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="備份伺服器" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding RestoreBackupCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconRestore}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="還原備份" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+        <Button Command="{Binding DeleteServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Style="{DynamicResource DangerButtonStyle}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <StackPanel Orientation="Horizontal">
+            <Image Source="{StaticResource IconDelete}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Text="刪除" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </WrapPanel>
+    </StackPanel>
+  </Grid>
+</UserControl>
