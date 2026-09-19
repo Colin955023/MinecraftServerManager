@@ -3,7 +3,6 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 
@@ -18,10 +17,12 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private static readonly string[] LoaderPrefixes = ["Fabric ", "Forge ", "Quilt ", "NeoForge ", "Vanilla "];
 
     private readonly IJavaRuntimeDetector? _javaDetector;
+    private readonly IMinecraftJavaRequirementService? _javaRequirementService;
     private readonly IServerManager? _serverManager;
     private readonly ILoaderCatalogService? _loaderCatalog;
     private readonly Action<string, bool>? _notificationSink;
     private readonly IExternalLauncher? _launcher;
+    private readonly Action<string, string?>? _navigateCallback;
     private readonly long _systemMemoryMb;
     private List<string>? _customJvmArgs;
 
@@ -67,8 +68,6 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [ObservableProperty]
     private string _jvmArgsSummary = "使用系統建議 JVM 參數 (G1GC)";
 
-    private readonly Action<string, string?>? _navigateCallback;
-
     public CreateServerViewModel(
         IJavaRuntimeDetector? javaDetector = null,
         IServerManager? serverManager = null,
@@ -76,10 +75,12 @@ public sealed partial class CreateServerViewModel : PageViewModel
         Action<string, bool>? notificationSink = null,
         long? systemMemoryMb = null,
         IExternalLauncher? launcher = null,
-        Action<string, string?>? navigateCallback = null)
+        Action<string, string?>? navigateCallback = null,
+        IMinecraftJavaRequirementService? javaRequirementService = null)
         : base("create", "建立新伺服器", "配置名稱、版本、模組載入器與記憶體參數建立伺服器")
     {
         _javaDetector = javaDetector;
+        _javaRequirementService = javaRequirementService;
         _serverManager = serverManager;
         _loaderCatalog = loaderCatalog;
         _notificationSink = notificationSink;
@@ -103,8 +104,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
         ];
         LoaderVersions = ["無"];
 
-        int? recJava = MinecraftJavaRecommendation.GetRecommendedMajor(SelectedMinecraftVersion);
-        _jvmArgsSummary = recJava >= 21 ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
+        int? cachedMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
+        _jvmArgsSummary = (cachedMajor is null or >= 21) ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
 
         UpdateLoaderStateSync();
         UpdateMemoryWarning();
@@ -137,10 +138,28 @@ public sealed partial class CreateServerViewModel : PageViewModel
         UpdateSynchronizedServerName();
         if (_customJvmArgs == null)
         {
-            int? recommendedJava = MinecraftJavaRecommendation.GetRecommendedMajor(value);
-            JvmArgsSummary = recommendedJava >= 21 ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
+            if (_javaRequirementService is not null)
+            {
+                _ = UpdateJvmArgsSummaryAsync(value);
+            }
         }
         _ = RefreshLoaderVersionsAsync();
+    }
+
+    private async Task UpdateJvmArgsSummaryAsync(string version)
+    {
+        try
+        {
+            int major = await _javaRequirementService!.GetRequiredJavaMajorAsync(version).ConfigureAwait(true);
+            if (_customJvmArgs == null && string.Equals(SelectedMinecraftVersion, version, StringComparison.OrdinalIgnoreCase))
+            {
+                JvmArgsSummary = major >= 21 ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
+            }
+        }
+        catch
+        {
+            // 無法從官方取得時保持預設，嚴禁版本號硬推算猜測
+        }
     }
 
     partial void OnMinMemoryMbChanged(string value) => UpdateMemoryWarning();
@@ -229,6 +248,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
 
         await RefreshLoaderVersionsAsync().ConfigureAwait(true);
+        if (_javaRequirementService is not null)
+        {
+            _ = Task.Run(() => _javaRequirementService.PreloadAllJavaRequirementsAsync());
+        }
     }
 
     private async Task RefreshLoaderVersionsAsync()
@@ -319,15 +342,42 @@ public sealed partial class CreateServerViewModel : PageViewModel
         IsDetectingJava = true;
         try
         {
-            var detected = await _javaDetector.DetectAsync().ConfigureAwait(true);
-            if (detected.Count > 0)
+            int? targetMajor = null;
+            if (_javaRequirementService is not null)
             {
-                JavaPath = detected[0].ExecutablePath;
-                Logger.Information("自動偵測到 Java {Major}：{Path}", detected[0].MajorVersion, JavaPath);
+                try
+                {
+                    targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(SelectedMinecraftVersion).ConfigureAwait(true);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("向官方取得 Minecraft {Version} 之 Java major 失敗: {Error}", SelectedMinecraftVersion, ex.Message);
+                }
+            }
+
+            JavaRuntimeInfo? matched = targetMajor.HasValue
+                ? await _javaDetector.FindBestMatchAsync(targetMajor.Value).ConfigureAwait(true)
+                : null;
+
+            if (matched is not null)
+            {
+                JavaPath = matched.ExecutablePath;
+                Logger.Information("依據 Minecraft {McVersion} (官方指定需求 Java {TargetMajor}) 配對到最佳 Java {FoundMajor}：{Path}",
+                    SelectedMinecraftVersion, targetMajor, matched.MajorVersion, JavaPath);
             }
             else
             {
-                _notificationSink?.Invoke("未偵測到相容的 Java 執行檔，請手動指定路徑", true);
+                var detected = await _javaDetector.DetectAsync().ConfigureAwait(true);
+                if (detected.Count > 0)
+                {
+                    JavaPath = detected[0].ExecutablePath;
+                    Logger.Information("選取本機偵測到之 Java {FoundMajor}：{Path}",
+                        detected[0].MajorVersion, JavaPath);
+                }
+                else
+                {
+                    _notificationSink?.Invoke("未偵測到相容的 Java 執行檔，請手動指定路徑", true);
+                }
             }
         }
         catch (Exception ex)
@@ -388,7 +438,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public void ConfigureJvmArgs()
     {
         int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : 2048;
-        int? javaMajor = MinecraftJavaRecommendation.GetRecommendedMajor(SelectedMinecraftVersion);
+        int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
         var vm = new JvmArgsViewModel(javaMajor, maxMem, SelectedLoader, _customJvmArgs);
         var dialog = new Views.JvmArgsDialog(vm);
         if (Application.Current?.MainWindow is not null)
@@ -418,8 +468,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
         MaxMemoryMb = "2048";
         JavaPath = string.Empty;
         _customJvmArgs = null;
-        int? javaMajor = MinecraftJavaRecommendation.GetRecommendedMajor(SelectedMinecraftVersion);
-        JvmArgsSummary = (javaMajor.HasValue && javaMajor.Value >= 21)
+        int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
+        JvmArgsSummary = (javaMajor is null or >= 21)
             ? "使用系統建議 JVM 參數 (ZGC)"
             : "使用系統建議 JVM 參數 (G1GC)";
         UpdateLoaderStateSync();

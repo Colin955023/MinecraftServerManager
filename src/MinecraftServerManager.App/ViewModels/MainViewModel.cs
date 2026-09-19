@@ -45,13 +45,20 @@ public sealed partial class MainViewModel : ViewModelBase
         IModManager? modManager = null,
         IModrinthClient? modrinthClient = null,
         IUpdateCheckerService? updateChecker = null,
-        IExternalLauncher? launcher = null)
+        IExternalLauncher? launcher = null,
+        IMinecraftJavaRequirementService? javaRequirementService = null)
     {
         _settingsManager = settingsManager ?? new SettingsManager();
         _serverManager = serverManager;
         _launcher = launcher;
 
-        var createVm = new CreateServerViewModel(javaDetector, serverManager, loaderCatalog, ShowNotification, launcher: launcher);
+        var createVm = new CreateServerViewModel(
+            javaDetector,
+            serverManager,
+            loaderCatalog,
+            ShowNotification,
+            launcher: launcher,
+            javaRequirementService: javaRequirementService);
         var manageVm = new ManageServerViewModel(_settingsManager, serverManager, backupService, serverRuntime, null, null, null, NavigateToPage, ShowNotification, launcher);
         var modsVm = new ModsViewModel(serverManager, modManager, modrinthClient, ShowNotification, launcher);
         var aboutPrefsVm = new AboutPreferencesViewModel(_settingsManager, updateChecker, SetThemeMode, () => ResetWindowSizeRequested?.Invoke(), ShowNotification, launcher);

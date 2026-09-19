@@ -59,6 +59,7 @@ public partial class MainWindow : Window
 
         var javaDetector = new JavaRuntimeDetector(SharedProcessRunner);
         var httpPort = new HttpDownloadClient(SharedHttpClient);
+        var javaRequirements = new MinecraftJavaRequirementService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
         var loaderCatalog = new LoaderCatalogService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
         var loaderInstaller = new LoaderInstallerService(httpPort, SharedProcessRunner, Infrastructure.Utilities.RuntimePaths.GetInstallerCacheDir());
         var serverManager = new ServerManager(serversRoot, loaderInstaller: loaderInstaller);
@@ -80,12 +81,14 @@ public partial class MainWindow : Window
             modManager,
             modrinthClient,
             updateChecker,
-            SharedProcessRunner);
+            SharedProcessRunner,
+            javaRequirements);
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
 
-        // 背景非同步預熱本機 Java 候選快取
+        // 背景非同步預熱本機 Java 候選快取與官方 Java major 需求快取
         _ = Task.Run(() => javaDetector.DetectAsync());
+        _ = Task.Run(() => javaRequirements.PreloadAllJavaRequirementsAsync());
         _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
         DataContext = _viewModel;

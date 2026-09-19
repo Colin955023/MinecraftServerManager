@@ -88,6 +88,13 @@ Domain （不依賴其他任何專案，純粹領域邏輯）
 - **雙版本發布策略**：
   - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，並啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`），總體積約 62 MB，具備最高穩定性與隨點即開特性
   - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積僅約 1.6 MB，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
+
+### 7. 官方 Java 版本需求動態解析與多層快取
+
+- **官方真實來源唯一依賴**：直接向 Mojang 官方版本 Manifest 與版本 package JSON 動態取得 `javaVersion.majorVersion`。
+- **多層級持久化快取**：實作 `IMinecraftJavaRequirementService` 服務，快取檔案儲存於 `Cache/versions/mc_java_requirements_cache.json`，並在啟動時提供非同步平行預載（Preload）機制，離線時亦可直接取用歷史版本快取。
+- **本地 Java 智慧自動配對**：建立伺服器時的「自動偵測 Java」功能優先以官方指定的 Java major 版本呼叫 `FindBestMatchAsync`，自動選配本機最適合且相容的 64 位元 Java 執行檔。
+
 - **更新檢查與智慧防呆邊界**：
   - 更新檢查服務具備環境探測機制（`IEnvironmentRuntimeInfo`），會自動偵測系統是否具備 .NET 10 Desktop Runtime
   - 預設一律優先挑選自包含版（`self-contained`）；僅當目前本體即為框架相依版且系統存在執行環境時，才選取框架相依版
