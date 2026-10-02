@@ -7,7 +7,7 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 /// </summary>
 public static class AppLogging
 {
-    private static readonly object SyncRoot = new();
+    private static readonly Lock SyncRoot = new();
     private static ILoggerFactory? _loggerFactory;
     private static RotatingFileLoggerProvider? _fileLoggerProvider;
     private static LoggerExternalScopeProvider? _scopeProvider;

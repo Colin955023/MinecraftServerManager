@@ -40,6 +40,23 @@ public static partial class MinecraftVersionSemantics
     [GeneratedRegex(@"\b(fabric|neoforge|forge|quilt)\b", RegexOptions.IgnoreCase)]
     private static partial Regex KnownLoaderPattern();
 
+    [GeneratedRegex(@"^\d+\.\d+(?:\.\d+)*$")]
+    private static partial Regex OfficialReleasePattern();
+
+    /// <summary>
+    /// 判斷 Minecraft 版本字串是否為標準正式發布版本（純數字點分版號，排除 pre、rc、snapshot、experiment 等測試版）
+    /// </summary>
+    public static bool IsOfficialReleaseVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        string trimmed = version.Trim();
+        return OfficialReleasePattern().IsMatch(trimmed);
+    }
+
     private static readonly Regex[] MinecraftVersionPatterns =
     [
         MinecraftPattern1(),
@@ -54,7 +71,7 @@ public static partial class MinecraftVersionSemantics
     private static readonly string[] SubstringLoaders = ["fabric", "quilt", "neoforge"];
 
     /// <summary>
-    /// 判斷 Minecraft 版本是否支援 Fabric（1.14 以上）
+    /// 判斷 Minecraft 版本是否支援 Fabric / Quilt（1.14 以上或快照）
     /// </summary>
     public static bool IsFabricCompatible(string minecraftVersion)
     {
@@ -63,15 +80,85 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        if (VersionValue.TryParse(minecraftVersion, out var parsed))
+        string trimmed = minecraftVersion.Trim();
+
+        // 明確為舊版 1.0 ~ 1.13.x 則不支援
+        if (VersionValue.TryParse(trimmed, out var parsed))
         {
-            return parsed.Major > 1 || (parsed.Major == 1 && parsed.Minor >= 14);
+            if (parsed.Major == 1 && parsed.Minor < 14)
+            {
+                return false;
+            }
+            if (parsed.Major >= 1)
+            {
+                return true;
+            }
         }
 
-        var matches = DigitsPattern().Matches(minecraftVersion);
+        var matches = DigitsPattern().Matches(trimmed);
         if (matches.Count >= 2 && int.TryParse(matches[0].Value, out int major) && int.TryParse(matches[1].Value, out int minor))
         {
-            return major > 1 || (major == 1 && minor >= 14);
+            if (major == 1 && minor < 14)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        // 快照版本或非標準版本格式（如 24w..., 26.3...），預設相容
+        return true;
+    }
+
+    /// <summary>
+    /// 判斷 Minecraft 版本是否支援 NeoForge（>= 1.20.1）
+    /// </summary>
+    public static bool IsNeoForgeCompatible(string minecraftVersion)
+    {
+        if (string.IsNullOrWhiteSpace(minecraftVersion))
+        {
+            return false;
+        }
+
+        string trimmed = minecraftVersion.Trim();
+        if (VersionValue.TryParse(trimmed, out var parsed))
+        {
+            if (parsed.Major > 1)
+            {
+                return true;
+            }
+
+            if (parsed.Major == 1)
+            {
+                if (parsed.Minor > 20)
+                {
+                    return true;
+                }
+
+                if (parsed.Minor == 20 && parsed.Patch >= 1)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        var matches = DigitsPattern().Matches(trimmed);
+        if (matches.Count >= 2 && int.TryParse(matches[0].Value, out int major) && int.TryParse(matches[1].Value, out int minor))
+        {
+            if (major > 1)
+            {
+                return true;
+            }
+
+            if (major == 1 && minor > 20)
+            {
+                return true;
+            }
+
+            if (major == 1 && minor == 20 && matches.Count >= 3 && int.TryParse(matches[2].Value, out int patch) && patch >= 1)
+            {
+                return true;
+            }
         }
 
         return false;
@@ -133,8 +220,12 @@ public static partial class MinecraftVersionSemantics
 
         var match = ModVersionCleanPattern().Match(version);
         string cleaned = match.Success ? version[..match.Index] : version;
-        return cleaned.Trim().TrimEnd('.', '-');
+        cleaned = TrailingJunkPattern().Replace(cleaned, string.Empty);
+        return cleaned.Trim();
     }
+
+    [GeneratedRegex(@"[^\w.]+$")]
+    private static partial Regex TrailingJunkPattern();
 
     /// <summary>
     /// 正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號

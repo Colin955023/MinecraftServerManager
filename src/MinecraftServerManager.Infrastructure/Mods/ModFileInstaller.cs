@@ -261,7 +261,13 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
     private static (string EnabledPath, string DisabledPath) ResolveModFilePaths(string stableModsDir, string modId)
     {
-        string cleanModId = Path.GetFileName(modId.Trim());
+        string raw = modId.Trim();
+        int hashIdx = raw.IndexOf('#');
+        if (hashIdx >= 0)
+        {
+            raw = raw[..hashIdx];
+        }
+        string cleanModId = Path.GetFileName(raw.Trim('\'', '"', ' ', '\r', '\n', '\t'));
         if (cleanModId.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
         {
             cleanModId = cleanModId[..^4];

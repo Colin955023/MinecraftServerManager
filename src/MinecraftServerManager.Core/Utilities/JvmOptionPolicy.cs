@@ -8,7 +8,9 @@ public static class JvmOptionPolicy
     private const string GcOptionPrefix = "-XX:+Use";
 
     /// <summary>
-    /// 將使用者自訂 JVM 參數正規化為清單
+    /// 將使用者自訂 JVM 參數正規化為清單（等同 Python shlex.split 之殼層引號規則，
+    /// 讓含空白的引號路徑，例如 -Dlog4j.configurationFile="C:\Program Files\x\log4j2.xml"，
+    /// 能正確視為單一參數而不被空白截斷）
     /// </summary>
     public static IReadOnlyList<string> NormalizeJvmArgs(string? rawArgs)
     {
@@ -17,18 +19,81 @@ public static class JvmOptionPolicy
             return [];
         }
 
-        var result = new List<string>();
-        string[] parts = rawArgs.Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        foreach (string part in parts)
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool inSingleQuote = false;
+        bool inDoubleQuote = false;
+        bool hasToken = false;
+
+        foreach (char c in rawArgs)
         {
-            string trimmed = part.Trim();
-            if (!string.IsNullOrEmpty(trimmed))
+            if (inSingleQuote)
             {
-                result.Add(trimmed);
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+                else
+                {
+                    current.Append(c);
+                }
+                continue;
             }
+
+            if (inDoubleQuote)
+            {
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+                else
+                {
+                    current.Append(c);
+                }
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                hasToken = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                hasToken = true;
+                continue;
+            }
+
+            if (char.IsWhiteSpace(c))
+            {
+                if (hasToken)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                    hasToken = false;
+                }
+                continue;
+            }
+
+            current.Append(c);
+            hasToken = true;
         }
 
-        return result;
+        if (hasToken)
+        {
+            tokens.Add(current.ToString());
+        }
+
+        // 引號未閉合時（等同 shlex.split 的 ValueError），退回單純以空白切割
+        if (inSingleQuote || inDoubleQuote)
+        {
+            return rawArgs.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        return tokens.Where(static token => token.Length > 0).ToList();
     }
 
     /// <summary>
@@ -122,6 +187,6 @@ public static class JvmOptionPolicy
         }
 
         var details = GetRecommendedJvmArgsDetails(javaMajor, memoryMaxMb, loaderType);
-        return details.Select(d => d.Option).ToArray();
+        return [.. details.Select(d => d.Option)];
     }
 }

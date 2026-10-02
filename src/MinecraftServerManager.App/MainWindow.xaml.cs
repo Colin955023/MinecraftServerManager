@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private static readonly Infrastructure.Process.ProcessRunner SharedProcessRunner = new();
     private static readonly ServerRuntime SharedServerRuntime = new(SharedProcessRunner);
     private readonly MainViewModel _viewModel;
+    private readonly Infrastructure.Services.UpdateCheckerService _updateChecker;
 
     public MainWindow()
     {
@@ -58,18 +59,23 @@ public partial class MainWindow : Window
         }
 
         var javaDetector = new JavaRuntimeDetector(SharedProcessRunner);
+        var javaInstaller = new JavaWingetInstaller(SharedProcessRunner);
         var httpPort = new HttpDownloadClient(SharedHttpClient);
         var javaRequirements = new MinecraftJavaRequirementService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
         var loaderCatalog = new LoaderCatalogService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
         var loaderInstaller = new LoaderInstallerService(httpPort, SharedProcessRunner, Infrastructure.Utilities.RuntimePaths.GetInstallerCacheDir());
-        var serverManager = new ServerManager(serversRoot, loaderInstaller: loaderInstaller);
+        var serverManager = new ServerManager(
+            serversRoot,
+            loaderInstaller: loaderInstaller,
+            javaDetector: javaDetector,
+            javaRequirementService: javaRequirements);
         var backupService = new ServerBackupService(serversRoot);
 
         var modScanner = new Infrastructure.Mods.LocalModScanner();
         var modInstaller = new Infrastructure.Mods.ModFileInstaller(httpPort);
         var modManager = new Infrastructure.Mods.ModManager(modScanner, modInstaller);
         var modrinthClient = new Infrastructure.Mods.ModrinthClient(httpPort);
-        var updateChecker = new Infrastructure.Services.UpdateCheckerService(httpPort);
+        _updateChecker = new Infrastructure.Services.UpdateCheckerService(httpPort);
 
         _viewModel = new MainViewModel(
             settings,
@@ -80,17 +86,34 @@ public partial class MainWindow : Window
             loaderCatalog,
             modManager,
             modrinthClient,
-            updateChecker,
+            _updateChecker,
             SharedProcessRunner,
-            javaRequirements);
+            javaRequirements,
+            javaInstaller);
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
 
-        // 背景非同步預熱本機 Java 候選快取與官方 Java major 需求快取
-        _ = Task.Run(() => javaDetector.DetectAsync());
-        _ = Task.Run(() => javaRequirements.PreloadAllJavaRequirementsAsync());
+        // 背景非同步預熱：Paper 與 4 種載入器 + MC版本 + 官方與 Paper Java 需求 + 本機Java候選
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var detectTask = javaDetector.DetectAsync();
+                var reqTask = javaRequirements.PreloadAllJavaRequirementsAsync();
+                var mcTask = loaderCatalog.GetMinecraftVersionsAsync();
+                var paperTask = loaderCatalog.GetPaperMinecraftVersionsAsync();
+                var loadersTask = loaderCatalog.ForceReloadAllLoadersAsync();
+                await Task.WhenAll(detectTask, reqTask, mcTask, paperTask, loadersTask).ConfigureAwait(false);
+                Logger.Information("啟動背景預熱完成 (Java 候選、官方與 Paper Java 需求、Minecraft 版本與各載入器清單)");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("背景預熱過程發生部分異常: {Message}", ex.Message);
+            }
+        });
         _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
+        _viewModel.UiScaleChanged += ApplyUiScale;
         DataContext = _viewModel;
 
         Loaded += MainWindow_Loaded;
@@ -105,6 +128,27 @@ public partial class MainWindow : Window
         int ww = (int)ActualWidth;
         int wh = (int)ActualHeight;
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
+    }
+
+    /// <summary>
+    /// 套用全域 UI 縮放至主視窗與所有彈跳對話框（透過共用動態資源）。
+    /// </summary>
+    private void ApplyUiScale(double scale)
+    {
+        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
+        {
+            scale = 1.0;
+        }
+
+        scale = Math.Clamp(scale, 0.5, 3.0);
+        UiScaleTransform.ScaleX = scale;
+        UiScaleTransform.ScaleY = scale;
+
+        // 提供給對話框使用的共用縮放資源
+        Application.Current.Resources["UiScaleValue"] = scale;
+        Application.Current.Resources["UiScaleTransform"] = new ScaleTransform(scale, scale);
+
+        Logger.Information("已套用全域 UI 縮放: {Scale:P0}", scale);
     }
 
     private void OnResetWindowSizeRequested()
@@ -184,49 +228,68 @@ public partial class MainWindow : Window
         Logger.Information("主視窗已載入完成，目前主題: {Theme}", _viewModel.IsLightTheme ? "淺色 (Light)" : "深色 (Dark)");
         ApplyTheme(_viewModel.IsLightTheme);
         RestoreWindowPosition();
+        ApplyUiScale(_viewModel.Settings.GetUiScale());
 
         int sw = (int)SystemParameters.PrimaryScreenWidth;
         int sh = (int)SystemParameters.PrimaryScreenHeight;
         int ww = (int)ActualWidth;
         int wh = (int)ActualHeight;
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
+
+        // 啟動時自動檢查更新
+        if (_viewModel.Settings.IsAutoUpdateEnabled())
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await _updateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+                    if (result.HasUpdate)
+                    {
+                        await Dispatcher.InvokeAsync(() =>
+                        {
+                            string cleanedNotes = AboutPreferencesViewModel.CleanReleaseNotes(result.ReleaseNotes);
+                            var confirm = MessageBox.Show(
+                                this,
+                                $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即前往 GitHub 下載更新？",
+                                "發現新版本",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Information);
+
+                            if (confirm == MessageBoxResult.Yes)
+                            {
+                                SharedProcessRunner.OpenUrl(result.ReleasePageUrl);
+                            }
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("啟動自動檢查更新失敗: {Message}", ex.Message);
+                }
+            });
+        }
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
         SaveWindowPosition();
+        _viewModel.UnregisterEvents();
     }
 
     private void RestoreWindowPosition()
     {
         var settings = _viewModel.Settings;
-        if (!settings.IsRememberSizePositionEnabled())
-        {
-            if (settings.IsAutoCenterEnabled())
-            {
-                WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            }
-            return;
-        }
-
         var winSettings = settings.GetMainWindowSettings();
+
         if (winSettings.Width > 0 && winSettings.Height > 0)
         {
             Width = Math.Max(MinWidth, winSettings.Width);
             Height = Math.Max(MinHeight, winSettings.Height);
         }
 
-        if (winSettings.X.HasValue && winSettings.Y.HasValue)
-        {
-            Left = winSettings.X.Value;
-            Top = winSettings.Y.Value;
-            WindowStartupLocation = WindowStartupLocation.Manual;
-        }
-        else if (settings.IsAutoCenterEnabled())
-        {
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        }
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         if (winSettings.Maximized)
         {
@@ -237,10 +300,6 @@ public partial class MainWindow : Window
     private void SaveWindowPosition()
     {
         var settings = _viewModel.Settings;
-        if (!settings.IsRememberSizePositionEnabled())
-        {
-            return;
-        }
 
         bool isMax = WindowState == WindowState.Maximized;
         int width = isMax ? (int)RestoreBounds.Width : (int)ActualWidth;
@@ -282,7 +341,7 @@ public partial class MainWindow : Window
             SetBrushColor("WarningBrush", "#B45309");
 
             SetBrushColor("ButtonDisabledBackgroundBrush", "#E2E8F0");
-            SetBrushColor("ButtonDisabledForegroundBrush", "#64748B");
+            SetBrushColor("ButtonDisabledForegroundBrush", "#1A1D24");
             SetBrushColor("ButtonDisabledBorderBrush", "#CBD5E1");
 
             SetBrushColor("ComboBoxPopupBackgroundBrush", "#FFFFFF");

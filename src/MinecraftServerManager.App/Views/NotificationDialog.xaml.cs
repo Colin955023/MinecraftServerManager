@@ -47,12 +47,8 @@ public partial class NotificationDialog : Window
             if (effectiveOwner != null && effectiveOwner.IsVisible)
             {
                 dialog.Owner = effectiveOwner;
-                dialog.WindowStartupLocation = WindowStartupLocation.CenterOwner;
             }
-            else
-            {
-                dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            }
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
             dialog.ShowDialog();
         }

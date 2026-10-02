@@ -3,18 +3,11 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>
 /// 頁面 ViewModel 基礎類別
 /// </summary>
-public abstract class PageViewModel : ViewModelBase
+public abstract class PageViewModel(string key, string title, string subtitle) : ViewModelBase
 {
-    protected PageViewModel(string key, string title, string subtitle)
-    {
-        Key = key;
-        Title = title;
-        Subtitle = subtitle;
-    }
+    public string Key { get; } = key;
 
-    public string Key { get; }
+    public string Title { get; } = title;
 
-    public string Title { get; }
-
-    public string Subtitle { get; }
+    public string Subtitle { get; } = subtitle;
 }

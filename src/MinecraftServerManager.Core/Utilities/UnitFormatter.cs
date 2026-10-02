@@ -10,7 +10,7 @@ public static class UnitFormatter
     {
         long value = Math.Max(0, size);
         double scaled = value;
-        string[] units = new[] { "B", "KiB", "MiB", "GiB" };
+        string[] units = ["B", "KiB", "MiB", "GiB"];
 
         foreach (string? unit in units)
         {

@@ -20,7 +20,7 @@ public sealed record ImportManifest
 
     public ImportManifest(IEnumerable<ImportManifestEntry> entries, string revision, long totalBytes)
     {
-        Entries = (entries ?? []).ToArray();
+        Entries = [.. entries ?? []];
         Revision = revision ?? string.Empty;
         TotalBytes = totalBytes;
     }

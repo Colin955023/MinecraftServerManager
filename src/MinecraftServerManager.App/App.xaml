@@ -6,7 +6,7 @@
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
-        <ResourceDictionary Source="Resources/ColorIcons.xaml" />
+        <ResourceDictionary Source="pack://application:,,,/MinecraftServerManager.App;component/Resources/ColorIcons.xaml" />
       </ResourceDictionary.MergedDictionaries>
 
       <!-- 深色主題預設色彩 -->
@@ -310,7 +310,6 @@
 
       <!-- 下拉選單 ComboBox 樣式 (徹底重構範本，Popup 背景色與邊框自適應主題) -->
       <Style TargetType="ComboBox">
-        <Setter Property="behaviors:ComboBoxWheelBehavior.EnableWheelSelection" Value="True" />
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -393,8 +392,10 @@
                             CornerRadius="5"
                             Margin="0,4,0,4"
                             Padding="4">
-                      <ScrollViewer SnapsToDevicePixels="True">
-                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                      <ScrollViewer SnapsToDevicePixels="True"
+                                    VirtualizingPanel.IsVirtualizing="True"
+                                    VirtualizingPanel.VirtualizationMode="Recycling">
+                        <VirtualizingStackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
                       </ScrollViewer>
                     </Border>
                   </Grid>
@@ -441,7 +442,7 @@
         <Style.Triggers>
           <Trigger Property="IsSelected" Value="True">
             <Setter Property="Background" Value="{DynamicResource ComboBoxItemSelectedBrush}" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
           </Trigger>
         </Style.Triggers>
       </Style>
@@ -473,6 +474,9 @@
         <Setter Property="CanUserAddRows" Value="False" />
         <Setter Property="RowBackground" Value="Transparent" />
         <Setter Property="AlternatingRowBackground" Value="{DynamicResource SidebarBrush}" />
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="behaviors:DataGridHeaderAutoFitBehavior.EnableHeaderDoubleClickAutoFit" Value="True" />
       </Style>
 
       <!-- TabControl 與 TabItem 樣式 (消除深色白底白字，選中下劃線高亮) -->
@@ -521,6 +525,82 @@
                   <Setter Property="FontWeight" Value="SemiBold" />
                 </Trigger>
               </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <!-- 右鍵選單 ContextMenu 與 MenuItem 樣式 (自適應深淺主題) -->
+      <Style TargetType="ContextMenu">
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Grid.IsSharedSizeScope" Value="True" />
+        <Setter Property="HasDropShadow" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ContextMenu">
+              <Border Background="{DynamicResource CardBrush}"
+                      BorderBrush="{DynamicResource BorderBrush}"
+                      BorderThickness="1"
+                      CornerRadius="6"
+                      Padding="4">
+                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle" />
+              </Border>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <Style TargetType="MenuItem">
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="MenuItem">
+              <Border x:Name="border"
+                      Background="Transparent"
+                      CornerRadius="4"
+                      Padding="{TemplateBinding Padding}"
+                      Margin="1">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" SharedSizeGroup="Icon" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <ContentPresenter x:Name="Icon" ContentSource="Icon" Margin="0,0,8,0" VerticalAlignment="Center" />
+                  <ContentPresenter Grid.Column="1"
+                                    ContentSource="Header"
+                                    RecognizesAccessKey="True"
+                                    VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ComboBoxItemHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
+                  <Setter Property="Cursor" Value="Arrow" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
+      <Style TargetType="Separator">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Margin" Value="4,4" />
+        <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Separator">
+              <Border Height="{TemplateBinding Height}"
+                      Background="{TemplateBinding Background}"
+                      SnapsToDevicePixels="True" />
             </ControlTemplate>
           </Setter.Value>
         </Setter>

@@ -1,6 +1,7 @@
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Settings;
@@ -35,6 +36,11 @@ public sealed partial class MainViewModel : ViewModelBase
     public event Action<string, string, NotificationLevel>? NotificationRequested;
     public event Action? ResetWindowSizeRequested;
 
+    /// <summary>
+    /// 全域 UI 縮放變更事件，由 MainWindow 套用至 LayoutTransform。
+    /// </summary>
+    public event Action<double>? UiScaleChanged;
+
     public MainViewModel(
         SettingsManager? settingsManager = null,
         IJavaRuntimeDetector? javaDetector = null,
@@ -46,7 +52,8 @@ public sealed partial class MainViewModel : ViewModelBase
         IModrinthClient? modrinthClient = null,
         IUpdateCheckerService? updateChecker = null,
         IExternalLauncher? launcher = null,
-        IMinecraftJavaRequirementService? javaRequirementService = null)
+        IMinecraftJavaRequirementService? javaRequirementService = null,
+        IJavaInstaller? javaInstaller = null)
     {
         _settingsManager = settingsManager ?? new SettingsManager();
         _serverManager = serverManager;
@@ -58,10 +65,41 @@ public sealed partial class MainViewModel : ViewModelBase
             loaderCatalog,
             ShowNotification,
             launcher: launcher,
-            javaRequirementService: javaRequirementService);
-        var manageVm = new ManageServerViewModel(_settingsManager, serverManager, backupService, serverRuntime, null, null, null, NavigateToPage, ShowNotification, launcher);
+            navigateCallback: (pageKey, serverName) =>
+            {
+                NavigateToPage(pageKey);
+                if (!string.IsNullOrWhiteSpace(serverName)
+                    && _pages.TryGetValue("manage", out var page)
+                    && page is ManageServerViewModel manageVm)
+                {
+                    _ = manageVm.RefreshAndSelectServerAsync(serverName);
+                }
+            },
+            javaRequirementService: javaRequirementService,
+            javaInstaller: javaInstaller,
+            serverRuntime: serverRuntime);
+        var manageVm = new ManageServerViewModel(
+            _settingsManager,
+            serverManager,
+            backupService,
+            serverRuntime,
+            null,
+            null,
+            null,
+            NavigateToPage,
+            ShowNotification,
+            launcher,
+            javaDetector,
+            javaRequirementService);
         var modsVm = new ModsViewModel(serverManager, modManager, modrinthClient, ShowNotification, launcher);
-        var aboutPrefsVm = new AboutPreferencesViewModel(_settingsManager, updateChecker, SetThemeMode, () => ResetWindowSizeRequested?.Invoke(), ShowNotification, launcher);
+        var aboutPrefsVm = new AboutPreferencesViewModel(
+            _settingsManager,
+            updateChecker,
+            SetThemeMode,
+            () => ResetWindowSizeRequested?.Invoke(),
+            ShowNotification,
+            launcher,
+            scale => UiScaleChanged?.Invoke(scale));
 
         _pages["create"] = createVm;
         _pages["manage"] = manageVm;
@@ -72,6 +110,7 @@ public sealed partial class MainViewModel : ViewModelBase
         _currentPage = createVm;
 
         ApplyInitialTheme();
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
 
     public PageViewModel CurrentPageValue => CurrentPage;
@@ -133,13 +172,9 @@ public sealed partial class MainViewModel : ViewModelBase
 
         if (_launcher is not null)
         {
-            if (_launcher.OpenFolder(path))
+            if (!_launcher.OpenFolder(path))
             {
-                ShowNotification($"已開啟伺服器資料夾：{path}", false);
-            }
-            else
-            {
-                ShowNotification($"開啟資料夾失敗：{path}", true);
+                ShowNotification($"無法開啟資料夾：{path}", true);
             }
         }
     }
@@ -174,8 +209,22 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             "light" => true,
             "dark" => false,
-            _ => false, // system 預設深色
+            _ => SystemThemeService.IsSystemLightTheme(),
         };
+    }
+
+    private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category is UserPreferenceCategory.General or UserPreferenceCategory.Color)
+        {
+            if (string.Equals(_settingsManager.GetThemeMode(), "system", StringComparison.OrdinalIgnoreCase))
+            {
+                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    SetThemeMode("system");
+                });
+            }
+        }
     }
 
     private void NavigateToPage(string pageKey)
@@ -190,6 +239,16 @@ public sealed partial class MainViewModel : ViewModelBase
             CurrentPage = targetPage;
             OnPropertyChanged(nameof(PageTitle));
             OnPropertyChanged(nameof(PageSubtitle));
+
+            switch (targetPage)
+            {
+                case ManageServerViewModel manageVm:
+                    _ = manageVm.RefreshServers();
+                    break;
+                case ModsViewModel modsVm:
+                    _ = modsVm.RefreshServersAsync();
+                    break;
+            }
         }
         else
         {
@@ -202,4 +261,6 @@ public sealed partial class MainViewModel : ViewModelBase
         string themeMode = _settingsManager.GetThemeMode();
         SetThemeMode(themeMode);
     }
+
+    public void UnregisterEvents() => SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
 }

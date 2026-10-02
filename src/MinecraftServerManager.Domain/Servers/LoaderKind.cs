@@ -3,9 +3,10 @@ namespace MinecraftServerManager.Domain.Servers;
 public enum LoaderKind
 {
     Unknown,
-    Vanilla,
+    Paper,
     Fabric,
     Forge,
     NeoForge,
     Quilt,
+    Vanilla,
 }

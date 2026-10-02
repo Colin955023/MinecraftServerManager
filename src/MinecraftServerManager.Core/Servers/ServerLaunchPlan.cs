@@ -12,7 +12,8 @@ public sealed record ServerLaunchPlan(
     LoaderKind Loader,
     int MinMemoryMb,
     int MaxMemoryMb,
-    bool IsScript);
+    bool IsScript,
+    string? ServerName = null);
 
 /// <summary>
 /// 伺服器啟動規劃器契約介面

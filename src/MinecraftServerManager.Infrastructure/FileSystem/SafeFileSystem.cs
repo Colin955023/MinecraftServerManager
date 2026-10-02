@@ -204,12 +204,18 @@ public static class SafeFileSystem
 
             if (File.Exists(target))
             {
+                var fileInfo = new FileInfo(target);
+                if (fileInfo.IsReadOnly)
+                {
+                    fileInfo.IsReadOnly = false;
+                }
                 File.Delete(target);
                 return true;
             }
 
             if (Directory.Exists(target))
             {
+                RemoveReadOnlyAttributesRecursive(new DirectoryInfo(target));
                 Directory.Delete(target, recursive: true);
                 return true;
             }
@@ -442,5 +448,35 @@ public static class SafeFileSystem
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         return Path.GetFullPath(path);
+    }
+
+    private static void RemoveReadOnlyAttributesRecursive(DirectoryInfo directory)
+    {
+        try
+        {
+            if (directory.Attributes.HasFlag(FileAttributes.ReadOnly))
+            {
+                directory.Attributes &= ~FileAttributes.ReadOnly;
+            }
+
+            foreach (var file in directory.EnumerateFiles())
+            {
+                if (file.IsReadOnly)
+                {
+                    file.IsReadOnly = false;
+                }
+            }
+
+            foreach (var subDir in directory.EnumerateDirectories())
+            {
+                if (!IsReparsePoint(subDir.FullName))
+                {
+                    RemoveReadOnlyAttributesRecursive(subDir);
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 }

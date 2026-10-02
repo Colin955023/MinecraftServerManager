@@ -31,6 +31,11 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 
         if (isScript)
         {
+            if (!SafeScriptValidator.ValidateScriptContent(targetFullPath, stableDir))
+            {
+                throw new InvalidOperationException($"啟動腳本「{targetFile}」未通過安全性檢驗（可能包含未受信任的指令或批次注入字元）");
+            }
+
             return new ServerLaunchPlan(
                 JavaExecutable: targetFullPath,
                 WorkingDirectory: stableDir,
@@ -38,7 +43,8 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 Loader: config.LoaderType,
                 MinMemoryMb: config.MemoryMinMb ?? 1024,
                 MaxMemoryMb: config.MemoryMaxMb,
-                IsScript: true);
+                IsScript: true,
+                ServerName: config.Name.Value);
         }
 
         string executableJava = !string.IsNullOrWhiteSpace(javaPath)
@@ -62,9 +68,25 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
 
         args.AddRange(customArgs);
 
-        args.Add("-jar");
-        args.Add(targetFile);
-        args.Add("nogui");
+        if (targetFile.StartsWith('@'))
+        {
+            args.Add(targetFile);
+        }
+        else
+        {
+            args.Add("-jar");
+            args.Add(targetFile);
+        }
+
+        string guiArg = (config.LoaderType == LoaderKind.Paper || targetFile.StartsWith("paper", StringComparison.OrdinalIgnoreCase))
+            ? "--nogui"
+            : "nogui";
+        args.Add(guiArg);
+
+        if (!SafeScriptValidator.ValidateCommandInputs(stableDir, args))
+        {
+            throw new InvalidOperationException($"伺服器啟動指令引用的檔案未通過安全性邊界檢驗");
+        }
 
         return new ServerLaunchPlan(
             JavaExecutable: executableJava,
@@ -73,6 +95,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             Loader: config.LoaderType,
             MinMemoryMb: min,
             MaxMemoryMb: config.MemoryMaxMb,
-            IsScript: false);
+            IsScript: false,
+            ServerName: config.Name.Value);
     }
 }

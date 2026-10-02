@@ -193,32 +193,24 @@
     </DrawingImage.Drawing>
   </DrawingImage>
 
-  <!-- 操作按鈕：還原伺服器 (歷程暖橘) -->
+  <!-- 操作按鈕：還原伺服器 (逆時針復原箭頭，經典歷程還原造型) -->
   <DrawingImage x:Key="IconRestore">
     <DrawingImage.Drawing>
       <DrawingGroup>
-        <GeometryDrawing Brush="#E67E22">
+        <GeometryDrawing Brush="#3498DB">
           <GeometryDrawing.Geometry>
-            <EllipseGeometry Center="12,12" RadiusX="11" RadiusY="11" />
+            <PathGeometry Figures="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" />
           </GeometryDrawing.Geometry>
-        </GeometryDrawing>
-        <GeometryDrawing Brush="#FFFFFF">
-          <GeometryDrawing.Geometry>
-            <PathGeometry Figures="M12,7V12L15.5,15.5M12,4A8,8 0 1,0 20,12" />
-          </GeometryDrawing.Geometry>
-          <GeometryDrawing.Pen>
-            <Pen Brush="#FFFFFF" Thickness="2" StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
-          </GeometryDrawing.Pen>
         </GeometryDrawing>
       </DrawingGroup>
     </DrawingImage.Drawing>
   </DrawingImage>
 
-  <!-- 操作按鈕：刪除伺服器 (警示鮮紅垃圾桶) -->
+  <!-- 操作按鈕：刪除伺服器 (灰色垃圾桶，防與紅色背景重疊) -->
   <DrawingImage x:Key="IconDelete">
     <DrawingImage.Drawing>
       <DrawingGroup>
-        <GeometryDrawing Brush="#E74C3C">
+        <GeometryDrawing Brush="#BDC3C7">
           <GeometryDrawing.Geometry>
             <PathGeometry Figures="M6,19C6,20.1 6.9,21 8,21H16C17.1,21 18,20.1 18,19V7H6V19M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19V4Z" />
           </GeometryDrawing.Geometry>
@@ -287,22 +279,17 @@
     </DrawingImage.Drawing>
   </DrawingImage>
 
-  <!-- 勾選圖示：驗證通過與篩選相符提示 (翡翠綠圓形打勾徽章) -->
+  <!-- 勾選圖示：驗證通過與篩選相符提示 (現代精美翡翠綠打勾) -->
   <DrawingImage x:Key="IconCheck">
     <DrawingImage.Drawing>
       <DrawingGroup>
-        <GeometryDrawing Brush="#2ECC71">
-          <GeometryDrawing.Geometry>
-            <EllipseGeometry Center="12,12" RadiusX="11" RadiusY="11" />
-          </GeometryDrawing.Geometry>
-        </GeometryDrawing>
-        <GeometryDrawing Brush="#FFFFFF">
-          <GeometryDrawing.Geometry>
-            <PathGeometry Figures="M7,12L10.5,15.5L17,8.5" />
-          </GeometryDrawing.Geometry>
+        <GeometryDrawing>
           <GeometryDrawing.Pen>
-            <Pen Brush="#FFFFFF" Thickness="2.2" StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
+            <Pen Brush="#2ECC71" Thickness="2.6" StartLineCap="Round" EndLineCap="Round" LineJoin="Round" />
           </GeometryDrawing.Pen>
+          <GeometryDrawing.Geometry>
+            <PathGeometry Figures="M4.5,12.2 L9.5,17.2 L19.5,6.8" />
+          </GeometryDrawing.Geometry>
         </GeometryDrawing>
       </DrawingGroup>
     </DrawingImage.Drawing>

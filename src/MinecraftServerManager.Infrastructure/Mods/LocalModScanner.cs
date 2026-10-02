@@ -51,7 +51,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         }).ConfigureAwait(false);
 
         persistence.Flush();
-        return result.OrderBy(m => m.Filename, StringComparer.OrdinalIgnoreCase).ToList();
+        return [.. result.OrderBy(m => m.Filename, StringComparer.OrdinalIgnoreCase)];
     }
 
     public Task<LocalModInfo?> ScanSingleModAsync(string filePath, CancellationToken cancellationToken = default)
@@ -227,19 +227,19 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         var idMatch = ForgeModIdRegex().Match(content);
         if (idMatch.Success)
         {
-            meta.Id = idMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            meta.Id = CleanTomlValue(idMatch.Groups[1].Value);
         }
 
         var nameMatch = ForgeDisplayNameRegex().Match(content);
         if (nameMatch.Success)
         {
-            meta.Name = nameMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            meta.Name = CleanTomlValue(nameMatch.Groups[1].Value);
         }
 
         var verMatch = ForgeVersionRegex().Match(content);
         if (verMatch.Success)
         {
-            string v = verMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            string v = CleanTomlValue(verMatch.Groups[1].Value);
             if (v == "${file.jarVersion}")
             {
                 v = ReadManifestVersion(archive) ?? v;
@@ -250,25 +250,66 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         var descMatch = ForgeDescRegex().Match(content);
         if (descMatch.Success)
         {
-            meta.Description = descMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            meta.Description = CleanTomlValue(descMatch.Groups[1].Value);
         }
 
         var authorMatch = ForgeAuthorsRegex().Match(content);
         if (authorMatch.Success)
         {
-            meta.Author = authorMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            meta.Author = CleanTomlValue(authorMatch.Groups[1].Value);
         }
 
         var mcVerMatch = ForgeMcDepRegex().Match(content);
         if (mcVerMatch.Success)
         {
-            string raw = mcVerMatch.Groups[1].Value.Trim('\'', '"', ' ', '\r', '\n');
+            string raw = CleanTomlValue(mcVerMatch.Groups[1].Value);
             string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
             if (!string.IsNullOrWhiteSpace(normalized))
             {
                 meta.MinecraftVersion = normalized;
             }
         }
+    }
+
+    private static string CleanTomlValue(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        string val = raw.Trim();
+        bool inQuotes = false;
+        char quoteChar = '\0';
+        int commentIndex = -1;
+        for (int i = 0; i < val.Length; i++)
+        {
+            char c = val[i];
+            if ((c == '"' || c == '\'') && (i == 0 || val[i - 1] != '\\'))
+            {
+                if (!inQuotes)
+                {
+                    inQuotes = true;
+                    quoteChar = c;
+                }
+                else if (c == quoteChar)
+                {
+                    inQuotes = false;
+                }
+            }
+            else if (c == '#' && !inQuotes)
+            {
+                commentIndex = i;
+                break;
+            }
+        }
+
+        if (commentIndex >= 0)
+        {
+            val = val[..commentIndex];
+        }
+
+        return val.Trim('\'', '"', ' ', '\r', '\n', '\t');
     }
 
     private static void ParseLegacyMcModInfo(JsonElement root, LocalModMetadataBuilder meta)
@@ -332,10 +373,14 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             {
                 if (line.StartsWith("Implementation-Version:", StringComparison.OrdinalIgnoreCase))
                 {
-                    string val = line.Split(':', 2)[1].Trim();
-                    if (!string.IsNullOrEmpty(val) && val != "${projectversion}")
+                    int colonIdx = line.IndexOf(':');
+                    if (colonIdx >= 0)
                     {
-                        return val;
+                        string val = line[(colonIdx + 1)..].Trim();
+                        if (!string.IsNullOrEmpty(val) && val != "${projectversion}")
+                        {
+                            return val;
+                        }
                     }
                 }
             }
@@ -357,11 +402,17 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             }
         }
 
-        if (meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version))
+        int firstDash = baseStem.IndexOf('-');
+        if (firstDash > 0)
         {
-            string[] parts = baseStem.Split('-');
-            if (parts.Length > 1)
+            if (string.IsNullOrWhiteSpace(meta.Id))
             {
+                meta.Id = baseStem[..firstDash];
+            }
+
+            if (meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version))
+            {
+                string[] parts = baseStem.Split('-');
                 for (int i = 1; i < parts.Length; i++)
                 {
                     if (parts[i].Any(char.IsDigit))
@@ -371,6 +422,10 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                     }
                 }
             }
+        }
+        else if (string.IsNullOrWhiteSpace(meta.Id))
+        {
+            meta.Id = baseStem;
         }
 
         if (meta.MinecraftVersion == "未知" || string.IsNullOrWhiteSpace(meta.MinecraftVersion))
@@ -396,12 +451,6 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                     _ => meta.LoaderType,
                 };
             }
-        }
-
-        if (string.IsNullOrWhiteSpace(meta.Id))
-        {
-            string[] parts = baseStem.Split('-');
-            meta.Id = parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]) ? parts[0] : baseStem;
         }
     }
 

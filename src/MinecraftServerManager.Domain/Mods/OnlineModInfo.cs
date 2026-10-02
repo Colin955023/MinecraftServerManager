@@ -55,8 +55,8 @@ public sealed record OnlineModInfo
         HomepageUrl = homepageUrl ?? string.Empty;
         Url = url ?? string.Empty;
         IconUrl = !string.IsNullOrWhiteSpace(iconUrl) ? iconUrl : Url;
-        Categories = (categories ?? []).ToArray();
-        Versions = (versions ?? []).ToArray();
+        Categories = [.. categories ?? []];
+        Versions = [.. versions ?? []];
         ServerSide = serverSide ?? string.Empty;
         ClientSide = clientSide ?? string.Empty;
         Source = source ?? "modrinth";

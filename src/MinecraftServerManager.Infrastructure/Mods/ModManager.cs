@@ -24,7 +24,7 @@ public sealed class ModManager(
         string modsDir = Path.Combine(stableServerDir, "mods");
 
         var mods = await scanner.ScanModsAsync(modsDir, cancellationToken).ConfigureAwait(false);
-        return includeDisabled ? mods : mods.Where(m => m.Status == ModStatus.Enabled).ToList();
+        return includeDisabled ? mods : [.. mods.Where(m => m.Status == ModStatus.Enabled)];
     }
 
     public Task<LocalModMutationResult> SetModStateAsync(
@@ -89,8 +89,30 @@ public sealed class ModManager(
             "json" => JsonCodec.Serialize(mods, indented: true),
             "html" => BuildHtml(mods),
             "csv" => BuildCsv(mods),
+            "xlsx" => Convert.ToBase64String(BuildXlsxBytes(mods)),
             _ => BuildText(mods)
         };
+    }
+
+    private static readonly string[] XlsxHeaders = ["狀態", "名稱", "版本", "MC版本", "載入器", "作者", "檔名"];
+
+    /// <summary>
+    /// 建置標準 OpenXML XLSX 位元組陣列。
+    /// </summary>
+    public static byte[] BuildXlsxBytes(IReadOnlyList<LocalModInfo> mods)
+    {
+        ArgumentNullException.ThrowIfNull(mods);
+
+        var rows = new List<IReadOnlyList<string>>
+        {
+            XlsxHeaders
+        };
+        foreach (var m in mods)
+        {
+            string st = m.Status == ModStatus.Enabled ? "啟用" : "停用";
+            rows.Add([st, m.Name, m.Version, m.MinecraftVersion, m.LoaderType, m.Author, m.Filename]);
+        }
+        return OpenXmlSpreadsheetBuilder.BuildWorkbook("模組列表", rows);
     }
 
     private static string BuildText(IReadOnlyList<LocalModInfo> mods)

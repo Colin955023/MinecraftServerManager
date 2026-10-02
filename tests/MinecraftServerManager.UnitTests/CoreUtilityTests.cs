@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.Utilities;
 using Xunit;
@@ -130,24 +131,24 @@ public sealed class CoreUtilityTests
         var zgcArgs = JvmOptionPolicy.RecommendGcArgs(4096, javaMajor: 21);
         Assert.Contains("-XX:+UseZGC", zgcArgs);
 
-        string[] existing = new[] { "-XX:+UseParallelGC" };
+        string[] existing = ["-XX:+UseParallelGC"];
         var suppressed = JvmOptionPolicy.RecommendGcArgs(4096, javaMajor: 21, existingArgs: existing);
         Assert.Empty(suppressed);
     }
 
     [Fact]
-    public void ModSemanticsSelectsBestModVersion()
+    public void ModHelpersSelectsBestModVersion()
     {
-        Assert.Equal("sha512", ModSemantics.NormalizeHashAlgorithm("SHA-512"));
-        Assert.True(ModSemantics.IsAllowedVersionType("release"));
-        Assert.True(ModSemantics.IsAllowedVersionType("beta"));
-        Assert.False(ModSemantics.IsAllowedVersionType("alpha"));
+        Assert.Equal("sha512", ModHelpers.NormalizeHashAlgorithm("SHA-512"));
+        Assert.True(ModHelpers.IsAllowedVersionType("release"));
+        Assert.True(ModHelpers.IsAllowedVersionType("beta"));
+        Assert.False(ModHelpers.IsAllowedVersionType("alpha"));
 
         var vAlpha = new Domain.Mods.OnlineModVersion("1", "1.0", "Alpha", versionType: "alpha", files: [new Domain.Mods.ModFile("a.jar")]);
         var vBeta = new Domain.Mods.OnlineModVersion("2", "1.1", "Beta", versionType: "beta", files: [new Domain.Mods.ModFile("b.jar")]);
         var vRelease = new Domain.Mods.OnlineModVersion("3", "1.2", "Release", versionType: "release", files: [new Domain.Mods.ModFile("c.jar")]);
 
-        var best = ModSemantics.SelectBestModVersion([vAlpha, vRelease, vBeta]);
+        var best = ModHelpers.SelectBestModVersion([vAlpha, vRelease, vBeta]);
         Assert.NotNull(best);
         Assert.Equal("3", best.VersionId);
     }

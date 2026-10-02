@@ -53,13 +53,13 @@ public sealed record ServerInspection
         MinecraftVersion = minecraftVersion ?? "unknown";
         LoaderVersion = loaderVersion ?? "unknown";
         Evidence = (evidence ?? []).ToDictionary(e => e.Key, e => e.Value);
-        Conflicts = (conflicts ?? []).ToArray();
+        Conflicts = [.. conflicts ?? []];
         LaunchTarget = launchTarget ?? ServerLaunchTarget.None();
         MemoryMaxMb = memoryMaxMb;
         MemoryMinMb = memoryMinMb;
         EulaState = eulaState;
-        MissingFiles = (missingFiles ?? []).ToArray();
-        Warnings = (warnings ?? []).ToArray();
+        MissingFiles = [.. missingFiles ?? []];
+        Warnings = [.. warnings ?? []];
         StatusReady = statusReady;
         Launchable = launchable;
     }

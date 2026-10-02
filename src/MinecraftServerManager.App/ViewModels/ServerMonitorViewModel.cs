@@ -21,7 +21,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _statsTimer;
     private readonly Queue<string> _logBuffer = new();
-    private readonly object _bufferLock = new();
+    private readonly Lock _bufferLock = new();
     private readonly string _serverPath;
     private DateTime? _startTime;
 
@@ -53,9 +53,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     private string _onlinePlayersText = "0 / 20";
 
     [ObservableProperty]
-    private string _jvmPidText = "-";
-
-    [ObservableProperty]
     private string _memoryUsageText = "-";
 
     [ObservableProperty]
@@ -71,13 +68,26 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
     public ObservableCollection<string> OnlinePlayers { get; } = [];
 
+    /// <summary>
+    /// 是否無在線玩家
+    /// </summary>
+    public bool HasNoOnlinePlayers => OnlinePlayers.Count == 0;
+
+    /// <summary>
+    /// 伺服器啟動委派
+    /// </summary>
+    private readonly Func<Task>? _startRequestHandler;
+
     public ServerMonitorViewModel(
         IServerRuntime serverRuntime,
         string serverName,
         string serverPath = "",
-        string mcVersion = "")
+        string mcVersion = "",
+        Func<Task>? startRequestHandler = null)
     {
         _serverRuntime = serverRuntime;
+        _startRequestHandler = startRequestHandler;
+        OnlinePlayers.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoOnlinePlayers));
         _serverPath = serverPath;
         _minecraftVersionText = string.IsNullOrWhiteSpace(mcVersion) ? "未知" : mcVersion;
         _windowTitle = $"伺服器主控台監控 — {serverName}";
@@ -86,8 +96,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         if (_isServerRunning)
         {
             _startTime = DateTime.Now;
-            _serverStatusText = "執行中";
-            _jvmPidText = _serverRuntime.Pid > 0 ? $"PID: {_serverRuntime.Pid}" : "-";
+            _serverStatusText = _serverRuntime.IsReady ? "執行中 (已就緒)" : "啟動中 (載入世界)...";
         }
 
         // 載入歷史 latest.log
@@ -95,6 +104,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
         _serverRuntime.OutputLineReceived += OnOutputLineReceived;
         _serverRuntime.ServerExited += OnServerExited;
+        _serverRuntime.ServerReady += OnServerReady;
 
         _flushTimer = new DispatcherTimer
         {
@@ -119,22 +129,51 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         }
 
         string logFile = Path.Combine(_serverPath, "logs", "latest.log");
-        if (File.Exists(logFile))
+        if (!File.Exists(logFile))
         {
-            try
+            return;
+        }
+
+        try
+        {
+            const int maxBytesToRead = 256 * 1024;
+            const int maxLines = 200;
+
+            using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            long length = fs.Length;
+            if (length == 0)
             {
-                var lines = File.ReadLines(logFile, Encoding.UTF8).TakeLast(200);
-                foreach (string line in lines)
-                {
-                    string cleaned = AnsiRegex().Replace(line, string.Empty);
-                    Logs.Add(cleaned);
-                }
-                Logger.Information("已載入歷史 latest.log，共 {Count} 行", Logs.Count);
+                return;
             }
-            catch (Exception ex)
+
+            long bytesToRead = Math.Min(length, maxBytesToRead);
+            fs.Seek(-bytesToRead, SeekOrigin.End);
+
+            byte[] buffer = new byte[bytesToRead];
+            int bytesRead = fs.Read(buffer, 0, (int)bytesToRead);
+
+            string text = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+            var keptLines = new List<string>(maxLines);
+            foreach (var lineSpan in text.AsSpan().EnumerateLines())
             {
-                Logger.Warning("讀取歷史 latest.log 失敗: {Message}", ex.Message);
+                keptLines.Add(lineSpan.ToString());
             }
+
+            int startIndex = bytesToRead < length && keptLines.Count > 1 ? 1 : 0;
+            int takeCount = Math.Min(maxLines, keptLines.Count - startIndex);
+            int from = keptLines.Count - takeCount;
+
+            for (int i = Math.Max(startIndex, from); i < keptLines.Count; i++)
+            {
+                string cleaned = AnsiRegex().Replace(keptLines[i], string.Empty);
+                Logs.Add(cleaned);
+            }
+
+            Logger.Information("已載入歷史 latest.log，共 {Count} 行", Logs.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("讀取歷史 latest.log 失敗: {Message}", ex.Message);
         }
     }
 
@@ -150,7 +189,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             if (_serverRuntime.Pid > 0)
             {
                 int pid = _serverRuntime.Pid;
-                JvmPidText = $"PID: {pid}";
                 try
                 {
                     using var proc = Process.GetProcessById(pid);
@@ -165,9 +203,70 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         }
         else
         {
-            JvmPidText = "-";
             MemoryUsageText = "-";
             ServerStatusText = "已停止";
+        }
+    }
+
+    private readonly List<string> _commandHistory = [];
+    private int _historyIndex = -1;
+
+    /// <summary>
+    /// 鍵盤方向鍵上下瀏覽歷史發送指令
+    /// </summary>
+    public string? NavigateHistory(bool previous)
+    {
+        if (_commandHistory.Count == 0)
+        {
+            return null;
+        }
+
+        if (previous)
+        {
+            if (_historyIndex > 0)
+            {
+                _historyIndex--;
+            }
+            else
+            {
+                _historyIndex = 0;
+            }
+            CommandText = _commandHistory[_historyIndex];
+        }
+        else
+        {
+            if (_historyIndex < _commandHistory.Count - 1)
+            {
+                _historyIndex++;
+                CommandText = _commandHistory[_historyIndex];
+            }
+            else
+            {
+                _historyIndex = _commandHistory.Count;
+                CommandText = string.Empty;
+            }
+        }
+
+        return CommandText;
+    }
+
+    [RelayCommand]
+    public void CopyAllLogs()
+    {
+        if (Logs.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            string text = string.Join(Environment.NewLine, Logs);
+            System.Windows.Clipboard.SetText(text);
+            Logger.Information("已將主控台全部日誌複製至剪貼簿");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("複製日誌失敗：{Message}", ex.Message);
         }
     }
 
@@ -190,9 +289,37 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         string cmd = CommandText.Trim();
         CommandText = string.Empty;
 
+        if (_commandHistory.Count == 0 || _commandHistory[^1] != cmd)
+        {
+            _commandHistory.Add(cmd);
+        }
+        _historyIndex = _commandHistory.Count;
+
         AddLogLine($"> {cmd}");
         Logger.Information("主控台發送伺服器指令: {Command}", cmd);
         await _serverRuntime.SendCommandAsync(cmd).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    public async Task StartServerAsync()
+    {
+        if (_serverRuntime.IsRunning)
+        {
+            AddLogLine(">>> 伺服器已在執行中");
+            return;
+        }
+
+        if (_startRequestHandler is null)
+        {
+            AddLogLine(">>> 此監控視窗未連動啟動功能，請回管理頁面啟動伺服器");
+            return;
+        }
+
+        Logger.Information("主控台請求啟動伺服器");
+        ServerStatusText = "啟動中 (載入世界)...";
+        AddLogLine(">>> 正在啟動伺服器...");
+        await _startRequestHandler().ConfigureAwait(true);
+        RefreshState();
     }
 
     [RelayCommand]
@@ -258,6 +385,16 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         }
     }
 
+    private void OnServerReady()
+    {
+        if (IsServerRunning)
+        {
+            ServerStatusText = "執行中 (已就緒)";
+            AddLogLine("[系統] 伺服器已就緒完成載入！");
+            Logger.Information("主控台已接收伺服器就緒事件");
+        }
+    }
+
     private void OnServerExited(int exitCode)
     {
         IsServerRunning = false;
@@ -313,5 +450,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         _statsTimer.Stop();
         _serverRuntime.OutputLineReceived -= OnOutputLineReceived;
         _serverRuntime.ServerExited -= OnServerExited;
+        _serverRuntime.ServerReady -= OnServerReady;
     }
 }

@@ -6,8 +6,8 @@ namespace MinecraftServerManager.Infrastructure.FileSystem;
 public static class SafeZipArchive
 {
     public const int DefaultMaxMembers = 100_000;
-    public const long DefaultMaxMemberBytes = 512L * 1024 * 1024;
-    public const long DefaultMaxTotalBytes = 2L * 1024 * 1024 * 1024;
+    public const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
+    public const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
     public const long DefaultMaxArchiveBytes = DefaultMaxTotalBytes + (64L * 1024 * 1024);
     public const int DefaultMaxCompressionRatio = 200;
 
@@ -91,6 +91,7 @@ public static class SafeZipArchive
             maxCompressionRatio);
 
         long totalBytes = members.Sum(static member => member.Entry.Length);
+        EnsureSufficientDiskSpace(destination, totalBytes);
         progress?.Invoke(0, totalBytes);
         long extractedBytes = 0;
 
@@ -159,6 +160,50 @@ public static class SafeZipArchive
         source.CopyTo(buffer, 1024 * 1024);
         return buffer.Length <= maxBytes ? buffer.ToArray() : null;
     }
+
+    /// <summary>
+    /// 檢查目標磁碟實際剩餘空間，只要剩餘空間充足即允許解壓（保留 5% 或 512 MB 安全水位）。
+    /// </summary>
+    private static void EnsureSufficientDiskSpace(string destination, long requiredBytes)
+    {
+        if (requiredBytes <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            string? root = Path.GetPathRoot(Path.GetFullPath(destination));
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                return;
+            }
+
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady)
+            {
+                return;
+            }
+
+            long headroom = Math.Min(512L * 1024 * 1024, requiredBytes / 20);
+            if (drive.AvailableFreeSpace < requiredBytes + headroom)
+            {
+                throw new SafeArchiveException(
+                    $"目標磁碟 {root} 剩餘空間不足：需要約 {FormatBytes(requiredBytes)}，實際可用 {FormatBytes(drive.AvailableFreeSpace)}");
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            // 無法判定磁碟資訊時不阻斷流程，交由實際寫入階段回報錯誤
+        }
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F2} GB",
+        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):F2} MB",
+        _ => $"{bytes} B"
+    };
 
     private static List<PreparedMember> PrepareMembers(
         ZipArchive archive,
@@ -251,7 +296,7 @@ public static class SafeZipArchive
         HashSet<string> parentPaths)
     {
         string[] parts = relativePath.Split(Path.DirectorySeparatorChar);
-        string key = string.Join(Path.DirectorySeparatorChar, parts);
+        string key = relativePath;
         bool isDirectory = entry.FullName.EndsWith('/');
         if (paths.TryGetValue(key, out bool existingIsDirectory))
         {
@@ -331,6 +376,12 @@ public static class SafeZipArchive
                 1024 * 1024,
                 FileOptions.WriteThrough);
             _archive = new ZipArchive(_stream, ZipArchiveMode.Create, leaveOpen: true);
+        }
+
+        public void SetComment(string comment)
+        {
+            ThrowIfDisposed();
+            _archive.Comment = comment;
         }
 
         public void WriteBytes(string memberName, ReadOnlySpan<byte> content)
@@ -429,7 +480,7 @@ public static class SafeZipArchive
 
             string normalized = SanitizeMemberName(memberName);
             string[] parts = normalized.Split(Path.DirectorySeparatorChar);
-            string key = string.Join(Path.DirectorySeparatorChar, parts);
+            string key = normalized;
             if (_paths.Contains(key) || _parentPaths.Contains(key))
             {
                 throw new SafeArchiveException($"壓縮檔包含重複或路徑衝突： {memberName}");

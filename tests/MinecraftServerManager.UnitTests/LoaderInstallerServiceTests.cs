@@ -35,42 +35,41 @@ public sealed class LoaderInstallerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task InstallLoaderVanillaDownloadsServerJarSuccessfully()
+    public async Task InstallLoaderPaperDownloadsServerJarSuccessfully()
     {
-        string manifestJson = """
-        {
-            "versions": [
-                { "id": "1.20.4", "url": "https://example.com/1.20.4.json" }
-            ]
-        }
-        """;
-
-        string metaJson = """
+        string paperBuildJson = """
         {
             "downloads": {
-                "server": { "url": "https://example.com/server.jar" }
+                "server:application": {
+                    "name": "paper-1.20.4-497.jar",
+                    "url": "https://fill-data.papermc.io/v3/projects/paper/versions/1.20.4/builds/497/download",
+                    "checksums": {
+                        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    }
+                }
             }
         }
         """;
 
-        var http = new MockInstallerHttpPort(manifestJson, metaJson);
+        var http = new MockInstallerHttpPort(paperBuildJson: paperBuildJson);
         var runner = new MockInstallerProcessRunner(0);
         var service = new LoaderInstallerService(http, runner, _cacheDir);
 
         string target = await service.InstallLoaderAsync(
-            LoaderKind.Vanilla,
+            LoaderKind.Paper,
             minecraftVersion: "1.20.4",
-            loaderVersion: "",
+            loaderVersion: "497",
             serverDirectory: _serverDir,
             javaExecutablePath: "java.exe");
 
-        Assert.Equal("server.jar", target);
-        Assert.True(File.Exists(Path.Combine(_serverDir, "server.jar")));
+        Assert.Equal("paper-1.20.4-497.jar", target);
+        Assert.True(File.Exists(Path.Combine(_serverDir, "paper-1.20.4-497.jar")));
     }
 
     [Fact]
     public async Task InstallLoaderFabricBuildsCorrectArgsAndDetectsTarget()
     {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
         var http = new MockInstallerHttpPort("", "");
         var runner = new MockInstallerProcessRunner(0, onRun: () =>
         {
@@ -96,6 +95,52 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.Contains("1.20.4", spec.Arguments);
         Assert.Contains("-loader", spec.Arguments);
         Assert.Contains("0.15.7", spec.Arguments);
+    }
+
+    [Fact]
+    public async Task InstallLoaderFabricDownloadsVanillaServerJarWhenNotExists()
+    {
+        string manifestJson = """
+        {
+            "versions": [
+                {
+                    "id": "1.20.4",
+                    "type": "release",
+                    "url": "https://piston-meta.mojang.com/v1/packages/test/1.20.4.json"
+                }
+            ]
+        }
+        """;
+
+        string metaJson = """
+        {
+            "downloads": {
+                "server": {
+                    "sha1": "testsha",
+                    "size": 1234,
+                    "url": "https://piston-data.mojang.com/v1/objects/test/server.jar"
+                }
+            }
+        }
+        """;
+
+        var http = new MockInstallerHttpPort(manifestJson, metaJson);
+        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        {
+            File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
+        });
+
+        var service = new LoaderInstallerService(http, runner, _cacheDir);
+
+        string target = await service.InstallLoaderAsync(
+            LoaderKind.Fabric,
+            minecraftVersion: "1.20.4",
+            loaderVersion: "0.15.7",
+            serverDirectory: _serverDir,
+            javaExecutablePath: "java.exe");
+
+        Assert.Equal("fabric-server-launch.jar", target);
+        Assert.True(File.Exists(Path.Combine(_serverDir, "server.jar")), "Fabric 安裝應預先下載原版 server.jar");
     }
 
     [Fact]
@@ -126,6 +171,7 @@ public sealed class LoaderInstallerServiceTests : IDisposable
     [Fact]
     public async Task InstallLoaderThrowsWhenProcessExitCodeIsNotZero()
     {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
         var http = new MockInstallerHttpPort("", "");
         var runner = new MockInstallerProcessRunner(1);
 
@@ -142,11 +188,18 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.Contains("安裝失敗", ex.Message);
     }
 
-    private sealed class MockInstallerHttpPort(string manifestJson, string metaJson) : IHttpPort
+    private sealed class MockInstallerHttpPort(
+        string manifestJson = "",
+        string metaJson = "",
+        string paperBuildJson = "") : IHttpPort
     {
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
         {
-            if (uri.AbsoluteUri.Contains("version_manifest"))
+            if (uri.AbsoluteUri.Contains("papermc.io", StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult<string?>(paperBuildJson);
+            }
+            if (uri.AbsoluteUri.Contains("version_manifest", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult<string?>(manifestJson);
             }

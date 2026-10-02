@@ -30,13 +30,13 @@ public sealed record OnlineModVersion
         VersionId = versionId ?? string.Empty;
         VersionNumber = versionNumber ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
-        GameVersions = (gameVersions ?? []).ToArray();
-        Loaders = (loaders ?? []).ToArray();
+        GameVersions = [.. gameVersions ?? []];
+        Loaders = [.. loaders ?? []];
         VersionType = versionType ?? string.Empty;
         DatePublished = datePublished ?? string.Empty;
         Changelog = changelog ?? string.Empty;
-        Files = (files ?? []).ToArray();
-        Dependencies = (dependencies ?? []).ToArray();
+        Files = [.. files ?? []];
+        Dependencies = [.. dependencies ?? []];
     }
 
     public ModFile? PrimaryFile

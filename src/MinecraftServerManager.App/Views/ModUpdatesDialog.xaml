@@ -1,0 +1,70 @@
+<Window x:Class="MinecraftServerManager.App.Views.ModUpdatesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="發現模組更新"
+        Width="680"
+        Height="460"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 標題 -->
+    <TextBlock Grid.Row="0"
+               Text="📦 發現可用模組更新"
+               FontSize="18"
+               FontWeight="Bold"
+               Foreground="{DynamicResource TextBrush}"
+               Margin="0,0,0,6" />
+
+    <!-- 說明 -->
+    <TextBlock Grid.Row="1"
+               Text="下列模組在 Modrinth 上有相容的新版本，請勾選要更新的模組後點擊「一鍵更新所選模組」："
+               FontSize="13"
+               Foreground="{DynamicResource MutedTextBrush}"
+               Margin="0,0,0,14" />
+
+    <!-- 模組列表 -->
+    <Border Grid.Row="2"
+            Background="{DynamicResource CardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            Padding="8"
+            Margin="0,0,0,16">
+      <DataGrid x:Name="UpdatesGrid"
+                AutoGenerateColumns="False"
+                CanUserResizeColumns="True"
+                HeadersVisibility="Column"
+                IsReadOnly="False"
+                SelectionMode="Single">
+        <DataGrid.Columns>
+          <DataGridCheckBoxColumn Header="更新" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="50" />
+          <DataGridTextColumn Header="模組名稱" Binding="{Binding ModName}" IsReadOnly="True" Width="180" />
+          <DataGridTextColumn Header="目前版本" Binding="{Binding CurrentVersion}" IsReadOnly="True" Width="110" />
+          <DataGridTextColumn Header="最新版本" Binding="{Binding NewVersion}" IsReadOnly="True" Width="110" />
+          <DataGridTextColumn Header="新檔案名稱" Binding="{Binding FileName}" IsReadOnly="True" Width="*" />
+        </DataGrid.Columns>
+      </DataGrid>
+    </Border>
+
+    <!-- 底部操作列 -->
+    <Grid Grid.Row="3">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+        <Button Content="全選" Click="OnSelectAllClicked" Margin="0,0,8,0" Padding="12,6" />
+        <Button Content="取消全選" Click="OnDeselectAllClicked" Padding="12,6" />
+      </StackPanel>
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Content="取消" Click="OnCancelClicked" Margin="0,0,10,0" Padding="16,6" />
+        <Button Content="一鍵更新所選模組" Click="OnUpdateClicked" Style="{DynamicResource PrimaryButtonStyle}" Padding="20,6" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

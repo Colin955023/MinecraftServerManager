@@ -69,6 +69,9 @@ dotnet_diagnostic.IDE0060.severity = warning
 dotnet_diagnostic.IDE0079.severity = warning
 dotnet_diagnostic.IDE0005.severity = warning
 
+# 啟用 IDE analyzer
+dotnet_diagnostic.IDE0000.severity = warning
+
 # 命名 / 可維護性
 dotnet_diagnostic.IDE0001.severity = warning
 dotnet_diagnostic.IDE0002.severity = warning

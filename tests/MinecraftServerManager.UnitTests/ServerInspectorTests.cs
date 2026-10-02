@@ -98,4 +98,24 @@ public sealed class ServerInspectorTests : IDisposable
         Assert.Equal(EulaState.Rejected, inspection.EulaState);
         Assert.False(inspection.Launchable);
     }
+
+    [Fact]
+    public async Task DetectsPaperServerAndLoaderSuccessfully()
+    {
+        string serverDir = Path.Combine(_testRoot, "paper-server");
+        Directory.CreateDirectory(serverDir);
+        File.WriteAllText(Path.Combine(serverDir, "paper-1.20.4-497.jar"), "dummy paper jar");
+        File.WriteAllText(Path.Combine(serverDir, "eula.txt"), "eula=true\n");
+        File.WriteAllText(Path.Combine(serverDir, "paper-global.yml"), "# paper config\n");
+
+        var inspector = new ServerInspector();
+        var inspection = await inspector.InspectAsync(serverDir);
+
+        Assert.True(inspection.IsCandidate);
+        Assert.True(inspection.Launchable);
+        Assert.Equal(EulaState.Accepted, inspection.EulaState);
+        Assert.Equal("paper", inspection.LoaderType);
+        Assert.Equal("paper-1.20.4-497.jar", inspection.LaunchTarget.Value);
+        Assert.Equal(LaunchTargetKind.Jar, inspection.LaunchTarget.Kind);
+    }
 }

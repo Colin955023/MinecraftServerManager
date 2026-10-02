@@ -1,3 +1,4 @@
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -15,6 +16,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     private readonly IExternalLauncher? _launcher;
     private readonly Action<string>? _onThemeModeChanged;
     private readonly Action? _onResetWindowSizeRequested;
+    private readonly Action<double>? _onUiScaleChanged;
     private readonly Action<string, bool>? _notificationSink;
 
     [ObservableProperty]
@@ -24,13 +26,19 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public bool IsManualCheckVisible => !IsAutoUpdateEnabled;
 
     [ObservableProperty]
-    private bool _isRememberSizePositionEnabled = true;
-
-    [ObservableProperty]
-    private bool _isAutoCenterEnabled = true;
-
-    [ObservableProperty]
     private int _selectedThemeModeIndex;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCustomScaleVisible))]
+    private int _selectedUiScaleIndex = 1;
+
+    [ObservableProperty]
+    private string _customUiScaleText = "100";
+
+    /// <summary>
+    /// 選擇「自訂」時顯示輸入框與百分比提示。
+    /// </summary>
+    public bool IsCustomScaleVisible => SelectedUiScaleIndex == UiScaleOptions.Count - 1;
 
     [ObservableProperty]
     private string _screenResolutionInfo = "目前螢幕解析度: 1920 × 1080";
@@ -44,21 +52,21 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         Action<string>? onThemeModeChanged = null,
         Action? onResetWindowSizeRequested = null,
         Action<string, bool>? notificationSink = null,
-        IExternalLauncher? launcher = null)
+        IExternalLauncher? launcher = null,
+        Action<double>? onUiScaleChanged = null)
         : base("about_preferences", "關於與設定", "查看應用程式資訊、授權條款與視窗偏好設定")
     {
         _settingsManager = settingsManager;
         _updateChecker = updateChecker;
         _onThemeModeChanged = onThemeModeChanged;
         _onResetWindowSizeRequested = onResetWindowSizeRequested;
+        _onUiScaleChanged = onUiScaleChanged;
         _notificationSink = notificationSink;
         _launcher = launcher;
 
         if (_settingsManager is not null)
         {
             _isAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
-            _isRememberSizePositionEnabled = _settingsManager.IsRememberSizePositionEnabled();
-            _isAutoCenterEnabled = _settingsManager.IsAutoCenterEnabled();
             string theme = _settingsManager.GetThemeMode();
             _selectedThemeModeIndex = theme switch
             {
@@ -66,6 +74,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 "dark" => 2,
                 _ => 0,
             };
+
+            double scale = _settingsManager.GetUiScale();
+            _customUiScaleText = ((int)Math.Round(scale * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _selectedUiScaleIndex = PresetScales.IndexOf(scale) is int idx && idx >= 0 ? idx : UiScaleOptions.Count - 1;
         }
     }
 
@@ -89,24 +101,34 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
     public static IReadOnlyList<string> ThemeModes { get; } = ["依照系統設定", "淺色", "深色"];
 
-    partial void OnIsAutoUpdateEnabledChanged(bool value)
+    public static IReadOnlyList<string> UiScaleOptions { get; } = ["75%", "100% (預設)", "125%", "150%", "200%", "自訂"];
+
+    private static readonly List<double> PresetScales = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+    /// <summary>
+    /// 由目前選擇換算出實際縮放倍率。
+    /// </summary>
+    public double ResolveUiScale()
     {
-        _settingsManager?.SetAutoUpdateEnabled(value);
+        if (SelectedUiScaleIndex >= 0 && SelectedUiScaleIndex < PresetScales.Count)
+        {
+            return PresetScales[SelectedUiScaleIndex];
+        }
+
+        if (double.TryParse(CustomUiScaleText, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double percent)
+            && percent > 0)
+        {
+            return Math.Clamp(Math.Round(percent / 100.0, 2), 0.5, 3.0);
+        }
+
+        return 1.0;
     }
 
-    partial void OnIsRememberSizePositionEnabledChanged(bool value)
-    {
-        _settingsManager?.SetRememberSizePosition(value);
-    }
-
-    partial void OnIsAutoCenterEnabledChanged(bool value)
-    {
-        _settingsManager?.SetAutoCenter(value);
-    }
+    partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager?.SetAutoUpdateEnabled(value);
 
     partial void OnSelectedThemeModeIndexChanged(int value)
     {
-        var mode = value switch
+        string mode = value switch
         {
             1 => "light",
             2 => "dark",
@@ -115,6 +137,23 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
         _settingsManager?.SetThemeMode(mode);
         _onThemeModeChanged?.Invoke(mode);
+    }
+
+    partial void OnSelectedUiScaleIndexChanged(int value)
+    {
+        double scale = ResolveUiScale();
+        _settingsManager?.SetUiScale(scale);
+        _onUiScaleChanged?.Invoke(scale);
+    }
+
+    partial void OnCustomUiScaleTextChanged(string value)
+    {
+        if (SelectedUiScaleIndex == UiScaleOptions.Count - 1)
+        {
+            double scale = ResolveUiScale();
+            _settingsManager?.SetUiScale(scale);
+            _onUiScaleChanged?.Invoke(scale);
+        }
     }
 
     [RelayCommand]
@@ -126,10 +165,8 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     [RelayCommand]
     private async Task CheckForUpdatesAsync()
     {
-        _notificationSink?.Invoke("正在檢查 GitHub 最新版本...", false);
         if (_updateChecker is null)
         {
-            _notificationSink?.Invoke("未設定更新檢查服務", true);
             return;
         }
 
@@ -138,12 +175,21 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             var result = await _updateChecker.CheckForUpdateAsync();
             if (result.HasUpdate)
             {
-                _notificationSink?.Invoke($"發現新版本 {result.LatestVersion}！正在為您開啟發布頁面", false);
-                _launcher?.OpenUrl(result.ReleasePageUrl);
+                string cleanedNotes = CleanReleaseNotes(result.ReleaseNotes);
+                var confirm = MessageBox.Show(
+                    $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即前往 GitHub 下載更新？",
+                    "發現新版本",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (confirm == MessageBoxResult.Yes)
+                {
+                    _launcher?.OpenUrl(result.ReleasePageUrl);
+                }
             }
             else
             {
-                _notificationSink?.Invoke($"目前已是最新版本 ({result.CurrentVersion})", false);
+                _notificationSink?.Invoke($"目前已是最新版本 (v{result.CurrentVersion})", false);
             }
         }
         catch (Exception ex)
@@ -152,43 +198,85 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
     }
 
+    public static string CleanReleaseNotes(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return "(無更新日誌)";
+        }
+
+        var keptLines = new List<string>();
+
+        foreach (var lineSpan in notes.AsSpan().EnumerateLines())
+        {
+            var trimmed = lineSpan.Trim();
+            if (trimmed.Contains("===", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            keptLines.Add(lineSpan.ToString());
+        }
+
+        int start = 0;
+        while (start < keptLines.Count && string.IsNullOrWhiteSpace(keptLines[start]))
+        {
+            start++;
+        }
+
+        int end = keptLines.Count - 1;
+        while (end >= start && string.IsNullOrWhiteSpace(keptLines[end]))
+        {
+            end--;
+        }
+
+        if (start > end)
+        {
+            return "(無更新日誌)";
+        }
+
+        var trimmedLines = keptLines.Skip(start).Take(end - start + 1).ToList();
+
+        if (trimmedLines.Count > 15)
+        {
+            trimmedLines = [.. trimmedLines.Take(15)];
+            trimmedLines.Add("... (完整內容請查看發行頁面)");
+        }
+
+        return string.Join(Environment.NewLine, trimmedLines);
+    }
+
     [RelayCommand]
-    private void ResetToDefaultSize() => _onResetWindowSizeRequested?.Invoke();
+    private void ResetToDefaultSize()
+    {
+        if (Views.DialogHelper.Confirm("確定要將主視窗大小與位置重設為預設值嗎？", "確認重設視窗大小"))
+        {
+            _onResetWindowSizeRequested?.Invoke();
+        }
+    }
 
     [RelayCommand]
     private void ResetAllSettings()
     {
-        IsRememberSizePositionEnabled = true;
-        IsAutoCenterEnabled = true;
+        if (!Views.DialogHelper.Confirm("確定要恢復所有偏好設定為原廠預設值嗎？", "確認恢復預設", MessageBoxImage.Warning))
+        {
+            return;
+        }
+
         IsAutoUpdateEnabled = true;
         SelectedThemeModeIndex = 0;
 
-        _settingsManager?.SetRememberSizePosition(true);
-        _settingsManager?.SetAutoCenter(true);
+        SelectedUiScaleIndex = 1;
+        CustomUiScaleText = "100";
+
         _settingsManager?.SetAutoUpdateEnabled(true);
         _settingsManager?.SetThemeMode("system");
+        _settingsManager?.SetUiScale(1.0);
+        _onUiScaleChanged?.Invoke(1.0);
 
         _notificationSink?.Invoke("已恢復所有偏好設定為預設值", false);
     }
 
-    [RelayCommand]
-    private void ApplySettings()
-    {
-        string mode = SelectedThemeModeIndex switch
-        {
-            1 => "light",
-            2 => "dark",
-            _ => "system",
-        };
-
-        _settingsManager?.SetRememberSizePosition(IsRememberSizePositionEnabled);
-        _settingsManager?.SetAutoCenter(IsAutoCenterEnabled);
-        _settingsManager?.SetAutoUpdateEnabled(IsAutoUpdateEnabled);
-        _settingsManager?.SetThemeMode(mode);
-        _onThemeModeChanged?.Invoke(mode);
-
-        _notificationSink?.Invoke("設定已成功套用！", false);
-    }
 
     public void UpdateDisplayInfo(int screenWidth, int screenHeight, int windowWidth, int windowHeight)
     {

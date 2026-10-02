@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -23,6 +24,8 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
 {
     private readonly IServerBackupService _backupService;
     private readonly string _serverName;
+    private readonly string _backupDirectory;
+    private readonly Func<bool>? _isServerRunningCheck;
 
     [ObservableProperty]
     private BackupDisplayItem? _selectedBackup;
@@ -33,10 +36,16 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
     [ObservableProperty]
     private bool _isBusy;
 
-    public RestoreBackupViewModel(IServerBackupService backupService, string serverName)
+    public RestoreBackupViewModel(
+        IServerBackupService backupService,
+        string serverName,
+        string? backupDirectory = null,
+        Func<bool>? isServerRunningCheck = null)
     {
         _backupService = backupService;
         _serverName = serverName;
+        _backupDirectory = backupDirectory ?? string.Empty;
+        _isServerRunningCheck = isServerRunningCheck;
         WindowTitle = $"備份還原 — {serverName}";
         Backups = [];
 
@@ -56,7 +65,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         StatusMessage = "正在讀取備份清單...";
         try
         {
-            var list = await _backupService.ListBackupsAsync(_serverName).ConfigureAwait(true);
+            var list = await Task.Run(() => _backupService.ListBackupsAsync(_serverName, _backupDirectory)).ConfigureAwait(true);
             Backups.Clear();
             foreach (var b in list)
             {
@@ -92,11 +101,26 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
             return;
         }
 
+        if (_isServerRunningCheck?.Invoke() == true)
+        {
+            StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
+            Views.DialogHelper.ShowWarning("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原");
+            return;
+        }
+
+        if (!Views.DialogHelper.Confirm(
+            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法撤銷。",
+            "確認還原備份",
+            MessageBoxImage.Warning))
+        {
+            return;
+        }
+
         IsBusy = true;
         StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
         try
         {
-            bool success = await _backupService.RestoreBackupAsync(_serverName, SelectedBackup.FileName).ConfigureAwait(true);
+            bool success = await Task.Run(() => _backupService.RestoreBackupAsync(_serverName, SelectedBackup.FileName, _backupDirectory)).ConfigureAwait(true);
             if (success)
             {
                 RequestClose?.Invoke(true);
@@ -126,10 +150,18 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         }
 
         var toDelete = SelectedBackup;
+        if (!Views.DialogHelper.Confirm(
+            $"確定要永久刪除備份檔案「{toDelete.FileName}」嗎？\n此操作無法復原。",
+            "確認刪除備份",
+            MessageBoxImage.Warning))
+        {
+            return;
+        }
+
         IsBusy = true;
         try
         {
-            bool success = await _backupService.DeleteBackupAsync(_serverName, toDelete.FileName).ConfigureAwait(true);
+            bool success = await Task.Run(() => _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory)).ConfigureAwait(true);
             if (success)
             {
                 Backups.Remove(toDelete);

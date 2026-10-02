@@ -3,15 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="匯入 Minecraft 伺服器"
         Width="580"
-        Height="430"
+        Height="340"
         MinWidth="500"
-        MinHeight="380"
+        MinHeight="300"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
         Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
-  <Window.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis" />
-  </Window.Resources>
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -43,19 +40,13 @@
 
       <TextBlock Text="匯入後的伺服器名稱" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
       <TextBox Text="{Binding ServerName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,14" />
-
-      <TextBlock Text="傳輸模式" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
-      <ComboBox ItemsSource="{Binding Modes}" SelectedIndex="{Binding SelectedModeIndex}" />
     </StackPanel>
 
-    <!-- 狀態提示與進度條 -->
-    <StackPanel Grid.Row="2" Margin="0,0,0,12">
-      <ProgressBar Height="4"
-                   IsIndeterminate="True"
-                   Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"
-                   Margin="0,0,0,8" />
+    <!-- 錯誤狀態提示 -->
+    <StackPanel Grid.Row="2" Margin="0,0,0,14">
       <TextBlock Text="{Binding StatusMessage}"
                  Foreground="{DynamicResource DangerBrush}"
+                 TextWrapping="Wrap"
                  FontSize="12" />
     </StackPanel>
 

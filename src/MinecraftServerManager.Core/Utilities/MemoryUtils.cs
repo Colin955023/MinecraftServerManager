@@ -31,7 +31,7 @@ public sealed record MemoryValidationResult
         AdjustedMax = adjustedMax;
         AdjustedMin = adjustedMin;
         ErrorMessage = errorMessage;
-        WarningMessages = (warningMessages ?? []).ToArray();
+        WarningMessages = [.. warningMessages ?? []];
     }
 
     public static MemoryValidationResult Valid(

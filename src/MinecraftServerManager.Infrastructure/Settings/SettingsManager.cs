@@ -14,7 +14,7 @@ public sealed class SettingsManager
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly object _syncRoot = new();
+    private readonly Lock _syncRoot = new();
     private readonly string _settingsPath;
     private UserSettings _settings;
 
@@ -90,7 +90,15 @@ public sealed class SettingsManager
         }
     }
 
-    public void SetServersRoot(string? path) => Update(settings => settings with { ServersRoot = NormalizeServersRootPath(path) });
+    public void SetServersRoot(string? path)
+    {
+        string normalized = NormalizeServersRootPath(path);
+        if (!string.IsNullOrEmpty(normalized))
+        {
+            SafeFileSystem.ResolveStableDirectory(normalized, create: true);
+        }
+        Update(settings => settings with { ServersRoot = normalized });
+    }
 
     public string GetValidatedServersRootPath(bool create = false)
     {
@@ -149,6 +157,29 @@ public sealed class SettingsManager
 
     public void MarkFirstRunCompleted() => Update(settings => settings with { FirstRunCompleted = true });
 
+    /// <summary>
+    /// 全域 UI 縮放比例（0.5 ~ 3.0，預設 1.0）
+    /// </summary>
+    public double GetUiScale()
+    {
+        lock (_syncRoot)
+        {
+            return NormalizeUiScale(_settings.UiScale);
+        }
+    }
+
+    public void SetUiScale(double scale) => Update(settings => settings with { UiScale = NormalizeUiScale(scale) });
+
+    private static double NormalizeUiScale(double scale)
+    {
+        if (double.IsNaN(scale) || double.IsInfinity(scale) || scale <= 0)
+        {
+            return 1.0;
+        }
+
+        return Math.Clamp(Math.Round(scale, 2), 0.5, 3.0);
+    }
+
     public WindowPreferences GetWindowPreferences()
     {
         lock (_syncRoot)
@@ -156,14 +187,6 @@ public sealed class SettingsManager
             return NormalizeWindowPreferences(_settings.WindowPreferences);
         }
     }
-
-    public bool IsRememberSizePositionEnabled() => GetWindowPreferences().RememberSizePosition;
-
-    public void SetRememberSizePosition(bool enabled) => UpdateWindowPreferences(preferences => preferences with { RememberSizePosition = enabled });
-
-    public bool IsAutoCenterEnabled() => GetWindowPreferences().AutoCenter;
-
-    public void SetAutoCenter(bool enabled) => UpdateWindowPreferences(preferences => preferences with { AutoCenter = enabled });
 
     public MainWindowSettings GetMainWindowSettings() => GetWindowPreferences().MainWindow;
 
@@ -179,6 +202,17 @@ public sealed class SettingsManager
 
     public void SetThemeMode(string? mode) => UpdateWindowPreferences(preferences => preferences with { ThemeMode = NormalizeThemeMode(mode) });
 
+    private static WindowPreferences NormalizeWindowPreferences(WindowPreferences? preferences)
+    {
+        preferences ??= new WindowPreferences();
+        var mainWindow = preferences.MainWindow ?? new MainWindowSettings();
+        return preferences with
+        {
+            ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
+            MainWindow = mainWindow,
+        };
+    }
+
     private UserSettings LoadSettings()
     {
         using var result = JsonCodec.ReadJsonWithBytes(_settingsPath);
@@ -192,7 +226,12 @@ public sealed class SettingsManager
         try
         {
             var loaded = result.Document.RootElement.Deserialize<UserSettings>(ReadOptions);
-            return NormalizeSettings(loaded ?? new UserSettings());
+            var normalized = NormalizeSettings(loaded ?? new UserSettings());
+            if (loaded is not null && !string.Equals(loaded.ServersRoot, normalized.ServersRoot, StringComparison.Ordinal))
+            {
+                Save(normalized);
+            }
+            return normalized;
         }
         catch (JsonException)
         {
@@ -226,17 +265,6 @@ public sealed class SettingsManager
         {
             ServersRoot = NormalizeServersRootPath(settings.ServersRoot).Trim(),
             WindowPreferences = NormalizeWindowPreferences(settings.WindowPreferences),
-        };
-    }
-
-    private static WindowPreferences NormalizeWindowPreferences(WindowPreferences? preferences)
-    {
-        preferences ??= new WindowPreferences();
-        var mainWindow = preferences.MainWindow ?? new MainWindowSettings();
-        return preferences with
-        {
-            ThemeMode = NormalizeThemeMode(preferences.ThemeMode),
-            MainWindow = mainWindow,
         };
     }
 

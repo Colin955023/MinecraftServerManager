@@ -98,7 +98,7 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         var backupService = new ServerBackupService(_serversRoot, maxRetentionCount: 2);
 
         // 1. 建立備份
-        var backup1 = await backupService.CreateBackupAsync("BackupServer", "第一個測試備份");
+        var backup1 = await backupService.CreateBackupAsync("BackupServer", comment: "第一個測試備份");
         Assert.NotNull(backup1);
         Assert.True(File.Exists(backup1.FullPath));
 

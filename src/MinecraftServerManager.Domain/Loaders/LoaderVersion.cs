@@ -19,6 +19,6 @@ public sealed record LoaderVersion
         Url = url;
         Stable = stable;
         MinecraftVersion = minecraftVersion;
-        GameVersions = (gameVersions ?? []).ToArray();
+        GameVersions = [.. gameVersions ?? []];
     }
 }

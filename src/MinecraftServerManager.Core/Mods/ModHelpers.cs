@@ -42,6 +42,7 @@ public static partial class ModHelpers
 
         string clean = ModFilenameStem(rawQuery);
         clean = CamelCaseRegex().Replace(clean, " $1");
+        clean = CamelCaseAcronymBoundaryRegex().Replace(clean, " ");
         clean = clean.Replace('_', ' ').Replace('-', ' ');
         clean = LoaderNoiseRegex().Replace(clean, " ");
         clean = McVersionNoiseRegex().Replace(clean, " ");
@@ -89,6 +90,10 @@ public static partial class ModHelpers
 
     [GeneratedRegex(@"(?<=[a-z0-9])([A-Z])")]
     private static partial Regex CamelCaseRegex();
+
+    // 處理連續大寫字母後接一個「大寫+小寫」單字的邊界，例如 "XMLParser" -> "XML Parser"
+    [GeneratedRegex(@"(?<=[A-Z])(?=[A-Z][a-z])")]
+    private static partial Regex CamelCaseAcronymBoundaryRegex();
 
     [GeneratedRegex(@"(?i)\b(?:fabric|forge|loader|quilt|neoforge)\b")]
     private static partial Regex LoaderNoiseRegex();

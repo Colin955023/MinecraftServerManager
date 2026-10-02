@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -53,7 +54,7 @@ public sealed partial class PropertyEditItem : ObservableObject
         Description = description;
         DefaultValue = defaultValue;
         EditorType = editorType;
-        Options = options ?? Array.Empty<string>();
+        Options = options ?? [];
 
         if (editorType == PropertyEditorType.Boolean)
         {
@@ -319,6 +320,11 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
     [RelayCommand]
     public void ResetAllToDefault()
     {
+        if (!Views.DialogHelper.Confirm("確定要將所有伺服器設定屬性還原為預設值嗎？", "確認恢復預設", MessageBoxImage.Warning))
+        {
+            return;
+        }
+
         foreach (var item in _allItems)
         {
             item.ResetToDefault();

@@ -14,13 +14,14 @@ public sealed class JavaWingetInstallerTests
     [InlineData(17, "Microsoft.OpenJDK.17")]
     [InlineData(21, "Microsoft.OpenJDK.21")]
     [InlineData(25, "Microsoft.OpenJDK.25")]
+    [InlineData(26, "Microsoft.OpenJDK.26")]
+    [InlineData(27, "Microsoft.OpenJDK.27")]
     public void ResolvesCorrectWingetPackageId(int majorVersion, string expectedPackage) => Assert.Equal(expectedPackage, JavaWingetInstaller.ResolvePackageId(majorVersion));
 
     [Theory]
     [InlineData(7)]
-    [InlineData(9)]
-    [InlineData(10)]
-    [InlineData(18)]
+    [InlineData(0)]
+    [InlineData(-1)]
     public void ThrowsForUnsupportedJavaMajorVersion(int unsupportedMajor)
     {
         var ex = Assert.Throws<JavaInstallException>(() =>

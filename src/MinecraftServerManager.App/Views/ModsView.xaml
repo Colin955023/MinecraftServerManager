@@ -2,7 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels">
-  <Grid Margin="0,0,16,16">
+  <Grid Margin="0,0,16,16" Background="Transparent" PreviewMouseLeftButtonDown="OnViewPreviewMouseLeftButtonDown">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -12,7 +12,7 @@
     <!-- 頂部標題 -->
     <StackPanel Grid.Row="0" Margin="0,0,0,16">
       <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-        <Image Source="{StaticResource IconMods}" Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center" />
+        <Image Source="{DynamicResource IconMods}" Width="24" Height="24" Margin="0,0,10,0" VerticalAlignment="Center" />
         <TextBlock Text="模組管理" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,12,0" VerticalAlignment="Center" />
         <TextBlock Text="模組管理與線上探索"
                    FontSize="14"
@@ -36,7 +36,7 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-          <Image Source="{StaticResource IconFolder}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center" />
+          <Image Source="{DynamicResource IconFolder}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center" />
           <TextBlock Text="伺服器:" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
         </StackPanel>
         <ComboBox Grid.Column="1"
@@ -47,7 +47,7 @@
                 Command="{Binding RefreshServersCommand}"
                 Height="32">
           <StackPanel Orientation="Horizontal">
-            <Image Source="{StaticResource IconRefresh}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <Image Source="{DynamicResource IconRefresh}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" />
             <TextBlock Text="重新整理" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
           </StackPanel>
         </Button>
@@ -155,28 +155,46 @@
             <DataGrid x:Name="LocalModsGrid"
                       ItemsSource="{Binding LocalMods}"
                       SelectedItem="{Binding SelectedLocalMod}"
+                      SelectedIndex="-1"
                       SelectionMode="Extended"
                       AutoGenerateColumns="False"
                       HeadersVisibility="Column"
                       CanUserResizeColumns="True"
-                      SelectionChanged="LocalModsGrid_SelectionChanged"
-                      MouseDoubleClick="LocalModsGrid_MouseDoubleClick">
+                      SelectionChanged="LocalModsGrid_SelectionChanged">
+              <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                  <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+                </Style>
+              </DataGrid.RowStyle>
               <DataGrid.ContextMenu>
                 <ContextMenu>
                   <MenuItem Header="切換啟用/停用" Command="{Binding ToggleModCommand}" CommandParameter="{Binding SelectedLocalMod}" />
                   <Separator />
-                  <MenuItem Header="開啟模組資料夾" Command="{Binding OpenModsFolderCommand}" />
-                  <MenuItem Header="檢查此模組更新" Command="{Binding CheckModUpdatesCommand}" />
+                  <MenuItem Header="在資料夾中顯示" Command="{Binding ShowInFolderCommand}" CommandParameter="{Binding SelectedLocalMod}" />
+                  <MenuItem Header="檢查模組更新" Command="{Binding CheckModUpdatesCommand}" />
                   <Separator />
                   <MenuItem Header="刪除選中模組" Command="{Binding DeleteSelectedModCommand}" Foreground="{DynamicResource DangerBrush}" />
                 </ContextMenu>
               </DataGrid.ContextMenu>
               <DataGrid.Columns>
-                <DataGridCheckBoxColumn Header="啟用" Binding="{Binding IsEnabled, UpdateSourceTrigger=PropertyChanged}" Width="60" />
-                <DataGridTextColumn Header="名稱" Binding="{Binding Name}" Width="200" IsReadOnly="True" />
-                <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="120" IsReadOnly="True" />
-                <DataGridTextColumn Header="檔案名稱" Binding="{Binding FileName}" Width="*" IsReadOnly="True" />
-                <DataGridTextColumn Header="大小" Binding="{Binding FileSize}" Width="100" IsReadOnly="True" />
+                <DataGridTemplateColumn Header="狀態" Width="60">
+                  <DataGridTemplateColumn.CellTemplate>
+                    <DataTemplate>
+                      <CheckBox IsChecked="{Binding IsEnabled, Mode=OneWay}"
+                                Command="{Binding DataContext.ToggleModCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                CommandParameter="{Binding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                    </DataTemplate>
+                  </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="模組名稱" Binding="{Binding Name}" Width="200" IsReadOnly="True" />
+                <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="110" IsReadOnly="True" />
+                <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="120" IsReadOnly="True" />
+                <DataGridTextColumn Header="載入器" Binding="{Binding LoaderType}" Width="90" IsReadOnly="True" />
+                <DataGridTextColumn Header="檔案大小" Binding="{Binding FileSize}" Width="100" IsReadOnly="True" />
+                <DataGridTextColumn Header="修改時間" Binding="{Binding ModifiedTime}" Width="140" IsReadOnly="True" />
+                <DataGridTextColumn Header="描述" Binding="{Binding Description}" Width="*" IsReadOnly="True" />
               </DataGrid.Columns>
             </DataGrid>
           </Border>
@@ -187,7 +205,7 @@
       <TabItem FontSize="14" Padding="12,6">
         <TabItem.Header>
           <StackPanel Orientation="Horizontal">
-            <Image Source="{StaticResource IconGlobe}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+            <Image Source="{DynamicResource IconGlobe}" Width="16" Height="16" Margin="0,0,8,0" VerticalAlignment="Center" />
             <TextBlock Text="瀏覽模組" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
           </StackPanel>
         </TabItem.Header>
@@ -208,7 +226,7 @@
                   Padding="12,8"
                   Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal">
-              <Image Source="{StaticResource IconCheck}" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center" />
+              <Image Source="{DynamicResource IconCheck}" Width="15" Height="15" Margin="0,0,8,0" VerticalAlignment="Center" />
               <TextBlock Text="{Binding OnlineFilterHint}"
                          Foreground="{DynamicResource TextBrush}"
                          FontSize="12"
@@ -228,7 +246,12 @@
                      Text="{Binding OnlineSearchText, UpdateSourceTrigger=PropertyChanged}"
                      Height="32"
                      VerticalContentAlignment="Center"
-                     Margin="0,0,10,0" />
+                     Margin="0,0,10,0">
+              <TextBox.InputBindings>
+                <KeyBinding Key="Return" Command="{Binding SearchOnlineModsCommand}" />
+                <KeyBinding Key="Enter" Command="{Binding SearchOnlineModsCommand}" />
+              </TextBox.InputBindings>
+            </TextBox>
             <TextBlock Grid.Column="1" Text="排序:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextBrush}" />
             <ComboBox Grid.Column="2"
                       ItemsSource="{x:Static vm:ModsViewModel.OnlineSortOptions}"
@@ -242,7 +265,7 @@
                     Height="32"
                     Padding="16,0">
               <StackPanel Orientation="Horizontal">
-                <Image Source="{StaticResource IconSearch}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
+                <Image Source="{DynamicResource IconSearch}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
                 <TextBlock Text="搜尋 Modrinth" VerticalAlignment="Center" Foreground="#FFFFFF" />
               </StackPanel>
             </Button>
@@ -261,7 +284,8 @@
                       HeadersVisibility="Column"
                       CanUserResizeColumns="True"
                       IsReadOnly="True"
-                      SelectionMode="Single">
+                      SelectionMode="Single"
+                      MouseDoubleClick="OnlineModsGrid_MouseDoubleClick">
               <DataGrid.Columns>
                 <DataGridTextColumn Header="模組名稱" Binding="{Binding Title}" Width="220" />
                 <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="120" />
@@ -274,11 +298,34 @@
 
           <!-- 底部安裝操作列 -->
           <Grid Grid.Row="3" Margin="0,10,0,0">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+              <TextBlock Text="{Binding OnlineResultHint}"
+                         VerticalAlignment="Center"
+                         Margin="0,0,16,0"
+                         Foreground="{DynamicResource MutedTextBrush}"
+                         FontSize="12" />
+              <TextBlock Text="{Binding InstallQueueHint}"
+                         VerticalAlignment="Center"
+                         Foreground="{DynamicResource MutedTextBrush}"
+                         FontSize="12" />
+            </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <Button Content="下載並安裝選取模組"
-                      Command="{Binding InstallSelectedOnlineModCommand}"
+              <Button Content="開啟 Modrinth 頁面"
+                      Command="{Binding OpenModrinthPageCommand}"
+                      Margin="0,0,10,0"
+                      Padding="14,8" />
+              <Button Content="檢視安裝清單"
+                      Command="{Binding ViewInstallQueueCommand}"
+                      Margin="0,0,10,0"
+                      Padding="14,8" />
+              <Button Content="清空清單"
+                      Command="{Binding ClearInstallQueueCommand}"
+                      Margin="0,0,10,0"
+                      Padding="14,8" />
+              <Button Content="開始安裝清單"
+                      Command="{Binding InstallQueuedModsCommand}"
                       Style="{DynamicResource PrimaryButtonStyle}"
-                      Padding="20,8" />
+                      Padding="18,8" />
             </StackPanel>
           </Grid>
         </Grid>

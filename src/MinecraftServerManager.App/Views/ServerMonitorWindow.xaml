@@ -31,27 +31,8 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <!-- 頂部操作三按鈕：刷新、停止、清空 -->
+        <!-- 左側：強制終止（危險操作獨立擺放） -->
         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-          <Button Command="{Binding RefreshStateCommand}"
-                  Height="32"
-                  Margin="0,0,8,0"
-                  Padding="12,4">
-            <StackPanel Orientation="Horizontal">
-              <Image Source="{StaticResource IconRefresh}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" />
-              <TextBlock Text="刷新" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
-            </StackPanel>
-          </Button>
-          <Button Command="{Binding StopServerCommand}"
-                  IsEnabled="{Binding IsServerRunning}"
-                  Height="32"
-                  Margin="0,0,8,0"
-                  Padding="12,4">
-            <StackPanel Orientation="Horizontal">
-              <Image Source="{StaticResource IconStop}" Width="14" Height="14" Margin="0,0,6,0" VerticalAlignment="Center" />
-              <TextBlock Text="停止" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
-            </StackPanel>
-          </Button>
           <Button Command="{Binding ForceKillCommand}"
                   IsEnabled="{Binding IsServerRunning}"
                   Style="{DynamicResource DangerButtonStyle}"
@@ -61,11 +42,8 @@
           </Button>
         </StackPanel>
 
-        <!-- 系統資源卡片：PID、記憶體、版本、人數、運行時間 -->
+        <!-- 系統資源卡片：記憶體、版本、人數、運行時間 -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-          <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding JvmPidText, StringFormat='JVM: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
-          </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
             <TextBlock Text="{Binding MemoryUsageText, StringFormat='記憶體: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
@@ -80,12 +58,32 @@
           </Border>
         </StackPanel>
 
-        <!-- 右側控制：自動捲動 -->
-        <CheckBox Grid.Column="2"
-                  Content="自動捲動"
-                  IsChecked="{Binding IsAutoScrollEnabled}"
-                  Foreground="{DynamicResource TextBrush}"
-                  VerticalAlignment="Center" />
+        <!-- 右側控制：自動捲動 + 啟動 / 停止 / 刷新（順序固定） -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <CheckBox Content="自動捲動"
+                    IsChecked="{Binding IsAutoScrollEnabled}"
+                    Foreground="{DynamicResource TextBrush}"
+                    VerticalAlignment="Center"
+                    Margin="0,0,12,0" />
+          <Button Command="{Binding StartServerCommand}"
+                  Height="32"
+                  Margin="0,0,8,0"
+                  Padding="12,4">
+            <TextBlock Text="🚀 啟動" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </Button>
+          <Button Command="{Binding StopServerCommand}"
+                  IsEnabled="{Binding IsServerRunning}"
+                  Height="32"
+                  Margin="0,0,8,0"
+                  Padding="12,4">
+            <TextBlock Text="⏹️ 停止" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </Button>
+          <Button Command="{Binding RefreshStateCommand}"
+                  Height="32"
+                  Padding="12,4">
+            <TextBlock Text="🔄 刷新" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </Button>
+        </StackPanel>
       </Grid>
     </Border>
 
@@ -96,9 +94,9 @@
         <ColumnDefinition Width="200" />
       </Grid.ColumnDefinitions>
 
-      <!-- 終端機日誌檢視區 (掛載 ContextMenu) -->
+      <!-- 終端機日誌檢視區 (黑底綠字) -->
       <Border Grid.Column="0"
-              Background="#0A0B0D"
+              Background="#0C0C0C"
               BorderBrush="{DynamicResource BorderBrush}"
               BorderThickness="1"
               CornerRadius="6"
@@ -106,15 +104,21 @@
               Margin="0,0,10,0">
         <ListBox x:Name="LogListBox"
                  ItemsSource="{Binding Logs}"
-                 Background="Transparent"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 ScrollViewer.CanContentScroll="True"
+                 Background="#0C0C0C"
                  BorderThickness="0"
                  FontFamily="Consolas, Cascadia Code, Courier New"
                  FontSize="12"
-                 Foreground="#E0E6ED"
+                 Foreground="#00FF66"
                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
                  ScrollViewer.VerticalScrollBarVisibility="Auto">
           <ListBox.ContextMenu>
             <ContextMenu>
+              <MenuItem Header="複製全部日誌" Command="{Binding CopyAllLogsCommand}" />
+              <Separator />
               <MenuItem Header="清空日誌" Command="{Binding ClearLogsCommand}" />
             </ContextMenu>
           </ListBox.ContextMenu>
@@ -122,10 +126,11 @@
             <Style TargetType="ListBoxItem">
               <Setter Property="Padding" Value="0,1" />
               <Setter Property="Focusable" Value="False" />
+              <Setter Property="Foreground" Value="#00FF66" />
               <Setter Property="Template">
                 <Setter.Value>
                   <ControlTemplate TargetType="ListBoxItem">
-                    <ContentPresenter />
+                    <ContentPresenter TextElement.Foreground="#00FF66" />
                   </ControlTemplate>
                 </Setter.Value>
               </Setter>
@@ -152,6 +157,23 @@
                      FontSize="14"
                      Foreground="{DynamicResource TextBrush}"
                      Margin="0,0,0,8" />
+          <TextBlock Grid.Row="1"
+                     Text="無玩家在線"
+                     FontSize="13"
+                     Foreground="{DynamicResource MutedTextBrush}"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasNoOnlinePlayers}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
           <ListBox Grid.Row="1"
                    ItemsSource="{Binding OnlinePlayers}"
                    Background="Transparent"
@@ -160,7 +182,7 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel Orientation="Horizontal" Margin="0,3">
-                  <Image Source="{StaticResource IconCheck}" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                  <Image Source="{DynamicResource IconCheck}" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center" />
                   <TextBlock Text="{Binding}" VerticalAlignment="Center" FontSize="13" />
                 </StackPanel>
               </DataTemplate>

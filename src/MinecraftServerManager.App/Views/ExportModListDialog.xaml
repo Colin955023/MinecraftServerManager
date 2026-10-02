@@ -4,7 +4,7 @@
         Title="匯出模組清單"
         Width="440"
         Height="310"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBrush}"
         Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">

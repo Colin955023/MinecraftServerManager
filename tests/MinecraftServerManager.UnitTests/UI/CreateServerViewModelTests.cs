@@ -46,9 +46,108 @@ public sealed class CreateServerViewModelTests
 
         vm.ResetFormCommand.Execute(null);
 
-        Assert.Equal($"Vanilla {vm.SelectedMinecraftVersion}", vm.ServerName);
-        Assert.Equal("Vanilla", vm.SelectedLoader);
+        Assert.Equal($"Paper {vm.SelectedMinecraftVersion}", vm.ServerName);
+        Assert.Equal("Paper", vm.SelectedLoader);
         Assert.Equal("2048", vm.MaxMemoryMb);
+    }
+
+    [Fact]
+    public async Task AutoDetectJavaShouldSilentlySetPathWhenFoundWithoutNotification()
+    {
+        string notification = string.Empty;
+        var fakeDetector = new FakeJavaDetector(new Core.Ports.JavaRuntimeInfo(
+            ExecutablePath: @"C:\Java\bin\java.exe",
+            MajorVersion: 21,
+            Is64Bit: true,
+            Vendor: "Microsoft"));
+
+        var fakeReq = new FakeJavaRequirement(21);
+
+        var vm = new CreateServerViewModel(
+            javaDetector: fakeDetector,
+            javaRequirementService: fakeReq,
+            notificationSink: (msg, isErr) => notification = msg)
+        {
+            SelectedMinecraftVersion = "1.21.4"
+        };
+
+        await vm.AutoDetectJavaCommand.ExecuteAsync(null);
+
+        Assert.Equal(@"C:\Java\bin\java.exe", vm.JavaPath);
+        Assert.Empty(notification); // 驗證不會彈出提示，靜默填入
+    }
+
+    private sealed class FakeJavaDetector(Core.Ports.JavaRuntimeInfo? match) : Core.Ports.IJavaRuntimeDetector
+    {
+        public Task<IReadOnlyList<Core.Ports.JavaRuntimeInfo>> DetectAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Ports.JavaRuntimeInfo>>(match != null ? [match] : []);
+
+        public Task<Core.Ports.JavaRuntimeInfo?> FindBestMatchAsync(int targetMajor, CancellationToken cancellationToken = default) =>
+            Task.FromResult(match);
+    }
+
+    private sealed class FakeJavaRequirement(int major) : Core.Ports.IMinecraftJavaRequirementService
+    {
+        public Task<int> GetRequiredJavaMajorAsync(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown, CancellationToken cancellationToken = default) =>
+            Task.FromResult(major);
+
+        public int? GetCachedJavaMajor(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown) => major;
+
+        public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, int>>(new Dictionary<string, int>());
+
+        public void ReloadCache() { }
+    }
+
+    [Fact]
+    public void IsMinecraftVersionReloadEnabledShouldToggleBasedOnSelectedLoader()
+    {
+        var vm = new CreateServerViewModel();
+        Assert.Equal("Paper", vm.SelectedLoader);
+        Assert.False(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "Fabric";
+        Assert.True(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "Forge";
+        Assert.True(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "NeoForge";
+        Assert.True(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "Quilt";
+        Assert.True(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "Paper";
+        Assert.False(vm.IsMinecraftVersionReloadEnabled);
+
+        vm.SelectedLoader = "Fabric";
+        Assert.True(vm.IsMinecraftVersionReloadEnabled);
+        vm.ResetFormCommand.Execute(null);
+        Assert.Equal("Paper", vm.SelectedLoader);
+        Assert.False(vm.IsMinecraftVersionReloadEnabled);
+    }
+
+    [Fact]
+    public void LoaderVersionsMenuShouldBeDisabledForPaperFabricQuiltAndEnabledForForgeNeoForge()
+    {
+        var vm = new CreateServerViewModel
+        {
+            SelectedLoader = "Paper"
+        };
+        Assert.False(vm.IsLoaderVersionEnabled);
+
+        vm.SelectedLoader = "Fabric";
+        Assert.False(vm.IsLoaderVersionEnabled);
+
+        vm.SelectedLoader = "Quilt";
+        Assert.False(vm.IsLoaderVersionEnabled);
+
+        vm.SelectedLoader = "Forge";
+        Assert.True(vm.IsLoaderVersionEnabled);
+
+        vm.SelectedLoader = "NeoForge";
+        Assert.True(vm.IsLoaderVersionEnabled);
     }
 }
 

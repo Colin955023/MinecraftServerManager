@@ -11,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExternalScope
 {
     private readonly RotatingFileLoggerOptions _options;
-    private readonly object _syncRoot = new();
+    private readonly Lock _syncRoot = new();
     private readonly ConcurrentDictionary<string, RotatingFileLogger> _loggers = new(StringComparer.OrdinalIgnoreCase);
     private IExternalScopeProvider? _scopeProvider;
     private StreamWriter? _writer;

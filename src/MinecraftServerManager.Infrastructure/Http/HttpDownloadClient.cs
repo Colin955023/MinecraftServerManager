@@ -27,7 +27,9 @@ public sealed record HttpDownloadProgress(long BytesDownloaded, long TotalBytes)
 
 public sealed record HttpDownloadResult(bool Success, string? Error = null, long BytesDownloaded = 0);
 
-public sealed class HttpDownloadClient : IHttpPort
+public sealed class HttpDownloadClient(
+    HttpClient client,
+    Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null) : IHttpPort
 {
     public const long MaxJsonBytes = 16L * 1024 * 1024;
     public const long MaxTextBytes = 64L * 1024 * 1024;
@@ -50,16 +52,8 @@ public sealed class HttpDownloadClient : IHttpPort
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly HttpClient _client;
-    private readonly Func<string, CancellationToken, Task<IPAddress[]>>? _resolver;
-
-    public HttpDownloadClient(
-        HttpClient client,
-        Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null)
-    {
-        _client = client ?? throw new ArgumentNullException(nameof(client));
-        _resolver = resolver;
-    }
+    private readonly HttpClient _client = client ?? throw new ArgumentNullException(nameof(client));
+    private readonly Func<string, CancellationToken, Task<IPAddress[]>>? _resolver = resolver;
 
     /// <summary>
     /// IHttpPort 介面實作：安全下載檔案

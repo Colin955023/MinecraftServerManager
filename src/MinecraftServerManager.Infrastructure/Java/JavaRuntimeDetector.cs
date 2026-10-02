@@ -11,6 +11,18 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 {
     private const int MaxJavaDirectoryEntries = 128;
     private const string CacheFileName = "java_candidates_cache.json";
+    private static readonly string[] CommonVendors =
+    [
+        "Java",
+        "Microsoft",
+        "Eclipse Adoptium",
+        "Eclipse Foundation",
+        "Zulu",
+        "Amazon Corretto",
+        "BellSoft",
+        "Oracle",
+        "Semeru"
+    ];
 
     public async Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
         bool forceRefresh = false,
@@ -40,7 +52,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
 
         var sorted = detected
-            .OrderByDescending(item => item.MajorVersion)
+            .OrderBy(item => item.MajorVersion)
             .ThenByDescending(item => item.Is64Bit)
             .ThenBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -55,6 +67,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     {
         var runtimes = await DetectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        // 嚴格精確匹配目標 Java major 版本
         // 1. 完全符合且為 64 位元
         var exact64 = runtimes.FirstOrDefault(r => r.MajorVersion == targetMajor && r.Is64Bit);
         if (exact64 is not null)
@@ -69,12 +82,8 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             return exact;
         }
 
-        // 3. 次佳相容版本（高於需求且版本最低者）
-        return runtimes
-            .Where(r => r.MajorVersion > targetMajor)
-            .OrderBy(r => r.MajorVersion)
-            .ThenByDescending(r => r.Is64Bit)
-            .FirstOrDefault();
+        // 3. 找不到完全匹配的版本，回傳 null
+        return null;
     }
 
     private async Task<JavaRuntimeInfo?> TryReadRuntimeAsync(
@@ -160,33 +169,29 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             AddCandidate(candidates, Path.Combine(javaHome, "bin", "javaw.exe"));
         }
 
-        // PATH 候選
         candidates.Add("java.exe");
 
         string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (string segment in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        ReadOnlySpan<char> pathSpan = pathEnv.AsSpan();
+        while (!pathSpan.IsEmpty)
         {
-            AddCandidate(candidates, Path.Combine(segment, "java.exe"));
-            AddCandidate(candidates, Path.Combine(segment, "javaw.exe"));
-        }
+            int sepIndex = pathSpan.IndexOf(Path.PathSeparator);
+            ReadOnlySpan<char> segment = (sepIndex >= 0 ? pathSpan[..sepIndex] : pathSpan).Trim();
+            pathSpan = sepIndex >= 0 ? pathSpan[(sepIndex + 1)..] : [];
 
-        // 常見安裝根目錄
-        string[] commonVendors = new[]
-        {
-            "Java",
-            "Microsoft",
-            "Eclipse Adoptium",
-            "Eclipse Foundation",
-            "Zulu",
-            "Amazon Corretto",
-            "BellSoft",
-            "Oracle",
-            "Semeru"
-        };
+            if (segment.IsEmpty)
+            {
+                continue;
+            }
+
+            string segmentStr = segment.ToString();
+            AddCandidate(candidates, Path.Combine(segmentStr, "java.exe"));
+            AddCandidate(candidates, Path.Combine(segmentStr, "javaw.exe"));
+        }
 
         foreach (string root in GetJavaRoots())
         {
-            foreach (string? vendor in commonVendors)
+            foreach (string vendor in CommonVendors)
             {
                 string vendorRoot = Path.Combine(root, vendor);
                 IReadOnlyList<FileSystemEntry> entries;
@@ -280,14 +285,42 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             var validRuntimes = new List<JavaRuntimeInfo>();
             foreach (var item in cacheData.Candidates)
             {
-                if (File.Exists(item.ExecutablePath) && !SafeFileSystem.IsReparsePoint(item.ExecutablePath))
+                if (File.Exists(item.Path) && !SafeFileSystem.IsReparsePoint(item.Path))
                 {
-                    validRuntimes.Add(new JavaRuntimeInfo(
-                        ExecutablePath: item.ExecutablePath,
-                        MajorVersion: item.MajorVersion,
-                        Is64Bit: item.Is64Bit,
-                        JavawPath: item.JavawPath,
-                        Vendor: item.Vendor));
+                    // 驗證實際的 Java 版本
+                    try
+                    {
+                        using var process = new System.Diagnostics.Process
+                        {
+                            StartInfo = new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = item.Path,
+                                Arguments = "-version",
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            }
+                        };
+                        process.Start();
+                        string output = process.StandardError.ReadToEnd() + process.StandardOutput.ReadToEnd();
+                        process.WaitForExit();
+
+                        var details = JavaVersionParser.ParseDetails(output);
+                        if (details is { MajorVersion: > 0 } parsed)
+                        {
+                            validRuntimes.Add(new JavaRuntimeInfo(
+                                ExecutablePath: item.Path,
+                                MajorVersion: parsed.MajorVersion,
+                                Is64Bit: parsed.Is64Bit,
+                                JavawPath: null,
+                                Vendor: parsed.Vendor));
+                        }
+                    }
+                    catch
+                    {
+                        // 版本讀取失敗，跳過此項目
+                    }
                 }
                 else
                 {
@@ -312,14 +345,17 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             Directory.CreateDirectory(cacheDir);
             string cachePath = Path.Combine(cacheDir, CacheFileName);
 
-            var payload = new JavaCachePayload(
-                Candidates: runtimes.Select(r => new JavaCacheEntry(
-                    r.ExecutablePath,
-                    r.MajorVersion,
-                    r.Is64Bit,
-                    r.JavawPath,
-                    r.Vendor)).ToList(),
-                CachedAt: DateTimeOffset.UtcNow);
+            // 規範化：驗證檔案存在、排除重複路徑、依 major 由小到大排序並使同 major 集中存放
+            var entries = runtimes
+                .Where(r => !string.IsNullOrWhiteSpace(r.ExecutablePath) && File.Exists(r.ExecutablePath))
+                .GroupBy(r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(r => r.MajorVersion)
+                .ThenBy(r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(r => new JavaCacheEntry(r.ExecutablePath, r.MajorVersion))
+                .ToList();
+
+            var payload = new JavaCachePayload(Candidates: entries);
 
             string json = JsonCodec.Serialize(payload, indented: true);
             AtomicFileWriter.WriteText(cachePath, json);
@@ -331,13 +367,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     }
 
     internal sealed record JavaCacheEntry(
-        [property: JsonPropertyName("path")] string ExecutablePath,
-        [property: JsonPropertyName("major")] int MajorVersion,
-        [property: JsonPropertyName("is64Bit")] bool Is64Bit,
-        [property: JsonPropertyName("javawPath")] string? JavawPath,
-        [property: JsonPropertyName("vendor")] string? Vendor);
+        [property: JsonPropertyName("path")] string Path,
+        [property: JsonPropertyName("major")] int MajorVersion);
 
     internal sealed record JavaCachePayload(
-        [property: JsonPropertyName("candidates")] IReadOnlyList<JavaCacheEntry> Candidates,
-        [property: JsonPropertyName("cachedAt")] DateTimeOffset CachedAt);
+        [property: JsonPropertyName("candidates")] IReadOnlyList<JavaCacheEntry> Candidates);
 }

@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -14,7 +16,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 /// 完全依據 Mojang 官方 version package JSON 的 javaVersion.majorVersion 動態取得並快取，
 /// 嚴格禁止依據版本號進行硬編碼推算。
 /// </summary>
-public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementService
+public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? cacheDirectory = null) : IMinecraftJavaRequirementService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MinecraftJavaRequirementService");
 
@@ -23,23 +25,18 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
     public const string ManifestV2Url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     public const string ManifestFallbackUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
 
-    private readonly IHttpPort _httpPort;
-    private readonly string _cacheDirectory;
-    private readonly ConcurrentDictionary<string, int> _memoryCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _lock = new();
-    private bool _cacheLoaded;
-
-    public MinecraftJavaRequirementService(IHttpPort httpPort, string? cacheDirectory = null)
-    {
-        _httpPort = httpPort ?? throw new ArgumentNullException(nameof(httpPort));
-        _cacheDirectory = SafeFileSystem.ResolveStableDirectory(
+    private readonly IHttpPort _httpPort = httpPort ?? throw new ArgumentNullException(nameof(httpPort));
+    private readonly string _cacheDirectory = SafeFileSystem.ResolveStableDirectory(
             string.IsNullOrWhiteSpace(cacheDirectory) ? RuntimePaths.GetVersionCacheDir() : cacheDirectory,
             create: true);
-    }
+    private readonly ConcurrentDictionary<string, int> _memoryCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _lock = new();
+    private bool _cacheLoaded;
 
     /// <inheritdoc />
     public async Task<int> GetRequiredJavaMajorAsync(
         string minecraftVersion,
+        LoaderKind loader = LoaderKind.Unknown,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(minecraftVersion);
@@ -47,9 +44,21 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         string cleaned = minecraftVersion.Trim();
         EnsureCacheLoaded();
 
-        if (_memoryCache.TryGetValue(cleaned, out int cachedMajor) && cachedMajor > 0)
+        string cacheKey = loader == LoaderKind.Paper ? $"paper:{cleaned}" : cleaned;
+        if (_memoryCache.TryGetValue(cacheKey, out int cachedMajor) && cachedMajor > 0)
         {
             return cachedMajor;
+        }
+
+        if (loader == LoaderKind.Paper)
+        {
+            int? paperMajor = await FetchJavaMajorFromPaperAsync(cleaned, cancellationToken).ConfigureAwait(false);
+            if (paperMajor is > 0)
+            {
+                _memoryCache[cacheKey] = paperMajor.Value;
+                PersistCache();
+                return paperMajor.Value;
+            }
         }
 
         // 快取未命中：自官方 Manifest 與版本 Package JSON 動態抓取
@@ -57,15 +66,19 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         if (remoteMajor is > 0)
         {
             _memoryCache[cleaned] = remoteMajor.Value;
+            if (loader == LoaderKind.Paper)
+            {
+                _memoryCache[cacheKey] = remoteMajor.Value;
+            }
             PersistCache();
             return remoteMajor.Value;
         }
 
-        throw new InvalidOperationException($"無法從 Mojang 官方版本資訊取得 Minecraft 版本「{cleaned}」指定的 Java major 版本。");
+        throw new InvalidOperationException($"無法從 Mojang 官方或載入器版本資訊取得 Minecraft 版本「{cleaned}」指定的 Java major 版本。");
     }
 
     /// <inheritdoc />
-    public int? GetCachedJavaMajor(string minecraftVersion)
+    public int? GetCachedJavaMajor(string minecraftVersion, LoaderKind loader = LoaderKind.Unknown)
     {
         if (string.IsNullOrWhiteSpace(minecraftVersion))
         {
@@ -75,9 +88,15 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         string cleaned = minecraftVersion.Trim();
         EnsureCacheLoaded();
 
-        if (_memoryCache.TryGetValue(cleaned, out int cachedMajor) && cachedMajor > 0)
+        string cacheKey = loader == LoaderKind.Paper ? $"paper:{cleaned}" : cleaned;
+        if (_memoryCache.TryGetValue(cacheKey, out int cachedMajor) && cachedMajor > 0)
         {
             return cachedMajor;
+        }
+
+        if (loader == LoaderKind.Paper && _memoryCache.TryGetValue(cleaned, out int fallbackMajor) && fallbackMajor > 0)
+        {
+            return fallbackMajor;
         }
 
         return null;
@@ -90,22 +109,23 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
     {
         EnsureCacheLoaded();
 
-        var versionUrls = await GetOfficialVersionUrlsAsync(cancellationToken).ConfigureAwait(false);
-        if (versionUrls.Count == 0)
+        // 只抓取 Stable == true 且具備官方 server 下載連結之正式版本
+        var mcVersions = await GetMinecraftVersionsWithServerAsync(cancellationToken).ConfigureAwait(false);
+        if (mcVersions.Count == 0)
         {
             return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
         }
 
         var toFetch = force
-            ? versionUrls
-            : versionUrls.Where(kv => !_memoryCache.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            ? mcVersions
+            : mcVersions.Where(kv => !_memoryCache.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
 
         if (toFetch.Count == 0)
         {
             return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
         }
 
-        Logger.Information("開始預載入 {Count} 個 Minecraft 版本的官方 Java major 需求", toFetch.Count);
+        Logger.Information("開始預載入 {Count} 個穩定版 Minecraft 版本的官方 Java major 需求", toFetch.Count);
 
         using var throttler = new SemaphoreSlim(10, 10);
         var tasks = toFetch.Select(async pair =>
@@ -133,6 +153,169 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         PersistCache();
 
         return new Dictionary<string, int>(_memoryCache, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 取得所有 Stable == true 且具備官方 server.jar 下載連結的 Minecraft 版本及其 package URL。
+    /// 僅回傳正式釋出版本，排除 snapshot/alpha/beta/pre/release candidate 等預發布版本。
+    /// </summary>
+    private async Task<Dictionary<string, string>> GetMinecraftVersionsWithServerAsync(CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 優先從本地 mc_versions_cache.json 讀取
+        string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
+        if (File.Exists(versionsCachePath))
+        {
+            try
+            {
+                string json = await File.ReadAllTextAsync(versionsCachePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(json);
+
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        string? id = null;
+                        string? url = null;
+                        bool? stable = null;
+
+                        if (elem.TryGetProperty("Version", out var vProp))
+                        {
+                            id = vProp.GetString();
+                        }
+                        else if (elem.TryGetProperty("id", out var idProp))
+                        {
+                            id = idProp.GetString();
+                        }
+
+                        if (elem.TryGetProperty("Url", out var uProp))
+                        {
+                            url = uProp.GetString();
+                        }
+                        else if (elem.TryGetProperty("url", out var urlProp))
+                        {
+                            url = urlProp.GetString();
+                        }
+
+                        if (elem.TryGetProperty("Stable", out var sProp))
+                        {
+                            stable = sProp.GetBoolean();
+                        }
+                        else if (elem.TryGetProperty("stable", out var stableProp))
+                        {
+                            stable = stableProp.GetBoolean();
+                        }
+
+                        // 只保留 Stable == true 且有 URL 的版本
+                        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(url) && stable == true)
+                        {
+                            result[id.Trim()] = url.Trim();
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("自本機 mc_versions_cache.json 讀取版本失敗: {Error}", ex.Message);
+            }
+        }
+
+        // 本地快取為空時，從官方 Manifest 取得
+        if (result.Count == 0)
+        {
+            string? manifestJson = null;
+            try
+            {
+                manifestJson = await _httpPort.GetTextAsync(new Uri(ManifestV2Url), cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                try
+                {
+                    manifestJson = await _httpPort.GetTextAsync(new Uri(ManifestFallbackUrl), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("抓取 Mojang Manifest 失敗: {Error}", ex.Message);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifestJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(manifestJson);
+                    JsonElement arrayElement;
+
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                        doc.RootElement.TryGetProperty("versions", out var vElem) &&
+                        vElem.ValueKind == JsonValueKind.Array)
+                    {
+                        arrayElement = vElem;
+                    }
+                    else if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        arrayElement = doc.RootElement;
+                    }
+                    else
+                    {
+                        return result;
+                    }
+
+                    foreach (var elem in arrayElement.EnumerateArray())
+                    {
+                        string? id = null;
+                        string? url = null;
+                        string? type = null;
+
+                        if (elem.TryGetProperty("id", out var idProp))
+                        {
+                            id = idProp.GetString();
+                        }
+                        else if (elem.TryGetProperty("Version", out var vProp))
+                        {
+                            id = vProp.GetString();
+                        }
+
+                        if (elem.TryGetProperty("url", out var urlProp))
+                        {
+                            url = urlProp.GetString();
+                        }
+                        else if (elem.TryGetProperty("Url", out var uProp))
+                        {
+                            url = uProp.GetString();
+                        }
+
+                        if (elem.TryGetProperty("type", out var tProp))
+                        {
+                            type = tProp.GetString();
+                        }
+
+                        // 只保留 release 類型且有 URL 的版本
+                        if (!string.IsNullOrWhiteSpace(id)
+                            && !string.IsNullOrWhiteSpace(url)
+                            && string.Equals(type, "release", StringComparison.OrdinalIgnoreCase))
+                        {
+                            result[id.Trim()] = url.Trim();
+                        }
+                    }
+
+                    // 將結果寫入本地快取
+                    if (result.Count > 0)
+                    {
+                        var forCache = result.Select(kv => new LoaderVersion(kv.Key, kv.Value, true)).ToList();
+                        SaveCachedVersions(versionsCachePath, forCache);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("解析 Manifest 版本 JSON 清單失敗: {Error}", ex.Message);
+                }
+            }
+        }
+
+        return result;
     }
 
     private void EnsureCacheLoaded()
@@ -173,7 +356,73 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 }
             }
 
+            string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
+            if (File.Exists(paperCachePath))
+            {
+                try
+                {
+                    string pJson = File.ReadAllText(paperCachePath, Encoding.UTF8);
+                    using var pDoc = JsonDocument.Parse(pJson);
+                    if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var elem in pDoc.RootElement.EnumerateArray())
+                        {
+                            string? ver = elem.TryGetProperty("Version", out var vP) ? vP.GetString() : (elem.TryGetProperty("version", out var vP2) ? vP2.GetString() : null);
+                            int? jm = elem.TryGetProperty("JavaMajor", out var jP) && jP.ValueKind == JsonValueKind.Number && jP.TryGetInt32(out int jVal)
+                                ? jVal
+                                : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
+                            if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
+                            {
+                                _memoryCache[$"paper:{ver.Trim()}"] = jm.Value;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("讀取 Paper Java requirements 快取失敗 ({Path}): {Error}", paperCachePath, ex.Message);
+                }
+            }
+
+            string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
+            if (File.Exists(mcCachePath))
+            {
+                try
+                {
+                    string mJson = File.ReadAllText(mcCachePath, Encoding.UTF8);
+                    using var mDoc = JsonDocument.Parse(mJson);
+                    if (mDoc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var elem in mDoc.RootElement.EnumerateArray())
+                        {
+                            string? ver = elem.TryGetProperty("Version", out var vP) ? vP.GetString() : (elem.TryGetProperty("version", out var vP2) ? vP2.GetString() : null);
+                            int? jm = elem.TryGetProperty("JavaMajor", out var jP) && jP.ValueKind == JsonValueKind.Number && jP.TryGetInt32(out int jVal)
+                                ? jVal
+                                : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
+                            if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
+                            {
+                                _memoryCache.TryAdd(ver.Trim(), jm.Value);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("讀取 MC 版本快取中之 Java major 失敗 ({Path}): {Error}", mcCachePath, ex.Message);
+                }
+            }
+
             _cacheLoaded = true;
+        }
+    }
+
+    /// <inheritdoc />
+    public void ReloadCache()
+    {
+        lock (_lock)
+        {
+            _cacheLoaded = false;
+            EnsureCacheLoaded();
         }
     }
 
@@ -210,7 +459,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         // 2. 本地找不到時向 Mojang 官方 Manifest 查詢
         if (string.IsNullOrWhiteSpace(targetUrl))
         {
-            var urls = await GetOfficialVersionUrlsAsync(cancellationToken).ConfigureAwait(false);
+            var urls = await GetMinecraftVersionsWithServerAsync(cancellationToken).ConfigureAwait(false);
             urls.TryGetValue(minecraftVersion, out targetUrl);
         }
 
@@ -272,104 +521,6 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         return null;
     }
 
-    private async Task<Dictionary<string, string>> GetOfficialVersionUrlsAsync(CancellationToken cancellationToken)
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        string? manifestJson = null;
-        try
-        {
-            manifestJson = await _httpPort.GetTextAsync(new Uri(ManifestV2Url), cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            try
-            {
-                manifestJson = await _httpPort.GetTextAsync(new Uri(ManifestFallbackUrl), cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug("抓取 Mojang Manifest 失敗: {Error}", ex.Message);
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(manifestJson))
-        {
-            string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-            if (File.Exists(versionsCachePath))
-            {
-                try
-                {
-                    manifestJson = await File.ReadAllTextAsync(versionsCachePath, cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                }
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(manifestJson))
-        {
-            return result;
-        }
-
-        try
-        {
-            using var doc = JsonDocument.Parse(manifestJson);
-            JsonElement arrayElement;
-
-            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
-                doc.RootElement.TryGetProperty("versions", out var vElem) &&
-                vElem.ValueKind == JsonValueKind.Array)
-            {
-                arrayElement = vElem;
-            }
-            else if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                arrayElement = doc.RootElement;
-            }
-            else
-            {
-                return result;
-            }
-
-            foreach (var elem in arrayElement.EnumerateArray())
-            {
-                string? id = null;
-                string? url = null;
-
-                if (elem.TryGetProperty("id", out var idProp))
-                {
-                    id = idProp.GetString();
-                }
-                else if (elem.TryGetProperty("Version", out var vProp))
-                {
-                    id = vProp.GetString();
-                }
-
-                if (elem.TryGetProperty("url", out var urlProp))
-                {
-                    url = urlProp.GetString();
-                }
-                else if (elem.TryGetProperty("Url", out var uProp))
-                {
-                    url = uProp.GetString();
-                }
-
-                if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(url))
-                {
-                    result[id.Trim()] = url.Trim();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug("解析 Manifest 版本 JSON 清單失敗: {Error}", ex.Message);
-        }
-
-        return result;
-    }
-
     private async Task<int?> FetchJavaMajorFromUrlAsync(string url, CancellationToken cancellationToken)
     {
         try
@@ -418,6 +569,52 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             {
                 return mv2;
             }
+        }
+
+        // 3. Mojang 官方套件規格：合法 version package 但未定義 javaVersion 欄位者，官方啟動器標準皆指派 jre-legacy (Java 8)
+        if (root.TryGetProperty("id", out _) && (root.TryGetProperty("downloads", out _) || root.TryGetProperty("libraries", out _)))
+        {
+            return 8;
+        }
+
+        return null;
+    }
+
+    private static void SaveCachedVersions(string cachePath, IReadOnlyList<LoaderVersion> versions)
+    {
+        try
+        {
+            string json = JsonCodec.Serialize(versions, indented: true);
+            AtomicFileWriter.WriteText(cachePath, json);
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task<int?> FetchJavaMajorFromPaperAsync(string version, CancellationToken cancellationToken)
+    {
+        try
+        {
+            string url = $"https://fill.papermc.io/v3/projects/paper/versions/{version}";
+            string? json = await _httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("version", out var vProp) &&
+                vProp.TryGetProperty("java", out var jProp) &&
+                jProp.TryGetProperty("version", out var jvProp) &&
+                jvProp.TryGetProperty("minimum", out var minProp) &&
+                minProp.TryGetInt32(out int minimum))
+            {
+                return minimum;
+            }
+        }
+        catch
+        {
         }
 
         return null;

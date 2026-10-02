@@ -193,6 +193,37 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         Assert.True(File.Exists(cacheFile));
     }
 
+    [Fact]
+    public async Task EnsureCacheLoadedReadsPaperMcVersionsCacheSuccessfully()
+    {
+        string paperCachePath = Path.Combine(_testTempDir, "paper_mc_versions_cache.json");
+        string paperJson = """
+        [
+            {
+                "Version": "1.21.4",
+                "Stable": true,
+                "JavaMajor": 21
+            },
+            {
+                "Version": "1.20.4",
+                "Stable": true,
+                "JavaMajor": 17
+            }
+        ]
+        """;
+        await File.WriteAllTextAsync(paperCachePath, paperJson);
+
+        var mockHttp = new MockHttpPort();
+        var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
+
+        int major21 = await service.GetRequiredJavaMajorAsync("1.21.4", Domain.Servers.LoaderKind.Paper);
+        int major17 = await service.GetRequiredJavaMajorAsync("1.20.4", Domain.Servers.LoaderKind.Paper);
+
+        Assert.Equal(21, major21);
+        Assert.Equal(17, major17);
+        Assert.Equal(0, mockHttp.RequestCount); // 驗證零網路請求，完全命中本地快取
+    }
+
     private sealed class MockHttpPort : IHttpPort
     {
         public Dictionary<Uri, string> Responses { get; } = [];

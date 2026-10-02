@@ -9,10 +9,13 @@ public interface IServerRuntime : IAsyncDisposable
 {
     public int Pid { get; }
     public bool IsRunning { get; }
+    public bool IsReady { get; }
     public int? ExitCode { get; }
+    public string? ActiveServerName { get; }
 
     public event Action<string>? OutputLineReceived;
     public event Action<int>? ServerExited;
+    public event Action? ServerReady;
 
     /// <summary>
     /// 依據強型別啟動計畫啟動伺服器程序

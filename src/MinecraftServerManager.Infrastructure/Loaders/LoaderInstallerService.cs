@@ -29,9 +29,20 @@ public sealed partial class LoaderInstallerService(
 
         string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
 
-        if (loader == LoaderKind.Vanilla)
+        if (loader == LoaderKind.Paper)
         {
-            return await InstallVanillaAsync(minecraftVersion, stableServerDir, progress, cancellationToken).ConfigureAwait(false);
+            return await InstallPaperAsync(minecraftVersion, loaderVersion, stableServerDir, progress, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 僅 Fabric 與 Quilt 安裝前需預先準備官方原版 server.jar（Forge 與 NeoForge 內建原版下載流程，無需此步驟）
+        if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
+        {
+            progress?.Report(new LoaderInstallProgress("vanilla_prepare", "正在準備原版伺服器檔案...", 5));
+            string serverJarPath = Path.Combine(stableServerDir, "server.jar");
+            if (!File.Exists(serverJarPath))
+            {
+                await EnsureVanillaServerJarAsync(minecraftVersion, stableServerDir, progress, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         // 下載各 Loader Installer
@@ -68,13 +79,98 @@ public sealed partial class LoaderInstallerService(
         return launchTarget;
     }
 
-    private async Task<string> InstallVanillaAsync(
+    private async Task<string> InstallPaperAsync(
+        string minecraftVersion,
+        string loaderVersion,
+        string serverDirectory,
+        IProgress<LoaderInstallProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        progress?.Report(new LoaderInstallProgress("fetching", "正在取得 PaperMC 伺服器下載資訊...", 10));
+
+        string buildEndpoint = string.IsNullOrWhiteSpace(loaderVersion) || loaderVersion.Contains("最新", StringComparison.OrdinalIgnoreCase) || loaderVersion.Equals("latest", StringComparison.OrdinalIgnoreCase)
+            ? $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds/latest"
+            : $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds/{loaderVersion.Trim()}";
+
+        string? buildJson = await httpPort.GetTextAsync(new Uri(buildEndpoint), cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(buildJson))
+        {
+            throw new InvalidOperationException($"無法取得 PaperMC {minecraftVersion} 的建置下載資訊");
+        }
+
+        var (downloadUrl, fileName, sha256) = ExtractPaperDownloadInfo(buildJson);
+        if (string.IsNullOrEmpty(downloadUrl))
+        {
+            throw new InvalidOperationException($"找不到 PaperMC {minecraftVersion} 的伺服器下載連結");
+        }
+
+        string targetJarName = !string.IsNullOrWhiteSpace(fileName) ? fileName : "paper.jar";
+        string targetJarPath = Path.Combine(serverDirectory, targetJarName);
+
+        progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName}...", 20));
+
+        var downloadResult = await httpPort.DownloadAsync(
+            new Uri(downloadUrl),
+            targetJarPath,
+            new Progress<HttpProgress>(p =>
+            {
+                int pct = p.TotalBytes > 0 ? (int)(20 + ((double)p.BytesDownloaded / p.TotalBytes * 75)) : 20;
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+            }),
+            expectedHash: sha256,
+            expectedHashAlgorithm: "sha256",
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (!downloadResult.Success)
+        {
+            throw new InvalidOperationException($"下載 PaperMC 核心失敗：{downloadResult.Error}");
+        }
+
+        progress?.Report(new LoaderInstallProgress("completed", "PaperMC 伺服器核心下載完成", 100));
+        return targetJarName;
+    }
+
+    private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("downloads", out var downloadsProp) || downloadsProp.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null, null);
+        }
+
+        JsonElement item;
+        if (downloadsProp.TryGetProperty("server:application", out var appProp))
+        {
+            item = appProp;
+        }
+        else
+        {
+            item = downloadsProp.EnumerateObject().FirstOrDefault().Value;
+        }
+
+        if (item.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null, null);
+        }
+
+        string? url = item.TryGetProperty("url", out var u) ? u.GetString() : null;
+        string? name = item.TryGetProperty("name", out var n) ? n.GetString() : null;
+        string? sha256 = null;
+        if (item.TryGetProperty("checksums", out var csProp) && csProp.TryGetProperty("sha256", out var shaProp))
+        {
+            sha256 = shaProp.GetString();
+        }
+
+        return (url, name, sha256);
+    }
+
+    private async Task<string> EnsureVanillaServerJarAsync(
         string minecraftVersion,
         string serverDirectory,
         IProgress<LoaderInstallProgress>? progress,
         CancellationToken cancellationToken)
     {
-        progress?.Report(new LoaderInstallProgress("fetching", "正在取得官方伺服器下載資訊...", 10));
+        progress?.Report(new LoaderInstallProgress("fetching", "正在取得官方原版伺服器下載資訊...", 10));
         string? manifestJson = await httpPort.GetTextAsync(new Uri("https://piston-meta.mojang.com/mc/game/version_manifest.json"), cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(manifestJson))
         {
@@ -100,7 +196,7 @@ public sealed partial class LoaderInstallerService(
         }
 
         string targetJar = Path.Combine(serverDirectory, "server.jar");
-        progress?.Report(new LoaderInstallProgress("downloading", "正在下載 server.jar...", 30));
+        progress?.Report(new LoaderInstallProgress("downloading", "正在下載原版 server.jar...", 30));
 
         var downloadResult = await httpPort.DownloadAsync(
             new Uri(serverDownloadUrl),
@@ -108,7 +204,7 @@ public sealed partial class LoaderInstallerService(
             new Progress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(30 + ((double)p.BytesDownloaded / p.TotalBytes * 65)) : 30;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 server.jar ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
             }),
             expectedHash: expectedSha1,
             expectedHashAlgorithm: "sha1",
@@ -116,10 +212,10 @@ public sealed partial class LoaderInstallerService(
 
         if (!downloadResult.Success)
         {
-            throw new InvalidOperationException($"下載 server.jar 失敗：{downloadResult.Error}");
+            throw new InvalidOperationException($"下載原版 server.jar 失敗：{downloadResult.Error}");
         }
 
-        progress?.Report(new LoaderInstallProgress("completed", "Vanilla server.jar 下載完成", 100));
+        progress?.Report(new LoaderInstallProgress("completed", "原版 server.jar 準備完成", 100));
         return "server.jar";
     }
 
@@ -174,10 +270,24 @@ public sealed partial class LoaderInstallerService(
         switch (loader)
         {
             case LoaderKind.Fabric:
-                args.AddRange(["server", "-mcversion", minecraftVersion, "-loader", loaderVersion, "-dir", serverDirectory]);
+                if (!string.IsNullOrWhiteSpace(loaderVersion))
+                {
+                    args.AddRange(["server", "-mcversion", minecraftVersion, "-loader", loaderVersion, "-dir", serverDirectory]);
+                }
+                else
+                {
+                    args.AddRange(["server", "-mcversion", minecraftVersion, "-dir", serverDirectory]);
+                }
                 break;
             case LoaderKind.Quilt:
-                args.AddRange(["install", "server", minecraftVersion, loaderVersion, $"--install-dir={serverDirectory}"]);
+                if (!string.IsNullOrWhiteSpace(loaderVersion))
+                {
+                    args.AddRange(["install", "server", minecraftVersion, loaderVersion, $"--install-dir={serverDirectory}"]);
+                }
+                else
+                {
+                    args.AddRange(["install", "server", minecraftVersion, $"--install-dir={serverDirectory}"]);
+                }
                 break;
             case LoaderKind.Forge:
             case LoaderKind.NeoForge:
@@ -193,9 +303,50 @@ public sealed partial class LoaderInstallerService(
 
     private static string ResolveLaunchTarget(string serverDirectory, LoaderKind loader)
     {
-        if (File.Exists(Path.Combine(serverDirectory, "run.bat")))
+        // 優先從 Forge / NeoForge 的 run.bat 提取 @...win_args.txt
+        string runBat = Path.Combine(serverDirectory, "run.bat");
+        if (File.Exists(runBat))
         {
-            return "run.bat";
+            try
+            {
+                string runBatContent = File.ReadAllText(runBat);
+                var match = WinArgsRegex().Match(runBatContent);
+                if (match.Success)
+                {
+                    string matchedArgs = match.Groups[1].Value.Trim().Trim('"').Replace('\\', '/');
+                    return "@" + matchedArgs;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // 檢查 Forge / NeoForge libraries 中的 win_args.txt
+        string forgeLib = Path.Combine(serverDirectory, "libraries", "net", "minecraftforge", "forge");
+        if (Directory.Exists(forgeLib))
+        {
+            foreach (string sub in Directory.GetDirectories(forgeLib))
+            {
+                string winArgs = Path.Combine(sub, "win_args.txt");
+                if (File.Exists(winArgs))
+                {
+                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
+                }
+            }
+        }
+
+        string neoLib = Path.Combine(serverDirectory, "libraries", "net", "neoforged", "neoforge");
+        if (Directory.Exists(neoLib))
+        {
+            foreach (string sub in Directory.GetDirectories(neoLib))
+            {
+                string winArgs = Path.Combine(sub, "win_args.txt");
+                if (File.Exists(winArgs))
+                {
+                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
+                }
+            }
         }
 
         var files = SafeFileSystem.ListBoundedDirectory(serverDirectory, rejectReparse: false)
@@ -205,6 +356,7 @@ public sealed partial class LoaderInstallerService(
 
         string? preferred = loader switch
         {
+            LoaderKind.Paper => files.FirstOrDefault(f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
             LoaderKind.Fabric => files.FirstOrDefault(f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
             LoaderKind.Quilt => files.FirstOrDefault(f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
             LoaderKind.Forge => files.FirstOrDefault(f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
@@ -212,8 +364,21 @@ public sealed partial class LoaderInstallerService(
             _ => null
         };
 
-        return preferred ?? files.FirstOrDefault(f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
+        if (preferred is not null)
+        {
+            return preferred;
+        }
+
+        if (File.Exists(runBat))
+        {
+            return "run.bat";
+        }
+
+        return files.FirstOrDefault(f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
     }
+
+    [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
+    private static partial Regex WinArgsRegex();
 
     private static string? ExtractVersionMetaUrl(string manifestJson, string targetVersion)
     {

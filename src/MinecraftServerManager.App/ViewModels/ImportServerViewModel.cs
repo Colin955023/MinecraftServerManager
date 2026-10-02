@@ -1,7 +1,9 @@
 using System.IO;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
+using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 
@@ -10,18 +12,15 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>
 /// 匯入伺服器對話框 ViewModel
 /// </summary>
-public sealed partial class ImportServerViewModel : ObservableObject
+public sealed partial class ImportServerViewModel(IServerManager serverManager) : ObservableObject
 {
-    private readonly IServerManager _serverManager;
+    private readonly IServerManager _serverManager = serverManager;
 
     [ObservableProperty]
     private string _sourcePath = string.Empty;
 
     [ObservableProperty]
     private string _serverName = string.Empty;
-
-    [ObservableProperty]
-    private int _selectedModeIndex;
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
@@ -33,14 +32,6 @@ public sealed partial class ImportServerViewModel : ObservableObject
     public bool IsNotBusy => !IsBusy;
 
     public string? ImportedServerName { get; private set; }
-
-    public ImportServerViewModel(IServerManager serverManager)
-    {
-        _serverManager = serverManager;
-        Modes = ["複製 (推薦，保留來源備份)", "移動 (快速，搬移至管理目錄)"];
-    }
-
-    public IReadOnlyList<string> Modes { get; }
 
     public event Action<bool>? RequestClose;
 
@@ -99,15 +90,35 @@ public sealed partial class ImportServerViewModel : ObservableObject
         }
 
         IsBusy = true;
-        StatusMessage = "正在檢查並匯入伺服器...";
+        StatusMessage = string.Empty;
+
+        string targetName = ServerName.Trim();
+        string source = SourcePath.Trim();
+
+        var progressDialog = new ServerImportProgressDialog(targetName);
+        if (Application.Current?.MainWindow is not null)
+        {
+            progressDialog.Owner = Application.Current.MainWindow;
+        }
+
+        // 開啟獨立進度視窗並在背景非同步執行匯入
+        progressDialog.Show();
+        var progress = progressDialog.Progress;
+
         try
         {
-            var mode = SelectedModeIndex == 1 ? ImportTransferMode.Move : ImportTransferMode.Copy;
-            var result = await _serverManager.ImportServerAsync(SourcePath.Trim(), ServerName.Trim(), mode).ConfigureAwait(true);
+            var result = await Task.Run(() => _serverManager.ImportServerAsync(
+                source,
+                targetName,
+                ImportTransferMode.Copy,
+                progress)).ConfigureAwait(true);
+
+            ServerImportProgressDialog.MarkCompleted();
+            progressDialog.Close();
 
             if (result.Completed)
             {
-                ImportedServerName = ServerName.Trim();
+                ImportedServerName = targetName;
                 RequestClose?.Invoke(true);
             }
             else
@@ -117,6 +128,8 @@ public sealed partial class ImportServerViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            ServerImportProgressDialog.MarkCompleted();
+            progressDialog.Close();
             StatusMessage = $"匯入異常：{ex.Message}";
         }
         finally

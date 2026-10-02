@@ -18,6 +18,7 @@ public sealed partial class ServerInspector : IServerInspector
     private static readonly string[] ServerJarCandidates =
     [
         "run.bat",
+        "paper.jar",
         "fabric-server-launch.jar",
         "quilt-server-launch.jar",
         "server.jar",
@@ -43,11 +44,11 @@ public sealed partial class ServerInspector : IServerInspector
                     error: "找不到伺服器目錄"));
             }
 
-            var entries = SafeFileSystem.ListBoundedDirectory(stableDir, maxEntries: 512, maxTotalBytes: 10 * 1024 * 1024, rejectReparse: false);
+            var entries = SafeFileSystem.ListBoundedDirectory(stableDir, maxEntries: 512, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false);
             var files = entries.Where(e => !e.IsDirectory).Select(e => Path.GetFileName(e.FullPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var eulaState = InspectEula(stableDir, files);
-            var launchTarget = InspectLaunchTarget(files);
+            var launchTarget = InspectLaunchTarget(stableDir, files);
             var (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource) =
                 InspectLoaderAndVersion(stableDir, files, launchTarget);
             var (maxMb, minMb) = InspectMemory(stableDir);
@@ -170,7 +171,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
     }
 
-    private static ServerLaunchTarget InspectLaunchTarget(HashSet<string> files)
+    private static ServerLaunchTarget InspectLaunchTarget(string directory, HashSet<string> files)
     {
         var candidates = new List<string>();
 
@@ -183,12 +184,54 @@ public sealed partial class ServerInspector : IServerInspector
             }
         }
 
-        // 搜尋其他 jar 檔案
+        // 檢查 Forge / NeoForge libraries 中的 win_args.txt
+        string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
+        if (Directory.Exists(forgeLib))
+        {
+            foreach (string sub in Directory.GetDirectories(forgeLib))
+            {
+                string winArgs = Path.Combine(sub, "win_args.txt");
+                if (File.Exists(winArgs))
+                {
+                    string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
+                    if (!candidates.Contains(target))
+                    {
+                        candidates.Insert(0, target);
+                    }
+                }
+            }
+        }
+
+        string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
+        if (Directory.Exists(neoLib))
+        {
+            foreach (string sub in Directory.GetDirectories(neoLib))
+            {
+                string winArgs = Path.Combine(sub, "win_args.txt");
+                if (File.Exists(winArgs))
+                {
+                    string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
+                    if (!candidates.Contains(target))
+                    {
+                        candidates.Insert(0, target);
+                    }
+                }
+            }
+        }
+
+        // 搜尋其他 jar 檔案（paper*.jar 優先置前）
         foreach (string file in files)
         {
             if (file.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) && !candidates.Contains(file))
             {
-                candidates.Add(file);
+                if (file.StartsWith("paper", StringComparison.OrdinalIgnoreCase))
+                {
+                    candidates.Insert(0, file);
+                }
+                else
+                {
+                    candidates.Add(file);
+                }
             }
         }
 
@@ -198,17 +241,21 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         string primary = candidates[0];
-        var kind = primary.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+        var kind = (primary.EndsWith(".bat", StringComparison.OrdinalIgnoreCase) || primary.StartsWith('@'))
             ? LaunchTargetKind.Script
             : LaunchTargetKind.Jar;
 
-        string reason = primary.Equals("run.bat", StringComparison.OrdinalIgnoreCase)
-            ? "偵測到官方推薦啟動腳本 run.bat"
-            : primary.StartsWith("fabric", StringComparison.OrdinalIgnoreCase)
-                ? "偵測到 Fabric 官方啟動程式"
-                : primary.Equals("server.jar", StringComparison.OrdinalIgnoreCase)
-                    ? "標準 Minecraft 伺服器程式"
-                    : "找到伺服器主程式";
+        string reason = primary.StartsWith('@')
+            ? "偵測到 Forge / NeoForge 啟動引數檔"
+            : primary.Equals("run.bat", StringComparison.OrdinalIgnoreCase)
+                ? "偵測到官方推薦啟動腳本 run.bat"
+                : primary.StartsWith("paper", StringComparison.OrdinalIgnoreCase)
+                    ? "偵測到 PaperMC 官方伺服器核心"
+                    : primary.StartsWith("fabric", StringComparison.OrdinalIgnoreCase)
+                        ? "偵測到 Fabric 官方啟動程式"
+                        : primary.Equals("server.jar", StringComparison.OrdinalIgnoreCase)
+                            ? "標準 Minecraft 伺服器程式"
+                            : "找到伺服器主程式";
 
         return new ServerLaunchTarget(
             kind: kind,
@@ -362,10 +409,17 @@ public sealed partial class ServerInspector : IServerInspector
             }
         }
 
-        // 4. 從標準啟動檔名補充判斷載入器類型
+        // 4. 從標準啟動檔名或特徵設定檔判斷載入器類型
         if (loaderType == "unknown")
         {
-            if (files.Contains("fabric-server-launch.jar"))
+            if (target.Value.StartsWith("paper", StringComparison.OrdinalIgnoreCase) ||
+                files.Any(f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) ||
+                files.Contains("paper-global.yml") || files.Contains("paper.yml") || files.Contains("paper-world-defaults.yml"))
+            {
+                loaderType = "paper";
+                loaderTypeSource = "Paper 伺服器特徵 (paper.jar 或 paper-global.yml)";
+            }
+            else if (files.Contains("fabric-server-launch.jar"))
             {
                 loaderType = "fabric";
                 loaderTypeSource = "fabric-server-launch.jar 啟動檔名";
@@ -383,8 +437,25 @@ public sealed partial class ServerInspector : IServerInspector
             }
         }
 
-        // 5. 從主程式檔名解析 (如 forge-1.20.1-47.2.0.jar)
+        // 5. 從主程式檔名解析 (如 paper-1.21.4-165.jar 或 forge-1.20.1-47.2.0.jar)
         string exeName = target.Value;
+        var paperMatch = PaperJarRegex().Match(exeName);
+        if (paperMatch.Success)
+        {
+            if (mcVersion == "unknown")
+            {
+                mcVersion = paperMatch.Groups["mcVer"].Value;
+                mcVersionSource = $"{exeName} 檔名";
+            }
+            if (loaderVersion == "unknown")
+            {
+                loaderVersion = paperMatch.Groups["build"].Value;
+                loaderVersionSource = $"{exeName} 檔名";
+            }
+            loaderType = "paper";
+            loaderTypeSource = $"{exeName} 檔名";
+        }
+
         var forgeMatch = ForgeJarRegex().Match(exeName);
         if (forgeMatch.Success)
         {
@@ -511,6 +582,15 @@ public sealed partial class ServerInspector : IServerInspector
             }
         }
 
+        if (string.Equals(loaderType, "vanilla", StringComparison.OrdinalIgnoreCase))
+        {
+            if (loaderVersion == "unknown" || string.IsNullOrWhiteSpace(loaderVersion))
+            {
+                loaderVersion = mcVersion;
+                loaderVersionSource = mcVersionSource;
+            }
+        }
+
         return (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource);
     }
 
@@ -623,13 +703,31 @@ public sealed partial class ServerInspector : IServerInspector
 
     private static string? DeriveMinecraftVersionFromNeoForge(string rawVersion)
     {
-        string[] parts = rawVersion.Split('.');
-        if (parts.Length >= 2 && int.TryParse(parts[0], out int major) && major >= 20)
+        ReadOnlySpan<char> span = rawVersion.AsSpan();
+        int firstDot = span.IndexOf('.');
+        if (firstDot <= 0)
         {
-            string minor = parts[1].Split('-')[0];
-            return $"1.{major}.{minor}";
+            return null;
         }
-        return null;
+
+        ReadOnlySpan<char> majorSpan = span[..firstDot];
+        if (!int.TryParse(majorSpan, provider: null, out int major) || major < 20)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<char> remainder = span[(firstDot + 1)..];
+        int nextDot = remainder.IndexOf('.');
+        ReadOnlySpan<char> secondPart = nextDot >= 0 ? remainder[..nextDot] : remainder;
+        int dashIdx = secondPart.IndexOf('-');
+        ReadOnlySpan<char> minorSpan = dashIdx >= 0 ? secondPart[..dashIdx] : secondPart;
+
+        if (minorSpan.IsEmpty)
+        {
+            return null;
+        }
+
+        return $"1.{major}.{minorSpan}";
     }
 
     private static (int MaxMb, int? MinMb) InspectMemory(string directory)
@@ -679,6 +777,9 @@ public sealed partial class ServerInspector : IServerInspector
 
     [GeneratedRegex(@"(?:fml\.forgeVersion,\s*|MinecraftForge v|Forge\s+)(\d+\.\d+\.\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ForgeLogRegex();
+
+    [GeneratedRegex(@"^paper-(?<mcVer>\d+\.\d+(?:\.\d+)?)-(?<build>\d+)\.jar$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PaperJarRegex();
 
     [GeneratedRegex(@"NeoForge\s+(?:version\s+|v)?(\d+\.\d+\.\d+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex NeoForgeLogRegex();

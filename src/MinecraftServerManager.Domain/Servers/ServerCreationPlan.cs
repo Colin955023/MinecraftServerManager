@@ -63,12 +63,12 @@ public sealed record ServerCreationPlan
         LoaderVersion = loaderVersion ?? string.Empty;
         MemoryMaxMb = memoryMaxMb;
         MemoryMinMb = memoryMinMb;
-        JvmArgs = (jvmArgs ?? []).ToArray();
+        JvmArgs = [.. jvmArgs ?? []];
         Properties = new Dictionary<string, string>(properties ?? []);
         FinalPath = finalPath ?? string.Empty;
         StagingPath = stagingPath ?? string.Empty;
         UserJavaPath = userJavaPath;
-        Warnings = (warnings ?? []).ToArray();
+        Warnings = [.. warnings ?? []];
         RegistryRevision = registryRevision ?? string.Empty;
     }
 

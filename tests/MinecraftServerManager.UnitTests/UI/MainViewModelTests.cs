@@ -3,12 +3,32 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests.UI;
 
-public sealed class MainViewModelTests
+public sealed class MainViewModelTests : IDisposable
 {
-    private static MainViewModel CreateIsolatedViewModel()
+    private readonly string _testDir;
+
+    public MainViewModelTests()
     {
-        string dir = Path.Combine(Path.GetTempPath(), "msm_test_" + Guid.NewGuid().ToString("N"));
-        var settings = new Infrastructure.Settings.SettingsManager(dir);
+        _testDir = Path.Combine(Path.GetTempPath(), "msm_test_" + Guid.NewGuid().ToString("N"));
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_testDir))
+            {
+                Directory.Delete(_testDir, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private MainViewModel CreateIsolatedViewModel()
+    {
+        var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         return new MainViewModel(settingsManager: settings);
     }
 

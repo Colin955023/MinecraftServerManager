@@ -35,13 +35,47 @@ public readonly partial record struct VersionValue(
         }
 
 
-        string[] components = match.Groups["version"].Value.Split('.');
-        if (!int.TryParse(components[0], CultureInfo.InvariantCulture, out int major)
-            || !TryParseComponent(components, 1, out int minor)
-            || !TryParseComponent(components, 2, out int patch))
+        ReadOnlySpan<char> versionSpan = match.Groups["version"].ValueSpan;
+        int firstDot = versionSpan.IndexOf('.');
+        if (firstDot < 0)
+        {
+            if (!int.TryParse(versionSpan, CultureInfo.InvariantCulture, out int singleMajor))
+            {
+                result = default;
+                return false;
+            }
+
+            result = new VersionValue(singleMajor, 0, 0, match.Groups["pre"].Value, match.Groups["build"].Value);
+            return true;
+        }
+
+        if (!int.TryParse(versionSpan[..firstDot], CultureInfo.InvariantCulture, out int major))
         {
             result = default;
             return false;
+        }
+
+        ReadOnlySpan<char> rest = versionSpan[(firstDot + 1)..];
+        int secondDot = rest.IndexOf('.');
+        int patch = 0;
+
+        int minor;
+        if (secondDot < 0)
+        {
+            if (!int.TryParse(rest, CultureInfo.InvariantCulture, out minor))
+            {
+                result = default;
+                return false;
+            }
+        }
+        else
+        {
+            if (!int.TryParse(rest[..secondDot], CultureInfo.InvariantCulture, out minor)
+                || !int.TryParse(rest[(secondDot + 1)..], CultureInfo.InvariantCulture, out patch))
+            {
+                result = default;
+                return false;
+            }
         }
 
         result = new VersionValue(
@@ -91,12 +125,5 @@ public readonly partial record struct VersionValue(
         }
 
         return string.IsNullOrEmpty(BuildMetadata) ? core : $"{core}+{BuildMetadata}";
-    }
-
-    private static bool TryParseComponent(string[] components, int index, out int value)
-    {
-        value = 0;
-        return index >= components.Length
-            || int.TryParse(components[index], CultureInfo.InvariantCulture, out value);
     }
 }

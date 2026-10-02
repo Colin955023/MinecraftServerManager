@@ -1,4 +1,4 @@
-$env:DOTNET_CLI_FORCE_UTF8_ENCODING = "1"
+﻿$env:DOTNET_CLI_FORCE_UTF8_ENCODING = "1"
 $env:MSBUILDDISABLENODEREUSE = "1"
 $env:DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER = "1"
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)

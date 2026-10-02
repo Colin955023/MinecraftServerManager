@@ -129,7 +129,7 @@ public sealed class DomainModelTests
     [InlineData(1024, 2048, false)]
     public void ServerCreationPlanValidatesMemoryInvariants(int maxMb, int minMb, bool shouldSucceed)
     {
-        Action act = () => _ = new ServerCreationPlan(
+        void act() => _ = new ServerCreationPlan(
             "tx-test",
             ServerName.Parse("MemTest"),
             MinecraftVersion.Parse("1.20.1"),

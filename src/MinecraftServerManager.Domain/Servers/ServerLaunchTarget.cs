@@ -21,7 +21,7 @@ public sealed record ServerLaunchTarget
         Kind = kind;
         Value = value ?? string.Empty;
         Command = command ?? string.Empty;
-        Candidates = (candidates ?? []).ToArray();
+        Candidates = [.. candidates ?? []];
         Reason = reason ?? string.Empty;
     }
 

@@ -23,6 +23,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         var missingRequired = new List<string>();
         var optional = new List<string>();
         var incompatible = new List<string>();
+        var embedded = new List<string>();
 
         string normalizedServerLoader = ModHelpers.NormalizeIdentifier(serverLoader);
         string normalizedServerMcVer = ModHelpers.NormalizeIdentifier(serverMinecraftVersion);
@@ -105,6 +106,11 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
                             optional.Add(depName);
                         }
                         break;
+
+                    case ModDependencyType.Embedded:
+                        // 內嵌依賴已封裝於模組檔案內，不需另行安裝，僅供顯示參考
+                        embedded.Add(depName);
+                        break;
                 }
             }
         }
@@ -114,6 +120,13 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             hardErrors.Add($"缺少必要依賴模組：{string.Join(", ", missingRequired)}");
         }
 
-        return new OnlineModCompatibilityReport(hardErrors, warnings, notes, missingRequired, optional, incompatible);
+        return new OnlineModCompatibilityReport(
+            hardErrors,
+            warnings,
+            notes,
+            missingRequired,
+            optional,
+            incompatible,
+            embeddedDependencies: embedded);
     }
 }

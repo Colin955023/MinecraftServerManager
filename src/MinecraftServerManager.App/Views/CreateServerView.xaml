@@ -19,7 +19,7 @@
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
-          <Image Grid.Column="0" Source="{StaticResource IconWarning}" Width="20" Height="20" Margin="0,0,12,0" VerticalAlignment="Top" />
+          <Image Grid.Column="0" Source="{DynamicResource IconWarning}" Width="20" Height="20" Margin="0,0,12,0" VerticalAlignment="Top" />
           <StackPanel Grid.Column="1">
             <TextBlock FontSize="13" TextWrapping="Wrap" LineHeight="20">
               <Hyperlink Command="{Binding OpenEulaCommand}" Foreground="{DynamicResource AccentBrush}">
@@ -92,7 +92,7 @@
                 Width="42"
                 Margin="0,6,0,6"
                 ToolTip="重新載入載入器版本">
-          <Image Source="{StaticResource IconRefresh}" Width="14" Height="14" />
+          <Image Source="{DynamicResource IconRefresh}" Width="14" Height="14" />
         </Button>
 
         <!-- Minecraft 版本 -->
@@ -103,10 +103,11 @@
                   Margin="0,6,8,6" />
         <Button Grid.Row="4" Grid.Column="2"
                 Command="{Binding ReloadMinecraftVersionsCommand}"
+                IsEnabled="{Binding IsMinecraftVersionReloadEnabled}"
                 Width="42"
                 Margin="0,6,0,6"
                 ToolTip="重新載入 Minecraft 版本">
-          <Image Source="{StaticResource IconRefresh}" Width="14" Height="14" />
+          <Image Source="{DynamicResource IconRefresh}" Width="14" Height="14" />
         </Button>
 
         <!-- 記憶體設定 (MB) -->

@@ -19,8 +19,8 @@ public sealed record ServerDiscoveryReport
         IEnumerable<ServerDiscoveryIssue>? issues = null,
         int managedCount = 0)
     {
-        Candidates = (candidates ?? []).ToArray();
-        Issues = (issues ?? []).ToArray();
+        Candidates = [.. candidates ?? []];
+        Issues = [.. issues ?? []];
         ManagedCount = managedCount;
     }
 }

@@ -12,7 +12,9 @@ public sealed record ProcessStartSpec(
     string FileName,
     IReadOnlyList<string> Arguments,
     string? WorkingDirectory = null,
-    IReadOnlyDictionary<string, string?>? Environment = null);
+    IReadOnlyDictionary<string, string?>? Environment = null,
+    bool CreateNoWindow = true,
+    bool UseShellExecute = false);
 
 public sealed record ProcessExitResult(int ExitCode, bool WasForceStopped);
 
@@ -41,6 +43,8 @@ public interface IProcessRunner
 public interface IExternalLauncher
 {
     public bool OpenFolder(string folderPath);
+
+    public bool ShowInFolder(string filePath);
 
     public bool OpenUrl(string url);
 }

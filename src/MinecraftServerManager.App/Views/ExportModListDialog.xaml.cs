@@ -13,6 +13,7 @@ public partial class ExportModListDialog : Window
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
+    private static readonly string[] ModListXlsxHeaders = ["啟用狀態", "模組名稱", "版本", "作者", "檔案名稱", "模組ID", "描述"];
     private readonly IReadOnlyList<LocalModRowItem> _mods;
     private readonly string _serverName;
 
@@ -52,7 +53,7 @@ public partial class ExportModListDialog : Window
         SaveFileDialog saveDialog = new()
         {
             Title = "儲存模組清單",
-            FileName = $"mods_{_serverName}_{DateTime.Now:yyyyMMdd_HHmmss}{extension}",
+            FileName = $"{_serverName}{extension}",
             Filter = filter
         };
 
@@ -104,12 +105,13 @@ public partial class ExportModListDialog : Window
             case ".json":
                 var items = _mods.Select(m => new
                 {
-                    id = m.Id,
                     name = m.Name,
                     version = m.Version,
-                    fileName = m.FileName,
-                    fileSize = m.FileSize,
-                    isEnabled = m.IsEnabled
+                    enabled = m.IsEnabled,
+                    author = m.Author == "-" ? string.Empty : m.Author,
+                    filename = m.FileName,
+                    description = m.Description,
+                    id = m.Id
                 });
                 string json = JsonSerializer.Serialize(items, JsonOptions);
                 File.WriteAllText(filePath, json, Encoding.UTF8);
@@ -117,33 +119,50 @@ public partial class ExportModListDialog : Window
 
             case ".html":
                 StringBuilder sbHtml = new();
-                sbHtml.AppendLine("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>模組清單 - " + _serverName + "</title>");
-                sbHtml.AppendLine("<style>body{font-family:sans-serif;margin:24px;} table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:8px;text-align:left;} th{background-color:#4CAF50;color:white;} tr:nth-child(even){background-color:#f9f9f9;}</style>");
+                sbHtml.AppendLine("<!DOCTYPE html>");
+                sbHtml.AppendLine("<html lang=\"zh-TW\">");
+                sbHtml.AppendLine("<head><meta charset=\"UTF-8\"><title>模組列表</title>");
+                sbHtml.AppendLine("<style>table{border-collapse:collapse;}th,td{border:1px solid silver;padding:6px;}th{background:whitesmoke;}</style>");
                 sbHtml.AppendLine("</head><body>");
-                sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<h1>模組清單 — {_serverName}</h1>");
-                sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<p>匯出時間：{DateTime.Now:yyyy-MM-dd HH:mm:ss}，總計 {_mods.Count} 個模組</p>");
-                sbHtml.AppendLine("<table><thead><tr><th>狀態</th><th>模組名稱</th><th>版本</th><th>檔案名稱</th><th>大小</th></tr></thead><tbody>");
+                sbHtml.AppendLine("<h2>模組列表</h2>");
+                sbHtml.AppendLine("<table>");
+                sbHtml.AppendLine("<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>描述</th></tr>");
                 foreach (LocalModRowItem m in _mods)
                 {
-                    string status = m.IsEnabled ? "啟用" : "停用";
-                    sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{status}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(m.FileName)}</td><td>{m.FileSize}</td></tr>");
+                    string statusIcon = m.IsEnabled ? "✅" : "❌";
+                    string author = m.Author == "-" ? string.Empty : m.Author;
+                    sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{statusIcon}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.FileName)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Id)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Description)}</td></tr>");
                 }
-                sbHtml.AppendLine("</tbody></table></body></html>");
+                sbHtml.AppendLine("</table></body></html>");
                 File.WriteAllText(filePath, sbHtml.ToString(), Encoding.UTF8);
                 break;
 
             case ".xlsx":
+                var rows = new List<IReadOnlyList<string>>
+                {
+                    ModListXlsxHeaders
+                };
+                foreach (LocalModRowItem m in _mods)
+                {
+                    string status = m.IsEnabled ? "是" : "否";
+                    string author = m.Author == "-" ? string.Empty : m.Author;
+                    rows.Add([status, m.Name, m.Version, author, m.FileName, m.Id, m.Description]);
+                }
+                byte[] xlsxBytes = Infrastructure.Utilities.OpenXmlSpreadsheetBuilder.BuildWorkbook("模組列表", rows);
+                File.WriteAllBytes(filePath, xlsxBytes);
+                break;
+
             case ".txt":
             default:
                 StringBuilder sbTxt = new();
-                sbTxt.AppendLine(CultureInfo.InvariantCulture, $"=== 模組清單 — {_serverName} ===");
-                sbTxt.AppendLine(CultureInfo.InvariantCulture, $"匯出時間：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                sbTxt.AppendLine(CultureInfo.InvariantCulture, $"模組總數：{_mods.Count} 個");
-                sbTxt.AppendLine(new string('-', 80));
+                sbTxt.AppendLine("# 模組列表");
+                sbTxt.AppendLine();
                 foreach (LocalModRowItem m in _mods)
                 {
-                    string status = m.IsEnabled ? "[啟用]" : "[停用]";
-                    sbTxt.AppendLine(CultureInfo.InvariantCulture, $"{status} {m.Name} (版本: {m.Version}) - {m.FileName} ({m.FileSize})");
+                    string statusIcon = m.IsEnabled ? "✅" : "❌";
+                    string author = m.Author == "-" ? string.Empty : m.Author;
+                    string authorPart = !string.IsNullOrWhiteSpace(author) ? $" - by {author}" : string.Empty;
+                    sbTxt.AppendLine(CultureInfo.InvariantCulture, $"{statusIcon} {m.Name} ({m.Version}){authorPart}");
                 }
                 File.WriteAllText(filePath, sbTxt.ToString(), Encoding.UTF8);
                 break;

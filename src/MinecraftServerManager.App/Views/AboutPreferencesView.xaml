@@ -150,6 +150,42 @@
                     HorizontalAlignment="Left" />
         </Grid>
 
+        <!-- 全域介面縮放 -->
+        <Grid Margin="0,0,0,24">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="介面縮放:" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,12,0" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <ComboBox SelectedIndex="{Binding SelectedUiScaleIndex}"
+                      ItemsSource="{x:Static vm:AboutPreferencesViewModel.UiScaleOptions}"
+                      Width="160"
+                      HorizontalAlignment="Left" />
+            <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+              <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsCustomScaleVisible}" Value="True">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </StackPanel.Style>
+              <TextBox Text="{Binding CustomUiScaleText, UpdateSourceTrigger=PropertyChanged}"
+                       Width="70"
+                       Padding="6,4"
+                       VerticalContentAlignment="Center" />
+              <TextBlock Text="%（50 ~ 300）"
+                         VerticalAlignment="Center"
+                         Margin="6,0,0,0"
+                         Foreground="{DynamicResource MutedTextBrush}" />
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+
         <!-- 底部偏好設定操作按鈕 (恢復預設) -->
         <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,20" />
         <Button Content="恢復預設"

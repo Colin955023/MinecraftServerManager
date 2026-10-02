@@ -35,6 +35,32 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         }
     }
 
+    public bool ShowInFolder(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            Logger.Warning("在資料夾中顯示失敗，檔案不存在或為空: {Path}", filePath);
+            return false;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"/select,\"{filePath}\"",
+                UseShellExecute = true,
+            });
+            Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "在資料夾中顯示檔案異常: {Path}", filePath);
+            return false;
+        }
+    }
+
     public bool OpenUrl(string url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -80,13 +106,13 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         {
             FileName = resolvedFileName,
             WorkingDirectory = specification.WorkingDirectory ?? Environment.CurrentDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
+            UseShellExecute = specification.UseShellExecute,
+            CreateNoWindow = specification.CreateNoWindow,
+            RedirectStandardInput = !specification.UseShellExecute,
+            RedirectStandardOutput = !specification.UseShellExecute,
+            RedirectStandardError = !specification.UseShellExecute,
+            StandardOutputEncoding = specification.UseShellExecute ? null : Encoding.UTF8,
+            StandardErrorEncoding = specification.UseShellExecute ? null : Encoding.UTF8,
         };
         foreach (string argument in specification.Arguments)
         {
@@ -208,7 +234,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         private readonly System.Diagnostics.Process _process;
         private readonly Task _standardOutputTask;
         private readonly Task _standardErrorTask;
-        private readonly object _outputLock = new();
+        private readonly Lock _outputLock = new();
         private readonly Queue<ProcessOutput> _pendingOutput = new();
         private bool _wasForceStopped;
         private bool _disposed;
@@ -217,8 +243,12 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         public ManagedProcess(System.Diagnostics.Process process)
         {
             _process = process;
-            _standardOutputTask = PumpAsync(_process.StandardOutput, ProcessOutputKind.StandardOutput);
-            _standardErrorTask = PumpAsync(_process.StandardError, ProcessOutputKind.StandardError);
+            _standardOutputTask = process.StartInfo.RedirectStandardOutput
+                ? PumpAsync(_process.StandardOutput, ProcessOutputKind.StandardOutput)
+                : Task.CompletedTask;
+            _standardErrorTask = process.StartInfo.RedirectStandardError
+                ? PumpAsync(_process.StandardError, ProcessOutputKind.StandardError)
+                : Task.CompletedTask;
         }
 
         public int Pid => _process.Id;
@@ -255,6 +285,10 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             ObjectDisposedException.ThrowIf(_disposed, this);
             ArgumentNullException.ThrowIfNull(line);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!_process.StartInfo.RedirectStandardInput)
+            {
+                return;
+            }
             await _process.StandardInput.WriteLineAsync(line).WaitAsync(cancellationToken).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
         }

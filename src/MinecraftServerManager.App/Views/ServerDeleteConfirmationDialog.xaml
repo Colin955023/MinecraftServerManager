@@ -1,0 +1,71 @@
+<Window x:Class="MinecraftServerManager.App.Views.ServerDeleteConfirmationDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="確認刪除伺服器"
+        Width="500"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 標題 -->
+    <StackPanel Grid.Row="0" Margin="0,0,0,16">
+      <TextBlock Text="🗑️ 確認刪除伺服器"
+                 FontSize="18"
+                 FontWeight="Bold"
+                 Foreground="{DynamicResource DangerBrush}" />
+    </StackPanel>
+
+    <!-- 內容提示 -->
+    <TextBlock Grid.Row="1"
+               x:Name="MessageText"
+               FontSize="13"
+               TextWrapping="Wrap"
+               LineHeight="20"
+               Foreground="{DynamicResource TextBrush}"
+               Margin="0,0,0,24" />
+
+    <!-- 按鈕區：有備份時（是/否/取消） -->
+    <StackPanel Grid.Row="2"
+                x:Name="WithBackupsButtons"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Visibility="Collapsed">
+      <Button Content="是"
+              Click="OnYesClicked"
+              Padding="20,6"
+              Margin="0,0,10,0"
+              Style="{DynamicResource DangerButtonStyle}" />
+      <Button Content="否"
+              Click="OnNoClicked"
+              Padding="20,6"
+              Margin="0,0,10,0" />
+      <Button Content="取消"
+              Click="OnCancelClicked"
+              Padding="20,6" />
+    </StackPanel>
+
+    <!-- 按鈕區：無備份時（確定刪除/取消） -->
+    <StackPanel Grid.Row="2"
+                x:Name="NoBackupsButtons"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Visibility="Collapsed">
+      <Button Content="確定刪除"
+              Click="OnConfirmClicked"
+              Padding="14,6"
+              Margin="0,0,10,0"
+              Style="{DynamicResource DangerButtonStyle}" />
+      <Button Content="取消"
+              Click="OnCancelClicked"
+              Padding="14,6" />
+    </StackPanel>
+  </Grid>
+</Window>

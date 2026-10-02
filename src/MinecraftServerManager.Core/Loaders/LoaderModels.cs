@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MinecraftServerManager.Core.Loaders;
 
 /// <summary>
@@ -5,10 +7,17 @@ namespace MinecraftServerManager.Core.Loaders;
 /// </summary>
 public sealed record LoaderVersion(
     string Version,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? Url = null,
     bool Stable = true,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? MinecraftVersion = null,
-    IReadOnlyList<string>? CompatibleGameVersions = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<string>? CompatibleGameVersions = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? JavaMajor = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Build = null);
 
 /// <summary>
 /// 載入器安裝器描述

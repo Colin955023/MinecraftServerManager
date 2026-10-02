@@ -61,7 +61,7 @@ public static class RestoreTransactionRecovery
                     continue;
                 }
 
-                RestoreTransactionRecord? payload = null;
+                RestoreTransactionRecord? payload;
                 try
                 {
                     payload = JsonCodec.Deserialize<RestoreTransactionRecord>(File.ReadAllText(entry.FullPath));

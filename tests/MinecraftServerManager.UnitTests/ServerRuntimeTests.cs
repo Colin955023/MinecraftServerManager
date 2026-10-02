@@ -4,7 +4,7 @@ using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
-public sealed class ServerRuntimeTests : IDisposable
+public sealed class ServerRuntimeTests : IAsyncLifetime
 {
     private readonly string _testDir;
 
@@ -14,7 +14,9 @@ public sealed class ServerRuntimeTests : IDisposable
         Directory.CreateDirectory(_testDir);
     }
 
-    public void Dispose()
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
     {
         for (int i = 0; i < 3; i++)
         {
@@ -28,7 +30,7 @@ public sealed class ServerRuntimeTests : IDisposable
             }
             catch (Exception) when (i < 2)
             {
-                Thread.Sleep(50);
+                await Task.Delay(50).ConfigureAwait(false);
             }
             catch
             {
@@ -139,6 +141,27 @@ public sealed class ServerRuntimeTests : IDisposable
 
         Assert.Single(outputs);
         Assert.Equal("Server started!", outputs[0]);
+    }
+
+    [Fact]
+    public async Task OutputContainingDoneTriggersServerReadyAndSetsIsReady()
+    {
+        var runner = new FakeProcessRunner();
+        await using var runtime = new ServerRuntime(runner);
+
+        bool readyFired = false;
+        runtime.ServerReady += () => readyFired = true;
+
+        await runtime.StartAsync("java.exe", _testDir, "server.jar", 1024);
+        Assert.False(runtime.IsReady);
+
+        runner.LastCreatedProcess!.RaiseOutput("[Server thread/INFO]: Preparing spawn area: 98%");
+        Assert.False(runtime.IsReady);
+        Assert.False(readyFired);
+
+        runner.LastCreatedProcess!.RaiseOutput("[Server thread/INFO]: Done (4.521s)! For help, type \"help\"");
+        Assert.True(runtime.IsReady);
+        Assert.True(readyFired);
     }
 
     [Fact]

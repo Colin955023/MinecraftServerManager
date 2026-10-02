@@ -8,19 +8,21 @@ namespace MinecraftServerManager.Core.Ports;
 public interface IMinecraftJavaRequirementService
 {
     /// <summary>
-    /// 依據 Minecraft 版本非同步取得官方指定的 Java 主要版本
+    /// 依據 Minecraft 版本與載入器非同步取得官方或載入器指定的 Java 主要版本
     /// </summary>
     /// <param name="minecraftVersion">Minecraft 版本字串 (例如 "1.21.4")</param>
+    /// <param name="loader">載入器種類 (例如 Paper 或 Unknown)</param>
     /// <param name="cancellationToken">取消語彙基元</param>
-    /// <returns>官方指定的 Java 主要版本 (例如 21, 17, 8)</returns>
-    public Task<int> GetRequiredJavaMajorAsync(string minecraftVersion, CancellationToken cancellationToken = default);
+    /// <returns>指定的 Java 主要版本 (例如 21, 17, 8)</returns>
+    public Task<int> GetRequiredJavaMajorAsync(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 從快取同步取得官方指定的 Java 主要版本；若快取未載入或尚未包含此版本則回傳 null
+    /// 從快取同步取得指定的 Java 主要版本；若快取未載入或尚未包含此版本則回傳 null
     /// </summary>
     /// <param name="minecraftVersion">Minecraft 版本字串</param>
-    /// <returns>官方指定的 Java 主要版本，未快取時回傳 null</returns>
-    public int? GetCachedJavaMajor(string minecraftVersion);
+    /// <param name="loader">載入器種類</param>
+    /// <returns>指定的 Java 主要版本，未快取時回傳 null</returns>
+    public int? GetCachedJavaMajor(string minecraftVersion, Domain.Servers.LoaderKind loader = Domain.Servers.LoaderKind.Unknown);
 
     /// <summary>
     /// 平行非同步預載入官方 Manifest 中所有 release 版本的 Java major 需求至快取檔案
@@ -29,4 +31,9 @@ public interface IMinecraftJavaRequirementService
     /// <param name="cancellationToken">取消語彙基元</param>
     /// <returns>版本與 Java major 映射字典</returns>
     public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 重新載入本地快取至記憶體快取
+    /// </summary>
+    public void ReloadCache();
 }

@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -166,10 +167,9 @@ public static class ServerPropertiesMigrationService
             return false;
         }
 
-        string[] parts = version.Trim().Split('.');
-        if (parts.Length >= 2 && int.TryParse(parts[0], out int major) && int.TryParse(parts[1], out int minor))
+        if (VersionValue.TryParse(version.Trim(), out var parsed))
         {
-            return major > 1 || (major == 1 && minor >= 19);
+            return parsed >= new VersionValue(1, 19, 0);
         }
 
         return false;

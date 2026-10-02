@@ -7,9 +7,19 @@ namespace MinecraftServerManager.App;
 public partial class App : Application
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("App");
+    private static Mutex? _singleInstanceMutex;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        _singleInstanceMutex = new Mutex(true, "MinecraftServerManagerMutex", out bool createdNew);
+        if (!createdNew)
+        {
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            Shutdown(0);
+            return;
+        }
+
         AppLogging.Initialize();
         Logger.Information("Minecraft Server Manager 啟動中 (版本 2.0.0)");
 
@@ -21,9 +31,29 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
-        AppLogging.Shutdown();
-        base.OnExit(e);
+        try
+        {
+            Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
+            AppLogging.Shutdown();
+        }
+        finally
+        {
+            if (_singleInstanceMutex is not null)
+            {
+                try
+                {
+                    _singleInstanceMutex.ReleaseMutex();
+                }
+                catch
+                {
+                }
+
+                _singleInstanceMutex.Dispose();
+                _singleInstanceMutex = null;
+            }
+
+            base.OnExit(e);
+        }
     }
 
     private static void App_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

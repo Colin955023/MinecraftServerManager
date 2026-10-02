@@ -14,10 +14,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
     public int Pid => _process?.Pid ?? 0;
     public bool IsRunning => _process is not null && !_process.HasExited;
+    public bool IsReady { get; private set; }
     public int? ExitCode => _process?.ExitCode;
+    public string? ActiveServerName { get; private set; }
 
     public event Action<string>? OutputLineReceived;
     public event Action<int>? ServerExited;
+    public event Action? ServerReady;
 
     public async Task StartAsync(ServerLaunchPlan plan, CancellationToken cancellationToken = default)
     {
@@ -30,6 +33,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             throw new InvalidOperationException("伺服器程序已在執行中");
         }
 
+        IsReady = false;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
         Logger.Information("啟動伺服器程序 (目錄: {Directory}, Java: {Java}, 參數量: {ArgCount})", stableDir, plan.JavaExecutable, plan.Arguments.Count);
 
@@ -39,7 +43,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             WorkingDirectory: stableDir);
 
         _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
-        Logger.Information("伺服器程序已啟動，PID: {Pid}", _process.Pid);
+        ActiveServerName = plan.ServerName ?? Path.GetFileName(stableDir);
+        Logger.Information("伺服器「{Server}」程序已啟動，PID: {Pid}", ActiveServerName, _process.Pid);
         _process.OutputReceived += OnOutputReceived;
 
         _ = MonitorExitAsync(_process);
@@ -64,6 +69,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             throw new InvalidOperationException("伺服器程序已在執行中");
         }
 
+        IsReady = false;
         string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
         bool isScript = executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
 
@@ -101,6 +107,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
+        ActiveServerName = Path.GetFileName(stableDir);
         Logger.Information("伺服器程序已成功啟動，PID: {Pid}", _process.Pid);
         _process.OutputReceived += OnOutputReceived;
 
@@ -168,6 +175,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
 
         _disposed = true;
+        ActiveServerName = null;
 
         if (_process is not null)
         {
@@ -175,9 +183,21 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             await _process.DisposeAsync().ConfigureAwait(false);
             _process = null;
         }
+        IsReady = false;
     }
 
-    private void OnOutputReceived(ProcessOutput output) => OutputLineReceived?.Invoke(output.Text);
+    private void OnOutputReceived(ProcessOutput output)
+    {
+        string text = output.Text;
+        OutputLineReceived?.Invoke(text);
+
+        if (!IsReady && (text.Contains("Done (", StringComparison.OrdinalIgnoreCase) || text.Contains("Done in ", StringComparison.OrdinalIgnoreCase)))
+        {
+            IsReady = true;
+            Logger.Information("伺服器已進入就緒 (Ready) 狀態");
+            ServerReady?.Invoke();
+        }
+    }
 
     private async Task MonitorExitAsync(IManagedProcess proc)
     {
@@ -185,11 +205,17 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         {
             var result = await proc.WaitForExitAsync().ConfigureAwait(false);
             Logger.Information("伺服器監控回報程序 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
+            IsReady = false;
             ServerExited?.Invoke(result.ExitCode);
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "伺服器程序監控異常 (PID: {Pid})", proc.Pid);
+        }
+        finally
+        {
+            ActiveServerName = null;
+            IsReady = false;
         }
     }
 }

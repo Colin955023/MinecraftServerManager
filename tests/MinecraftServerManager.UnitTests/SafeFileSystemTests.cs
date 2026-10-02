@@ -60,6 +60,33 @@ public sealed class SafeFileSystemTests
         }
     }
 
+    [Fact]
+    public void DeleteWithin_DeletesDirectoryContainingReadOnlyFilesSuccessfully()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            string targetDir = Path.Combine(root, "dirWithReadOnly");
+            Directory.CreateDirectory(targetDir);
+            string readOnlyFile = Path.Combine(targetDir, "readonly.txt");
+            File.WriteAllText(readOnlyFile, "protected content");
+
+            // 設為唯讀屬性
+            File.SetAttributes(readOnlyFile, FileAttributes.ReadOnly);
+
+            bool deleted = SafeFileSystem.DeleteWithin(root, targetDir);
+            Assert.True(deleted);
+            Assert.False(Directory.Exists(targetDir));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static string CreateTemporaryDirectory()
     {
         string path = Path.Combine(Path.GetTempPath(), "msm-filesystem-" + Guid.NewGuid().ToString("N"));

@@ -6,16 +6,11 @@ using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
-public sealed class ServerPropertiesStore : IServerPropertiesStore
+public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertiesStore
 {
     private const int MaxPropertiesFileBytes = 1024 * 1024; // 1 MB
     private const string MissingRevision = "missing";
-    private readonly string _serversRoot;
-
-    public ServerPropertiesStore(string serversRoot)
-    {
-        _serversRoot = serversRoot ?? string.Empty;
-    }
+    private readonly string _serversRoot = serversRoot ?? string.Empty;
 
     public string GetPropertiesFilePath(string serverName)
     {
@@ -52,7 +47,7 @@ public sealed class ServerPropertiesStore : IServerPropertiesStore
             var fileInfo = new FileInfo(path);
             if (fileInfo.Length == 0)
             {
-                string emptyHash = HashCalculator.DigestBytes(ReadOnlySpan<byte>.Empty);
+                string emptyHash = HashCalculator.DigestBytes([]);
                 return new ServerPropertiesSnapshot(
                     ServerName: serverName,
                     Status: ServerPropertiesReadStatus.Empty,

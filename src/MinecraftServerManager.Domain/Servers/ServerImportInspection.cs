@@ -39,7 +39,7 @@ public sealed record ServerImportInspection
         Name = name;
         FinalPath = finalPath ?? string.Empty;
         Server = server;
-        Warnings = (warnings ?? []).ToArray();
+        Warnings = [.. warnings ?? []];
         Committable = committable;
         ConflictType = conflictType;
         Manifest = manifest;

@@ -65,7 +65,9 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
             var process = await processRunner.StartAsync(
                 new ProcessStartSpec(
                     "winget",
-                    ["install", "--accept-package-agreements", "--accept-source-agreements", packageId]),
+                    ["install", "--accept-package-agreements", "--accept-source-agreements", packageId],
+                    CreateNoWindow: false,
+                    UseShellExecute: true),
                 cancellationToken).ConfigureAwait(false);
             await using (process.ConfigureAwait(false))
             {
@@ -97,10 +99,18 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         }
     }
 
-    public static string ResolvePackageId(int majorVersion) => majorVersion switch
+    public static string ResolvePackageId(int majorVersion)
     {
-        8 => "Oracle.JavaRuntimeEnvironment",
-        11 or 16 or 17 or 21 or 25 => $"Microsoft.OpenJDK.{majorVersion}",
-        _ => throw new JavaInstallException($"不支援自動安裝 Java 主要版本 {majorVersion}，請手動前往官網下載")
-    };
+        if (majorVersion == 8)
+        {
+            return "Oracle.JavaRuntimeEnvironment";
+        }
+
+        if (majorVersion > 8)
+        {
+            return $"Microsoft.OpenJDK.{majorVersion}";
+        }
+
+        throw new JavaInstallException($"不支援自動安裝 Java 主要版本 {majorVersion}，請手動前往官網下載");
+    }
 }
