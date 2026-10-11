@@ -102,13 +102,20 @@ public static class SafeZipArchive
             foreach (var member in members)
             {
                 string target = Path.Combine(destination, member.RelativePath);
+                string destinationRoot = Path.GetFullPath(destination + Path.DirectorySeparatorChar);
+                string resolvedTarget = Path.GetFullPath(target);
+                if (!resolvedTarget.StartsWith(destinationRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new SafeArchiveException($"壓縮檔嘗試路徑穿越： {member.Entry.FullName}");
+                }
+
                 if (member.Entry.FullName.EndsWith('/'))
                 {
-                    SafeFileSystem.ResolveStableDirectory(target, create: true);
+                    SafeFileSystem.ResolveStableDirectory(resolvedTarget, create: true);
                     continue;
                 }
 
-                string safeTarget = SafeFileSystem.ResolveStablePath(target, createParent: true);
+                string safeTarget = SafeFileSystem.ResolveStablePath(resolvedTarget, createParent: true);
                 long memberBytes = 0L;
                 try
                 {
