@@ -8,7 +8,7 @@ public static class JvmOptionPolicy
     private const string GcOptionPrefix = "-XX:+Use";
 
     /// <summary>
-    /// 將使用者自訂 JVM 參數正規化為清單（等同 Python shlex.split 之殼層引號規則，
+    /// 將使用者自訂 JVM 參數正規化為清單（依據標準命令列殼層引號規則，
     /// 讓含空白的引號路徑，例如 -Dlog4j.configurationFile="C:\Program Files\x\log4j2.xml"，
     /// 能正確視為單一參數而不被空白截斷）
     /// </summary>
@@ -93,7 +93,7 @@ public static class JvmOptionPolicy
             return rawArgs.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         }
 
-        return tokens.Where(static token => token.Length > 0).ToList();
+        return [.. tokens.Where(static token => token.Length > 0)];
     }
 
     /// <summary>
@@ -131,8 +131,8 @@ public static class JvmOptionPolicy
             args.Add(("-XX:+UnlockExperimentalVMOptions", "解鎖實驗性 JVM 參數以允許進階效能調校"));
             args.Add(("-XX:+DisableExplicitGC", "禁止手動觸發 System.gc"));
             args.Add(("-XX:+AlwaysPreTouch", "啟動時預先配置實體記憶體分頁"));
-            args.Add(("-XX:G1NewSizePercent=30", "設定年輕代初始大小佔總堆疊的 30%"));
-            args.Add(("-XX:G1MaxNewSizePercent=40", "設定年輕代最大佔總堆疊的 40%"));
+            args.Add(("-XX:G1NewSizePercent=30", "設定年輕代初始大小佔總堆積的 30%"));
+            args.Add(("-XX:G1MaxNewSizePercent=40", "設定年輕代最大佔總堆積的 40%"));
 
             if (memoryMaxMb >= 12288)
             {
@@ -147,12 +147,12 @@ public static class JvmOptionPolicy
             args.Add(("-XX:G1HeapWastePercent=5", "允許浪費 5% 記憶體以縮短回收時間"));
             args.Add(("-XX:G1MixedGCCountTarget=4", "設定混合 GC 目標次數分攤回收壓力"));
             args.Add(("-XX:InitiatingHeapOccupancyPercent=15", "提早至 15% 佔用率即開始並行標記適合 Minecraft"));
-            args.Add(("-XX:G1MixedGCLiveThresholdPercent=90", "提高舊生代回收閾值增加回收效率"));
+            args.Add(("-XX:G1MixedGCLiveThresholdPercent=90", "提高舊生代回收門檻值增加回收效率"));
             args.Add(("-XX:G1RSetUpdatingPauseTimePercent=5", "限制更新記憶集時間比例為 5% 縮短暫停時間"));
             args.Add(("-XX:SurvivorRatio=32", "增大 Survivor 區比例減少物件過早晉升"));
             args.Add(("-XX:+PerfDisableSharedMem", "停用效能監控資料共享記憶體防止磁碟延遲"));
             args.Add(("-XX:MaxTenuringThreshold=1", "設定物件最大晉升年齡為 1 加速回收短命物件"));
-            args.Add(("-Dusing.aikars.flags=https://mcflags.emc.gs", "Aikar 參數標識屬性"));
+            args.Add(("-Dusing.aikars.flags=https://mcflags.emc.gs", "Aikar 參數識別標記屬性"));
             args.Add(("-Daikars.new.flags=true", "標記使用新版 Aikar 參數"));
         }
 

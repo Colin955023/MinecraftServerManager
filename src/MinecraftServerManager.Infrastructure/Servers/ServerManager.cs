@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -163,12 +164,18 @@ public sealed partial class ServerManager : IServerManager
 
             if (_loaderInstaller is not null)
             {
-                Logger.Information("開始下載與安裝伺服器核心 (載入器: {Loader})", plan.LoaderType);
+                int lastArtifactPct = 15;
                 var loaderProgress = progress is null ? null : new Progress<LoaderInstallProgress>(lp =>
                 {
                     int mappedPct = 15 + (int)(lp.PercentCompleted * 0.70); // 15% ~ 85%
+                    int clamped = Math.Clamp(mappedPct, 15, 85);
+                    lock (plan)
+                    {
+                        clamped = Math.Max(lastArtifactPct, clamped);
+                        lastArtifactPct = clamped;
+                    }
                     progress.Report(new ServerCreationProgressReport(
-                        ServerCreationPhase.Artifact, Math.Clamp(mappedPct, 15, 85), lp.Message));
+                        ServerCreationPhase.Artifact, clamped, lp.Message));
                 });
 
                 await _loaderInstaller.InstallLoaderAsync(
@@ -216,6 +223,13 @@ public sealed partial class ServerManager : IServerManager
             }
 
             var config = plan.BuildConfig(serverDir);
+            if (plan.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
+                File.Exists(Path.Combine(serverDir, "user_jvm_args.txt")) ||
+                File.Exists(Path.Combine(serverDir, "run.bat")))
+            {
+                UpdateForgeUserJvmArgs(serverDir, config);
+            }
+
             lock (_lock)
             {
                 var registry = LoadRegistry();
@@ -418,6 +432,42 @@ public sealed partial class ServerManager : IServerManager
         }
 
         AtomicFileWriter.WriteText(Path.Combine(directory, "start_server.bat"), builder.ToString());
+    }
+
+    /// <summary>
+    /// 更新 Forge / NeoForge 之 user_jvm_args.txt 啟動與記憶體參數檔案（原子安全寫入）
+    /// </summary>
+    public static void UpdateForgeUserJvmArgs(string serverDirectory, ServerConfig config)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        ArgumentNullException.ThrowIfNull(config);
+
+        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
+        var lines = new List<string>();
+
+        var customJvmArgs = config.JvmArgs ?? [];
+        if (!JvmOptionPolicy.HasGcOption(customJvmArgs))
+        {
+            var recommendedGc = JvmOptionPolicy.RecommendGcArgs(config.MemoryMaxMb, javaMajor: null, loaderType: config.LoaderType.ToString(), existingArgs: customJvmArgs);
+            lines.AddRange(recommendedGc);
+        }
+
+        lines.AddRange(customJvmArgs);
+
+        if (config.MemoryMinMb.HasValue)
+        {
+            lines.Add($"-Xms{config.MemoryMinMb.Value}M");
+        }
+
+        if (config.MemoryMaxMb > 0)
+        {
+            lines.Add($"-Xmx{config.MemoryMaxMb}M");
+        }
+
+        string userJvmArgsPath = Path.Combine(stableDir, "user_jvm_args.txt");
+        string content = string.Join(Environment.NewLine, lines) + Environment.NewLine;
+        AtomicFileWriter.WriteText(userJvmArgsPath, content);
+        Logger.Information("已更新 Forge/NeoForge 參數檔: {Path}", userJvmArgsPath);
     }
 
     private async Task<string?> ResolveJavaExecutableAsync(
@@ -647,6 +697,16 @@ public sealed partial class ServerManager : IServerManager
             SaveRegistry(registry);
         }
 
+        if (Directory.Exists(config.Path))
+        {
+            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
+                File.Exists(Path.Combine(config.Path, "user_jvm_args.txt")) ||
+                File.Exists(Path.Combine(config.Path, "run.bat")))
+            {
+                UpdateForgeUserJvmArgs(config.Path, config);
+            }
+        }
+
         string jvmText = config.JvmArgs is { Count: > 0 } ? string.Join(" ", config.JvmArgs) : "無";
         Logger.Information("伺服器「{Name}」設定更新成功 (記憶體: {Min}M-{Max}M, JVM參數: {Jvm})", config.Name.Value, config.MemoryMinMb, config.MemoryMaxMb, jvmText);
         return ServerOperationResult.Ok("更新伺服器設定成功");
@@ -718,7 +778,7 @@ public sealed partial class ServerManager : IServerManager
                 return ServerImportResult.Failed(targetName, "來源目錄不包含有效的 Minecraft 伺服器檔案 (未找到伺服器核心 jar 或關鍵執行檔案)");
             }
 
-            progress?.Report(new ServerImportProgressReport(80, "正在配置伺服器環境與屬性設定..."));
+            progress?.Report(new ServerImportProgressReport(80, "正在設定伺服器環境與屬性..."));
 
             // 確保 eula.txt 存在
             string eulaFile = Path.Combine(stableStaging, "eula.txt");

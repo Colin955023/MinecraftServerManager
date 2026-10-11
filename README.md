@@ -6,16 +6,17 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
 
-專為 Windows 10／11（64 位元）打造的 Minecraft 伺服器管理工具，採用 C#、.NET 10 與 WPF 技術建置，提供流暢操作體驗、高安全性邊界與極致啟動效能。
+專為 Windows 10／11（64 位元）打造的 Minecraft 伺服器管理工具，採用 C#、.NET 10 與 WPF 原生技術開發，提供流暢的操作體驗、安全的檔案防護與快速的啟動速度。
 
 ## 主要特色
 
-- **載入器支援**：支援 Vanilla、Fabric、Quilt、Forge、NeoForge 官方核心之一鍵下載與伺服器建立
-- **獨立即時監控**：獨立主控台視窗、50ms 批次聚合緩衝、ANSI 色碼清洗、在線玩家解析、指令發送與優雅停止
-- **安全交易式還原**：備份還原具備暫存解壓、自動快照與失敗回復（Rollback）機制，自動保留最新 10 份備份
-- **模組與 Modrinth 整合**：本地模組智慧啟用／停用、Modrinth 線上搜尋下載、雜湊完整性校驗與 4 種格式清單匯出
-- **安全屬性編輯**：`server.properties` 設定調整內建樂觀鎖保護，防止檔案並行修改衝突
-- **官方原生安全壓縮**：產出原生單一執行檔（Single-File EXE），無第三方加殼，杜絕防毒軟體誤判
+- **核心與載入器**：支援 Paper、Vanilla、Fabric、Quilt、Forge、NeoForge 等官方核心之快速下載與建立
+- **Java 管理與配對**：依照 Minecraft 官方版本需求自動配對，支援 Windows winget 自動安裝 Java（Java 8 到 21+）與自訂路徑
+- **即時監控視窗**：獨立主控台、開機就緒 Windows 桌面通知、方向鍵瀏覽歷史指令、線上玩家清單、指令傳送與安全關閉程序
+- **安全備份與還原**：還原時自動保留現場最新記錄檔與當機報告，具備失敗自動回復機制，自動保留最新 10 份備份
+- **模組管理**：支援 Windows 自然排序、模組啟用與停用、自動下載相依模組、Modrinth 線上搜尋與安裝、官方下載來源驗證，以及匯出試算表（XLSX）、HTML、JSON 與純文字
+- **伺服器設定驗證**：編輯 `server.properties` 時自動檢查連接埠（1～65534）與 IP 等數值正確性，避免設定錯誤
+- **單一執行檔發行**：產出原生單一執行檔（EXE），不使用加殼工具，避免防毒軟體誤判
 
 ## 使用方法
 
@@ -25,13 +26,13 @@
 
 | 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
 | :--- | :--- | :--- | :--- | :--- |
-| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 62 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 Runtime 與所有依賴庫，開箱即用，絕不因缺少環境而報錯 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.6 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 63 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與所有相依元件，開箱即用，絕不因缺少環境而報錯 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 2 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
 
 > [!TIP]
 > 如果您不確定電腦是否已安裝 .NET 10，請一律下載 **`MinecraftServerManager-self-contained.exe`** 即可順暢使用。
 
-### 從原始碼開發與建置
+### 從原始程式碼開發與建置
 
 需求環境：Windows 10／11、.NET 10 SDK、PowerShell 7（`pwsh`）。
 

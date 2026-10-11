@@ -80,6 +80,27 @@ public sealed class ManageServerViewModelTests
         }
     }
 
+    [Fact]
+    public void MissingImportantFilesShouldDisableStartAndDisplayDetail()
+    {
+        var vm = new ManageServerViewModel();
+        var server = new ServerRowItem
+        {
+            Name = "BrokenServer",
+            Version = "1.21.4",
+            Loader = "NeoForge",
+            Status = "缺少重要檔案：win_args.txt",
+            HasMissingFiles = true,
+            Path = @"C:\servers\BrokenServer"
+        };
+        vm.SelectedServer = server;
+
+        Assert.True(vm.HasSelectedServer);
+        Assert.False(vm.StartServerCommand.CanExecute(null));
+        Assert.False(vm.MonitorServerCommand.CanExecute(null));
+        Assert.Contains("win_args.txt", server.Status);
+    }
+
     private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher
     {
         public List<string> OpenedFolders { get; } = [];
@@ -89,6 +110,7 @@ public sealed class ManageServerViewModelTests
             return true;
         }
         public bool ShowInFolder(string filePath) => !string.IsNullOrEmpty(filePath);
+        public bool OpenFile(string filePath) => !string.IsNullOrEmpty(filePath);
         public bool OpenUrl(string url) => !string.IsNullOrEmpty(url);
     }
 }

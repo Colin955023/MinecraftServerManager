@@ -38,7 +38,7 @@
                 HeadersVisibility="Column"
                 RowHeaderWidth="0">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="版本號" Binding="{Binding VersionNumber}" Width="180" />
+          <DataGridTextColumn Header="版本號碼" Binding="{Binding VersionNumber}" Width="180" />
           <DataGridTextColumn Header="支援 MC" Binding="{Binding GameVersions}" Width="160" />
           <DataGridTextColumn Header="載入器" Binding="{Binding Loaders}" Width="120" />
           <DataGridTextColumn Header="發布時間" Binding="{Binding DatePublished}" Width="140" />

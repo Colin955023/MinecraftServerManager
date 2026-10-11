@@ -36,6 +36,17 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 throw new InvalidOperationException($"啟動腳本「{targetFile}」未通過安全性檢驗（可能包含未受信任的指令或批次注入字元）");
             }
 
+            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || File.Exists(Path.Combine(stableDir, "user_jvm_args.txt")))
+            {
+                ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
+            }
+
+            IReadOnlyDictionary<string, string?>? env = null;
+            if (!string.IsNullOrWhiteSpace(javaPath) && !string.Equals(javaPath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
+            {
+                env = BuildJavaEnvironment(javaPath.Trim());
+            }
+
             return new ServerLaunchPlan(
                 JavaExecutable: targetFullPath,
                 WorkingDirectory: stableDir,
@@ -44,7 +55,8 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 MinMemoryMb: config.MemoryMinMb ?? 1024,
                 MaxMemoryMb: config.MemoryMaxMb,
                 IsScript: true,
-                ServerName: config.Name.Value);
+                ServerName: config.Name.Value,
+                Environment: env);
         }
 
         string executableJava = !string.IsNullOrWhiteSpace(javaPath)
@@ -97,5 +109,37 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             MaxMemoryMb: config.MemoryMaxMb,
             IsScript: false,
             ServerName: config.Name.Value);
+    }
+
+    /// <summary>
+    /// 為指定的 Java 執行檔建置注入用的環境變數（設定 JAVA_HOME 並將 java bin 目錄置於 PATH 最前端）
+    /// </summary>
+    public static IReadOnlyDictionary<string, string?> BuildJavaEnvironment(string javaExecutablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(javaExecutablePath);
+
+        string javaBinDir = Path.GetDirectoryName(javaExecutablePath) ?? string.Empty;
+        string javaHome = javaBinDir;
+
+        string dirName = Path.GetFileName(javaBinDir);
+        if (dirName.Equals("bin", StringComparison.OrdinalIgnoreCase))
+        {
+            string? parent = Path.GetDirectoryName(javaBinDir);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                javaHome = parent;
+            }
+        }
+
+        string currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        string newPath = string.IsNullOrWhiteSpace(javaBinDir)
+            ? currentPath
+            : $"{javaBinDir};{currentPath}";
+
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["JAVA_HOME"] = javaHome,
+            ["PATH"] = newPath
+        };
     }
 }

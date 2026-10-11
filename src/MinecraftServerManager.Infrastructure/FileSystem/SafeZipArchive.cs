@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -94,50 +95,55 @@ public static class SafeZipArchive
         EnsureSufficientDiskSpace(destination, totalBytes);
         progress?.Invoke(0, totalBytes);
         long extractedBytes = 0;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
 
-        foreach (var member in members)
+        try
         {
-            string target = Path.Combine(destination, member.RelativePath);
-            if (member.Entry.FullName.EndsWith('/'))
+            foreach (var member in members)
             {
-                SafeFileSystem.ResolveStableDirectory(target, create: true);
-                continue;
-            }
-
-            string safeTarget = SafeFileSystem.ResolveStablePath(target, createParent: true);
-            long memberBytes = 0L;
-            try
-            {
-                using var source = member.Entry.Open();
-                using var output = new FileStream(
-                    safeTarget,
-                    FileMode.Create,
-                    FileAccess.Write,
-                    FileShare.None,
-                    1024 * 1024,
-                    FileOptions.SequentialScan | FileOptions.WriteThrough);
-
-                byte[] buffer = new byte[1024 * 1024];
-                int read;
-                while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                string target = Path.Combine(destination, member.RelativePath);
+                if (member.Entry.FullName.EndsWith('/'))
                 {
-                    memberBytes += read;
-                    extractedBytes += read;
-                    if (memberBytes > maxMemberUncompressedBytes || extractedBytes > maxTotalUncompressedBytes)
-                    {
-                        throw new SafeArchiveException("壓縮檔實際解壓大小超過安全上限");
-                    }
-
-                    output.Write(buffer, 0, read);
-                    progress?.Invoke(extractedBytes, totalBytes);
+                    SafeFileSystem.ResolveStableDirectory(target, create: true);
+                    continue;
                 }
 
-                output.Flush(true);
+                string safeTarget = SafeFileSystem.ResolveStablePath(target, createParent: true);
+                long memberBytes = 0L;
+                try
+                {
+                    using var source = member.Entry.Open();
+                    using var output = new FileStream(
+                        safeTarget,
+                        FileMode.Create,
+                        FileAccess.Write,
+                        FileShare.None,
+                        81920,
+                        FileOptions.SequentialScan);
+
+                    int read;
+                    while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        memberBytes += read;
+                        extractedBytes += read;
+                        if (memberBytes > maxMemberUncompressedBytes || extractedBytes > maxTotalUncompressedBytes)
+                        {
+                            throw new SafeArchiveException("壓縮檔實際解壓縮大小超過安全上限");
+                        }
+
+                        output.Write(buffer, 0, read);
+                        progress?.Invoke(extractedBytes, totalBytes);
+                    }
+                }
+                catch (IOException exception) when (exception is not SafeArchiveException)
+                {
+                    throw new SafeArchiveException($"無法解壓縮檔案： {member.Entry.FullName}", exception);
+                }
             }
-            catch (IOException exception) when (exception is not SafeArchiveException)
-            {
-                throw new SafeArchiveException($"無法解壓縮檔案： {member.Entry.FullName}", exception);
-            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
 
         progress?.Invoke(totalBytes > 0 ? totalBytes : extractedBytes, totalBytes);
@@ -162,7 +168,7 @@ public static class SafeZipArchive
     }
 
     /// <summary>
-    /// 檢查目標磁碟實際剩餘空間，只要剩餘空間充足即允許解壓（保留 5% 或 512 MB 安全水位）。
+    /// 檢查目標磁碟實際剩餘空間，只要剩餘空間充足即允許解壓縮（保留 5% 或 512 MB 安全水位）。
     /// </summary>
     private static void EnsureSufficientDiskSpace(string destination, long requiredBytes)
     {
@@ -231,7 +237,7 @@ public static class SafeZipArchive
             totalBytes += entry.Length;
             if (totalBytes > maxTotalUncompressedBytes)
             {
-                throw new SafeArchiveException("壓縮檔解壓後大小超過安全上限");
+                throw new SafeArchiveException("壓縮檔解壓縮後大小超過安全上限");
             }
 
             members.Add(new PreparedMember(entry, relativePath));
@@ -405,32 +411,39 @@ public static class SafeZipArchive
 
             string normalized = PrepareMember(memberName, info.Length);
             var entry = _archive.CreateEntry(normalized, CompressionLevel.Optimal);
-            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.SequentialScan);
+            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan);
             using var output = entry.Open();
-            byte[] buffer = new byte[1024 * 1024];
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
             long copied = 0L;
-            while (copied < info.Length)
+            try
             {
-                long remaining = info.Length - copied;
-                int requested = (int)Math.Min(buffer.Length, remaining + 1);
-                int read = input.Read(buffer, 0, requested);
-                if (read == 0)
+                while (copied < info.Length)
                 {
-                    break;
+                    long remaining = info.Length - copied;
+                    int requested = (int)Math.Min(buffer.Length, remaining + 1);
+                    int read = input.Read(buffer, 0, requested);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    copied += read;
+                    if (copied > info.Length)
+                    {
+                        throw new SafeArchiveException($"壓縮來源檔案在讀取期間成長： {source}");
+                    }
+
+                    output.Write(buffer, 0, read);
                 }
 
-                copied += read;
-                if (copied > info.Length)
+                if (copied != info.Length)
                 {
-                    throw new SafeArchiveException($"壓縮來源檔案在讀取期間成長： {source}");
+                    throw new SafeArchiveException($"壓縮來源檔案在讀取期間縮短： {source}");
                 }
-
-                output.Write(buffer, 0, read);
             }
-
-            if (copied != info.Length)
+            finally
             {
-                throw new SafeArchiveException($"壓縮來源檔案在讀取期間縮短： {source}");
+                ArrayPool<byte>.Shared.Return(buffer);
             }
 
             return copied;

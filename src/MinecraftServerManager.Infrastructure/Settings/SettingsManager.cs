@@ -227,15 +227,14 @@ public sealed class SettingsManager
         {
             var loaded = result.Document.RootElement.Deserialize<UserSettings>(ReadOptions);
             var normalized = NormalizeSettings(loaded ?? new UserSettings());
-            if (loaded is not null && !string.Equals(loaded.ServersRoot, normalized.ServersRoot, StringComparison.Ordinal))
-            {
-                Save(normalized);
-            }
+            Save(normalized);
             return normalized;
         }
         catch (JsonException)
         {
-            return new UserSettings();
+            var fallback = new UserSettings();
+            Save(fallback);
+            return fallback;
         }
     }
 

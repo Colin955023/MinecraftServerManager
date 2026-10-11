@@ -18,20 +18,22 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly Dictionary<string, PageViewModel> _pages = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
-    private PageViewModel _currentPage;
+    public partial PageViewModel CurrentPage { get; set; }
 
     [ObservableProperty]
-    private string _notificationMessage = string.Empty;
+    public partial string NotificationMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private bool _isNotificationVisible;
+    public partial bool IsNotificationVisible { get; set; }
 
     [ObservableProperty]
-    private bool _isNotificationError;
+    public partial bool IsNotificationError { get; set; }
+
     private readonly IExternalLauncher? _launcher;
+    private readonly IUpdateCheckerService? _updateChecker;
 
     [ObservableProperty]
-    private bool _isLightTheme;
+    public partial bool IsLightTheme { get; set; }
 
     public event Action<string, string, NotificationLevel>? NotificationRequested;
     public event Action? ResetWindowSizeRequested;
@@ -58,6 +60,7 @@ public sealed partial class MainViewModel : ViewModelBase
         _settingsManager = settingsManager ?? new SettingsManager();
         _serverManager = serverManager;
         _launcher = launcher;
+        _updateChecker = updateChecker;
 
         var createVm = new CreateServerViewModel(
             javaDetector,
@@ -105,9 +108,7 @@ public sealed partial class MainViewModel : ViewModelBase
         _pages["manage"] = manageVm;
         _pages["mods"] = modsVm;
         _pages["about_preferences"] = aboutPrefsVm;
-
-        // 預設為「建立伺服器」頁面
-        _currentPage = createVm;
+        CurrentPage = createVm;
 
         ApplyInitialTheme();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -120,6 +121,10 @@ public sealed partial class MainViewModel : ViewModelBase
     public string PageSubtitle => CurrentPage.Subtitle;
 
     public SettingsManager Settings => _settingsManager;
+
+    public IUpdateCheckerService? UpdateChecker => _updateChecker;
+
+    public IExternalLauncher? Launcher => _launcher;
 
     public AboutPreferencesViewModel? AboutPreferences => _pages.TryGetValue("about_preferences", out var p) ? p as AboutPreferencesViewModel : null;
 
@@ -152,7 +157,7 @@ public sealed partial class MainViewModel : ViewModelBase
             return;
         }
 
-        ShowNotification("開啟伺服器匯入對話框 (支援資料夾與 ZIP 壓縮檔)", false);
+        ShowNotification("開啟伺服器匯入對話方塊 (支援資料夾與 ZIP 壓縮檔)", false);
     }
 
     [RelayCommand]

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Frozen;
 using System.Net;
 using System.Security.Cryptography;
@@ -37,15 +38,17 @@ public sealed class HttpDownloadClient(
     public const int DefaultMaxRedirects = 10;
     public const int DefaultMaxAttempts = 3;
 
-    private static readonly FrozenSet<HttpStatusCode> RetryableStatuses = new[]
-    {
+    private static readonly HttpStatusCode[] RetryableStatusesSource =
+    [
         HttpStatusCode.RequestTimeout,
         HttpStatusCode.TooManyRequests,
         HttpStatusCode.InternalServerError,
         HttpStatusCode.BadGateway,
         HttpStatusCode.ServiceUnavailable,
         HttpStatusCode.GatewayTimeout,
-    }.ToFrozenSet();
+    ];
+
+    private static readonly FrozenSet<HttpStatusCode> RetryableStatuses = RetryableStatusesSource.ToFrozenSet();
 
     private static readonly JsonSerializerOptions JsonCodecOptions = new()
     {
@@ -296,7 +299,7 @@ public sealed class HttpDownloadClient(
     }
 
     /// <summary>
-    /// IHttpPort 介面實作：安全發送 POST JSON 請求並取得文字回應
+    /// IHttpPort 介面實作：安全傳送 POST JSON 請求並取得文字回應
     /// </summary>
     public async Task<string?> PostJsonAsync(
         Uri uri,
@@ -545,7 +548,7 @@ public sealed class HttpDownloadClient(
 
         using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         var memoryStream = new MemoryStream(contentLength.HasValue ? (int)Math.Min(contentLength.Value, 1024 * 1024) : 4096);
-        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(65536);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
         try
         {
             long totalRead = 0L;
@@ -571,7 +574,7 @@ public sealed class HttpDownloadClient(
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
@@ -585,9 +588,9 @@ public sealed class HttpDownloadClient(
         CancellationToken cancellationToken)
     {
         using var source = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var output = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.WriteThrough);
+        using var output = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.SequentialScan);
         using var hash = expectedHash is null ? null : IncrementalHash.CreateHash(CreateHashAlgorithmName(expectedHashAlgorithm));
-        byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(1024 * 1024);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
             long downloaded = 0L;
@@ -620,7 +623,7 @@ public sealed class HttpDownloadClient(
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

@@ -48,4 +48,5 @@ TestResults/
 publish/
 coverage/
 output/
+.codebase-memory/
 

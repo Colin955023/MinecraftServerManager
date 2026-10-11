@@ -34,26 +34,40 @@ public sealed partial class LoaderInstallerService(
             return await InstallPaperAsync(minecraftVersion, loaderVersion, stableServerDir, progress, cancellationToken).ConfigureAwait(false);
         }
 
+        int lastPct = 0;
+        void SafeReport(string phase, string message, int pct)
+        {
+            lastPct = Math.Max(lastPct, pct);
+            progress?.Report(new LoaderInstallProgress(phase, message, Math.Clamp(lastPct, 0, 100)));
+        }
+
         // 僅 Fabric 與 Quilt 安裝前需預先準備官方原版 server.jar（Forge 與 NeoForge 內建原版下載流程，無需此步驟）
         if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
         {
-            progress?.Report(new LoaderInstallProgress("vanilla_prepare", "正在準備原版伺服器檔案...", 5));
+            SafeReport("vanilla_prepare", "正在準備原版伺服器檔案...", 5);
             string serverJarPath = Path.Combine(stableServerDir, "server.jar");
             if (!File.Exists(serverJarPath))
             {
-                await EnsureVanillaServerJarAsync(minecraftVersion, stableServerDir, progress, cancellationToken).ConfigureAwait(false);
+                var vanillaProgress = progress is null ? null : new Progress<LoaderInstallProgress>(vp =>
+                {
+                    int mapped = (int)(vp.PercentCompleted * 0.35); // 0% ~ 35%
+                    SafeReport("vanilla_prepare", vp.Message, mapped);
+                });
+                await EnsureVanillaServerJarAsync(minecraftVersion, stableServerDir, vanillaProgress, cancellationToken).ConfigureAwait(false);
             }
+            SafeReport("vanilla_prepare", "原版伺服器檔案已就緒", 35);
         }
 
-        // 下載各 Loader Installer
-        progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {loader} 安裝器...", 10));
+        // 下載各 Loader Installer (35% ~ 50%)
+        SafeReport("downloading", $"正在下載 {loader} 安裝器...", 38);
         string installerJarPath = await DownloadInstallerJarAsync(loader, minecraftVersion, loaderVersion, cancellationToken).ConfigureAwait(false);
+        SafeReport("downloading", $"{loader} 安裝器下載完成", 50);
 
         // 組合啟動參數
-        progress?.Report(new LoaderInstallProgress("installing", $"正在執行 {loader} 伺服器安裝...", 30));
+        SafeReport("installing", $"正在執行 {loader} 伺服器安裝...", 52);
         var spec = BuildProcessStartSpec(loader, minecraftVersion, loaderVersion, installerJarPath, stableServerDir, javaExecutablePath);
 
-        // 執行安裝程序
+        // 執行安裝程序 (52% ~ 95%)
         var process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
         await using (process.ConfigureAwait(false))
         {
@@ -61,21 +75,22 @@ public sealed partial class LoaderInstallerService(
             process.OutputReceived += output =>
             {
                 int estimated = tracker.FeedOutput(output.Text);
-                progress?.Report(new LoaderInstallProgress("installing", output.Text, estimated));
+                int mapped = 52 + (int)(estimated * 0.43); // 52% ~ 95%
+                SafeReport("installing", output.Text, mapped);
             };
 
             var exitResult = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             if (exitResult.ExitCode != 0)
             {
-                throw new InvalidOperationException($"{loader} 安裝失敗，處理序結束代碼：{exitResult.ExitCode}");
+                throw new InvalidOperationException($"{loader} 安裝失敗，程序結束代碼：{exitResult.ExitCode}");
             }
         }
 
         // 探索主要啟動檔案
-        progress?.Report(new LoaderInstallProgress("finalizing", "正在確認伺服器啟動檔案...", 95));
+        SafeReport("finalizing", "正在確認伺服器啟動檔案...", 96);
         string launchTarget = ResolveLaunchTarget(stableServerDir, loader);
 
-        progress?.Report(new LoaderInstallProgress("completed", "安裝完成", 100));
+        SafeReport("completed", "安裝完成", 100);
         return launchTarget;
     }
 

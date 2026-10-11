@@ -15,7 +15,8 @@ public enum ModStatus
 public enum ModPlatform
 {
     Local,
-    Modrinth
+    Modrinth,
+    CurseForge
 }
 
 /// <summary>
@@ -28,3 +29,13 @@ public enum ModDependencyType
     Incompatible,
     Embedded
 }
+
+/// <summary>
+/// 模組安裝動作類型
+/// </summary>
+public enum ModInstallAction
+{
+    Install,
+    Update
+}
+

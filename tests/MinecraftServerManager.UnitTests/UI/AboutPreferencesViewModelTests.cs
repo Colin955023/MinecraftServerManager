@@ -61,7 +61,10 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     public void ResetAllSettingsShouldRestoreDefaults()
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
-        var vm = new AboutPreferencesViewModel(settingsManager: settings)
+        bool windowSizeResetCalled = false;
+        var vm = new AboutPreferencesViewModel(
+            settingsManager: settings,
+            onResetWindowSizeRequested: () => windowSizeResetCalled = true)
         {
             IsAutoUpdateEnabled = false,
             SelectedThemeModeIndex = 1 // 淺色
@@ -71,6 +74,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
+        Assert.True(windowSizeResetCalled);
     }
 
     [Fact]

@@ -239,6 +239,47 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}", true);
         }
+        finally
+        {
+            TryCleanupStagingDir(stableModsDir, stagingDir);
+        }
+    }
+
+    /// <summary>
+    /// 清理模組目錄中的 .download_staging 暫存資料夾
+    /// </summary>
+    public static void CleanupStagingDirectory(string modsDirectory)
+    {
+        try
+        {
+            string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory);
+            string stagingDir = Path.Combine(stableModsDir, ".download_staging");
+            if (Directory.Exists(stagingDir))
+            {
+                SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryCleanupStagingDir(string stableModsDir, string stagingDir)
+    {
+        try
+        {
+            if (Directory.Exists(stagingDir))
+            {
+                var entries = SafeFileSystem.ListBoundedDirectory(stagingDir, maxEntries: 10, rejectReparse: false);
+                if (entries.Count == 0)
+                {
+                    SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static void Rollback(string stagingDir, string tempPath, string targetPath, string? backupPath)
@@ -322,5 +363,25 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         return (enabledPath, disabledPath);
+    }
+
+    /// <summary>
+    /// 檢查指定的模組下載 URL 是否為官方 Modrinth CDN 來源
+    /// </summary>
+    public static bool IsOfficialModrinthSource(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return uri.Scheme == Uri.UriSchemeHttps &&
+                   (string.Equals(uri.Host, "cdn.modrinth.com", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(uri.Host, "modrinth.com", StringComparison.OrdinalIgnoreCase));
+        }
+
+        return false;
     }
 }

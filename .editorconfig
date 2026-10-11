@@ -10,6 +10,10 @@ insert_final_newline = true
 [*.{csproj,props,targets,xaml,xml}]
 indent_size = 2
 
+[*.ps1]
+charset = utf-8-bom
+indent_size = 4
+
 [*.cs]
 # 基本排版格式
 indent_size = 4
@@ -62,12 +66,25 @@ dotnet_style_collection_initializer = true:warning
 dotnet_style_explicit_tuple_names = true:warning
 dotnet_style_namespace_match_folder = true:warning
 
-# 未使用 / 冗餘程式碼
+# 未使用 / 死碼 / 冗餘程式碼（支援 dotnet format 自動修復）
 dotnet_diagnostic.IDE0051.severity = error
 dotnet_diagnostic.IDE0052.severity = error
-dotnet_diagnostic.IDE0060.severity = warning
+dotnet_diagnostic.IDE0059.severity = error
+dotnet_diagnostic.IDE0060.severity = error
 dotnet_diagnostic.IDE0079.severity = warning
-dotnet_diagnostic.IDE0005.severity = warning
+dotnet_diagnostic.IDE0005.severity = error
+dotnet_diagnostic.IDE0004.severity = error
+dotnet_diagnostic.IDE0071.severity = warning
+dotnet_diagnostic.IDE0075.severity = warning
+dotnet_diagnostic.IDE0080.severity = warning
+dotnet_diagnostic.IDE0110.severity = warning
+dotnet_diagnostic.IDE0150.severity = warning
+
+# C# 編譯器死碼與未讀取變數規則
+dotnet_diagnostic.CS0168.severity = error
+dotnet_diagnostic.CS0219.severity = error
+dotnet_diagnostic.CS0414.severity = error
+dotnet_diagnostic.CS8019.severity = error
 
 # 啟用 IDE analyzer
 dotnet_diagnostic.IDE0000.severity = warning

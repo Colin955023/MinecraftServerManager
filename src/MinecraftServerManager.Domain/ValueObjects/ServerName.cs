@@ -70,7 +70,7 @@ public readonly record struct ServerName
         }
 
         string comparisonName = normalized.ToLowerInvariant();
-        if (comparisonName is ".issues" or "servers_config.json" || comparisonName.StartsWith(".msm-", StringComparison.Ordinal))
+        if (comparisonName is ".issues" or "servers.json" or "servers_config.json" || comparisonName.StartsWith(".msm-", StringComparison.Ordinal))
         {
             error = "伺服器名稱與程式內部保留路徑衝突";
             return false;

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="模組作業進度"
         Width="520"
-        Height="220"
+        Height="250"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
@@ -28,6 +28,7 @@
                x:Name="PhaseText"
                Text="正在連線至 Modrinth 查詢最新相容版本..."
                FontSize="13"
+               MinHeight="60"
                TextWrapping="Wrap"
                Foreground="{DynamicResource MutedTextBrush}"
                Margin="0,0,0,16" />

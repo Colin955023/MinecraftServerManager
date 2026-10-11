@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="匯入伺服器中"
         Width="520"
-        Height="240"
+        Height="250"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
@@ -28,6 +28,7 @@
                x:Name="PhaseText"
                Text="正在準備暫存環境..."
                FontSize="13"
+               MinHeight="60"
                TextWrapping="Wrap"
                Foreground="{DynamicResource MutedTextBrush}"
                Margin="0,0,0,16" />

@@ -29,48 +29,54 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private bool _isProgrammaticServerNameUpdate;
 
     [ObservableProperty]
-    private string _serverName;
+    public partial string ServerName { get; set; }
 
     [ObservableProperty]
-    private string _javaPath = string.Empty;
+    public partial string JavaPath { get; set; } = string.Empty;
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotDetectingJava))]
-    private bool _isDetectingJava;
+    public partial bool IsDetectingJava { get; set; }
 
     public bool IsNotDetectingJava => !IsDetectingJava;
 
     [ObservableProperty]
-    private string _selectedLoader = "Paper";
+    public partial string SelectedLoader { get; set; } = "Paper";
 
     [ObservableProperty]
-    private string _selectedLoaderVersion = "最新穩定版 (Paper)";
+    public partial string SelectedLoaderVersion { get; set; } = "最新穩定版 (Paper)";
 
     [ObservableProperty]
-    private bool _isLoaderVersionEnabled = true;
+    public partial bool IsLoaderVersionEnabled { get; set; } = true;
 
     [ObservableProperty]
-    private bool _isMinecraftVersionReloadEnabled;
+    public partial bool IsLoadingVersions { get; set; }
 
     [ObservableProperty]
-    private string _selectedMinecraftVersion = "1.21.4";
+    public partial string LoadingStatusText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _minMemoryMb = "1024";
+    public partial bool IsMinecraftVersionReloadEnabled { get; set; }
 
     [ObservableProperty]
-    private string _maxMemoryMb = "2048";
+    public partial string SelectedMinecraftVersion { get; set; } = "1.21.4";
 
     [ObservableProperty]
-    private string _memoryWarningText = string.Empty;
+    public partial string MinMemoryMb { get; set; } = "1024";
 
     [ObservableProperty]
-    private bool _isMemoryWarning;
+    public partial string MaxMemoryMb { get; set; } = "2048";
 
     [ObservableProperty]
-    private bool _isMemoryError;
+    public partial string MemoryWarningText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _jvmArgsSummary = "使用系統建議 JVM 參數 (G1GC)";
+    public partial bool IsMemoryWarning { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsMemoryError { get; set; }
+
+    [ObservableProperty]
+    public partial string JvmArgsSummary { get; set; } = "使用系統建議 JVM 參數 (G1GC)";
 
     public CreateServerViewModel(
         IJavaRuntimeDetector? javaDetector = null,
@@ -83,7 +89,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         IMinecraftJavaRequirementService? javaRequirementService = null,
         IJavaInstaller? javaInstaller = null,
         IServerRuntime? serverRuntime = null)
-        : base("create", "建立新伺服器", "配置名稱、版本、模組載入器與記憶體參數建立伺服器")
+        : base("create", "建立新伺服器", "設定名稱、版本、模組載入器與記憶體參數建立伺服器")
     {
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
@@ -96,7 +102,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         _navigateCallback = navigateCallback;
         _systemMemoryMb = systemMemoryMb ?? GetTotalSystemMemoryMb();
 
-        AvailableLoaders = ["Paper", "Fabric", "Forge", "NeoForge", "Quilt"];
+        AvailableLoaders = ["Paper", "Fabric", "Quilt", "Forge", "NeoForge"];
         AvailableMinecraftVersions =
         [
             "1.21.4",
@@ -110,12 +116,12 @@ public sealed partial class CreateServerViewModel : PageViewModel
             "1.16.5",
             "1.12.2"
         ];
-        _serverName = $"{SelectedLoader} {SelectedMinecraftVersion}";
+        ServerName = $"{SelectedLoader} {SelectedMinecraftVersion}";
         LoaderVersions = [SelectedLoaderVersion];
 
         int? cachedMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
-        _jvmArgsSummary = (cachedMajor is null or >= 21) ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
-        _isMinecraftVersionReloadEnabled = !string.Equals(SelectedLoader, "Paper", StringComparison.OrdinalIgnoreCase);
+        JvmArgsSummary = (cachedMajor is null or >= 21) ? "使用系統建議 JVM 參數 (ZGC)" : "使用系統建議 JVM 參數 (G1GC)";
+        IsMinecraftVersionReloadEnabled = !string.Equals(SelectedLoader, "Paper", StringComparison.OrdinalIgnoreCase);
 
         UpdateLoaderStateSync();
         UpdateMemoryWarning();
@@ -133,7 +139,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public ObservableCollection<string> LoaderVersions { get; }
 
     public static string EulaNoticeText =>
-        "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點擊建立即表示你同意 Minecraft 條款，任何違法行為本軟體不負責任";
+        "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點選建立即表示你同意 Minecraft 條款，任何違法行為本軟體不負責任";
 
     public static string EulaUrl => "https://aka.ms/MinecraftEULA";
 
@@ -224,7 +230,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
         catch
         {
-            // 無法從官方取得時保持預設，嚴禁版本號硬推算猜測
+            // 無法從官方取得時保持預設，嚴禁版本號碼硬推算猜測
         }
     }
 
@@ -274,6 +280,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
+        IsLoadingVersions = true;
+        LoadingStatusText = "正在載入可用版本清單...";
         try
         {
             var loaderKind = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var lk) ? lk : LoaderKind.Paper;
@@ -311,6 +319,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 }
             });
         }
+        IsLoadingVersions = false;
+        LoadingStatusText = string.Empty;
     }
 
     private async Task RefreshLoaderVersionsAsync()
@@ -372,6 +382,30 @@ public sealed partial class CreateServerViewModel : PageViewModel
         if (dialog.ShowDialog() == true)
         {
             JavaPath = dialog.FileName;
+        }
+    }
+
+    [RelayCommand]
+    public void OpenManageJava()
+    {
+        var vm = new ManageJavaViewModel(
+            _javaDetector,
+            _javaRequirementService,
+            _javaInstaller,
+            JavaPath,
+            SelectedMinecraftVersion,
+            SelectedLoader);
+
+        var dialog = new Views.ManageJavaDialog(vm);
+        if (Application.Current?.MainWindow is not null)
+        {
+            dialog.Owner = Application.Current.MainWindow;
+        }
+
+        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(vm.ResultJavaPath))
+        {
+            JavaPath = vm.ResultJavaPath;
+            _notificationSink?.Invoke($"已選取 Java：{JavaPath}", false);
         }
     }
 
@@ -497,48 +531,16 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
-        if (_loaderCatalog is not null)
+        IsLoadingVersions = true;
+        LoadingStatusText = "正在向網路重新整理 Minecraft 版本清單...";
+        try
         {
-            try
-            {
-                var lk = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var kind) ? kind : LoaderKind.Unknown;
-                var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(lk, forceReload: true).ConfigureAwait(true);
-                if (versions.Count > 0)
-                {
-                    AvailableMinecraftVersions.Clear();
-                    foreach (var v in versions)
-                    {
-                        AvailableMinecraftVersions.Add(v.Version);
-                    }
-                    if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
-                    {
-                        SelectedMinecraftVersion = AvailableMinecraftVersions[0];
-                    }
-                    _javaRequirementService?.ReloadCache();
-                    await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
-                    Logger.Information("已手動向網路重新整理 {Loader} 的 Minecraft 版本清單，共 {Count} 個版本", SelectedLoader, versions.Count);
-                    await RefreshLoaderVersionsAsync().ConfigureAwait(true);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "重新整理版本清單失敗: {Message}", ex.Message);
-                return;
-            }
-        }
-    }
-
-    [RelayCommand]
-    public async Task ReloadLoaderVersions()
-    {
-        if (_loaderCatalog is not null)
-        {
-            if (string.Equals(SelectedLoader, "Paper", StringComparison.OrdinalIgnoreCase))
+            if (_loaderCatalog is not null)
             {
                 try
                 {
-                    var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(true);
+                    var lk = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var kind) ? kind : LoaderKind.Unknown;
+                    var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(lk, forceReload: true).ConfigureAwait(true);
                     if (versions.Count > 0)
                     {
                         AvailableMinecraftVersions.Clear();
@@ -550,23 +552,75 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         {
                             SelectedMinecraftVersion = AvailableMinecraftVersions[0];
                         }
+                        _javaRequirementService?.ReloadCache();
+                        await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
+                        Logger.Information("已手動向網路重新整理 {Loader} 的 Minecraft 版本清單，共 {Count} 個版本", SelectedLoader, versions.Count);
+                        await RefreshLoaderVersionsAsync().ConfigureAwait(true);
+                        return;
                     }
-                    _javaRequirementService?.ReloadCache();
-                    await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
-                    Logger.Information("已手動向網路重新整理 PaperMC 版本清單，共 {Count} 個版本", versions.Count);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, "重新整理 PaperMC 版本清單失敗: {Message}", ex.Message);
+                    Logger.Error(ex, "重新整理版本清單失敗: {Message}", ex.Message);
+                    return;
                 }
             }
-            else
-            {
-                await _loaderCatalog.ForceReloadAllLoadersAsync().ConfigureAwait(true);
-                Logger.Information("已強制向網路重新載入所有載入器版本清單");
-            }
         }
-        await RefreshLoaderVersionsAsync().ConfigureAwait(true);
+        finally
+        {
+            IsLoadingVersions = false;
+            LoadingStatusText = string.Empty;
+        }
+    }
+
+    [RelayCommand]
+    public async Task ReloadLoaderVersions()
+    {
+        IsLoadingVersions = true;
+        LoadingStatusText = "正在向網路重新整理載入器版本清單...";
+        try
+        {
+            if (_loaderCatalog is not null)
+            {
+                if (string.Equals(SelectedLoader, "Paper", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(true);
+                        if (versions.Count > 0)
+                        {
+                            AvailableMinecraftVersions.Clear();
+                            foreach (var v in versions)
+                            {
+                                AvailableMinecraftVersions.Add(v.Version);
+                            }
+                            if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
+                            {
+                                SelectedMinecraftVersion = AvailableMinecraftVersions[0];
+                            }
+                        }
+                        _javaRequirementService?.ReloadCache();
+                        await UpdateJvmArgsSummaryAsync(SelectedMinecraftVersion).ConfigureAwait(true);
+                        Logger.Information("已手動向網路重新整理 PaperMC 版本清單，共 {Count} 個版本", versions.Count);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Error(ex, "重新整理 PaperMC 版本清單失敗: {Message}", ex.Message);
+                    }
+                }
+                else
+                {
+                    await _loaderCatalog.ForceReloadAllLoadersAsync().ConfigureAwait(true);
+                    Logger.Information("已強制向網路重新載入所有載入器版本清單");
+                }
+            }
+            await RefreshLoaderVersionsAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            IsLoadingVersions = false;
+            LoadingStatusText = string.Empty;
+        }
     }
 
     [RelayCommand]
@@ -588,7 +642,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             JvmArgsSummary = finalArgs.Count > 0
                 ? $"已套用 {finalArgs.Count} 個 JVM 參數"
                 : "無使用自訂 JVM 參數";
-            Logger.Information("JVM 參數已配置，共 {Count} 個參數", finalArgs.Count);
+            Logger.Information("JVM 參數已設定，共 {Count} 個參數", finalArgs.Count);
         }
     }
 
@@ -637,20 +691,51 @@ public sealed partial class CreateServerViewModel : PageViewModel
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(JavaPath))
+                var lk = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var loaderKind) ? loaderKind : LoaderKind.Unknown;
+                int? targetMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion, lk);
+
+                string effectiveJavaPath = JavaPath?.Trim() ?? string.Empty;
+                if (targetMajor.HasValue && _javaDetector is not null)
                 {
-                    await AutoDetectJavaInternalAsync(silent: false).ConfigureAwait(true);
+                    bool currentMatches = false;
+                    if (!string.IsNullOrWhiteSpace(effectiveJavaPath))
+                    {
+                        var detected = await _javaDetector.DetectAsync(forceRefresh: false).ConfigureAwait(true);
+                        var currentInfo = detected.FirstOrDefault(j => string.Equals(j.ExecutablePath, effectiveJavaPath, StringComparison.OrdinalIgnoreCase));
+                        if (currentInfo is not null && currentInfo.MajorVersion == targetMajor.Value)
+                        {
+                            currentMatches = true;
+                        }
+                    }
+
+                    if (!currentMatches)
+                    {
+                        var matched = await _javaDetector.FindBestMatchAsync(targetMajor.Value).ConfigureAwait(true);
+                        if (matched is not null)
+                        {
+                            effectiveJavaPath = matched.ExecutablePath;
+                            Logger.Information("建立伺服器已自動切換使用符合之 Java {Major}：{Path}（不覆寫表單欄位）", matched.MajorVersion, effectiveJavaPath);
+                        }
+                        else
+                        {
+                            Logger.Warning("建立伺服器已終止：本機未安裝符合 Minecraft {Version} 所需之 Java {Major}", SelectedMinecraftVersion, targetMajor.Value);
+                            Views.DialogHelper.ShowError(
+                                $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再進行建立。",
+                                "Java 版本不相符");
+                            _notificationSink?.Invoke($"建立伺服器終止：缺少符合的 Java {targetMajor.Value}", true);
+                            return;
+                        }
+                    }
                 }
 
-                if (string.IsNullOrWhiteSpace(JavaPath))
+                if (string.IsNullOrWhiteSpace(effectiveJavaPath))
                 {
-                    _notificationSink?.Invoke("未設定合適的 Java 執行檔路徑，請手動指定或安裝所需的 Java 版本", true);
+                    _notificationSink?.Invoke("未設定合適的 Java 執行檔路徑，請點選「管理 Java」指定或安裝", true);
                     return;
                 }
 
                 int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : 1024;
                 int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : 2048;
-                Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var loaderKind);
 
                 string loaderVer = SelectedLoaderVersion;
                 if (loaderVer is "無" or "無可用版本")
@@ -666,10 +751,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     memoryMaxMb: maxMem,
                     memoryMinMb: minMem,
                     jvmArgs: _customJvmArgs,
-                    userJavaPath: JavaPath);
+                    userJavaPath: effectiveJavaPath);
 
                 Logger.Information("開始建立伺服器: {Name}, 版本: {Version}, 載入器: {Loader}, 記憶體: {Min}M-{Max}M, Java: {Java}",
-                    plan.Name.Value, plan.MinecraftVersion.Value, plan.LoaderType, plan.MemoryMinMb, plan.MemoryMaxMb, JavaPath);
+                    plan.Name.Value, plan.MinecraftVersion.Value, plan.LoaderType, plan.MemoryMinMb, plan.MemoryMaxMb, effectiveJavaPath);
 
                 var progressDialog = new Views.ServerCreationProgressDialog(plan.Name.Value);
                 if (Application.Current?.MainWindow is not null)
@@ -699,7 +784,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         var initDialog = new Views.ServerInitializationDialog(
                             _serverRuntime,
                             created.Config,
-                            JavaPath);
+                            effectiveJavaPath);
 
                         if (Application.Current?.MainWindow is not null)
                         {

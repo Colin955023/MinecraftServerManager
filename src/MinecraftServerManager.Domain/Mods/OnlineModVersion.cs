@@ -5,6 +5,7 @@ public sealed record OnlineModVersion
     public string VersionId { get; }
     public string VersionNumber { get; }
     public string DisplayName { get; }
+    public string ProjectId { get; }
     public IReadOnlyList<string> GameVersions { get; }
     public IReadOnlyList<string> Loaders { get; }
     public string VersionType { get; }
@@ -25,11 +26,13 @@ public sealed record OnlineModVersion
         string datePublished = "",
         string changelog = "",
         IEnumerable<ModFile>? files = null,
-        IEnumerable<OnlineModDependency>? dependencies = null)
+        IEnumerable<OnlineModDependency>? dependencies = null,
+        string projectId = "")
     {
         VersionId = versionId ?? string.Empty;
         VersionNumber = versionNumber ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
+        ProjectId = projectId ?? string.Empty;
         GameVersions = [.. gameVersions ?? []];
         Loaders = [.. loaders ?? []];
         VersionType = versionType ?? string.Empty;

@@ -34,7 +34,7 @@ public sealed class ModVersionDisplayItem
 }
 
 /// <summary>
-/// 線上模組版本選擇對話框 ViewModel
+/// 線上模組版本選擇對話方塊 ViewModel
 /// </summary>
 public sealed partial class ModVersionPickerViewModel : ObservableObject
 {
@@ -44,13 +44,13 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
     private readonly string? _minecraftVersion;
 
     [ObservableProperty]
-    private ModVersionDisplayItem? _selectedVersion;
+    public partial ModVersionDisplayItem? SelectedVersion { get; set; }
 
     [ObservableProperty]
-    private string _statusMessage = "正在讀取版本清單…";
+    public partial string StatusMessage { get; set; } = "正在讀取版本清單…";
 
     [ObservableProperty]
-    private bool _isBusy;
+    public partial bool IsBusy { get; set; }
 
     public ModVersionPickerViewModel(
         IModrinthClient modrinthClient,

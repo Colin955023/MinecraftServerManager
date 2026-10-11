@@ -30,10 +30,16 @@ public sealed partial class PropertyEditItem : ObservableObject
     public IReadOnlyList<string> Options { get; }
 
     [ObservableProperty]
-    private string _value = string.Empty;
+    public partial string Value { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private bool _boolValue;
+    public partial bool BoolValue { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasError))]
+    public partial string? ErrorMessage { get; set; }
+
+    public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
     public bool IsBoolean => EditorType == PropertyEditorType.Boolean;
     public bool IsOptions => EditorType == PropertyEditorType.Options;
@@ -49,7 +55,7 @@ public sealed partial class PropertyEditItem : ObservableObject
         IReadOnlyList<string>? options = null)
     {
         Key = key;
-        _value = value;
+        Value = value;
         Category = category;
         Description = description;
         DefaultValue = defaultValue;
@@ -58,8 +64,17 @@ public sealed partial class PropertyEditItem : ObservableObject
 
         if (editorType == PropertyEditorType.Boolean)
         {
-            _boolValue = bool.TryParse(value, out bool b) && b;
+            BoolValue = bool.TryParse(value, out bool b) && b;
         }
+
+        Validate();
+    }
+
+    public bool Validate()
+    {
+        var (isValid, error) = ServerPropertiesValidator.ValidateProperty(Key, Value, DefaultValue);
+        ErrorMessage = isValid ? null : error;
+        return isValid;
     }
 
     partial void OnBoolValueChanged(bool value)
@@ -74,12 +89,13 @@ public sealed partial class PropertyEditItem : ObservableObject
     {
         if (IsBoolean && bool.TryParse(value, out bool b))
         {
-            if (_boolValue != b)
+            if (BoolValue != b)
             {
-                _boolValue = b;
-                OnPropertyChanged(nameof(BoolValue));
+                BoolValue = b;
             }
         }
+
+        Validate();
     }
 
     [RelayCommand]
@@ -90,11 +106,12 @@ public sealed partial class PropertyEditItem : ObservableObject
         {
             BoolValue = bool.TryParse(DefaultValue, out bool b) && b;
         }
+        Validate();
     }
 }
 
 /// <summary>
-/// 伺服器屬性設定對話框 ViewModel
+/// 伺服器屬性設定對話方塊 ViewModel
 /// </summary>
 public sealed partial class ServerPropertiesViewModel : ObservableObject
 {
@@ -104,41 +121,41 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
     private readonly List<PropertyEditItem> _allItems = [];
 
     [ObservableProperty]
-    private string _searchText = string.Empty;
+    public partial string SearchText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _selectedCategory = "全部";
+    public partial string SelectedCategory { get; set; } = "全部";
 
     [ObservableProperty]
-    private string _motd = "A Minecraft Server";
+    public partial string Motd { get; set; } = "A Minecraft Server";
 
     [ObservableProperty]
-    private string _serverPort = "25565";
+    public partial string ServerPort { get; set; } = "25565";
 
     [ObservableProperty]
-    private string _maxPlayers = "20";
+    public partial string MaxPlayers { get; set; } = "20";
 
     [ObservableProperty]
-    private string _selectedDifficulty = "easy";
+    public partial string SelectedDifficulty { get; set; } = "easy";
 
     [ObservableProperty]
-    private string _selectedGamemode = "survival";
+    public partial string SelectedGamemode { get; set; } = "survival";
 
     [ObservableProperty]
-    private bool _pvp = true;
+    public partial bool Pvp { get; set; } = true;
 
     [ObservableProperty]
-    private bool _onlineMode = true;
+    public partial bool OnlineMode { get; set; } = true;
 
     [ObservableProperty]
-    private bool _whiteList;
+    public partial bool WhiteList { get; set; }
 
     [ObservableProperty]
-    private string _statusMessage = string.Empty;
+    public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotSaving))]
-    private bool _isSaving;
+    public partial bool IsSaving { get; set; }
 
     public bool IsNotSaving => !IsSaving;
 
@@ -320,7 +337,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
     [RelayCommand]
     public void ResetAllToDefault()
     {
-        if (!Views.DialogHelper.Confirm("確定要將所有伺服器設定屬性還原為預設值嗎？", "確認恢復預設", MessageBoxImage.Warning))
+        if (!Views.DialogHelper.Confirm("確定要將所有伺服器設定屬性還原為預設值嗎？", "確認還原預設", MessageBoxImage.Warning))
         {
             return;
         }
@@ -342,13 +359,37 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
             return;
         }
 
+        // 儲存前先對所有屬性進行嚴格驗證
+        foreach (var item in _allItems)
+        {
+            if (!item.Validate())
+            {
+                StatusMessage = $"「{item.Key}」設定值無效：{item.ErrorMessage}";
+                return;
+            }
+        }
+
         IsSaving = true;
         try
         {
+            // 僅篩選出有修改之差異項進行儲存，加速寫入效率
             var patches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var item in _allItems)
             {
-                patches[item.Key] = item.Value.Trim();
+                string currentVal = item.Value.Trim();
+                string? originalVal = _snapshot.Properties.TryGetValue(item.Key, out string? orig) ? orig.Trim() : null;
+
+                if (originalVal is null || !string.Equals(originalVal, currentVal, StringComparison.Ordinal))
+                {
+                    patches[item.Key] = currentVal;
+                }
+            }
+
+            // 若沒有任何屬性被修改，無需執行磁碟 I/O，直接成功關閉
+            if (patches.Count == 0)
+            {
+                RequestClose?.Invoke(true);
+                return;
             }
 
             var result = await _propertiesStore.UpdateAsync(_serverName, patches, _snapshot.Revision).ConfigureAwait(true);

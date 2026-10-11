@@ -22,7 +22,11 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var facets = new List<string> { "[\"project_type:mod\"]" };
+        var facets = new List<string>
+        {
+            "[\"project_type:mod\"]",
+            "[\"server_side:required\",\"server_side:optional\"]"
+        };
         if (!string.IsNullOrWhiteSpace(loader) && !loader.Equals("unknown", StringComparison.OrdinalIgnoreCase) && !loader.Equals("vanilla", StringComparison.OrdinalIgnoreCase))
         {
             facets.Add($"[\"categories:{loader.Trim().ToLowerInvariant()}\"]");
@@ -42,7 +46,74 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             return [];
         }
 
-        return ParseSearchResults(json);
+        var results = ParseSearchResults(json);
+        if (results.Count == 0)
+        {
+            return results;
+        }
+
+        var versionIds = results
+            .Select(m => m.LatestVersion)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (versionIds.Count > 0)
+        {
+            var versionMap = await FetchVersionNumbersBatchAsync(versionIds, cancellationToken).ConfigureAwait(false);
+            if (versionMap.Count > 0)
+            {
+                return [.. results.Select(m => versionMap.TryGetValue(m.LatestVersion, out string? vn) && !string.IsNullOrWhiteSpace(vn)
+                    ? m with { LatestVersion = vn }
+                    : m)];
+            }
+        }
+
+        return results;
+    }
+
+    private async Task<Dictionary<string, string>> FetchVersionNumbersBatchAsync(
+        IReadOnlyList<string> versionIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string[] chunk in versionIds.Chunk(50))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                string idsParam = Uri.EscapeDataString(JsonCodec.Serialize(chunk));
+                string url = $"{BaseUrl}/versions?ids={idsParam}";
+                string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    continue;
+                }
+
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var elem in doc.RootElement.EnumerateArray())
+                    {
+                        if (elem.TryGetProperty("id", out var idProp) &&
+                            elem.TryGetProperty("version_number", out var vnProp))
+                        {
+                            string? id = idProp.GetString();
+                            string? vn = vnProp.GetString();
+                            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(vn))
+                            {
+                                result[id] = vn;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return result;
     }
 
     public async Task<IReadOnlyList<OnlineModVersion>> GetProjectVersionsAsync(
@@ -188,6 +259,14 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     ? [.. verElem.EnumerateArray().Select(v => v.GetString() ?? string.Empty)]
                     : new List<string>();
 
+                string serverSide = hit.TryGetProperty("server_side", out var ssElem) ? ssElem.GetString() ?? string.Empty : string.Empty;
+                string clientSide = hit.TryGetProperty("client_side", out var csElem) ? csElem.GetString() ?? string.Empty : string.Empty;
+
+                if (serverSide.Equals("unsupported", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 list.Add(new OnlineModInfo(
                     projectId: projectId,
                     slug: slug,
@@ -200,7 +279,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     url: $"https://modrinth.com/mod/{slug}",
                     iconUrl: iconUrl,
                     categories: categories,
-                    versions: versions));
+                    versions: versions,
+                    serverSide: serverSide,
+                    clientSide: clientSide));
             }
         }
         catch
@@ -289,6 +370,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
             }
         }
 
-        return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, changelog, files, dependencies);
+        string projectId = elem.TryGetProperty("project_id", out var projElem) ? projElem.GetString() ?? string.Empty : string.Empty;
+
+        return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, changelog, files, dependencies, projectId: projectId);
     }
 }

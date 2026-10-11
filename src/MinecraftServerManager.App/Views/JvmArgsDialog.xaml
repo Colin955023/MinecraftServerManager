@@ -35,7 +35,7 @@
                LineHeight="18"
                Margin="0,0,0,16" />
 
-    <!-- 建議參數列表卡片 -->
+    <!-- 建議參數清單卡片 -->
     <Border Grid.Row="2"
             Background="{DynamicResource CardBrush}"
             BorderBrush="{DynamicResource BorderBrush}"

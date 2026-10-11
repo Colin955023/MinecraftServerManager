@@ -96,6 +96,8 @@ public sealed class CreateServerViewModelTests
         public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyDictionary<string, int>>(new Dictionary<string, int>());
 
+        public IReadOnlyList<int> GetCachedAvailableJavaMajors() => [major];
+
         public void ReloadCache() { }
     }
 
@@ -167,7 +169,7 @@ public sealed class CreateServerSynchronizationTests
         vm.SelectedMinecraftVersion = "1.20.1";
         Assert.Equal("Fabric 1.20.1", vm.ServerName);
 
-        // 帶後綴切換
+        // 帶字尾切換
         vm.ServerName = "Fabric 1.20.1 - 冒險伺服器";
         vm.SelectedLoader = "Forge";
         Assert.Equal("Forge 1.20.1 - 冒險伺服器", vm.ServerName);

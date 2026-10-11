@@ -42,12 +42,13 @@ public interface IServerBackupService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 從備份還原伺服器檔案
+    /// 從備份還原伺服器檔案（支援進度回報）
     /// </summary>
     public Task<bool> RestoreBackupAsync(
         string serverName,
         string backupFileName,
         string? backupDirectory = null,
+        IProgress<ServerBackupProgressReport>? progress = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

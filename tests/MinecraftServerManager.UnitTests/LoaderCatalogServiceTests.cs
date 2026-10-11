@@ -242,6 +242,10 @@ public sealed class LoaderCatalogServiceTests : IDisposable
             {
                 return paperProjectJson;
             }
+            if (url.Contains("/builds"))
+            {
+                return """[{"id": 100, "channel": "STABLE"}]""";
+            }
             if (url.Contains("/versions/1.21.4"))
             {
                 return """{"version": {"java": {"version": {"minimum": 21}}}}""";
@@ -373,9 +377,135 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         string mcCache = Path.Combine(_cacheDir, "mc_versions_cache.json");
         string reqCache = Path.Combine(_cacheDir, "mc_java_requirements_cache.json");
         Assert.True(File.Exists(mcCache));
-        Assert.True(File.Exists(reqCache));
-        string reqContent = await File.ReadAllTextAsync(reqCache);
-        Assert.Contains("\"1.21.4\": 21", reqContent);
+        Assert.False(File.Exists(reqCache));
+        string mcContent = await File.ReadAllTextAsync(mcCache);
+        Assert.Contains("\"JavaMajor\": 21", mcContent);
+    }
+
+    [Fact]
+    public async Task GetMinecraftVersionsForLoaderAsync_ForFabricAndQuilt_FiltersOutVersionsLessThan1_14()
+    {
+        string manifestJson = """
+        {
+            "versions": [
+                { "id": "1.20.4", "type": "release", "url": "https://example.com/1.20.4.json" },
+                { "id": "1.14", "type": "release", "url": "https://example.com/1.14.json" },
+                { "id": "1.13.2", "type": "release", "url": "https://example.com/1.13.2.json" },
+                { "id": "1.12.2", "type": "release", "url": "https://example.com/1.12.2.json" }
+            ]
+        }
+        """;
+
+        var fakeHttp = new FakeCatalogHttpPort(manifestJson);
+        var service = new LoaderCatalogService(fakeHttp, _cacheDir);
+
+        var fabricVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Fabric);
+        Assert.Equal(2, fabricVersions.Count);
+        Assert.Contains(fabricVersions, v => v.Version == "1.20.4");
+        Assert.Contains(fabricVersions, v => v.Version == "1.14");
+        Assert.DoesNotContain(fabricVersions, v => v.Version == "1.13.2");
+        Assert.DoesNotContain(fabricVersions, v => v.Version == "1.12.2");
+
+        var quiltVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Quilt);
+        Assert.Equal(2, quiltVersions.Count);
+        Assert.Contains(quiltVersions, v => v.Version == "1.20.4");
+        Assert.Contains(quiltVersions, v => v.Version == "1.14");
+        Assert.DoesNotContain(quiltVersions, v => v.Version == "1.13.2");
+        Assert.DoesNotContain(quiltVersions, v => v.Version == "1.12.2");
+    }
+
+    [Fact]
+    public async Task GetPaperMinecraftVersionsAsync_ExcludesVersionsWithoutStableBuilds()
+    {
+        string projectJson = """
+        {
+            "versions": {
+                "1.21": ["1.21.4"],
+                "26": ["26.3"]
+            }
+        }
+        """;
+
+        string builds263Json = """
+        [
+            { "id": 1, "channel": "BETA" },
+            { "id": 2, "channel": "ALPHA" }
+        ]
+        """;
+
+        string builds1214Json = """
+        [
+            { "id": 165, "channel": "STABLE" }
+        ]
+        """;
+
+        string version1214Json = """
+        {
+            "version": {
+                "java": {
+                    "version": {
+                        "minimum": 21
+                    }
+                }
+            }
+        }
+        """;
+
+        var fakeHttp = new FakeCatalogHttpPort(uri =>
+        {
+            string s = uri.ToString();
+            if (s.EndsWith("/projects/paper", StringComparison.OrdinalIgnoreCase))
+            {
+                return projectJson;
+            }
+            if (s.Contains("/versions/26.3/builds"))
+            {
+                return builds263Json;
+            }
+            if (s.Contains("/versions/1.21.4/builds"))
+            {
+                return builds1214Json;
+            }
+            if (s.Contains("/versions/1.21.4"))
+            {
+                return version1214Json;
+            }
+            return null;
+        });
+
+        var service = new LoaderCatalogService(fakeHttp, _cacheDir);
+        var paperVersions = await service.GetPaperMinecraftVersionsAsync(forceReload: true);
+
+        // 26.3 僅有 BETA/ALPHA，無任何 STABLE 建置，必須被剔除！
+        Assert.Single(paperVersions);
+        Assert.Equal("1.21.4", paperVersions[0].Version);
+        Assert.Equal("165", paperVersions[0].Build);
+        Assert.Equal(21, paperVersions[0].JavaMajor);
+    }
+
+    [Fact]
+    public async Task GetMinecraftVersionsAsync_CleansCacheFileOfUnstableEntries()
+    {
+        string cacheFile = Path.Combine(_cacheDir, "mc_versions_cache.json");
+        string dirtyCacheJson = """
+        [
+            { "Version": "1.20.4", "Url": "https://example.com/1.20.4.json", "Stable": true },
+            { "Version": "24w05a", "Url": "https://example.com/24w05a.json", "Stable": false }
+        ]
+        """;
+        await File.WriteAllTextAsync(cacheFile, dirtyCacheJson);
+
+        var fakeHttp = new FakeCatalogHttpPort("");
+        var service = new LoaderCatalogService(fakeHttp, _cacheDir);
+
+        var versions = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
+
+        Assert.Single(versions);
+        Assert.Equal("1.20.4", versions[0].Version);
+
+        // 驗證快取檔案已自動清洗並剔除 Stable: false
+        string cleanedJson = await File.ReadAllTextAsync(cacheFile);
+        Assert.DoesNotContain("24w05a", cleanedJson);
     }
 
     private sealed class FakeCatalogHttpPort : IHttpPort

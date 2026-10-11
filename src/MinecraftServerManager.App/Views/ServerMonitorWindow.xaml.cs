@@ -71,7 +71,16 @@ public partial class ServerMonitorWindow : Window
         }
     }
 
-    private void CommandInputBox_KeyDown(object sender, KeyEventArgs e)
+    private void PlayerListItem_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ListBoxItem item && item.DataContext is string playerName && !string.IsNullOrWhiteSpace(playerName))
+        {
+            _viewModel.CopyPlayerName(playerName);
+            e.Handled = true;
+        }
+    }
+
+    private void CommandInputBox_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter)
         {

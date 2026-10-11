@@ -46,7 +46,7 @@ public static class AtomicFileWriter
 
                 if (File.Exists(target))
                 {
-                    File.Move(temporary, target, overwrite: true);
+                    File.Replace(temporary, target, null);
                 }
                 else
                 {
@@ -106,7 +106,14 @@ public static class AtomicFileWriter
 
         try
         {
-            File.Move(source, target, overwrite: true);
+            if (File.Exists(target))
+            {
+                File.Replace(source, target, null);
+            }
+            else
+            {
+                File.Move(source, target);
+            }
             return true;
         }
         catch (IOException)

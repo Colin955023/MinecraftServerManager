@@ -18,15 +18,86 @@ public sealed class ModrinthClientTests
             "hits": [
                 {
                     "project_id": "AANobbMI",
-                    "slug": "sodium",
-                    "title": "Sodium",
-                    "description": "A modern rendering engine for Minecraft",
+                    "slug": "fabric-api",
+                    "title": "Fabric API",
+                    "description": "Core API library for Fabric mods",
                     "categories": ["fabric", "quilt"],
-                    "client_side": "required",
-                    "server_side": "unsupported",
+                    "client_side": "optional",
+                    "server_side": "optional",
                     "downloads": 25000000,
                     "icon_url": "https://cdn.modrinth.com/icon.png",
+                    "latest_version": "v_test_123",
                     "versions": ["1.20.1", "1.20.2"]
+                }
+            ],
+            "offset": 0,
+            "limit": 10,
+            "total_hits": 1
+        }
+        """;
+
+        string versionsBatchResponse = """
+        [
+            {
+                "id": "v_test_123",
+                "version_number": "0.5.8"
+            }
+        ]
+        """;
+
+        string? requestedUrl = null;
+        var fakeHttp = new FakeHttpPort(uri =>
+        {
+            string s = uri.AbsoluteUri;
+            if (s.Contains("/search"))
+            {
+                requestedUrl = s;
+                return jsonResponse;
+            }
+
+            if (s.Contains("/versions?ids="))
+            {
+                return versionsBatchResponse;
+            }
+
+            return null;
+        });
+        var client = new ModrinthClient(fakeHttp);
+
+        var results = await client.SearchModsAsync("fabric-api", loader: "fabric", minecraftVersion: "1.20.1");
+
+        Assert.Single(results);
+        var mod = results[0];
+        Assert.Equal("AANobbMI", mod.Id);
+        Assert.Equal("fabric-api", mod.Slug);
+        Assert.Equal("Fabric API", mod.Title);
+        Assert.Equal(25000000, mod.Downloads);
+        Assert.Equal("0.5.8", mod.LatestVersion);
+        Assert.Equal("https://cdn.modrinth.com/icon.png", mod.IconUrl);
+        Assert.Contains("fabric", mod.Loaders);
+
+        Assert.NotNull(requestedUrl);
+        Assert.Contains("server_side", Uri.UnescapeDataString(requestedUrl));
+    }
+
+    [Fact]
+    public async Task SearchModsAsyncFiltersOutUnsupportedServerSideMods()
+    {
+        string jsonResponse = """
+        {
+            "hits": [
+                {
+                    "project_id": "client_only_1",
+                    "slug": "sodium",
+                    "title": "Sodium",
+                    "description": "Client-only rendering mod",
+                    "categories": ["fabric"],
+                    "client_side": "required",
+                    "server_side": "unsupported",
+                    "downloads": 5000000,
+                    "icon_url": "",
+                    "latest_version": "v1",
+                    "versions": ["1.20.1"]
                 }
             ],
             "offset": 0,
@@ -39,15 +110,7 @@ public sealed class ModrinthClientTests
         var client = new ModrinthClient(fakeHttp);
 
         var results = await client.SearchModsAsync("sodium", loader: "fabric", minecraftVersion: "1.20.1");
-
-        Assert.Single(results);
-        var mod = results[0];
-        Assert.Equal("AANobbMI", mod.Id);
-        Assert.Equal("sodium", mod.Slug);
-        Assert.Equal("Sodium", mod.Title);
-        Assert.Equal(25000000, mod.Downloads);
-        Assert.Equal("https://cdn.modrinth.com/icon.png", mod.IconUrl);
-        Assert.Contains("fabric", mod.Loaders);
+        Assert.Empty(results);
     }
 
     [Fact]

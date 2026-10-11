@@ -4,8 +4,39 @@
              xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels">
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Margin="0,0,16,24">
-      <!-- 頂部標題 -->
-      <TextBlock Text="建立新伺服器" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,16" />
+      <!-- 頂部標題與狀態 -->
+      <Grid Margin="0,0,0,16">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Grid.Column="0" Text="建立新伺服器" FontSize="26" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,16,0" VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <ProgressBar IsIndeterminate="True"
+                       Width="80"
+                       Height="4"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Center">
+            <ProgressBar.Style>
+              <Style TargetType="ProgressBar">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsLoadingVersions}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsDetectingJava}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ProgressBar.Style>
+          </ProgressBar>
+          <TextBlock Text="{Binding LoadingStatusText}"
+                     FontSize="12"
+                     Foreground="{DynamicResource AccentBrush}"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+      </Grid>
 
       <!-- EULA 條款提示 -->
       <Border Background="{DynamicResource CardBrush}"
@@ -25,7 +56,7 @@
               <Hyperlink Command="{Binding OpenEulaCommand}" Foreground="{DynamicResource AccentBrush}">
                 <Run Text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)" />
                 <LineBreak />
-                <Run Text="點擊建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任" />
+                <Run Text="點選建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任" />
               </Hyperlink>
             </TextBlock>
           </StackPanel>
@@ -67,9 +98,8 @@
                 Width="72"
                 Margin="0,6,8,6" />
         <Button Grid.Row="1" Grid.Column="3"
-                Content="自動偵測"
-                Command="{Binding AutoDetectJavaCommand}"
-                IsEnabled="{Binding IsNotDetectingJava}"
+                Content="管理 Java"
+                Command="{Binding OpenManageJavaCommand}"
                 Width="85"
                 Margin="0,6,0,6" />
 
@@ -131,7 +161,7 @@
         <!-- 記憶體說明與警告標籤 -->
         <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,6">
           <TextBlock Text="最小記憶體選填，若留空由 Java 決定" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
-          <TextBlock Text="最大記憶體(必須)建議：2048MB (預設) | 4096MB (一般) | 8192MB (多人遊戲)"
+          <TextBlock Text="最大記憶體(必要)建議：2048MB (預設) | 4096MB (一般) | 8192MB (多人遊戲)"
                      FontSize="11"
                      Foreground="{DynamicResource MutedTextBrush}"
                      Margin="0,2,0,0" />

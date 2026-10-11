@@ -12,11 +12,13 @@ public partial class ServerBackupProgressDialog : Window
     private static bool _completed;
     private readonly IProgress<ServerBackupProgressReport> _progress;
 
-    public ServerBackupProgressDialog(string serverName)
+    public ServerBackupProgressDialog(string serverName, string actionTitle = "備份")
     {
         InitializeComponent();
         _completed = false;
-        TitleText.Text = $"正在備份伺服器「{serverName}」";
+        Title = $"{actionTitle}伺服器中";
+        TitleText.Text = $"正在{actionTitle}伺服器「{serverName}」";
+        PhaseText.Text = actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案...";
         _progress = new Progress<ServerBackupProgressReport>(Report);
 
         if (Icon == null)

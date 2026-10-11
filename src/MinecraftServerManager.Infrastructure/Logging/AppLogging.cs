@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>
-/// 應用程式日誌管理中心
+/// 應用程式記錄管理中心
 /// </summary>
 public static class AppLogging
 {
@@ -13,7 +13,7 @@ public static class AppLogging
     private static LoggerExternalScopeProvider? _scopeProvider;
 
     /// <summary>
-    /// 初始化應用程式日誌管道
+    /// 初始化應用程式記錄管線
     /// </summary>
     public static void Initialize(RotatingFileLoggerOptions? options = null)
     {
@@ -66,7 +66,7 @@ public static class AppLogging
     }
 
     /// <summary>
-    /// 關閉並清除日誌管道，確保檔案串流完成寫入與釋放
+    /// 關閉並清除記錄管線，確保檔案串流完成寫入與釋放
     /// </summary>
     public static void Shutdown()
     {

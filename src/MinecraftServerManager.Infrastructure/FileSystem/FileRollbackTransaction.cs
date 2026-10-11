@@ -59,7 +59,7 @@ public sealed class FileRollbackTransaction : IDisposable
 
         if (failures.Count > 0)
         {
-            throw new SafeFileSystemException("檔案回滾失敗", new AggregateException(failures));
+            throw new SafeFileSystemException("檔案回復失敗", new AggregateException(failures));
         }
 
         CleanupJournal();
@@ -101,11 +101,11 @@ public sealed class FileRollbackTransaction : IDisposable
             }
             catch (IOException exception)
             {
-                throw new SafeFileSystemException($"無法建立回滾備份： {targetPath}", exception);
+                throw new SafeFileSystemException($"無法建立復原備份： {targetPath}", exception);
             }
             catch (UnauthorizedAccessException exception)
             {
-                throw new SafeFileSystemException($"無法建立回滾備份： {targetPath}", exception);
+                throw new SafeFileSystemException($"無法建立復原備份： {targetPath}", exception);
             }
         }
 
@@ -148,7 +148,7 @@ public sealed class FileRollbackTransaction : IDisposable
     {
         if (_finalized)
         {
-            throw new InvalidOperationException("檔案回滾交易已結束");
+            throw new InvalidOperationException("檔案回復交易已結束");
         }
     }
 

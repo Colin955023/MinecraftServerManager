@@ -42,7 +42,7 @@
           </Button>
         </StackPanel>
 
-        <!-- 系統資源卡片：記憶體、版本、人數、運行時間 -->
+        <!-- 系統資源卡片：記憶體、版本、人數、運作時間 -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
             <TextBlock Text="{Binding MemoryUsageText, StringFormat='記憶體: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
@@ -51,14 +51,14 @@
             <TextBlock Text="{Binding MinecraftVersionText, StringFormat='MC: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding OnlinePlayersText, StringFormat='在線: {0}'}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+            <TextBlock Text="{Binding OnlinePlayersText, StringFormat='線上: {0}'}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
           </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding UptimeText, StringFormat='運行: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="{Binding UptimeText, StringFormat='運作時間: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
         </StackPanel>
 
-        <!-- 右側控制：自動捲動 + 啟動 / 停止 / 刷新（順序固定） -->
+        <!-- 右側控制：自動捲動 + 啟動 / 停止 / 重新整理（順序固定） -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
           <CheckBox Content="自動捲動"
                     IsChecked="{Binding IsAutoScrollEnabled}"
@@ -66,35 +66,38 @@
                     VerticalAlignment="Center"
                     Margin="0,0,12,0" />
           <Button Command="{Binding StartServerCommand}"
+                  IsEnabled="{Binding CanStartServer}"
+                  Style="{DynamicResource SuccessButtonStyle}"
                   Height="32"
                   Margin="0,0,8,0"
                   Padding="12,4">
-            <TextBlock Text="🚀 啟動" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="🚀 啟動" VerticalAlignment="Center" Foreground="#FFFFFF" />
           </Button>
           <Button Command="{Binding StopServerCommand}"
                   IsEnabled="{Binding IsServerRunning}"
+                  Style="{DynamicResource DangerButtonStyle}"
                   Height="32"
                   Margin="0,0,8,0"
                   Padding="12,4">
-            <TextBlock Text="⏹️ 停止" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="⏹️ 停止" VerticalAlignment="Center" Foreground="#FFFFFF" />
           </Button>
           <Button Command="{Binding RefreshStateCommand}"
                   Height="32"
                   Padding="12,4">
-            <TextBlock Text="🔄 刷新" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="🔄 重新整理" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
           </Button>
         </StackPanel>
       </Grid>
     </Border>
 
-    <!-- 中間區域：左側日誌主控台 + 右側在線玩家清單卡片 -->
+    <!-- 中間區域：左側紀錄主控台 + 右側線上玩家清單卡片 -->
     <Grid Grid.Row="1">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*" />
         <ColumnDefinition Width="200" />
       </Grid.ColumnDefinitions>
 
-      <!-- 終端機日誌檢視區 (黑底綠字) -->
+      <!-- 終端機紀錄檢視區 (黑底綠字) -->
       <Border Grid.Column="0"
               Background="#0C0C0C"
               BorderBrush="{DynamicResource BorderBrush}"
@@ -117,9 +120,9 @@
                  ScrollViewer.VerticalScrollBarVisibility="Auto">
           <ListBox.ContextMenu>
             <ContextMenu>
-              <MenuItem Header="複製全部日誌" Command="{Binding CopyAllLogsCommand}" />
+              <MenuItem Header="複製全部紀錄" Command="{Binding CopyAllLogsCommand}" />
               <Separator />
-              <MenuItem Header="清空日誌" Command="{Binding ClearLogsCommand}" />
+              <MenuItem Header="清空紀錄" Command="{Binding ClearLogsCommand}" />
             </ContextMenu>
           </ListBox.ContextMenu>
           <ListBox.ItemContainerStyle>
@@ -139,7 +142,7 @@
         </ListBox>
       </Border>
 
-      <!-- 右側在線玩家清單卡片 -->
+      <!-- 右側線上玩家清單卡片 -->
       <Border Grid.Column="1"
               Background="{DynamicResource CardBrush}"
               BorderBrush="{DynamicResource BorderBrush}"
@@ -152,13 +155,13 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <TextBlock Grid.Row="0"
-                     Text="在線玩家"
+                     Text="線上玩家"
                      FontWeight="Bold"
                      FontSize="14"
                      Foreground="{DynamicResource TextBrush}"
                      Margin="0,0,0,8" />
           <TextBlock Grid.Row="1"
-                     Text="無玩家在線"
+                     Text="無玩家線上"
                      FontSize="13"
                      Foreground="{DynamicResource MutedTextBrush}"
                      HorizontalAlignment="Center"
@@ -179,6 +182,14 @@
                    Background="Transparent"
                    BorderThickness="0"
                    Foreground="{DynamicResource TextBrush}">
+            <ListBox.ItemContainerStyle>
+              <Style TargetType="ListBoxItem">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="ToolTip" Value="點選複製玩家名稱" />
+                <Setter Property="Padding" Value="4,2" />
+                <EventSetter Event="PreviewMouseLeftButtonUp" Handler="PlayerListItem_PreviewMouseLeftButtonUp" />
+              </Style>
+            </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <StackPanel Orientation="Horizontal" Margin="0,3">
@@ -202,15 +213,17 @@
       <TextBox x:Name="CommandInputBox"
                Grid.Column="0"
                Text="{Binding CommandText, UpdateSourceTrigger=PropertyChanged}"
-               KeyDown="CommandInputBox_KeyDown"
+               IsEnabled="{Binding IsServerRunning}"
+               PreviewKeyDown="CommandInputBox_PreviewKeyDown"
                Margin="0,0,10,0"
                Padding="8,8"
                FontFamily="Consolas, Cascadia Code, Courier New"
                FontSize="13" />
 
       <Button Grid.Column="1"
-              Content="發送指令"
+              Content="傳送指令"
               Command="{Binding SendCommandCommand}"
+              IsEnabled="{Binding IsServerRunning}"
               Style="{DynamicResource PrimaryButtonStyle}"
               Padding="18,8" />
     </Grid>

@@ -4,7 +4,7 @@ using MinecraftServerManager.App.ViewModels;
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// JVM 參數設定對話框
+/// JVM 參數設定對話方塊
 /// </summary>
 public partial class JvmArgsDialog : Window
 {

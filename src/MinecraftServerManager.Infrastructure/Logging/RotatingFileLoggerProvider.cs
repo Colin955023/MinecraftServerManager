@@ -140,7 +140,19 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         {
             try
             {
-                string logDir = SafeFileSystem.ResolveStableDirectory(_options.LogDirectory, create: true);
+                string logDir;
+                try
+                {
+                    logDir = SafeFileSystem.ResolveStableDirectory(_options.LogDirectory, create: true);
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[RotatingFileLoggerProvider] 無法於預設目錄建立記錄檔 ({ex.Message})，嘗試切換至暫存目錄備援");
+                    string fallbackDir = Path.Combine(Path.GetTempPath(), "MinecraftServerManager", "Logs");
+                    Directory.CreateDirectory(fallbackDir);
+                    logDir = fallbackDir;
+                }
+
                 PruneLogs(logDir, Math.Max(0, _options.MaxArchiveFiles - 1));
 
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture);
@@ -149,9 +161,9 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
                 OpenWriter();
             }
-            catch
+            catch (Exception ex)
             {
-                // 初始化檔案寫入失敗時保留提供者存在但不造成程式崩潰
+                Console.Error.WriteLine($"[RotatingFileLoggerProvider] 備援記錄檔初始化亦失敗: {ex.Message}");
                 _writer = null;
             }
         }

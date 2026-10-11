@@ -5,7 +5,7 @@ using System.Windows.Input;
 namespace MinecraftServerManager.App.Behaviors;
 
 /// <summary>
-/// 提供 ComboBox 滑鼠懸停滾輪切換選項的附加行為
+/// 提供 ComboBox 滑鼠暫留滾輪切換選項的附加行為
 /// </summary>
 public static class ComboBoxWheelBehavior
 {

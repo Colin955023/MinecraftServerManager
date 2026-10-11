@@ -14,7 +14,7 @@ public static class SafeScriptValidator
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeScriptValidator");
 
     /// <summary>
-    /// 批次命令中禁止出現的危險字元（防範命令鏈接與變數展開注入）
+    /// 批次命令中禁止出現的危險字元（防範命令串接與變數展開注入）
     /// </summary>
     private static readonly SearchValues<char> UnsafeBatchChars = SearchValues.Create("&|<>^%!();\0");
 

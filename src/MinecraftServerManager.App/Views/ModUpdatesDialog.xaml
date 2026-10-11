@@ -25,7 +25,7 @@
 
     <!-- 說明 -->
     <TextBlock Grid.Row="1"
-               Text="下列模組在 Modrinth 上有相容的新版本，請勾選要更新的模組後點擊「一鍵更新所選模組」："
+               Text="下列模組在線上平台上有相容的新版本，請勾選要更新的模組後點選「立即更新所選模組」："
                FontSize="13"
                Foreground="{DynamicResource MutedTextBrush}"
                Margin="0,0,0,14" />
@@ -46,9 +46,10 @@
                 SelectionMode="Single">
         <DataGrid.Columns>
           <DataGridCheckBoxColumn Header="更新" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="50" />
-          <DataGridTextColumn Header="模組名稱" Binding="{Binding ModName}" IsReadOnly="True" Width="180" />
-          <DataGridTextColumn Header="目前版本" Binding="{Binding CurrentVersion}" IsReadOnly="True" Width="110" />
-          <DataGridTextColumn Header="最新版本" Binding="{Binding NewVersion}" IsReadOnly="True" Width="110" />
+          <DataGridTextColumn Header="模組名稱" Binding="{Binding ModName}" IsReadOnly="True" Width="170" />
+          <DataGridTextColumn Header="目前版本" Binding="{Binding CurrentVersion}" IsReadOnly="True" Width="100" />
+          <DataGridTextColumn Header="最新版本" Binding="{Binding NewVersion}" IsReadOnly="True" Width="100" />
+          <DataGridTextColumn Header="來源平台" Binding="{Binding SourcePlatform}" IsReadOnly="True" Width="95" />
           <DataGridTextColumn Header="新檔案名稱" Binding="{Binding FileName}" IsReadOnly="True" Width="*" />
         </DataGrid.Columns>
       </DataGrid>
@@ -63,7 +64,7 @@
 
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
         <Button Content="取消" Click="OnCancelClicked" Margin="0,0,10,0" Padding="16,6" />
-        <Button Content="一鍵更新所選模組" Click="OnUpdateClicked" Style="{DynamicResource PrimaryButtonStyle}" Padding="20,6" />
+        <Button Content="立即更新所選模組" Click="OnUpdateClicked" Style="{DynamicResource PrimaryButtonStyle}" Padding="20,6" />
       </StackPanel>
     </Grid>
   </Grid>

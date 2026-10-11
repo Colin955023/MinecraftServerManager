@@ -15,11 +15,11 @@ public sealed partial class JvmArgOptionItem(string option, string description, 
     public string Description { get; } = description;
 
     [ObservableProperty]
-    private bool _isChecked = isChecked;
+    public partial bool IsChecked { get; set; } = isChecked;
 }
 
 /// <summary>
-/// JVM 參數設定對話框 ViewModel
+/// JVM 參數設定對話方塊 ViewModel
 /// </summary>
 public sealed partial class JvmArgsViewModel : ObservableObject
 {
@@ -29,14 +29,13 @@ public sealed partial class JvmArgsViewModel : ObservableObject
     private readonly HashSet<string> _recommendedSet = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
-    private string _descriptionText = string.Empty;
+    public partial string DescriptionText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private bool _hasCustomArgs;
+    public partial bool HasCustomArgs { get; set; }
 
     [ObservableProperty]
-    private string _customArgsText = string.Empty;
-
+    public partial string CustomArgsText { get; set; } = string.Empty;
     public ObservableCollection<JvmArgOptionItem> RecommendedArgs { get; } = [];
 
     public JvmArgsViewModel(
@@ -57,15 +56,15 @@ public sealed partial class JvmArgsViewModel : ObservableObject
     {
         if (_javaMajor.HasValue && _javaMajor.Value >= 21)
         {
-            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 ZGC 低延遲最佳化設定。滑鼠游標移至項目可查看說明。";
+            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 ZGC 低延遲最佳化設定。滑鼠游標移至項目可檢視說明。";
         }
         else if (_javaMajor.HasValue)
         {
-            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可查看說明。";
+            DescriptionText = $"目前偵測為 Java {_javaMajor.Value}，已自動套用 G1GC (Aikar's Flags) 最佳化設定。滑鼠游標移至項目可檢視說明。";
         }
         else
         {
-            DescriptionText = "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可查看說明。";
+            DescriptionText = "Java 21+ 建議使用 ZGC；Java 8/16/17 建議使用 G1GC。滑鼠游標移至項目可檢視說明。";
         }
     }
 

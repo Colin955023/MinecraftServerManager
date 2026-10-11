@@ -13,12 +13,12 @@ namespace MinecraftServerManager.App.ViewModels;
 public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeOffset createdAt)
 {
     public string FileName { get; } = fileName;
-    public string SizeFormatted { get; } = (sizeBytes / 1024.0 / 1024.0).ToString("F2", CultureInfo.InvariantCulture) + " MB";
+    public string SizeFormatted { get; } = Core.Utilities.MemoryUtils.FormatBytes(sizeBytes);
     public string CreatedAtFormatted { get; } = createdAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }
 
 /// <summary>
-/// 備份還原與管理對話框 ViewModel
+/// 備份還原與管理對話方塊 ViewModel
 /// </summary>
 public sealed partial class RestoreBackupViewModel : ObservableObject
 {
@@ -28,13 +28,13 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
     private readonly Func<bool>? _isServerRunningCheck;
 
     [ObservableProperty]
-    private BackupDisplayItem? _selectedBackup;
+    public partial BackupDisplayItem? SelectedBackup { get; set; }
 
     [ObservableProperty]
-    private string _statusMessage = string.Empty;
+    public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private bool _isBusy;
+    public partial bool IsBusy { get; set; }
 
     public RestoreBackupViewModel(
         IServerBackupService backupService,
@@ -109,7 +109,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         }
 
         if (!Views.DialogHelper.Confirm(
-            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法撤銷。",
+            $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
             "確認還原備份",
             MessageBoxImage.Warning))
         {
@@ -118,21 +118,41 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
 
         IsBusy = true;
         StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
+
+        var progressDialog = new Views.ServerBackupProgressDialog(_serverName, "還原")
+        {
+            Owner = Application.Current?.MainWindow
+        };
+        progressDialog.Show();
+
         try
         {
-            bool success = await Task.Run(() => _backupService.RestoreBackupAsync(_serverName, SelectedBackup.FileName, _backupDirectory)).ConfigureAwait(true);
+            bool success = await Task.Run(() => _backupService.RestoreBackupAsync(
+                _serverName,
+                SelectedBackup.FileName,
+                _backupDirectory,
+                progressDialog.Progress)).ConfigureAwait(true);
+
+            Views.ServerBackupProgressDialog.MarkCompleted();
+            progressDialog.Close();
+
             if (success)
             {
+                Views.DialogHelper.ShowInfo($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成");
                 RequestClose?.Invoke(true);
             }
             else
             {
                 StatusMessage = "還原失敗，伺服器資料未變更";
+                Views.DialogHelper.ShowWarning("還原失敗，伺服器檔案未變更。", "還原失敗");
             }
         }
         catch (Exception ex)
         {
+            Views.ServerBackupProgressDialog.MarkCompleted();
+            progressDialog.Close();
             StatusMessage = $"還原異常：{ex.Message}";
+            Views.DialogHelper.ShowWarning($"還原過程發生未預期異常：{ex.Message}", "還原異常");
         }
         finally
         {

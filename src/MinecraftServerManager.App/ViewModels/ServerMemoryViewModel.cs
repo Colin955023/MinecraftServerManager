@@ -5,7 +5,7 @@ using MinecraftServerManager.Domain.Servers;
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>
-/// 伺服器記憶體設定對話框 ViewModel
+/// 伺服器記憶體設定對話方塊 ViewModel
 /// </summary>
 public sealed partial class ServerMemoryViewModel(
     ServerConfig config,
@@ -17,19 +17,19 @@ public sealed partial class ServerMemoryViewModel(
     private readonly long _systemMemoryMb = systemMemoryMb ?? GetSystemMemoryMb();
 
     [ObservableProperty]
-    private string _maxMemoryMb = config.MemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public partial string MaxMemoryMb { get; set; } = config.MemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     [ObservableProperty]
-    private string _minMemoryMb = config.MemoryMinMb.HasValue ? config.MemoryMinMb.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+    public partial string MinMemoryMb { get; set; } = config.MemoryMinMb.HasValue ? config.MemoryMinMb.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
 
     [ObservableProperty]
-    private string _errorMessage = string.Empty;
+    public partial string ErrorMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private bool _hasError;
+    public partial bool HasError { get; set; }
 
     [ObservableProperty]
-    private bool _isBusy;
+    public partial bool IsBusy { get; set; }
 
     public string ServerName => _config.Name.Value;
 

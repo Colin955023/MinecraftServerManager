@@ -19,6 +19,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
     public string? ActiveServerName { get; private set; }
 
     public event Action<string>? OutputLineReceived;
+    public event Action? ServerStarted;
     public event Action<int>? ServerExited;
     public event Action? ServerReady;
 
@@ -29,23 +30,25 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         if (IsRunning)
         {
-            Logger.Warning("嘗試啟動伺服器但已有程序在執行中 (PID: {Pid})", Pid);
-            throw new InvalidOperationException("伺服器程序已在執行中");
+            Logger.Warning("嘗試啟動伺服器但已有行程在執行中 (PID: {Pid})", Pid);
+            throw new InvalidOperationException("伺服器行程已在執行中");
         }
 
         IsReady = false;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
-        Logger.Information("啟動伺服器程序 (目錄: {Directory}, Java: {Java}, 參數量: {ArgCount})", stableDir, plan.JavaExecutable, plan.Arguments.Count);
+        Logger.Information("啟動伺服器行程 (目錄: {Directory}, Java: {Java}, 參數量: {ArgCount})", stableDir, plan.JavaExecutable, plan.Arguments.Count);
 
         var spec = new ProcessStartSpec(
             FileName: plan.JavaExecutable,
             Arguments: plan.Arguments,
-            WorkingDirectory: stableDir);
+            WorkingDirectory: stableDir,
+            Environment: plan.Environment);
 
         _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
         ActiveServerName = plan.ServerName ?? Path.GetFileName(stableDir);
-        Logger.Information("伺服器「{Server}」程序已啟動，PID: {Pid}", ActiveServerName, _process.Pid);
+        Logger.Information("伺服器「{Server}」行程已啟動，PID: {Pid}", ActiveServerName, _process.Pid);
         _process.OutputReceived += OnOutputReceived;
+        ServerStarted?.Invoke();
 
         _ = MonitorExitAsync(_process);
     }
@@ -65,8 +68,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         if (IsRunning)
         {
-            Logger.Warning("嘗試啟動伺服器但已有程序在執行中 (PID: {Pid})", Pid);
-            throw new InvalidOperationException("伺服器程序已在執行中");
+            Logger.Warning("嘗試啟動伺服器但已有行程在執行中 (PID: {Pid})", Pid);
+            throw new InvalidOperationException("伺服器行程已在執行中");
         }
 
         IsReady = false;
@@ -78,10 +81,18 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         {
             string scriptPath = Path.Combine(stableDir, executableName);
             Logger.Information("啟動批次檔腳本伺服器 (路徑: {Script})", scriptPath);
+
+            IReadOnlyDictionary<string, string?>? env = null;
+            if (!string.IsNullOrWhiteSpace(javaExecutablePath) && !string.Equals(javaExecutablePath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
+            {
+                env = ServerLaunchPlanner.BuildJavaEnvironment(javaExecutablePath.Trim());
+            }
+
             spec = new ProcessStartSpec(
                 FileName: scriptPath,
                 Arguments: [],
-                WorkingDirectory: stableDir);
+                WorkingDirectory: stableDir,
+                Environment: env);
         }
         else
         {
@@ -108,8 +119,9 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
         ActiveServerName = Path.GetFileName(stableDir);
-        Logger.Information("伺服器程序已成功啟動，PID: {Pid}", _process.Pid);
+        Logger.Information("伺服器行程已成功啟動，PID: {Pid}", _process.Pid);
         _process.OutputReceived += OnOutputReceived;
+        ServerStarted?.Invoke();
 
         _ = MonitorExitAsync(_process);
     }
@@ -147,7 +159,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             return new ProcessExitResult(ExitCode ?? 0, false);
         }
 
-        Logger.Information("發送伺服器停止請求 (stop 指令，優雅終止等候: {Timeout})", gracefulTimeout);
+        Logger.Information("傳送伺服器停止請求 (stop 指令，平順終止等候: {Timeout})", gracefulTimeout);
 
         // 嘗試寫入 stop 讓伺服器正常存檔關閉
         await SendCommandAsync("stop", cancellationToken).ConfigureAwait(false);
@@ -161,7 +173,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            Logger.Warning("伺服器未在 {Timeout} 內優雅關閉，發送強制終止命令", gracefulTimeout);
+            Logger.Warning("伺服器未在 {Timeout} 內平順關閉，傳送強制終止命令", gracefulTimeout);
             // 逾時，強制樹狀終止
             return await _process.StopAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
         }
@@ -179,7 +191,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         if (_process is not null)
         {
-            Logger.Information("處置伺服器程序資源 (PID: {Pid})", _process.Pid);
+            Logger.Information("處置伺服器行程資源 (PID: {Pid})", _process.Pid);
             await _process.DisposeAsync().ConfigureAwait(false);
             _process = null;
         }
@@ -204,13 +216,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         try
         {
             var result = await proc.WaitForExitAsync().ConfigureAwait(false);
-            Logger.Information("伺服器監控回報程序 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
+            Logger.Information("伺服器監控回報行程 (PID: {Pid}) 已結束，結束代碼: {ExitCode}, 是否被強制終止: {WasForceStopped}", proc.Pid, result.ExitCode, result.WasForceStopped);
             IsReady = false;
             ServerExited?.Invoke(result.ExitCode);
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "伺服器程序監控異常 (PID: {Pid})", proc.Pid);
+            Logger.Error(ex, "伺服器行程監控異常 (PID: {Pid})", proc.Pid);
         }
         finally
         {

@@ -96,4 +96,56 @@ internal static class FileSafety
 
         return true;
     }
+
+    public static void ClearReadOnlyAttribute(string path)
+    {
+        try
+        {
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                var attrs = File.GetAttributes(path);
+                if ((attrs & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly);
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    public static void ClearReadOnlyRecursively(string directoryPath)
+    {
+        try
+        {
+            if (!Directory.Exists(directoryPath))
+            {
+                return;
+            }
+
+            var dirInfo = new DirectoryInfo(directoryPath);
+            foreach (var info in dirInfo.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    if ((info.Attributes & FileAttributes.ReadOnly) != 0)
+                    {
+                        info.Attributes &= ~FileAttributes.ReadOnly;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            if ((dirInfo.Attributes & FileAttributes.ReadOnly) != 0)
+            {
+                dirInfo.Attributes &= ~FileAttributes.ReadOnly;
+            }
+        }
+        catch
+        {
+        }
+    }
 }

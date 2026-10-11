@@ -128,9 +128,11 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         int major = await service.GetRequiredJavaMajorAsync("1.21.4");
         Assert.Equal(21, major);
 
-        // 驗證已寫入磁碟快取檔案
-        string cacheFile = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
-        Assert.True(File.Exists(cacheFile));
+        // 驗證已寫入版本快取檔案且未建立舊版獨立快取
+        string versionsCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.VersionsCacheFileName);
+        string reqCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
+        Assert.True(File.Exists(versionsCache));
+        Assert.False(File.Exists(reqCache));
 
         // 第二次呼叫時命中快取，請求數不再增加
         int reqCountBefore = mockHttp.RequestCount;
@@ -189,8 +191,10 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
         Assert.Equal(21, dict["1.21.4"]);
         Assert.Equal(8, dict["1.16.5"]);
 
-        string cacheFile = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
-        Assert.True(File.Exists(cacheFile));
+        string versionsCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.VersionsCacheFileName);
+        string reqCache = Path.Combine(_testTempDir, MinecraftJavaRequirementService.RequirementsCacheFileName);
+        Assert.True(File.Exists(versionsCache));
+        Assert.False(File.Exists(reqCache));
     }
 
     [Fact]

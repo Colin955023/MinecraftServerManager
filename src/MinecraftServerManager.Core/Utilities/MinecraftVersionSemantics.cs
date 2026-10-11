@@ -209,7 +209,7 @@ public static partial class MinecraftVersionSemantics
     }
 
     /// <summary>
-    /// 清除模組版本字串中的載入器與發行階段後綴
+    /// 清除模組版本字串中的載入器與發行階段字尾
     /// </summary>
     public static string CleanModVersion(string? version)
     {
@@ -228,7 +228,7 @@ public static partial class MinecraftVersionSemantics
     private static partial Regex TrailingJunkPattern();
 
     /// <summary>
-    /// 正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號
+    /// 正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號碼
     /// </summary>
     public static string NormalizeMinecraftVersion(string? raw)
     {

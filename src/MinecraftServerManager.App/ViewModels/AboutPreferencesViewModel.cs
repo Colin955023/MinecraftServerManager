@@ -21,19 +21,19 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsManualCheckVisible))]
-    private bool _isAutoUpdateEnabled = true;
+    public partial bool IsAutoUpdateEnabled { get; set; } = true;
 
     public bool IsManualCheckVisible => !IsAutoUpdateEnabled;
 
     [ObservableProperty]
-    private int _selectedThemeModeIndex;
+    public partial int SelectedThemeModeIndex { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsCustomScaleVisible))]
-    private int _selectedUiScaleIndex = 1;
+    public partial int SelectedUiScaleIndex { get; set; } = 1;
 
     [ObservableProperty]
-    private string _customUiScaleText = "100";
+    public partial string CustomUiScaleText { get; set; } = "100";
 
     /// <summary>
     /// 選擇「自訂」時顯示輸入框與百分比提示。
@@ -41,10 +41,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public bool IsCustomScaleVisible => SelectedUiScaleIndex == UiScaleOptions.Count - 1;
 
     [ObservableProperty]
-    private string _screenResolutionInfo = "目前螢幕解析度: 1920 × 1080";
+    public partial string ScreenResolutionInfo { get; set; } = "目前螢幕解析度: 1920 × 1080";
 
     [ObservableProperty]
-    private string _currentWindowSizeInfo = "目前主視窗大小: 1350 × 820";
+    public partial string CurrentWindowSizeInfo { get; set; } = "目前主視窗大小: 1350 × 820";
 
     public AboutPreferencesViewModel(
         SettingsManager? settingsManager = null,
@@ -54,7 +54,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         Action<string, bool>? notificationSink = null,
         IExternalLauncher? launcher = null,
         Action<double>? onUiScaleChanged = null)
-        : base("about_preferences", "關於與設定", "查看應用程式資訊、授權條款與視窗偏好設定")
+        : base("about_preferences", "關於與設定", "檢視應用程式資訊、授權條款與視窗偏好設定")
     {
         _settingsManager = settingsManager;
         _updateChecker = updateChecker;
@@ -66,9 +66,9 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
         if (_settingsManager is not null)
         {
-            _isAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
+            IsAutoUpdateEnabled = _settingsManager.IsAutoUpdateEnabled();
             string theme = _settingsManager.GetThemeMode();
-            _selectedThemeModeIndex = theme switch
+            SelectedThemeModeIndex = theme switch
             {
                 "light" => 1,
                 "dark" => 2,
@@ -76,8 +76,8 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             };
 
             double scale = _settingsManager.GetUiScale();
-            _customUiScaleText = ((int)Math.Round(scale * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            _selectedUiScaleIndex = PresetScales.IndexOf(scale) is int idx && idx >= 0 ? idx : UiScaleOptions.Count - 1;
+            CustomUiScaleText = ((int)Math.Round(scale * 100)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            SelectedUiScaleIndex = PresetScales.IndexOf(scale) is int idx && idx >= 0 ? idx : UiScaleOptions.Count - 1;
         }
     }
 
@@ -202,7 +202,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     {
         if (string.IsNullOrWhiteSpace(notes))
         {
-            return "(無更新日誌)";
+            return "(無更新紀錄)";
         }
 
         var keptLines = new List<string>();
@@ -232,7 +232,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
         if (start > end)
         {
-            return "(無更新日誌)";
+            return "(無更新紀錄)";
         }
 
         var trimmedLines = keptLines.Skip(start).Take(end - start + 1).ToList();
@@ -240,7 +240,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         if (trimmedLines.Count > 15)
         {
             trimmedLines = [.. trimmedLines.Take(15)];
-            trimmedLines.Add("... (完整內容請查看發行頁面)");
+            trimmedLines.Add("... (完整內容請檢視發行頁面)");
         }
 
         return string.Join(Environment.NewLine, trimmedLines);
@@ -258,7 +258,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     [RelayCommand]
     private void ResetAllSettings()
     {
-        if (!Views.DialogHelper.Confirm("確定要恢復所有偏好設定為原廠預設值嗎？", "確認恢復預設", MessageBoxImage.Warning))
+        if (!Views.DialogHelper.Confirm("確定要將所有偏好設定還原為原廠預設值嗎？", "確認還原預設", MessageBoxImage.Warning))
         {
             return;
         }
@@ -273,8 +273,9 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         _settingsManager?.SetThemeMode("system");
         _settingsManager?.SetUiScale(1.0);
         _onUiScaleChanged?.Invoke(1.0);
+        _onResetWindowSizeRequested?.Invoke();
 
-        _notificationSink?.Invoke("已恢復所有偏好設定為預設值", false);
+        _notificationSink?.Invoke("已還原所有偏好設定為預設值", false);
     }
 
 

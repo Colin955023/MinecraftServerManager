@@ -204,37 +204,11 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
     {
         foreach (var (key, value) in patches)
         {
-            if (string.Equals(key, "server-port", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(key, "query.port", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(key, "rcon.port", StringComparison.OrdinalIgnoreCase))
+            string defaultVal = ServerPropertiesMetadata.GetDefault(key, string.Empty);
+            var (isValid, error) = ServerPropertiesValidator.ValidateProperty(key, value, defaultVal);
+            if (!isValid)
             {
-                if (!int.TryParse(value, out int port) || port is < 1 or > 65534)
-                {
-                    return $"連接埠 {key} 必須在 1 到 65534 之間";
-                }
-            }
-            else if (string.Equals(key, "max-players", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!int.TryParse(value, out int players) || players < 0)
-                {
-                    return "max-players 必須大於或等於 0";
-                }
-            }
-            else if (string.Equals(key, "difficulty", StringComparison.OrdinalIgnoreCase))
-            {
-                string lower = value.Trim().ToLowerInvariant();
-                if (lower is not ("peaceful" or "easy" or "normal" or "hard"))
-                {
-                    return $"難度設定值無效：{value}";
-                }
-            }
-            else if (string.Equals(key, "gamemode", StringComparison.OrdinalIgnoreCase))
-            {
-                string lower = value.Trim().ToLowerInvariant();
-                if (lower is not ("survival" or "creative" or "adventure" or "spectator"))
-                {
-                    return $"遊戲模式設定值無效：{value}";
-                }
+                return error;
             }
         }
 

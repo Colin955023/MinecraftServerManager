@@ -13,7 +13,8 @@ public sealed record ServerLaunchPlan(
     int MinMemoryMb,
     int MaxMemoryMb,
     bool IsScript,
-    string? ServerName = null);
+    string? ServerName = null,
+    IReadOnlyDictionary<string, string?>? Environment = null);
 
 /// <summary>
 /// 伺服器啟動規劃器契約介面

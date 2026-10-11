@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text;
 using MinecraftServerManager.Core.Ports;
@@ -9,6 +10,10 @@ namespace MinecraftServerManager.Infrastructure.Process;
 public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ProcessRunner");
+
+    private static readonly FrozenSet<string> AllowedOpenFileExtensions =
+        new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv" }
+            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public bool OpenFolder(string folderPath)
     {
@@ -45,10 +50,11 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
 
         try
         {
+            string sanitized = Path.GetFullPath(filePath).Replace("\"", string.Empty);
             using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
             {
                 FileName = "explorer.exe",
-                Arguments = $"/select,\"{filePath}\"",
+                Arguments = $"/select,\"{sanitized}\"",
                 UseShellExecute = true,
             });
             Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
@@ -57,6 +63,38 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         catch (Exception ex)
         {
             Logger.Error(ex, "在資料夾中顯示檔案異常: {Path}", filePath);
+            return false;
+        }
+    }
+
+    public bool OpenFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        {
+            Logger.Warning("開啟檔案失敗，檔案不存在或為空: {Path}", filePath);
+            return false;
+        }
+
+        string ext = Path.GetExtension(filePath);
+        if (!AllowedOpenFileExtensions.Contains(ext))
+        {
+            Logger.Warning("拒絕開啟不具備文字或記錄檔白名單副檔名之檔案: {Path}", filePath);
+            return false;
+        }
+
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
+            {
+                FileName = filePath,
+                UseShellExecute = true,
+            });
+            Logger.Information("已開啟檔案: {Path}", filePath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error(ex, "開啟檔案異常: {Path}", filePath);
             return false;
         }
     }
@@ -71,7 +109,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
 
         if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
         {
-            Logger.Warning("開啟網址被拒絕，非 HTTP/HTTPS 協議: {Url}", url);
+            Logger.Warning("開啟網址被拒絕，非 HTTP/HTTPS 協定: {Url}", url);
             return false;
         }
 
@@ -100,7 +138,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         cancellationToken.ThrowIfCancellationRequested();
         string resolvedFileName = ResolveAndValidateExecutable(specification);
 
-        Logger.Information("準備啟動子程序: {FileName} (工作目錄: {WorkingDirectory})", resolvedFileName, specification.WorkingDirectory);
+        Logger.Information("準備啟動子行程: {FileName} (工作目錄: {WorkingDirectory})", resolvedFileName, specification.WorkingDirectory);
 
         var startInfo = new ProcessStartInfo
         {
@@ -144,16 +182,16 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         {
             if (!process.Start())
             {
-                Logger.Error("無法啟動子程序: {FileName}", resolvedFileName);
-                throw new InvalidOperationException("無法啟動子程序");
+                Logger.Error("無法啟動子行程: {FileName}", resolvedFileName);
+                throw new InvalidOperationException("無法啟動子行程");
             }
 
-            Logger.Information("子程序啟動成功，PID: {Pid} ({FileName})", process.Id, resolvedFileName);
+            Logger.Information("子行程啟動成功，PID: {Pid} ({FileName})", process.Id, resolvedFileName);
             return Task.FromResult<IManagedProcess>(new ManagedProcess(process));
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "啟動子程序失敗: {FileName}", resolvedFileName);
+            Logger.Error(ex, "啟動子行程失敗: {FileName}", resolvedFileName);
             process.Dispose();
             throw;
         }
@@ -298,7 +336,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             ObjectDisposedException.ThrowIf(_disposed, this);
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
-            Logger.Information("子程序 (PID: {Pid}) 結束，結束代碼: {ExitCode}, 強制終止: {WasForceStopped}", _process.Id, _process.ExitCode, _wasForceStopped);
+            Logger.Information("子行程 (PID: {Pid}) 結束，結束代碼: {ExitCode}, 強制終止: {WasForceStopped}", _process.Id, _process.ExitCode, _wasForceStopped);
             return new(_process.ExitCode, _wasForceStopped);
         }
 
@@ -310,7 +348,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             ArgumentOutOfRangeException.ThrowIfLessThan(gracefulTimeout, TimeSpan.Zero);
             if (!HasExited)
             {
-                Logger.Information("正在請求子程序 (PID: {Pid}) 關閉主視窗，等候逾時: {Timeout}", _process.Id, gracefulTimeout);
+                Logger.Information("正在請求子行程 (PID: {Pid}) 關閉主視窗，等候逾時: {Timeout}", _process.Id, gracefulTimeout);
                 _process.CloseMainWindow();
                 using var timeout = new CancellationTokenSource(gracefulTimeout);
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
@@ -321,7 +359,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
                     _wasForceStopped = true;
-                    Logger.Warning("子程序 (PID: {Pid}) 未在預期時間內結束，執行強制中斷程序樹", _process.Id);
+                    Logger.Warning("子行程 (PID: {Pid}) 未在預期時間內結束，執行強制中斷行程樹", _process.Id);
                     _process.Kill(entireProcessTree: true);
                 }
             }

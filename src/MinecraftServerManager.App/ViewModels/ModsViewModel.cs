@@ -10,6 +10,7 @@ using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -32,6 +33,10 @@ public sealed partial class LocalModRowItem : ObservableObject
 
     public string LoaderType { get; init; } = "-";
 
+    public string MinecraftVersion { get; init; } = "-";
+
+    public long RawFileSize { get; init; }
+
     public string ModifiedTime { get; init; } = "-";
 
     public string Description { get; init; } = string.Empty;
@@ -41,10 +46,13 @@ public sealed partial class LocalModRowItem : ObservableObject
     public string HashAlgorithm { get; init; } = string.Empty;
 
     [ObservableProperty]
-    private bool _isSelected;
+    public partial bool IsSelected { get; set; }
 
     [ObservableProperty]
-    private bool _isEnabled = true;
+    public partial bool IsEnabled { get; set; } = true;
+
+    [ObservableProperty]
+    public partial string SourcePlatform { get; set; } = "-";
 }
 
 /// <summary>
@@ -53,6 +61,8 @@ public sealed partial class LocalModRowItem : ObservableObject
 public sealed class OnlineModRowItem
 {
     public string Id { get; init; } = string.Empty;
+
+    public string? Slug { get; init; }
 
     public string Title { get; init; } = string.Empty;
 
@@ -65,6 +75,10 @@ public sealed class OnlineModRowItem
     public long DownloadCountRaw { get; init; }
 
     public string LatestVersion { get; init; } = string.Empty;
+
+    public string ServerSide { get; init; } = string.Empty;
+
+    public string ClientSide { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -78,7 +92,11 @@ public sealed class ModInstallQueueItem
 
     public string VersionNumber { get; init; } = string.Empty;
 
+    public string? CurrentVersion { get; init; }
+
     public string FileName { get; init; } = string.Empty;
+
+    public string? OldFileName { get; init; }
 
     public string DownloadUrl { get; init; } = string.Empty;
 
@@ -87,6 +105,16 @@ public sealed class ModInstallQueueItem
     public string HashAlgorithm { get; init; } = "sha512";
 
     public IReadOnlyList<string> Dependencies { get; init; } = [];
+
+    public ModInstallAction Action { get; init; } = ModInstallAction.Install;
+
+    public string ActionText => Action == ModInstallAction.Update ? "更新" : "安裝";
+
+    public string VersionDisplay => Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(CurrentVersion)
+        ? $"{CurrentVersion} ➔ {VersionNumber}"
+        : VersionNumber;
+
+    public string Reason { get; init; } = "全新安裝";
 }
 
 /// <summary>
@@ -101,6 +129,7 @@ public sealed partial class ModsViewModel : PageViewModel
     private readonly IModManager? _modManager;
     private readonly IModrinthClient? _modrinthClient;
     private readonly IExternalLauncher? _launcher;
+    private readonly IModDependencyPlanner _dependencyPlanner;
 
     private readonly List<LocalModRowItem> _allLocalMods = [];
     private readonly List<OnlineModRowItem> _allOnlineMods = [];
@@ -116,53 +145,65 @@ public sealed partial class ModsViewModel : PageViewModel
     private bool _isLoadingServers;
 
     [ObservableProperty]
-    private string _selectedServer = "請選擇伺服器";
+    public partial string SelectedServer { get; set; } = "請選擇伺服器";
 
     [ObservableProperty]
-    private bool _hasSelectedServer;
+    public partial bool HasSelectedServer { get; set; }
 
     [ObservableProperty]
-    private string _localSearchText = string.Empty;
+    public partial string LocalSearchText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _selectedLocalFilter = "全部";
+    public partial string SelectedLocalFilter { get; set; } = "全部";
 
     [ObservableProperty]
-    private string _onlineSearchText = string.Empty;
+    public partial string OnlineSearchText { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _selectedOnlineSort = "相關性";
+    public partial string SelectedPlatform { get; set; } = "Modrinth";
+
+    public string OpenPlatformPageButtonText => string.Equals(SelectedPlatform, "CurseForge", StringComparison.OrdinalIgnoreCase)
+        ? "開啟 CurseForge 頁面"
+        : "開啟 Modrinth 頁面";
 
     [ObservableProperty]
-    private LocalModRowItem? _selectedLocalMod;
+    public partial string SelectedOnlineSort { get; set; } = "相關性";
 
     [ObservableProperty]
-    private OnlineModRowItem? _selectedOnlineMod;
+    public partial LocalModRowItem? SelectedLocalMod { get; set; }
 
     [ObservableProperty]
-    private bool _canBatchToggle;
+    public partial OnlineModRowItem? SelectedOnlineMod { get; set; }
 
     [ObservableProperty]
-    private bool _canCheckUpdates;
+    public partial bool CanBatchToggle { get; set; }
 
     [ObservableProperty]
-    private string _onlineFilterHint = "請先選擇伺服器以篩選相容模組";
+    public partial bool CanCheckUpdates { get; set; }
 
     [ObservableProperty]
-    private bool _isSearchingOnline;
+    public partial bool CanDeleteMod { get; set; }
 
     [ObservableProperty]
-    private bool _isInstallingMod;
+    public partial string OnlineFilterHint { get; set; } = "請先選擇伺服器以篩選相容模組";
+
+    [ObservableProperty]
+    public partial bool IsSearchingOnline { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsInstallingMod { get; set; }
 
     /// <summary>
     /// 線上搜尋結果提示。
     /// </summary>
     [ObservableProperty]
-    private string _onlineResultHint = string.Empty;
+    public partial string OnlineResultHint { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _installQueueHint = "安裝清單：0 個項目";
+    public partial string InstallQueueHint { get; set; } = "安裝清單：0 個項目";
 
+    [ObservableProperty]
+    public partial int SelectedTabIndex { get; set; }
     public ObservableCollection<string> Servers { get; } = [];
 
     /// <summary>
@@ -177,13 +218,15 @@ public sealed partial class ModsViewModel : PageViewModel
     public static IReadOnlyList<string> LocalFilterOptions { get; } = ["全部", "已啟用", "已停用"];
 
     public static IReadOnlyList<string> OnlineSortOptions { get; } = ["相關性", "下載量", "最新發布", "最近更新", "名稱"];
+    public static IReadOnlyList<string> PlatformOptions { get; } = ["Modrinth", "CurseForge"];
 
     public ModsViewModel(
         IServerManager? serverManager = null,
         IModManager? modManager = null,
         IModrinthClient? modrinthClient = null,
         Action<string, bool>? notificationSink = null,
-        IExternalLauncher? launcher = null)
+        IExternalLauncher? launcher = null,
+        IModDependencyPlanner? dependencyPlanner = null)
         : base("mods", "🧩 模組管理", "參考 Prism Launcher 的模組管理流程")
     {
         _serverManager = serverManager;
@@ -191,8 +234,17 @@ public sealed partial class ModsViewModel : PageViewModel
         _modrinthClient = modrinthClient;
         _notificationSink = notificationSink;
         _launcher = launcher;
+        _dependencyPlanner = dependencyPlanner ?? new ModDependencyPlanner();
 
         _ = LoadServersInternalAsync();
+    }
+
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        if (value == 1 && _allOnlineMods.Count == 0 && !IsSearchingOnline)
+        {
+            _ = SearchOnlineModsAsync();
+        }
     }
 
     partial void OnLocalSearchTextChanged(string value) => ApplyLocalFilter();
@@ -200,6 +252,32 @@ public sealed partial class ModsViewModel : PageViewModel
     partial void OnSelectedLocalFilterChanged(string value) => ApplyLocalFilter();
 
     partial void OnSelectedOnlineSortChanged(string value) => ApplyOnlineSort();
+
+    partial void OnSelectedPlatformChanged(string value)
+    {
+        OnPropertyChanged(nameof(OpenPlatformPageButtonText));
+        if (value == "CurseForge")
+        {
+            _allOnlineMods.Clear();
+            OnlineMods.Clear();
+            SelectedOnlineMod = null;
+            OnlineResultHint = "CurseForge 模組搜尋即將推出，敬請期待";
+        }
+        else
+        {
+            OnlineResultHint = string.Empty;
+            if (SelectedTabIndex == 1)
+            {
+                _ = SearchOnlineModsAsync();
+            }
+        }
+    }
+
+    partial void OnSelectedLocalModChanged(LocalModRowItem? value)
+    {
+        CanDeleteMod = value is not null || LocalMods.Any(m => m.IsSelected);
+        DeleteSelectedModCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnSelectedServerChanged(string value)
     {
@@ -239,7 +317,7 @@ public sealed partial class ModsViewModel : PageViewModel
                         Servers.Add(name);
                     }
 
-                    // 保留既有選取項目，避免刷新後重置回第一筆
+                    // 保留既有選取項目，避免重新整理後重設回第一筆
                     string target = serverNames.Contains(previous, StringComparer.OrdinalIgnoreCase)
                         ? previous
                         : serverNames[0];
@@ -290,6 +368,8 @@ public sealed partial class ModsViewModel : PageViewModel
             SelectedLocalMod = null;
             CanBatchToggle = false;
             CanCheckUpdates = false;
+            CanDeleteMod = false;
+            DeleteSelectedModCommand.NotifyCanExecuteChanged();
 
             if (_serverManager is null || _modManager is null || string.IsNullOrWhiteSpace(SelectedServer) || SelectedServer == "請選擇伺服器")
             {
@@ -304,7 +384,7 @@ public sealed partial class ModsViewModel : PageViewModel
                 return;
             }
 
-            OnlineFilterHint = $"相容條件：Minecraft {server.MinecraftVersion.Value} ｜ 載入器: {server.LoaderType} ｜ 自動篩選相容版本";
+            OnlineFilterHint = $"相容條件：Minecraft {server.MinecraftVersion.Value} ｜ 載入器: {server.LoaderType} ｜ 僅限伺服器端與兩端相容模組";
 
             var mods = await _modManager.GetModsAsync(server.Path);
 
@@ -328,9 +408,16 @@ public sealed partial class ModsViewModel : PageViewModel
                     FileSize = FormatModSize(mod.FileSize),
                     Author = string.IsNullOrWhiteSpace(mod.Author) ? "-" : mod.Author,
                     LoaderType = string.IsNullOrWhiteSpace(mod.LoaderType) ? "-" : mod.LoaderType,
+                    MinecraftVersion = string.IsNullOrWhiteSpace(mod.MinecraftVersion) ? "-" : mod.MinecraftVersion,
+                    RawFileSize = mod.FileSize,
                     ModifiedTime = FormatModTime(mod.FileMtime),
                     Description = mod.Description,
                     IsEnabled = mod.Status == ModStatus.Enabled,
+                    SourcePlatform = mod.Platform switch
+                    {
+                        ModPlatform.CurseForge => "CurseForge",
+                        _ => "Modrinth"
+                    },
                     CurrentHash = mod.CurrentHash,
                     HashAlgorithm = mod.HashAlgorithm
                 });
@@ -350,13 +437,8 @@ public sealed partial class ModsViewModel : PageViewModel
         }
     }
 
-    private static string FormatModSize(long bytes) => bytes switch
-    {
-        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):F2} MB",
-        >= 1024L => $"{bytes / 1024.0:F2} KB",
-        > 0 => $"{bytes} B",
-        _ => "-"
-    };
+    private static string FormatModSize(long bytes) =>
+        bytes > 0 ? Core.Utilities.MemoryUtils.FormatBytes(bytes) : "-";
 
     private static string FormatModTime(double unixSeconds)
     {
@@ -418,8 +500,7 @@ public sealed partial class ModsViewModel : PageViewModel
             mod.IsSelected = targetState;
         }
         int selCount = LocalMods.Count(m => m.IsSelected);
-        CanBatchToggle = selCount >= 2;
-        CanCheckUpdates = selCount >= 1;
+        UpdateSelectionState(selCount);
         Logger.Information("已執行模組全選/取消全選，目標狀態: {State}", targetState);
     }
 
@@ -427,6 +508,8 @@ public sealed partial class ModsViewModel : PageViewModel
     {
         CanBatchToggle = selectedCount >= 2;
         CanCheckUpdates = selectedCount >= 1;
+        CanDeleteMod = selectedCount >= 1 || SelectedLocalMod is not null;
+        DeleteSelectedModCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
@@ -505,6 +588,57 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     [RelayCommand]
+    public void CopyModInfo(LocalModRowItem? item)
+    {
+        var target = item ?? SelectedLocalMod;
+        if (target is null)
+        {
+            return;
+        }
+
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(target.Name))
+        {
+            lines.Add($"模組名稱: {target.Name.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(target.Version) && target.Version != "-")
+        {
+            lines.Add($"版本: {target.Version.Trim()}");
+        }
+        lines.Add($"狀態: {(target.IsEnabled ? "啟用" : "停用")}");
+        if (!string.IsNullOrWhiteSpace(target.Author) && target.Author != "-")
+        {
+            lines.Add($"作者: {target.Author.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(target.LoaderType) && target.LoaderType != "-")
+        {
+            lines.Add($"載入器: {target.LoaderType.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(target.FileSize) && target.FileSize != "-")
+        {
+            lines.Add($"檔案大小: {target.FileSize.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(target.ModifiedTime) && target.ModifiedTime != "-")
+        {
+            lines.Add($"修改時間: {target.ModifiedTime.Trim()}");
+        }
+        if (!string.IsNullOrWhiteSpace(target.Description))
+        {
+            lines.Add($"描述: {target.Description.Trim()}");
+        }
+
+        string text = string.Join(Environment.NewLine, lines);
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("複製模組資訊至剪貼簿失敗: {Message}", ex.Message);
+        }
+    }
+
+    [RelayCommand]
     public async Task CheckModUpdatesAsync()
     {
         var targets = LocalMods.Where(m => m.IsSelected).ToList();
@@ -526,17 +660,18 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        Logger.Information("開始檢查已選取模組更新，共 {Count} 個模組", targets.Count);
-        _notificationSink?.Invoke($"正在檢查 {targets.Count} 個模組的更新...", false);
+        Logger.Information("開始檢查已選取模組更新，共 {Count} 個模組（預設優先使用 Modrinth）", targets.Count);
 
         string loader = server.LoaderType.ToString().ToLowerInvariant();
         string mcVer = server.MinecraftVersion.Value;
         var candidates = new List<ModUpdateCandidateItem>();
 
+        var installedMods = _modManager is not null ? await _modManager.GetModsAsync(server.Path).ConfigureAwait(true) : [];
+
         ModOperationProgressDialog? progressDialog = null;
         if (Application.Current is not null)
         {
-            progressDialog = new ModOperationProgressDialog("檢查模組更新中", "正在連接 Modrinth 查詢最新相容版本...");
+            progressDialog = new ModOperationProgressDialog("檢查模組更新中", "正在連線查詢最新相容版本...");
             if (Application.Current.MainWindow is not null)
             {
                 progressDialog.Owner = Application.Current.MainWindow;
@@ -581,14 +716,30 @@ public sealed partial class ModsViewModel : PageViewModel
 
                     if (versions.Count > 0)
                     {
-                        var latest = versions[0];
-                        var primaryFile = latest.PrimaryFile;
-                        if (primaryFile is not null &&
-                            !string.IsNullOrWhiteSpace(latest.VersionNumber) &&
-                            !string.Equals(latest.VersionNumber, mod.Version, StringComparison.OrdinalIgnoreCase) &&
-                            !string.Equals(mod.Version, "-", StringComparison.Ordinal) &&
-                            !string.IsNullOrWhiteSpace(primaryFile.Url))
+                        OnlineModVersion? compatibleLatest = null;
+                        foreach (var ver in versions)
                         {
+                            if (string.IsNullOrWhiteSpace(ver.VersionNumber) ||
+                                string.Equals(ver.VersionNumber, mod.Version, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(mod.Version, "-", StringComparison.Ordinal) ||
+                                ver.PrimaryFile is null ||
+                                string.IsNullOrWhiteSpace(ver.PrimaryFile.Url))
+                            {
+                                continue;
+                            }
+
+                            // 依照 Prism Launcher 規範：進行相容性與相依性評估，排除硬性不相容與衝突版本
+                            var report = _dependencyPlanner.EvaluateCompatibility(ver, mcVer, loader, installedMods);
+                            if (!report.HasHardErrors && report.IncompatibleInstalled.Count == 0)
+                            {
+                                compatibleLatest = ver;
+                                break;
+                            }
+                        }
+
+                        if (compatibleLatest is not null)
+                        {
+                            var primaryFile = compatibleLatest.PrimaryFile!;
                             string? sha512 = null;
                             string? sha1 = null;
                             if (primaryFile.Hashes is not null)
@@ -603,8 +754,8 @@ public sealed partial class ModsViewModel : PageViewModel
                             {
                                 ModName = mod.Name,
                                 CurrentVersion = mod.Version,
-                                NewVersion = latest.VersionNumber,
-                                FileName = !string.IsNullOrWhiteSpace(primaryFile.Filename) ? primaryFile.Filename : $"{mod.Name}-{latest.VersionNumber}.jar",
+                                NewVersion = compatibleLatest.VersionNumber,
+                                FileName = !string.IsNullOrWhiteSpace(primaryFile.Filename) ? primaryFile.Filename : $"{mod.Name}-{compatibleLatest.VersionNumber}.jar",
                                 DownloadUrl = primaryFile.Url,
                                 ExpectedHash = expectedHash,
                                 HashAlgorithm = hashAlgo,
@@ -621,7 +772,17 @@ public sealed partial class ModsViewModel : PageViewModel
         }
         finally
         {
-            progressDialog?.Close();
+            if (progressDialog is not null)
+            {
+                if (Application.Current is not null && !Application.Current.Dispatcher.CheckAccess())
+                {
+                    Application.Current.Dispatcher.Invoke(progressDialog.Close);
+                }
+                else
+                {
+                    progressDialog.Close();
+                }
+            }
         }
 
         if (candidates.Count > 0)
@@ -641,19 +802,29 @@ public sealed partial class ModsViewModel : PageViewModel
                     await PerformModUpdatesAsync(server.Path, toUpdate).ConfigureAwait(true);
                     await LoadLocalModsAsync().ConfigureAwait(true);
                     _notificationSink?.Invoke($"已成功更新 {toUpdate.Count} 個模組！", false);
-                    DialogHelper.ShowInfo($"成功更新 {toUpdate.Count} 個模組至最新相容版本！", "更新完成");
                 }
             }
         }
         else
         {
-            DialogHelper.ShowInfo($"檢查完成，所選取的 {targets.Count} 個模組皆為最新相容版本，無需更新。", "已是最新版本");
             _notificationSink?.Invoke($"檢查完成，選取的 {targets.Count} 個模組皆為相容最新版本", false);
         }
     }
 
     private async Task PerformModUpdatesAsync(string serverPath, IReadOnlyList<ModUpdateCandidateItem> items)
     {
+        var unofficial = items.Where(i => !ModFileInstaller.IsOfficialModrinthSource(i.DownloadUrl)).ToList();
+        if (unofficial.Count > 0)
+        {
+            string msg = "下列模組更新下載來源非官方 Modrinth CDN：\n" +
+                         string.Join("\n", unofficial.Select(u => $"• {u.ModName}: {u.DownloadUrl}")) +
+                         "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並更新？";
+            if (!DialogHelper.Confirm(msg, "非官方下載來源警告", MessageBoxImage.Warning))
+            {
+                return;
+            }
+        }
+
         ModOperationProgressDialog? updateProgressDialog = null;
         if (Application.Current is not null)
         {
@@ -705,7 +876,18 @@ public sealed partial class ModsViewModel : PageViewModel
         }
         finally
         {
-            updateProgressDialog?.Close();
+            if (updateProgressDialog is not null)
+            {
+                if (Application.Current is not null && !Application.Current.Dispatcher.CheckAccess())
+                {
+                    Application.Current.Dispatcher.Invoke(updateProgressDialog.Close);
+                }
+                else
+                {
+                    updateProgressDialog.Close();
+                }
+            }
+            ModFileInstaller.CleanupStagingDirectory(Path.Combine(serverPath, "mods"));
         }
     }
 
@@ -814,10 +996,16 @@ public sealed partial class ModsViewModel : PageViewModel
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanDeleteMod))]
     public async Task DeleteSelectedModAsync()
     {
-        if (SelectedLocalMod is null)
+        var targets = LocalMods.Where(m => m.IsSelected).ToList();
+        if (targets.Count == 0 && SelectedLocalMod is not null)
+        {
+            targets = [SelectedLocalMod];
+        }
+
+        if (targets.Count == 0)
         {
             _notificationSink?.Invoke("請先選取要刪除的模組", true);
             return;
@@ -834,22 +1022,37 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        var modToDelete = SelectedLocalMod;
-        if (!DialogHelper.Confirm(
-            $"確定要刪除模組「{modToDelete.Name}」嗎？\n此操作將永久刪除對應檔案，無法復原。",
-            "確認刪除模組",
-            MessageBoxImage.Warning))
+        string confirmMsg = targets.Count == 1
+            ? $"確定要刪除模組「{targets[0].Name}」嗎？\n此操作將永久刪除對應檔案，無法復原。"
+            : $"確定要刪除選取的 {targets.Count} 個模組嗎？\n此操作將永久刪除對應檔案，無法復原。";
+
+        if (!DialogHelper.Confirm(confirmMsg, "確認刪除模組", MessageBoxImage.Warning))
         {
             return;
         }
 
-        var result = await _modManager.DeleteModsAsync(server.Path, [modToDelete.Id]);
+        var idsToDelete = targets
+            .Select(m => !string.IsNullOrEmpty(m.FileName) ? m.FileName : m.Id)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var result = await _modManager.DeleteModsAsync(server.Path, idsToDelete);
         if (result.Completed || result.Partial)
         {
-            _allLocalMods.Remove(modToDelete);
-            LocalMods.Remove(modToDelete);
-            Logger.Information("刪除模組成功: {Name} ({FileName})", modToDelete.Name, modToDelete.FileName);
-            _notificationSink?.Invoke($"已成功刪除模組「{modToDelete.Name}」", false);
+            foreach (var mod in targets)
+            {
+                _allLocalMods.Remove(mod);
+                LocalMods.Remove(mod);
+            }
+
+            SelectedLocalMod = null;
+            UpdateSelectionState(0);
+
+            string successMsg = targets.Count == 1
+                ? $"已成功刪除模組「{targets[0].Name}」"
+                : $"已成功刪除 {targets.Count} 個模組";
+            Logger.Information("刪除模組成功，共 {Count} 個模組", targets.Count);
+            _notificationSink?.Invoke(successMsg, false);
         }
         else
         {
@@ -879,15 +1082,18 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand]
     public async Task SearchOnlineModsAsync()
     {
-        if (string.IsNullOrWhiteSpace(OnlineSearchText))
+        if (SelectedPlatform == "CurseForge")
         {
-            _notificationSink?.Invoke("請輸入搜尋關鍵字", true);
+            _allOnlineMods.Clear();
+            OnlineMods.Clear();
+            SelectedOnlineMod = null;
+            OnlineResultHint = "CurseForge 模組搜尋即將推出，敬請期待";
             return;
         }
 
         if (_modrinthClient is null)
         {
-            _notificationSink?.Invoke("Modrinth 客戶端未初始化", true);
+            _notificationSink?.Invoke("Modrinth 用戶端未初始化", true);
             return;
         }
 
@@ -910,20 +1116,24 @@ public sealed partial class ModsViewModel : PageViewModel
                 }
             }
 
-            Logger.Information("搜尋線上模組: 關鍵字: {Query}, 載入器: {Loader}, MC版本: {Version}", OnlineSearchText.Trim(), loader, mcVersion);
-            var results = await _modrinthClient.SearchModsAsync(OnlineSearchText.Trim(), loader: loader, minecraftVersion: mcVersion);
+            string query = OnlineSearchText?.Trim() ?? string.Empty;
+            Logger.Information("搜尋線上模組: 平台: {Platform}, 關鍵字: {Query}, 載入器: {Loader}, MC版本: {Version}", SelectedPlatform, query, loader, mcVersion);
+            var results = await _modrinthClient.SearchModsAsync(query, loader: loader, minecraftVersion: mcVersion);
 
             foreach (var item in results)
             {
                 _allOnlineMods.Add(new OnlineModRowItem
                 {
                     Id = item.ProjectId,
+                    Slug = item.Slug,
                     Title = item.Name,
                     Author = item.Author,
                     Description = item.Description,
                     Downloads = item.DownloadCount.ToString("N0", CultureInfo.InvariantCulture),
                     DownloadCountRaw = item.DownloadCount,
-                    LatestVersion = item.LatestVersion
+                    LatestVersion = item.LatestVersion,
+                    ServerSide = item.ServerSide,
+                    ClientSide = item.ClientSide
                 });
             }
 
@@ -933,7 +1143,9 @@ public sealed partial class ModsViewModel : PageViewModel
             {
                 SelectedOnlineMod = OnlineMods[0];
                 Logger.Information("線上搜尋完成，找到 {Count} 個模組", OnlineMods.Count);
-                OnlineResultHint = $"在 Modrinth 找到 {OnlineMods.Count} 個相容模組";
+                OnlineResultHint = string.IsNullOrWhiteSpace(query)
+                    ? $"已為您預載 {OnlineMods.Count} 個伺服器相容推薦模組"
+                    : $"在 {SelectedPlatform} 找到 {OnlineMods.Count} 個伺服器相容模組";
             }
             else
             {
@@ -969,7 +1181,7 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 取得所有相容版本並彈出版本選擇對話框。
+    /// 取得所有相容版本並彈出版本選擇對話方塊。
     /// </summary>
     [RelayCommand]
     public async Task PickOnlineModVersionAsync(OnlineModRowItem? mod)
@@ -978,6 +1190,19 @@ public sealed partial class ModsViewModel : PageViewModel
         if (mod is null || _modrinthClient is null)
         {
             return;
+        }
+
+        // 比照 Prism Launcher：偵測伺服器端環境相容性，防範純用戶端模組造成伺服器當機
+        if (string.Equals(mod.ServerSide, "unsupported", StringComparison.OrdinalIgnoreCase))
+        {
+            bool proceed = DialogHelper.Confirm(
+                $"模組「{mod.Title}」在 Modrinth 標記為純用戶端模組 (server_side: unsupported)，在伺服器端執行可能引發當機！\n\n是否仍要強行挑選版本並加入安裝清單？",
+                "伺服器端環境不相容警告",
+                MessageBoxImage.Warning);
+            if (!proceed)
+            {
+                return;
+            }
         }
 
         string? loader = null;
@@ -1022,6 +1247,94 @@ public sealed partial class ModsViewModel : PageViewModel
             InstallQueue.Add(queueItem);
         }
 
+        if (chosen.Dependencies.Count > 0 && _serverManager is not null && HasSelectedServer && _modManager is not null && _modrinthClient is not null)
+        {
+            try
+            {
+                var server = await _serverManager.GetServerAsync(SelectedServer);
+                if (server is not null)
+                {
+                    var installed = await _modManager.GetModsAsync(server.Path);
+                    var rawDeps = chosen.Dependencies
+                        .Select(d => new OnlineModDependency(d, ModDependencyType.Required))
+                        .ToList();
+
+                    var missingDeps = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
+                        _modrinthClient,
+                        rawDeps,
+                        server.MinecraftVersion.Value,
+                        server.LoaderType.ToString(),
+                        installed);
+
+                    var toAdd = missingDeps
+                        .Where(plan => plan.TargetVersion.PrimaryFile is not null && !InstallQueue.Any(q => string.Equals(q.FileName, plan.TargetVersion.PrimaryFile.Filename, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+
+                    if (toAdd.Count > 0)
+                    {
+                        var installItems = toAdd.Where(p => p.Action == ModInstallAction.Install).ToList();
+                        var updateItems = toAdd.Where(p => p.Action == ModInstallAction.Update).ToList();
+
+                        var sb = new System.Text.StringBuilder();
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"模組「{mod.Title}」偵測到 {toAdd.Count} 個必要相依模組規劃：");
+
+                        if (installItems.Count > 0)
+                        {
+                            sb.AppendLine("\n【全新安裝】");
+                            foreach (var item in installItems)
+                            {
+                                sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.TargetVersion.PrimaryFile?.Filename})");
+                            }
+                        }
+
+                        if (updateItems.Count > 0)
+                        {
+                            sb.AppendLine("\n【更新升級】");
+                            foreach (var item in updateItems)
+                            {
+                                sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.ExistingLocalMod?.Version} ➔ {item.TargetVersion.VersionNumber})");
+                            }
+                        }
+
+                        sb.AppendLine("\n是否將這些相依模組一併加入安裝清單？");
+
+                        bool confirm = DialogHelper.Confirm(sb.ToString(), "發現必要相依模組");
+
+                        if (confirm)
+                        {
+                            foreach (var plan in toAdd)
+                            {
+                                var depVer = plan.TargetVersion;
+                                var pf = depVer.PrimaryFile!;
+                                string? hash = ExtractHash(pf, out string algo);
+                                string projId = !string.IsNullOrWhiteSpace(depVer.ProjectId) ? depVer.ProjectId : depVer.VersionId;
+                                InstallQueue.Add(new ModInstallQueueItem
+                                {
+                                    ProjectId = projId,
+                                    Title = depVer.DisplayName,
+                                    VersionNumber = depVer.VersionNumber,
+                                    CurrentVersion = plan.ExistingLocalMod?.Version,
+                                    FileName = pf.Filename,
+                                    OldFileName = plan.ExistingLocalMod?.Filename,
+                                    DownloadUrl = pf.Url,
+                                    ExpectedHash = hash,
+                                    HashAlgorithm = algo,
+                                    Dependencies = [.. depVer.Dependencies.Select(d => d.ProjectId ?? string.Empty).Where(id => id.Length > 0)],
+                                    Action = plan.Action,
+                                    Reason = plan.Reason
+                                });
+                            }
+                            _notificationSink?.Invoke($"已將 {toAdd.Count} 個相依模組加入安裝清單", false);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("檢查相依模組時發生異常: {Message}", ex.Message);
+            }
+        }
+
         UpdateInstallQueueHint();
 
         if (pickerVm.InstallImmediately)
@@ -1046,7 +1359,7 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 進行相依性檢測後統一批次下載安裝。
+    /// 進行相依性評估後統一批次下載安裝。
     /// </summary>
     [RelayCommand]
     public async Task InstallQueuedModsAsync()
@@ -1069,11 +1382,21 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        // 相依性檢測：警示清單中尚未涵蓋的必要相依模組
-        var queuedProjects = InstallQueue.Select(i => i.ProjectId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 相依性評估：排除佇列中與伺服器本機已安裝的模組
+        var queuedProjects = InstallQueue
+            .Select(i => i.ProjectId)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var installedMods = await _modManager.GetModsAsync(server.Path).ConfigureAwait(true);
+        var installedIdentifiers = installedMods
+            .Where(m => !string.IsNullOrWhiteSpace(m.Id))
+            .Select(m => m.Id.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var missingDependencies = InstallQueue
             .SelectMany(i => i.Dependencies)
-            .Where(id => !queuedProjects.Contains(id))
+            .Where(id => !string.IsNullOrWhiteSpace(id) && !queuedProjects.Contains(id) && !installedIdentifiers.Contains(id))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -1087,10 +1410,38 @@ public sealed partial class ModsViewModel : PageViewModel
         int success = 0;
         var pending = InstallQueue.ToList();
 
+        var unofficial = pending.Where(i => !ModFileInstaller.IsOfficialModrinthSource(i.DownloadUrl)).ToList();
+        if (unofficial.Count > 0)
+        {
+            string msg = "下列待安裝模組下載來源非官方 Modrinth CDN：\n" +
+                         string.Join("\n", unofficial.Select(u => $"• {u.Title}: {u.DownloadUrl}")) +
+                         "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並安裝？";
+            if (!DialogHelper.Confirm(msg, "非官方下載來源警告", MessageBoxImage.Warning))
+            {
+                IsInstallingMod = false;
+                return;
+            }
+        }
+
+        ModOperationProgressDialog? installProgressDialog = null;
+        if (Application.Current is not null)
+        {
+            installProgressDialog = new ModOperationProgressDialog("正在安裝模組", "準備下載模組檔案...");
+            if (Application.Current.MainWindow is not null)
+            {
+                installProgressDialog.Owner = Application.Current.MainWindow;
+            }
+            installProgressDialog.Show();
+        }
+
         try
         {
-            foreach (var item in pending)
+            for (int i = 0; i < pending.Count; i++)
             {
+                var item = pending[i];
+                string actionText = item.Action == ModInstallAction.Update ? "更新" : "安裝";
+                installProgressDialog?.UpdateProgress(i + 1, pending.Count, $"正在{actionText} ({i + 1}/{pending.Count}): {item.Title} ({item.FileName})...");
+
                 try
                 {
                     var result = await _modManager.InstallOnlineModAsync(
@@ -1102,6 +1453,30 @@ public sealed partial class ModsViewModel : PageViewModel
 
                     if (result.Completed)
                     {
+                        if (item.Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(item.OldFileName) &&
+                            !string.Equals(item.OldFileName, item.FileName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                string modsDir = Path.Combine(server.Path, "mods");
+                                string oldPath = Path.Combine(modsDir, item.OldFileName);
+                                string oldDisabled = oldPath + ".disabled";
+                                if (File.Exists(oldPath))
+                                {
+                                    File.Delete(oldPath);
+                                }
+
+                                if (File.Exists(oldDisabled))
+                                {
+                                    File.Delete(oldDisabled);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Warning("刪除舊版本模組檔案「{Old}」失敗: {Message}", item.OldFileName, ex.Message);
+                            }
+                        }
+
                         success++;
                         InstallQueue.Remove(item);
                     }
@@ -1120,28 +1495,55 @@ public sealed partial class ModsViewModel : PageViewModel
 
             Logger.Information("批次安裝完成，成功 {Success} / {Total}", success, pending.Count);
             await LoadLocalModsAsync();
+
+            if (pending.Count > 0)
+            {
+                int failed = pending.Count - success;
+                string summaryMsg = $"已成功安裝 {success} 個模組！" + (failed > 0 ? $"\n其中 {failed} 個模組安裝失敗，請檢查網路連線或記錄檔。" : string.Empty);
+                _notificationSink?.Invoke(summaryMsg, failed > 0);
+            }
         }
         finally
         {
+            if (installProgressDialog is not null)
+            {
+                if (Application.Current is not null && !Application.Current.Dispatcher.CheckAccess())
+                {
+                    Application.Current.Dispatcher.Invoke(installProgressDialog.Close);
+                }
+                else
+                {
+                    installProgressDialog.Close();
+                }
+            }
             IsInstallingMod = false;
             UpdateInstallQueueHint();
+            if (!string.IsNullOrWhiteSpace(server?.Path))
+            {
+                ModFileInstaller.CleanupStagingDirectory(Path.Combine(server.Path, "mods"));
+            }
         }
     }
 
     /// <summary>
-    /// 檢視待安裝清單內容而不執行安裝。
+    /// 檢視待安裝佇列清單視窗
     /// </summary>
     [RelayCommand]
     public void ViewInstallQueue()
     {
-        if (InstallQueue.Count == 0)
+        var dialog = new ModInstallQueueDialog(InstallQueue);
+        if (Application.Current?.MainWindow is not null)
         {
-            DialogHelper.ShowInfo("目前安裝清單沒有任何待安裝項目。\n\n您可以在「瀏覽模組」清單中雙擊模組，選擇版本並加入安裝清單。", "安裝清單");
-            return;
+            dialog.Owner = Application.Current.MainWindow;
         }
 
-        string items = string.Join("\n", InstallQueue.Select((item, idx) => $"{idx + 1}. {item.Title} (版本: {item.VersionNumber}, 檔案: {item.FileName})"));
-        DialogHelper.ShowInfo($"目前待安裝模組清單 (共 {InstallQueue.Count} 項)：\n\n{items}\n\n確認無誤後，可點擊「開始安裝」按鈕批次下載與安裝。", "檢視安裝清單");
+        bool? confirmed = dialog.ShowDialog();
+        UpdateInstallQueueHint();
+
+        if (confirmed == true && InstallQueue.Count > 0)
+        {
+            _ = InstallQueuedModsAsync();
+        }
     }
 
     /// <summary>
@@ -1155,10 +1557,10 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 於瀏覽器開啟選取模組的 Modrinth 頁面。
+    /// 於瀏覽器開啟選取模組的線上專案頁面。
     /// </summary>
     [RelayCommand]
-    public void OpenModrinthPage()
+    public void OpenModPlatformPage()
     {
         if (SelectedOnlineMod is null)
         {
@@ -1166,15 +1568,38 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        string url = $"https://modrinth.com/mod/{SelectedOnlineMod.Id}";
+        string url;
+        if (string.Equals(SelectedPlatform, "CurseForge", StringComparison.OrdinalIgnoreCase))
+        {
+            string slug = !string.IsNullOrWhiteSpace(SelectedOnlineMod.Slug) ? SelectedOnlineMod.Slug : SelectedOnlineMod.Id;
+            url = $"https://www.curseforge.com/minecraft/mc-mods/{slug}";
+        }
+        else
+        {
+            url = $"https://modrinth.com/mod/{SelectedOnlineMod.Id}";
+        }
+
         if (_launcher is not null && !_launcher.OpenUrl(url))
         {
             _notificationSink?.Invoke($"無法開啟連結：{url}", true);
         }
     }
 
-    private void UpdateInstallQueueHint() =>
-        InstallQueueHint = $"安裝清單：{InstallQueue.Count} 個項目";
+    private void UpdateInstallQueueHint()
+    {
+        if (InstallQueue.Count == 0)
+        {
+            InstallQueueHint = "安裝佇列為空";
+            return;
+        }
+
+        int installs = InstallQueue.Count(i => i.Action == ModInstallAction.Install);
+        int updates = InstallQueue.Count(i => i.Action == ModInstallAction.Update);
+
+        InstallQueueHint = updates > 0
+            ? $"安裝清單：{installs} 個新增，{updates} 個更新"
+            : $"安裝清單：{installs} 個項目待安裝";
+    }
 
     [RelayCommand]
     public async Task InstallSelectedOnlineModAsync()
@@ -1238,6 +1663,17 @@ public sealed partial class ModsViewModel : PageViewModel
                 }
             }
 
+            if (!ModFileInstaller.IsOfficialModrinthSource(targetFile.Url))
+            {
+                if (!DialogHelper.Confirm(
+                    $"模組「{mod.Title}」的下載來源非官方 Modrinth CDN：\n{targetFile.Url}\n\n可能存在未驗證的安全風險，是否仍要繼續下載並安裝？",
+                    "非官方下載來源警告",
+                    MessageBoxImage.Warning))
+                {
+                    return;
+                }
+            }
+
             _notificationSink?.Invoke($"正在下載並安裝「{mod.Title}」({targetFile.Filename})...", false);
             var result = await _modManager.InstallOnlineModAsync(
                 server.Path,
@@ -1251,6 +1687,125 @@ public sealed partial class ModsViewModel : PageViewModel
                 Logger.Information("模組「{Title}」安裝成功！檔案: {File}", mod.Title, targetFile.Filename);
                 await LoadLocalModsAsync();
                 _notificationSink?.Invoke($"模組「{mod.Title}」安裝成功！", false);
+
+                if (targetVersion.Dependencies.Count > 0)
+                {
+                    try
+                    {
+                        var installed = await _modManager.GetModsAsync(server.Path);
+                        var rawDeps = targetVersion.Dependencies
+                            .Where(d => d.DependencyType == ModDependencyType.Required)
+                            .ToList();
+
+                        if (rawDeps.Count > 0)
+                        {
+                            var missingDeps = await _dependencyPlanner.ResolveDependenciesRecursivelyAsync(
+                                _modrinthClient,
+                                rawDeps,
+                                server.MinecraftVersion.Value,
+                                loader,
+                                installed);
+
+                            if (missingDeps.Count > 0)
+                            {
+                                var installItems = missingDeps.Where(p => p.Action == ModInstallAction.Install).ToList();
+                                var updateItems = missingDeps.Where(p => p.Action == ModInstallAction.Update).ToList();
+
+                                var sb = new System.Text.StringBuilder();
+                                sb.AppendLine(CultureInfo.InvariantCulture, $"模組「{mod.Title}」偵測到 {missingDeps.Count} 個必要相依模組規劃：");
+
+                                if (installItems.Count > 0)
+                                {
+                                    sb.AppendLine("\n【全新安裝】");
+                                    foreach (var item in installItems)
+                                    {
+                                        sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.TargetVersion.PrimaryFile?.Filename})");
+                                    }
+                                }
+
+                                if (updateItems.Count > 0)
+                                {
+                                    sb.AppendLine("\n【更新升級】");
+                                    foreach (var item in updateItems)
+                                    {
+                                        sb.AppendLine(CultureInfo.InvariantCulture, $"• {item.TargetVersion.DisplayName} ({item.ExistingLocalMod?.Version} ➔ {item.TargetVersion.VersionNumber})");
+                                    }
+                                }
+
+                                sb.AppendLine("\n是否一併下載並安裝？");
+
+                                bool confirm = DialogHelper.Confirm(sb.ToString(), "發現必要相依模組");
+
+                                if (confirm)
+                                {
+                                    var unofficialDeps = missingDeps.Where(d => d.TargetVersion.PrimaryFile is not null && !ModFileInstaller.IsOfficialModrinthSource(d.TargetVersion.PrimaryFile.Url)).ToList();
+                                    if (unofficialDeps.Count > 0)
+                                    {
+                                        string unoffMsg = "下列必要相依模組下載來源非官方 Modrinth CDN：\n" +
+                                                          string.Join("\n", unofficialDeps.Select(d => $"• {d.TargetVersion.DisplayName}: {d.TargetVersion.PrimaryFile!.Url}")) +
+                                                          "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並安裝？";
+                                        if (!DialogHelper.Confirm(unoffMsg, "非官方下載來源警告", MessageBoxImage.Warning))
+                                        {
+                                            return;
+                                        }
+                                    }
+
+                                    foreach (var plan in missingDeps)
+                                    {
+                                        var depVer = plan.TargetVersion;
+                                        var pf = depVer.PrimaryFile;
+                                        if (pf is null)
+                                        {
+                                            continue;
+                                        }
+
+                                        string? depHash = ExtractHash(pf, out string depAlgo);
+                                        string actionLabel = plan.Action == ModInstallAction.Update ? "更新" : "安裝";
+                                        _notificationSink?.Invoke($"正在{actionLabel}相依模組「{depVer.DisplayName}」...", false);
+                                        var installRes = await _modManager.InstallOnlineModAsync(
+                                            server.Path,
+                                            pf.Url,
+                                            pf.Filename,
+                                            expectedHash: depHash,
+                                            hashAlgorithm: depAlgo);
+
+                                        if (installRes.Completed && plan.Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(plan.ExistingLocalMod?.Filename))
+                                        {
+                                            string oldName = plan.ExistingLocalMod.Filename;
+                                            if (!string.Equals(oldName, pf.Filename, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                try
+                                                {
+                                                    string oldPath = Path.Combine(server.Path, "mods", oldName);
+                                                    string oldDisabled = oldPath + ".disabled";
+                                                    if (File.Exists(oldPath))
+                                                    {
+                                                        File.Delete(oldPath);
+                                                    }
+
+                                                    if (File.Exists(oldDisabled))
+                                                    {
+                                                        File.Delete(oldDisabled);
+                                                    }
+                                                }
+                                                catch (Exception ex)
+                                                {
+                                                    Logger.Warning("刪除舊版本模組檔案「{Old}」失敗: {Message}", oldName, ex.Message);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    await LoadLocalModsAsync();
+                                    _notificationSink?.Invoke($"已成功處理 {missingDeps.Count} 個相依模組", false);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning("安裝相依模組時發生異常: {Message}", ex.Message);
+                    }
+                }
             }
             else
             {
@@ -1267,5 +1822,28 @@ public sealed partial class ModsViewModel : PageViewModel
         {
             IsInstallingMod = false;
         }
+    }
+
+    private static string? ExtractHash(ModFile? file, out string algorithm)
+    {
+        algorithm = "sha512";
+        if (file?.Hashes is null)
+        {
+            return null;
+        }
+
+        if (file.Hashes.TryGetValue("sha512", out string? sha512) && !string.IsNullOrWhiteSpace(sha512))
+        {
+            algorithm = "sha512";
+            return sha512;
+        }
+
+        if (file.Hashes.TryGetValue("sha1", out string? sha1) && !string.IsNullOrWhiteSpace(sha1))
+        {
+            algorithm = "sha1";
+            return sha1;
+        }
+
+        return null;
     }
 }

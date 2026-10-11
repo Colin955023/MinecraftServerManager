@@ -48,6 +48,28 @@
             <TextBlock Text="重新整理" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
           </StackPanel>
         </Button>
+        <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+          <ProgressBar IsIndeterminate="True"
+                       Width="80"
+                       Height="4"
+                       Margin="0,0,8,0"
+                       VerticalAlignment="Center">
+            <ProgressBar.Style>
+              <Style TargetType="ProgressBar">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding IsBusy}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </ProgressBar.Style>
+          </ProgressBar>
+          <TextBlock Text="{Binding BusyStatusText}"
+                     FontSize="12"
+                     Foreground="{DynamicResource AccentBrush}"
+                     VerticalAlignment="Center" />
+        </StackPanel>
       </StackPanel>
     </StackPanel>
 
@@ -78,7 +100,7 @@
           <DataGrid.ContextMenu>
             <ContextMenu>
               <MenuItem Header="🧠 修改記憶體設定" Command="{Binding EditServerMemoryCommand}" />
-              <MenuItem Header="🔄 重新檢測伺服器" Command="{Binding RecheckServerCommand}" />
+              <MenuItem Header="🔄 重新偵測伺服器" Command="{Binding RecheckServerCommand}" />
               <Separator />
               <MenuItem Header="📂 開啟備份資料夾" Command="{Binding OpenBackupFolderCommand}" />
               <MenuItem Header="📁 修改備份路徑" Command="{Binding EditBackupPathCommand}" />
@@ -88,8 +110,27 @@
             <DataGridTextColumn Header="名稱" Binding="{Binding Name}" Width="180" />
             <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="90" />
             <DataGridTextColumn Header="載入器" Binding="{Binding Loader}" Width="100" />
-            <DataGridTextColumn Header="狀態" Binding="{Binding Status}" Width="90" />
+            <DataGridTemplateColumn Header="狀態" SortMemberPath="Status" Width="Auto" MinWidth="110">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Status}">
+                    <TextBlock.Style>
+                      <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding HasMissingFiles}" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </TextBlock.Style>
+                  </TextBlock>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
             <DataGridTextColumn Header="伺服器大小" Binding="{Binding Size}" Width="100" />
+            <DataGridTextColumn Header="修改日期" Binding="{Binding LastModified}" Width="140" />
             <DataGridTextColumn Header="備份狀態" Binding="{Binding BackupStatus}" Width="100" />
             <DataGridTextColumn Header="路徑" Binding="{Binding Path}" Width="*" />
           </DataGrid.Columns>
@@ -104,7 +145,7 @@
 
       <WrapPanel>
         <Button Command="{Binding StartServerCommand}"
-                IsEnabled="{Binding HasSelectedServer}"
+                IsEnabled="{Binding CanStartOrMonitorServer}"
                 Style="{DynamicResource PrimaryButtonStyle}"
                 Width="120"
                 Height="32"
@@ -115,7 +156,7 @@
           </StackPanel>
         </Button>
         <Button Command="{Binding MonitorServerCommand}"
-                IsEnabled="{Binding HasSelectedServer}"
+                IsEnabled="{Binding CanStartOrMonitorServer}"
                 Width="120"
                 Height="32"
                 Margin="0,0,8,8">

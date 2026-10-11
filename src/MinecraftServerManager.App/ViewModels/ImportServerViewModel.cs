@@ -10,24 +10,24 @@ using MinecraftServerManager.Domain.Servers;
 namespace MinecraftServerManager.App.ViewModels;
 
 /// <summary>
-/// 匯入伺服器對話框 ViewModel
+/// 匯入伺服器對話方塊 ViewModel
 /// </summary>
 public sealed partial class ImportServerViewModel(IServerManager serverManager) : ObservableObject
 {
     private readonly IServerManager _serverManager = serverManager;
 
     [ObservableProperty]
-    private string _sourcePath = string.Empty;
+    public partial string SourcePath { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _serverName = string.Empty;
+    public partial string ServerName { get; set; } = string.Empty;
 
     [ObservableProperty]
-    private string _statusMessage = string.Empty;
+    public partial string StatusMessage { get; set; } = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsNotBusy))]
-    private bool _isBusy;
+    public partial bool IsBusy { get; set; }
 
     public bool IsNotBusy => !IsBusy;
 
@@ -48,10 +48,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
         if (dialog.ShowDialog() == true)
         {
             SourcePath = dialog.FileName;
-            if (string.IsNullOrWhiteSpace(ServerName))
-            {
-                ServerName = Path.GetFileNameWithoutExtension(dialog.FileName);
-            }
+            ServerName = Path.GetFileNameWithoutExtension(dialog.FileName);
         }
     }
 
@@ -67,10 +64,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
         if (dialog.ShowDialog() == true)
         {
             SourcePath = dialog.FolderName;
-            if (string.IsNullOrWhiteSpace(ServerName))
-            {
-                ServerName = Path.GetFileName(dialog.FolderName);
-            }
+            ServerName = Path.GetFileName(dialog.FolderName);
         }
     }
 

@@ -33,6 +33,12 @@ public interface IMinecraftJavaRequirementService
     public Task<IReadOnlyDictionary<string, int>> PreloadAllJavaRequirementsAsync(bool force = false, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 取得本地版本快取中所有出現過的 Java 主要版本清單
+    /// </summary>
+    /// <returns>排序後不重複的 Java 主要版本集合</returns>
+    public IReadOnlyList<int> GetCachedAvailableJavaMajors();
+
+    /// <summary>
     /// 重新載入本地快取至記憶體快取
     /// </summary>
     public void ReloadCache();

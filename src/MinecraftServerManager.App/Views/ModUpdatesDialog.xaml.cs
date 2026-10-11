@@ -27,6 +27,7 @@ public sealed class ModUpdateCandidateItem : INotifyPropertyChanged
     public required string CurrentVersion { get; init; }
     public required string NewVersion { get; init; }
     public required string FileName { get; init; }
+    public string SourcePlatform { get; init; } = "Modrinth";
     public required string DownloadUrl { get; init; }
     public string? ExpectedHash { get; init; }
     public string? HashAlgorithm { get; init; }

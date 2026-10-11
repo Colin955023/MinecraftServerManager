@@ -94,7 +94,7 @@ public sealed class ModManager(
         };
     }
 
-    private static readonly string[] XlsxHeaders = ["狀態", "名稱", "版本", "MC版本", "載入器", "作者", "檔名"];
+    private static readonly string[] XlsxHeaders = ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
 
     /// <summary>
     /// 建置標準 OpenXML XLSX 位元組陣列。
@@ -109,8 +109,10 @@ public sealed class ModManager(
         };
         foreach (var m in mods)
         {
-            string st = m.Status == ModStatus.Enabled ? "啟用" : "停用";
-            rows.Add([st, m.Name, m.Version, m.MinecraftVersion, m.LoaderType, m.Author, m.Filename]);
+            string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            rows.Add([st, m.Name, m.Version, m.MinecraftVersion, m.LoaderType, m.Author, m.Filename, m.Id, fsize, mtime, m.Description]);
         }
         return OpenXmlSpreadsheetBuilder.BuildWorkbook("模組列表", rows);
     }
@@ -133,12 +135,14 @@ public sealed class ModManager(
     {
         var sb = new StringBuilder();
         sb.AppendLine("<!DOCTYPE html><html lang=\"zh-TW\"><head><meta charset=\"UTF-8\"><title>模組列表</title>");
-        sb.AppendLine("<style>table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}th{background:#f4f4f4;}</style></head><body>");
-        sb.AppendLine("<h2>模組清單</h2><table><tr><th>狀態</th><th>名稱</th><th>版本</th><th>MC版本</th><th>作者</th><th>檔名</th></tr>");
+        sb.AppendLine("<style>table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}th{background:#f4f4f4;}td:last-child{white-space:pre-wrap;}</style></head><body>");
+        sb.AppendLine("<h2>模組列表</h2><table><tr><th>啟用狀態</th><th>模組名稱</th><th>版本</th><th>MC版本</th><th>載入器</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>檔案大小</th><th>修改時間</th><th>描述</th></tr>");
         foreach (var m in mods)
         {
             string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
-            sb.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{st}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(m.MinecraftVersion)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Filename)}</td></tr>");
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            sb.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{st}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(m.MinecraftVersion)}</td><td>{System.Net.WebUtility.HtmlEncode(m.LoaderType)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Filename)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Id)}</td><td>{System.Net.WebUtility.HtmlEncode(fsize)}</td><td>{System.Net.WebUtility.HtmlEncode(mtime)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Description)}</td></tr>");
         }
         sb.AppendLine("</table></body></html>");
         return sb.ToString();
@@ -147,11 +151,13 @@ public sealed class ModManager(
     private static string BuildCsv(IReadOnlyList<LocalModInfo> mods)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("狀態,名稱,版本,MC版本,載入器,作者,檔名");
+        sb.AppendLine("啟用狀態,模組名稱,版本,MC版本,載入器,作者,檔案名稱,模組ID,檔案大小,修改時間,描述");
         foreach (var m in mods)
         {
-            string st = m.Status == ModStatus.Enabled ? "啟用" : "停用";
-            sb.AppendLine(CultureInfo.InvariantCulture, $"\"{st}\",\"{EscapeCsv(m.Name)}\",\"{EscapeCsv(m.Version)}\",\"{EscapeCsv(m.MinecraftVersion)}\",\"{EscapeCsv(m.LoaderType)}\",\"{EscapeCsv(m.Author)}\",\"{EscapeCsv(m.Filename)}\"");
+            string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            sb.AppendLine(CultureInfo.InvariantCulture, $"\"{st}\",\"{EscapeCsv(m.Name)}\",\"{EscapeCsv(m.Version)}\",\"{EscapeCsv(m.MinecraftVersion)}\",\"{EscapeCsv(m.LoaderType)}\",\"{EscapeCsv(m.Author)}\",\"{EscapeCsv(m.Filename)}\",\"{EscapeCsv(m.Id)}\",\"{EscapeCsv(fsize)}\",\"{EscapeCsv(mtime)}\",\"{EscapeCsv(m.Description)}\"");
         }
         return sb.ToString();
     }

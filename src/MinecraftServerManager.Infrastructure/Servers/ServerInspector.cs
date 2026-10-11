@@ -136,8 +136,9 @@ public sealed partial class ServerInspector : IServerInspector
                 totalBytes += file.Length;
             }
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Logger.Debug("計算目錄大小時發生例外: {Message}", ex.Message);
         }
         return totalBytes;
     }
@@ -165,8 +166,9 @@ public sealed partial class ServerInspector : IServerInspector
 
             return EulaState.Missing;
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            Logger.Debug("讀取 eula.txt 失敗: {Message}", ex.Message);
             return EulaState.Missing;
         }
     }
@@ -322,10 +324,12 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderTypeSource = "libraries/net/neoforged/neoforge";
                 try
                 {
-                    string[] subDirs = Directory.GetDirectories(neoLib);
-                    if (subDirs.Length > 0)
+                    var subDirs = SafeFileSystem.ListBoundedDirectory(neoLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
+                        .Where(e => e.IsDirectory)
+                        .ToList();
+                    if (subDirs.Count > 0)
                     {
-                        string verName = Path.GetFileName(subDirs[0]);
+                        string verName = Path.GetFileName(subDirs[0].FullPath);
                         loaderVersion = verName;
                         loaderVersionSource = $"libraries/net/neoforged/neoforge/{verName}";
                         string? derived = DeriveMinecraftVersionFromNeoForge(verName);
@@ -336,7 +340,10 @@ public sealed partial class ServerInspector : IServerInspector
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("探測 NeoForge 函式庫目錄失敗: {Message}", ex.Message);
+                }
             }
 
             // Forge
@@ -347,9 +354,11 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderTypeSource = "libraries/net/minecraftforge/forge";
                 try
                 {
-                    foreach (string sub in Directory.GetDirectories(forgeLib))
+                    var subDirs = SafeFileSystem.ListBoundedDirectory(forgeLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
+                        .Where(e => e.IsDirectory);
+                    foreach (var sub in subDirs)
                     {
-                        string dirName = Path.GetFileName(sub);
+                        string dirName = Path.GetFileName(sub.FullPath);
                         int dash = dirName.IndexOf('-');
                         if (dash > 0)
                         {
@@ -367,7 +376,10 @@ public sealed partial class ServerInspector : IServerInspector
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("探測 Forge 函式庫目錄失敗: {Message}", ex.Message);
+                }
             }
 
             // Fabric
@@ -378,15 +390,20 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderTypeSource = "libraries/net/fabricmc/fabric-loader";
                 try
                 {
-                    string[] subDirs = Directory.GetDirectories(fabricLib);
-                    if (subDirs.Length > 0)
+                    var subDirs = SafeFileSystem.ListBoundedDirectory(fabricLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
+                        .Where(e => e.IsDirectory)
+                        .ToList();
+                    if (subDirs.Count > 0)
                     {
-                        string verName = Path.GetFileName(subDirs[0]);
+                        string verName = Path.GetFileName(subDirs[0].FullPath);
                         loaderVersion = verName;
                         loaderVersionSource = $"libraries/net/fabricmc/fabric-loader/{verName}";
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("探測 Fabric 函式庫目錄失敗: {Message}", ex.Message);
+                }
             }
 
             // Quilt
@@ -397,15 +414,20 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderTypeSource = "libraries/org/quiltmc/quilt-loader";
                 try
                 {
-                    string[] subDirs = Directory.GetDirectories(quiltLib);
-                    if (subDirs.Length > 0)
+                    var subDirs = SafeFileSystem.ListBoundedDirectory(quiltLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
+                        .Where(e => e.IsDirectory)
+                        .ToList();
+                    if (subDirs.Count > 0)
                     {
-                        string verName = Path.GetFileName(subDirs[0]);
+                        string verName = Path.GetFileName(subDirs[0].FullPath);
                         loaderVersion = verName;
                         loaderVersionSource = $"libraries/org/quiltmc/quilt-loader/{verName}";
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("探測 Quilt 函式庫目錄失敗: {Message}", ex.Message);
+                }
             }
         }
 
@@ -516,11 +538,14 @@ public sealed partial class ServerInspector : IServerInspector
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("檢查啟動腳本失敗: {Message}", ex.Message);
+                }
             }
         }
 
-        // 7. 檢查 logs/latest.log 或最新修改之日誌檔
+        // 7. 檢查 logs/latest.log 或最新修改之記錄檔
         if (mcVersion == "unknown" || loaderVersion == "unknown")
         {
             string? logFile = FindLatestLogFile(directory);
@@ -539,7 +564,7 @@ public sealed partial class ServerInspector : IServerInspector
                             if (mcMatch.Success)
                             {
                                 mcVersion = mcMatch.Groups[1].Value;
-                                mcVersionSource = $"{Path.GetFileName(logFile)} 啟動日誌";
+                                mcVersionSource = $"{Path.GetFileName(logFile)} 啟動記錄";
                             }
                         }
 
@@ -549,11 +574,11 @@ public sealed partial class ServerInspector : IServerInspector
                             if (forgeM.Success)
                             {
                                 loaderVersion = forgeM.Groups[1].Value;
-                                loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器日誌";
+                                loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器記錄";
                                 if (loaderType == "unknown")
                                 {
                                     loaderType = "forge";
-                                    loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器日誌";
+                                    loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器記錄";
                                 }
                             }
                             else
@@ -562,11 +587,11 @@ public sealed partial class ServerInspector : IServerInspector
                                 if (neoM.Success)
                                 {
                                     loaderVersion = neoM.Groups[1].Value;
-                                    loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器日誌";
+                                    loaderVersionSource = $"{Path.GetFileName(logFile)} 載入器記錄";
                                     if (loaderType == "unknown")
                                     {
                                         loaderType = "neoforge";
-                                        loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器日誌";
+                                        loaderTypeSource = $"{Path.GetFileName(logFile)} 載入器記錄";
                                     }
                                 }
                             }
@@ -578,7 +603,10 @@ public sealed partial class ServerInspector : IServerInspector
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.Debug("讀取伺服器記錄檔失敗: {Message}", ex.Message);
+                }
             }
         }
 
@@ -616,7 +644,10 @@ public sealed partial class ServerInspector : IServerInspector
                     return newest.FullName;
                 }
             }
-            catch { }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.Debug("尋找最新記錄檔失敗: {Message}", ex.Message);
+            }
         }
 
         string rootLog = Path.Combine(serverDirectory, "server.log");
@@ -652,7 +683,10 @@ public sealed partial class ServerInspector : IServerInspector
                 }
             }
         }
-        catch { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Logger.Debug("解析 version.json 失敗: {Message}", ex.Message);
+        }
         return null;
     }
 
@@ -697,7 +731,10 @@ public sealed partial class ServerInspector : IServerInspector
                 }
             }
         }
-        catch { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Logger.Debug("解析 JAR 清單版本失敗: {Message}", ex.Message);
+        }
         return null;
     }
 
@@ -725,6 +762,11 @@ public sealed partial class ServerInspector : IServerInspector
         if (minorSpan.IsEmpty)
         {
             return null;
+        }
+
+        if (major >= 26)
+        {
+            return $"{major}.{minorSpan}";
         }
 
         return $"1.{major}.{minorSpan}";
@@ -761,8 +803,9 @@ public sealed partial class ServerInspector : IServerInspector
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                Logger.Debug("讀取 user_jvm_args.txt 記憶體設定失敗: {Message}", ex.Message);
             }
         }
 

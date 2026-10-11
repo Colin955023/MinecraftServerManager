@@ -224,22 +224,21 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
     {
         meta.LoaderType = "forge";
 
-        var idMatch = ForgeModIdRegex().Match(content);
-        if (idMatch.Success)
+        string id = ExtractTomlString(content, "modId");
+        if (!string.IsNullOrWhiteSpace(id))
         {
-            meta.Id = CleanTomlValue(idMatch.Groups[1].Value);
+            meta.Id = id;
         }
 
-        var nameMatch = ForgeDisplayNameRegex().Match(content);
-        if (nameMatch.Success)
+        string name = ExtractTomlString(content, "displayName");
+        if (!string.IsNullOrWhiteSpace(name))
         {
-            meta.Name = CleanTomlValue(nameMatch.Groups[1].Value);
+            meta.Name = name;
         }
 
-        var verMatch = ForgeVersionRegex().Match(content);
-        if (verMatch.Success)
+        string v = ExtractTomlString(content, "version");
+        if (!string.IsNullOrWhiteSpace(v))
         {
-            string v = CleanTomlValue(verMatch.Groups[1].Value);
             if (v == "${file.jarVersion}")
             {
                 v = ReadManifestVersion(archive) ?? v;
@@ -247,16 +246,16 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             meta.Version = v;
         }
 
-        var descMatch = ForgeDescRegex().Match(content);
-        if (descMatch.Success)
+        string desc = ExtractTomlString(content, "description");
+        if (!string.IsNullOrWhiteSpace(desc))
         {
-            meta.Description = CleanTomlValue(descMatch.Groups[1].Value);
+            meta.Description = desc;
         }
 
-        var authorMatch = ForgeAuthorsRegex().Match(content);
-        if (authorMatch.Success)
+        string author = ExtractTomlString(content, "authors");
+        if (!string.IsNullOrWhiteSpace(author))
         {
-            meta.Author = CleanTomlValue(authorMatch.Groups[1].Value);
+            meta.Author = author;
         }
 
         var mcVerMatch = ForgeMcDepRegex().Match(content);
@@ -269,6 +268,101 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 meta.MinecraftVersion = normalized;
             }
         }
+    }
+
+    private static string ExtractTomlString(string content, string key)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        int idx = 0;
+        while (idx < content.Length)
+        {
+            int lineStart = idx;
+            int nextNewline = content.IndexOf('\n', idx);
+            int lineEnd = nextNewline >= 0 ? nextNewline : content.Length;
+
+            int pos = lineStart;
+            while (pos < lineEnd && (content[pos] == ' ' || content[pos] == '\t'))
+            {
+                pos++;
+            }
+
+            if (pos + key.Length < lineEnd &&
+                content.AsSpan(pos, key.Length).Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                pos += key.Length;
+                while (pos < lineEnd && (content[pos] == ' ' || content[pos] == '\t'))
+                {
+                    pos++;
+                }
+
+                if (pos < lineEnd && content[pos] == '=')
+                {
+                    pos++;
+                    while (pos < content.Length && (content[pos] == ' ' || content[pos] == '\t' || content[pos] == '\r' || content[pos] == '\n'))
+                    {
+                        pos++;
+                    }
+
+                    if (pos >= content.Length)
+                    {
+                        return string.Empty;
+                    }
+
+                    if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("'''"))
+                    {
+                        int end = content.IndexOf("'''", pos + 3, StringComparison.Ordinal);
+                        return end >= 0 ? content[(pos + 3)..end].Trim() : content[(pos + 3)..].Trim();
+                    }
+
+                    if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("\"\"\""))
+                    {
+                        int end = content.IndexOf("\"\"\"", pos + 3, StringComparison.Ordinal);
+                        return end >= 0 ? content[(pos + 3)..end].Trim() : content[(pos + 3)..].Trim();
+                    }
+
+                    if (content[pos] == '\'')
+                    {
+                        int end = content.IndexOf('\'', pos + 1);
+                        return end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
+                    }
+
+                    if (content[pos] == '"')
+                    {
+                        int end = -1;
+                        for (int i = pos + 1; i < content.Length; i++)
+                        {
+                            if (content[i] == '"' && content[i - 1] != '\\')
+                            {
+                                end = i;
+                                break;
+                            }
+                        }
+                        return end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
+                    }
+
+                    int eol = content.IndexOf('\n', pos);
+                    string rawVal = eol >= 0 ? content[pos..eol] : content[pos..];
+                    int hashIdx = rawVal.IndexOf('#');
+                    if (hashIdx >= 0)
+                    {
+                        rawVal = rawVal[..hashIdx];
+                    }
+                    return rawVal.Trim();
+                }
+            }
+
+            if (nextNewline < 0)
+            {
+                break;
+            }
+            idx = nextNewline + 1;
+        }
+
+        return string.Empty;
     }
 
     private static string CleanTomlValue(string raw)
@@ -463,6 +557,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         public string LoaderType { get; set; } = "未知";
         public string Author { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
+        public ModPlatform Platform { get; set; } = ModPlatform.Local;
 
         public Dictionary<string, string> ToDictionary() => new(StringComparer.OrdinalIgnoreCase)
         {
@@ -473,6 +568,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             ["loader_type"] = LoaderType,
             ["author"] = Author,
             ["description"] = Description,
+            ["platform"] = Platform.ToString(),
         };
 
         public static LocalModMetadataBuilder FromDictionary(IReadOnlyDictionary<string, string> dict, string fallbackName) => new()
@@ -484,6 +580,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             LoaderType = dict.GetValueOrDefault("loader_type", "未知"),
             Author = dict.GetValueOrDefault("author", string.Empty),
             Description = dict.GetValueOrDefault("description", string.Empty),
+            Platform = Enum.TryParse<ModPlatform>(dict.GetValueOrDefault("platform", "Local"), ignoreCase: true, out var p) ? p : ModPlatform.Local,
         };
 
         public LocalModInfo ToModInfo(
@@ -503,7 +600,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 loaderType: string.IsNullOrWhiteSpace(LoaderType) ? "未知" : LoaderType,
                 description: Description ?? string.Empty,
                 author: Author ?? string.Empty,
-                platform: ModPlatform.Local,
+                platform: Platform,
                 status: isEnabled ? ModStatus.Enabled : ModStatus.Disabled,
                 filePath: filePath,
                 fileSize: fileSize,
@@ -511,21 +608,6 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 currentHash: cachedHash ?? string.Empty,
                 hashAlgorithm: string.IsNullOrEmpty(cachedHash) ? string.Empty : ModHelpers.PreferredHashAlgorithm);
     }
-
-    [GeneratedRegex(@"(?m)^\s*modId\s*=\s*(.+)$")]
-    private static partial Regex ForgeModIdRegex();
-
-    [GeneratedRegex(@"(?m)^\s*displayName\s*=\s*(.+)$")]
-    private static partial Regex ForgeDisplayNameRegex();
-
-    [GeneratedRegex(@"(?m)^\s*version\s*=\s*(.+)$")]
-    private static partial Regex ForgeVersionRegex();
-
-    [GeneratedRegex(@"(?m)^\s*description\s*=\s*(.+)$")]
-    private static partial Regex ForgeDescRegex();
-
-    [GeneratedRegex(@"(?m)^\s*authors\s*=\s*(.+)$")]
-    private static partial Regex ForgeAuthorsRegex();
 
     [GeneratedRegex(@"(?m)^\s*modId\s*=\s*[""']minecraft[""']\s*\n\s*versionRange\s*=\s*(.+)$")]
     private static partial Regex ForgeMcDepRegex();

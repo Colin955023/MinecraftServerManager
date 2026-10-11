@@ -89,6 +89,31 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartAsyncWithBatScriptAndCustomJavaInjectsJavaHomeAndPathEnvironment()
+    {
+        var runner = new FakeProcessRunner();
+        await using var runtime = new ServerRuntime(runner);
+
+        string fakeJava = Path.Combine(_testDir, "custom-jdk", "bin", "java.exe");
+        await runtime.StartAsync(
+            javaExecutablePath: fakeJava,
+            serverDirectory: _testDir,
+            executableName: "run.bat",
+            memoryMaxMb: 2048);
+
+        Assert.True(runtime.IsRunning);
+
+        var spec = runner.LastSpecification;
+        Assert.NotNull(spec);
+        Assert.NotNull(spec.Environment);
+        Assert.True(spec.Environment.ContainsKey("JAVA_HOME"));
+        Assert.Equal(Path.Combine(_testDir, "custom-jdk"), spec.Environment["JAVA_HOME"]);
+        Assert.True(spec.Environment.ContainsKey("PATH"));
+        Assert.StartsWith(Path.Combine(_testDir, "custom-jdk", "bin"), spec.Environment["PATH"]!);
+    }
+
+
+    [Fact]
     public async Task StartAsyncWhenAlreadyRunningThrowsInvalidOperationException()
     {
         var runner = new FakeProcessRunner();

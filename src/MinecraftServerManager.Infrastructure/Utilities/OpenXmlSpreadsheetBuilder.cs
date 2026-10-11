@@ -8,7 +8,7 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 
 /// <summary>
 /// 使用 .NET 原生 ZipArchive 與標準 OpenXML 規範建置單工作表 Excel (.xlsx) 檔案。
-/// 零外部依賴、極致輕量且安全過濾 XML 1.0 非法控制字元。
+/// 零外部相依性、極致輕量且安全過濾 XML 1.0 非法控制字元。
 /// </summary>
 public static class OpenXmlSpreadsheetBuilder
 {

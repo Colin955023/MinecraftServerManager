@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
@@ -13,6 +13,7 @@
     <Product>Minecraft Server Manager</Product>
     <Company>Colin955023</Company>
     <Copyright>GPL-3.0 License</Copyright>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="$(RepoRootDir)\assets\icon.ico" Link="assets\icon.ico" />

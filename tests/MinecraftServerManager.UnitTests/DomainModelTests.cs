@@ -14,6 +14,7 @@ public sealed class DomainModelTests
         Assert.Throws<ArgumentException>(() => ServerName.Parse("COM1"));
         Assert.Throws<ArgumentException>(() => ServerName.Parse("COM1 .txt"));
         Assert.Throws<ArgumentException>(() => ServerName.Parse("demo."));
+        Assert.Throws<ArgumentException>(() => ServerName.Parse("servers.json"));
         Assert.Throws<ArgumentException>(() => ServerName.Parse("servers_config.json"));
         Assert.Throws<ArgumentException>(() => ServerName.Parse(".msm-delete-test"));
     }
@@ -107,7 +108,7 @@ public sealed class DomainModelTests
         Assert.Equal(2048, config.MemoryMinMb);
         Assert.Equal(@"C:\Servers\Test", config.Path);
 
-        // 驗證不變量：min > max 應拋出 ArgumentException
+        // 驗證不變條件：min > max 應拋出 ArgumentException
         Assert.Throws<ArgumentException>(() => new ServerCreationPlan(
             "tx-fail",
             ServerName.Parse("無效"),

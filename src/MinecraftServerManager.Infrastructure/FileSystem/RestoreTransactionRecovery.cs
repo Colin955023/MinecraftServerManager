@@ -92,7 +92,7 @@ public static class RestoreTransactionRecovery
                 {
                     if (Directory.Exists(serverPath))
                     {
-                        // 原目錄已存在，說明還原已成功完成或無需還原，清理暫存
+                        // 原目錄已存在，代表還原已成功完成或無需還原，清理暫存
                         SafeFileSystem.DeleteWithin(stableParent, rollbackPath);
                         SafeFileSystem.DeleteWithin(stableParent, entry.FullPath);
                         continue;

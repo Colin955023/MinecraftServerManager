@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -13,7 +12,7 @@ public partial class ExportModListDialog : Window
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    private static readonly string[] ModListXlsxHeaders = ["啟用狀態", "模組名稱", "版本", "作者", "檔案名稱", "模組ID", "描述"];
+    private static readonly string[] ModListXlsxHeaders = ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
     private readonly IReadOnlyList<LocalModRowItem> _mods;
     private readonly string _serverName;
 
@@ -52,8 +51,8 @@ public partial class ExportModListDialog : Window
 
         SaveFileDialog saveDialog = new()
         {
-            Title = "儲存模組清單",
-            FileName = $"{_serverName}{extension}",
+            Title = "儲存模組列表",
+            FileName = $"{_serverName}_模組列表{extension}",
             Filter = filter
         };
 
@@ -68,25 +67,15 @@ public partial class ExportModListDialog : Window
 
             MessageBoxResult ask = MessageBox.Show(
                 this,
-                $"已成功匯出至：\n{saveDialog.FileName}\n\n是否要立即開啟此檔案？",
-                "匯出完成",
+                $"已儲存：\n{saveDialog.FileName}\n\n是否要立即開啟匯出的檔案？",
+                "匯出成功",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Information);
 
             if (ask == MessageBoxResult.Yes)
             {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = saveDialog.FileName,
-                        UseShellExecute = true
-                    });
-                }
-                catch
-                {
-                    // 忽略外部開啟例外
-                }
+                var launcher = new Infrastructure.Process.ProcessRunner();
+                launcher.OpenFile(saveDialog.FileName);
             }
 
             DialogResult = true;
@@ -108,10 +97,14 @@ public partial class ExportModListDialog : Window
                     name = m.Name,
                     version = m.Version,
                     enabled = m.IsEnabled,
+                    minecraftVersion = m.MinecraftVersion == "-" ? string.Empty : m.MinecraftVersion,
+                    loaderType = m.LoaderType == "-" ? string.Empty : m.LoaderType,
                     author = m.Author == "-" ? string.Empty : m.Author,
                     filename = m.FileName,
-                    description = m.Description,
-                    id = m.Id
+                    id = m.Id,
+                    fileSize = m.FileSize == "-" ? string.Empty : m.FileSize,
+                    modifiedTime = m.ModifiedTime == "-" ? string.Empty : m.ModifiedTime,
+                    description = m.Description
                 });
                 string json = JsonSerializer.Serialize(items, JsonOptions);
                 File.WriteAllText(filePath, json, Encoding.UTF8);
@@ -122,16 +115,20 @@ public partial class ExportModListDialog : Window
                 sbHtml.AppendLine("<!DOCTYPE html>");
                 sbHtml.AppendLine("<html lang=\"zh-TW\">");
                 sbHtml.AppendLine("<head><meta charset=\"UTF-8\"><title>模組列表</title>");
-                sbHtml.AppendLine("<style>table{border-collapse:collapse;}th,td{border:1px solid silver;padding:6px;}th{background:whitesmoke;}</style>");
+                sbHtml.AppendLine("<style>table{border-collapse:collapse;width:100%;}th,td{border:1px solid silver;padding:6px;text-align:left;}th{background:whitesmoke;}</style>");
                 sbHtml.AppendLine("</head><body>");
                 sbHtml.AppendLine("<h2>模組列表</h2>");
                 sbHtml.AppendLine("<table>");
-                sbHtml.AppendLine("<tr><th>啟用</th><th>名稱</th><th>版本</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>描述</th></tr>");
+                sbHtml.AppendLine("<tr><th>啟用狀態</th><th>模組名稱</th><th>版本</th><th>MC版本</th><th>載入器</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>檔案大小</th><th>修改時間</th><th>描述</th></tr>");
                 foreach (LocalModRowItem m in _mods)
                 {
-                    string statusIcon = m.IsEnabled ? "✅" : "❌";
+                    string statusIcon = m.IsEnabled ? "✅ 啟用" : "❌ 停用";
                     string author = m.Author == "-" ? string.Empty : m.Author;
-                    sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{statusIcon}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.FileName)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Id)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Description)}</td></tr>");
+                    string mcVer = m.MinecraftVersion == "-" ? string.Empty : m.MinecraftVersion;
+                    string loader = m.LoaderType == "-" ? string.Empty : m.LoaderType;
+                    string fsize = m.FileSize == "-" ? string.Empty : m.FileSize;
+                    string mtime = m.ModifiedTime == "-" ? string.Empty : m.ModifiedTime;
+                    sbHtml.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{statusIcon}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(mcVer)}</td><td>{System.Net.WebUtility.HtmlEncode(loader)}</td><td>{System.Net.WebUtility.HtmlEncode(author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.FileName)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Id)}</td><td>{System.Net.WebUtility.HtmlEncode(fsize)}</td><td>{System.Net.WebUtility.HtmlEncode(mtime)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Description)}</td></tr>");
                 }
                 sbHtml.AppendLine("</table></body></html>");
                 File.WriteAllText(filePath, sbHtml.ToString(), Encoding.UTF8);
@@ -146,7 +143,11 @@ public partial class ExportModListDialog : Window
                 {
                     string status = m.IsEnabled ? "是" : "否";
                     string author = m.Author == "-" ? string.Empty : m.Author;
-                    rows.Add([status, m.Name, m.Version, author, m.FileName, m.Id, m.Description]);
+                    string mcVer = m.MinecraftVersion == "-" ? string.Empty : m.MinecraftVersion;
+                    string loader = m.LoaderType == "-" ? string.Empty : m.LoaderType;
+                    string fsize = m.FileSize == "-" ? string.Empty : m.FileSize;
+                    string mtime = m.ModifiedTime == "-" ? string.Empty : m.ModifiedTime;
+                    rows.Add([status, m.Name, m.Version, mcVer, loader, author, m.FileName, m.Id, fsize, mtime, m.Description]);
                 }
                 byte[] xlsxBytes = Infrastructure.Utilities.OpenXmlSpreadsheetBuilder.BuildWorkbook("模組列表", rows);
                 File.WriteAllBytes(filePath, xlsxBytes);

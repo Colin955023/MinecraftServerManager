@@ -125,6 +125,22 @@ public sealed class ModFileInstallerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_modsDir, "fail.jar")));
     }
 
+    [Theory]
+    [InlineData("https://cdn.modrinth.com/data/ABC/versions/1.0.jar", true)]
+    [InlineData("https://modrinth.com/mod/sodium", true)]
+    [InlineData("http://cdn.modrinth.com/data/ABC/versions/1.0.jar", false)]
+    [InlineData("https://malicious.site/fake.jar", false)]
+    [InlineData("https://cdn.modrinth.com.attacker.com/mod.jar", false)]
+    [InlineData("https://sub.cdn.modrinth.com/mod.jar", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    [InlineData("not a url", false)]
+    public void IsOfficialModrinthSource_ValidatesUrlsCorrectly(string? url, bool expected)
+    {
+        bool actual = ModFileInstaller.IsOfficialModrinthSource(url);
+        Assert.Equal(expected, actual);
+    }
+
     private sealed class FakeHttpPort : IHttpPort
     {
         public bool ShouldFailDownload { get; set; }

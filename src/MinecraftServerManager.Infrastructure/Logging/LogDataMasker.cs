@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>
-/// 日誌敏感資訊遮罩工具
+/// 記錄敏感資訊遮罩工具
 /// </summary>
 public static partial class LogDataMasker
 {

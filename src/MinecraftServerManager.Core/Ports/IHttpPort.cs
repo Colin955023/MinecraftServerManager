@@ -52,7 +52,7 @@ public interface IHttpPort
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 安全發送 POST JSON 請求並取得遠端文字回應
+    /// 安全傳送 POST JSON 請求並取得遠端文字回應
     /// </summary>
     public Task<string?> PostJsonAsync(
         Uri uri,

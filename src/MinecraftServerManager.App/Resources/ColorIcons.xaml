@@ -138,7 +138,7 @@
     </DrawingImage.Drawing>
   </DrawingImage>
 
-  <!-- 操作按鈕：監控終端 (科技青) -->
+  <!-- 操作按鈕：監控終端機 (科技青) -->
   <DrawingImage x:Key="IconConsole">
     <DrawingImage.Drawing>
       <DrawingGroup>

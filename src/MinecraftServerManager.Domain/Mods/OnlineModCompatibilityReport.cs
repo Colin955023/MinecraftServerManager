@@ -1,7 +1,7 @@
 namespace MinecraftServerManager.Domain.Mods;
 
 /// <summary>
-/// 線上模組相容性與依賴分析結果
+/// 線上模組相容性與相依性分析結果
 /// </summary>
 public sealed record OnlineModCompatibilityReport
 {

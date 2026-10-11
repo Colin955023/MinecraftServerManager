@@ -5,26 +5,26 @@ namespace MinecraftServerManager.Domain.Mods;
 /// </summary>
 public sealed record OnlineModInfo
 {
-    public string ProjectId { get; }
-    public string Slug { get; }
-    public string Name { get; }
-    public string Author { get; }
-    public string Description { get; }
-    public string LatestVersion { get; }
-    public int DownloadCount { get; }
-    public string HomepageUrl { get; }
-    public string Url { get; }
-    public IReadOnlyList<string> Categories { get; }
-    public IReadOnlyList<string> Versions { get; }
-    public string ServerSide { get; }
-    public string ClientSide { get; }
-    public string Source { get; }
-    public bool Available { get; }
+    public string ProjectId { get; init; }
+    public string Slug { get; init; }
+    public string Name { get; init; }
+    public string Author { get; init; }
+    public string Description { get; init; }
+    public string LatestVersion { get; init; }
+    public int DownloadCount { get; init; }
+    public string HomepageUrl { get; init; }
+    public string Url { get; init; }
+    public IReadOnlyList<string> Categories { get; init; }
+    public IReadOnlyList<string> Versions { get; init; }
+    public string ServerSide { get; init; }
+    public string ClientSide { get; init; }
+    public string Source { get; init; }
+    public bool Available { get; init; }
 
     public string Id => ProjectId;
     public string Title => Name;
     public int Downloads => DownloadCount;
-    public string IconUrl { get; }
+    public string IconUrl { get; init; }
     public IReadOnlyList<string> Loaders => Categories;
 
     public OnlineModInfo(

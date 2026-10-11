@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
-using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -100,6 +99,19 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
         }
 
         return null;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<int> GetCachedAvailableJavaMajors()
+    {
+        EnsureCacheLoaded();
+        var majors = _memoryCache.Values
+            .Where(v => v >= 8)
+            .Distinct()
+            .OrderBy(v => v)
+            .ToList();
+
+        return majors.Count > 0 ? majors : [8, 11, 16, 17, 21];
     }
 
     /// <inheritdoc />
@@ -332,12 +344,12 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                 return;
             }
 
-            string cachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
-            if (File.Exists(cachePath))
+            string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
+            if (File.Exists(legacyCachePath))
             {
                 try
                 {
-                    string json = File.ReadAllText(cachePath, Encoding.UTF8);
+                    string json = File.ReadAllText(legacyCachePath, Encoding.UTF8);
                     using var doc = JsonDocument.Parse(json);
                     if (doc.RootElement.ValueKind == JsonValueKind.Object)
                     {
@@ -349,10 +361,13 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                             }
                         }
                     }
+
+                    // 舊檔案已完成記憶體載入遷移，安全清理刪除
+                    File.Delete(legacyCachePath);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning("讀取 Java requirements 快取失敗 ({Path}): {Error}", cachePath, ex.Message);
+                    Logger.Warning("讀取舊版 Java requirements 快取失敗 ({Path}): {Error}", legacyCachePath, ex.Message);
                 }
             }
 
@@ -373,7 +388,7 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                                 : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
                             if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
                             {
-                                _memoryCache[$"paper:{ver.Trim()}"] = jm.Value;
+                                _memoryCache[$"paper:{ver.Trim()}"] = Math.Max(8, jm.Value);
                             }
                         }
                     }
@@ -401,7 +416,7 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                                 : (elem.TryGetProperty("javaMajor", out var jP2) && jP2.ValueKind == JsonValueKind.Number && jP2.TryGetInt32(out int jVal2) ? jVal2 : null);
                             if (!string.IsNullOrWhiteSpace(ver) && jm is > 0)
                             {
-                                _memoryCache.TryAdd(ver.Trim(), jm.Value);
+                                _memoryCache.TryAdd(ver.Trim(), Math.Max(8, jm.Value));
                             }
                         }
                     }
@@ -432,15 +447,64 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
         {
             try
             {
-                string cachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
+                // 刪除已廢棄之獨立快取檔案
+                string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
+                if (File.Exists(legacyCachePath))
+                {
+                    try { File.Delete(legacyCachePath); } catch { }
+                }
 
-                var sorted = _memoryCache
-                    .OrderByDescending(kv => VersionValue.TryParse(kv.Key, out var v) ? v : VersionValue.Zero)
-                    .ThenByDescending(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                // 1. 同步更新官方 MC 快取 mc_versions_cache.json
+                string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
+                if (File.Exists(mcCachePath))
+                {
+                    var mcVersions = LoadCachedVersions(mcCachePath);
+                    bool mcChanged = false;
+                    var updatedMc = new List<LoaderVersion>(mcVersions.Count);
+                    foreach (var v in mcVersions)
+                    {
+                        if (_memoryCache.TryGetValue(v.Version, out int jm) && jm > 0 && v.JavaMajor != jm)
+                        {
+                            updatedMc.Add(v with { JavaMajor = jm });
+                            mcChanged = true;
+                        }
+                        else
+                        {
+                            updatedMc.Add(v);
+                        }
+                    }
 
-                string json = JsonCodec.Serialize(sorted, indented: true);
-                AtomicFileWriter.WriteText(cachePath, json);
+                    if (mcChanged)
+                    {
+                        SaveCachedVersions(mcCachePath, updatedMc);
+                    }
+                }
+
+                // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json
+                string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
+                if (File.Exists(paperCachePath))
+                {
+                    var paperVersions = LoadCachedVersions(paperCachePath);
+                    bool paperChanged = false;
+                    var updatedPaper = new List<LoaderVersion>(paperVersions.Count);
+                    foreach (var v in paperVersions)
+                    {
+                        if (_memoryCache.TryGetValue($"paper:{v.Version}", out int jm) && jm > 0 && v.JavaMajor != jm)
+                        {
+                            updatedPaper.Add(v with { JavaMajor = jm });
+                            paperChanged = true;
+                        }
+                        else
+                        {
+                            updatedPaper.Add(v);
+                        }
+                    }
+
+                    if (paperChanged)
+                    {
+                        SaveCachedVersions(paperCachePath, updatedPaper);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -578,6 +642,23 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
         }
 
         return null;
+    }
+
+    private static List<LoaderVersion> LoadCachedVersions(string cachePath)
+    {
+        try
+        {
+            if (!File.Exists(cachePath))
+            {
+                return [];
+            }
+            string json = File.ReadAllText(cachePath, Encoding.UTF8);
+            return JsonCodec.Deserialize<List<LoaderVersion>>(json) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private static void SaveCachedVersions(string cachePath, IReadOnlyList<LoaderVersion> versions)

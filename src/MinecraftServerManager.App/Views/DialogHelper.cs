@@ -3,7 +3,7 @@ using System.Windows;
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 封裝使用者互動對話框，自動防範非 UI/測試環境彈窗阻塞
+/// 封裝使用者互動對話方塊，自動防範非 UI/測試環境對話方塊阻塞
 /// </summary>
 public static class DialogHelper
 {

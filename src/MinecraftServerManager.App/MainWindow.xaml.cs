@@ -1,33 +1,41 @@
 using System.ComponentModel;
-using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Views;
-using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Http;
-using MinecraftServerManager.Infrastructure.Java;
-using MinecraftServerManager.Infrastructure.Loaders;
 using MinecraftServerManager.Infrastructure.Logging;
-using MinecraftServerManager.Infrastructure.Servers;
-using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App;
 
 public partial class MainWindow : Window
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MainWindow");
-    private static readonly System.Net.Http.HttpClient SharedHttpClient = new(
-        new System.Net.Http.SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) });
-    private static readonly Infrastructure.Process.ProcessRunner SharedProcessRunner = new();
-    private static readonly ServerRuntime SharedServerRuntime = new(SharedProcessRunner);
+    private readonly AppCompositionRoot? _compositionRoot;
     private readonly MainViewModel _viewModel;
-    private readonly Infrastructure.Services.UpdateCheckerService _updateChecker;
 
-    public MainWindow()
+    public MainWindow() : this(new AppCompositionRoot())
+    {
+    }
+
+    public MainWindow(AppCompositionRoot compositionRoot)
+    {
+        ArgumentNullException.ThrowIfNull(compositionRoot);
+        InitializeComponent();
+        _compositionRoot = compositionRoot;
+        _viewModel = compositionRoot.MainViewModel;
+        InitializeWindow();
+    }
+
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
+        _compositionRoot = null;
+        _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+        InitializeWindow();
+    }
 
+    private void InitializeWindow()
+    {
         if (Icon == null)
         {
             try
@@ -41,76 +49,7 @@ public partial class MainWindow : Window
             }
         }
 
-        var settings = new SettingsManager();
-        string serversRoot = EnsureServersRootConfigured(settings);
-
-        try
-        {
-            string legacyCache = Path.Combine(serversRoot, ".modcache");
-            if (Directory.Exists(legacyCache))
-            {
-                SafeFileSystem.DeleteWithin(serversRoot, legacyCache);
-                Logger.Information("已清理 servers 根目錄殘留的 .modcache: {Path}", legacyCache);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("清理 servers/.modcache 失敗: {Message}", ex.Message);
-        }
-
-        var javaDetector = new JavaRuntimeDetector(SharedProcessRunner);
-        var javaInstaller = new JavaWingetInstaller(SharedProcessRunner);
-        var httpPort = new HttpDownloadClient(SharedHttpClient);
-        var javaRequirements = new MinecraftJavaRequirementService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
-        var loaderCatalog = new LoaderCatalogService(httpPort, Infrastructure.Utilities.RuntimePaths.GetVersionCacheDir());
-        var loaderInstaller = new LoaderInstallerService(httpPort, SharedProcessRunner, Infrastructure.Utilities.RuntimePaths.GetInstallerCacheDir());
-        var serverManager = new ServerManager(
-            serversRoot,
-            loaderInstaller: loaderInstaller,
-            javaDetector: javaDetector,
-            javaRequirementService: javaRequirements);
-        var backupService = new ServerBackupService(serversRoot);
-
-        var modScanner = new Infrastructure.Mods.LocalModScanner();
-        var modInstaller = new Infrastructure.Mods.ModFileInstaller(httpPort);
-        var modManager = new Infrastructure.Mods.ModManager(modScanner, modInstaller);
-        var modrinthClient = new Infrastructure.Mods.ModrinthClient(httpPort);
-        _updateChecker = new Infrastructure.Services.UpdateCheckerService(httpPort);
-
-        _viewModel = new MainViewModel(
-            settings,
-            javaDetector,
-            serverManager,
-            backupService,
-            SharedServerRuntime,
-            loaderCatalog,
-            modManager,
-            modrinthClient,
-            _updateChecker,
-            SharedProcessRunner,
-            javaRequirements,
-            javaInstaller);
-
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-
-        // 背景非同步預熱：Paper 與 4 種載入器 + MC版本 + 官方與 Paper Java 需求 + 本機Java候選
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var detectTask = javaDetector.DetectAsync();
-                var reqTask = javaRequirements.PreloadAllJavaRequirementsAsync();
-                var mcTask = loaderCatalog.GetMinecraftVersionsAsync();
-                var paperTask = loaderCatalog.GetPaperMinecraftVersionsAsync();
-                var loadersTask = loaderCatalog.ForceReloadAllLoadersAsync();
-                await Task.WhenAll(detectTask, reqTask, mcTask, paperTask, loadersTask).ConfigureAwait(false);
-                Logger.Information("啟動背景預熱完成 (Java 候選、官方與 Paper Java 需求、Minecraft 版本與各載入器清單)");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("背景預熱過程發生部分異常: {Message}", ex.Message);
-            }
-        });
         _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
         _viewModel.UiScaleChanged += ApplyUiScale;
@@ -131,7 +70,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 套用全域 UI 縮放至主視窗與所有彈跳對話框（透過共用動態資源）。
+    /// 套用全域 UI 縮放至主視窗與所有快顯對話方塊（經由共用動態資源）。
     /// </summary>
     private void ApplyUiScale(double scale)
     {
@@ -144,7 +83,7 @@ public partial class MainWindow : Window
         UiScaleTransform.ScaleX = scale;
         UiScaleTransform.ScaleY = scale;
 
-        // 提供給對話框使用的共用縮放資源
+        // 提供給對話方塊使用的共用縮放資源
         Application.Current.Resources["UiScaleValue"] = scale;
         Application.Current.Resources["UiScaleTransform"] = new ScaleTransform(scale, scale);
 
@@ -159,66 +98,6 @@ public partial class MainWindow : Window
         Height = 820;
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = (SystemParameters.PrimaryScreenHeight - Height) / 2;
-    }
-
-    private static string EnsureServersRootConfigured(SettingsManager settings)
-    {
-        string current = settings.GetServersRoot();
-        if (!string.IsNullOrWhiteSpace(current))
-        {
-            try
-            {
-                string validated = settings.GetValidatedServersRootPath(create: true);
-                Logger.Information("已驗證伺服器存放目錄: {Path}", validated);
-                return validated;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("既有伺服器目錄設定無效 ({Message})，重新提示選取", ex.Message);
-            }
-        }
-
-        while (true)
-        {
-            NotificationDialog.Show(
-                null,
-                "選擇伺服器資料夾",
-                "請選擇要存放所有 Minecraft 伺服器的主資料夾\n(系統會在該資料夾內自動建立 servers 子資料夾)",
-                NotificationLevel.Info);
-
-            var dialog = new Microsoft.Win32.OpenFolderDialog
-            {
-                Title = "選擇存放 Minecraft 伺服器的主資料夾",
-                Multiselect = false
-            };
-
-            if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.FolderName))
-            {
-                try
-                {
-                    settings.SetServersRoot(dialog.FolderName.Trim());
-                    return settings.GetValidatedServersRootPath(create: true);
-                }
-                catch (Exception ex)
-                {
-                    NotificationDialog.Show(null, "設定錯誤", $"無法寫入設定或建立資料夾：{ex.Message}", NotificationLevel.Error);
-                }
-            }
-            else
-            {
-                var res = MessageBox.Show(
-                    "未選擇資料夾，是否要結束程式？",
-                    "結束程式",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-
-                if (res == MessageBoxResult.Yes)
-                {
-                    Application.Current.Shutdown();
-                    Environment.Exit(0);
-                }
-            }
-        }
     }
 
     private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level) => NotificationDialog.Show(this, title, message, level);
@@ -237,13 +116,13 @@ public partial class MainWindow : Window
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
 
         // 啟動時自動檢查更新
-        if (_viewModel.Settings.IsAutoUpdateEnabled())
+        if (_viewModel.Settings.IsAutoUpdateEnabled() && _viewModel.UpdateChecker is { } updateChecker && _viewModel.Launcher is { } launcher)
         {
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var result = await _updateChecker.CheckForUpdateAsync().ConfigureAwait(false);
+                    var result = await updateChecker.CheckForUpdateAsync().ConfigureAwait(false);
                     if (result.HasUpdate)
                     {
                         await Dispatcher.InvokeAsync(() =>
@@ -258,7 +137,7 @@ public partial class MainWindow : Window
 
                             if (confirm == MessageBoxResult.Yes)
                             {
-                                SharedProcessRunner.OpenUrl(result.ReleasePageUrl);
+                                launcher.OpenUrl(result.ReleasePageUrl);
                             }
                         });
                     }
@@ -274,8 +153,12 @@ public partial class MainWindow : Window
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
         Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
-        SaveWindowPosition();
-        _viewModel.UnregisterEvents();
+        if (_viewModel is not null)
+        {
+            SaveWindowPosition();
+            _viewModel.UnregisterEvents();
+        }
+        _compositionRoot?.Dispose();
     }
 
     private void RestoreWindowPosition()
@@ -332,6 +215,8 @@ public partial class MainWindow : Window
             SetBrushColor("AccentHoverBrush", "#3D5CC4");
             SetBrushColor("DangerBrush", "#DC2626");
             SetBrushColor("DangerHoverBrush", "#B91C1C");
+            SetBrushColor("SuccessBrush", "#1A7F37");
+            SetBrushColor("SuccessHoverBrush", "#1F883D");
             SetBrushColor("NotificationBrush", "#E7EEFF");
             SetBrushColor("ButtonDefaultHoverBrush", "#E2E8F0");
             SetBrushColor("NavButtonHoverBrush", "#E5E7EB");
@@ -360,6 +245,8 @@ public partial class MainWindow : Window
             SetBrushColor("AccentHoverBrush", "#3D5CC4");
             SetBrushColor("DangerBrush", "#B91C1C");
             SetBrushColor("DangerHoverBrush", "#991B1B");
+            SetBrushColor("SuccessBrush", "#238636");
+            SetBrushColor("SuccessHoverBrush", "#2EA043");
             SetBrushColor("NotificationBrush", "#283A5A");
             SetBrushColor("ButtonDefaultHoverBrush", "#2E3440");
             SetBrushColor("NavButtonHoverBrush", "#2D323E");

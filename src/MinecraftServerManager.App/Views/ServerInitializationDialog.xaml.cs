@@ -9,7 +9,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 伺服器初次啟動初始化對話框
+/// 伺服器初次啟動初始化對話方塊
 /// </summary>
 public partial class ServerInitializationDialog : Window
 {
@@ -140,15 +140,17 @@ public partial class ServerInitializationDialog : Window
         });
     }
 
-    private async void OnServerReady()
+    private void OnServerReady() => _ = HandleServerReadyAsync();
+
+    private async Task HandleServerReadyAsync()
     {
         try
         {
             _doneDetected = true;
             await Dispatcher.InvokeAsync(async () =>
             {
-                StatusText.Text = "狀態: 伺服器已就緒！正在優雅關閉完成初始化...";
-                AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在發送 stop 指令正常關閉...\n");
+                StatusText.Text = "狀態: 伺服器已就緒！正在平順關閉完成初始化...";
+                AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...\n");
 
                 try
                 {
@@ -156,7 +158,7 @@ public partial class ServerInitializationDialog : Window
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warning("發送 stop 指令或終止程序時發生異常: {Message}", ex.Message);
+                    Logger.Warning("傳送 stop 指令或終止行程時發生異常: {Message}", ex.Message);
                 }
             });
         }
@@ -170,11 +172,12 @@ public partial class ServerInitializationDialog : Window
     {
         Dispatcher.InvokeAsync(() =>
         {
+            InitProgressBar.Visibility = Visibility.Collapsed;
             if (_doneDetected)
             {
                 IsSuccess = true;
                 StatusText.Text = "狀態: 伺服器初次啟動初始化完成！";
-                AppendLog($"\n[系統] 伺服器程序已安全退出 (結束代碼: {exitCode})，初次初始化完成！\n");
+                AppendLog($"\n[系統] 伺服器行程已安全結束 (結束代碼: {exitCode})，初次初始化完成！\n");
                 CompleteButton.IsEnabled = true;
                 CompleteButton.Content = "完成初始化";
                 StartCountdown(5, isSuccess: true);
@@ -182,8 +185,8 @@ public partial class ServerInitializationDialog : Window
             else
             {
                 IsSuccess = false;
-                StatusText.Text = $"狀態: 伺服器未完成初始化即退出 (代碼: {exitCode})";
-                AppendLog($"\n[警告] 伺服器程序已結束 (結束代碼: {exitCode})，未收到就緒標記。\n");
+                StatusText.Text = $"狀態: 伺服器未完成初始化即結束 (代碼: {exitCode})";
+                AppendLog($"\n[警告] 伺服器行程已結束 (結束代碼: {exitCode})，未收到就緒標記。\n");
                 CompleteButton.IsEnabled = true;
                 CompleteButton.Content = "關閉";
                 StartCountdown(60, isSuccess: false);

@@ -1,8 +1,7 @@
 <Application x:Class="MinecraftServerManager.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:behaviors="clr-namespace:MinecraftServerManager.App.Behaviors"
-             StartupUri="MainWindow.xaml">
+             xmlns:behaviors="clr-namespace:MinecraftServerManager.App.Behaviors">
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
@@ -21,6 +20,8 @@
       <SolidColorBrush x:Key="WarningBrush" Color="#F59E0B" />
       <SolidColorBrush x:Key="DangerBrush" Color="#B91C1C" />
       <SolidColorBrush x:Key="DangerHoverBrush" Color="#991B1B" />
+      <SolidColorBrush x:Key="SuccessBrush" Color="#238636" />
+      <SolidColorBrush x:Key="SuccessHoverBrush" Color="#2EA043" />
       <SolidColorBrush x:Key="NotificationBrush" Color="#283A5A" />
       <SolidColorBrush x:Key="ButtonDefaultHoverBrush" Color="#2E3440" />
       <SolidColorBrush x:Key="NavButtonHoverBrush" Color="#2D323E" />
@@ -28,7 +29,7 @@
       <SolidColorBrush x:Key="DataGridGridLineBrush" Color="#3F4552" />
       <SolidColorBrush x:Key="TabItemUnderlineBrush" Color="#4F6FD8" />
 
-      <!-- 禁用與狀態筆刷 -->
+      <!-- 停用與狀態筆刷 -->
       <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#2B2D35" />
       <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#94A3B8" />
       <SolidColorBrush x:Key="ButtonDisabledBorderBrush" Color="#383C46" />
@@ -54,6 +55,32 @@
       <Style TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+      </Style>
+
+      <!-- ToolTip 全域主題樣式 (解決淺灰底配白字問題) -->
+      <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="8,5" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ToolTip">
+              <Border Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="5"
+                      Padding="{TemplateBinding Padding}"
+                      SnapsToDevicePixels="True">
+                <ContentPresenter />
+              </Border>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
       </Style>
 
       <!-- 通用按鈕樣式 (圓角 5px，自訂 Disabled 狀態消除白框) -->
@@ -86,7 +113,7 @@
                   <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDefaultHoverBrush}" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="border" Property="Background" Value="#1A1C22" />
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDefaultHoverBrush}" />
                 </Trigger>
                 <Trigger Property="IsEnabled" Value="False">
                   <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
@@ -182,6 +209,47 @@
         </Setter>
       </Style>
 
+      <!-- 成功按鈕樣式 (Success - 綠色) -->
+      <Style x:Key="SuccessButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="Foreground" Value="#FFFFFF" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <Border x:Name="border"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="5"
+                      Padding="{TemplateBinding Padding}"
+                      SnapsToDevicePixels="True">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                  RecognizesAccessKey="True" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource SuccessHoverBrush}" />
+                  <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource SuccessHoverBrush}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource SuccessBrush}" />
+                  <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
+                  <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource ButtonDisabledBorderBrush}" />
+                  <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
+                  <Setter Property="Cursor" Value="Arrow" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+
       <!-- 導覽列按鈕樣式 -->
       <Style x:Key="NavButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent" />
@@ -209,7 +277,7 @@
                   <Setter TargetName="border" Property="Background" Value="{DynamicResource NavButtonHoverBrush}" />
                 </Trigger>
                 <Trigger Property="IsPressed" Value="True">
-                  <Setter TargetName="border" Property="Background" Value="{DynamicResource ButtonDefaultHoverBrush}" />
+                  <Setter TargetName="border" Property="Background" Value="{DynamicResource NavButtonHoverBrush}" />
                 </Trigger>
               </ControlTemplate.Triggers>
             </ControlTemplate>
@@ -276,7 +344,7 @@
         </Setter>
       </Style>
 
-      <!-- 下拉選單 ComboBoxItem 樣式 (高對比、自訂選中/懸停背景，無白底白字) -->
+      <!-- 下拉選單 ComboBoxItem 樣式 (高對比、自訂選取/滑鼠停留背景，無白底白字) -->
       <Style TargetType="ComboBoxItem">
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="Padding" Value="10,6" />
@@ -308,8 +376,9 @@
         </Setter>
       </Style>
 
-      <!-- 下拉選單 ComboBox 樣式 (徹底重構範本，Popup 背景色與邊框自適應主題) -->
+      <!-- 下拉選單 ComboBox 樣式 (徹底重構範本，Popup 背景色與邊框適應深淺主題) -->
       <Style TargetType="ComboBox">
+        <Setter Property="behaviors:ComboBoxWheelBehavior.EnableWheelSelection" Value="True" />
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
@@ -364,7 +433,7 @@
                   </ToggleButton.Template>
                 </ToggleButton>
 
-                <!-- 顯示當前選中項目 -->
+                <!-- 顯示目前選取項目 -->
                 <ContentPresenter x:Name="ContentSite"
                                   IsHitTestVisible="False"
                                   Content="{TemplateBinding SelectionBoxItem}"
@@ -477,9 +546,10 @@
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
         <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
         <Setter Property="behaviors:DataGridHeaderAutoFitBehavior.EnableHeaderDoubleClickAutoFit" Value="True" />
+        <Setter Property="behaviors:DataGridNaturalSortBehavior.EnableNaturalSort" Value="True" />
       </Style>
 
-      <!-- TabControl 與 TabItem 樣式 (消除深色白底白字，選中下劃線高亮) -->
+      <!-- TabControl 與 TabItem 樣式 (消除深色白底白字，選取底線突顯) -->
       <Style TargetType="TabControl">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
@@ -530,7 +600,7 @@
         </Setter>
       </Style>
 
-      <!-- 右鍵選單 ContextMenu 與 MenuItem 樣式 (自適應深淺主題) -->
+      <!-- 右鍵選單 ContextMenu 與 MenuItem 樣式 (適應深淺主題) -->
       <Style TargetType="ContextMenu">
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="OverridesDefaultStyle" Value="True" />

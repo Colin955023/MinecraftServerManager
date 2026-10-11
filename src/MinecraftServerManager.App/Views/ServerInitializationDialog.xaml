@@ -24,13 +24,22 @@
                  FontWeight="Bold"
                  Foreground="{DynamicResource TextBrush}"
                  Margin="0,0,0,4" />
-      <TextBlock x:Name="StatusText"
-                 Text="狀態: 正在準備啟動伺服器進行初次世界生成與設定配置..."
-                 FontSize="13"
-                 Foreground="{DynamicResource MutedTextBrush}" />
+      <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+        <ProgressBar x:Name="InitProgressBar"
+                     IsIndeterminate="True"
+                     Width="80"
+                     Height="4"
+                     Margin="0,0,8,0"
+                     VerticalAlignment="Center" />
+        <TextBlock x:Name="StatusText"
+                   Text="狀態: 正在準備啟動伺服器進行初次世界生成與設定..."
+                   FontSize="13"
+                   Foreground="{DynamicResource MutedTextBrush}"
+                   VerticalAlignment="Center" />
+      </StackPanel>
     </StackPanel>
 
-    <!-- 中間：控制台日誌輸出 (黑底綠字) -->
+    <!-- 中間：主控台記錄輸出 (黑底綠字) -->
     <Border Grid.Row="1"
             Background="#0C0C0C"
             BorderBrush="{DynamicResource BorderBrush}"

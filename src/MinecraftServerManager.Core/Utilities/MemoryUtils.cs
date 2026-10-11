@@ -114,7 +114,7 @@ public static partial class MemoryUtils
     }
 
     /// <summary>
-    /// 格式化位元組大小（B/KB/MB/GB）
+    /// 格式化位元組大小（B/KB/MB/GB/TB，滿 1024 自動使用下一個單位）
     /// </summary>
     public static string FormatBytes(long bytes)
     {
@@ -137,7 +137,12 @@ public static partial class MemoryUtils
             return $"{mb:F1} MB";
         }
         double gb = mb / 1024.0;
-        return $"{gb:F2} GB";
+        if (gb < 1024)
+        {
+            return $"{gb:F2} GB";
+        }
+        double tb = gb / 1024.0;
+        return $"{tb:F2} TB";
     }
 
     /// <summary>

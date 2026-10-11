@@ -1,6 +1,7 @@
 using System.Globalization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
 
@@ -28,16 +29,23 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
 
         var list = new List<ServerBackupInfo>();
         var entries = SafeFileSystem.ListBoundedDirectory(backupsDir, rejectReparse: false);
+        string prefix = $"backup-{serverName}-";
         foreach (var entry in entries)
         {
             if (!entry.IsDirectory && entry.FullPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
             {
-                var fileInfo = new FileInfo(entry.FullPath);
-                list.Add(new ServerBackupInfo(
-                    FileName: Path.GetFileName(entry.FullPath),
-                    FullPath: entry.FullPath,
-                    SizeBytes: fileInfo.Length,
-                    CreatedAt: fileInfo.CreationTimeUtc));
+                string fn = Path.GetFileName(entry.FullPath);
+                if (fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                    fn.StartsWith($"{serverName}-", StringComparison.OrdinalIgnoreCase) ||
+                    fn.Contains(serverName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var fileInfo = new FileInfo(entry.FullPath);
+                    list.Add(new ServerBackupInfo(
+                        FileName: fn,
+                        FullPath: entry.FullPath,
+                        SizeBytes: fileInfo.Length,
+                        CreatedAt: fileInfo.CreationTimeUtc));
+                }
             }
         }
 
@@ -175,6 +183,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         string serverName,
         string backupFileName,
         string? backupDirectory = null,
+        IProgress<ServerBackupProgressReport>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverName);
@@ -195,20 +204,30 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         string preservedLogsDir = Path.Combine(_resolvedServersRoot, $".restore-preserved-logs-{Guid.NewGuid():N}");
         bool hasPreservedLogs = false;
 
+        progress?.Report(new ServerBackupProgressReport(5, "正在暫存現場診斷記錄檔...", 0, 0));
+
         try
         {
-            // 階段零：暫存現場之 logs 與 crash-reports，防止災難復原時遺失關鍵診斷日誌
+            // 階段零：暫存現場之 logs 與 crash-reports，防止災難復原時遺失關鍵診斷記錄檔
             if (Directory.Exists(serverDir))
             {
+                FileSafety.ClearReadOnlyRecursively(serverDir);
                 PreserveLiveDiagnostics(serverDir, preservedLogsDir);
                 hasPreservedLogs = Directory.Exists(preservedLogsDir) && Directory.EnumerateFileSystemEntries(preservedLogsDir).Any();
             }
 
             // 階段一：在暫存 staging 目錄進行解壓與完整性校驗
             Directory.CreateDirectory(stagingDir);
-            SafeZipArchive.Extract(backupFilePath, stagingDir);
+            progress?.Report(new ServerBackupProgressReport(10, "正在解壓縮備份檔案...", 0, 0));
+            SafeZipArchive.Extract(backupFilePath, stagingDir, (extracted, total) =>
+            {
+                int pct = total > 0 ? (int)(10 + (extracted * 50 / total)) : 35;
+                progress?.Report(new ServerBackupProgressReport(Math.Clamp(pct, 10, 60), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 60)}%)...", extracted, total));
+            });
+            FileSafety.ClearReadOnlyRecursively(stagingDir);
 
             // 階段二：建立既有伺服器檔案之 rollback 快照
+            progress?.Report(new ServerBackupProgressReport(65, "正在建立伺服器現況快照...", 0, 0));
             Directory.CreateDirectory(rollbackDir);
             var currentEntries = SafeFileSystem.ListBoundedDirectory(serverDir, rejectReparse: false);
             foreach (var entry in currentEntries)
@@ -222,6 +241,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 string relName = Path.GetFileName(entry.FullPath);
                 string targetRollback = Path.Combine(rollbackDir, relName);
 
+                FileSafety.ClearReadOnlyAttribute(entry.FullPath);
                 if (entry.IsDirectory)
                 {
                     Directory.Move(entry.FullPath, targetRollback);
@@ -233,11 +253,14 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             }
 
             // 階段三：將 staging 中的還原內容搬移至伺服器目錄
+            progress?.Report(new ServerBackupProgressReport(80, "正在還原備份檔案至伺服器目錄...", 0, 0));
             var stagingEntries = SafeFileSystem.ListBoundedDirectory(stagingDir, rejectReparse: false);
             foreach (var sEntry in stagingEntries)
             {
                 string relName = Path.GetFileName(sEntry.FullPath);
                 string targetLive = Path.Combine(serverDir, relName);
+
+                FileSafety.ClearReadOnlyAttribute(sEntry.FullPath);
 
                 if (sEntry.IsDirectory)
                 {
@@ -249,16 +272,20 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
                 }
             }
 
-            // 階段四：將現場保留之診斷日誌安全合併移回伺服器目錄
+            // 階段四：將現場保留之診斷記錄檔安全合併移回伺服器目錄
             if (hasPreservedLogs)
             {
+                progress?.Report(new ServerBackupProgressReport(92, "正在合併保留之診斷記錄檔...", 0, 0));
                 RestorePreservedDiagnostics(preservedLogsDir, serverDir);
             }
 
             // 還原成功後清理 rollback 快照與 staging 暫存目錄
+            progress?.Report(new ServerBackupProgressReport(96, "正在清理暫存快照環境...", 0, 0));
             CleanDirectorySafe(rollbackDir);
             CleanDirectorySafe(stagingDir);
             CleanDirectorySafe(preservedLogsDir);
+
+            progress?.Report(new ServerBackupProgressReport(100, "備份還原完成！", 0, 0));
             return true;
         }
         catch
@@ -384,6 +411,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         {
             if (Directory.Exists(dirPath))
             {
+                FileSafety.ClearReadOnlyRecursively(dirPath);
                 Directory.Delete(dirPath, recursive: true);
             }
         }

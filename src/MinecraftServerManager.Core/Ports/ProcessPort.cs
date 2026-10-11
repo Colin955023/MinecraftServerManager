@@ -46,5 +46,7 @@ public interface IExternalLauncher
 
     public bool ShowInFolder(string filePath);
 
+    public bool OpenFile(string filePath);
+
     public bool OpenUrl(string url);
 }

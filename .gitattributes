@@ -1,4 +1,4 @@
-# 強制文本檔案的換行符一致性（跨平台開發）
+# 強制文字檔的換行字元一致性（跨平台開發）
 
 # Auto detect text files and normalize line endings to LF
 * text=auto
@@ -21,7 +21,7 @@
 *.sh text eol=lf
 *.bash text eol=lf
 
-# 配置：LF
+# 設定檔：LF
 *.toml text eol=lf
 *.json text eol=lf
 *.yaml text eol=lf
@@ -36,7 +36,7 @@
 *.rst text eol=lf
 *.changelog text eol=lf
 
-# 二進制檔案（不進行轉換）
+# 二進位檔案（不進行轉換）
 *.exe binary
 *.dll binary
 *.so binary

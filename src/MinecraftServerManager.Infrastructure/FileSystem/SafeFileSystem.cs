@@ -42,7 +42,13 @@ public static class SafeFileSystem
     {
         try
         {
-            return (File.GetAttributes(GetFullPath(path)) & FileAttributes.ReparsePoint) != 0;
+            string full = GetFullPath(path);
+            if (!File.Exists(full) && !Directory.Exists(full))
+            {
+                return false;
+            }
+
+            return (File.GetAttributes(full) & FileAttributes.ReparsePoint) != 0;
         }
         catch (FileNotFoundException)
         {
@@ -54,11 +60,11 @@ public static class SafeFileSystem
         }
         catch (IOException)
         {
-            return true;
+            return false;
         }
         catch (UnauthorizedAccessException)
         {
-            return true;
+            return false;
         }
     }
 
@@ -90,7 +96,7 @@ public static class SafeFileSystem
                 return false;
             }
 
-            EnsureNoReparseAlongPath(existingParent);
+            EnsureNoReparseAlongPath(existingParent, basePath);
             return true;
         }
         catch (IOException)
@@ -409,11 +415,22 @@ public static class SafeFileSystem
         }
     }
 
-    private static void EnsureNoReparseAlongPath(string path)
+    private static void EnsureNoReparseAlongPath(string path, string? stopBoundary = null)
     {
+        string? boundary = string.IsNullOrEmpty(stopBoundary) ? null : GetFullPath(stopBoundary);
         var current = new DirectoryInfo(GetFullPath(path));
         while (current is not null)
         {
+            if (boundary is not null && string.Equals(current.FullName, boundary, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            if (current.Parent is null)
+            {
+                break;
+            }
+
             if (current.Exists && IsReparsePoint(current.FullName))
             {
                 throw new SafeFileSystemException($"路徑不可包含 reparse point： {current.FullName}");

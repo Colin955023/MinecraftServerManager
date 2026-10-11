@@ -64,15 +64,93 @@ public static class ModSemantics
     }
 
     /// <summary>
-    /// 從版本清單中挑選最適合的候選版本
+    /// 從版本清單中挑選最適合的候選版本（單次線性掃描 O(N)，零配置）
     /// </summary>
     public static OnlineModVersion? SelectBestModVersion(IEnumerable<OnlineModVersion> versions)
     {
-        return versions
-            .OrderByDescending(v => v.PrimaryFile != null ? 1 : 0)
-            .ThenByDescending(v => GetVersionTypePriority(v.VersionType))
-            .ThenByDescending(v => v.DatePublished)
-            .ThenByDescending(v => v.VersionNumber)
-            .FirstOrDefault();
+        if (versions is null)
+        {
+            return null;
+        }
+
+        OnlineModVersion? best = null;
+        int bestHasFile = -1;
+        int bestTypePriority = -1;
+        string bestDate = string.Empty;
+        string bestVersionNumber = string.Empty;
+
+        foreach (var v in versions)
+        {
+            if (v is null)
+            {
+                continue;
+            }
+
+            int hasFile = v.PrimaryFile != null ? 1 : 0;
+            int typePriority = GetVersionTypePriority(v.VersionType);
+            string date = v.DatePublished ?? string.Empty;
+            string verNum = v.VersionNumber ?? string.Empty;
+
+            if (best is null)
+            {
+                best = v;
+                bestHasFile = hasFile;
+                bestTypePriority = typePriority;
+                bestDate = date;
+                bestVersionNumber = verNum;
+                continue;
+            }
+
+            if (hasFile != bestHasFile)
+            {
+                if (hasFile > bestHasFile)
+                {
+                    best = v;
+                    bestHasFile = hasFile;
+                    bestTypePriority = typePriority;
+                    bestDate = date;
+                    bestVersionNumber = verNum;
+                }
+                continue;
+            }
+
+            if (typePriority != bestTypePriority)
+            {
+                if (typePriority > bestTypePriority)
+                {
+                    best = v;
+                    bestHasFile = hasFile;
+                    bestTypePriority = typePriority;
+                    bestDate = date;
+                    bestVersionNumber = verNum;
+                }
+                continue;
+            }
+
+            int dateCmp = string.Compare(date, bestDate, StringComparison.Ordinal);
+            if (dateCmp != 0)
+            {
+                if (dateCmp > 0)
+                {
+                    best = v;
+                    bestHasFile = hasFile;
+                    bestTypePriority = typePriority;
+                    bestDate = date;
+                    bestVersionNumber = verNum;
+                }
+                continue;
+            }
+
+            if (string.Compare(verNum, bestVersionNumber, StringComparison.Ordinal) > 0)
+            {
+                best = v;
+                bestHasFile = hasFile;
+                bestTypePriority = typePriority;
+                bestDate = date;
+                bestVersionNumber = verNum;
+            }
+        }
+
+        return best;
     }
 }

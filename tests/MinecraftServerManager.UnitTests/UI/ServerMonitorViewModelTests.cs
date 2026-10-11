@@ -1,0 +1,169 @@
+using System.Text;
+using MinecraftServerManager.App.ViewModels;
+using MinecraftServerManager.Core.Ports;
+using Xunit;
+
+namespace MinecraftServerManager.UnitTests.UI;
+
+/// <summary>
+/// 伺服器監控視窗 ViewModel 測試（驗證紀錄限制、重新整理清空重載與玩家名單解析）
+/// </summary>
+public sealed class ServerMonitorViewModelTests : IDisposable
+{
+    private readonly string _tempServerDir;
+    private readonly MockServerRuntime _runtime;
+
+    public ServerMonitorViewModelTests()
+    {
+        _tempServerDir = Path.Combine(Path.GetTempPath(), "msm-monitor-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempServerDir);
+        _runtime = new MockServerRuntime();
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_tempServerDir))
+            {
+                Directory.Delete(_tempServerDir, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    [Fact]
+    public void ParsesPlayerList_DifferentCoreFormats_UpdatesCountAndPlayerList()
+    {
+        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+
+        // 格式 1: Vanilla / Paper 繁複格式: There are 2 of a max of 20 players online: Steve, Alex
+        _runtime.RaiseOutputLine("[12:00:00 INFO]: There are 2 of a max of 20 players online: Steve, Alex");
+
+        Assert.Equal("2 / 20", vm.OnlinePlayersText);
+        Assert.Equal(2, vm.OnlinePlayers.Count);
+        Assert.Contains("Steve", vm.OnlinePlayers);
+        Assert.Contains("Alex", vm.OnlinePlayers);
+        Assert.False(vm.HasNoOnlinePlayers);
+
+        // 格式 2: 簡短斜線格式: There are 1/20 players online: Steve
+        _runtime.RaiseOutputLine("[12:01:00 INFO]: There are 1/20 players online: Steve");
+
+        Assert.Equal("1 / 20", vm.OnlinePlayersText);
+        Assert.Single(vm.OnlinePlayers);
+        Assert.Contains("Steve", vm.OnlinePlayers);
+
+        // 格式 3: 0 人線上: There are 0 of a max 20 players online:
+        _runtime.RaiseOutputLine("[12:02:00 INFO]: There are 0 of a max 20 players online:");
+
+        Assert.Equal("0 / 20", vm.OnlinePlayersText);
+        Assert.Empty(vm.OnlinePlayers);
+        Assert.True(vm.HasNoOnlinePlayers);
+    }
+
+    [Fact]
+    public void HandlesPlayerJoinAndLeave_UpdatesOnlinePlayersCorrectly()
+    {
+        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+
+        _runtime.RaiseOutputLine("[12:00:00 INFO]: : PlayerOne joined the game");
+        Assert.Single(vm.OnlinePlayers);
+        Assert.Contains("PlayerOne", vm.OnlinePlayers);
+
+        _runtime.RaiseOutputLine("[12:01:00 INFO]: : PlayerTwo joined the game");
+        Assert.Equal(2, vm.OnlinePlayers.Count);
+        Assert.Contains("PlayerTwo", vm.OnlinePlayers);
+
+        _runtime.RaiseOutputLine("[12:02:00 INFO]: : PlayerOne left the game");
+        Assert.Single(vm.OnlinePlayers);
+        Assert.DoesNotContain("PlayerOne", vm.OnlinePlayers);
+        Assert.Contains("PlayerTwo", vm.OnlinePlayers);
+    }
+
+    [Fact]
+    public void ReloadLogs_ClearsExistingAndLoadsFromDiskWithinLimits()
+    {
+        string logsDir = Path.Combine(_tempServerDir, "logs");
+        Directory.CreateDirectory(logsDir);
+        string logFile = Path.Combine(logsDir, "latest.log");
+
+        var utf8NoBom = new UTF8Encoding(false);
+        // 寫入初始 5 行
+        File.WriteAllLines(logFile, ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"], utf8NoBom);
+
+        using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+        Assert.Equal(5, vm.Logs.Count);
+
+        // 修改記錄檔內容為 3 行新內容，並執行手動重新載入
+        File.WriteAllLines(logFile, ["New A", "New B", "New C"], utf8NoBom);
+        vm.ReloadLogs();
+
+        // 驗證已先清空舊紀錄並重新載入最新 3 行
+        Assert.Equal(3, vm.Logs.Count);
+        Assert.Equal("New A", vm.Logs[0]);
+        Assert.Equal("New C", vm.Logs[2]);
+    }
+
+    private sealed class MockServerRuntime : IServerRuntime
+    {
+        public int Pid => 1234;
+        public bool IsRunning { get; set; }
+        public bool IsReady { get; set; }
+        public int? ExitCode => 0;
+        public string? ActiveServerName => "TestServer";
+
+        public event Action<string>? OutputLineReceived;
+        public event Action<int>? ServerExited;
+        public event Action? ServerReady;
+        public event Action? ServerStarted;
+
+        public void RaiseOutputLine(string line) => OutputLineReceived?.Invoke(line);
+        public void RaiseExited(int exitCode) => ServerExited?.Invoke(exitCode);
+        public void RaiseReady() => ServerReady?.Invoke();
+        public void RaiseStarted() => ServerStarted?.Invoke();
+
+        public Task StartAsync(Core.Servers.ServerLaunchPlan plan, CancellationToken cancellationToken = default)
+        {
+            _ = plan;
+            _ = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task StartAsync(
+            string javaExecutablePath,
+            string serverDirectory,
+            string executableName,
+            int memoryMaxMb,
+            int? memoryMinMb = null,
+            IReadOnlyList<string>? customJvmArgs = null,
+            CancellationToken cancellationToken = default)
+        {
+            _ = javaExecutablePath;
+            _ = serverDirectory;
+            _ = executableName;
+            _ = memoryMaxMb;
+            _ = memoryMinMb;
+            _ = customJvmArgs;
+            _ = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default)
+        {
+            _ = command;
+            _ = cancellationToken;
+            return Task.FromResult(true);
+        }
+
+        public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default)
+        {
+            _ = gracefulTimeout;
+            _ = cancellationToken;
+            return Task.FromResult(new ProcessExitResult(0, false));
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}

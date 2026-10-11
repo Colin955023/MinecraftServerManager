@@ -13,7 +13,7 @@ public enum ServerDeleteDecision
 }
 
 /// <summary>
-/// 刪除伺服器確認對話框
+/// 刪除伺服器確認對話方塊
 /// </summary>
 public partial class ServerDeleteConfirmationDialog : Window
 {

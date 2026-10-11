@@ -65,7 +65,7 @@ public sealed class ModManagerTests : IDisposable
 
         string csv = await manager.ExportModListAsync(_testDir, format: "csv");
 
-        Assert.Contains("狀態,名稱,版本,MC版本,載入器,作者,檔名", csv, StringComparison.Ordinal);
+        Assert.Contains("啟用狀態,模組名稱,版本,MC版本,載入器,作者,檔案名稱,模組ID,檔案大小,修改時間,描述", csv, StringComparison.Ordinal);
         Assert.Contains("\"My, Mod\"", csv, StringComparison.Ordinal);
         Assert.Contains("\"2.1.0\"", csv, StringComparison.Ordinal);
     }
@@ -103,7 +103,7 @@ public sealed class ModManagerTests : IDisposable
         string html = await manager.ExportModListAsync(_testDir, format: "html");
 
         Assert.Contains("<table>", html, StringComparison.Ordinal);
-        Assert.Contains("<th>名稱</th>", html, StringComparison.Ordinal);
+        Assert.Contains("<th>模組名稱</th>", html, StringComparison.Ordinal);
     }
 
     private sealed class FakeScanner(IReadOnlyList<LocalModInfo> mods) : ILocalModScanner

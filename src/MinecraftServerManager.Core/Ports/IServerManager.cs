@@ -18,7 +18,7 @@ public interface IServerManager
     public Task<ServerConfig?> GetServerAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 依建立計畫建立伺服器（支援交易回滾）
+    /// 依建立計畫建立伺服器（支援交易回復）
     /// </summary>
     public Task<ServerCreationResult> CreateServerAsync(
         ServerCreationPlan plan,

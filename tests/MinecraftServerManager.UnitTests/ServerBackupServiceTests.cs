@@ -130,7 +130,7 @@ public sealed class ServerBackupServiceTests : IDisposable
     {
         var backup = await _backupService.CreateBackupAsync("TestServer");
 
-        // 模擬伺服器運行後產生了崩潰報告與現場最新日誌
+        // 模擬伺服器運作後產生了當機報告與現場最新記錄檔
         string logsDir = Path.Combine(_serverDir, "logs");
         string crashDir = Path.Combine(_serverDir, "crash-reports");
         Directory.CreateDirectory(logsDir);
@@ -142,12 +142,30 @@ public sealed class ServerBackupServiceTests : IDisposable
         bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName);
         Assert.True(restored);
 
-        // 驗證崩潰報告被妥善保留移回
+        // 驗證當機報告被妥善保留移回
         Assert.True(File.Exists(Path.Combine(crashDir, "crash-2026-09-24.txt")));
         Assert.Equal("Live crash traceback", File.ReadAllText(Path.Combine(crashDir, "crash-2026-09-24.txt")));
 
-        // 驗證現場日誌被保留
+        // 驗證現場記錄檔被保留
         bool hasLog = File.Exists(Path.Combine(logsDir, "latest.log")) || File.Exists(Path.Combine(logsDir, "latest.log.pre-restore"));
         Assert.True(hasLog);
+    }
+
+    [Fact]
+    public async Task RestoresBackup_ClearsReadOnlyAttribute_SuccessfullyRestores()
+    {
+        var backup = await _backupService.CreateBackupAsync("TestServer");
+
+        // 將既有檔案設為 ReadOnly 唯讀屬性，模擬鎖定情況
+        string propsPath = Path.Combine(_serverDir, "server.properties");
+        File.SetAttributes(propsPath, FileAttributes.ReadOnly);
+
+        bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName);
+        Assert.True(restored);
+
+        // 還原後唯讀屬性應被清除且內容成功復原
+        var attrs = File.GetAttributes(propsPath);
+        Assert.False(attrs.HasFlag(FileAttributes.ReadOnly));
+        Assert.Equal("motd=Initial Server", File.ReadAllText(propsPath));
     }
 }

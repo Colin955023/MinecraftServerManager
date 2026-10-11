@@ -6,7 +6,7 @@
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
   </UserControl.Resources>
   <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <!-- 左右分欄佈局 -->
+    <!-- 左右分欄版面配置 -->
     <Grid Margin="12,4,16,24">
       <Grid.ColumnDefinitions>
         <!-- 左欄：關於程式 -->
@@ -79,7 +79,7 @@
             <TextBlock Text="• 本專案採用 GNU General Public License v3.0 授權條款" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 部分設計理念參考 PrismLauncher" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 請遵守 Minecraft EULA 和當地法律法規" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="特別感謝 PrismLauncher 開發團隊的開源貢獻！" Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0" />
           </StackPanel>
         </Border>
@@ -186,9 +186,9 @@
         </Grid>
 
 
-        <!-- 底部偏好設定操作按鈕 (恢復預設) -->
+        <!-- 底部偏好設定操作按鈕 (還原預設) -->
         <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,20" />
-        <Button Content="恢復預設"
+        <Button Content="還原預設"
                 Command="{Binding ResetAllSettingsCommand}"
                 Style="{DynamicResource DangerButtonStyle}"
                 HorizontalAlignment="Left"

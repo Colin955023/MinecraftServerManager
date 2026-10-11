@@ -147,4 +147,29 @@ public sealed class ServerManagerTests : IDisposable
         Assert.True(Directory.Exists(importedDir));
         Assert.True(File.Exists(Path.Combine(importedDir, "server.jar")));
     }
+
+    [Fact]
+    public async Task UpdatesForgeUserJvmArgsCorrectly()
+    {
+        var plan = ServerCreationPlan.Create(
+            name: ServerName.Parse("ForgeTest"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.1"),
+            loaderType: LoaderKind.Forge,
+            memoryMaxMb: 4096,
+            memoryMinMb: 2048,
+            jvmArgs: ["-Dcustom.flag=true"]);
+
+        var creation = await _manager.CreateServerAsync(plan);
+        Assert.True(creation.Completed);
+
+        string serverDir = Path.Combine(_testRoot, "ForgeTest");
+        string jvmArgsFile = Path.Combine(serverDir, "user_jvm_args.txt");
+        Assert.True(File.Exists(jvmArgsFile));
+
+        string content = await File.ReadAllTextAsync(jvmArgsFile);
+        Assert.Contains("-Xms2048M", content);
+        Assert.Contains("-Xmx4096M", content);
+        Assert.Contains("-Dcustom.flag=true", content);
+        Assert.Contains("-XX:+UseG1GC", content);
+    }
 }

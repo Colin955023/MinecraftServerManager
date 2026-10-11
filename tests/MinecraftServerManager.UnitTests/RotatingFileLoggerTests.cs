@@ -129,7 +129,7 @@ public sealed class RotatingFileLoggerTests
             // 寫入足量訊息使總長度遠超 300 bytes
             for (int i = 0; i < 20; i++)
             {
-                logger.LogInformation("這是一條測試日誌訊息編號 {Index} 用於觸發檔案自動輪替機制", i);
+                logger.LogInformation("這是一條測試記錄訊息編號 {Index} 用於觸發檔案自動輪替機制", i);
             }
 
             provider.Dispose();
@@ -197,7 +197,7 @@ public sealed class RotatingFileLoggerTests
 
             var tasks = Enumerable.Range(0, 50).Select(i => Task.Run(() =>
             {
-                logger.LogInformation("執行緒 {ThreadId} 寫入平行測試日誌項 {Index}", Environment.CurrentManagedThreadId, i);
+                logger.LogInformation("執行緒 {ThreadId} 寫入平行測試記錄項 {Index}", Environment.CurrentManagedThreadId, i);
             }));
 
             await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(15));

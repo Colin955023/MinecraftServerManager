@@ -1,4 +1,4 @@
-﻿<Window x:Class="MinecraftServerManager.App.MainWindow"
+<Window x:Class="MinecraftServerManager.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels"
@@ -117,7 +117,7 @@
       </Grid>
     </Border>
 
-    <!-- 右側主要內容區（通知已改為彈出對話框，移除橫條） -->
+    <!-- 右側主要內容區（通知已改為彈出對話方塊，移除橫條） -->
     <Grid Grid.Column="1" Margin="28,20,28,20">
       <ContentControl Content="{Binding CurrentPage}" />
     </Grid>

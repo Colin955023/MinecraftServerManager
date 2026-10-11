@@ -4,7 +4,7 @@ using MinecraftServerManager.Infrastructure.Utilities;
 namespace MinecraftServerManager.Infrastructure.Logging;
 
 /// <summary>
-/// 輪替檔案日誌設定選項
+/// 輪替檔案記錄設定選項
 /// </summary>
 public sealed class RotatingFileLoggerOptions
 {

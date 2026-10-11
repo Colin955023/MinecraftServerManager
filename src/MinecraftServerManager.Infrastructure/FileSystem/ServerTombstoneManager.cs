@@ -13,7 +13,7 @@ public sealed record DeleteTombstoneRecord(
     int SchemaVersion = 1);
 
 /// <summary>
-/// 伺服器刪除交易暫存與崩潰復原管理工具
+/// 伺服器刪除交易暫存與中斷復原管理工具
 /// </summary>
 public static class ServerTombstoneManager
 {
@@ -45,7 +45,7 @@ public static class ServerTombstoneManager
         var record = new DeleteTombstoneRecord(validatedName, original, DateTime.UtcNow);
         string json = JsonCodec.Serialize(record);
 
-        // 寫入外部日誌
+        // 寫入外部紀錄
         AtomicFileWriter.WriteText(journalPath, json);
 
         // 嚴格在邊界內移動目錄至 tombstone
@@ -125,14 +125,14 @@ public static class ServerTombstoneManager
             string? registeredPath = registeredServerLookup(record.ServerName);
             if (string.IsNullOrEmpty(registeredPath))
             {
-                // 已從登錄中移除，確認已提交刪除，執行安全清理
+                // 已從登記中移除，確認已提交刪除，執行安全清理
                 SafeFileSystem.DeleteWithin(root, entry.FullPath);
                 SafeFileSystem.DeleteWithin(root, journalPath);
                 onCleaned?.Invoke(record.ServerName);
                 continue;
             }
 
-            // 伺服器仍在登錄中，說明在 commit 前崩潰，進行 fail-safe 還原
+            // 伺服器仍在登記中，代表在提交前異常終止，進行 fail-safe 還原
             string targetOriginal = Path.GetFullPath(registeredPath);
             if (Directory.Exists(targetOriginal))
             {
