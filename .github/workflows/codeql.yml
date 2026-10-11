@@ -74,7 +74,7 @@ jobs:
         env:
           MSBUILDDISABLENODEREUSE: '1'
           DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: '1'
-        run: dotnet build MinecraftServerManager.sln -c Release
+        run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -c Release
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225

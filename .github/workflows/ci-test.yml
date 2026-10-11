@@ -39,6 +39,21 @@ permissions:
   contents: read
 
 jobs:
+  gitleaks:
+    name: 隱私與機密資訊檢查 (Gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: 隱私與機密資訊檢查 (Gitleaks)
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   quality:
     name: C# Quality & Tests (.NET 10)
     runs-on: windows-latest
@@ -63,11 +78,6 @@ jobs:
             Directory.Packages.props
             src/**/*.csproj
             tests/**/*.csproj
-
-      - name: 隱私與機密資訊檢查 (Gitleaks)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: C# 品質門禁 (Restore, Format, Build, Tests)
         run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1
