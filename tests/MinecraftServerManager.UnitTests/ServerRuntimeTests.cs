@@ -14,14 +14,14 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
         Directory.CreateDirectory(_testDir);
     }
 
-    public Task InitializeAsync()
+    public ValueTask InitializeAsync()
     {
         File.WriteAllText(Path.Combine(_testDir, "server.jar"), "dummy jar");
         File.WriteAllText(Path.Combine(_testDir, "run.bat"), "@echo off\njava -jar server.jar nogui\n");
-        return Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         for (int i = 0; i < 3; i++)
         {

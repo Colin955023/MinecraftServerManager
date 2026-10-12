@@ -36,7 +36,7 @@ public sealed class HttpDownloadClientTests
                 new Uri("https://example.com/file"),
                 target,
                 new HttpDownloadOptions { MaxBytes = 1024 },
-                new Progress<HttpDownloadProgress>(progress.Add));
+                new SyncProgress<HttpDownloadProgress>(progress.Add));
 
             Assert.True(result.Success);
             Assert.Equal("下載內容", File.ReadAllText(target));

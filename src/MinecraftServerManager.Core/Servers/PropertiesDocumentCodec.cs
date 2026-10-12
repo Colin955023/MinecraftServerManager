@@ -49,6 +49,20 @@ public static class PropertiesDocumentCodec
             }
         }
 
+        if (logicalLine.Length > 0)
+        {
+            string fullLine = logicalLine.ToString().Trim();
+            logicalLine.Clear();
+            if (fullLine.Length > 0 && !fullLine.StartsWith('#') && !fullLine.StartsWith('!'))
+            {
+                var (key, value) = ParseKeyValue(fullLine, keyBuilder, valueBuilder);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    result[key] = value;
+                }
+            }
+        }
+
         return result;
     }
 
