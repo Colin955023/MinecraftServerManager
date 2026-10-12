@@ -26,9 +26,10 @@ public sealed class MainViewModelTests : IDisposable
         }
     }
 
-    private MainViewModel CreateIsolatedViewModel()
+    private MainViewModel CreateIsolatedViewModel(string themeMode = "dark")
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
+        settings.SetThemeMode(themeMode);
         return new MainViewModel(settingsManager: settings);
     }
 
@@ -114,5 +115,19 @@ public sealed class MainViewModelTests : IDisposable
 
         vm.ToggleThemeCommand.Execute(null);
         Assert.False(vm.IsLightTheme);
+    }
+
+    [Fact]
+    public void ToggleThemeShouldInvertThemeStateFromLight()
+    {
+        var vm = CreateIsolatedViewModel(themeMode: "light");
+        Assert.True(vm.IsLightTheme);
+
+        vm.ToggleThemeCommand.Execute(null);
+        Assert.False(vm.IsLightTheme);
+        Assert.True(vm.IsNotificationVisible);
+
+        vm.ToggleThemeCommand.Execute(null);
+        Assert.True(vm.IsLightTheme);
     }
 }
