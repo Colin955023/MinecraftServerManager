@@ -128,7 +128,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             }
             catch
             {
-                // 檔案寫入失敗時不造成宿主程序閃退
+                // 檔案寫入失敗時不造成宿主行程閃退
             }
         }
     }

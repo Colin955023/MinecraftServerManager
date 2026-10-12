@@ -146,7 +146,7 @@
             </StackPanel>
           </Grid>
 
-          <!-- 模組表格 (移除選取核取方塊，改用原生 Windows Extended 多選、雙擊切換啟用、右鍵選單) -->
+          <!-- 模組表格 (移除選取核取方塊，改用原生 Windows Extended 多選、按兩下切換啟用、右鍵選單) -->
           <Border Grid.Row="1"
                   Background="{DynamicResource CardBrush}"
                   BorderBrush="{DynamicResource BorderBrush}"

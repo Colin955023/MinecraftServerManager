@@ -408,7 +408,14 @@ public sealed partial class ServerManager : IServerManager
         string? javaPath,
         IReadOnlyList<string>? jvmArgs = null)
     {
-        string javaCommand = !string.IsNullOrWhiteSpace(javaPath) ? $"\"{javaPath}\"" : "java";
+        string resolvedPath = javaPath ?? string.Empty;
+        if (!Path.IsPathRooted(resolvedPath))
+        {
+            string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            resolvedPath = Path.Combine(pf, "Java", "bin", "java.exe");
+        }
+
+        string javaCommand = $"\"{resolvedPath}\"";
         var builder = new StringBuilder();
         builder.AppendLine("@echo off");
         builder.AppendLine("chcp 65001 > nul");

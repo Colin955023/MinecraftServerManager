@@ -137,7 +137,7 @@ public static partial class RuntimePaths
         }
         catch
         {
-            // 清理舊版本快取失敗不影響主程序運作
+            // 清理舊版本快取失敗不影響主行程運作
         }
     }
 }

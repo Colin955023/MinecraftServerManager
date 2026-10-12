@@ -412,7 +412,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
         Logger.Warning("主控台請求強制終止伺服器");
         ServerStatusText = "正在強制終止伺服器...";
-        AddLogLine(">>> 強制終止伺服器程序...");
+        AddLogLine(">>> 強制終止伺服器行程...");
         await _serverRuntime.StopAsync(TimeSpan.Zero).ConfigureAwait(false);
     }
 
@@ -509,7 +509,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             _startTime = DateTime.Now;
             ServerStatusText = "啟動中 (載入世界)...";
             _serverReadyNotified = false;
-            AddLogLine("[系統] 伺服器程序已啟動...");
+            AddLogLine("[系統] 伺服器行程已啟動...");
             Logger.Information("主控台已接收伺服器啟動事件");
         });
     }

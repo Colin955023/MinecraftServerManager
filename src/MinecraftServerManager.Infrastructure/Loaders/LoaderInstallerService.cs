@@ -67,7 +67,7 @@ public sealed partial class LoaderInstallerService(
         SafeReport("installing", $"正在執行 {loader} 伺服器安裝...", 52);
         var spec = BuildProcessStartSpec(loader, minecraftVersion, loaderVersion, installerJarPath, stableServerDir, javaExecutablePath);
 
-        // 執行安裝程序 (52% ~ 95%)
+        // 執行安裝流程 (52% ~ 95%)
         var process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
         await using (process.ConfigureAwait(false))
         {
@@ -82,7 +82,7 @@ public sealed partial class LoaderInstallerService(
             var exitResult = await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             if (exitResult.ExitCode != 0)
             {
-                throw new InvalidOperationException($"{loader} 安裝失敗，程序結束代碼：{exitResult.ExitCode}");
+                throw new InvalidOperationException($"{loader} 安裝失敗，行程結束代碼：{exitResult.ExitCode}");
             }
         }
 

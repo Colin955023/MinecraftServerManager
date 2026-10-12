@@ -497,7 +497,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
             string? earlyExit = await DetectEarlyExitAsync().ConfigureAwait(true);
             if (earlyExit is not null)
             {
-                Logger.Error("伺服器啟動後異常退出: {Message}", earlyExit);
+                Logger.Error("伺服器啟動後異常結束: {Message}", earlyExit);
                 _notificationSink?.Invoke(earlyExit, true);
                 UpdateServerStatusInPlace();
                 return false;
@@ -800,7 +800,6 @@ public sealed partial class ManageServerViewModel : PageViewModel
             {
                 string serverName = SelectedServer.Name;
                 Logger.Information("伺服器「{Name}」備份已成功還原", serverName);
-                _notificationSink?.Invoke($"伺服器「{serverName}」備份已安全還原", false);
                 await RefreshAndSelectServerAsync(serverName).ConfigureAwait(true);
             }
             return;
@@ -1044,7 +1043,6 @@ public sealed partial class ManageServerViewModel : PageViewModel
             if (invalidReason is not null)
             {
                 DialogHelper.ShowWarning(invalidReason, "備份路徑無效");
-                _notificationSink?.Invoke(invalidReason, true);
                 return;
             }
 
@@ -1239,7 +1237,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 啟動後等待 3 秒，若子程序已異常退出則回傳錯誤訊息。
+    /// 啟動後等待 3 秒，若子行程已異常結束則回傳錯誤訊息。
     /// </summary>
     private async Task<string?> DetectEarlyExitAsync()
     {

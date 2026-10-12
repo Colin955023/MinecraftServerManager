@@ -227,7 +227,7 @@ public sealed partial class ModsViewModel : PageViewModel
         Action<string, bool>? notificationSink = null,
         IExternalLauncher? launcher = null,
         IModDependencyPlanner? dependencyPlanner = null)
-        : base("mods", "🧩 模組管理", "參考 Prism Launcher 的模組管理流程")
+        : base("mods", "🧩 模組管理", "現代化高效模組管理流程")
     {
         _serverManager = serverManager;
         _modManager = modManager;
@@ -720,20 +720,20 @@ public sealed partial class ModsViewModel : PageViewModel
                         foreach (var ver in versions)
                         {
                             if (string.IsNullOrWhiteSpace(ver.VersionNumber) ||
-                                string.Equals(ver.VersionNumber, mod.Version, StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(mod.Version, "-", StringComparison.Ordinal) ||
                                 ver.PrimaryFile is null ||
                                 string.IsNullOrWhiteSpace(ver.PrimaryFile.Url))
                             {
                                 continue;
                             }
 
-                            // 依照 Prism Launcher 規範：進行相容性與相依性評估，排除硬性不相容與衝突版本
+                            // 標準相容性評估：進行相容性與相依性評估，排除硬性不相容與衝突版本
                             var report = _dependencyPlanner.EvaluateCompatibility(ver, mcVer, loader, installedMods);
                             if (!report.HasHardErrors && report.IncompatibleInstalled.Count == 0)
                             {
-                                compatibleLatest = ver;
-                                break;
+                                if (compatibleLatest is null || FlexVersion.Compare(ver.VersionNumber, compatibleLatest.VersionNumber) > 0)
+                                {
+                                    compatibleLatest = ver;
+                                }
                             }
                         }
 
@@ -747,20 +747,39 @@ public sealed partial class ModsViewModel : PageViewModel
                                 primaryFile.Hashes.TryGetValue("sha512", out sha512);
                                 primaryFile.Hashes.TryGetValue("sha1", out sha1);
                             }
-                            string? expectedHash = sha512 ?? sha1;
-                            string? hashAlgo = sha512 is not null ? "sha512" : (sha1 is not null ? "sha1" : null);
 
-                            candidates.Add(new ModUpdateCandidateItem
+                            // 1. 雜湊比對：若本地模組雜湊與線上最新版本之雜湊相符，代表已是同一檔案最新版
+                            bool hashMatches = false;
+                            if (!string.IsNullOrWhiteSpace(mod.CurrentHash))
                             {
-                                ModName = mod.Name,
-                                CurrentVersion = mod.Version,
-                                NewVersion = compatibleLatest.VersionNumber,
-                                FileName = !string.IsNullOrWhiteSpace(primaryFile.Filename) ? primaryFile.Filename : $"{mod.Name}-{compatibleLatest.VersionNumber}.jar",
-                                DownloadUrl = primaryFile.Url,
-                                ExpectedHash = expectedHash,
-                                HashAlgorithm = hashAlgo,
-                                LocalMod = mod,
-                            });
+                                if ((sha512 is not null && string.Equals(mod.CurrentHash, sha512, StringComparison.OrdinalIgnoreCase)) ||
+                                    (sha1 is not null && string.Equals(mod.CurrentHash, sha1, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    hashMatches = true;
+                                }
+                            }
+
+                            // 2. 語意版本比對：依據 FlexVersion 規格比對，線上最新版本必須大於本地版本
+                            int versionComparison = FlexVersion.Compare(compatibleLatest.VersionNumber, mod.Version);
+
+                            // 只有在版本更大且雜湊不同時，才判定為有可用更新，杜絕降級與虛假更新
+                            if (!hashMatches && versionComparison > 0)
+                            {
+                                string? expectedHash = sha512 ?? sha1;
+                                string? hashAlgo = sha512 is not null ? "sha512" : (sha1 is not null ? "sha1" : null);
+
+                                candidates.Add(new ModUpdateCandidateItem
+                                {
+                                    ModName = mod.Name,
+                                    CurrentVersion = mod.Version,
+                                    NewVersion = compatibleLatest.VersionNumber,
+                                    FileName = !string.IsNullOrWhiteSpace(primaryFile.Filename) ? primaryFile.Filename : $"{mod.Name}-{compatibleLatest.VersionNumber}.jar",
+                                    DownloadUrl = primaryFile.Url,
+                                    ExpectedHash = expectedHash,
+                                    HashAlgorithm = hashAlgo,
+                                    LocalMod = mod,
+                                });
+                            }
                         }
                     }
                 }
@@ -787,7 +806,6 @@ public sealed partial class ModsViewModel : PageViewModel
 
         if (candidates.Count > 0)
         {
-            _notificationSink?.Invoke($"發現 {candidates.Count} 個模組有可用更新", false);
             var updateDialog = new ModUpdatesDialog(candidates);
             if (Application.Current?.MainWindow is not null)
             {
@@ -1192,7 +1210,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        // 比照 Prism Launcher：偵測伺服器端環境相容性，防範純用戶端模組造成伺服器當機
+        // 偵測伺服器端環境相容性，防範純用戶端模組造成伺服器當機
         if (string.Equals(mod.ServerSide, "unsupported", StringComparison.OrdinalIgnoreCase))
         {
             bool proceed = DialogHelper.Confirm(
@@ -1635,7 +1653,7 @@ public sealed partial class ModsViewModel : PageViewModel
 
             if (versions.Count == 0)
             {
-                _notificationSink?.Invoke($"模組「{mod.Title}」在當前伺服器版本 ({server.MinecraftVersion.Value} / {loader}) 下無相容檔案", true);
+                _notificationSink?.Invoke($"模組「{mod.Title}」在目前伺服器版本 ({server.MinecraftVersion.Value} / {loader}) 下無相容檔案", true);
                 return;
             }
 

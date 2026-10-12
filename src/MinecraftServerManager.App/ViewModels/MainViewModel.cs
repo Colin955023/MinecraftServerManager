@@ -197,7 +197,8 @@ public sealed partial class MainViewModel : ViewModelBase
         IsLightTheme = !IsLightTheme;
         string mode = IsLightTheme ? "light" : "dark";
         _settingsManager.SetThemeMode(mode);
-        ShowNotification($"已切換為{(IsLightTheme ? "淺色" : "深色")}主題", isError: false);
+        NotificationMessage = $"已切換為{(IsLightTheme ? "淺色" : "深色")}主題";
+        IsNotificationVisible = true;
     }
 
     public void ShowNotification(string message, bool isError = false)
@@ -208,15 +209,13 @@ public sealed partial class MainViewModel : ViewModelBase
         NotificationRequested?.Invoke(isError ? "錯誤" : "提示", message, isError ? NotificationLevel.Error : NotificationLevel.Info);
     }
 
-    public void SetThemeMode(string mode)
-    {
+    public void SetThemeMode(string mode) =>
         IsLightTheme = mode switch
         {
             "light" => true,
             "dark" => false,
             _ => SystemThemeService.IsSystemLightTheme(),
         };
-    }
 
     private void OnUserPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
@@ -238,6 +237,20 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             return;
         }
+
+        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            var mainWindow = System.Windows.Application.Current?.MainWindow;
+            if (mainWindow is not null)
+            {
+                if (mainWindow.WindowState == System.Windows.WindowState.Minimized)
+                {
+                    mainWindow.WindowState = System.Windows.WindowState.Normal;
+                }
+                mainWindow.Activate();
+                mainWindow.Focus();
+            }
+        });
 
         if (_pages.TryGetValue(pageKey, out var targetPage))
         {

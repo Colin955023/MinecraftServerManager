@@ -160,9 +160,6 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public void OpenGithub() => _launcher?.OpenUrl(GithubUrl);
 
     [RelayCommand]
-    public void OpenPrismLauncher() => _launcher?.OpenUrl("https://prismlauncher.org/");
-
-    [RelayCommand]
     private async Task CheckForUpdatesAsync()
     {
         if (_updateChecker is null)

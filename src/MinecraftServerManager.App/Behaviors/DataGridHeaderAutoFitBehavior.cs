@@ -10,7 +10,7 @@ using System.Windows.Media;
 namespace MinecraftServerManager.App.Behaviors;
 
 /// <summary>
-/// 提供 DataGrid 欄位標頭雙擊自動最適欄寬之附加行為（依資料來源全部資料列之單行最寬文字為基準）
+/// 提供 DataGrid 欄位標頭按兩下自動最適欄寬之附加行為（依資料來源全部資料列之單行最寬文字為基準）
 /// </summary>
 public static class DataGridHeaderAutoFitBehavior
 {

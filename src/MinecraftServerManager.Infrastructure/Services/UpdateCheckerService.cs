@@ -137,7 +137,7 @@ public sealed class UpdateCheckerService(
 
             if (isRunningFrameworkDependent && hasNet10Runtime && !string.IsNullOrEmpty(fdCandidate.Name))
             {
-                // 當前為 framework-dependent 且具備 .NET 10 Runtime 優先選用 framework-dependent
+                // 目前為 framework-dependent 且具備 .NET 10 Runtime 優先選用 framework-dependent
                 selectedExeName = fdCandidate.Name;
                 downloadUrl = fdCandidate.Url;
             }

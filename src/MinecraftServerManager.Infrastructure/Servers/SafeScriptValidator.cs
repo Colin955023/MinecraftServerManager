@@ -154,36 +154,42 @@ public static class SafeScriptValidator
                     continue;
                 }
 
-                // 1. 無條件禁止命令串接、管道、重新導向與轉義符號（任何指令與註解均不得含有）
-                if (line.AsSpan().ContainsAny(StrictForbiddenBatchChars))
+                string lineToCheck = line;
+                if (TryStripSafeChcpNulRedirection(line, out string safeStripped))
+                {
+                    lineToCheck = safeStripped;
+                }
+
+                // 1. 禁止未受信任之命令串接、管道、重新導向與轉義符號（除上述安全的 chcp > nul 特例除外）
+                if (lineToCheck.AsSpan().ContainsAny(StrictForbiddenBatchChars))
                 {
                     Logger.Warning("啟動腳本包含不安全之命令串接或重新導向字元：{Line}", line);
                     return false;
                 }
 
                 // 2. 禁止延遲變數展開字元 !
-                if (line.Contains('!'))
+                if (lineToCheck.Contains('!'))
                 {
                     Logger.Warning("啟動腳本包含延遲變數展開字元 !：{Line}", line);
                     return false;
                 }
 
                 // 3. 檢查變數展開 %，僅允許相容之合法位置參數（例如 %*、%~dp0、%1 等）
-                if (HasUnsafePercentUsage(line.AsSpan()))
+                if (HasUnsafePercentUsage(lineToCheck.AsSpan()))
                 {
                     Logger.Warning("啟動腳本包含未受信任之環境變數展開語法：{Line}", line);
                     return false;
                 }
 
                 // 4. 防範路徑穿越
-                if (line.Contains(".."))
+                if (lineToCheck.Contains(".."))
                 {
                     Logger.Warning("啟動腳本包含相對路徑穿越序列 ..：{Line}", line);
                     return false;
                 }
 
                 // 5. 結構化指令格式白名單檢驗
-                if (!IsAllowedScriptCommand(line))
+                if (!IsAllowedScriptCommand(lineToCheck))
                 {
                     Logger.Warning("啟動腳本包含未受信任之指令：{Line}", line);
                     return false;
@@ -251,20 +257,70 @@ public static class SafeScriptValidator
                    cdArg.Equals("%~dp0", StringComparison.OrdinalIgnoreCase);
         }
 
-        // Java 啟動指令
-        if (line.StartsWith("java", StringComparison.OrdinalIgnoreCase) && (line.Length == 4 || char.IsWhiteSpace(line[4])))
+        // Java 啟動指令：依規範嚴格排除純 java 或 java.exe，只接受合規之絕對路徑
+        if (TryExtractLaunchExecutable(line, out string exePath))
         {
-            return true;
-        }
-
-        if (line.StartsWith("\"java\"", StringComparison.OrdinalIgnoreCase) ||
-            line.StartsWith("java.exe", StringComparison.OrdinalIgnoreCase) ||
-            line.StartsWith("\"java.exe\"", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
+            if (Path.IsPathRooted(exePath))
+            {
+                try
+                {
+                    string fileName = Path.GetFileName(exePath);
+                    if (ValidJavaExecutables.Contains(fileName))
+                    {
+                        return true;
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+            }
         }
 
         return false;
+    }
+
+    private static bool TryExtractLaunchExecutable(string line, out string exePath)
+    {
+        exePath = string.Empty;
+        ReadOnlySpan<char> span = line.AsSpan().Trim();
+        if (span.IsEmpty)
+        {
+            return false;
+        }
+
+        if (span.StartsWith('@'))
+        {
+            span = span[1..].TrimStart();
+        }
+
+        if (span.IsEmpty)
+        {
+            return false;
+        }
+
+        if (span[0] == '"')
+        {
+            int closingQuote = span[1..].IndexOf('"');
+            if (closingQuote < 0)
+            {
+                return false;
+            }
+
+            int endQuotePos = closingQuote + 1;
+            if (endQuotePos + 1 < span.Length && !char.IsWhiteSpace(span[endQuotePos + 1]))
+            {
+                return false;
+            }
+
+            exePath = span[1..endQuotePos].Trim().ToString();
+            return !string.IsNullOrWhiteSpace(exePath);
+        }
+
+        int spaceIndex = span.IndexOf(' ');
+        ReadOnlySpan<char> rawTarget = spaceIndex >= 0 ? span[..spaceIndex] : span;
+        exePath = rawTarget.Trim().ToString();
+        return !string.IsNullOrWhiteSpace(exePath);
     }
 
     private static bool HasUnsafePercentUsage(ReadOnlySpan<char> span)
@@ -327,5 +383,55 @@ public static class SafeScriptValidator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 檢查並安全剝離合規的字碼頁切換重導向（如 chcp 65001 > nul），確保其通過後續安全性檢驗。
+    /// </summary>
+    private static bool TryStripSafeChcpNulRedirection(string line, out string strippedLine)
+    {
+        strippedLine = line;
+        ReadOnlySpan<char> span = line.AsSpan().Trim();
+        if (span.StartsWith('@'))
+        {
+            span = span[1..].TrimStart();
+        }
+
+        if (!span.StartsWith("chcp", StringComparison.OrdinalIgnoreCase) ||
+            (span.Length > 4 && !char.IsWhiteSpace(span[4])))
+        {
+            return false;
+        }
+
+        int gtIndex = span.IndexOf('>');
+        if (gtIndex < 0)
+        {
+            return false;
+        }
+
+        // 僅允許恰好一個 '>' 且絕不允許其他禁止字元出現在重導向之前或之後
+        if (span[(gtIndex + 1)..].Contains('>'))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> target = span[(gtIndex + 1)..].Trim();
+        if (!target.Equals("nul", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> commandPart = span[..gtIndex].Trim();
+        ReadOnlySpan<char> afterChcp = commandPart[4..].Trim();
+        foreach (char c in afterChcp)
+        {
+            if (!char.IsAsciiDigit(c))
+            {
+                return false;
+            }
+        }
+
+        strippedLine = commandPart.ToString();
+        return true;
     }
 }

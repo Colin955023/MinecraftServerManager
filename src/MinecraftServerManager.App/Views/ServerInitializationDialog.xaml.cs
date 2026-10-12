@@ -180,7 +180,7 @@ public partial class ServerInitializationDialog : Window
                 AppendLog($"\n[系統] 伺服器行程已安全結束 (結束代碼: {exitCode})，初次初始化完成！\n");
                 CompleteButton.IsEnabled = true;
                 CompleteButton.Content = "完成初始化";
-                StartCountdown(5, isSuccess: true);
+                StartCountdown(2, isSuccess: true);
             }
             else
             {
@@ -228,7 +228,7 @@ public partial class ServerInitializationDialog : Window
         else
         {
             CountdownText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0x9E, 0x0B));
-            CountdownText.Text = $"初始化未完成，倒數 {_countdownSeconds} 秒後自動退出...";
+            CountdownText.Text = $"初始化未完成，倒數 {_countdownSeconds} 秒後自動關閉...";
         }
     }
 
@@ -309,6 +309,26 @@ public partial class ServerInitializationDialog : Window
         catch (Exception ex)
         {
             Logger.Warning("ServerInitializationDialog_Closing 異常: {Message}", ex.Message);
+        }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        try
+        {
+            if (Owner is not null)
+            {
+                if (Owner.WindowState == WindowState.Minimized)
+                {
+                    Owner.WindowState = WindowState.Normal;
+                }
+                Owner.Activate();
+                Owner.Focus();
+            }
+        }
+        catch
+        {
         }
     }
 }
