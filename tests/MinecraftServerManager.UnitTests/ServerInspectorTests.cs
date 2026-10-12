@@ -118,4 +118,32 @@ public sealed class ServerInspectorTests : IDisposable
         Assert.Equal("paper-1.20.4-497.jar", inspection.LaunchTarget.Value);
         Assert.Equal(LaunchTargetKind.Jar, inspection.LaunchTarget.Kind);
     }
+
+    [Fact]
+    public async Task IgnoresOversizedMetadataSafely()
+    {
+        string serverDir = Path.Combine(_testRoot, "oversized-metadata-server");
+        Directory.CreateDirectory(serverDir);
+        File.WriteAllText(Path.Combine(serverDir, "server.jar"), "dummy jar");
+        File.WriteAllText(Path.Combine(serverDir, "server.properties"), "server-port=25565\n");
+
+        // 建立 3MB 的超大 eula.txt 與 version.json
+        string largeEula = Path.Combine(serverDir, "eula.txt");
+        using (var fs = new FileStream(largeEula, FileMode.Create, FileAccess.Write))
+        {
+            fs.SetLength(3L * 1024 * 1024);
+        }
+
+        string largeVersion = Path.Combine(serverDir, "version.json");
+        using (var fs = new FileStream(largeVersion, FileMode.Create, FileAccess.Write))
+        {
+            fs.SetLength(3L * 1024 * 1024);
+        }
+
+        var inspector = new ServerInspector();
+        var inspection = await inspector.InspectAsync(serverDir);
+
+        Assert.True(inspection.IsCandidate);
+        Assert.Equal(EulaState.Missing, inspection.EulaState); // 超大 eula.txt 被安全忽略，不致當機
+    }
 }

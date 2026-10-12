@@ -118,7 +118,6 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 }
 
                 _writer.WriteLine(logLine);
-                _writer.Flush();
 
                 _currentFileBytes += Encoding.UTF8.GetByteCount(logLine) + Environment.NewLine.Length;
 

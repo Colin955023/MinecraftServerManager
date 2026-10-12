@@ -36,6 +36,25 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         IsReady = false;
         string stableDir = SafeFileSystem.ResolveStableDirectory(plan.WorkingDirectory);
+
+        if (plan.IsScript)
+        {
+            string scriptPath = Path.IsPathRooted(plan.JavaExecutable)
+                ? plan.JavaExecutable
+                : Path.Combine(stableDir, plan.JavaExecutable);
+            string fullScriptPath = Path.GetFullPath(scriptPath);
+
+            if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
+            {
+                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑越界：{plan.JavaExecutable}");
+            }
+
+            if (!SafeScriptValidator.ValidateScriptContent(fullScriptPath, stableDir))
+            {
+                throw new InvalidOperationException($"啟動腳本「{plan.JavaExecutable}」未通過安全性檢驗");
+            }
+        }
+
         Logger.Information("啟動伺服器行程 (目錄: {Directory}, Java: {Java}, 參數量: {ArgCount})", stableDir, plan.JavaExecutable, plan.Arguments.Count);
 
         var spec = new ProcessStartSpec(
@@ -79,8 +98,22 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         ProcessStartSpec spec;
         if (isScript)
         {
-            string scriptPath = Path.Combine(stableDir, executableName);
-            Logger.Information("啟動批次檔腳本伺服器 (路徑: {Script})", scriptPath);
+            string scriptPath = Path.IsPathRooted(executableName)
+                ? executableName
+                : Path.Combine(stableDir, executableName);
+            string fullScriptPath = Path.GetFullPath(scriptPath);
+
+            if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
+            {
+                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑越界：{executableName}");
+            }
+
+            if (!SafeScriptValidator.ValidateScriptContent(fullScriptPath, stableDir))
+            {
+                throw new InvalidOperationException($"啟動腳本「{executableName}」未通過安全性檢驗");
+            }
+
+            Logger.Information("啟動批次檔腳本伺服器 (路徑: {Script})", fullScriptPath);
 
             IReadOnlyDictionary<string, string?>? env = null;
             if (!string.IsNullOrWhiteSpace(javaExecutablePath) && !string.Equals(javaExecutablePath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
@@ -89,13 +122,23 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             }
 
             spec = new ProcessStartSpec(
-                FileName: scriptPath,
+                FileName: fullScriptPath,
                 Arguments: [],
                 WorkingDirectory: stableDir,
                 Environment: env);
         }
         else
         {
+            string targetPath = Path.IsPathRooted(executableName)
+                ? executableName
+                : Path.Combine(stableDir, executableName);
+            string fullTargetPath = Path.GetFullPath(targetPath);
+
+            if (!SafeFileSystem.IsPathWithin(stableDir, fullTargetPath, strict: false))
+            {
+                throw new SafeFileSystemException($"偵測到非法的啟動目標路徑越界：{executableName}");
+            }
+
             var args = new List<string>();
             int min = memoryMinMb ?? (memoryMaxMb > 1024 ? 1024 : memoryMaxMb);
             args.Add($"-Xms{min}M");
@@ -109,6 +152,11 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             args.Add("-jar");
             args.Add(executableName);
             args.Add("nogui");
+
+            if (!SafeScriptValidator.ValidateCommandInputs(stableDir, args))
+            {
+                throw new InvalidOperationException("伺服器啟動指令引用的檔案未通過安全性邊界檢驗");
+            }
 
             Logger.Information("啟動 Java 伺服器 (目錄: {Directory}, Jar: {Jar}, 記憶體: {Min}M-{Max}M)", stableDir, executableName, min, memoryMaxMb);
             spec = new ProcessStartSpec(

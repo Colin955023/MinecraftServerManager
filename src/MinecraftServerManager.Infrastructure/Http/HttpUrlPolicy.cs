@@ -90,15 +90,44 @@ public static class HttpUrlPolicy
                 || bytes[0] == 127
                 || (bytes[0] == 169 && bytes[1] == 254)
                 || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
-                || (bytes[0] == 192 && bytes[1] == 0 && bytes[2] == 0)
+                || (bytes[0] == 192 && bytes[1] == 0 && (bytes[2] == 0 || bytes[2] == 2))
                 || (bytes[0] == 192 && bytes[1] == 168)
+                || (bytes[0] == 198 && bytes[1] is >= 18 and <= 19)
+                || (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100)
+                || (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113)
                 || bytes[0] >= 224);
+        }
+
+        if (IsIPv4Compatible(bytes))
+        {
+            var ipv4 = new IPAddress(bytes.AsSpan(12, 4));
+            return IsPublicAddress(ipv4);
         }
 
         return !normalized.IsIPv6LinkLocal
             && !normalized.IsIPv6SiteLocal
             && !normalized.IsIPv6Teredo
             && (bytes[0] & 0xFE) != 0xFC
-            && bytes[0] != 0xFF;
+            && bytes[0] != 0xFF
+            && !(bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8)
+            && !(bytes[0] == 0x01 && bytes[1] == 0x00);
+    }
+
+    private static bool IsIPv4Compatible(byte[] bytes)
+    {
+        if (bytes.Length != 16)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < 12; i++)
+        {
+            if (bytes[i] != 0)
+            {
+                return false;
+            }
+        }
+
+        return !(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] <= 1);
     }
 }

@@ -54,4 +54,39 @@ public sealed class ProcessRunnerTests
             ["--version"],
             WorkingDirectory: Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")))));
     }
+
+    [Fact]
+    public async Task StartsBatchScriptWithSpacesAndCapturesOutput()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "msm test batch " + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string batPath = Path.Combine(tempDir, "script with space.bat");
+            File.WriteAllText(batPath, "@echo off\r\necho BATCH_OUTPUT_%1\r\n");
+
+            var runner = new ProcessRunner();
+            var output = new List<ProcessOutput>();
+
+            await using var process = await runner.StartAsync(new ProcessStartSpec(
+                batPath,
+                ["TEST_ARG"],
+                WorkingDirectory: tempDir));
+            process.OutputReceived += output.Add;
+
+            var result = await process.WaitForExitAsync();
+
+            Assert.True(process.Pid > 0);
+            Assert.Equal(0, result.ExitCode);
+            Assert.False(result.WasForceStopped);
+            Assert.Contains(output, item => item.Text.Contains("BATCH_OUTPUT_TEST_ARG", StringComparison.Ordinal));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
 }

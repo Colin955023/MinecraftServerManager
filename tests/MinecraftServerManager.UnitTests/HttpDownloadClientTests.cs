@@ -337,6 +337,109 @@ public sealed class HttpDownloadClientTests
         }
     }
 
+    [Fact]
+    public async Task PostJsonAsyncReturnsResponseOnSuccess()
+    {
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
+        });
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client, PublicResolver);
+
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{\"test\":true}");
+
+        Assert.NotNull(response);
+        Assert.Equal("{\"status\":\"ok\"}", response);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task PostJsonAsyncRejectsPrivateIpAndReturnsNull()
+    {
+        var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"status\":\"ok\"}", Encoding.UTF8, "application/json"),
+        });
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client, static (_, _) => Task.FromResult(new[] { IPAddress.Parse("127.0.0.1") }));
+
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+
+        Assert.Null(response);
+        Assert.Equal(0, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task PostJsonAsyncFailsClosedOnRedirect()
+    {
+        var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+        redirect.Headers.Location = new Uri("https://example.com/other");
+        var handler = new QueueHandler(redirect);
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client, PublicResolver);
+
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public async Task PostJsonAsyncReturnsNullWhenResponseOversized()
+    {
+        var oversizedResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[100]),
+        };
+        oversizedResponse.Content.Headers.ContentLength = HttpDownloadClient.MaxJsonBytes + 1;
+        var handler = new QueueHandler(oversizedResponse);
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client, PublicResolver);
+
+        string? response = await http.PostJsonAsync(new Uri("https://example.com/api"), "{}");
+
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public async Task DownloadRejectsIPv6LoopbackAndPrivateIp()
+    {
+        string root = CreateTemporaryDirectory();
+        try
+        {
+            string target = Path.Combine(root, "file.bin");
+            var handler = new QueueHandler(new HttpResponseMessage(HttpStatusCode.OK));
+            using var client = new HttpClient(handler);
+            var http = new HttpDownloadClient(client, static (_, _) => Task.FromResult(new[] { IPAddress.IPv6Loopback }));
+
+            var result = await http.DownloadAsync(new Uri("https://example.com/download"), target);
+
+            Assert.False(result.Success);
+            Assert.Contains("非公開", result.Error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetJsonAsyncRejectsRedirectLimitExceeded()
+    {
+        var redirect = new HttpResponseMessage(HttpStatusCode.Redirect);
+        redirect.Headers.Location = new Uri("https://example.com/api");
+        var handler = new QueueHandler(
+            redirect, redirect, redirect, redirect, redirect,
+            redirect, redirect, redirect, redirect, redirect, redirect);
+        using var client = new HttpClient(handler);
+        var http = new HttpDownloadClient(client, PublicResolver);
+
+        var response = await http.GetJsonAsync<TestModel>(new Uri("https://example.com/api"));
+
+        Assert.False(response.IsSuccess);
+        Assert.Equal("invalid_request", response.ErrorKind);
+    }
+
     private static Task<IPAddress[]> PublicResolver(string _, CancellationToken __) =>
         Task.FromResult(new[] { IPAddress.Parse("93.184.216.34") });
 

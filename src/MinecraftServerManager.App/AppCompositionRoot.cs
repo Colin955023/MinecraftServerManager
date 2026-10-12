@@ -49,6 +49,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable, IDisposable
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = DecompressionMethods.All,
+            AllowAutoRedirect = false,
         };
         _sharedHttpClient = new HttpClient(_httpHandler, disposeHandler: false);
         _sharedProcessRunner = new ProcessRunner();

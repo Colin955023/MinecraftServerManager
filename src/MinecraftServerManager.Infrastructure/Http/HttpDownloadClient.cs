@@ -309,6 +309,7 @@ public sealed class HttpDownloadClient(
         try
         {
             HttpUrlPolicy.ValidateStatic(uri);
+            await HttpUrlPolicy.ValidatePublicHostAsync(uri, _resolver, cancellationToken).ConfigureAwait(false);
         }
         catch (HttpSecurityException)
         {
@@ -319,16 +320,38 @@ public sealed class HttpDownloadClient(
         {
             using var content = new StringContent(jsonPayload ?? "{}", Encoding.UTF8, "application/json");
             using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = content };
-            var response = await _client.SendAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken).ConfigureAwait(false);
+            EnsureUserAgent(request);
+            var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             using (response)
             {
-                if (!response.IsSuccessStatusCode)
+                if (IsRedirect(response.StatusCode) || !response.IsSuccessStatusCode)
                 {
                     return null;
                 }
 
-                return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                if (response.Content.Headers.ContentEncoding.Any(static encoding =>
+                        !string.Equals(encoding, "identity", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return null;
+                }
+
+                long contentLength = response.Content.Headers.ContentLength ?? 0;
+                if (contentLength > MaxJsonBytes)
+                {
+                    return null;
+                }
+
+                using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, cancellationToken).ConfigureAwait(false);
+                ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
+                    ? segment.AsSpan()
+                    : bodyStream.ToArray();
+
+                return Encoding.UTF8.GetString(utf8Span);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {

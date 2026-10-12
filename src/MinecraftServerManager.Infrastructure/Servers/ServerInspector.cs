@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -153,6 +154,11 @@ public sealed partial class ServerInspector : IServerInspector
         try
         {
             string path = Path.Combine(directory, "eula.txt");
+            if (new FileInfo(path).Length > MaxMetadataBytes)
+            {
+                return EulaState.Missing;
+            }
+
             string content = File.ReadAllText(path, Encoding.UTF8);
             if (content.Contains("eula=true", StringComparison.OrdinalIgnoreCase))
             {
@@ -513,7 +519,7 @@ public sealed partial class ServerInspector : IServerInspector
             string runBat = Path.Combine(directory, "run.bat");
             string winArgs = Path.Combine(directory, "win_args.txt");
             string toCheck = File.Exists(runBat) ? runBat : (File.Exists(winArgs) ? winArgs : string.Empty);
-            if (!string.IsNullOrEmpty(toCheck))
+            if (!string.IsNullOrEmpty(toCheck) && new FileInfo(toCheck).Length <= MaxMetadataBytes)
             {
                 try
                 {
@@ -654,6 +660,8 @@ public sealed partial class ServerInspector : IServerInspector
         return File.Exists(rootLog) ? rootLog : null;
     }
 
+    private const long MaxMetadataBytes = 2L * 1024 * 1024;
+
     private static string? TryExtractMinecraftVersionFromRootJson(string directory)
     {
         string jsonPath = Path.Combine(directory, "version.json");
@@ -664,8 +672,21 @@ public sealed partial class ServerInspector : IServerInspector
 
         try
         {
+            var fileInfo = new FileInfo(jsonPath);
+            if (fileInfo.Length > MaxMetadataBytes)
+            {
+                Logger.Warning("version.json 檔案超過安全大小上限 ({Size} bytes)，略過解析", fileInfo.Length);
+                return null;
+            }
+
             using var stream = File.OpenRead(jsonPath);
-            using var doc = JsonDocument.Parse(stream);
+            byte[]? payload = ReadBoundedBytes(stream, MaxMetadataBytes);
+            if (payload is null)
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(payload);
             var root = doc.RootElement;
             foreach (string prop in (ReadOnlySpan<string>)["id", "name", "release_target"])
             {
@@ -696,22 +717,26 @@ public sealed partial class ServerInspector : IServerInspector
         {
             using var zip = ZipFile.OpenRead(jarPath);
             var versionEntry = zip.GetEntry("version.json");
-            if (versionEntry is not null)
+            if (versionEntry is not null && versionEntry.Length <= MaxMetadataBytes)
             {
                 using var stream = versionEntry.Open();
-                using var doc = JsonDocument.Parse(stream);
-                var root = doc.RootElement;
-                foreach (string prop in (ReadOnlySpan<string>)["id", "name", "release_target"])
+                byte[]? versionBytes = ReadBoundedBytes(stream, MaxMetadataBytes);
+                if (versionBytes is not null)
                 {
-                    if (root.TryGetProperty(prop, out var val))
+                    using var doc = JsonDocument.Parse(versionBytes);
+                    var root = doc.RootElement;
+                    foreach (string prop in (ReadOnlySpan<string>)["id", "name", "release_target"])
                     {
-                        string? str = val.GetString();
-                        if (!string.IsNullOrEmpty(str))
+                        if (root.TryGetProperty(prop, out var val))
                         {
-                            string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(str);
-                            if (!string.IsNullOrEmpty(extracted))
+                            string? str = val.GetString();
+                            if (!string.IsNullOrEmpty(str))
                             {
-                                return extracted;
+                                string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(str);
+                                if (!string.IsNullOrEmpty(extracted))
+                                {
+                                    return extracted;
+                                }
                             }
                         }
                     }
@@ -719,23 +744,53 @@ public sealed partial class ServerInspector : IServerInspector
             }
 
             var manifestEntry = zip.GetEntry("META-INF/MANIFEST.MF");
-            if (manifestEntry is not null)
+            if (manifestEntry is not null && manifestEntry.Length <= MaxMetadataBytes)
             {
                 using var stream = manifestEntry.Open();
-                using var reader = new StreamReader(stream, Encoding.UTF8);
-                string manifestText = reader.ReadToEnd();
-                string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(manifestText);
-                if (!string.IsNullOrEmpty(extracted))
+                byte[]? manifestBytes = ReadBoundedBytes(stream, MaxMetadataBytes);
+                if (manifestBytes is not null)
                 {
-                    return extracted;
+                    string manifestText = Encoding.UTF8.GetString(manifestBytes);
+                    string? extracted = MinecraftVersionSemantics.ExtractMinecraftVersionFromText(manifestText);
+                    if (!string.IsNullOrEmpty(extracted))
+                    {
+                        return extracted;
+                    }
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
         {
             Logger.Debug("解析 JAR 清單版本失敗: {Message}", ex.Message);
         }
         return null;
+    }
+
+    private static byte[]? ReadBoundedBytes(Stream stream, long maxBytes)
+    {
+        using var memoryStream = new MemoryStream();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
+        try
+        {
+            long totalRead = 0;
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                totalRead += read;
+                if (totalRead > maxBytes)
+                {
+                    return null;
+                }
+
+                memoryStream.Write(buffer, 0, read);
+            }
+
+            return memoryStream.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private static string? DeriveMinecraftVersionFromNeoForge(string rawVersion)

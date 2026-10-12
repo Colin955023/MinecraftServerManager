@@ -66,4 +66,34 @@ public sealed class JsonAndAtomicWriterTests
             directory.Delete(true);
         }
     }
+
+    [Fact]
+    public void AtomicFileWriterHandlesConcurrentWritesCorrectlyWithLockStriping()
+    {
+        var directory = Directory.CreateTempSubdirectory("msm-atomic-concurrency-");
+        try
+        {
+            // 測試 50 個不同路徑的併發寫入
+            Parallel.For(0, 50, i =>
+            {
+                string path = Path.Combine(directory.FullName, $"file_{i}.txt");
+                bool success = AtomicFileWriter.WriteText(path, $"content_{i}");
+                Assert.True(success);
+            });
+
+            // 測試同一路徑的併發寫入競爭
+            string sharedPath = Path.Combine(directory.FullName, "shared.txt");
+            Parallel.For(0, 20, i =>
+            {
+                AtomicFileWriter.WriteText(sharedPath, $"val_{i}");
+            });
+
+            Assert.True(File.Exists(sharedPath));
+            Assert.NotEmpty(File.ReadAllText(sharedPath));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
 }

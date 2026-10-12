@@ -17,7 +17,8 @@ on:
       - 'Directory.Packages.props'
       - 'global.json'
       - '.editorconfig'
-      - '.github/workflows/ci-test.yml'
+      - '.github/workflows/**'
+      - '.github/codeql/**'
   pull_request:
     branches:
       - master
@@ -30,7 +31,8 @@ on:
       - 'Directory.Packages.props'
       - 'global.json'
       - '.editorconfig'
-      - '.github/workflows/ci-test.yml'
+      - '.github/workflows/**'
+      - '.github/codeql/**'
   workflow_dispatch:
   merge_group:
     types: [checks_requested]

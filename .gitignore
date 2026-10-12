@@ -49,4 +49,6 @@ publish/
 coverage/
 output/
 .codebase-memory/
+*_wpftmp.csproj
+*_wpftmp.*
 

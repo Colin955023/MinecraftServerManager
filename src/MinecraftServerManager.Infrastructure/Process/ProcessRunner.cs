@@ -140,9 +140,12 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
 
         Logger.Information("準備啟動子行程: {FileName} (工作目錄: {WorkingDirectory})", resolvedFileName, specification.WorkingDirectory);
 
+        string ext = Path.GetExtension(resolvedFileName);
+        bool isBatchScript = ext.Equals(".bat", StringComparison.OrdinalIgnoreCase) ||
+                             ext.Equals(".cmd", StringComparison.OrdinalIgnoreCase);
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = resolvedFileName,
             WorkingDirectory = specification.WorkingDirectory ?? Environment.CurrentDirectory,
             UseShellExecute = specification.UseShellExecute,
             CreateNoWindow = specification.CreateNoWindow,
@@ -152,9 +155,32 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             StandardOutputEncoding = specification.UseShellExecute ? null : Encoding.UTF8,
             StandardErrorEncoding = specification.UseShellExecute ? null : Encoding.UTF8,
         };
-        foreach (string argument in specification.Arguments)
+
+        if (isBatchScript && !specification.UseShellExecute)
         {
-            startInfo.ArgumentList.Add(argument);
+            string comSpec = Environment.GetEnvironmentVariable("ComSpec") ??
+                             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+            if (!File.Exists(comSpec))
+            {
+                throw new FileNotFoundException("找不到系統命令解譯器 (cmd.exe)", comSpec);
+            }
+
+            startInfo.FileName = comSpec;
+            startInfo.ArgumentList.Add("/d");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add(resolvedFileName);
+            foreach (string argument in specification.Arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+        }
+        else
+        {
+            startInfo.FileName = resolvedFileName;
+            foreach (string argument in specification.Arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
         }
 
         if (specification.Environment is not null)
@@ -211,21 +237,25 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             throw new DirectoryNotFoundException($"找不到工作目錄：{specification.WorkingDirectory}");
         }
 
-        if (Path.IsPathRooted(fileName) || fileName.Contains(Path.DirectorySeparatorChar) || fileName.Contains(Path.AltDirectorySeparatorChar))
+        string basePath = specification.WorkingDirectory ?? Environment.CurrentDirectory;
+        string candidatePath = Path.GetFullPath(fileName, basePath);
+
+        if (Path.IsPathRooted(fileName) ||
+            fileName.Contains(Path.DirectorySeparatorChar) ||
+            fileName.Contains(Path.AltDirectorySeparatorChar) ||
+            File.Exists(candidatePath))
         {
-            string basePath = specification.WorkingDirectory ?? Environment.CurrentDirectory;
-            string fullPath = Path.GetFullPath(fileName, basePath);
-            if (!File.Exists(fullPath))
+            if (!File.Exists(candidatePath))
             {
                 throw new FileNotFoundException("找不到指定的執行檔", fileName);
             }
 
-            if (SafeFileSystem.IsReparsePoint(fullPath) && !IsTrustedWindowsAppAlias(fullPath))
+            if (SafeFileSystem.IsReparsePoint(candidatePath) && !IsTrustedWindowsAppAlias(candidatePath))
             {
                 throw new SafeFileSystemException($"執行檔路徑不可為不可信任的 reparse point：{fileName}");
             }
 
-            return fullPath;
+            return candidatePath;
         }
 
         // 純檔名搜尋，若為 winget 則額外檢查 WindowsApps 目錄

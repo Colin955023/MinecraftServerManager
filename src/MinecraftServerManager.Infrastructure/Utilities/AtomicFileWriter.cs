@@ -1,11 +1,17 @@
-using System.Collections.Concurrent;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
 public static class AtomicFileWriter
 {
-    private static readonly ConcurrentDictionary<string, object> PathLocks = new(StringComparer.OrdinalIgnoreCase);
+    private const int StripeCount = 128;
+    private static readonly object[] StripeLocks = Enumerable.Range(0, StripeCount).Select(static _ => new object()).ToArray();
+
+    private static object GetLockForPath(string path)
+    {
+        uint hash = (uint)StringComparer.OrdinalIgnoreCase.GetHashCode(path);
+        return StripeLocks[hash % StripeCount];
+    }
 
     public static bool WriteBytes(string filePath, ReadOnlySpan<byte> content, bool skipIfUnchanged = false)
     {
@@ -23,7 +29,7 @@ public static class AtomicFileWriter
             return false;
         }
 
-        lock (PathLocks.GetOrAdd(target, static _ => new object()))
+        lock (GetLockForPath(target))
         {
             if (skipIfUnchanged && File.Exists(target))
             {
