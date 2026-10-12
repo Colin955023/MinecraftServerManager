@@ -7,26 +7,10 @@ concurrency:
 on:
   push:
     branches: [ "master" ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'global.json'
-      - '.github/workflows/codeql.yml'
   merge_group:
     types: [checks_requested]
   pull_request:
     branches: [ "master" ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'global.json'
-      - '.github/workflows/codeql.yml'
   workflow_dispatch:
   schedule:
     - cron: '0 0 * * 1'
