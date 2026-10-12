@@ -192,6 +192,71 @@ public sealed class InputFuzzingAndBoundarySecurityTests
         }
     }
 
+    [Fact]
+    public void PropertiesDocumentCodec_MutationFuzzing_DoesNotHangOrCrash()
+    {
+        string baseTemplate = "server-port=25565\nmotd=A\\ Minecraft\\:\\ Server\\u0021\ndifficulty:normal\nallow-flight=true\n";
+
+        for (int i = 0; i < 100; i++)
+        {
+            string mutated = MutatePropertiesString(baseTemplate, i);
+            var result = PropertiesDocumentCodec.Parse(mutated);
+            Assert.NotNull(result);
+        }
+    }
+
+    [Fact]
+    public void SafeZipArchive_CorruptedArchiveFuzzing_GracefullyRejects()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "mc_corrupt_zip_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                string corruptPath = Path.Combine(tempDir, $"corrupted_{i}.zip");
+                string destDir = Path.Combine(tempDir, $"out_{i}");
+
+                // 產生畸形或截斷的 ZIP 位元組
+                byte[] garbage = new byte[64 + (i * 10)];
+                RandomNumberGenerator.Fill(garbage);
+                // 偶爾寫入合法的 PK 標頭但後面接著垃圾
+                if (i % 2 == 0)
+                {
+                    garbage[0] = 0x50; // 'P'
+                    garbage[1] = 0x4B; // 'K'
+                    garbage[2] = 0x03;
+                    garbage[3] = 0x04;
+                }
+
+                File.WriteAllBytes(corruptPath, garbage);
+
+                Assert.ThrowsAny<Exception>(() => SafeZipArchive.Extract(corruptPath, destDir));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    private static string MutatePropertiesString(string baseText, int seed)
+    {
+        return (seed % 6) switch
+        {
+            0 => baseText + new string('\\', 500),
+            1 => baseText.Replace("=", ":=") + "\0\r\n\\u9999\\uZZZZ",
+            2 => new string('A', 2000) + "=" + new string('B', 2000),
+            3 => "\\u00" + Convert.ToHexString(RandomNumberGenerator.GetBytes(8)),
+            4 => string.Join('\n', Enumerable.Range(0, 50).Select(static n => $"prop_{n}=" + new string('\\', n))),
+            _ => baseText + "\n" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+        };
+    }
+
     private static string GenerateRandomFuzzedString(int seed)
     {
         return (seed % 10) switch

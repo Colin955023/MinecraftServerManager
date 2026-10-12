@@ -139,20 +139,6 @@ Domain （不相依其他任何專案，純粹領域邏輯）
   - `UseSystemResourceKeys=true`：直接使用系統資源鍵值以精簡字串資源
 - **防毒相容保證**：嚴禁使用 UPX 等第三方加殼工具，保持二進位格式純正，達到 0 防毒誤報
 
-### 13. 軟體供應鏈安全、分支保護與來源證明
-
-- **分支保護原則與維護模式說明**：
-  - `master` 主分支受到 GitHub Rulesets／分支保護規範防護，限制直接推送、強制 Pull Request 機制、要求 CI 狀態檢查全部通過，且嚴格禁止 Force Push 與刪除分支。
-- **Sigstore 簽章與 SLSA Provenance**：
-  - 於 CI／CD Release 發布管線整合 GitHub 原生 Attestation 機制（`actions/attest`），為產出的雙版本可執行檔建立具備不可竄改性之 SLSA Provenance 憑證。
-  - 發行階段由管線自動下載匯出 `.intoto.jsonl` 來源證明檔案，隨 GitHub Release 成品一同發布，供使用者與自動化工具驗證建置來源與完整性。
-- **軟體物料清單（SBOM）發布**：
-  - 發行流程中整合微軟官方 Microsoft SBOM Tool，針對 .NET 發布成品自動掃描並產出標準 SPDX 2.2 JSON 規格（`MinecraftServerManager.spdx.json`）及 SHA-256 校驗檔。
-  - SBOM 作為正式 Release 附件獨立上傳，明確區隔於 SLSA provenance（`.intoto.jsonl`），落實軟體物料透明度。
-- **輸入邊界防護與模糊化／邊界安全性測試**：
-  - 核心模組（`ServerPropertiesValidator`、`SafeFileSystem`、`SafeZipArchive`）實施嚴格邊界驗證與畸形輸入防護。
-  - 單元測試套件中納入模糊化與邊界探測（Fuzzing & Boundary Tests），全量覆蓋各類畸形格式、超長輸入、非預期控制字元及路徑穿越攻擊向量。
-
 ## 品質保證與建置自動化
 
 專案透過自動化腳本實施嚴格門禁：
