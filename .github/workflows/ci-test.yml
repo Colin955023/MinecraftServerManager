@@ -8,31 +8,9 @@ on:
   push:
     branches:
       - master
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'global.json'
-      - '.editorconfig'
-      - '.github/workflows/**'
-      - '.github/codeql/**'
   pull_request:
     branches:
       - master
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - '*.sln'
-      - 'Directory.Build.props'
-      - 'Directory.Packages.props'
-      - 'global.json'
-      - '.editorconfig'
-      - '.github/workflows/**'
-      - '.github/codeql/**'
   workflow_dispatch:
   merge_group:
     types: [checks_requested]
