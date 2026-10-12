@@ -1,167 +1,156 @@
-# 技術手冊
+# Minecraft 伺服器管理器技術手冊
 
-## 技術棧
+本手冊說明 Minecraft 伺服器管理器程式所採用的技術堆疊、分層架構、核心演算法與安全機制。
 
-| 類別 | 工具 |
-|---|---|
-| 執行環境 | Python `>=3.14,<3.15`、Windows 10／11 |
-| GUI | PySide6、PySide6-Fluent-Widgets |
-| 網路／資料 | httpx、orjson、packaging、defusedxml |
-| 系統／日誌 | psutil、Python `logging` |
-| 打包 | Nuitka onefile |
-| 品質 | pytest-cov、Ruff、Mypy、Pylint、Bandit、Vulture、detect-secrets、自訂匯入邊界檢查 |
+## 技術堆疊總覽
 
-相依套件與最低版本以 `pyproject.toml`、鎖定版本以 `uv.lock` 為準。
+| 領域 | 技術與元件 | 說明 |
+|---|---|---|
+| 核心平台 | .NET 10（`net10.0-windows`） | 採用最新 LTS 框架，提供高效能 JIT 與非同步 I/O |
+| 使用者介面 | WPF（Windows Presentation Foundation） | 原生 Windows 桌面框架，落實 MVVM 模式與資料繫結 |
+| 資料序列化 | `System.Text.Json` | 高效能唯讀 Span 與串流 JSON 序列化／反序列化 |
+| 網路通訊 | `System.Net.Http.HttpClient` | 集中連線池管理、自動重試預算與完整逾時控制 |
+| 外部行程管理 | `System.Diagnostics.Process` | 非同步串流重新導向、平順停止（Graceful Shutdown）與行程樹強制清理 |
+| 正規表示式最佳化 | `[GeneratedRegex]` Source Generator | 編譯時期產生比對狀態機，零執行期正規表示式解析開銷 |
+| 平行運算 | `Parallel.ForEachAsync` | 多核心平行化處理模組掃描與檔案雜湊運算 |
+| 測試驗證 | xUnit、UnitTests、IntegrationTests | 完整本機隔離測試，無外部網路與使用者環境相依性 |
+| 封裝發布 | 原生 Single-File、官方原生安全壓縮 | 關閉未使用執行期功能開關（Feature Switches），無第三方加殼 |
 
-## 架構
+## 專案分層架構
 
-```text
-src/main.py
-└─ ui/core_frames/main_window.py        唯一 production composition root
-   ├─ core/server/                      建立、匯入、檢查、執行、屬性、備份
-   ├─ core/mods/                        掃描、安裝、Provider、Modrinth、規劃
-   ├─ core/loader/                      載入器版本、安裝與適配
-   ├─ ui/core_frames|dialogs|mods|...   Qt／Fluent UI adapters
-   ├─ models/mod_models.py              模組共享領域資料
-   ├─ models/server_models.py           伺服器共享領域資料
-   └─ utils/                            檔案、網路、Java、日誌、執行期工具
-```
-
-依賴方向由 `scripts/check_import_boundaries.py` 對全部 `src/**/*.py` 強制：
+專案依照清晰的單向相依性原則劃分：
 
 ```text
-ui → core → models → utils
+src/
+├─ MinecraftServerManager.App/             WPF 視窗、View、ViewModel、Dialog、佈景主題與組合根
+├─ MinecraftServerManager.Core/            業務工作流程、用例（Use Cases）、交易管理與介面合約
+├─ MinecraftServerManager.Domain/          領域實體、值物件與純領域邏輯（無外部相依性）
+└─ MinecraftServerManager.Infrastructure/  安全檔案系統、網路下載、程序管理、Java 探測與系統整合
+tests/
+├─ MinecraftServerManager.UnitTests/       領域邏輯與業務流程之單元測試
+└─ MinecraftServerManager.IntegrationTests/元件協作與整合驗證測試
 ```
 
-### 主要 owner
+### 相依關係規則
 
-| 領域 | 唯一 owner／外部 seam |
-|---|---|
-| 建立伺服器 | `CreateServerJourney`：plan → 確認同一 plan → execute |
-| 伺服器內容 | `ServerInspector.inspect()`：版本、載入器、EULA、缺檔、啟動目標 |
-| 執行中程序 | `ServerRuntime`：process、PID、輸出、狀態、命令、停止與清理 |
-| 伺服器屬性 | `ServerPropertiesStore`：`server.properties`、revision conflict、原子提交 |
-| 模組規劃 | application-scoped `ModPlanning`：相容性、遞迴依賴、本地更新 |
-| 模組 UI 狀態 | `ModManagementSession`；各 Presenter 擁有自己的 widget／view state |
-| Review | `ModReviewWorkflow`、immutable snapshot、`ReviewExecutionHandoff` |
-| UI 背景工作 | `UIWorkScope` |
+```text
+App → Core → Domain
+App → Infrastructure
+Infrastructure → Core Contracts / Domain
+Domain （不相依其他任何專案，純粹領域邏輯）
+```
 
-## 匯入邊界
+- **Domain**：完全不相依 WPF、檔案 I/O、網路或作業系統 API，確保領域邏輯的純粹性與可測試性
+- **Core**：定義核心服務合約（Contracts）、工作流程（Workflows）與交易編排（Orchestration）
+- **Infrastructure**：具體實作 Core 定義之介面，負責實體磁碟存取、外部行程呼叫、HTTP 呼叫與 Java 環境探測
+- **App**：負責視窗繪製、使用者互動與 ViewModel 狀態管理；透過專屬的組合根（`AppCompositionRoot`）集中裝配所有底層服務、管理連線與行程生命週期，並於主視窗顯式啟動流程中完成目錄引導與背景非同步預熱（`ShutdownMode.OnExplicitShutdown` → `OnMainWindowClose`），徹底讓 Code-behind 專注於純 UI 邏輯。
 
-自訂邊界只掃描 `src/`。測試可深層匯入，以直接測試或替換 `src` implementation dependency；測試引用不會使未被 production 使用的 facade export 合法化。
+## 關鍵技術與安全設計
 
-- `src/` 跨頂層 package 必須從 `src.core`、`src.models`、`src.ui`、`src.utils` 匯入。
-- 同一 feature 目錄的內部協作使用單層相對匯入；禁止父層 traversal。
-- 只允許 `src/__init__.py` 與 `src/{core,models,ui,utils}/__init__.py`。
-- facade 使用 `lazy_exports`，只能匯出自己頂層 package 內且有 `src/` runtime consumer 的符號。
-- `src.models` 只公開共享領域資料；UI／workflow internal 型別留在 owner。
+### 1. 安全檔案系統（SafeFileSystem）
 
-執行：
+- **路徑邊界防護（Path Containment）**：嚴格驗證所有檔案存取路徑必須落在預期的工作目錄之內，全面阻斷路徑穿越（Directory Traversal）攻擊
+- **符號連結防護（Reparse Point Defense）**：在走訪檔案與目錄時，嚴格辨識並攔截惡意符號連結與 NTFS 節點（Junction），受限於邊界目錄向上檢查，避免誤殺作業系統層級之掛載點與 AppData
+- **目錄清理唯讀屬性防護**：在執行目錄遞迴刪除前，自動清除檔案與子資料夾的 Windows `FileAttributes.ReadOnly` 唯讀屬性，避免權限例外中斷操作
+- **受限目錄走訪（Bounded Walk）**：限制最大走訪深度與檔案總數上限，避免惡意目錄遞迴造成堆疊溢位或資源耗竭
+- **安全不可部分完成替換（Native Atomic File Replacement）**：重要設定檔與資料儲存時，先寫入暫存檔案並驗證完整性，再透過作業系統原生 `File.Replace` 不可部分完成替換目標檔案，防止斷電損壞並保留安全描述元
+- **封存檔高效解壓縮（ArrayPool & Memory Defense）**：解壓縮流程全面採用 `ArrayPool<byte>.Shared` 消除大型物件堆積（LOH）重複配置，並移除中間寫入之磁碟同步限制，大幅提升大容量整合包解壓縮吞吐量
+- **舊版快取自動維護（Runtime Cache Pruning）**：啟動時自動辨識版本特徵並安全清理舊版本殘存之快取檔案，維持磁碟整潔
+
+### 2. 交易式備份與還原機制（Transactional Restore）
+
+- **隔離解壓縮驗證**：備份還原時一律先解壓縮至獨立暫存隔離區，並執行路徑邊界與檔案完整性校驗
+- **現場記錄安全保護（Live Logs Protection）**：執行目標目錄還原覆蓋前，自動將伺服器現場之 `logs/` 與 `crash-reports/` 暫存隔離；待還原覆蓋成功後自動移回合併，防止還原操作抹除發生當機或故障當下的關鍵排查線索
+- **前置狀態快照**：執行目標目錄覆蓋前，自動為伺服器現況建立復原快照（Rollback Snapshot）
+- **失敗自動回復**：若解壓縮或檔案複製過程遭遇任何例外，立即自動回復至還原前的快照狀態，確保伺服器永不處於毀損中間態
+- **備份上限維護**：內建自動清理原則，維持最新 10 份備份，自動清除過期備份以節省磁碟空間
+
+### 3. 高效能獨立主控台與記錄管線
+
+- **獨立視窗架構**：伺服器啟動後於專屬視窗獨立運作，避免高頻記錄阻礙主介面操作
+- **伺服器就緒即時偵測（Server Ready Detection）**：非同步記錄管線持續精確比對伺服器就緒特徵（`"Done ("` / `"Done in "`），於完成啟動時觸發 `ServerReady` 事件並即時解鎖介面操作與狀態卡片
+- **50ms 聚合緩衝機制**：採用微批次記錄聚合緩衝器，高負載時合併大量記錄輸出，徹底根除 UI 畫面算繪瓶頸
+- **ANSI 終端機控制碼清理**：非同步過濾終端機控制色碼，保留純文字內容
+- **編譯時期正規表示式玩家計數**：利用 `[GeneratedRegex]` 原始程式碼產生器即時解析玩家加入與離開事件，維護精確線上人數
+- **行程平順關閉與強制終止**：優先向伺服器 stdin 傳送 `stop` 指令並等候行程正常關閉；若逾時則透過行程樹強制終止，防止孤兒 Java 行程滯留
+- **Forge / NeoForge 啟動參數與 Java 環境注入**：
+  - 伺服器建立、設定更新與啟動時，自動將推薦之垃圾回收參數、記憶體範圍（`-Xms`、`-Xmx`）與自訂 JVM 參數透過不可分割寫入安全同步至 `user_jvm_args.txt`。
+  - 針對 Windows 批次檔啟動方式（`run.bat`），啟動規劃器自動解析指定 Java 實體之根路徑推導 `JAVA_HOME`，並將該 Java `bin/` 目錄插入至執行環境變數 `PATH` 之最前端，直接注入 `ProcessStartSpec`，確保批次檔順暢以使用者指定的精確 Java 版本執行。
+
+### 4. 平行化模組管理與 Modrinth 整合
+
+- **平行化本地掃描**：透過 `Parallel.ForEachAsync` 平行讀取伺服器 `mods` 目錄，快速擷取模組中繼資料並計算雜湊
+- **模組智慧啟閉**：透過標準化副檔名切換（`.jar` 與 `.jar.disabled`）實現無損啟用與停用，並自動處理檔名衝突備份
+- **雜湊校驗與安全下載**：下載 Modrinth 線上模組時，強制執行 SHA-512／SHA-1 雙重雜湊比對，確保檔案未被竄改
+- **多元清單匯出與原生 XLSX 產生器**：支援將模組清單匯出為純文字（.txt）、JSON（.json）、HTML（.html）與 Excel（.xlsx）格式。其中 XLSX 格式由原生輕量級 `OpenXmlSpreadsheetBuilder` 直接透過 `System.IO.Compression.ZipArchive` 產生，零第三方套件相依性，且檔案完全合規相容 Microsoft Excel 與 LibreOffice
+
+### 5. 伺服器版本與載入器深度偵測管線
+
+- **多層級自動探測**：依序深入探測伺服器根目錄 `version.json`、主程式 JAR 內部中繼資料（`version.json` 與 `META-INF/MANIFEST.MF`）、`libraries/` 目錄結構（支援 Paper、Vanilla、Fabric、Quilt、Forge 及帶有 `-beta` 的 NeoForge 發行版本）、Paper 特徵設定檔（`paper-global.yml`、`paper.yml` 等）、啟動腳本（`start_server.bat`/`run.bat`/`win_args.txt`）與執行記錄（`logs/latest.log`）
+- **精確來源檔案追蹤**：完整記錄 Minecraft 版本、載入器類型與載入器版本個別的確切偵測來源檔案，並於記錄中輸出結構化稽核紀錄
+- **伺服器整體大小安全計算**：在背景安全走訪伺服器目錄累加檔案大小（自動略過 Reparse Point），以高效率格式化為 MB／GB 呈現
+
+### 6. PaperMC 整合與外掛伺服器支援架構
+
+- **官方 Fill API v3 規範串接**：採用 PaperMC 官方最新 `fill.papermc.io/v3` API。動態查詢 PaperMC 支援的 Minecraft 版本清單、特定版本之建置號（Builds）與各項 SHA-256 驗證雜湊。
+- **純外掛核心架構與單一 JAR 部署**：PaperMC 核心包含完整的 Paperclip 啟動器，建立時直接下載為 `paper.jar`（或版本命名檔名）並校驗 SHA-256 完整性，免除一般模組載入器（如 Forge/Fabric）需啟動本機外部 Java 安裝程序的開銷。
+- **外掛伺服器邊界隔離**：PaperMC 為標準 Bukkit/Spigot/Paper 外掛伺服器架構（放置於 `plugins/`），無法直接相容 Forge/Fabric 模組；模組管理面板自動排除 Paper 伺服器，防止誤操作。
+- **標準無圖形介面啟動參數（`--nogui`）**：針對 Paper 伺服器核心自動設定 Paper 官方標準啟動引數 `--nogui`，確保主控台與即時就緒記錄（`"Done ("` / `"Done in "`）順暢相容。
+
+### 7. 雙版本原生單一檔案發布與微軟瘦身技術
+
+- **原生 Single-File 封裝**：直接使用 .NET 官方提供之 Single-File 封裝技術，產出單一可執行檔
+- **雙版本發布策略**：
+  - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，並啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`），總體積約 63 MB，具備最高穩定性與隨點即開特性
+  - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積僅約 1.6 MB，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
+
+### 8. Java 版本需求動態解析與多層快取
+
+- **官方真實來源唯一相依**：原版核心直接向 Mojang 官方版本 Manifest 與版本 package JSON 動態取得 `javaVersion.majorVersion`；PaperMC 伺服器則直接向 Paper Fill API v3（`/v3/projects/paper/versions/{version}`）動態取得 `version.java.version.minimum`，徹底杜絕版本硬編碼推算。
+- **PaperMC Java 需求整合與啟動背景預熱**：Paper 所需之 Java 最低版本直接整合記錄於 `paper_mc_versions_cache.json` 中，並於程式啟動時由背景預載任務一次性平行處理，日常版本切換、伺服器建立與 Java 自動配對 100% 仰賴本機快取；僅於使用者點選重新載入或有全新發布版本時才執行差異增量更新，杜絕重複頻繁的 API 呼叫。
+- **多層級持久化快取**：實作 `IMinecraftJavaRequirementService` 服務，快取檔案儲存於 `Cache/versions/mc_java_requirements_cache.json` 與 `paper_mc_versions_cache.json`，並在啟動時提供非同步平行預載（Preload）機制，離線時亦可直接取用歷史版本快取。
+- **本地 Java 智慧自動配對與管理**：建立伺服器時的「自動偵測 Java」功能優先以官方指定的 Java major 版本呼叫 `FindBestMatchAsync`，自動選配本機最適合且相容的 64 位元 Java 執行檔。同時提供「管理 Java 執行環境」視窗，整合 Windows 原生 `winget` CLI，支援自動安裝指定版本的 OpenJDK（Java 8 至 21+），並可手動瀏覽指定自訂 Java 執行檔。
+
+### 9. 伺服器屬性驗證與關鍵檔案預檢
+
+- **設定項目合法性嚴格驗證（ServerPropertiesValidator）**：對 `server.properties` 中的屬性值進行即時型別與邊界驗證，包含 `server-ip`/`management-server-host` 位址格式、連接埠範圍（1~65534）、遊戲難度（peaceful/easy/normal/hard）、遊戲模式（survival/creative/adventure/spectator）、最大玩家數與視距等，杜絕因無效設定值導致伺服器開機失敗。
+- **關鍵啟動檔案完整性檢查（CheckImportantFiles）**：啟動前精準檢查各載入器之必要啟動檔案（如 Paper 之 `paper.jar`/`server.jar`、Fabric 之 `fabric-server-launch.jar`、Forge/NeoForge 之 `win_args.txt`/`run.bat` 等），若偵測到缺失立即提示管理員，防範盲目啟動造成行程異常終止。
+
+### 10. 遞迴模組相依性規劃與安裝佇列安全
+
+- **遞迴相依性解析（ModDependencyPlanner）**：安裝線上模組時自動向下遞迴解析必要相依模組，排除伺服器已安裝及佇列中項目，支援純用戶端模組過濾防護與 Quilt/Fabric、NeoForge/Forge 載入器相容性矩陣。
+- **視覺化待安裝佇列視窗（ModInstallQueueDialog）**：提供專屬對話方塊集中管理待安裝與待更新佇列，直觀顯示新增與更新狀態標記，支援單項移除與快速清空佇列。
+- **官方 CDN 下載來源驗證**：嚴格驗證模組下載來源是否屬於官方 Modrinth CDN（`cdn.modrinth.com`），遇非官方來源即時彈窗警示；下載先經隔離暫存區校驗 SHA-512/SHA-1 雜湊，失敗時自動清理暫存檔。
+
+### 11. Windows 原生自然排序（Natural Sort）
+
+- **原生 API 整合（StrCmpLogicalW）**：利用 `DataGridNaturalSortBehavior` 附加行為攔截 DataGrid 欄位排序事件，呼叫 Windows 原生 `Shlwapi.dll` 之 `StrCmpLogicalW` 演算法，使伺服器與模組清單中的數字命名遵循人類自然直覺（如 1, 2, 10 而非字典序 1, 10, 2）。
+
+### 12. 安全更新機制與發布防呆
+
+- **更新檢查與智慧防呆邊界**：
+  - 更新檢查服務具備環境探測機制（`IEnvironmentRuntimeInfo`），會自動偵測系統是否具備 .NET 10 Desktop Runtime
+  - 預設一律優先挑選自包含版（`self-contained`）；僅當目前本體即為框架相依版且系統存在執行環境時，才選取框架相依版
+  - 當遠端 Release 僅提供框架相依版但本機缺乏執行環境時，強制封鎖自動下載並發出警語導引至發布頁面，杜絕下載後因缺少環境當機的問題
+- **執行期功能開關裁切（Feature Switches）**：
+  - `DebuggerSupport=false`：停用執行期除錯支援
+  - `EventSourceSupport=false`：停用非必要之 EventSource 診斷記錄
+  - `MetadataUpdaterSupport=false`：停用熱重載中繼資料更新機制
+  - `UseSystemResourceKeys=true`：直接使用系統資源鍵值以精簡字串資源
+- **防毒相容保證**：嚴禁使用 UPX 等第三方加殼工具，保持二進位格式純正，達到 0 防毒誤報
+
+## 品質保證與建置自動化
+
+專案透過自動化腳本實施嚴格門禁：
 
 ```bat
-uv run scripts\check_import_boundaries.py
+# 執行品質門禁（隱私檢查、格式化驗證、Release 編譯品質分析、全量測試）
+pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
+
+# 發布單一執行檔
+pwsh -NoProfile -File scripts\dotnet_publish.ps1 -Configuration Release
 ```
 
-## 目錄職責
-
-### `src/core/server/`
-
-| 檔案 | 職責 |
-|---|---|
-| `server_crud.py` | 伺服器登錄、設定檔與刪除 tombstone 背景清理 |
-| `server_creation.py` | 交易式建立、整體進度映射與補償 |
-| `server_import.py` | 資料夾／ZIP 匯入、探索、已管理項目計數與重新偵測 |
-| `server_inspector.py` | 唯讀內容檢查 |
-| `server_runtime.py` | 統一啟動與首次初始化生命週期；協調備份、還原、刪除期間的維護保留 |
-| `server_output_history.py` | 安全讀取受限大小的輸出尾端，保留重複訊息與截斷狀態 |
-| `server_properties.py` | `server.properties` 唯一真相來源 |
-| `server_backup.py` | 原子 ZIP 備份、交易式快照還原與失敗回滾 |
-
-### `src/core/mods/`
-
-| 檔案 | 職責 |
-|---|---|
-| `mod_manager.py` | 掃描、安裝與 provider orchestration |
-| `local_mod_scanner.py` | JAR metadata 與快取回填 |
-| `mod_file_installer.py` | 下載、安裝、替換、回滾、刪除 |
-| `provider_identity.py` | provider 身分與生命週期 |
-| `modrinth_http.py` | Modrinth HTTP 查詢與 `ModrinthHttpAdapter` |
-| `dependency_planner_facade.py` | `ModPlanning` 唯一 use-case interface |
-| `compatibility_analyzer.py` | 內部純相容性分析 |
-| `mod_planning_ports.py` | loader rules port 與 production adapter |
-| `mod_provider_port.py` | provider 窄 port |
-
-### `src/core/loader/`
-
-| 檔案 | 職責 |
-|---|---|
-| `loader_manager.py` | 載入器中繼資料、版本解析與查詢 |
-| `loader_installer.py` | 載入器安裝執行、文字進度解析／估算與檔案配置 |
-| `loader_adapters.py` | 載入器外部資料來源適配 |
-
-### `src/ui/`
-
-- `core_frames/`：主視窗、建立、管理、偏好與導航。
-- `dialogs/`：建立確認、屬性、JVM、還原及進度對話框。
-- `mods/`：具名 feature、Session、Review workflow、install executor、tree projection。
-- `services/`：管理頁狀態計算與跨頁工作協調。
-- `support/`：Fluent 主題、UI tokens、狀態、`UIUtils`、`UIWorkScope`。
-- `windows/`：伺服器監控。
-
-`ModManagementFrame` 只負責根組裝與生命週期，不代理 feature command。`review_dependency.py`、`review_details.py`、`review_formatting.py`、`review_grouping.py`、`review_prompts.py`、`review_selection.py`、`review_snapshot_store.py` 與 `review_state.py` 是內部 implementation；外部 seam 維持 `review_workflow.py` 與 `review_contracts.py`。
-
-### `src/utils/`
-
-- `core_utils/`：原子寫入、路徑、雜湊、例外、日誌、單位、版本。
-- `network_utils/`：集中 HTTP timeout、retry、URL 驗證及一般回應內容上限；URL 靜態政策檢查不觸發 DNS，實際 request attempt 才解析一次並固定公開 IP；原始 HTTPS origin 各自使用隔離的 connection pool，保留 Host/SNI 並避免不同 hostname 因共用 IP 而誤用同一連線。一般 request 使用單一 private retry state machine，完整檔案下載則由完整下載交易擁有唯一 retry budget，避免開流與串流層重試乘積化。
-- `java_support/`：Java 偵測與 winget 安裝。
-- `runtime_utils/`：路徑、設定、背景工作、subprocess、系統狀態。
-- `mod_utils/`：下載政策、metadata、語意與版本過濾。
-- `server_utils/`：記憶體、啟動命令、版本語意與共用伺服器名稱安全政策。
-- `update_utils/`：更新資料解析。
-
-## 進度、主題與刪除交易
-
-- `ProgressEvent` 的 `overall_percent` 是建立伺服器 UI 的穩定整體進度來源。下載階段優先使用實際 byte／unit 比例；Java Loader installer 若只提供 `stage`／`message` 文字，`InstallerProgressTracker` 依已知階段做**估算**，不可視為安裝器官方百分比。明確 `%` 或 `x/y` 輸出仍優先採用。`ProgressDialog` 一旦取得可判定進度即維持 determinate 模式，並拒絕延遲事件造成百分比倒退。
-- 共用 Fluent modal 與監控 surface 由 `themed_surface_stylesheet()` 依 `Colors` token 套用背景、主要／次要文字及邊框；不要在個別 Label 只覆寫 transparent background 而遺失主題文字色。
-- Qt 視窗圖示由 `qt_runtime.apply_window_icon()` 統一處理。開發環境讀取 `assets/icon.ico`；Nuitka 封裝環境在 `QApplication.windowIcon()` 缺失時從目前 EXE 的 Windows icon resource 取得，再同步至主視窗、modal、監控視窗與 Fluent title bar。
-- 刪除伺服器的同步 commit point 是「原目錄改名為 `.msm-delete-*` tombstone + 原子移除登錄」。commit 成功後才回報列表已移除，實體遞迴刪除在背景執行並對暫時性檔案鎖做有限重試。`ServerCRUD` 是刪除 tombstone 的唯一恢復 owner：重新啟動時，若 marker 對應的伺服器仍在登錄且原路徑消失，視為尚未 commit 並 fail-safe 還原；若已不在登錄，才排程背景清理。其他 transaction owner 不可直接刪除 `.msm-delete-*`。
-
-## 重要實作規則
-
-- JSON／文字寫入使用原子寫入；不要直接覆寫正式檔。
-- GUI 可見控制項使用 QFluentWidgets；PySide6 保留基礎設施，檔案選擇器集中於 `UIUtils`。
-- UI 背景工作經 `UIWorkScope`；主視窗關閉時保存設定、停止計時器，以非阻塞流程停止 runtime 與背景工作，再關閉其餘視窗。
-- `server.properties` 不複製到 `ServerConfig`。
-- production 與 tests 應驗證同一外部 seam；不得為測試新增 production API。
-- 測試必須全自動且不得觸發真實網路、互動視窗或外部程式；必要檔案只能建立於 pytest `tmp_path` 並在測試後清除。
-
-## 開發命令
-
-```bat
-uv sync
-uv run python -m src.main
-
-uv sync --group test
-uv run pytest -q --cov=src --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml
-
-scripts\format_lint_fix_gate.bat
-uv run report\comprehensive_report.py
-```
-
-### Nuitka 建置
-
-正式輸出使用 `scripts\build_nuitka.ps1` 建立 onefile 執行檔。腳本會先同步 build 群組、拒絕在輸出執行檔仍執行時覆寫、產生 `report\nuitka-compilation-report.xml`，並驗證 onefile 狀態、必要的 `LICENSE` 及禁止的 Qt platform DLL。建置報告若需供工具解析，請以 UTF-8 位元組讀取後再交給 XML parser，避免 XML 宣告編碼與 PowerShell 字串轉換不一致。
-
-```bat
-powershell -ExecutionPolicy Bypass -File scripts\build_nuitka.ps1
-```
-
-若需保留 Nuitka 產生的 C 原始碼以供檢閱，使用 `-KeepCSource`。腳本會只保留
-`dist\main.c-source`，並移除可由下次建置重新產生的 OBJ、`main.dist` 與 onefile 暫存目錄。
-
-`dist\<repository>.exe` 是發佈檔；`dist\main.dist` 只作建置檢查與問題診斷，不應直接當作安裝內容。
-
-onefile 預設使用 Nuitka 的版本化快取規格 `{CACHE_DIR}/Programs/MinecraftServerManager/{VERSION}`，Windows 實際位置為 `%LOCALAPPDATA%\Programs\MinecraftServerManager\<版本>`。新版本完成啟動後會清理舊版本目錄；若舊版本仍被鎖定則保留至下次啟動再清理。
-
-使用方式見 [USER_GUIDE.md](USER_GUIDE.md)。
+- **隱私與安全檢查**：整合 Gitleaks 掃描原始程式碼中的金鑰與敏感資訊
+- **程式碼排版與分析**：強制執行 `dotnet format --verify-no-changes` 與 Roslyn Analyzers 靜態程式碼品質檢驗
+- **測試隔離原則**：測試案例不得發起真實公網請求、不得開啟互動對話方塊、不得建立全域 Windows 特殊路徑，所有檔案測試均限定於暫存目錄內執行

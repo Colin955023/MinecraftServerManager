@@ -1,8 +1,6 @@
 {
   "recommendations": [
-    "ms-python.python",
-    "ms-python.vscode-pylance",
-    "ms-python.mypy-type-checker",
-    "charliermarsh.ruff"
+    "ms-dotnettools.csdevkit",
+    "ms-dotnettools.csharp"
   ]
 }

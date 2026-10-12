@@ -1,0 +1,77 @@
+<Window x:Class="MinecraftServerManager.App.Views.ModInstallQueueDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="待安裝模組清單"
+        Width="720"
+        Height="480"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 標題 -->
+    <TextBlock Grid.Row="0"
+               Text="📋 待安裝模組清單"
+               FontSize="18"
+               FontWeight="Bold"
+               Foreground="{DynamicResource TextBrush}"
+               Margin="0,0,0,6" />
+
+    <!-- 說明 -->
+    <TextBlock Grid.Row="1"
+               Text="目前已排入安裝佇列的模組與相依項目如下："
+               FontSize="13"
+               Foreground="{DynamicResource MutedTextBrush}"
+               Margin="0,0,0,14" />
+
+    <!-- 清單表格 -->
+    <Border Grid.Row="2"
+            Background="{DynamicResource CardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            Padding="8"
+            Margin="0,0,0,16">
+      <DataGrid x:Name="QueueGrid"
+                AutoGenerateColumns="False"
+                CanUserResizeColumns="True"
+                HeadersVisibility="Column"
+                IsReadOnly="True"
+                SelectionMode="Single">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="動作" Binding="{Binding ActionText}" Width="70" />
+          <DataGridTextColumn Header="模組名稱" Binding="{Binding Title}" Width="180" />
+          <DataGridTextColumn Header="版本" Binding="{Binding VersionDisplay}" Width="130" />
+          <DataGridTextColumn Header="檔案名稱" Binding="{Binding FileName}" Width="170" />
+          <DataGridTextColumn Header="原因 / 說明" Binding="{Binding Reason}" Width="*" />
+        </DataGrid.Columns>
+      </DataGrid>
+    </Border>
+
+    <!-- 底部按鈕 -->
+    <Grid Grid.Row="3">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+        <Button Content="清空清單"
+                Click="ClearQueue_Click"
+                Foreground="{DynamicResource DangerBrush}"
+                Padding="14,6" />
+      </StackPanel>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Content="關閉"
+                Click="Close_Click"
+                Margin="0,0,10,0"
+                Padding="16,6" />
+        <Button Content="開始安裝"
+                Click="StartInstall_Click"
+                Style="{DynamicResource PrimaryButtonStyle}"
+                Padding="20,6" />
+      </StackPanel>
+    </Grid>
+  </Grid>
+</Window>

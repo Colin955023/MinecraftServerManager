@@ -1,0 +1,167 @@
+using System.Globalization;
+using System.Text;
+using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Mods;
+using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Utilities;
+
+namespace MinecraftServerManager.Infrastructure.Mods;
+
+/// <summary>
+/// 模組管理外觀服務實作
+/// </summary>
+public sealed class ModManager(
+    ILocalModScanner scanner,
+    IModFileInstaller installer) : IModManager
+{
+    public async Task<IReadOnlyList<LocalModInfo>> GetModsAsync(
+        string serverDirectory,
+        bool includeDisabled = true,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string modsDir = Path.Combine(stableServerDir, "mods");
+
+        var mods = await scanner.ScanModsAsync(modsDir, cancellationToken).ConfigureAwait(false);
+        return includeDisabled ? mods : [.. mods.Where(m => m.Status == ModStatus.Enabled)];
+    }
+
+    public Task<LocalModMutationResult> SetModStateAsync(
+        string serverDirectory,
+        string modId,
+        bool enable,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string modsDir = Path.Combine(stableServerDir, "mods");
+        return installer.SetModStateAsync(modsDir, modId, enable, cancellationToken);
+    }
+
+    public Task<LocalModMutationResult> DeleteModsAsync(
+        string serverDirectory,
+        IReadOnlyList<string> modIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string modsDir = Path.Combine(stableServerDir, "mods");
+        return installer.DeleteModsAsync(modsDir, modIds, cancellationToken);
+    }
+
+    public Task<LocalModMutationResult> ImportModAsync(
+        string serverDirectory,
+        string sourceFilePath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string modsDir = Path.Combine(stableServerDir, "mods");
+        return installer.ImportLocalModAsync(modsDir, sourceFilePath, cancellationToken);
+    }
+
+    public Task<ModFileOperationResult> InstallOnlineModAsync(
+        string serverDirectory,
+        string downloadUrl,
+        string fileName,
+        string? expectedHash = null,
+        string? hashAlgorithm = null,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
+        string stableServerDir = SafeFileSystem.ResolveStableDirectory(serverDirectory, create: true);
+        string modsDir = Path.Combine(stableServerDir, "mods");
+        return installer.InstallRemoteModAsync(modsDir, downloadUrl, fileName, expectedHash, hashAlgorithm, progress, cancellationToken);
+    }
+
+    public async Task<string> ExportModListAsync(
+        string serverDirectory,
+        string format = "text",
+        CancellationToken cancellationToken = default)
+    {
+        var mods = await GetModsAsync(serverDirectory, includeDisabled: true, cancellationToken).ConfigureAwait(false);
+        string normFormat = (format ?? "text").Trim().ToLowerInvariant();
+
+        return normFormat switch
+        {
+            "json" => JsonCodec.Serialize(mods, indented: true),
+            "html" => BuildHtml(mods),
+            "csv" => BuildCsv(mods),
+            "xlsx" => Convert.ToBase64String(BuildXlsxBytes(mods)),
+            _ => BuildText(mods)
+        };
+    }
+
+    private static readonly string[] XlsxHeaders = ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
+
+    /// <summary>
+    /// 建置標準 OpenXML XLSX 位元組陣列。
+    /// </summary>
+    public static byte[] BuildXlsxBytes(IReadOnlyList<LocalModInfo> mods)
+    {
+        ArgumentNullException.ThrowIfNull(mods);
+
+        var rows = new List<IReadOnlyList<string>>
+        {
+            XlsxHeaders
+        };
+        foreach (var m in mods)
+        {
+            string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            rows.Add([st, m.Name, m.Version, m.MinecraftVersion, m.LoaderType, m.Author, m.Filename, m.Id, fsize, mtime, m.Description]);
+        }
+        return OpenXmlSpreadsheetBuilder.BuildWorkbook("模組列表", rows);
+    }
+
+    private static string BuildText(IReadOnlyList<LocalModInfo> mods)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# 模組清單");
+        sb.AppendLine();
+        foreach (var mod in mods)
+        {
+            string status = mod.Status == ModStatus.Enabled ? "✅" : "❌";
+            string author = !string.IsNullOrEmpty(mod.Author) ? $" - by {mod.Author}" : string.Empty;
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{status} {mod.Name} ({mod.Version}){author}");
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildHtml(IReadOnlyList<LocalModInfo> mods)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("<!DOCTYPE html><html lang=\"zh-TW\"><head><meta charset=\"UTF-8\"><title>模組列表</title>");
+        sb.AppendLine("<style>table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:8px;text-align:left;}th{background:#f4f4f4;}td:last-child{white-space:pre-wrap;}</style></head><body>");
+        sb.AppendLine("<h2>模組列表</h2><table><tr><th>啟用狀態</th><th>模組名稱</th><th>版本</th><th>MC版本</th><th>載入器</th><th>作者</th><th>檔案名稱</th><th>模組ID</th><th>檔案大小</th><th>修改時間</th><th>描述</th></tr>");
+        foreach (var m in mods)
+        {
+            string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            sb.AppendLine(CultureInfo.InvariantCulture, $"<tr><td>{st}</td><td>{System.Net.WebUtility.HtmlEncode(m.Name)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Version)}</td><td>{System.Net.WebUtility.HtmlEncode(m.MinecraftVersion)}</td><td>{System.Net.WebUtility.HtmlEncode(m.LoaderType)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Author)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Filename)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Id)}</td><td>{System.Net.WebUtility.HtmlEncode(fsize)}</td><td>{System.Net.WebUtility.HtmlEncode(mtime)}</td><td>{System.Net.WebUtility.HtmlEncode(m.Description)}</td></tr>");
+        }
+        sb.AppendLine("</table></body></html>");
+        return sb.ToString();
+    }
+
+    private static string BuildCsv(IReadOnlyList<LocalModInfo> mods)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("啟用狀態,模組名稱,版本,MC版本,載入器,作者,檔案名稱,模組ID,檔案大小,修改時間,描述");
+        foreach (var m in mods)
+        {
+            string st = m.Status == ModStatus.Enabled ? "✅" : "❌";
+            string fsize = m.FileSize > 0 ? Core.Utilities.MemoryUtils.FormatBytes(m.FileSize) : string.Empty;
+            string mtime = m.FileMtime > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)m.FileMtime).ToLocalTime().ToString("yyyy/MM/dd HH:mm", CultureInfo.InvariantCulture) : string.Empty;
+            sb.AppendLine(CultureInfo.InvariantCulture, $"\"{st}\",\"{EscapeCsv(m.Name)}\",\"{EscapeCsv(m.Version)}\",\"{EscapeCsv(m.MinecraftVersion)}\",\"{EscapeCsv(m.LoaderType)}\",\"{EscapeCsv(m.Author)}\",\"{EscapeCsv(m.Filename)}\",\"{EscapeCsv(m.Id)}\",\"{EscapeCsv(fsize)}\",\"{EscapeCsv(mtime)}\",\"{EscapeCsv(m.Description)}\"");
+        }
+        return sb.ToString();
+    }
+
+    private static string EscapeCsv(string value) =>
+        (value ?? string.Empty).Replace("\"", "\"\"");
+}

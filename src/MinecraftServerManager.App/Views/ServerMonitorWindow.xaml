@@ -1,0 +1,231 @@
+<Window x:Class="MinecraftServerManager.App.Views.ServerMonitorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding WindowTitle}"
+        Width="1050"
+        Height="680"
+        MinWidth="850"
+        MinHeight="520"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- 頂部卡片：操作三按鈕 + 系統資源統計 -->
+    <Border Grid.Row="0"
+            Background="{DynamicResource CardBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="14,10"
+            Margin="0,0,0,12">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 左側：強制終止（危險操作獨立擺放） -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+          <Button Command="{Binding ForceKillCommand}"
+                  IsEnabled="{Binding IsServerRunning}"
+                  Style="{DynamicResource DangerButtonStyle}"
+                  Height="32"
+                  Padding="12,4">
+            <TextBlock Text="強制終止" VerticalAlignment="Center" Foreground="#FFFFFF" />
+          </Button>
+        </StackPanel>
+
+        <!-- 系統資源卡片：記憶體、版本、人數、運作時間 -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
+            <TextBlock Text="{Binding MemoryUsageText, StringFormat='記憶體: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+          </Border>
+          <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
+            <TextBlock Text="{Binding MinecraftVersionText, StringFormat='MC: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+          </Border>
+          <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
+            <TextBlock Text="{Binding OnlinePlayersText, StringFormat='線上: {0}'}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+          </Border>
+          <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
+            <TextBlock Text="{Binding UptimeText, StringFormat='運作時間: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+          </Border>
+        </StackPanel>
+
+        <!-- 右側控制：自動捲動 + 啟動 / 停止 / 重新整理（順序固定） -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+          <CheckBox Content="自動捲動"
+                    IsChecked="{Binding IsAutoScrollEnabled}"
+                    Foreground="{DynamicResource TextBrush}"
+                    VerticalAlignment="Center"
+                    Margin="0,0,12,0" />
+          <Button Command="{Binding StartServerCommand}"
+                  IsEnabled="{Binding CanStartServer}"
+                  Style="{DynamicResource SuccessButtonStyle}"
+                  Height="32"
+                  Margin="0,0,8,0"
+                  Padding="12,4">
+            <TextBlock Text="🚀 啟動" VerticalAlignment="Center" Foreground="#FFFFFF" />
+          </Button>
+          <Button Command="{Binding StopServerCommand}"
+                  IsEnabled="{Binding IsServerRunning}"
+                  Style="{DynamicResource DangerButtonStyle}"
+                  Height="32"
+                  Margin="0,0,8,0"
+                  Padding="12,4">
+            <TextBlock Text="⏹️ 停止" VerticalAlignment="Center" Foreground="#FFFFFF" />
+          </Button>
+          <Button Command="{Binding RefreshStateCommand}"
+                  Height="32"
+                  Padding="12,4">
+            <TextBlock Text="🔄 重新整理" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- 中間區域：左側紀錄主控台 + 右側線上玩家清單卡片 -->
+    <Grid Grid.Row="1">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="200" />
+      </Grid.ColumnDefinitions>
+
+      <!-- 終端機紀錄檢視區 (黑底綠字) -->
+      <Border Grid.Column="0"
+              Background="#0C0C0C"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="10"
+              Margin="0,0,10,0">
+        <ListBox x:Name="LogListBox"
+                 ItemsSource="{Binding Logs}"
+                 VirtualizingPanel.IsVirtualizing="True"
+                 VirtualizingPanel.VirtualizationMode="Recycling"
+                 VirtualizingPanel.ScrollUnit="Pixel"
+                 ScrollViewer.CanContentScroll="True"
+                 Background="#0C0C0C"
+                 BorderThickness="0"
+                 FontFamily="Consolas, Cascadia Code, Courier New"
+                 FontSize="12"
+                 Foreground="#00FF66"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+          <ListBox.ContextMenu>
+            <ContextMenu>
+              <MenuItem Header="複製全部紀錄" Command="{Binding CopyAllLogsCommand}" />
+              <Separator />
+              <MenuItem Header="清空紀錄" Command="{Binding ClearLogsCommand}" />
+            </ContextMenu>
+          </ListBox.ContextMenu>
+          <ListBox.ItemContainerStyle>
+            <Style TargetType="ListBoxItem">
+              <Setter Property="Padding" Value="0,1" />
+              <Setter Property="Focusable" Value="False" />
+              <Setter Property="Foreground" Value="#00FF66" />
+              <Setter Property="Template">
+                <Setter.Value>
+                  <ControlTemplate TargetType="ListBoxItem">
+                    <ContentPresenter TextElement.Foreground="#00FF66" />
+                  </ControlTemplate>
+                </Setter.Value>
+              </Setter>
+            </Style>
+          </ListBox.ItemContainerStyle>
+        </ListBox>
+      </Border>
+
+      <!-- 右側線上玩家清單卡片 -->
+      <Border Grid.Column="1"
+              Background="{DynamicResource CardBrush}"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="12">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <TextBlock Grid.Row="0"
+                     Text="線上玩家"
+                     FontWeight="Bold"
+                     FontSize="14"
+                     Foreground="{DynamicResource TextBrush}"
+                     Margin="0,0,0,8" />
+          <TextBlock Grid.Row="1"
+                     Text="無玩家線上"
+                     FontSize="13"
+                     Foreground="{DynamicResource MutedTextBrush}"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding HasNoOnlinePlayers}" Value="True">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
+          <ListBox Grid.Row="1"
+                   ItemsSource="{Binding OnlinePlayers}"
+                   Background="Transparent"
+                   BorderThickness="0"
+                   Foreground="{DynamicResource TextBrush}">
+            <ListBox.ItemContainerStyle>
+              <Style TargetType="ListBoxItem">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="ToolTip" Value="點選複製玩家名稱" />
+                <Setter Property="Padding" Value="4,2" />
+                <EventSetter Event="PreviewMouseLeftButtonUp" Handler="PlayerListItem_PreviewMouseLeftButtonUp" />
+              </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Orientation="Horizontal" Margin="0,3">
+                  <Image Source="{DynamicResource IconCheck}" Width="13" Height="13" Margin="0,0,6,0" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding}" VerticalAlignment="Center" FontSize="13" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- 底部指令輸入列 -->
+    <Grid Grid.Row="2" Margin="0,12,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <TextBox x:Name="CommandInputBox"
+               Grid.Column="0"
+               Text="{Binding CommandText, UpdateSourceTrigger=PropertyChanged}"
+               IsEnabled="{Binding IsServerRunning}"
+               PreviewKeyDown="CommandInputBox_PreviewKeyDown"
+               Margin="0,0,10,0"
+               Padding="8,8"
+               FontFamily="Consolas, Cascadia Code, Courier New"
+               FontSize="13" />
+
+      <Button Grid.Column="1"
+              Content="傳送指令"
+              Command="{Binding SendCommandCommand}"
+              IsEnabled="{Binding IsServerRunning}"
+              Style="{DynamicResource PrimaryButtonStyle}"
+              Padding="18,8" />
+    </Grid>
+  </Grid>
+</Window>

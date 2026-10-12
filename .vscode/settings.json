@@ -1,33 +1,12 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
-  "python.analysis.typeCheckingMode": "off",
-  "python.analysis.diagnosticMode": "workspace",
-  "python.analysis.include": [
-    "src",
-    "tests",
-    "scripts",
-    "report"
+  "files.exclude": {
+    "**/*_wpftmp.*": true
+  },
+  "files.watcherExclude": {
+    "**/*_wpftmp.*": true
+  },
+  "dotnet.projects": [
+    "!**/*_wpftmp.csproj"
   ],
-  "python.analysis.exclude": [
-    "build/**",
-    "dist/**",
-    "**/node_modules",
-    "**/__pycache__",
-    "**/.*",
-    ".venv"
-  ],
-  "python.analysis.includeVenvInWorkspaceSymbols": false,
-  "mypy-type-checker.cwd": "${workspaceFolder}",
-  "mypy-type-checker.importStrategy": "fromEnvironment",
-  "mypy-type-checker.reportingScope": "custom",
-  "ruff.importStrategy": "fromEnvironment",
-  "ruff.configurationPreference": "filesystemFirst",
-  "[python]": {
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": {
-      "source.fixAll.ruff": "explicit",
-      "source.organizeImports.ruff": "explicit"
-    }
-  }
+  "dotnet.defaultSolution": "MinecraftServerManager.sln"
 }

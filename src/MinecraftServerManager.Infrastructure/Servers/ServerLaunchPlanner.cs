@@ -1,0 +1,145 @@
+using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Domain.Servers;
+using MinecraftServerManager.Infrastructure.FileSystem;
+
+namespace MinecraftServerManager.Infrastructure.Servers;
+
+/// <summary>
+/// 伺服器啟動規劃器實作
+/// </summary>
+public sealed class ServerLaunchPlanner : IServerLaunchPlanner
+{
+    public ServerLaunchPlan CreatePlan(ServerConfig config, ServerInspection inspection, string? javaPath = null)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(inspection);
+
+        string stableDir = SafeFileSystem.ResolveStableDirectory(config.Path);
+        string targetFile = !string.IsNullOrWhiteSpace(inspection.LaunchTarget.Value)
+            ? inspection.LaunchTarget.Value.Trim()
+            : "server.jar";
+
+        // 防範 Path Traversal：僅允許相對於 stableDir 的內部檔案
+        string targetFullPath = Path.GetFullPath(Path.Combine(stableDir, targetFile));
+        if (!SafeFileSystem.IsPathWithin(stableDir, targetFullPath, strict: false))
+        {
+            throw new SafeFileSystemException($"偵測到非法的啟動目標路徑越界：{targetFile}");
+        }
+
+        bool isScript = targetFile.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
+
+        if (isScript)
+        {
+            if (!SafeScriptValidator.ValidateScriptContent(targetFullPath, stableDir))
+            {
+                throw new InvalidOperationException($"啟動腳本「{targetFile}」未通過安全性檢驗（可能包含未受信任的指令或批次注入字元）");
+            }
+
+            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || File.Exists(Path.Combine(stableDir, "user_jvm_args.txt")))
+            {
+                ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
+            }
+
+            IReadOnlyDictionary<string, string?>? env = null;
+            if (!string.IsNullOrWhiteSpace(javaPath) && !string.Equals(javaPath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
+            {
+                env = BuildJavaEnvironment(javaPath.Trim());
+            }
+
+            return new ServerLaunchPlan(
+                JavaExecutable: targetFullPath,
+                WorkingDirectory: stableDir,
+                Arguments: [],
+                Loader: config.LoaderType,
+                MinMemoryMb: config.MemoryMinMb ?? 1024,
+                MaxMemoryMb: config.MemoryMaxMb,
+                IsScript: true,
+                ServerName: config.Name.Value,
+                Environment: env);
+        }
+
+        string executableJava = !string.IsNullOrWhiteSpace(javaPath)
+            ? javaPath
+            : "java";
+
+        int min = config.MemoryMinMb ?? (config.MemoryMaxMb > 1024 ? 1024 : config.MemoryMaxMb);
+        var args = new List<string>
+        {
+            $"-Xms{min}M",
+            $"-Xmx{config.MemoryMaxMb}M"
+        };
+
+        // 注入推薦 GC 與 JVM 參數
+        var customArgs = config.JvmArgs ?? [];
+        if (!JvmOptionPolicy.HasGcOption(customArgs))
+        {
+            var recommendedGc = JvmOptionPolicy.RecommendGcArgs(config.MemoryMaxMb, loaderType: config.LoaderType.ToString());
+            args.AddRange(recommendedGc);
+        }
+
+        args.AddRange(customArgs);
+
+        if (targetFile.StartsWith('@'))
+        {
+            args.Add(targetFile);
+        }
+        else
+        {
+            args.Add("-jar");
+            args.Add(targetFile);
+        }
+
+        string guiArg = (config.LoaderType == LoaderKind.Paper || targetFile.StartsWith("paper", StringComparison.OrdinalIgnoreCase))
+            ? "--nogui"
+            : "nogui";
+        args.Add(guiArg);
+
+        if (!SafeScriptValidator.ValidateCommandInputs(stableDir, args))
+        {
+            throw new InvalidOperationException($"伺服器啟動指令引用的檔案未通過安全性邊界檢驗");
+        }
+
+        return new ServerLaunchPlan(
+            JavaExecutable: executableJava,
+            WorkingDirectory: stableDir,
+            Arguments: args,
+            Loader: config.LoaderType,
+            MinMemoryMb: min,
+            MaxMemoryMb: config.MemoryMaxMb,
+            IsScript: false,
+            ServerName: config.Name.Value);
+    }
+
+    /// <summary>
+    /// 為指定的 Java 執行檔建置注入用的環境變數（設定 JAVA_HOME 並將 java bin 目錄置於 PATH 最前端）
+    /// </summary>
+    public static IReadOnlyDictionary<string, string?> BuildJavaEnvironment(string javaExecutablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(javaExecutablePath);
+
+        string javaBinDir = Path.GetDirectoryName(javaExecutablePath) ?? string.Empty;
+        string javaHome = javaBinDir;
+
+        string dirName = Path.GetFileName(javaBinDir);
+        if (dirName.Equals("bin", StringComparison.OrdinalIgnoreCase))
+        {
+            string? parent = Path.GetDirectoryName(javaBinDir);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                javaHome = parent;
+            }
+        }
+
+        string currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        string newPath = string.IsNullOrWhiteSpace(javaBinDir)
+            ? currentPath
+            : $"{javaBinDir};{currentPath}";
+
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["JAVA_HOME"] = javaHome,
+            ["PATH"] = newPath
+        };
+    }
+}

@@ -1,0 +1,6 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MinecraftServerManager.Domain</AssemblyName>
+    <RootNamespace>MinecraftServerManager.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>

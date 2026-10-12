@@ -1,20 +1,6 @@
 name: "Minecraft Server Manager CodeQL Config"
 paths-ignore:
-  - '**/.venv/**'
   - 'docs/**'
   - 'assets/**'
-  - 'report/**'
-  - 'dist/**'
-  - 'build/**'
-  - '**/__pycache__/**'
-
-packs:
-  - codeql/python-queries
-  - codeql/python-upgrades
-
-queries:
-  - uses: ./.github/codeql/queries/statement_no_effect_except_protocol.ql
-
-query-filters:
-  - exclude:
-      id: py/ineffectual-statement
+  - 'output/**'
+  - 'tests/**'
