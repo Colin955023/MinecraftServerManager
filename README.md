@@ -5,6 +5,7 @@
 [![WPF](https://img.shields.io/badge/UI-WPF-512BD4)](https://learn.microsoft.com/dotnet/desktop/wpf/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
 專為 Windows 10／11（64 位元）打造的 Minecraft 伺服器管理工具，採用 C#、.NET 10 與 WPF 原生技術開發，提供流暢的操作體驗、安全的檔案防護與快速的啟動速度。
 

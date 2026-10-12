@@ -139,6 +139,32 @@ jobs:
                   Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
               }
           }
+
+      - name: Generate SBOM (SPDX 2.2)
+        shell: pwsh
+        run: |
+          $sbomToolPath = Join-Path $env:RUNNER_TEMP "sbom-tool-win-x64.exe"
+          Write-Host "正在下載微軟官方 Microsoft SBOM Tool..."
+          Invoke-WebRequest -Uri "https://github.com/microsoft/sbom-tool/releases/latest/download/sbom-tool-win-x64.exe" -OutFile $sbomToolPath
+          $version = "${{ steps.release_info.outputs.version }}"
+          Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
+          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -nsb "https://github.com/Colin955023/MinecraftServerManager"
+          if ($LASTEXITCODE -ne 0) {
+              throw "SBOM 產生失敗"
+          }
+
+          $spdxSrc = "output/_manifest/spdx_2.2/manifest.spdx.json"
+          if (Test-Path $spdxSrc) {
+              $destSbom = "output/MinecraftServerManager.spdx.json"
+              Copy-Item -Path $spdxSrc -Destination $destSbom -Force
+              Remove-Item -Path "output/_manifest" -Recurse -Force
+              $hash = Get-FileHash -LiteralPath $destSbom -Algorithm SHA256
+              Set-Content -LiteralPath "$destSbom.sha256" -Value "$($hash.Hash)  MinecraftServerManager.spdx.json" -Encoding UTF8
+              Write-Host "SBOM 與 SHA-256 產生完成: $destSbom"
+          } else {
+              throw "SPDX 清單檔案未產生: $spdxSrc"
+          }
+
       - name: Upload release payload
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -245,7 +271,9 @@ jobs:
           $assets = Get-ChildItem -Path 'output' -File | Where-Object {
               $_.Name -match '^MinecraftServerManager.*\.exe$' -or
               $_.Name -match '^MinecraftServerManager.*\.exe\.sha256$' -or
-              $_.Name -match '^MinecraftServerManager.*\.exe\.intoto\.jsonl$'
+              $_.Name -match '^MinecraftServerManager.*\.exe\.intoto\.jsonl$' -or
+              $_.Name -match '^MinecraftServerManager.*\.spdx\.json$' -or
+              $_.Name -match '^MinecraftServerManager.*\.spdx\.json\.sha256$'
           } | ForEach-Object { $_.FullName }
           if (-not $assets -or $assets.Count -eq 0) {
               Write-Error "No release executable was found in output."
