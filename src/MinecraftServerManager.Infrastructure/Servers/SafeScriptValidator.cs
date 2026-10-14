@@ -175,7 +175,7 @@ public static class SafeScriptValidator
                 }
 
                 // 3. 檢查變數展開 %，僅允許相容之合法位置參數（例如 %*、%~dp0、%1 等）
-                if (HasUnsafePercentUsage(lineToCheck.AsSpan()))
+                if (HasUnsafePercentUsage(lineToCheck))
                 {
                     Logger.Warning("啟動腳本包含未受信任之環境變數展開語法：{Line}", line);
                     return false;

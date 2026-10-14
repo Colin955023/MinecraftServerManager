@@ -12,7 +12,6 @@
         Background="{DynamicResource WindowBrush}"
         Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
   <Window.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
     <DataTemplate DataType="{x:Type vm:CreateServerViewModel}">
       <views:CreateServerView />

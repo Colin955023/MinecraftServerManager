@@ -1,4 +1,3 @@
-using MinecraftServerManager.Domain.Loaders;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
@@ -63,10 +62,10 @@ public sealed class DomainModelTests
     [Fact]
     public void LoaderVersionPreservesStableAndGameVersionMetadata()
     {
-        var version = new LoaderVersion("0.16.10", stable: true, minecraftVersion: "1.21.1", gameVersions: ["1.21.1"]);
+        var version = new Core.Loaders.LoaderVersion("0.16.10", Stable: true, MinecraftVersion: "1.21.1", CompatibleGameVersions: ["1.21.1"]);
 
         Assert.True(version.Stable);
-        Assert.Equal("1.21.1", version.GameVersions.Single());
+        Assert.Equal("1.21.1", version.CompatibleGameVersions?.Single());
     }
 
     [Fact]

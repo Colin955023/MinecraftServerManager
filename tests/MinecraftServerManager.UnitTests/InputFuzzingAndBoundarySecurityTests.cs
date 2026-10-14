@@ -78,6 +78,10 @@ public sealed class InputFuzzingAndBoundarySecurityTests
                         !string.IsNullOrEmpty(error),
                         $"驗證判定為非法但未提供錯誤訊息：seed={seed}, key={key}, input='{fuzzedValue}'");
                 }
+                else
+                {
+                    Assert.Null(error);
+                }
             }
         }
     }

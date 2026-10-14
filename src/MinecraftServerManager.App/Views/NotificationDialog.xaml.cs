@@ -85,7 +85,7 @@ public partial class NotificationDialog : Window
         {
             var dialog = new NotificationDialog(title, message, level);
             Window? effectiveOwner = owner ?? Application.Current?.MainWindow;
-            if (effectiveOwner != null && effectiveOwner.IsVisible)
+            if (effectiveOwner is { IsVisible: true })
             {
                 dialog.Owner = effectiveOwner;
             }

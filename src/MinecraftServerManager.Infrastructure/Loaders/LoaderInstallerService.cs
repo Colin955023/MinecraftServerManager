@@ -285,24 +285,26 @@ public sealed partial class LoaderInstallerService(
         switch (loader)
         {
             case LoaderKind.Fabric:
+                args.Add("server");
+                args.Add("-mcversion");
+                args.Add(minecraftVersion);
                 if (!string.IsNullOrWhiteSpace(loaderVersion))
                 {
-                    args.AddRange(["server", "-mcversion", minecraftVersion, "-loader", loaderVersion, "-dir", serverDirectory]);
+                    args.Add("-loader");
+                    args.Add(loaderVersion);
                 }
-                else
-                {
-                    args.AddRange(["server", "-mcversion", minecraftVersion, "-dir", serverDirectory]);
-                }
+                args.Add("-dir");
+                args.Add(serverDirectory);
                 break;
             case LoaderKind.Quilt:
+                args.Add("install");
+                args.Add("server");
+                args.Add(minecraftVersion);
                 if (!string.IsNullOrWhiteSpace(loaderVersion))
                 {
-                    args.AddRange(["install", "server", minecraftVersion, loaderVersion, $"--install-dir={serverDirectory}"]);
+                    args.Add(loaderVersion);
                 }
-                else
-                {
-                    args.AddRange(["install", "server", minecraftVersion, $"--install-dir={serverDirectory}"]);
-                }
+                args.Add($"--install-dir={serverDirectory}");
                 break;
             case LoaderKind.Forge:
             case LoaderKind.NeoForge:

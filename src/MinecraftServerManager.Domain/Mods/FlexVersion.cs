@@ -250,7 +250,19 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
 
     public override bool Equals(object? obj) => obj is FlexVersion fv && Equals(fv);
 
-    public override int GetHashCode() => OriginalString.GetHashCode(StringComparison.OrdinalIgnoreCase);
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var section in _sections)
+        {
+            if (section.Type != SectionType.Null)
+            {
+                hash.Add(section.Value, StringComparer.Ordinal);
+            }
+        }
+
+        return hash.ToHashCode();
+    }
 
     public override string ToString() => OriginalString;
 

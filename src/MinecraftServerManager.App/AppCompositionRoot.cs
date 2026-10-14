@@ -18,7 +18,7 @@ namespace MinecraftServerManager.App;
 /// <summary>
 /// 應用程式組合根（Composition Root）：負責相依性注入、服務生命週期管理與背景預熱
 /// </summary>
-public sealed class AppCompositionRoot : IAsyncDisposable, IDisposable
+public sealed class AppCompositionRoot : IAsyncDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AppCompositionRoot");
 
@@ -74,6 +74,9 @@ public sealed class AppCompositionRoot : IAsyncDisposable, IDisposable
         var modManager = new ModManager(modScanner, modInstaller);
         var modrinthClient = new ModrinthClient(httpPort);
         _updateCheckerService = new UpdateCheckerService(httpPort);
+        var appUpdateService = new AppUpdateService(httpPort);
+
+        var uiService = new Services.WpfUiService();
 
         _mainViewModel = new MainViewModel(
             _settingsManager,
@@ -87,7 +90,9 @@ public sealed class AppCompositionRoot : IAsyncDisposable, IDisposable
             _updateCheckerService,
             _sharedProcessRunner,
             _javaRequirements,
-            javaInstaller);
+            javaInstaller,
+            uiService: uiService,
+            appUpdateService: appUpdateService);
     }
 
     private static string ResolveInitialServersRoot(SettingsManager settings)
@@ -139,21 +144,6 @@ public sealed class AppCompositionRoot : IAsyncDisposable, IDisposable
 
         await Task.WhenAll(detectTask, reqTask, mcTask, paperTask, loadersTask).ConfigureAwait(false);
         Logger.Information("啟動背景預熱完成 (Java 候選、官方與 Paper Java 需求、Minecraft 版本與各載入器清單)");
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            _sharedServerRuntime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        }
-        catch
-        {
-            // 忽略同步處置逾時或例外
-        }
-
-        _sharedHttpClient.Dispose();
-        _httpHandler.Dispose();
     }
 
     public async ValueTask DisposeAsync()

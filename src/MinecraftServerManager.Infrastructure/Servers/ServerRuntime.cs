@@ -240,6 +240,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         if (_process is not null)
         {
             Logger.Information("處置伺服器行程資源 (PID: {Pid})", _process.Pid);
+            _process.OutputReceived -= OnOutputReceived;
             await _process.DisposeAsync().ConfigureAwait(false);
             _process = null;
         }
@@ -274,6 +275,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         }
         finally
         {
+            proc.OutputReceived -= OnOutputReceived;
             ActiveServerName = null;
             IsReady = false;
         }

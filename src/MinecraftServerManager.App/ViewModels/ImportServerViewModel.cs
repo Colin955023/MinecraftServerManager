@@ -1,9 +1,7 @@
+using MinecraftServerManager.App.Services;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 
@@ -12,8 +10,11 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>
 /// 匯入伺服器對話方塊 ViewModel
 /// </summary>
-public sealed partial class ImportServerViewModel(IServerManager serverManager) : ObservableObject
+public sealed partial class ImportServerViewModel(IServerManager serverManager,
+    IUiService? uiService = null) : ObservableObject
 {
+    private readonly IUiService _ui = uiService ?? NoOpUiService.Instance;
+
     private readonly IServerManager _serverManager = serverManager;
 
     [ObservableProperty]
@@ -38,33 +39,20 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
     [RelayCommand]
     public void BrowseZip()
     {
-        var dialog = new OpenFileDialog
+        if (_ui.PickFiles("選取 Minecraft 伺服器 ZIP 壓縮檔", "ZIP 壓縮檔 (*.zip)|*.zip|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
         {
-            Title = "選取 Minecraft 伺服器 ZIP 壓縮檔",
-            Filter = "ZIP 壓縮檔 (*.zip)|*.zip|所有檔案 (*.*)|*.*",
-            Multiselect = false
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            SourcePath = dialog.FileName;
-            ServerName = Path.GetFileNameWithoutExtension(dialog.FileName);
+            SourcePath = picked[0];
+            ServerName = Path.GetFileNameWithoutExtension(picked[0]);
         }
     }
 
     [RelayCommand]
     public void BrowseFolder()
     {
-        var dialog = new OpenFolderDialog
+        if (_ui.PickFolder("選取 Minecraft 伺服器目錄") is { } folder)
         {
-            Title = "選取 Minecraft 伺服器目錄",
-            Multiselect = false
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            SourcePath = dialog.FolderName;
-            ServerName = Path.GetFileName(dialog.FolderName);
+            SourcePath = folder;
+            ServerName = Path.GetFileName(folder);
         }
     }
 
@@ -89,14 +77,8 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
         string targetName = ServerName.Trim();
         string source = SourcePath.Trim();
 
-        var progressDialog = new ServerImportProgressDialog(targetName);
-        if (Application.Current?.MainWindow is not null)
-        {
-            progressDialog.Owner = Application.Current.MainWindow;
-        }
-
         // 開啟獨立進度視窗並在背景非同步執行匯入
-        progressDialog.Show();
+        var progressDialog = _ui.ShowServerImportProgress(targetName);
         var progress = progressDialog.Progress;
 
         try
@@ -107,8 +89,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
                 ImportTransferMode.Copy,
                 progress)).ConfigureAwait(true);
 
-            ServerImportProgressDialog.MarkCompleted();
-            progressDialog.Close();
+            progressDialog.Complete();
 
             if (result.Completed)
             {
@@ -122,8 +103,7 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager) 
         }
         catch (Exception ex)
         {
-            ServerImportProgressDialog.MarkCompleted();
-            progressDialog.Close();
+            progressDialog.Complete();
             StatusMessage = $"匯入異常：{ex.Message}";
         }
         finally

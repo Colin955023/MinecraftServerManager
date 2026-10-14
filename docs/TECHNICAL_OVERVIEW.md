@@ -7,6 +7,7 @@
 | 領域 | 技術與元件 | 說明 |
 |---|---|---|
 | 核心平台 | .NET 10（`net10.0-windows`） | 採用最新 LTS 框架，提供高效能 JIT 與非同步 I/O |
+| 語言標準 | C# 14 | 採用 `field` 欄位支援屬性、隱式 Span 轉換、模式匹配與零額外負擔現代慣用語 |
 | 使用者介面 | WPF（Windows Presentation Foundation） | 原生 Windows 桌面框架，落實 MVVM 模式與資料繫結 |
 | 資料序列化 | `System.Text.Json` | 高效能唯讀 Span 與串流 JSON 序列化／反序列化 |
 | 網路通訊 | `System.Net.Http.HttpClient` | 集中連線池管理、自動重試預算與完整逾時控制 |
@@ -43,7 +44,7 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 - **Domain**：完全不相依 WPF、檔案 I/O、網路或作業系統 API，確保領域邏輯的純粹性與可測試性
 - **Core**：定義核心服務合約（Contracts）、工作流程（Workflows）與交易編排（Orchestration）
 - **Infrastructure**：具體實作 Core 定義之介面，負責實體磁碟存取、外部行程呼叫、HTTP 呼叫與 Java 環境探測
-- **App**：負責視窗繪製、使用者互動與 ViewModel 狀態管理；透過專屬的組合根（`AppCompositionRoot`）集中裝配所有底層服務、管理連線與行程生命週期，並於主視窗顯式啟動流程中完成目錄引導與背景非同步預熱（`ShutdownMode.OnExplicitShutdown`，並於 `OnMainWindowClose` 執行安全關閉），徹底讓 Code-behind 專注於純 UI 邏輯。
+- **App**：負責視窗繪製、使用者互動與 ViewModel 狀態管理；透過專屬的組合根（`AppCompositionRoot`）集中裝配所有底層服務、管理連線與行程生命週期，並於主視窗顯式啟動流程中完成目錄引導與背景非同步預熱（啟動初期採用 `ShutdownMode.OnExplicitShutdown`，主視窗顯示後切換為 `OnMainWindowClose`，並於主視窗關閉時執行安全關閉），徹底讓 Code-behind 專注於純 UI 邏輯。所有訊息框、檔案選取、對話方塊、進度與視窗控制，以及 UI 執行緒派送與計時器，皆經由 `IUiService` 介面進行（`WpfUiService` 為唯一的 WPF 實作），ViewModel 不直接建立視窗、呼叫 `MessageBox` 或使用 `Dispatcher`。
 
 ## 關鍵技術與安全設計
 

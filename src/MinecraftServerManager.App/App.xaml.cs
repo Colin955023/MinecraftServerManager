@@ -55,8 +55,7 @@ public partial class App : Application
             }
 
             // 6. 建構組合根與主視窗
-            var compositionRoot = new AppCompositionRoot(serversRoot, settingsManager);
-            var mainWindow = new MainWindow(compositionRoot);
+            var mainWindow = new MainWindow(serversRoot, settingsManager);
             MainWindow = mainWindow;
 
             // 7. 切換為主視窗關閉模式，呈現主視窗
@@ -64,7 +63,7 @@ public partial class App : Application
             mainWindow.Show();
 
             // 8. 啟動背景非同步預熱
-            compositionRoot.StartBackgroundWarmup();
+            mainWindow.StartBackgroundWarmup();
         }
         catch (Exception ex)
         {

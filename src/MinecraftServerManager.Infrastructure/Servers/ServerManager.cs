@@ -21,6 +21,14 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 public sealed partial class ServerManager : IServerManager
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerManager");
+    private static readonly string[] PreferredLaunchJars =
+    [
+        "paper.jar",
+        "fabric-server-launch.jar",
+        "quilt-server-launch.jar",
+        "server.jar",
+        "minecraft_server.jar",
+    ];
     private readonly string _serversRoot;
     private readonly string _registryFilePath;
     private readonly IServerInspector _inspector;
@@ -246,7 +254,8 @@ public sealed partial class ServerManager : IServerManager
             Logger.Error(ex, "建立伺服器「{Name}」失敗: {Message}", plan.Name.Value, ex.Message);
             if (createdDir)
             {
-                foreach (string cleanupTarget in new[] { stagingDir, serverDir })
+                ReadOnlySpan<string> cleanupTargets = [stagingDir, serverDir];
+                foreach (string cleanupTarget in cleanupTargets)
                 {
                     try
                     {
@@ -363,16 +372,7 @@ public sealed partial class ServerManager : IServerManager
             return paperJar;
         }
 
-        string[] preferred =
-        [
-            "paper.jar",
-            "fabric-server-launch.jar",
-            "quilt-server-launch.jar",
-            "server.jar",
-            "minecraft_server.jar",
-        ];
-
-        foreach (string candidate in preferred)
+        foreach (string candidate in PreferredLaunchJars)
         {
             if (File.Exists(Path.Combine(directory, candidate)))
             {
@@ -923,6 +923,7 @@ public sealed partial class ServerManager : IServerManager
         int newlyAdded = 0;
         int skipped = 0;
         var newNames = new List<string>();
+        var newConfigs = new List<(string Name, ServerConfig Config)>();
 
         Dictionary<string, ServerConfigPayload> snapshot;
         lock (_lock)
@@ -992,16 +993,23 @@ public sealed partial class ServerManager : IServerManager
                 memoryMinMb: inspection.MemoryMinMb,
                 path: directory);
 
+            newConfigs.Add((folderName, config));
+            newlyAdded++;
+            newNames.Add(folderName);
+            Logger.Information("偵測並預備註冊新伺服器「{Name}」：MC {MC} / {Loader}", folderName, mcVersion.Value, loaderKind);
+        }
+
+        if (newConfigs.Count > 0)
+        {
             lock (_lock)
             {
                 var registry = LoadRegistry();
-                registry[folderName] = ServerConfigPayload.FromDomain(config);
+                foreach (var (folderName, config) in newConfigs)
+                {
+                    registry[folderName] = ServerConfigPayload.FromDomain(config);
+                }
                 SaveRegistry(registry);
             }
-
-            newlyAdded++;
-            newNames.Add(folderName);
-            Logger.Information("偵測並註冊新伺服器「{Name}」：MC {MC} / {Loader}", folderName, mcVersion.Value, loaderKind);
         }
 
         Logger.Information("伺服器偵測完成：已管理 {Managed}，新增 {Added}，跳過 {Skipped}", alreadyManaged, newlyAdded, skipped);

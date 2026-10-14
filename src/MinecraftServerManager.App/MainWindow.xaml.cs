@@ -4,35 +4,33 @@ using System.Windows.Media;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App;
 
-public partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IAsyncDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("MainWindow");
     private readonly AppCompositionRoot? _compositionRoot;
     private readonly MainViewModel _viewModel;
+    private bool _shutdownInProgress;
+    private bool _shutdownCompleted;
 
-    public MainWindow() : this(new AppCompositionRoot())
+    /// <summary>
+    /// 建立主視窗並持有其應用程式組合根（於視窗關閉時非同步釋放）
+    /// </summary>
+    public MainWindow(string serversRoot, SettingsManager settingsManager)
     {
-    }
-
-    public MainWindow(AppCompositionRoot compositionRoot)
-    {
-        ArgumentNullException.ThrowIfNull(compositionRoot);
+        _compositionRoot = new AppCompositionRoot(serversRoot, settingsManager);
         InitializeComponent();
-        _compositionRoot = compositionRoot;
-        _viewModel = compositionRoot.MainViewModel;
+        _viewModel = _compositionRoot.MainViewModel;
         InitializeWindow();
     }
 
-    public MainWindow(MainViewModel viewModel)
-    {
-        InitializeComponent();
-        _compositionRoot = null;
-        _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
-        InitializeWindow();
-    }
+    /// <summary>
+    /// 於背景開始預熱（Java 候選、版本清單等）
+    /// </summary>
+    public void StartBackgroundWarmup() => _compositionRoot?.StartBackgroundWarmup();
 
     private void InitializeWindow()
     {
@@ -115,50 +113,65 @@ public partial class MainWindow : Window
         int wh = (int)ActualHeight;
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
 
-        // 啟動時自動檢查更新
-        if (_viewModel.Settings.IsAutoUpdateEnabled() && _viewModel.UpdateChecker is { } updateChecker && _viewModel.Launcher is { } launcher)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var result = await updateChecker.CheckForUpdateAsync().ConfigureAwait(false);
-                    if (result.HasUpdate)
-                    {
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            string cleanedNotes = AboutPreferencesViewModel.CleanReleaseNotes(result.ReleaseNotes);
-                            var confirm = MessageBox.Show(
-                                this,
-                                $"發現新版本 {result.LatestVersion} (目前版本：{result.CurrentVersion})！\n\n更新內容：\n{cleanedNotes}\n\n是否立即前往 GitHub 下載更新？",
-                                "發現新版本",
-                                MessageBoxButton.YesNo,
-                                MessageBoxImage.Information);
+        // 啟動時自動檢查更新（判斷邏輯位於 ViewModel，此處僅負責提示）
+        _ = _viewModel.CheckForUpdateOnStartupAsync();
+    }
 
-                            if (confirm == MessageBoxResult.Yes)
-                            {
-                                launcher.OpenUrl(result.ReleasePageUrl);
-                            }
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("啟動自動檢查更新失敗: {Message}", ex.Message);
-                }
-            });
+
+
+    /// <summary>
+    /// 非同步釋放主視窗持有的應用程式組合根
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_compositionRoot is not null)
+        {
+            await _compositionRoot.DisposeAsync().ConfigureAwait(true);
         }
     }
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        if (_shutdownCompleted)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (_shutdownInProgress)
+        {
+            return;
+        }
+
+        _shutdownInProgress = true;
         Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
         if (_viewModel is not null)
         {
             SaveWindowPosition();
             _viewModel.UnregisterEvents();
         }
-        _compositionRoot?.Dispose();
+
+        _ = ShutdownAndCloseAsync();
+    }
+
+    /// <summary>
+    /// 以非同步方式釋放應用程式資源（伺服器行程等）後再關閉視窗，避免 UI 執行緒同步等待
+    /// </summary>
+    private async Task ShutdownAndCloseAsync()
+    {
+        try
+        {
+            await DisposeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("關閉應用程式資源時發生例外: {Message}", ex.Message);
+        }
+        finally
+        {
+            _shutdownCompleted = true;
+            Close();
+        }
     }
 
     private void RestoreWindowPosition()

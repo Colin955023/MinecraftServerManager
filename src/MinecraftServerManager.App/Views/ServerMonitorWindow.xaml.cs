@@ -54,7 +54,7 @@ public partial class ServerMonitorWindow : Window
 
     private void OnLogsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (_viewModel.IsAutoScrollEnabled && e.Action == NotifyCollectionChangedAction.Add && LogListBox.Items.Count > 0)
+        if (_viewModel.IsAutoScrollEnabled && e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset && LogListBox.Items.Count > 0)
         {
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
             {

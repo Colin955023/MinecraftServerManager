@@ -65,22 +65,7 @@ public sealed class SettingsManager
         }
     }
 
-    public static string NormalizeServersBaseDirectory(string? path)
-    {
-        string root = NormalizeServersRootPath(path);
-        if (string.IsNullOrEmpty(root))
-        {
-            return string.Empty;
-        }
 
-        return Directory.GetParent(root)?.FullName ?? root;
-    }
-
-    public static string BuildServersRootPath(string baseDirectory)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(baseDirectory);
-        return NormalizeServersRootPath(baseDirectory);
-    }
 
     public string GetServersRoot()
     {

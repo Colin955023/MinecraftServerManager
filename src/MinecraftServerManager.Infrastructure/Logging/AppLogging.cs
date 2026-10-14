@@ -43,8 +43,12 @@ public static class AppLogging
     /// </summary>
     public static ILogger CreateLogger(string categoryName)
     {
-        EnsureInitialized();
-        return _loggerFactory!.CreateLogger(categoryName);
+        // 初始化檢查與建立記錄器必須在同一把鎖內完成，避免與 Shutdown 競態而使用到已釋放的工廠
+        lock (SyncRoot)
+        {
+            EnsureInitialized();
+            return _loggerFactory!.CreateLogger(categoryName);
+        }
     }
 
     /// <summary>
@@ -52,8 +56,11 @@ public static class AppLogging
     /// </summary>
     public static ILogger<T> CreateLogger<T>()
     {
-        EnsureInitialized();
-        return _loggerFactory!.CreateLogger<T>();
+        lock (SyncRoot)
+        {
+            EnsureInitialized();
+            return _loggerFactory!.CreateLogger<T>();
+        }
     }
 
     /// <summary>
