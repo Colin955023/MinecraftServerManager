@@ -49,6 +49,11 @@ public sealed class ComponentLogger
             return;
         }
 
+        if (!_logger.IsEnabled(level))
+        {
+            return;
+        }
+
         using var scope = _logger.BeginScope(_context);
         _logger.Log(level, exception, message, args);
     }

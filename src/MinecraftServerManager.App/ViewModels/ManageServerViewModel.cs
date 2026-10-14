@@ -1,6 +1,6 @@
+using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Views;
@@ -17,14 +17,8 @@ namespace MinecraftServerManager.App.ViewModels;
 /// <summary>
 /// 伺服器列表項目模型。
 /// </summary>
-public sealed class ServerRowItem : ObservableObject
+public sealed partial class ServerRowItem : ObservableObject
 {
-    private string _status = "已停止";
-    private bool _hasMissingFiles;
-    private string _size = "-";
-    private string _backupStatus = "無備份";
-    private string _lastModified = "-";
-
     public string Name { get; init; } = string.Empty;
 
     public string Version { get; init; } = string.Empty;
@@ -39,42 +33,29 @@ public sealed class ServerRowItem : ObservableObject
 
     public string BackupPath { get; set; } = string.Empty;
 
-    public string Status
-    {
-        get => _status;
-        set => SetProperty(ref _status, value);
-    }
+    [ObservableProperty]
+    public partial string Status { get; set; } = "已停止";
 
-    public bool HasMissingFiles
-    {
-        get => _hasMissingFiles;
-        set => SetProperty(ref _hasMissingFiles, value);
-    }
+    [ObservableProperty]
+    public partial bool HasMissingFiles { get; set; }
 
-    public string Size
-    {
-        get => _size;
-        set => SetProperty(ref _size, value);
-    }
+    [ObservableProperty]
+    public partial string Size { get; set; } = "-";
 
-    public string BackupStatus
-    {
-        get => _backupStatus;
-        set => SetProperty(ref _backupStatus, value);
-    }
+    [ObservableProperty]
+    public partial string BackupStatus { get; set; } = "無備份";
 
-    public string LastModified
-    {
-        get => _lastModified;
-        set => SetProperty(ref _lastModified, value);
-    }
+    [ObservableProperty]
+    public partial string LastModified { get; set; } = "-";
 }
 
 /// <summary>
 /// 管理伺服器頁面 ViewModel
 /// </summary>
-public sealed partial class ManageServerViewModel : PageViewModel
+public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
 {
+    private readonly IUiService _ui;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ManageServer");
 
     private readonly SettingsManager? _settingsManager;
@@ -89,7 +70,8 @@ public sealed partial class ManageServerViewModel : PageViewModel
     private readonly IExternalLauncher? _launcher;
     private readonly Action<string>? _navigateCallback;
     private readonly Action<string, bool>? _notificationSink;
-    private ServerMonitorWindow? _activeMonitorWindow;
+    private IMonitorWindow? _activeMonitorWindow;
+    private ServerMonitorViewModel? _activeMonitorViewModel;
 
     [ObservableProperty]
     public partial string DetectPath { get; set; } = string.Empty;
@@ -141,9 +123,11 @@ public sealed partial class ManageServerViewModel : PageViewModel
         Action<string, bool>? notificationSink = null,
         IExternalLauncher? launcher = null,
         IJavaRuntimeDetector? javaDetector = null,
-        IMinecraftJavaRequirementService? javaRequirementService = null)
+        IMinecraftJavaRequirementService? javaRequirementService = null,
+        IUiService? uiService = null)
         : base("manage", "管理現有伺服器", "檢視已安裝伺服器清單，進行啟動、停止、設定與備份維護")
     {
+        _ui = uiService ?? NoOpUiService.Instance;
         _settingsManager = settingsManager;
         _serverManager = serverManager;
         _backupService = backupService;
@@ -161,18 +145,21 @@ public sealed partial class ManageServerViewModel : PageViewModel
 
         if (_serverRuntime is not null)
         {
-            _serverRuntime.ServerStarted += () =>
-            {
-                Application.Current?.Dispatcher.InvokeAsync(UpdateServerStatusInPlace);
-            };
-            _serverRuntime.ServerReady += () =>
-            {
-                Application.Current?.Dispatcher.InvokeAsync(UpdateServerStatusInPlace);
-            };
-            _serverRuntime.ServerExited += _ =>
-            {
-                Application.Current?.Dispatcher.InvokeAsync(UpdateServerStatusInPlace);
-            };
+            _serverRuntime.ServerStarted += RequestStatusRefresh;
+            _serverRuntime.ServerReady += RequestStatusRefresh;
+            _serverRuntime.ServerExited += OnServerExitedHandler;
+        }
+    }
+
+    private void OnServerExitedHandler(int exitCode) => RequestStatusRefresh();
+
+    public void Dispose()
+    {
+        if (_serverRuntime is not null)
+        {
+            _serverRuntime.ServerStarted -= RequestStatusRefresh;
+            _serverRuntime.ServerReady -= RequestStatusRefresh;
+            _serverRuntime.ServerExited -= OnServerExitedHandler;
         }
     }
 
@@ -237,6 +224,11 @@ public sealed partial class ManageServerViewModel : PageViewModel
         }
     }
 
+    /// <summary>
+    /// 於 UI 執行緒排入伺服器狀態更新（不阻塞事件來源執行緒）
+    /// </summary>
+    private void RequestStatusRefresh() => _ui.PostToUi(() => { _ = UpdateServerStatusInPlaceAsync(); });
+
     [RelayCommand]
     public void AddServer() => _navigateCallback?.Invoke("create");
 
@@ -254,88 +246,18 @@ public sealed partial class ManageServerViewModel : PageViewModel
                 {
                     string? prevSelectedName = SelectedServer?.Name;
                     var serverEntries = await _serverManager.GetAllServersAsync();
+                    bool runtimeRunning = _serverRuntime?.IsRunning == true;
+                    string? activeName = _serverRuntime?.ActiveServerName;
+
+                    // 目錄容量、備份掃描與檔案檢查屬於磁碟 I/O，於背景執行緒完成，UI 執行緒僅負責更新集合
+                    IReadOnlyList<ServerRowSnapshot> snapshots = await Task.Run(() =>
+                        serverEntries.Select(s => BuildServerSnapshot(s, runtimeRunning, activeName)).ToList())
+                        .ConfigureAwait(true);
+
                     Servers.Clear();
-                    foreach (var s in serverEntries)
+                    foreach (ServerRowSnapshot snapshot in snapshots)
                     {
-                        string size = FormatDirectorySize(s.Path);
-                        string backupStatus = "無備份";
-                        try
-                        {
-                            if (!string.IsNullOrWhiteSpace(s.BackupPath) && Directory.Exists(s.BackupPath))
-                            {
-                                string prefix = $"backup-{s.Name.Value}-";
-                                var archives = Directory.EnumerateFiles(s.BackupPath, "*.zip")
-                                    .Where(f =>
-                                    {
-                                        string fn = Path.GetFileName(f);
-                                        return fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
-                                               fn.StartsWith($"{s.Name.Value}-", StringComparison.OrdinalIgnoreCase) ||
-                                               fn.Contains(s.Name.Value, StringComparison.OrdinalIgnoreCase);
-                                    })
-                                    .ToList();
-
-                                if (archives.Count > 0)
-                                {
-                                    DateTime latest = archives.Max(f => new FileInfo(f).LastWriteTime);
-                                    backupStatus = $"{archives.Count} 個備份（{FormatRelativeTime(latest)}）";
-                                }
-                            }
-                        }
-                        catch
-                        {
-                        }
-
-                        bool isThisServerRunning = _serverRuntime?.IsRunning == true &&
-                            string.Equals(_serverRuntime.ActiveServerName, s.Name.Value, StringComparison.OrdinalIgnoreCase);
-
-                        bool hasMissingFiles = false;
-                        string status;
-
-                        if (isThisServerRunning)
-                        {
-                            status = "執行中";
-                        }
-                        else
-                        {
-                            var (hasMissing, missingFiles) = CheckImportantFiles(s.Path, s.LoaderType.ToString());
-                            if (hasMissing)
-                            {
-                                status = $"缺少重要檔案：{string.Join("、", missingFiles)}";
-                                hasMissingFiles = true;
-                            }
-                            else
-                            {
-                                status = "已停止";
-                            }
-                        }
-
-                        string lastModified = "-";
-                        try
-                        {
-                            if (Directory.Exists(s.Path))
-                            {
-                                lastModified = Directory.GetLastWriteTime(s.Path).ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
-                            }
-                        }
-                        catch
-                        {
-                        }
-
-                        Servers.Add(new ServerRowItem
-                        {
-                            Name = s.Name.Value,
-                            Version = s.MinecraftVersion.Value,
-                            Loader = s.LoaderType.ToString(),
-                            Status = status,
-                            Size = size,
-                            BackupStatus = backupStatus,
-                            LastModified = lastModified,
-                            Path = s.Path,
-                            MemoryMaxMb = s.MemoryMaxMb,
-                            MemoryMinMb = s.MemoryMinMb,
-                            BackupPath = s.BackupPath,
-                            HasMissingFiles = hasMissingFiles
-                        });
+                        Servers.Add(ToRowItem(snapshot));
                     }
 
                     if (!string.IsNullOrEmpty(prevSelectedName))
@@ -365,45 +287,130 @@ public sealed partial class ManageServerViewModel : PageViewModel
         }
     }
 
-    /// <summary>
-    /// 低資源消耗即時更新各伺服器的執行與重要檔案狀態，不重新掃描整個硬碟與目錄容量。
-    /// </summary>
-    public void UpdateServerStatusInPlace()
+    private sealed record ServerRowSnapshot(
+        ServerConfig Config,
+        string Size,
+        string BackupStatus,
+        string Status,
+        string LastModified,
+        bool HasMissingFiles);
+
+    private sealed record ServerStatusProbe(string Status, bool HasMissingFiles, string? LastModified);
+
+    private static ServerRowSnapshot BuildServerSnapshot(ServerConfig s, bool runtimeRunning, string? activeName)
     {
-        foreach (var s in Servers)
+        bool isThisServerRunning = runtimeRunning && string.Equals(activeName, s.Name.Value, StringComparison.OrdinalIgnoreCase);
+        ServerStatusProbe probe = ProbeServerStatus(s.Path, s.LoaderType.ToString(), isThisServerRunning);
+        return new ServerRowSnapshot(
+            Config: s,
+            Size: FormatDirectorySize(s.Path),
+            BackupStatus: BuildBackupStatus(s),
+            Status: probe.Status,
+            LastModified: probe.LastModified ?? "-",
+            HasMissingFiles: probe.HasMissingFiles);
+    }
+
+    private static ServerRowItem ToRowItem(ServerRowSnapshot snapshot)
+    {
+        ServerConfig s = snapshot.Config;
+        return new ServerRowItem
         {
-            bool isThisRunning = _serverRuntime?.IsRunning == true &&
-                string.Equals(_serverRuntime.ActiveServerName, s.Name, StringComparison.OrdinalIgnoreCase);
+            Name = s.Name.Value,
+            Version = s.MinecraftVersion.Value,
+            Loader = s.LoaderType.ToString(),
+            Status = snapshot.Status,
+            Size = snapshot.Size,
+            BackupStatus = snapshot.BackupStatus,
+            LastModified = snapshot.LastModified,
+            Path = s.Path,
+            MemoryMaxMb = s.MemoryMaxMb,
+            MemoryMinMb = s.MemoryMinMb,
+            BackupPath = s.BackupPath,
+            HasMissingFiles = snapshot.HasMissingFiles,
+        };
+    }
 
-            if (isThisRunning)
-            {
-                s.Status = "執行中";
-                s.HasMissingFiles = false;
-            }
-            else
-            {
-                var (hasMissing, missingFiles) = CheckImportantFiles(s.Path, s.Loader);
-                if (hasMissing)
-                {
-                    s.Status = $"缺少重要檔案：{string.Join("、", missingFiles)}";
-                    s.HasMissingFiles = true;
-                }
-                else
-                {
-                    s.Status = "已停止";
-                    s.HasMissingFiles = false;
-                }
-            }
+    private static ServerStatusProbe ProbeServerStatus(string path, string loader, bool isRunning)
+    {
+        if (isRunning)
+        {
+            return new ServerStatusProbe("執行中", false, GetLastModifiedText(path));
+        }
 
-            if (Directory.Exists(s.Path))
+        var (hasMissing, missingFiles) = CheckImportantFiles(path, loader);
+        string status = hasMissing ? $"缺少重要檔案：{string.Join("、", missingFiles)}" : "已停止";
+        return new ServerStatusProbe(status, hasMissing, GetLastModifiedText(path));
+    }
+
+    private static string BuildBackupStatus(ServerConfig s)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(s.BackupPath) && Directory.Exists(s.BackupPath))
             {
-                try
+                string prefix = $"backup-{s.Name.Value}-";
+                var archives = Directory.EnumerateFiles(s.BackupPath, "*.zip")
+                    .Where(f =>
+                    {
+                        string fn = Path.GetFileName(f);
+                        return fn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+                               fn.StartsWith($"{s.Name.Value}-", StringComparison.OrdinalIgnoreCase) ||
+                               fn.Contains(s.Name.Value, StringComparison.OrdinalIgnoreCase);
+                    })
+                    .ToList();
+
+                if (archives.Count > 0)
                 {
-                    s.LastModified = Directory.GetLastWriteTime(s.Path).ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+                    DateTime latest = archives.Max(f => new FileInfo(f).LastWriteTime);
+                    return $"{archives.Count} 個備份（{FormatRelativeTime(latest)}）";
                 }
-                catch
-                {
-                }
+            }
+        }
+        catch
+        {
+        }
+
+        return "無備份";
+    }
+
+    private static string? GetLastModifiedText(string path)
+    {
+        try
+        {
+            return Directory.Exists(path)
+                ? Directory.GetLastWriteTime(path).ToString("yyyy/MM/dd HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 低資源消耗即時更新各伺服器的執行與重要檔案狀態：UI 執行緒僅讀寫集合，檔案檢查於背景執行，不重新掃描整個硬碟與目錄容量。
+    /// </summary>
+    public async Task UpdateServerStatusInPlaceAsync()
+    {
+        bool runtimeRunning = _serverRuntime?.IsRunning == true;
+        string? activeName = _serverRuntime?.ActiveServerName;
+        var targets = Servers.Select(s => (Row: s, s.Path, s.Loader, s.Name)).ToList();
+
+        var probes = await Task.Run(() => targets
+            .Select(t => ProbeServerStatus(
+                t.Path,
+                t.Loader,
+                runtimeRunning && string.Equals(activeName, t.Name, StringComparison.OrdinalIgnoreCase)))
+            .ToList()).ConfigureAwait(true);
+
+        for (int i = 0; i < targets.Count; i++)
+        {
+            ServerRowItem row = targets[i].Row;
+            row.Status = probes[i].Status;
+            row.HasMissingFiles = probes[i].HasMissingFiles;
+            if (probes[i].LastModified is { } lastModified)
+            {
+                row.LastModified = lastModified;
             }
         }
 
@@ -468,11 +475,11 @@ public sealed partial class ManageServerViewModel : PageViewModel
             }
 
             var inspection = await _serverInspector!.InspectAsync(server.Path).ConfigureAwait(true);
-            string? missingTarget = ResolveMissingLaunchTarget(server.Path, inspection.LaunchTarget.Value);
+            string? missingTarget = await Task.Run(() => ResolveMissingLaunchTarget(server.Path, inspection.LaunchTarget.Value)).ConfigureAwait(true);
             if (missingTarget is not null)
             {
                 Logger.Error("啟動目標檔案不存在: {Target}", missingTarget);
-                UpdateServerStatusInPlace();
+                _ = UpdateServerStatusInPlaceAsync();
                 _notificationSink?.Invoke($"啟動目標檔案不存在：{missingTarget}", true);
                 return false;
             }
@@ -491,15 +498,15 @@ public sealed partial class ManageServerViewModel : PageViewModel
             MonitorServerByName(server.Name.Value, server.Path, server.MinecraftVersion.Value);
 
             await _serverRuntime.StartAsync(plan).ConfigureAwait(true);
-            UpdateServerStatusInPlace();
+            _ = UpdateServerStatusInPlaceAsync();
 
             // 啟動後偵測是否於 3 秒內異常結束
             string? earlyExit = await DetectEarlyExitAsync().ConfigureAwait(true);
             if (earlyExit is not null)
             {
-                Logger.Error("伺服器啟動後異常退出: {Message}", earlyExit);
+                Logger.Error("伺服器啟動後異常結束: {Message}", earlyExit);
                 _notificationSink?.Invoke(earlyExit, true);
-                UpdateServerStatusInPlace();
+                _ = UpdateServerStatusInPlaceAsync();
                 return false;
             }
 
@@ -527,7 +534,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
             try
             {
                 await _serverRuntime.StopAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
-                UpdateServerStatusInPlace();
+                _ = UpdateServerStatusInPlaceAsync();
                 Logger.Information("伺服器已成功傳送停止請求: {Name}", SelectedServer.Name);
                 return;
             }
@@ -558,14 +565,9 @@ public sealed partial class ManageServerViewModel : PageViewModel
             return;
         }
 
-        if (_activeMonitorWindow is not null && _activeMonitorWindow.IsLoaded)
+        if (_activeMonitorWindow is { IsOpen: true })
         {
-            if (_activeMonitorWindow.WindowState == WindowState.Minimized)
-            {
-                _activeMonitorWindow.WindowState = WindowState.Normal;
-            }
-            _activeMonitorWindow.Activate();
-            _activeMonitorWindow.Focus();
+            _activeMonitorWindow.BringToFront();
             return;
         }
 
@@ -574,10 +576,16 @@ public sealed partial class ManageServerViewModel : PageViewModel
             serverName,
             serverPath,
             mcVersion,
-            startRequestHandler: () => StartServerByNameAsync(serverName));
-        _activeMonitorWindow = new ServerMonitorWindow(vm);
-        _activeMonitorWindow.Closed += (_, _) => _activeMonitorWindow = null;
-        _activeMonitorWindow.Show();
+            startRequestHandler: () => StartServerByNameAsync(serverName),
+            uiService: _ui);
+        _activeMonitorViewModel = vm;
+        _activeMonitorWindow = _ui.OpenServerMonitor(vm);
+        _activeMonitorWindow.Closed += () =>
+        {
+            _activeMonitorWindow = null;
+            _activeMonitorViewModel?.Dispose();
+            _activeMonitorViewModel = null;
+        };
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
@@ -591,9 +599,9 @@ public sealed partial class ManageServerViewModel : PageViewModel
         var store = _propertiesStore ?? (!string.IsNullOrWhiteSpace(_settingsManager?.GetServersRoot()) ? new ServerPropertiesStore(_settingsManager.GetServersRoot()) : null);
         if (store is not null)
         {
-            var vm = new ServerPropertiesViewModel(store, SelectedServer.Name);
-            var dialog = new ServerPropertiesDialog(vm);
-            if (dialog.ShowDialog() == true)
+            var vm = new ServerPropertiesViewModel(store, SelectedServer.Name,
+            uiService: _ui);
+            if (_ui.ShowServerProperties(vm) == true)
             {
                 _notificationSink?.Invoke($"伺服器「{SelectedServer.Name}」屬性設定已更新", false);
             }
@@ -601,14 +609,15 @@ public sealed partial class ManageServerViewModel : PageViewModel
     }
 
     [RelayCommand(CanExecute = nameof(HasSelectedServer))]
-    public void OpenServerFolder()
+    public async Task OpenServerFolder()
     {
         if (SelectedServer is null)
         {
             return;
         }
 
-        if (!Directory.Exists(SelectedServer.Path))
+        string serverFolder = SelectedServer.Path;
+        if (!await Task.Run(() => Directory.Exists(serverFolder)).ConfigureAwait(true))
         {
             _notificationSink?.Invoke($"資料夾不存在：{SelectedServer.Path}", true);
             return;
@@ -638,10 +647,8 @@ public sealed partial class ManageServerViewModel : PageViewModel
         {
             try
             {
-                if (!Directory.Exists(SelectedServer.BackupPath))
-                {
-                    Directory.CreateDirectory(SelectedServer.BackupPath);
-                }
+                string backupRoot = SelectedServer.BackupPath;
+                await Task.Run(() => Directory.CreateDirectory(backupRoot)).ConfigureAwait(true);
             }
             catch (Exception ex)
             {
@@ -653,19 +660,13 @@ public sealed partial class ManageServerViewModel : PageViewModel
         }
         else
         {
-            var saveDialog = new Microsoft.Win32.SaveFileDialog
-            {
-                Title = $"請選擇伺服器「{serverName}」的備份儲存檔案路徑",
-                Filter = "ZIP 壓縮檔 (*.zip)|*.zip",
-                FileName = $"backup-{serverName}-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
-            };
-
-            if (saveDialog.ShowDialog() != true)
+            string? savePath = _ui.PickSaveFile($"請選擇伺服器「{serverName}」的備份儲存檔案路徑", $"backup-{serverName}-{DateTime.Now:yyyyMMdd-HHmmss}.zip", "ZIP 壓縮檔 (*.zip)|*.zip");
+            if (savePath is null)
             {
                 return;
             }
 
-            destinationPath = saveDialog.FileName;
+            destinationPath = savePath;
         }
 
         string? boundaryViolation = ValidateBackupDestination(destinationPath);
@@ -678,12 +679,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
 
         if (_backupService is not null)
         {
-            var progressDialog = new ServerBackupProgressDialog(serverName)
-            {
-                Owner = Application.Current?.MainWindow
-            };
-
-            progressDialog.Show();
+            var progressDialog = _ui.ShowServerBackupProgress(serverName);
 
             try
             {
@@ -713,8 +709,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
                     await _serverManager.UpdateServerAsync(updated);
                 }
 
-                ServerBackupProgressDialog.MarkCompleted();
-                progressDialog.Close();
+                progressDialog.Complete();
                 Logger.Information("伺服器「{Name}」備份建立成功: {File}", serverName, backup.FullPath);
                 _notificationSink?.Invoke($"已成功建立伺服器「{serverName}」備份：{backup.FileName}", false);
                 await RefreshServers();
@@ -722,16 +717,14 @@ public sealed partial class ManageServerViewModel : PageViewModel
             }
             catch (OperationCanceledException)
             {
-                ServerBackupProgressDialog.MarkCompleted();
-                progressDialog.Close();
+                progressDialog.Complete();
                 Logger.Information("使用者取消了伺服器「{Name}」的備份操作", serverName);
                 _notificationSink?.Invoke($"已取消備份「{serverName}」", true);
                 return;
             }
             catch (Exception ex)
             {
-                ServerBackupProgressDialog.MarkCompleted();
-                progressDialog.Close();
+                progressDialog.Complete();
                 Logger.Error(ex, "備份伺服器失敗: {Message}", ex.Message);
                 _notificationSink?.Invoke($"備份伺服器失敗：{ex.Message}", true);
                 return;
@@ -794,13 +787,12 @@ public sealed partial class ManageServerViewModel : PageViewModel
                 _backupService,
                 SelectedServer.Name,
                 SelectedServer.BackupPath,
-                isServerRunningCheck: () => isRunning);
-            var dialog = new RestoreBackupDialog(vm);
-            if (dialog.ShowDialog() == true)
+                isServerRunningCheck: () => isRunning,
+            uiService: _ui);
+            if (_ui.ShowRestoreBackup(vm) == true)
             {
                 string serverName = SelectedServer.Name;
                 Logger.Information("伺服器「{Name}」備份已成功還原", serverName);
-                _notificationSink?.Invoke($"伺服器「{serverName}」備份已安全還原", false);
                 await RefreshAndSelectServerAsync(serverName).ConfigureAwait(true);
             }
             return;
@@ -836,20 +828,10 @@ public sealed partial class ManageServerViewModel : PageViewModel
             }
         }
 
-        ServerDeleteDecision decision = ServerDeleteDecision.DeleteServerOnly;
-        if (Application.Current is not null)
+        ServerDeleteDecision decision = _ui.ShowServerDeleteConfirmation(name, backupCount);
+        if (decision == ServerDeleteDecision.Cancel)
         {
-            var dialog = new ServerDeleteConfirmationDialog(name, backupCount);
-            if (Application.Current.MainWindow is not null)
-            {
-                dialog.Owner = Application.Current.MainWindow;
-            }
-
-            if (dialog.ShowDialog() != true || dialog.Decision == ServerDeleteDecision.Cancel)
-            {
-                return;
-            }
-            decision = dialog.Decision;
+            return;
         }
 
         if (_serverManager is not null)
@@ -924,8 +906,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
             return res.Success;
         });
 
-        var dialog = new ServerMemoryDialog(vm);
-        if (dialog.ShowDialog() == true)
+        if (_ui.ShowServerMemory(vm) == true)
         {
             _notificationSink?.Invoke($"已更新伺服器「{SelectedServer.Name}」記憶體設定", false);
             await RefreshAndSelectServerAsync(SelectedServer.Name);
@@ -972,11 +953,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
             await _serverManager.UpdateServerAsync(updated);
             await RefreshAndSelectServerAsync(config.Name.Value);
 
-            NotificationDialog.Show(
-                null,
-                "重新偵測完成",
-                $"已重新偵測伺服器：{config.Name.Value}\nMinecraft 版本：{mv.Value}\n載入器類型：{lk}\n載入器版本：{updated.LoaderVersion}",
-                NotificationLevel.Info);
+            _ui.ShowNotificationPopup("重新偵測完成", $"已重新偵測伺服器：{config.Name.Value}\nMinecraft 版本：{mv.Value}\n載入器類型：{lk}\n載入器版本：{updated.LoaderVersion}", NotificationLevel.Info);
         }
         catch (Exception ex)
         {
@@ -992,9 +969,10 @@ public sealed partial class ManageServerViewModel : PageViewModel
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(SelectedServer.BackupPath) || !Directory.Exists(SelectedServer.BackupPath))
+        string? backupFolder = SelectedServer.BackupPath;
+        if (string.IsNullOrWhiteSpace(backupFolder) || !await Task.Run(() => Directory.Exists(backupFolder)).ConfigureAwait(true))
         {
-            if (DialogHelper.Confirm(
+            if (_ui.Confirm(
                 $"伺服器「{SelectedServer.Name}」尚未設定自訂備份路徑。\n\n是否要立即設定外部備份資料夾？",
                 "尚未設定備份資料夾"))
             {
@@ -1026,25 +1004,14 @@ public sealed partial class ManageServerViewModel : PageViewModel
             return;
         }
 
-        var dialog = new Microsoft.Win32.OpenFolderDialog
+        string? folder = _ui.PickFolder($"選擇伺服器「{SelectedServer.Name}」的外部備份資料夾", !string.IsNullOrWhiteSpace(config.BackupPath) && Directory.Exists(config.BackupPath) ? config.BackupPath : null);
+        if (!string.IsNullOrWhiteSpace(folder))
         {
-            Title = $"選擇伺服器「{SelectedServer.Name}」的外部備份資料夾",
-            Multiselect = false
-        };
-
-        if (!string.IsNullOrWhiteSpace(config.BackupPath) && Directory.Exists(config.BackupPath))
-        {
-            dialog.InitialDirectory = config.BackupPath;
-        }
-
-        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.FolderName))
-        {
-            string selected = dialog.FolderName.Trim();
+            string selected = folder.Trim();
             string? invalidReason = ValidateBackupDestination(selected);
             if (invalidReason is not null)
             {
-                DialogHelper.ShowWarning(invalidReason, "備份路徑無效");
-                _notificationSink?.Invoke(invalidReason, true);
+                _ui.ShowWarning(invalidReason, "備份路徑無效");
                 return;
             }
 
@@ -1239,7 +1206,7 @@ public sealed partial class ManageServerViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 啟動後等待 3 秒，若子程序已異常退出則回傳錯誤訊息。
+    /// 啟動後等待 3 秒，若子行程已異常結束則回傳錯誤訊息。
     /// </summary>
     private async Task<string?> DetectEarlyExitAsync()
     {

@@ -15,6 +15,7 @@ namespace MinecraftServerManager.Infrastructure.Loaders;
 public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirectory) : ILoaderCatalogService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LoaderCatalogService");
+    private static readonly LoaderKind[] ReloadableLoaders = [LoaderKind.Fabric, LoaderKind.Quilt, LoaderKind.Forge, LoaderKind.NeoForge];
     private readonly string _cacheDir = InitializeCacheDirectory(cacheDirectory);
     private readonly TimeSpan _cacheTtl = TimeSpan.FromHours(12);
     private readonly ConcurrentDictionary<(LoaderKind, string), IReadOnlyList<LoaderVersion>> _memoryLoaderCache = new();
@@ -218,7 +219,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                         try
                         {
                             // 查詢 STABLE 建置清單；若無任何 STABLE 建置，直接剔除（不納入快取）
-                            var builds = await FetchPaperBuildsAsync(v.Version, cancellationToken).ConfigureAwait(false);
+                            var builds = await FetchPaperBuildsAsync(v.Version, cancellationToken, updateCache: false).ConfigureAwait(false);
                             if (builds.Count == 0 || string.IsNullOrWhiteSpace(builds[0].Version))
                             {
                                 return null;
@@ -474,28 +475,34 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     public async Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var loaders = new[] { LoaderKind.Fabric, LoaderKind.Quilt, LoaderKind.Forge, LoaderKind.NeoForge };
-        foreach (var loader in loaders)
+        await Task.WhenAll(ReloadableLoaders.Select(loader => ReloadLoaderAsync(loader, cancellationToken))).ConfigureAwait(false);
+    }
+
+    private async Task ReloadLoaderAsync(LoaderKind loader, CancellationToken cancellationToken)
+    {
+        string cacheFile = Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
+        try
         {
-            string cacheFile = Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
-            try
+            IReadOnlyList<LoaderVersion> fetched = loader switch
             {
-                IReadOnlyList<LoaderVersion> fetched = loader switch
-                {
-                    LoaderKind.Fabric => await FetchFabricVersionsAsync(cancellationToken).ConfigureAwait(false),
-                    LoaderKind.Quilt => await FetchQuiltVersionsAsync(cancellationToken).ConfigureAwait(false),
-                    LoaderKind.Forge => await FetchForgeVersionsAsync(cancellationToken).ConfigureAwait(false),
-                    LoaderKind.NeoForge => await FetchNeoForgeVersionsAsync(cancellationToken).ConfigureAwait(false),
-                    _ => []
-                };
-                if (fetched.Count > 0)
-                {
-                    SaveCachedVersions(cacheFile, PruneVersionsForCache(loader, fetched));
-                }
-            }
-            catch
+                LoaderKind.Fabric => await FetchFabricVersionsAsync(cancellationToken).ConfigureAwait(false),
+                LoaderKind.Quilt => await FetchQuiltVersionsAsync(cancellationToken).ConfigureAwait(false),
+                LoaderKind.Forge => await FetchForgeVersionsAsync(cancellationToken).ConfigureAwait(false),
+                LoaderKind.NeoForge => await FetchNeoForgeVersionsAsync(cancellationToken).ConfigureAwait(false),
+                _ => []
+            };
+            if (fetched.Count > 0)
             {
+                SaveCachedVersions(cacheFile, PruneVersionsForCache(loader, fetched));
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("重新載入 {Loader} 版本清單失敗: {Message}", loader, ex.Message);
         }
     }
 
@@ -822,8 +829,9 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
             string json = JsonCodec.Serialize(versions, indented: true);
             AtomicFileWriter.WriteText(cachePath, json);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning("寫入版本快取失敗: {Path}, 原因: {Message}", cachePath, ex.Message);
         }
     }
 
@@ -864,7 +872,8 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
     private async Task<IReadOnlyList<LoaderVersion>> FetchPaperBuildsAsync(
         string minecraftVersion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool updateCache = true)
     {
         string buildsUrl = $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds";
         string? json = await httpPort.GetTextAsync(new Uri(buildsUrl), cancellationToken).ConfigureAwait(false);
@@ -927,11 +936,17 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         if (stableList.Count > 0)
         {
             var latestBuild = stableList[0];
-            UpdatePaperVersionLatestBuild(minecraftVersion, latestBuild.Version);
+            if (updateCache)
+            {
+                UpdatePaperVersionLatestBuild(minecraftVersion, latestBuild.Version);
+            }
             return [latestBuild];
         }
 
-        RemovePaperVersionIfNoStableBuild(minecraftVersion);
+        if (updateCache)
+        {
+            RemovePaperVersionIfNoStableBuild(minecraftVersion);
+        }
         return [];
     }
 

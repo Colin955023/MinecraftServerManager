@@ -5,7 +5,7 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 public static class AtomicFileWriter
 {
     private const int StripeCount = 128;
-    private static readonly object[] StripeLocks = Enumerable.Range(0, StripeCount).Select(static _ => new object()).ToArray();
+    private static readonly object[] StripeLocks = [.. Enumerable.Range(0, StripeCount).Select(static _ => new object())];
 
     private static object GetLockForPath(string path)
     {
@@ -34,7 +34,7 @@ public static class AtomicFileWriter
             if (skipIfUnchanged && File.Exists(target))
             {
                 byte[]? existing = FileSafety.ReadRegularFile(target, content.Length);
-                if (existing is not null && existing.AsSpan().SequenceEqual(content))
+                if (existing is not null && existing.SequenceEqual(content))
                 {
                     return true;
                 }

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net;
 
 namespace MinecraftServerManager.Core.Servers;
@@ -7,8 +8,11 @@ namespace MinecraftServerManager.Core.Servers;
 /// </summary>
 public static class ServerPropertiesValidator
 {
-    private static readonly string[] ValidDifficulties = ["peaceful", "easy", "normal", "hard"];
-    private static readonly string[] ValidGamemodes = ["survival", "creative", "adventure", "spectator"];
+    private static readonly FrozenSet<string> ValidDifficulties =
+        new[] { "peaceful", "easy", "normal", "hard" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly FrozenSet<string> ValidGamemodes =
+        new[] { "survival", "creative", "adventure", "spectator" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 驗證單一設定屬性值是否合法
@@ -109,8 +113,7 @@ public static class ServerPropertiesValidator
         // 8. 遊戲難度選單驗證
         if (string.Equals(key, "difficulty", StringComparison.OrdinalIgnoreCase))
         {
-            string lower = val.ToLowerInvariant();
-            if (Array.IndexOf(ValidDifficulties, lower) < 0)
+            if (!ValidDifficulties.Contains(val))
             {
                 return (false, "難度必須為 peaceful、easy、normal 或 hard");
             }
@@ -121,8 +124,7 @@ public static class ServerPropertiesValidator
         // 9. 遊戲模式選單驗證
         if (string.Equals(key, "gamemode", StringComparison.OrdinalIgnoreCase))
         {
-            string lower = val.ToLowerInvariant();
-            if (Array.IndexOf(ValidGamemodes, lower) < 0)
+            if (!ValidGamemodes.Contains(val))
             {
                 return (false, "遊戲模式必須為 survival、creative、adventure 或 spectator");
             }

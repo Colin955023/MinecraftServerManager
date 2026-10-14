@@ -9,7 +9,7 @@ namespace MinecraftServerManager.App.Views;
 /// </summary>
 public partial class ServerBackupProgressDialog : Window
 {
-    private static bool _completed;
+    private bool _completed;
     private readonly IProgress<ServerBackupProgressReport> _progress;
 
     public ServerBackupProgressDialog(string serverName, string actionTitle = "備份")
@@ -44,7 +44,7 @@ public partial class ServerBackupProgressDialog : Window
     /// <summary>
     /// 標記流程結束，解除關閉鎖定。
     /// </summary>
-    public static void MarkCompleted() => _completed = true;
+    public void MarkCompleted() => _completed = true;
 
     private void Report(ServerBackupProgressReport report)
     {

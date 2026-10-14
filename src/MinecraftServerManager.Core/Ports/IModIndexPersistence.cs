@@ -11,7 +11,7 @@ public interface IModIndexPersistence
     public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName);
 
     /// <summary>
-    /// 保存模組中繼資料至快取
+    /// 儲存模組中繼資料至快取
     /// </summary>
     public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata);
 
@@ -21,7 +21,7 @@ public interface IModIndexPersistence
     public string? GetCachedHash(string fileName, string algorithm);
 
     /// <summary>
-    /// 保存檔案雜湊值至快取
+    /// 儲存檔案雜湊值至快取
     /// </summary>
     public void CacheHash(string fileName, string algorithm, string hash);
 

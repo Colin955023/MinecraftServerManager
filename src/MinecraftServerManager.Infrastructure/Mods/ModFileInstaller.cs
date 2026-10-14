@@ -215,11 +215,20 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             if (File.Exists(finalTargetPath))
             {
                 backupFilePath = Path.Combine(stagingDir, $"{safeFileName}.bak");
-                SafeFileSystem.MoveWithin(stagingDir, finalTargetPath, backupFilePath);
+                if (!SafeFileSystem.MoveWithin(stableModsDir, finalTargetPath, backupFilePath))
+                {
+                    backupFilePath = null;
+                    Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                    return ModFileOperationResult.Fail("無法備份既有模組檔案", false);
+                }
             }
 
             // 移動新檔案至目標路徑
-            SafeFileSystem.MoveWithin(stableModsDir, tempFilePath, finalTargetPath);
+            if (!SafeFileSystem.MoveWithin(stableModsDir, tempFilePath, finalTargetPath))
+            {
+                Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                return ModFileOperationResult.Fail("無法移動模組檔案至目標位置", true);
+            }
 
             // 清理備份
             if (backupFilePath is not null && File.Exists(backupFilePath))
@@ -286,13 +295,14 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
     {
         try
         {
+            string baseDir = Path.GetDirectoryName(stagingDir) ?? stagingDir;
             if (File.Exists(tempPath))
             {
-                SafeFileSystem.DeleteWithin(stagingDir, tempPath);
+                SafeFileSystem.DeleteWithin(baseDir, tempPath);
             }
             if (backupPath is not null && File.Exists(backupPath))
             {
-                SafeFileSystem.MoveWithin(stagingDir, backupPath, targetPath);
+                SafeFileSystem.MoveWithin(baseDir, backupPath, targetPath);
             }
         }
         catch

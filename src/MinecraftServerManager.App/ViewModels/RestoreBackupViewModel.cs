@@ -1,6 +1,6 @@
+using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -22,6 +22,8 @@ public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeO
 /// </summary>
 public sealed partial class RestoreBackupViewModel : ObservableObject
 {
+    private readonly IUiService _ui;
+
     private readonly IServerBackupService _backupService;
     private readonly string _serverName;
     private readonly string _backupDirectory;
@@ -40,8 +42,10 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         IServerBackupService backupService,
         string serverName,
         string? backupDirectory = null,
-        Func<bool>? isServerRunningCheck = null)
+        Func<bool>? isServerRunningCheck = null,
+        IUiService? uiService = null)
     {
+        _ui = uiService ?? NoOpUiService.Instance;
         _backupService = backupService;
         _serverName = serverName;
         _backupDirectory = backupDirectory ?? string.Empty;
@@ -104,14 +108,14 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         if (_isServerRunningCheck?.Invoke() == true)
         {
             StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
-            Views.DialogHelper.ShowWarning("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原");
+            _ui.ShowWarning("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原");
             return;
         }
 
-        if (!Views.DialogHelper.Confirm(
+        if (!_ui.Confirm(
             $"確定要將備份「{SelectedBackup.FileName}」還原至伺服器「{_serverName}」嗎？\n\n⚠️ 此操作將以備份內容覆蓋現有伺服器檔案，且無法復原。",
             "確認還原備份",
-            MessageBoxImage.Warning))
+            UiMessageLevel.Warning))
         {
             return;
         }
@@ -119,11 +123,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         IsBusy = true;
         StatusMessage = $"正在還原備份「{SelectedBackup.FileName}」...";
 
-        var progressDialog = new Views.ServerBackupProgressDialog(_serverName, "還原")
-        {
-            Owner = Application.Current?.MainWindow
-        };
-        progressDialog.Show();
+        var progressDialog = _ui.ShowServerBackupProgress(_serverName, "還原");
 
         try
         {
@@ -133,26 +133,24 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
                 _backupDirectory,
                 progressDialog.Progress)).ConfigureAwait(true);
 
-            Views.ServerBackupProgressDialog.MarkCompleted();
-            progressDialog.Close();
+            progressDialog.Complete();
 
             if (success)
             {
-                Views.DialogHelper.ShowInfo($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成");
+                _ui.ShowInfo($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成");
                 RequestClose?.Invoke(true);
             }
             else
             {
                 StatusMessage = "還原失敗，伺服器資料未變更";
-                Views.DialogHelper.ShowWarning("還原失敗，伺服器檔案未變更。", "還原失敗");
+                _ui.ShowWarning("還原失敗，伺服器檔案未變更。", "還原失敗");
             }
         }
         catch (Exception ex)
         {
-            Views.ServerBackupProgressDialog.MarkCompleted();
-            progressDialog.Close();
+            progressDialog.Complete();
             StatusMessage = $"還原異常：{ex.Message}";
-            Views.DialogHelper.ShowWarning($"還原過程發生未預期異常：{ex.Message}", "還原異常");
+            _ui.ShowWarning($"還原過程發生未預期異常：{ex.Message}", "還原異常");
         }
         finally
         {
@@ -170,10 +168,10 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         }
 
         var toDelete = SelectedBackup;
-        if (!Views.DialogHelper.Confirm(
+        if (!_ui.Confirm(
             $"確定要永久刪除備份檔案「{toDelete.FileName}」嗎？\n此操作無法復原。",
             "確認刪除備份",
-            MessageBoxImage.Warning))
+            UiMessageLevel.Warning))
         {
             return;
         }

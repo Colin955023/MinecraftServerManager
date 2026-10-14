@@ -118,7 +118,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             .Where(e =>
             {
                 string filePath = e.FullPath;
-                ReadOnlySpan<char> rel = Path.GetRelativePath(serverDir, filePath).AsSpan();
+                ReadOnlySpan<char> rel = Path.GetRelativePath(serverDir, filePath);
                 int sepIdx = rel.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                 ReadOnlySpan<char> firstSegment = sepIdx >= 0 ? rel[..sepIdx] : rel;
 
@@ -328,6 +328,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             {
                 CleanDirectorySafe(rollbackDir);
                 CleanDirectorySafe(stagingDir);
+                CleanDirectorySafe(preservedLogsDir);
             }
 
             return false;

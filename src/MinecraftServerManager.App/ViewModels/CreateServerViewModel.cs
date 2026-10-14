@@ -1,5 +1,5 @@
+using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -13,6 +13,8 @@ namespace MinecraftServerManager.App.ViewModels;
 /// </summary>
 public sealed partial class CreateServerViewModel : PageViewModel
 {
+    private readonly IUiService _ui;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("CreateServer");
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
@@ -88,9 +90,11 @@ public sealed partial class CreateServerViewModel : PageViewModel
         Action<string, string?>? navigateCallback = null,
         IMinecraftJavaRequirementService? javaRequirementService = null,
         IJavaInstaller? javaInstaller = null,
-        IServerRuntime? serverRuntime = null)
+        IServerRuntime? serverRuntime = null,
+        IUiService? uiService = null)
         : base("create", "建立新伺服器", "設定名稱、版本、模組載入器與記憶體參數建立伺服器")
     {
+        _ui = uiService ?? NoOpUiService.Instance;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _javaInstaller = javaInstaller;
@@ -370,22 +374,6 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public void OpenEula() => _launcher?.OpenUrl(EulaUrl);
 
     [RelayCommand]
-    public void BrowseJava()
-    {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "選取 Java 執行檔",
-            Filter = "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*",
-            CheckFileExists = true
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            JavaPath = dialog.FileName;
-        }
-    }
-
-    [RelayCommand]
     public void OpenManageJava()
     {
         var vm = new ManageJavaViewModel(
@@ -394,15 +382,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
             _javaInstaller,
             JavaPath,
             SelectedMinecraftVersion,
-            SelectedLoader);
+            SelectedLoader,
+            uiService: _ui);
 
-        var dialog = new Views.ManageJavaDialog(vm);
-        if (Application.Current?.MainWindow is not null)
-        {
-            dialog.Owner = Application.Current.MainWindow;
-        }
-
-        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(vm.ResultJavaPath))
+        if (_ui.ShowManageJava(vm) == true && !string.IsNullOrWhiteSpace(vm.ResultJavaPath))
         {
             JavaPath = vm.ResultJavaPath;
             _notificationSink?.Invoke($"已選取 Java：{JavaPath}", false);
@@ -456,7 +439,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             {
                 Logger.Warning("本機未偵測到 Minecraft {Version} 所需之 Java {Major}", SelectedMinecraftVersion, targetMajor.Value);
                 string pkgDesc = targetMajor.Value == 8 ? "Oracle JRE 8" : $"Microsoft OpenJDK {targetMajor.Value}";
-                bool installAgreed = Views.DialogHelper.Confirm(
+                bool installAgreed = _ui.Confirm(
                     $"本機未偵測到 Minecraft {SelectedMinecraftVersion} 所需的 Java {targetMajor.Value}。\n\n是否要使用 Windows 套件管理工具 (winget) 自動下載並安裝 {pkgDesc}？",
                     "缺少必要的 Java 版本");
 
@@ -487,8 +470,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         catch (Exception ex)
                         {
                             Logger.Error(ex, "透過 winget 安裝 Java 失敗: {Message}", ex.Message);
-                            Views.DialogHelper.ShowError($"透過 winget 安裝 Java {targetMajor.Value} 失敗：\n{ex.Message}\n\n請手動前往官網下載並安裝對應版本。", "安裝失敗");
-                            _notificationSink?.Invoke($"Java 安裝失敗：{ex.Message}", true);
+                            _ui.ShowError($"透過 winget 安裝 Java {targetMajor.Value} 失敗：\n{ex.Message}\n\n請手動前往官網下載並安裝對應版本。", "安裝失敗");
                         }
                     }
                     else
@@ -503,7 +485,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             }
             else if (!silent)
             {
-                _notificationSink?.Invoke("無法判定當前 Minecraft 版本所需之 Java 版本，請手動指定路徑", true);
+                _notificationSink?.Invoke("無法判定目前 Minecraft 版本所需之 Java 版本，請手動指定路徑", true);
             }
 
             return false;
@@ -629,13 +611,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : 2048;
         int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
         var vm = new JvmArgsViewModel(javaMajor, maxMem, SelectedLoader, _customJvmArgs);
-        var dialog = new Views.JvmArgsDialog(vm);
-        if (Application.Current?.MainWindow is not null)
-        {
-            dialog.Owner = Application.Current.MainWindow;
-        }
-
-        if (dialog.ShowDialog() == true)
+        if (_ui.ShowJvmArgs(vm) == true)
         {
             var finalArgs = vm.GetFinalJvmArgs();
             _customJvmArgs = [.. finalArgs];
@@ -649,7 +625,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [RelayCommand]
     public void ResetForm()
     {
-        if (!Views.DialogHelper.Confirm("確定要重設建立伺服器表單的所有欄位內容嗎？", "確認重設表單"))
+        if (!_ui.Confirm("確定要重設建立伺服器表單的所有欄位內容嗎？", "確認重設表單"))
         {
             return;
         }
@@ -719,10 +695,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         else
                         {
                             Logger.Warning("建立伺服器已終止：本機未安裝符合 Minecraft {Version} 所需之 Java {Major}", SelectedMinecraftVersion, targetMajor.Value);
-                            Views.DialogHelper.ShowError(
+                            _ui.ShowError(
                                 $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再進行建立。",
                                 "Java 版本不相符");
-                            _notificationSink?.Invoke($"建立伺服器終止：缺少符合的 Java {targetMajor.Value}", true);
                             return;
                         }
                     }
@@ -756,12 +731,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 Logger.Information("開始建立伺服器: {Name}, 版本: {Version}, 載入器: {Loader}, 記憶體: {Min}M-{Max}M, Java: {Java}",
                     plan.Name.Value, plan.MinecraftVersion.Value, plan.LoaderType, plan.MemoryMinMb, plan.MemoryMaxMb, effectiveJavaPath);
 
-                var progressDialog = new Views.ServerCreationProgressDialog(plan.Name.Value);
-                if (Application.Current?.MainWindow is not null)
-                {
-                    progressDialog.Owner = Application.Current.MainWindow;
-                }
-                progressDialog.Show();
+                var progressDialog = _ui.ShowServerCreationProgress(plan.Name.Value);
 
                 ServerCreationResult created;
                 try
@@ -770,8 +740,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 }
                 finally
                 {
-                    Views.ServerCreationProgressDialog.MarkCompleted();
-                    progressDialog.Close();
+                    progressDialog.Complete();
                 }
 
                 if (created.Completed && created.Config is not null)
@@ -781,30 +750,27 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     bool initSuccess = true;
                     if (_serverRuntime is not null)
                     {
-                        var initDialog = new Views.ServerInitializationDialog(
-                            _serverRuntime,
-                            created.Config,
-                            effectiveJavaPath);
-
-                        if (Application.Current?.MainWindow is not null)
-                        {
-                            initDialog.Owner = Application.Current.MainWindow;
-                        }
-
-                        initDialog.ShowDialog();
-                        initSuccess = initDialog.IsSuccess;
+                        initSuccess = _ui.ShowServerInitialization(created.Config, effectiveJavaPath, _serverRuntime);
                     }
+
+                    _ui.ActivateMainWindow();
 
                     if (initSuccess)
                     {
                         Logger.Information("伺服器建立成功: {Name}，路徑: {Path}", created.Config.Name.Value, created.Config.Path);
-                        _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」已成功建立並完成初始化！", false);
+                        if (_serverRuntime is null)
+                        {
+                            _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」已成功建立並完成初始化！", false);
+                        }
                         _navigateCallback?.Invoke("manage", created.Config.Name.Value);
                     }
                     else
                     {
                         Logger.Warning("伺服器「{Name}」初次初始化未完成或已被中斷", created.Config.Name.Value);
-                        _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」初次初始化未完成或已被中斷，伺服器檔案已保留。", true);
+                        if (_serverRuntime is null)
+                        {
+                            _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」初次初始化未完成或已被中斷，伺服器檔案已保留。", true);
+                        }
                     }
                 }
                 else

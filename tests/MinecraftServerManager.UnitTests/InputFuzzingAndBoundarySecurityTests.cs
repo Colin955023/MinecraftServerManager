@@ -78,6 +78,10 @@ public sealed class InputFuzzingAndBoundarySecurityTests
                         !string.IsNullOrEmpty(error),
                         $"驗證判定為非法但未提供錯誤訊息：seed={seed}, key={key}, input='{fuzzedValue}'");
                 }
+                else
+                {
+                    Assert.Null(error);
+                }
             }
         }
     }
@@ -153,7 +157,7 @@ public sealed class InputFuzzingAndBoundarySecurityTests
         Assert.Equal("Line1Line2Line3", multilineResult["description"]);
         Assert.Equal("Value", multilineResult["last-key"]);
 
-        // 5. 格式錯誤之 Unicode 跳脫字元（應安全降級為普通字元而非拋出例外）
+        // 5. 格式錯誤之 Unicode 跳脫字元（應安全降級為普通字元而非擲出例外）
         string malformedUnicode = "test1=\\uZZZZ\ntest2=\\u12\ntest3=\\u0021\n";
         var unicodeResult = PropertiesDocumentCodec.Parse(malformedUnicode);
         Assert.Contains("test1", unicodeResult.Keys);
@@ -235,7 +239,7 @@ public sealed class InputFuzzingAndBoundarySecurityTests
                     writer.Write("pwned");
                 }
 
-                // 驗證明確拋出 SafeArchiveException
+                // 驗證明確擲出 SafeArchiveException
                 var ex = Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(zipPath, extractDest));
                 Assert.NotNull(ex.Message);
 
@@ -281,7 +285,7 @@ public sealed class InputFuzzingAndBoundarySecurityTests
 
                 File.WriteAllBytes(corruptPath, garbage);
 
-                // 明確要求拋出 SafeArchiveException，拒絕使用過於寬鬆的 ThrowsAny
+                // 明確要求擲出 SafeArchiveException，拒絕使用過於寬鬆的 ThrowsAny
                 Assert.Throws<SafeArchiveException>(() => SafeZipArchive.Extract(corruptPath, destDir));
             }
         }

@@ -13,7 +13,7 @@
 
 - **核心與載入器**：支援 Paper、Vanilla、Fabric、Quilt、Forge、NeoForge 等官方核心之快速下載與建立
 - **Java 管理與配對**：依照 Minecraft 官方版本需求自動配對，支援 Windows winget 自動安裝 Java（Java 8 到 21+）與自訂路徑
-- **即時監控視窗**：獨立主控台、開機就緒 Windows 桌面通知、方向鍵瀏覽歷史指令、線上玩家清單、指令傳送與安全關閉程序
+- **即時監控視窗**：獨立主控台、開機就緒 Windows 桌面通知、方向鍵瀏覽歷史指令、線上玩家清單、指令傳送與安全關閉流程
 - **安全備份與還原**：還原時自動保留現場最新記錄檔與當機報告，具備失敗自動回復機制，自動保留最新 10 份備份
 - **模組管理**：支援 Windows 自然排序、模組啟用與停用、自動下載相依模組、Modrinth 線上搜尋與安裝、官方下載來源驗證，以及匯出試算表（XLSX）、HTML、JSON 與純文字
 - **伺服器設定驗證**：編輯 `server.properties` 時自動檢查連接埠（1～65534）與 IP 等數值正確性，避免設定錯誤
@@ -59,7 +59,7 @@ src/
 ├─ MinecraftServerManager.App/             WPF 視窗、View、ViewModel 與應用程式進入點
 ├─ MinecraftServerManager.Core/            工作流程、用例與服務合約
 ├─ MinecraftServerManager.Domain/          核心領域模型、值物件與業務規則
-└─ MinecraftServerManager.Infrastructure/  檔案系統、HTTP、程序管理與 Java 整合
+└─ MinecraftServerManager.Infrastructure/  檔案系統、HTTP、行程管理與 Java 整合
 tests/
 ├─ MinecraftServerManager.UnitTests/       全量單元測試套件
 └─ MinecraftServerManager.IntegrationTests/系統整合與流程測試套件

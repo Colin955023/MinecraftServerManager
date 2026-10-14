@@ -1,27 +1,34 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.IO;
 using System.Text;
 using System.Windows;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Servers;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
 /// 伺服器初次啟動初始化對話方塊
 /// </summary>
-public partial class ServerInitializationDialog : Window
+public sealed partial class ServerInitializationDialog : Window, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInitialization");
 
     private readonly IServerRuntime _serverRuntime;
+    private readonly ServerInitializationWorkflow _workflow;
     private readonly ServerConfig _config;
     private readonly string _javaExecutablePath;
-    private readonly StringBuilder _consoleBuffer = new();
+    private const int MaxConsoleChars = 50000;
+    private const int TrimmedConsoleChars = 40000;
+    private const int MaxPendingLines = 5000;
+    private const int MaxLinesPerFlush = 500;
+
+    private readonly ConcurrentQueue<string> _pendingLines = new();
+    private System.Windows.Threading.DispatcherTimer? _flushTimer;
     private System.Windows.Threading.DispatcherTimer? _countdownTimer;
     private int _countdownSeconds;
-    private bool _doneDetected;
     private bool _isClosingExpected;
 
     public bool IsSuccess { get; private set; }
@@ -35,6 +42,7 @@ public partial class ServerInitializationDialog : Window
         _serverRuntime = serverRuntime ?? throw new ArgumentNullException(nameof(serverRuntime));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _javaExecutablePath = javaExecutablePath;
+        _workflow = new ServerInitializationWorkflow(serverRuntime);
 
         TitleText.Text = $"正在初始化伺服器「{_config.Name.Value}」";
 
@@ -60,55 +68,20 @@ public partial class ServerInitializationDialog : Window
         _serverRuntime.ServerReady += OnServerReady;
         _serverRuntime.ServerExited += OnServerExited;
 
+        _flushTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _flushTimer.Tick += (_, _) => FlushPendingLines();
+        _flushTimer.Start();
+
         AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」進行初次世界與設定初始化...\n");
 
         try
         {
-            string startBat = Path.Combine(_config.Path, "start_server.bat");
-            string runBat = Path.Combine(_config.Path, "run.bat");
-            if (File.Exists(startBat))
-            {
-                AppendLog("[系統] 偵測到統一啟動腳本 start_server.bat，即將執行...\n");
-                await _serverRuntime.StartAsync(
-                    javaExecutablePath: _javaExecutablePath,
-                    serverDirectory: _config.Path,
-                    executableName: "start_server.bat",
-                    memoryMaxMb: _config.MemoryMaxMb,
-                    memoryMinMb: _config.MemoryMinMb,
-                    customJvmArgs: _config.JvmArgs).ConfigureAwait(true);
-            }
-            else if (File.Exists(runBat))
-            {
-                AppendLog("[系統] 偵測到啟動腳本 run.bat，即將執行...\n");
-                await _serverRuntime.StartAsync(
-                    javaExecutablePath: _javaExecutablePath,
-                    serverDirectory: _config.Path,
-                    executableName: "run.bat",
-                    memoryMaxMb: _config.MemoryMaxMb,
-                    memoryMinMb: _config.MemoryMinMb,
-                    customJvmArgs: _config.JvmArgs).ConfigureAwait(true);
-            }
-            else
-            {
-                string jarName = "server.jar";
-                if (!File.Exists(Path.Combine(_config.Path, jarName)))
-                {
-                    string[] jars = Directory.GetFiles(_config.Path, "*.jar");
-                    if (jars.Length > 0)
-                    {
-                        jarName = Path.GetFileName(jars[0]);
-                    }
-                }
+            string executableName = await ServerInitializationWorkflow.ResolveStartupTargetAsync(_config).ConfigureAwait(true);
+            AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+                ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
+                : $"[系統] 啟動伺服器核心 {executableName}...\n");
 
-                AppendLog($"[系統] 啟動伺服器核心 {jarName}...\n");
-                await _serverRuntime.StartAsync(
-                    javaExecutablePath: _javaExecutablePath,
-                    serverDirectory: _config.Path,
-                    executableName: jarName,
-                    memoryMaxMb: _config.MemoryMaxMb,
-                    memoryMinMb: _config.MemoryMinMb,
-                    customJvmArgs: _config.JvmArgs).ConfigureAwait(true);
-            }
+            await _workflow.StartAsync(_javaExecutablePath, _config, executableName).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -124,63 +97,33 @@ public partial class ServerInitializationDialog : Window
 
     private void OnOutputLineReceived(string line)
     {
-        Dispatcher.InvokeAsync(() =>
+        _pendingLines.Enqueue(line);
+        while (_pendingLines.Count > MaxPendingLines && _pendingLines.TryDequeue(out _))
         {
-            AppendLog(line + Environment.NewLine);
-
-            if (line.Contains("Loading dimension", StringComparison.OrdinalIgnoreCase) ||
-                line.Contains("Preparing spawn area", StringComparison.OrdinalIgnoreCase))
-            {
-                StatusText.Text = "狀態: 準備世界與生成區域中...";
-            }
-            else if (line.Contains("Preparing level", StringComparison.OrdinalIgnoreCase))
-            {
-                StatusText.Text = "狀態: 載入世界中...";
-            }
-        });
+        }
     }
 
-    private void OnServerReady() => _ = HandleServerReadyAsync();
-
-    private async Task HandleServerReadyAsync()
+    private void OnServerReady() => Dispatcher.InvokeAsync(() =>
     {
-        try
-        {
-            _doneDetected = true;
-            await Dispatcher.InvokeAsync(async () =>
-            {
-                StatusText.Text = "狀態: 伺服器已就緒！正在平順關閉完成初始化...";
-                AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...\n");
-
-                try
-                {
-                    await _serverRuntime.StopAsync(TimeSpan.FromSeconds(30));
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("傳送 stop 指令或終止行程時發生異常: {Message}", ex.Message);
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning("OnServerReady 異常: {Message}", ex.Message);
-        }
-    }
+        FlushPendingLines();
+        StatusText.Text = "狀態: 伺服器已就緒！正在平順關閉完成初始化...";
+        AppendLog("\n[系統] 伺服器準備完畢，所有模組載入完成，正在傳送 stop 指令正常關閉...\n");
+    });
 
     private void OnServerExited(int exitCode)
     {
         Dispatcher.InvokeAsync(() =>
         {
+            FlushPendingLines();
             InitProgressBar.Visibility = Visibility.Collapsed;
-            if (_doneDetected)
+            if (_workflow.ReadyDetected)
             {
                 IsSuccess = true;
                 StatusText.Text = "狀態: 伺服器初次啟動初始化完成！";
                 AppendLog($"\n[系統] 伺服器行程已安全結束 (結束代碼: {exitCode})，初次初始化完成！\n");
                 CompleteButton.IsEnabled = true;
                 CompleteButton.Content = "完成初始化";
-                StartCountdown(5, isSuccess: true);
+                StartCountdown(2, isSuccess: true);
             }
             else
             {
@@ -228,20 +171,51 @@ public partial class ServerInitializationDialog : Window
         else
         {
             CountdownText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0x9E, 0x0B));
-            CountdownText.Text = $"初始化未完成，倒數 {_countdownSeconds} 秒後自動退出...";
+            CountdownText.Text = $"初始化未完成，倒數 {_countdownSeconds} 秒後自動關閉...";
         }
     }
 
     private void AppendLog(string text)
     {
-        _consoleBuffer.Append(text);
-        if (_consoleBuffer.Length > 50000)
+        ConsoleBox.AppendText(text);
+        if (ConsoleBox.Text.Length > MaxConsoleChars)
         {
-            _consoleBuffer.Remove(0, 10000);
+            ConsoleBox.Text = ConsoleBox.Text[^TrimmedConsoleChars..];
         }
-        ConsoleBox.Text = _consoleBuffer.ToString();
         ConsoleBox.CaretIndex = ConsoleBox.Text.Length;
         ConsoleBox.ScrollToEnd();
+    }
+
+    private void FlushPendingLines()
+    {
+        if (_pendingLines.IsEmpty)
+        {
+            return;
+        }
+
+        var batch = new StringBuilder();
+        string? statusText = null;
+        int taken = 0;
+        while (taken < MaxLinesPerFlush && _pendingLines.TryDequeue(out string? line))
+        {
+            taken++;
+            batch.AppendLine(line);
+            if (line.Contains("Loading dimension", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("Preparing spawn area", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "狀態: 準備世界與生成區域中...";
+            }
+            else if (line.Contains("Preparing level", StringComparison.OrdinalIgnoreCase))
+            {
+                statusText = "狀態: 載入世界中...";
+            }
+        }
+
+        AppendLog(batch.ToString());
+        if (statusText is not null)
+        {
+            StatusText.Text = statusText;
+        }
     }
 
     private async void CancelButton_Click(object sender, RoutedEventArgs e)
@@ -259,7 +233,7 @@ public partial class ServerInitializationDialog : Window
 
                 try
                 {
-                    await _serverRuntime.StopAsync(TimeSpan.Zero);
+                    await _workflow.StopAsync(TimeSpan.Zero);
                 }
                 catch (Exception ex)
                 {
@@ -288,6 +262,7 @@ public partial class ServerInitializationDialog : Window
         try
         {
             _countdownTimer?.Stop();
+            _flushTimer?.Stop();
             _serverRuntime.OutputLineReceived -= OnOutputLineReceived;
             _serverRuntime.ServerReady -= OnServerReady;
             _serverRuntime.ServerExited -= OnServerExited;
@@ -297,7 +272,7 @@ public partial class ServerInitializationDialog : Window
                 e.Cancel = true;
                 try
                 {
-                    await _serverRuntime.StopAsync(TimeSpan.FromSeconds(5));
+                    await _workflow.StopAsync(TimeSpan.FromSeconds(5));
                 }
                 catch
                 {
@@ -309,6 +284,31 @@ public partial class ServerInitializationDialog : Window
         catch (Exception ex)
         {
             Logger.Warning("ServerInitializationDialog_Closing 異常: {Message}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 釋放初次啟動流程資源（取消就緒事件訂閱）
+    /// </summary>
+    public void Dispose() => _workflow.Dispose();
+
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        try
+        {
+            if (Owner is not null)
+            {
+                if (Owner.WindowState == WindowState.Minimized)
+                {
+                    Owner.WindowState = WindowState.Normal;
+                }
+                Owner.Activate();
+                Owner.Focus();
+            }
+        }
+        catch
+        {
         }
     }
 }

@@ -13,13 +13,14 @@ public static class HttpUrlPolicy
             throw new HttpSecurityException("只允許 HTTPS URL");
         }
 
-        if (string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo))
+        string host = uri.Host.TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(host) || !string.IsNullOrEmpty(uri.UserInfo))
         {
             throw new HttpSecurityException("URL 格式或 credential 不安全");
         }
 
-        if (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || uri.Host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase))
         {
             throw new HttpSecurityException("拒絕 localhost URL");
         }
@@ -29,7 +30,7 @@ public static class HttpUrlPolicy
             throw new HttpSecurityException("URL port 無效");
         }
 
-        if (IPAddress.TryParse(uri.Host, out var address) && !IsPublicAddress(address))
+        if (IPAddress.TryParse(host, out var address) && !IsPublicAddress(address))
         {
             throw new HttpSecurityException("拒絕非公開 IP URL");
         }
@@ -41,7 +42,8 @@ public static class HttpUrlPolicy
         CancellationToken cancellationToken = default)
     {
         ValidateStatic(uri);
-        if (IPAddress.TryParse(uri.Host, out var literal))
+        string host = uri.Host.TrimEnd('.');
+        if (IPAddress.TryParse(host, out var literal))
         {
             if (!IsPublicAddress(literal))
             {
@@ -52,11 +54,11 @@ public static class HttpUrlPolicy
         }
 
         Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
-            ?? ((host, token) => Dns.GetHostAddressesAsync(host, token));
+            ?? ((h, token) => Dns.GetHostAddressesAsync(h, token));
         IPAddress[] addresses;
         try
         {
-            addresses = await resolve(uri.Host.TrimEnd('.'), cancellationToken).ConfigureAwait(false);
+            addresses = await resolve(host, cancellationToken).ConfigureAwait(false);
         }
         catch (SocketException exception)
         {
@@ -81,39 +83,45 @@ public static class HttpUrlPolicy
             return false;
         }
 
-        byte[] bytes = normalized.GetAddressBytes();
-        if (normalized.AddressFamily == AddressFamily.InterNetwork)
+        Span<byte> bytes = stackalloc byte[16];
+        if (!normalized.TryWriteBytes(bytes, out int bytesWritten))
         {
-            return !(bytes[0] == 0
-                || bytes[0] == 10
-                || (bytes[0] == 100 && bytes[1] is >= 64 and <= 127)
-                || bytes[0] == 127
-                || (bytes[0] == 169 && bytes[1] == 254)
-                || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
-                || (bytes[0] == 192 && bytes[1] == 0 && (bytes[2] == 0 || bytes[2] == 2))
-                || (bytes[0] == 192 && bytes[1] == 168)
-                || (bytes[0] == 198 && bytes[1] is >= 18 and <= 19)
-                || (bytes[0] == 198 && bytes[1] == 51 && bytes[2] == 100)
-                || (bytes[0] == 203 && bytes[1] == 0 && bytes[2] == 113)
-                || bytes[0] >= 224);
+            return false;
         }
 
-        if (IsIPv4Compatible(bytes))
+        var span = bytes[..bytesWritten];
+        if (normalized.AddressFamily == AddressFamily.InterNetwork)
         {
-            var ipv4 = new IPAddress(bytes.AsSpan(12, 4));
+            return !(span[0] == 0
+                || span[0] == 10
+                || (span[0] == 100 && span[1] is >= 64 and <= 127)
+                || span[0] == 127
+                || (span[0] == 169 && span[1] == 254)
+                || (span[0] == 172 && span[1] is >= 16 and <= 31)
+                || (span[0] == 192 && span[1] == 0 && (span[2] == 0 || span[2] == 2))
+                || (span[0] == 192 && span[1] == 168)
+                || (span[0] == 198 && span[1] is >= 18 and <= 19)
+                || (span[0] == 198 && span[1] == 51 && span[2] == 100)
+                || (span[0] == 203 && span[1] == 0 && span[2] == 113)
+                || span[0] >= 224);
+        }
+
+        if (IsIPv4Compatible(span))
+        {
+            var ipv4 = new IPAddress(span.Slice(12, 4));
             return IsPublicAddress(ipv4);
         }
 
         return !normalized.IsIPv6LinkLocal
             && !normalized.IsIPv6SiteLocal
             && !normalized.IsIPv6Teredo
-            && (bytes[0] & 0xFE) != 0xFC
-            && bytes[0] != 0xFF
-            && !(bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0D && bytes[3] == 0xB8)
-            && !(bytes[0] == 0x01 && bytes[1] == 0x00);
+            && (span[0] & 0xFE) != 0xFC
+            && span[0] != 0xFF
+            && !(span[0] == 0x20 && span[1] == 0x01 && span[2] == 0x0D && span[3] == 0xB8)
+            && !(span[0] == 0x01 && span[1] == 0x00);
     }
 
-    private static bool IsIPv4Compatible(byte[] bytes)
+    private static bool IsIPv4Compatible(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length != 16)
         {

@@ -9,7 +9,7 @@ namespace MinecraftServerManager.App.Views;
 /// </summary>
 public partial class ServerImportProgressDialog : Window
 {
-    private static bool _completed;
+    private bool _completed;
     private readonly IProgress<ServerImportProgressReport> _progress;
 
     public ServerImportProgressDialog(string serverName)
@@ -42,7 +42,7 @@ public partial class ServerImportProgressDialog : Window
     /// <summary>
     /// 標記流程結束，解除關閉鎖定。
     /// </summary>
-    public static void MarkCompleted() => _completed = true;
+    public void MarkCompleted() => _completed = true;
 
     private void Report(ServerImportProgressReport report)
     {

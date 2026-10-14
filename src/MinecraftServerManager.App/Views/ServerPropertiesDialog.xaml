@@ -11,7 +11,6 @@
         Background="{DynamicResource WindowBrush}"
         Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
   <Window.Resources>
-    <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
     <DataTemplate DataType="{x:Type vm:PropertyEditItem}">
       <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
@@ -138,8 +137,17 @@
             BorderThickness="1"
             CornerRadius="6"
             Margin="0,0,0,14">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <ItemsControl ItemsSource="{Binding DisplayItems}" />
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    CanContentScroll="True">
+        <ItemsControl ItemsSource="{Binding DisplayItems}"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
       </ScrollViewer>
     </Border>
 

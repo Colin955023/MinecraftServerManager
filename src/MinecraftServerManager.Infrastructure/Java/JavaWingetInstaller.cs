@@ -26,6 +26,8 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         [0x8A150056] = "系統已安裝此版本套件",
     }.ToFrozenDictionary();
 
+    private static readonly string[] WingetVersionArgs = ["--version"];
+
     public async Task<bool> IsWingetAvailableAsync(CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
@@ -33,7 +35,7 @@ public sealed class JavaWingetInstaller(IProcessRunner processRunner) : IJavaIns
         try
         {
             var process = await processRunner.StartAsync(
-                new ProcessStartSpec("winget", ["--version"]),
+                new ProcessStartSpec("winget", WingetVersionArgs),
                 cancellationToken).ConfigureAwait(false);
             await using (process.ConfigureAwait(false))
             {

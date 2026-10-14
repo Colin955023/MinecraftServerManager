@@ -456,28 +456,37 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
 
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json
                 string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-                if (File.Exists(mcCachePath))
-                {
-                    var mcVersions = LoadCachedVersions(mcCachePath);
-                    bool mcChanged = false;
-                    var updatedMc = new List<LoaderVersion>(mcVersions.Count);
-                    foreach (var v in mcVersions)
-                    {
-                        if (_memoryCache.TryGetValue(v.Version, out int jm) && jm > 0 && v.JavaMajor != jm)
-                        {
-                            updatedMc.Add(v with { JavaMajor = jm });
-                            mcChanged = true;
-                        }
-                        else
-                        {
-                            updatedMc.Add(v);
-                        }
-                    }
+                var mcVersions = File.Exists(mcCachePath) ? LoadCachedVersions(mcCachePath) : [];
+                bool mcChanged = false;
+                var updatedMc = new List<LoaderVersion>(mcVersions.Count + _memoryCache.Count);
+                var seenMc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    if (mcChanged)
+                foreach (var v in mcVersions)
+                {
+                    seenMc.Add(v.Version);
+                    if (_memoryCache.TryGetValue(v.Version, out int jm) && jm > 0 && v.JavaMajor != jm)
                     {
-                        SaveCachedVersions(mcCachePath, updatedMc);
+                        updatedMc.Add(v with { JavaMajor = jm });
+                        mcChanged = true;
                     }
+                    else
+                    {
+                        updatedMc.Add(v);
+                    }
+                }
+
+                foreach (var kvp in _memoryCache)
+                {
+                    if (!kvp.Key.Contains(':') && kvp.Value > 0 && seenMc.Add(kvp.Key))
+                    {
+                        updatedMc.Add(new LoaderVersion(kvp.Key, Stable: true, JavaMajor: kvp.Value));
+                        mcChanged = true;
+                    }
+                }
+
+                if (mcChanged)
+                {
+                    SaveCachedVersions(mcCachePath, updatedMc);
                 }
 
                 // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json

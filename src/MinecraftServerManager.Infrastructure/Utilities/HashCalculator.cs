@@ -21,17 +21,14 @@ public sealed class HashCalculator
     public static string DigestBytes(ReadOnlySpan<byte> content, string algorithm = "sha256") =>
         algorithm.Trim().ToLowerInvariant() switch
         {
-            "sha256" => Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant(),
-            "sha1" => Convert.ToHexString(SHA1.HashData(content)).ToLowerInvariant(),
-            "sha512" => Convert.ToHexString(SHA512.HashData(content)).ToLowerInvariant(),
+            "sha256" => Convert.ToHexStringLower(SHA256.HashData(content)),
+            "sha1" => Convert.ToHexStringLower(SHA1.HashData(content)),
+            "sha512" => Convert.ToHexStringLower(SHA512.HashData(content)),
             _ => string.Empty,
         };
 
     public static string ComputeSha256(string content) =>
         DigestBytes(System.Text.Encoding.UTF8.GetBytes(content ?? string.Empty));
-
-    public static string ComputeFileSha256(string filePath) =>
-        SharedInstance.ComputeFileHash(filePath);
 
     public string ComputeFileHash(
         string filePath,
@@ -77,7 +74,7 @@ public sealed class HashCalculator
                 FileShare.Read,
                 64 * 1024,
                 FileOptions.SequentialScan);
-            string digest = Convert.ToHexString(hashAlgorithm.ComputeHash(stream)).ToLowerInvariant();
+            string digest = Convert.ToHexStringLower(hashAlgorithm.ComputeHash(stream));
             if (useCache)
             {
                 if (cache.Count >= MaxCacheEntries)

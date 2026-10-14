@@ -155,7 +155,7 @@ public sealed class MinecraftJavaRequirementServiceTests : IDisposable
 
         var service = new MinecraftJavaRequirementService(mockHttp, _testTempDir);
 
-        // 嚴格禁止以版本號盲目推算，官方清單找不到即拋出例外
+        // 嚴格禁止以版本號盲目推算，官方清單找不到即擲出例外
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetRequiredJavaMajorAsync("9.99.99"));
     }
 
