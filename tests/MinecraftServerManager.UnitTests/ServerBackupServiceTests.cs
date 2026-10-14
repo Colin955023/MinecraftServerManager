@@ -45,8 +45,8 @@ public sealed class ServerBackupServiceTests : IDisposable
         Assert.True(backup.SizeBytes > 0);
 
         var list = await _backupService.ListBackupsAsync("TestServer");
-        Assert.Single(list);
-        Assert.Equal(backup.FileName, list[0].FileName);
+        var item = Assert.Single(list);
+        Assert.Equal(backup.FileName, item.FileName);
     }
 
     [Fact]
@@ -90,8 +90,8 @@ public sealed class ServerBackupServiceTests : IDisposable
             Assert.StartsWith(Path.GetFullPath(externalDir), backup.FullPath, StringComparison.OrdinalIgnoreCase);
 
             var listed = await _backupService.ListBackupsAsync("TestServer", externalDir);
-            Assert.Single(listed);
-            Assert.Equal(backup.FileName, listed[0].FileName);
+            var item = Assert.Single(listed);
+            Assert.Equal(backup.FileName, item.FileName);
 
             File.WriteAllText(Path.Combine(_serverDir, "server.properties"), "motd=Modified Content");
             bool restored = await _backupService.RestoreBackupAsync("TestServer", backup.FileName, externalDir);

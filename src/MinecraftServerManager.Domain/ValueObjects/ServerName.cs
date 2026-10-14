@@ -99,7 +99,7 @@ public readonly record struct ServerName
                 || baseName.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)))
         {
             string suffix = baseName[3..];
-            return suffix.All(character => character is (>= '1' and <= '9') or '¹' or '²' or '³');
+            return suffix.All(static character => character is (>= '1' and <= '9') or '¹' or '²' or '³');
         }
 
         return false;

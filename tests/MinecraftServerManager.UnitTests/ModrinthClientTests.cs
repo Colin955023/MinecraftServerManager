@@ -66,8 +66,7 @@ public sealed class ModrinthClientTests
 
         var results = await client.SearchModsAsync("fabric-api", loader: "fabric", minecraftVersion: "1.20.1");
 
-        Assert.Single(results);
-        var mod = results[0];
+        var mod = Assert.Single(results);
         Assert.Equal("AANobbMI", mod.Id);
         Assert.Equal("fabric-api", mod.Slug);
         Assert.Equal("Fabric API", mod.Title);
@@ -156,16 +155,15 @@ public sealed class ModrinthClientTests
 
         var versions = await client.GetProjectVersionsAsync("sodium");
 
-        Assert.Single(versions);
-        var ver = versions[0];
+        var ver = Assert.Single(versions);
         Assert.Equal("v12345", ver.Id);
         Assert.Equal("0.5.8", ver.VersionNumber);
-        Assert.Single(ver.Files);
-        Assert.Equal("sodium-fabric-0.5.8.jar", ver.Files[0].Filename);
-        Assert.Equal("https://cdn.modrinth.com/data/sodium.jar", ver.Files[0].Url);
-        Assert.Single(ver.Dependencies);
-        Assert.Equal("P7dR8mSH", ver.Dependencies[0].ProjectId);
-        Assert.Equal(ModDependencyType.Required, ver.Dependencies[0].DependencyType);
+        var file = Assert.Single(ver.Files);
+        Assert.Equal("sodium-fabric-0.5.8.jar", file.Filename);
+        Assert.Equal("https://cdn.modrinth.com/data/sodium.jar", file.Url);
+        var dep = Assert.Single(ver.Dependencies);
+        Assert.Equal("P7dR8mSH", dep.ProjectId);
+        Assert.Equal(ModDependencyType.Required, dep.DependencyType);
     }
 
     [Fact]

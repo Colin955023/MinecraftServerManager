@@ -193,7 +193,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
                 allKeys.Add(key);
             }
 
-            foreach (string key in allKeys.OrderBy(k => ServerPropertiesMetadata.GetCategory(k)).ThenBy(k => k, StringComparer.OrdinalIgnoreCase))
+            foreach (string key in allKeys.OrderBy(static k => ServerPropertiesMetadata.GetCategory(k)).ThenBy(static k => k, StringComparer.OrdinalIgnoreCase))
             {
                 string category = ServerPropertiesMetadata.GetCategory(key);
                 string description = ServerPropertiesMetadata.GetDescription(key);

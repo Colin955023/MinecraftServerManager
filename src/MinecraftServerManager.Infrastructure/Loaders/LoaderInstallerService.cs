@@ -367,17 +367,17 @@ public sealed partial class LoaderInstallerService(
         }
 
         var files = SafeFileSystem.ListBoundedDirectory(serverDirectory, rejectReparse: false)
-            .Where(e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-            .Select(e => Path.GetFileName(e.FullPath))
+            .Where(static e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            .Select(static e => Path.GetFileName(e.FullPath))
             .ToList();
 
         string? preferred = loader switch
         {
-            LoaderKind.Paper => files.FirstOrDefault(f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Fabric => files.FirstOrDefault(f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Quilt => files.FirstOrDefault(f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Forge => files.FirstOrDefault(f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
-            LoaderKind.NeoForge => files.FirstOrDefault(f => f.StartsWith("neoforge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
+            LoaderKind.Paper => files.FirstOrDefault(static f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
+            LoaderKind.Fabric => files.FirstOrDefault(static f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
+            LoaderKind.Quilt => files.FirstOrDefault(static f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
+            LoaderKind.Forge => files.FirstOrDefault(static f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
+            LoaderKind.NeoForge => files.FirstOrDefault(static f => f.StartsWith("neoforge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
             _ => null
         };
 
@@ -391,7 +391,7 @@ public sealed partial class LoaderInstallerService(
             return "run.bat";
         }
 
-        return files.FirstOrDefault(f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
+        return files.FirstOrDefault(static f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
     }
 
     [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]

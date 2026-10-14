@@ -371,7 +371,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     }
 
     [RelayCommand]
-    public void OpenEula() => _launcher?.OpenUrl(EulaUrl);
+    public void OpenEula() => _launcher?.OpenUrl(EulaUrl, isTrusted: true);
 
     [RelayCommand]
     public void OpenManageJava()
@@ -777,6 +777,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 {
                     Logger.Warning("伺服器建立失敗: {Message}", created.Message);
                     _notificationSink?.Invoke($"建立伺服器失敗：{created.Message}", true);
+                    _ui.ShowWarning($"建立伺服器失敗：\n{created.Message}", "建立伺服器被拒絕");
                 }
                 return;
             }
@@ -784,6 +785,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             {
                 Logger.Error(ex, "建立伺服器時發生例外: {Message}", ex.Message);
                 _notificationSink?.Invoke($"建立伺服器失敗：{ex.Message}", true);
+                _ui.ShowError($"建立伺服器時發生錯誤：\n{ex.Message}", "建立伺服器失敗");
                 return;
             }
         }

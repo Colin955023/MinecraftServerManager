@@ -206,6 +206,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
         {
             Logger.Error(ex, "winget 安裝 Java {Major} 失敗: {Message}", targetMajor, ex.Message);
             StatusMessage = $"安裝失敗：{ex.Message}";
+            _ui.ShowError($"安裝 Java {targetMajor} 失敗或被拒絕：\n{ex.Message}", "Java 安裝失敗");
         }
         finally
         {

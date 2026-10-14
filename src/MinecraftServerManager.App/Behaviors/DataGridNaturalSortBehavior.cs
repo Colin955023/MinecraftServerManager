@@ -184,7 +184,7 @@ public sealed partial class WindowsNaturalSortComparer(string propertyName, List
     private static object? GetPropertyValue(object target, string propName)
     {
         var type = target.GetType();
-        var prop = PropertyCache.GetOrAdd((type, propName), key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
+        var prop = PropertyCache.GetOrAdd((type, propName), static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
         return prop?.GetValue(target);
     }
 

@@ -169,8 +169,8 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
 
         runner.LastCreatedProcess!.RaiseOutput("Server started!");
 
-        Assert.Single(outputs);
-        Assert.Equal("Server started!", outputs[0]);
+        string item = Assert.Single(outputs);
+        Assert.Equal("Server started!", item);
     }
 
     [Fact]

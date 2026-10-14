@@ -10,12 +10,12 @@ public sealed class DomainModelTests
     [Fact]
     public void ServerNameRejectsWindowsReservedNames()
     {
-        Assert.Throws<ArgumentException>(() => ServerName.Parse("COM1"));
-        Assert.Throws<ArgumentException>(() => ServerName.Parse("COM1 .txt"));
-        Assert.Throws<ArgumentException>(() => ServerName.Parse("demo."));
-        Assert.Throws<ArgumentException>(() => ServerName.Parse("servers.json"));
-        Assert.Throws<ArgumentException>(() => ServerName.Parse("servers_config.json"));
-        Assert.Throws<ArgumentException>(() => ServerName.Parse(".msm-delete-test"));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse("COM1"));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse("COM1 .txt"));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse("demo."));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse("servers.json"));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse("servers_config.json"));
+        Assert.Throws<ArgumentException>(static () => ServerName.Parse(".msm-delete-test"));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public sealed class DomainModelTests
         Assert.Equal(@"C:\Servers\Test", config.Path);
 
         // 驗證不變條件：min > max 應擲出 ArgumentException
-        Assert.Throws<ArgumentException>(() => new ServerCreationPlan(
+        Assert.Throws<ArgumentException>(static () => new ServerCreationPlan(
             "tx-fail",
             ServerName.Parse("無效"),
             MinecraftVersion.Parse("1.20.1"),

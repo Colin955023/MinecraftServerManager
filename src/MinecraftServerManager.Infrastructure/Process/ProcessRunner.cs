@@ -12,10 +12,16 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ProcessRunner");
 
     private static readonly FrozenSet<string> AllowedOpenFileExtensions =
-        new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv" }
+        new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv", ".html", ".htm", ".xlsx", ".xml" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    public bool OpenFolder(string folderPath)
+    /// <summary>
+    /// 檢查指定的檔案副檔名是否包含於允許直接開啟的安全白名單中
+    /// </summary>
+    public static bool IsAllowedOpenFileExtension(string extension) =>
+        !string.IsNullOrWhiteSpace(extension) && AllowedOpenFileExtensions.Contains(extension);
+
+    public bool OpenFolder(string folderPath, bool isTrusted = false)
     {
         if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
         {
@@ -29,11 +35,11 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟資料夾: {Path}", folderPath);
+        Logger.Information("已開啟資料夾: {Path} (內建/受信任: {IsTrusted})", folderPath, isTrusted);
         return true;
     }
 
-    public bool ShowInFolder(string filePath)
+    public bool ShowInFolder(string filePath, bool isTrusted = false)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
         {
@@ -57,11 +63,11 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
+        Logger.Information("已在資料夾中顯示檔案: {Path} (內建/受信任: {IsTrusted})", filePath, isTrusted);
         return true;
     }
 
-    public bool OpenFile(string filePath)
+    public bool OpenFile(string filePath, bool isTrusted = false)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
         {
@@ -69,11 +75,15 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        string ext = Path.GetExtension(filePath);
-        if (!AllowedOpenFileExtensions.Contains(ext))
+        // 若為程式內建或受信任的產出內容，不需判斷是否拒絕開啟
+        if (!isTrusted)
         {
-            Logger.Warning("拒絕開啟不具備文字或記錄檔白名單副檔名之檔案: {Path}", filePath);
-            return false;
+            string ext = Path.GetExtension(filePath);
+            if (!AllowedOpenFileExtensions.Contains(ext))
+            {
+                Logger.Warning("拒絕開啟不具備允許副檔名白名單之檔案: {Path}", filePath);
+                return false;
+            }
         }
 
         if (TryShellExecute(() => new ProcessStartInfo { FileName = filePath, UseShellExecute = true }) is { } error)
@@ -82,11 +92,11 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟檔案: {Path}", filePath);
+        Logger.Information("已開啟檔案: {Path} (內建/受信任: {IsTrusted})", filePath, isTrusted);
         return true;
     }
 
-    public bool OpenUrl(string url)
+    public bool OpenUrl(string url, bool isTrusted = false)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
@@ -94,7 +104,8 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+        // 若為程式內建或受信任的連結，不需進行協定拒絕判斷
+        if (!isTrusted && uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
         {
             Logger.Warning("開啟網址被拒絕，非 HTTP/HTTPS 協定: {Url}", url);
             return false;
@@ -106,7 +117,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟網址: {Url}", url);
+        Logger.Information("已開啟網址: {Url} (內建/受信任: {IsTrusted})", url, isTrusted);
         return true;
     }
 

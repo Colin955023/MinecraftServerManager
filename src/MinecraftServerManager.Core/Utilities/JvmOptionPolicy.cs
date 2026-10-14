@@ -99,7 +99,7 @@ public static class JvmOptionPolicy
     /// <summary>
     /// 檢查參數中是否已包含 GC 選項
     /// </summary>
-    public static bool HasGcOption(IEnumerable<string> args) => args.Any(arg => arg.StartsWith(GcOptionPrefix, StringComparison.OrdinalIgnoreCase) && arg.EndsWith("GC", StringComparison.OrdinalIgnoreCase));
+    public static bool HasGcOption(IEnumerable<string> args) => args.Any(static arg => arg.StartsWith(GcOptionPrefix, StringComparison.OrdinalIgnoreCase) && arg.EndsWith("GC", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// 取得建議的 JVM 參數與其對應的繁體中文說明
@@ -187,6 +187,6 @@ public static class JvmOptionPolicy
         }
 
         var details = GetRecommendedJvmArgsDetails(javaMajor, memoryMaxMb, loaderType);
-        return [.. details.Select(d => d.Option)];
+        return [.. details.Select(static d => d.Option)];
     }
 }

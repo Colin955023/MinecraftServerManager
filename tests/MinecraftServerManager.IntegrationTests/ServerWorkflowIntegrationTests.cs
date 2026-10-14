@@ -194,9 +194,9 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
 
         // 2. 掃描模組
         var mods = await modManager.GetModsAsync(serverDir);
-        Assert.Single(mods);
-        Assert.Equal("testmod", mods[0].Id);
-        Assert.Equal("Test Mod", mods[0].Name);
+        var mod = Assert.Single(mods);
+        Assert.Equal("testmod", mod.Id);
+        Assert.Equal("Test Mod", mod.Name);
 
         // 3. 切換停用狀態
         var toggleResult = await modManager.SetModStateAsync(serverDir, "testmod", enable: false);

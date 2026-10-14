@@ -218,7 +218,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     continue;
                 }
 
-                foreach (var entry in entries.Where(item => item.IsDirectory))
+                foreach (var entry in entries.Where(static item => item.IsDirectory))
                 {
                     AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
                     AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "javaw.exe"));
@@ -236,7 +236,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 try
                 {
                     var entries = SafeFileSystem.ListBoundedDirectory(jdksDir, maxEntries: MaxJavaDirectoryEntries, maxTotalBytes: 1);
-                    foreach (var entry in entries.Where(e => e.IsDirectory))
+                    foreach (var entry in entries.Where(static e => e.IsDirectory))
                     {
                         AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
                         AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "javaw.exe"));
@@ -345,15 +345,15 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             // 規範化：驗證檔案存在、排除重複路徑、排除非絕對路徑、依 major 由小到大排序並使同 major 集中存放
             var entries = runtimes
-                .Where(r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
+                .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
                             Path.IsPathRooted(r.ExecutablePath) &&
                             !string.Equals(Path.GetFileName(r.ExecutablePath), r.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&
                             File.Exists(r.ExecutablePath))
-                .GroupBy(r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.First())
-                .OrderBy(r => r.MajorVersion)
-                .ThenBy(r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(r => new JavaCacheEntry(r.ExecutablePath, r.MajorVersion))
+                .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(static g => g.First())
+                .OrderBy(static r => r.MajorVersion)
+                .ThenBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(static r => new JavaCacheEntry(r.ExecutablePath, r.MajorVersion))
                 .ToList();
 
             var payload = new JavaCachePayload(Candidates: entries);

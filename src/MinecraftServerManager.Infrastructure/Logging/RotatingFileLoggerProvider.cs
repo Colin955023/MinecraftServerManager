@@ -242,10 +242,10 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         try
         {
             var files = SafeFileSystem.ListBoundedDirectory(logDir)
-                .Where(entry => !entry.IsDirectory && File.Exists(entry.FullPath) &&
+                .Where(static entry => !entry.IsDirectory && File.Exists(entry.FullPath) &&
                     (entry.FullPath.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || entry.FullPath.Contains(".log.", StringComparison.OrdinalIgnoreCase)))
-                .Select(entry => new FileInfo(entry.FullPath))
-                .OrderBy(f => f.LastWriteTimeUtc)
+                .Select(static entry => new FileInfo(entry.FullPath))
+                .OrderBy(static f => f.LastWriteTimeUtc)
                 .ToList();
 
             int removeCount = Math.Max(0, files.Count - Math.Max(0, keep));

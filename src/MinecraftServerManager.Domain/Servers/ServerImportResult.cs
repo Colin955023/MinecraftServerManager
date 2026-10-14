@@ -35,7 +35,7 @@ public sealed record ServerImportResult(
 /// </summary>
 public sealed record ServerImportBatchResult(IReadOnlyList<ServerImportResult> Items)
 {
-    public int CompletedCount => Items.Count(i => i.Completed);
-    public int SkippedCount => Items.Count(i => i.Status == ImportStatus.Skipped);
-    public int FailedCount => Items.Count(i => i.Status == ImportStatus.Failed);
+    public int CompletedCount => Items.Count(static i => i.Completed);
+    public int SkippedCount => Items.Count(static i => i.Status == ImportStatus.Skipped);
+    public int FailedCount => Items.Count(static i => i.Status == ImportStatus.Failed);
 }

@@ -108,6 +108,49 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         Assert.Equal("New C", vm.Logs[2]);
     }
 
+    [Fact]
+    public async Task ServerReady_ReadsPropertiesUnderConcurrentAccess_ShowsNotification()
+    {
+        string propsPath = Path.Combine(_tempServerDir, "server.properties");
+        File.WriteAllText(propsPath, "server-port=25577\nserver-ip=127.0.0.1\n");
+
+        // 模擬外部行程（例如 Minecraft Java 伺服器）正以可讀可寫並行模式開啟該檔案
+        using var lockingStream = new FileStream(propsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+
+        var mockUi = new MockMonitorUiService();
+        _runtime.IsRunning = true;
+        _runtime.IsReady = false;
+        using var vm = new ServerMonitorViewModel(
+            _runtime,
+            "TestServer",
+            _tempServerDir,
+            uiService: mockUi);
+
+        // 觸發伺服器就緒事件
+        _runtime.RaiseReady();
+
+        for (int i = 0; i < 50 && mockUi.LastInfoMessage is null; i++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.NotNull(mockUi.LastInfoMessage);
+        Assert.Contains("25577", mockUi.LastInfoMessage);
+        Assert.Contains("127.0.0.1", mockUi.LastInfoMessage);
+    }
+
+    private sealed class MockMonitorUiService : App.Services.NoOpUiService
+    {
+        public string? LastInfoMessage { get; private set; }
+        public string? LastInfoTitle { get; private set; }
+
+        public override void ShowInfo(string message, string title)
+        {
+            LastInfoMessage = message;
+            LastInfoTitle = title;
+        }
+    }
+
     private sealed class MockServerRuntime : IServerRuntime
     {
         public int Pid => 1234;

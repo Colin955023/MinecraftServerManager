@@ -49,7 +49,7 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
             }
         }
 
-        return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([.. list.OrderByDescending(b => b.CreatedAt)]);
+        return Task.FromResult<IReadOnlyList<ServerBackupInfo>>([.. list.OrderByDescending(static b => b.CreatedAt)]);
     }
 
     public async Task<ServerBackupInfo> CreateBackupAsync(

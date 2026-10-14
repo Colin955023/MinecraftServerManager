@@ -168,7 +168,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     }
 
     [RelayCommand]
-    public void OpenGithub() => _launcher?.OpenUrl(GithubUrl);
+    public void OpenGithub() => _launcher?.OpenUrl(GithubUrl, isTrusted: true);
 
     [RelayCommand]
     private async Task CheckForUpdatesAsync()
@@ -221,7 +221,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 UiMessageLevel.Information);
             if (openWeb)
             {
-                _launcher?.OpenUrl(result.ReleasePageUrl);
+                _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
             }
             return;
         }
@@ -260,7 +260,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
                 UiMessageLevel.Error);
             if (fallback)
             {
-                _launcher?.OpenUrl(result.ReleasePageUrl);
+                _launcher?.OpenUrl(result.ReleasePageUrl, isTrusted: true);
             }
         }
     }

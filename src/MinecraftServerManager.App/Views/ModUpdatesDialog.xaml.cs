@@ -49,7 +49,7 @@ public partial class ModUpdatesDialog : Window
     }
 
     public IReadOnlyList<ModUpdateCandidateItem> GetSelectedItems() =>
-        [.. CandidateItems.Where(i => i.IsSelected)];
+        [.. CandidateItems.Where(static i => i.IsSelected)];
 
     private void OnSelectAllClicked(object sender, RoutedEventArgs e)
     {
@@ -69,7 +69,7 @@ public partial class ModUpdatesDialog : Window
 
     private void OnUpdateClicked(object sender, RoutedEventArgs e)
     {
-        if (!CandidateItems.Any(i => i.IsSelected))
+        if (!CandidateItems.Any(static i => i.IsSelected))
         {
             MessageBox.Show(this, "請至少勾選一個要更新的模組！", "未勾選項目", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;

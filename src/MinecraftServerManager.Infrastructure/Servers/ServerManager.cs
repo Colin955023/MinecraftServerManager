@@ -382,7 +382,7 @@ public sealed partial class ServerManager : IServerManager
 
         string? anyJar = Directory.EnumerateFiles(directory, "*.jar", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileName)
-            .FirstOrDefault(name => name is not null && !name.Contains("installer", StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(static name => name is not null && !name.Contains("installer", StringComparison.OrdinalIgnoreCase));
 
         if (anyJar is not null)
         {
@@ -515,8 +515,8 @@ public sealed partial class ServerManager : IServerManager
             try
             {
                 var list = await _javaDetector.DetectAsync(forceRefresh: false, cancellationToken: cancellationToken).ConfigureAwait(false);
-                var best = list.Where(j => j.Is64Bit).OrderByDescending(j => j.MajorVersion).FirstOrDefault()
-                           ?? list.OrderByDescending(j => j.MajorVersion).FirstOrDefault();
+                var best = list.Where(static j => j.Is64Bit).OrderByDescending(static j => j.MajorVersion).FirstOrDefault()
+                           ?? list.OrderByDescending(static j => j.MajorVersion).FirstOrDefault();
                 if (best is not null && File.Exists(best.ExecutablePath))
                 {
                     return best.ExecutablePath;
@@ -932,9 +932,9 @@ public sealed partial class ServerManager : IServerManager
         }
 
         var registeredPaths = snapshot.Values
-            .Select(p => p.Path)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar))
+            .Select(static p => p.Path)
+            .Where(static p => !string.IsNullOrWhiteSpace(p))
+            .Select(static p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (string directory in Directory.EnumerateDirectories(_serversRoot))

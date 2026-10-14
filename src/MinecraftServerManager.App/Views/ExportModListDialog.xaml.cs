@@ -63,7 +63,8 @@ public partial class ExportModListDialog : Window
 
             if (ask == MessageBoxResult.Yes)
             {
-                _launcher?.OpenFile(saveDialog.FileName);
+                // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
+                _launcher?.OpenFile(saveDialog.FileName, isTrusted: true);
             }
 
             DialogResult = true;

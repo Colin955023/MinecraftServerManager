@@ -21,7 +21,7 @@ public sealed class ProcessRunnerTests
         Assert.True(process.Pid > 0);
         Assert.Equal(0, result.ExitCode);
         Assert.False(result.WasForceStopped);
-        Assert.Contains(output, item => item.Kind == ProcessOutputKind.StandardOutput);
+        Assert.Contains(output, static item => item.Kind == ProcessOutputKind.StandardOutput);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class ProcessRunnerTests
             Assert.True(process.Pid > 0);
             Assert.Equal(0, result.ExitCode);
             Assert.False(result.WasForceStopped);
-            Assert.Contains(output, item => item.Text.Contains("BATCH_OUTPUT_TEST_ARG", StringComparison.Ordinal));
+            Assert.Contains(output, static item => item.Text.Contains("BATCH_OUTPUT_TEST_ARG", StringComparison.Ordinal));
         }
         finally
         {
@@ -88,5 +88,56 @@ public sealed class ProcessRunnerTests
                 Directory.Delete(tempDir, recursive: true);
             }
         }
+    }
+
+    [Theory]
+    [InlineData(".txt")]
+    [InlineData(".json")]
+    [InlineData(".html")]
+    [InlineData(".htm")]
+    [InlineData(".xlsx")]
+    [InlineData(".csv")]
+    [InlineData(".log")]
+    public void IsAllowedOpenFileExtension_AllowsSafeExportAndTextFormats(string ext)
+    {
+        Assert.True(ProcessRunner.IsAllowedOpenFileExtension(ext));
+        Assert.True(ProcessRunner.IsAllowedOpenFileExtension(ext.ToUpperInvariant()));
+    }
+
+    [Theory]
+    [InlineData(".exe")]
+    [InlineData(".bat")]
+    [InlineData(".cmd")]
+    [InlineData(".vbs")]
+    [InlineData(".ps1")]
+    [InlineData(".dll")]
+    public void IsAllowedOpenFileExtension_RejectsExecutableOrDangerousFormats(string ext) => Assert.False(ProcessRunner.IsAllowedOpenFileExtension(ext));
+
+    [Fact]
+    public void OpenFile_RejectsDangerousExtensionsBeforeShellExecution()
+    {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"reject-{Guid.NewGuid():N}.exe");
+        File.WriteAllText(tempFile, "dummy");
+        try
+        {
+            var runner = new ProcessRunner();
+            bool opened = runner.OpenFile(tempFile);
+            Assert.False(opened);
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+            {
+                File.Delete(tempFile);
+            }
+        }
+    }
+
+    [Fact]
+    public void OpenFile_WhenTrusted_SkipsExtensionRejection()
+    {
+        var runner = new ProcessRunner();
+        Assert.False(runner.OpenFile(string.Empty, isTrusted: true));
+        Assert.False(runner.OpenFile(Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.html"), isTrusted: true));
     }
 }

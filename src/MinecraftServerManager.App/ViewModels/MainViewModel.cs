@@ -189,7 +189,7 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>
     /// 透過外部啟動器開啟發行頁面
     /// </summary>
-    public void OpenReleasePage(string url) => _launcher?.OpenUrl(url);
+    public void OpenReleasePage(string url) => _launcher?.OpenUrl(url, isTrusted: true);
 
     [RelayCommand]
     public void Navigate(string pageKey) => NavigateToPage(pageKey);
@@ -235,12 +235,9 @@ public sealed partial class MainViewModel : ViewModelBase
 
         await Task.Run(() => Directory.CreateDirectory(path)).ConfigureAwait(true);
 
-        if (_launcher is not null)
+        if (_launcher is not null && !_launcher.OpenFolder(path, isTrusted: true))
         {
-            if (!_launcher.OpenFolder(path))
-            {
-                ShowNotification($"無法開啟資料夾：{path}", true);
-            }
+            ShowNotification($"無法開啟資料夾：{path}", true);
         }
     }
 
