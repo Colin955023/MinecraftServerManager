@@ -75,10 +75,10 @@ public static partial class ModHelpers
     public static OnlineModVersion? SelectBestModVersion(IEnumerable<OnlineModVersion> versions)
     {
         return versions
-            .OrderByDescending(v => v.PrimaryFile is not null ? 1 : 0)
-            .ThenByDescending(v => GetVersionTypePriority(v.VersionType))
-            .ThenByDescending(v => v.DatePublished)
-            .ThenByDescending(v => v.VersionNumber)
+            .OrderByDescending(static v => v.PrimaryFile is not null ? 1 : 0)
+            .ThenByDescending(static v => GetVersionTypePriority(v.VersionType))
+            .ThenByDescending(static v => v.DatePublished)
+            .ThenByDescending(static v => v.VersionNumber)
             .FirstOrDefault();
     }
 

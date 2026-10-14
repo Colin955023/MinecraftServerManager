@@ -54,7 +54,7 @@ public static class HttpUrlPolicy
         }
 
         Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
-            ?? ((h, token) => Dns.GetHostAddressesAsync(h, token));
+            ?? (static (h, token) => Dns.GetHostAddressesAsync(h, token));
         IPAddress[] addresses;
         try
         {
@@ -65,7 +65,7 @@ public static class HttpUrlPolicy
             throw new HttpSecurityException("URL hostname 無法解析", exception);
         }
 
-        if (addresses.Length == 0 || addresses.Any(address => !IsPublicAddress(address)))
+        if (addresses.Length == 0 || addresses.Any(static address => !IsPublicAddress(address)))
         {
             throw new HttpSecurityException("URL hostname 解析至非公開位址");
         }

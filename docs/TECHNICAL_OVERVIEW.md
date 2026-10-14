@@ -90,6 +90,9 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 - **模組智慧啟閉**：透過標準化副檔名切換（`.jar` 與 `.jar.disabled`）實現無損啟用與停用，並自動處理檔名衝突備份
 - **雜湊校驗與安全下載**：下載 Modrinth 線上模組時，強制執行 SHA-512／SHA-1 雙重雜湊比對，確保檔案未被竄改
 - **多元清單匯出與原生 XLSX 產生器**：支援將模組清單匯出為純文字（.txt）、JSON（.json）、HTML（.html）與 Excel（.xlsx）格式。其中 XLSX 格式由原生輕量級 `OpenXmlSpreadsheetBuilder` 直接透過 `System.IO.Compression.ZipArchive` 產生，零第三方套件相依性，且檔案完全合規相容 Microsoft Excel 與 LibreOffice
+- **外部啟動安全邊界與信任來源架構（IExternalLauncher & ProcessRunner）**：
+  - 開啟外部檔案與網址落實白名單機制，一般未受信任之檔案限定於安全文字與資料副檔名（含 `.txt`, `.log`, `.json`, `.html`, `.xlsx`, `.csv` 等）；非 HTTP/HTTPS 之未知協定一律阻擋。
+  - 實作「信任來源機制」（`isTrusted: true`）：所有由應用程式本身內建宣告的連結（如 GitHub 首頁、發布頁、EULA、模組平台）與本程式產出之建立檔案（如模組匯出檔）均標註為受信任來源，跳過副檔名與協定攔截，直接呼叫 Windows 殼層喚起或讓 Windows 原生彈出「選擇開啟程式」對話視窗。
 
 ### 5. 視窗生命週期與前台焦點管理
 

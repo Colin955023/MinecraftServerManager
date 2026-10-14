@@ -599,7 +599,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     }
 
     /// <summary>
-    /// 讀取 server.properties 中的 server-ip 與 server-port，未設定時使用預設值
+    /// 讀取 server.properties 中的 server-ip 與 server-port，未設定或讀取失敗時使用預設值
     /// </summary>
     private static (string ServerIp, string ServerPort) ReadServerAddress(string? serverPath)
     {
@@ -611,25 +611,41 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             string propsPath = Path.Combine(serverPath, "server.properties");
             if (File.Exists(propsPath))
             {
-                foreach (string line in File.ReadLines(propsPath))
+                try
                 {
-                    string trimmed = line.Trim();
-                    if (trimmed.StartsWith('#') || !trimmed.Contains('='))
+                    using var stream = new FileStream(propsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var reader = new StreamReader(stream, Encoding.UTF8);
+                    string? line;
+                    while ((line = reader.ReadLine()) is not null)
                     {
-                        continue;
-                    }
+                        ReadOnlySpan<char> span = line.AsSpan().Trim();
+                        if (span.IsEmpty || span.StartsWith("#") || span.StartsWith("!"))
+                        {
+                            continue;
+                        }
 
-                    string[] parts = trimmed.Split('=', 2);
-                    string key = parts[0].Trim();
-                    string val = parts[1].Trim();
-                    if (key.Equals("server-port", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(val))
-                    {
-                        serverPort = val;
+                        int eq = span.IndexOf('=');
+                        if (eq <= 0)
+                        {
+                            continue;
+                        }
+
+                        ReadOnlySpan<char> key = span[..eq].Trim();
+                        ReadOnlySpan<char> val = span[(eq + 1)..].Trim();
+
+                        if (key.Equals("server-port", StringComparison.OrdinalIgnoreCase) && !val.IsEmpty)
+                        {
+                            serverPort = val.ToString();
+                        }
+                        else if (key.Equals("server-ip", StringComparison.OrdinalIgnoreCase) && !val.IsEmpty)
+                        {
+                            serverIp = val.ToString();
+                        }
                     }
-                    else if (key.Equals("server-ip", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(val))
-                    {
-                        serverIp = val;
-                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Information("讀取 server.properties 位址資訊時發生存取限制，降級採用預設連接埠：{Message}", ex.Message);
                 }
             }
         }

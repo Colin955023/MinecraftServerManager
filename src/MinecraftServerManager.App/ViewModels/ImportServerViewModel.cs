@@ -99,12 +99,14 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
             else
             {
                 StatusMessage = $"匯入失敗：{result.Message}";
+                _ui.ShowWarning($"匯入伺服器被拒絕或失敗：\n{result.Message}", "匯入伺服器失敗");
             }
         }
         catch (Exception ex)
         {
             progressDialog.Complete();
             StatusMessage = $"匯入異常：{ex.Message}";
+            _ui.ShowError($"匯入伺服器時發生錯誤：\n{ex.Message}", "匯入伺服器異常");
         }
         finally
         {

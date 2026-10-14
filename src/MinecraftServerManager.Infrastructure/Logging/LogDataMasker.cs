@@ -25,14 +25,14 @@ public static partial class LogDataMasker
             return string.Empty;
         }
 
-        string masked = SensitiveKeyValueRegex().Replace(message, match =>
+        string masked = SensitiveKeyValueRegex().Replace(message, static match =>
         {
             string key = match.Groups[1].Value;
             string delimiter = match.Groups[2].Value;
             return $"{key}{delimiter}{MaskReplacement}";
         });
 
-        masked = BearerTokenRegex().Replace(masked, match =>
+        masked = BearerTokenRegex().Replace(masked, static match =>
         {
             string prefix = match.Groups[1].Value;
             return $"{prefix}{MaskReplacement}";

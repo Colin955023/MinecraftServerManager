@@ -106,9 +106,9 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
     {
         EnsureCacheLoaded();
         var majors = _memoryCache.Values
-            .Where(v => v >= 8)
+            .Where(static v => v >= 8)
             .Distinct()
-            .OrderBy(v => v)
+            .OrderBy(static v => v)
             .ToList();
 
         return majors.Count > 0 ? majors : [8, 11, 16, 17, 21];
@@ -316,7 +316,7 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                     // 將結果寫入本地快取
                     if (result.Count > 0)
                     {
-                        var forCache = result.Select(kv => new LoaderVersion(kv.Key, kv.Value, true)).ToList();
+                        var forCache = result.Select(static kv => new LoaderVersion(kv.Key, kv.Value, true)).ToList();
                         SaveCachedVersions(versionsCachePath, forCache);
                     }
                 }

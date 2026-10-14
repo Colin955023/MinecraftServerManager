@@ -17,8 +17,8 @@ public sealed class SafeFileSystemTests
 
             var entries = SafeFileSystem.WalkBoundedTree(root);
 
-            Assert.Contains(entries, entry => entry.IsDirectory && entry.FullPath.EndsWith("nested", StringComparison.Ordinal));
-            Assert.Contains(entries, entry => !entry.IsDirectory && entry.FullPath.EndsWith("child.txt", StringComparison.Ordinal));
+            Assert.Contains(entries, static entry => entry.IsDirectory && entry.FullPath.EndsWith("nested", StringComparison.Ordinal));
+            Assert.Contains(entries, static entry => !entry.IsDirectory && entry.FullPath.EndsWith("child.txt", StringComparison.Ordinal));
         }
         finally
         {

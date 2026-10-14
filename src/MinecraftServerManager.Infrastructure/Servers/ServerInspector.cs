@@ -46,7 +46,7 @@ public sealed partial class ServerInspector : IServerInspector
             }
 
             var entries = SafeFileSystem.ListBoundedDirectory(stableDir, maxEntries: 512, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false);
-            var files = entries.Where(e => !e.IsDirectory).Select(e => Path.GetFileName(e.FullPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var files = entries.Where(static e => !e.IsDirectory).Select(static e => Path.GetFileName(e.FullPath)).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var eulaState = InspectEula(stableDir, files);
             var launchTarget = InspectLaunchTarget(stableDir, files);
@@ -60,7 +60,7 @@ public sealed partial class ServerInspector : IServerInspector
             bool statusReady = launchable && !string.IsNullOrEmpty(mcVersion) && mcVersion != "unknown";
 
             var revisionBuilder = new StringBuilder();
-            foreach (string? file in files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            foreach (string? file in files.OrderBy(static f => f, StringComparer.OrdinalIgnoreCase))
             {
                 revisionBuilder.Append(file).Append(';');
             }
@@ -331,7 +331,7 @@ public sealed partial class ServerInspector : IServerInspector
                 try
                 {
                     var subDirs = SafeFileSystem.ListBoundedDirectory(neoLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(e => e.IsDirectory)
+                        .Where(static e => e.IsDirectory)
                         .ToList();
                     if (subDirs.Count > 0)
                     {
@@ -361,7 +361,7 @@ public sealed partial class ServerInspector : IServerInspector
                 try
                 {
                     var subDirs = SafeFileSystem.ListBoundedDirectory(forgeLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(e => e.IsDirectory);
+                        .Where(static e => e.IsDirectory);
                     foreach (var sub in subDirs)
                     {
                         string dirName = Path.GetFileName(sub.FullPath);
@@ -397,7 +397,7 @@ public sealed partial class ServerInspector : IServerInspector
                 try
                 {
                     var subDirs = SafeFileSystem.ListBoundedDirectory(fabricLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(e => e.IsDirectory)
+                        .Where(static e => e.IsDirectory)
                         .ToList();
                     if (subDirs.Count > 0)
                     {
@@ -421,7 +421,7 @@ public sealed partial class ServerInspector : IServerInspector
                 try
                 {
                     var subDirs = SafeFileSystem.ListBoundedDirectory(quiltLib, maxEntries: 16, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false)
-                        .Where(e => e.IsDirectory)
+                        .Where(static e => e.IsDirectory)
                         .ToList();
                     if (subDirs.Count > 0)
                     {
@@ -441,7 +441,7 @@ public sealed partial class ServerInspector : IServerInspector
         if (loaderType == "unknown")
         {
             if (target.Value.StartsWith("paper", StringComparison.OrdinalIgnoreCase) ||
-                files.Any(f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) ||
+                files.Any(static f => f.StartsWith("paper-", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) ||
                 files.Contains("paper-global.yml") || files.Contains("paper.yml") || files.Contains("paper-world-defaults.yml"))
             {
                 loaderType = "paper";
@@ -643,7 +643,7 @@ public sealed partial class ServerInspector : IServerInspector
             {
                 var dirInfo = new DirectoryInfo(logsDir);
                 var newest = dirInfo.EnumerateFiles("*.log")
-                    .OrderByDescending(f => f.LastWriteTimeUtc)
+                    .OrderByDescending(static f => f.LastWriteTimeUtc)
                     .FirstOrDefault();
                 if (newest is not null)
                 {

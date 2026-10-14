@@ -68,7 +68,7 @@ public sealed class WpfUiService : IUiService
     public void CopyToClipboard(string text) => Clipboard.SetText(text);
 
     public void ActivateMainWindow() =>
-        Application.Current?.Dispatcher.InvokeAsync(() =>
+        Application.Current?.Dispatcher.InvokeAsync(static () =>
         {
             var mainWindow = Application.Current?.MainWindow;
             if (mainWindow is null)

@@ -54,9 +54,9 @@ public sealed class RotatingFileLoggerTests
             provider.Dispose();
 
             string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            Assert.Single(logFiles);
+            string item = Assert.Single(logFiles);
 
-            string content = File.ReadAllText(logFiles[0]);
+            string content = File.ReadAllText(item);
             Assert.Contains(" | INFO     | ServerCore | 伺服器準備啟動", content, StringComparison.Ordinal);
             Assert.Contains(" | WARNING  | ServerCore | 記憶體設定過低", content, StringComparison.Ordinal);
         }
@@ -95,9 +95,9 @@ public sealed class RotatingFileLoggerTests
             provider.Dispose();
 
             string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            Assert.Single(logFiles);
+            string item = Assert.Single(logFiles);
 
-            string content = File.ReadAllText(logFiles[0]);
+            string content = File.ReadAllText(item);
             Assert.Contains(" | ERROR    | ExceptionLogger | 發生嚴重異常", content, StringComparison.Ordinal);
             Assert.Contains("System.InvalidOperationException: 測試例外錯誤", content, StringComparison.Ordinal);
         }
@@ -137,7 +137,7 @@ public sealed class RotatingFileLoggerTests
             string[] allFiles = Directory.GetFiles(tempDir);
             // 應存在基底檔案與至少一個 .1 備份檔案
             Assert.True(allFiles.Length >= 2);
-            Assert.Contains(allFiles, f => f.EndsWith(".1", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(allFiles, static f => f.EndsWith(".1", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -168,9 +168,9 @@ public sealed class RotatingFileLoggerTests
             Assert.Equal(3, remaining.Length);
 
             // 舊的 01 與 02 應被清理，保留 03, 04, 05
-            Assert.DoesNotContain(remaining, f => f.Contains("-01-", StringComparison.Ordinal));
-            Assert.DoesNotContain(remaining, f => f.Contains("-02-", StringComparison.Ordinal));
-            Assert.Contains(remaining, f => f.Contains("-05-", StringComparison.Ordinal));
+            Assert.DoesNotContain(remaining, static f => f.Contains("-01-", StringComparison.Ordinal));
+            Assert.DoesNotContain(remaining, static f => f.Contains("-02-", StringComparison.Ordinal));
+            Assert.Contains(remaining, static f => f.Contains("-05-", StringComparison.Ordinal));
         }
         finally
         {
@@ -205,9 +205,9 @@ public sealed class RotatingFileLoggerTests
             provider.Dispose();
 
             string[] files = Directory.GetFiles(tempDir, "*.log");
-            Assert.Single(files);
+            string item = Assert.Single(files);
 
-            string[] lines = File.ReadAllLines(files[0]);
+            string[] lines = File.ReadAllLines(item);
             Assert.Equal(50, lines.Length);
         }
         finally
@@ -313,9 +313,9 @@ public sealed class RotatingFileLoggerTests
             AppLogging.Shutdown();
 
             string[] logFiles = Directory.GetFiles(tempDir, "*.log");
-            Assert.Single(logFiles);
+            string item = Assert.Single(logFiles);
 
-            string content = File.ReadAllText(logFiles[0]);
+            string content = File.ReadAllText(item);
             Assert.Contains(" | INFO     | AppTest | AppLogging 初始化完成", content, StringComparison.Ordinal);
         }
         finally

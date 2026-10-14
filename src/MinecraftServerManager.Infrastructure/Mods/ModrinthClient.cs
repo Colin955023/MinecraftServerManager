@@ -252,11 +252,11 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                 string iconUrl = hit.TryGetProperty("icon_url", out var iconElem) ? iconElem.GetString() ?? string.Empty : string.Empty;
 
                 var categories = hit.TryGetProperty("categories", out var catElem)
-                    ? [.. catElem.EnumerateArray().Select(c => c.GetString() ?? string.Empty)]
+                    ? [.. catElem.EnumerateArray().Select(static c => c.GetString() ?? string.Empty)]
                     : new List<string>();
 
                 var versions = hit.TryGetProperty("versions", out var verElem)
-                    ? [.. verElem.EnumerateArray().Select(v => v.GetString() ?? string.Empty)]
+                    ? [.. verElem.EnumerateArray().Select(static v => v.GetString() ?? string.Empty)]
                     : new List<string>();
 
                 string serverSide = hit.TryGetProperty("server_side", out var ssElem) ? ssElem.GetString() ?? string.Empty : string.Empty;
@@ -322,11 +322,11 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         string changelog = elem.TryGetProperty("changelog", out var cl) ? cl.GetString() ?? string.Empty : string.Empty;
 
         var gameVersions = elem.TryGetProperty("game_versions", out var gv)
-            ? [.. gv.EnumerateArray().Select(v => v.GetString() ?? string.Empty)]
+            ? [.. gv.EnumerateArray().Select(static v => v.GetString() ?? string.Empty)]
             : new List<string>();
 
         var loaders = elem.TryGetProperty("loaders", out var ld)
-            ? [.. ld.EnumerateArray().Select(l => l.GetString() ?? string.Empty)]
+            ? [.. ld.EnumerateArray().Select(static l => l.GetString() ?? string.Empty)]
             : new List<string>();
 
         var files = new List<ModFile>();

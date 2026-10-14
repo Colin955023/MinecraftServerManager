@@ -59,7 +59,7 @@ public sealed class OpenXmlSpreadsheetBuilderTests
         using var memoryStream = new MemoryStream(xlsxBytes);
         using var archive = new ZipArchive(memoryStream, ZipArchiveMode.Read);
 
-        var entryNames = archive.Entries.Select(e => e.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var entryNames = archive.Entries.Select(static e => e.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         Assert.Contains("[Content_Types].xml", entryNames);
         Assert.Contains("_rels/.rels", entryNames);

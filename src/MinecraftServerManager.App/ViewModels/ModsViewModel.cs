@@ -315,8 +315,8 @@ public sealed partial class ModsViewModel : PageViewModel
             if (_serverManager is not null)
             {
                 var allServers = await _serverManager.GetAllServersAsync();
-                var serverList = allServers.Where(s => s.LoaderType is LoaderKind.Fabric or LoaderKind.Forge or LoaderKind.NeoForge or LoaderKind.Quilt).ToList();
-                var serverNames = serverList.Select(s => s.Name.Value).ToList();
+                var serverList = allServers.Where(static s => s.LoaderType is LoaderKind.Fabric or LoaderKind.Forge or LoaderKind.NeoForge or LoaderKind.Quilt).ToList();
+                var serverNames = serverList.Select(static s => s.Name.Value).ToList();
                 if (serverNames.Count > 0)
                 {
                     foreach (string name in serverNames)
@@ -496,18 +496,18 @@ public sealed partial class ModsViewModel : PageViewModel
         }
 
         LocalMods.ReplaceAll(filtered);
-        UpdateSelectionState(LocalMods.Count(m => m.IsSelected));
+        UpdateSelectionState(LocalMods.Count(static m => m.IsSelected));
     }
 
     [RelayCommand]
     public void ToggleSelectAll()
     {
-        bool targetState = LocalMods.Any(m => !m.IsSelected);
+        bool targetState = LocalMods.Any(static m => !m.IsSelected);
         foreach (var mod in LocalMods)
         {
             mod.IsSelected = targetState;
         }
-        int selCount = LocalMods.Count(m => m.IsSelected);
+        int selCount = LocalMods.Count(static m => m.IsSelected);
         UpdateSelectionState(selCount);
         Logger.Information("已執行模組全選/取消全選，目標狀態: {State}", targetState);
     }
@@ -553,7 +553,7 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand]
     public async Task BatchToggleAsync()
     {
-        var targets = LocalMods.Where(m => m.IsSelected).ToList();
+        var targets = LocalMods.Where(static m => m.IsSelected).ToList();
         if (targets.Count < 2)
         {
             _notificationSink?.Invoke("批次切換功能需選取至少 2 個模組", true);
@@ -813,11 +813,11 @@ public sealed partial class ModsViewModel : PageViewModel
 
     private async Task PerformModUpdatesAsync(string serverPath, IReadOnlyList<ModUpdateCandidateItem> items)
     {
-        var unofficial = items.Where(i => !ModFileInstaller.IsOfficialModrinthSource(i.DownloadUrl)).ToList();
+        var unofficial = items.Where(static i => !ModFileInstaller.IsOfficialModrinthSource(i.DownloadUrl)).ToList();
         if (unofficial.Count > 0)
         {
             string msg = "下列模組更新下載來源非官方 Modrinth CDN：\n" +
-                         string.Join("\n", unofficial.Select(u => $"• {u.ModName}: {u.DownloadUrl}")) +
+                         string.Join("\n", unofficial.Select(static u => $"• {u.ModName}: {u.DownloadUrl}")) +
                          "\n\n非官方來源可能存在安全風險，是否仍要繼續下載並更新？";
             if (!_ui.Confirm(msg, "非官方下載來源警告", UiMessageLevel.Warning))
             {
@@ -891,7 +891,7 @@ public sealed partial class ModsViewModel : PageViewModel
         await Task.Run(() => Directory.CreateDirectory(modsDir)).ConfigureAwait(true);
 
         Logger.Information("開啟模組資料夾: {Path}", modsDir);
-        if (_launcher is not null && !_launcher.OpenFolder(modsDir))
+        if (_launcher is not null && !_launcher.OpenFolder(modsDir, isTrusted: true))
         {
             _notificationSink?.Invoke($"無法開啟資料夾：{modsDir}", true);
         }
@@ -919,7 +919,7 @@ public sealed partial class ModsViewModel : PageViewModel
 
         string filePath = await Task.Run(() => ResolveModFilePath(server.Path, targetMod.FileName)).ConfigureAwait(true);
 
-        if (_launcher is not null && !_launcher.ShowInFolder(filePath))
+        if (_launcher is not null && !_launcher.ShowInFolder(filePath, isTrusted: true))
         {
             _notificationSink?.Invoke($"無法在資料夾中顯示：{filePath}", true);
         }
@@ -994,7 +994,7 @@ public sealed partial class ModsViewModel : PageViewModel
     [RelayCommand(CanExecute = nameof(CanDeleteMod))]
     public async Task DeleteSelectedModAsync()
     {
-        var targets = LocalMods.Where(m => m.IsSelected).ToList();
+        var targets = LocalMods.Where(static m => m.IsSelected).ToList();
         if (targets.Count == 0 && SelectedLocalMod is not null)
         {
             targets = [SelectedLocalMod];
@@ -1027,7 +1027,7 @@ public sealed partial class ModsViewModel : PageViewModel
         }
 
         var idsToDelete = targets
-            .Select(m => !string.IsNullOrEmpty(m.FileName) ? m.FileName : m.Id)
+            .Select(static m => !string.IsNullOrEmpty(m.FileName) ? m.FileName : m.Id)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -1160,8 +1160,8 @@ public sealed partial class ModsViewModel : PageViewModel
         OnlineMods.Clear();
         IEnumerable<OnlineModRowItem> sorted = SelectedOnlineSort switch
         {
-            "下載量" => _allOnlineMods.OrderByDescending(m => m.DownloadCountRaw),
-            "名稱" => _allOnlineMods.OrderBy(m => m.Title, StringComparer.OrdinalIgnoreCase),
+            "下載量" => _allOnlineMods.OrderByDescending(static m => m.DownloadCountRaw),
+            "名稱" => _allOnlineMods.OrderBy(static m => m.Title, StringComparer.OrdinalIgnoreCase),
             _ => _allOnlineMods
         };
 
@@ -1518,7 +1518,7 @@ public sealed partial class ModsViewModel : PageViewModel
             url = $"https://modrinth.com/mod/{SelectedOnlineMod.Id}";
         }
 
-        if (_launcher is not null && !_launcher.OpenUrl(url))
+        if (_launcher is not null && !_launcher.OpenUrl(url, isTrusted: true))
         {
             _notificationSink?.Invoke($"無法開啟連結：{url}", true);
         }
@@ -1532,8 +1532,8 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        int installs = InstallQueue.Count(i => i.Action == ModInstallAction.Install);
-        int updates = InstallQueue.Count(i => i.Action == ModInstallAction.Update);
+        int installs = InstallQueue.Count(static i => i.Action == ModInstallAction.Install);
+        int updates = InstallQueue.Count(static i => i.Action == ModInstallAction.Update);
 
         InstallQueueHint = updates > 0
             ? $"安裝清單：{installs} 個新增，{updates} 個更新"

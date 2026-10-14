@@ -12,9 +12,9 @@ public sealed class HttpDownloadClientTests
     [Fact]
     public void UrlPolicyRejectsInsecureAndPrivateTargets()
     {
-        Assert.Throws<HttpSecurityException>(() => HttpUrlPolicy.ValidateStatic(new Uri("http://example.com/file")));
-        Assert.Throws<HttpSecurityException>(() => HttpUrlPolicy.ValidateStatic(new Uri("https://user:pass@example.com/file")));
-        Assert.Throws<HttpSecurityException>(() => HttpUrlPolicy.ValidateStatic(new Uri("https://127.0.0.1/file")));
+        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("http://example.com/file")));
+        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("https://user:pass@example.com/file")));
+        Assert.Throws<HttpSecurityException>(static () => HttpUrlPolicy.ValidateStatic(new Uri("https://127.0.0.1/file")));
     }
 
     [Fact]

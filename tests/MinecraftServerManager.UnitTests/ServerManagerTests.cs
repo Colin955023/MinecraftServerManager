@@ -53,7 +53,7 @@ public sealed class ServerManagerTests : IDisposable
         Assert.True(File.Exists(Path.Combine(serverDir, "server.properties")));
 
         var all = await _manager.GetAllServersAsync();
-        Assert.Contains(all, s => s.Name.Value == "Survival-1");
+        Assert.Contains(all, static s => s.Name.Value == "Survival-1");
     }
 
     [Fact]

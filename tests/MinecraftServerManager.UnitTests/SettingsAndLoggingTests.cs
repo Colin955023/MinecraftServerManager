@@ -130,8 +130,8 @@ public sealed class SettingsAndLoggingTests
             Message = formatter(state, exception);
             Arguments = state is IReadOnlyList<KeyValuePair<string, object?>> values
                 ? values
-                    .Where(pair => !string.Equals(pair.Key, "{OriginalFormat}", StringComparison.Ordinal))
-                    .Select(pair => pair.Value)
+                    .Where(static pair => !string.Equals(pair.Key, "{OriginalFormat}", StringComparison.Ordinal))
+                    .Select(static pair => pair.Value)
                     .ToArray()
                 : null;
         }

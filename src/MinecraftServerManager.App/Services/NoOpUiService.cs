@@ -16,11 +16,11 @@ public class NoOpUiService : IUiService
 
     public virtual bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) => true;
 
-    public void ShowInfo(string message, string title) { }
+    public virtual void ShowInfo(string message, string title) { }
 
-    public void ShowWarning(string message, string title) { }
+    public virtual void ShowWarning(string message, string title) { }
 
-    public void ShowError(string message, string title) { }
+    public virtual void ShowError(string message, string title) { }
 
     public void ShowNotificationPopup(string title, string message, NotificationLevel level) { }
 

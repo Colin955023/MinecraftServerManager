@@ -45,9 +45,9 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var releasesOnly = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
-        Assert.Single(releasesOnly);
-        Assert.Equal("1.20.4", releasesOnly[0].Version);
-        Assert.True(releasesOnly[0].Stable);
+        var item = Assert.Single(releasesOnly);
+        Assert.Equal("1.20.4", item.Version);
+        Assert.True(item.Stable);
 
         var allVersions = await service.GetMinecraftVersionsAsync(includeSnapshots: true);
         Assert.Equal(2, allVersions.Count);
@@ -67,8 +67,8 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
-        Assert.Single(versions);
-        Assert.Equal("0.15.7", versions[0].Version);
+        var item = Assert.Single(versions);
+        Assert.Equal("0.15.7", item.Version);
     }
 
     [Fact]
@@ -89,9 +89,9 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Forge, "1.20.4");
-        Assert.Single(versions);
-        Assert.Equal("49.0.1", versions[0].Version);
-        Assert.Equal("1.20.4", versions[0].MinecraftVersion);
+        var item = Assert.Single(versions);
+        Assert.Equal("49.0.1", item.Version);
+        Assert.Equal("1.20.4", item.MinecraftVersion);
     }
 
     [Fact]
@@ -137,9 +137,9 @@ public sealed class LoaderCatalogServiceTests : IDisposable
 
         // 使用者查詢 26.3，快取解析為 1.26.3，應能成功比對
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "26.3");
-        Assert.Single(versions);
-        Assert.Equal("26.3.0.10-beta", versions[0].Version);
-        Assert.Equal("1.26.3", versions[0].MinecraftVersion);
+        var item = Assert.Single(versions);
+        Assert.Equal("26.3.0.10-beta", item.Version);
+        Assert.Equal("1.26.3", item.MinecraftVersion);
     }
 
     [Fact]
@@ -158,8 +158,8 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.Fabric, "1.20.4");
-        Assert.Single(versions);
-        Assert.Equal("0.16.1", versions[0].Version);
+        var item = Assert.Single(versions);
+        Assert.Equal("0.16.1", item.Version);
     }
 
     [Fact]
@@ -314,10 +314,10 @@ public sealed class LoaderCatalogServiceTests : IDisposable
 
         var builds = await service.GetLoaderVersionsAsync(LoaderKind.Paper, "1.21.4");
         // Paper 載入器版本應只取最新版本 (Latest Build)
-        Assert.Single(builds);
-        Assert.Equal("165", builds[0].Version);
-        Assert.True(builds[0].Stable);
-        Assert.Equal("https://fill-data.papermc.io/paper-1.21.4-165.jar", builds[0].Url);
+        var item = Assert.Single(builds);
+        Assert.Equal("165", item.Version);
+        Assert.True(item.Stable);
+        Assert.Equal("https://fill-data.papermc.io/paper-1.21.4-165.jar", item.Url);
 
         // 驗證不應在磁碟中寫入零碎的 build 快取檔案
         Assert.False(File.Exists(Path.Combine(_cacheDir, "paper_1.21.4_builds_cache.json")));
@@ -401,17 +401,17 @@ public sealed class LoaderCatalogServiceTests : IDisposable
 
         var fabricVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Fabric);
         Assert.Equal(2, fabricVersions.Count);
-        Assert.Contains(fabricVersions, v => v.Version == "1.20.4");
-        Assert.Contains(fabricVersions, v => v.Version == "1.14");
-        Assert.DoesNotContain(fabricVersions, v => v.Version == "1.13.2");
-        Assert.DoesNotContain(fabricVersions, v => v.Version == "1.12.2");
+        Assert.Contains(fabricVersions, static v => v.Version == "1.20.4");
+        Assert.Contains(fabricVersions, static v => v.Version == "1.14");
+        Assert.DoesNotContain(fabricVersions, static v => v.Version == "1.13.2");
+        Assert.DoesNotContain(fabricVersions, static v => v.Version == "1.12.2");
 
         var quiltVersions = await service.GetMinecraftVersionsForLoaderAsync(LoaderKind.Quilt);
         Assert.Equal(2, quiltVersions.Count);
-        Assert.Contains(quiltVersions, v => v.Version == "1.20.4");
-        Assert.Contains(quiltVersions, v => v.Version == "1.14");
-        Assert.DoesNotContain(quiltVersions, v => v.Version == "1.13.2");
-        Assert.DoesNotContain(quiltVersions, v => v.Version == "1.12.2");
+        Assert.Contains(quiltVersions, static v => v.Version == "1.20.4");
+        Assert.Contains(quiltVersions, static v => v.Version == "1.14");
+        Assert.DoesNotContain(quiltVersions, static v => v.Version == "1.13.2");
+        Assert.DoesNotContain(quiltVersions, static v => v.Version == "1.12.2");
     }
 
     [Fact]
@@ -477,10 +477,10 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var paperVersions = await service.GetPaperMinecraftVersionsAsync(forceReload: true);
 
         // 26.3 僅有 BETA/ALPHA，無任何 STABLE 建置，必須被剔除！
-        Assert.Single(paperVersions);
-        Assert.Equal("1.21.4", paperVersions[0].Version);
-        Assert.Equal("165", paperVersions[0].Build);
-        Assert.Equal(21, paperVersions[0].JavaMajor);
+        var item = Assert.Single(paperVersions);
+        Assert.Equal("1.21.4", item.Version);
+        Assert.Equal("165", item.Build);
+        Assert.Equal(21, item.JavaMajor);
     }
 
     [Fact]
@@ -500,8 +500,8 @@ public sealed class LoaderCatalogServiceTests : IDisposable
 
         var versions = await service.GetMinecraftVersionsAsync(includeSnapshots: false);
 
-        Assert.Single(versions);
-        Assert.Equal("1.20.4", versions[0].Version);
+        var item = Assert.Single(versions);
+        Assert.Equal("1.20.4", item.Version);
 
         // 驗證快取檔案已自動清洗並剔除 Stable: false
         string cleanedJson = await File.ReadAllTextAsync(cacheFile);

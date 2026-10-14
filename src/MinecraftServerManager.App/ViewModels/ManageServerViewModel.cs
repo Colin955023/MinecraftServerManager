@@ -481,6 +481,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
                 Logger.Error("啟動目標檔案不存在: {Target}", missingTarget);
                 _ = UpdateServerStatusInPlaceAsync();
                 _notificationSink?.Invoke($"啟動目標檔案不存在：{missingTarget}", true);
+                _ui.ShowError($"啟動目標檔案不存在：\n{missingTarget}", "啟動伺服器失敗");
                 return false;
             }
 
@@ -489,6 +490,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             {
                 Logger.Error("解析 Java 執行環境失敗: {Message}", javaError);
                 _notificationSink?.Invoke(javaError, true);
+                _ui.ShowError($"解析 Java 執行環境失敗：\n{javaError}", "啟動伺服器失敗");
                 return false;
             }
 
@@ -506,6 +508,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             {
                 Logger.Error("伺服器啟動後異常結束: {Message}", earlyExit);
                 _notificationSink?.Invoke(earlyExit, true);
+                _ui.ShowError($"伺服器啟動後異常結束：\n{earlyExit}", "伺服器異常結束");
                 _ = UpdateServerStatusInPlaceAsync();
                 return false;
             }
@@ -517,6 +520,7 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
         {
             Logger.Error(ex, "啟動伺服器失敗: {Message}", ex.Message);
             _notificationSink?.Invoke($"啟動伺服器失敗：{ex.Message}", true);
+            _ui.ShowError($"啟動伺服器失敗：\n{ex.Message}", "啟動伺服器失敗");
             return false;
         }
     }
@@ -623,12 +627,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             return;
         }
 
-        if (_launcher is not null)
+        if (_launcher is not null && !_launcher.OpenFolder(SelectedServer.Path, isTrusted: true))
         {
-            if (!_launcher.OpenFolder(SelectedServer.Path))
-            {
-                _notificationSink?.Invoke($"無法開啟資料夾：{SelectedServer.Path}", true);
-            }
+            _notificationSink?.Invoke($"無法開啟資料夾：{SelectedServer.Path}", true);
         }
     }
 
@@ -981,12 +982,9 @@ public sealed partial class ManageServerViewModel : PageViewModel, IDisposable
             return;
         }
 
-        if (_launcher is not null)
+        if (_launcher is not null && !_launcher.OpenFolder(SelectedServer.BackupPath, isTrusted: true))
         {
-            if (!_launcher.OpenFolder(SelectedServer.BackupPath))
-            {
-                _notificationSink?.Invoke($"無法開啟備份資料夾：{SelectedServer.BackupPath}", true);
-            }
+            _notificationSink?.Invoke($"無法開啟備份資料夾：{SelectedServer.BackupPath}", true);
         }
     }
 

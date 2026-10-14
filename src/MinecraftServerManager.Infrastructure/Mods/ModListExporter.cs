@@ -55,7 +55,7 @@ public sealed class ModListExporter : IModListExporter
     private static string BuildJson(IReadOnlyList<ModListExportRow> rows)
     {
         List<ModJsonItem> items = [.. rows
-            .Select(m => new ModJsonItem(
+            .Select(static m => new ModJsonItem(
                 Name: m.Name,
                 Version: m.Version,
                 Enabled: m.IsEnabled,

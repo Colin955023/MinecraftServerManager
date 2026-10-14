@@ -52,7 +52,7 @@ public sealed record ServerInspection
         LoaderType = loaderType ?? "unknown";
         MinecraftVersion = minecraftVersion ?? "unknown";
         LoaderVersion = loaderVersion ?? "unknown";
-        Evidence = (evidence ?? []).ToDictionary(e => e.Key, e => e.Value);
+        Evidence = (evidence ?? []).ToDictionary(static e => e.Key, static e => e.Value);
         Conflicts = [.. conflicts ?? []];
         LaunchTarget = launchTarget ?? ServerLaunchTarget.None();
         MemoryMaxMb = memoryMaxMb;

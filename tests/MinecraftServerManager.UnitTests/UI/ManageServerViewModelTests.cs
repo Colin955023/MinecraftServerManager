@@ -104,13 +104,13 @@ public sealed class ManageServerViewModelTests
     private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher
     {
         public List<string> OpenedFolders { get; } = [];
-        public bool OpenFolder(string folderPath)
+        public bool OpenFolder(string folderPath, bool isTrusted = false)
         {
             OpenedFolders.Add(folderPath);
             return true;
         }
-        public bool ShowInFolder(string filePath) => !string.IsNullOrEmpty(filePath);
-        public bool OpenFile(string filePath) => !string.IsNullOrEmpty(filePath);
-        public bool OpenUrl(string url) => !string.IsNullOrEmpty(url);
+        public bool ShowInFolder(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
+        public bool OpenFile(string filePath, bool isTrusted = false) => !string.IsNullOrEmpty(filePath);
+        public bool OpenUrl(string url, bool isTrusted = false) => !string.IsNullOrEmpty(url);
     }
 }

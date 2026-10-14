@@ -115,8 +115,8 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
                     ExpectedHash = ResolveHash(file, out string algorithm),
                     HashAlgorithm = algorithm,
                     Dependencies = [.. version.Dependencies
-                        .Select(d => d.ProjectId ?? string.Empty)
-                        .Where(id => id.Length > 0)]
+                        .Select(static d => d.ProjectId ?? string.Empty)
+                        .Where(static id => id.Length > 0)]
                 });
             }
 

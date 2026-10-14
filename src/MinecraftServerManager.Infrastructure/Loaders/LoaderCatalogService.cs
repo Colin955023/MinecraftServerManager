@@ -152,7 +152,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
         if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
         {
-            return [.. baseVersions.Where(v => MinecraftVersionSemantics.IsFabricCompatible(v.Version))];
+            return [.. baseVersions.Where(static v => MinecraftVersionSemantics.IsFabricCompatible(v.Version))];
         }
 
         return baseVersions;
@@ -385,16 +385,16 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         if (loader is LoaderKind.Fabric or LoaderKind.Quilt)
         {
             return [.. versions
-                .Where(v => v.Stable && !ContainsPreReleaseKeyword(v.Version))
+                .Where(static v => v.Stable && !ContainsPreReleaseKeyword(v.Version))
                 .Take(5)];
         }
 
         if (loader is LoaderKind.Forge or LoaderKind.NeoForge)
         {
             return [.. versions
-                .Where(v => !string.IsNullOrWhiteSpace(v.MinecraftVersion))
-                .GroupBy(v => v.MinecraftVersion!, StringComparer.OrdinalIgnoreCase)
-                .SelectMany(g => g.OrderByDescending(v => v.Version, StringComparer.OrdinalIgnoreCase).Take(4))];
+                .Where(static v => !string.IsNullOrWhiteSpace(v.MinecraftVersion))
+                .GroupBy(static v => v.MinecraftVersion!, StringComparer.OrdinalIgnoreCase)
+                .SelectMany(static g => g.OrderByDescending(static v => v.Version, StringComparer.OrdinalIgnoreCase).Take(4))];
         }
 
         return versions;
@@ -595,8 +595,8 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         var doc = XDocument.Parse(xmlContent, LoadOptions.None);
         var versions = doc.Descendants("version")
-            .Select(x => x.Value.Trim())
-            .Where(x => !string.IsNullOrEmpty(x))
+            .Select(static x => x.Value.Trim())
+            .Where(static x => !string.IsNullOrEmpty(x))
             .Distinct()
             .ToList();
 
@@ -789,14 +789,14 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
             }
         }
 
-        return [.. list.OrderByDescending(v => VersionValue.TryParse(v.Version, out var val) ? val : VersionValue.Zero)];
+        return [.. list.OrderByDescending(static v => VersionValue.TryParse(v.Version, out var val) ? val : VersionValue.Zero)];
     }
 
     private static IReadOnlyList<LoaderVersion> FilterMinecraftVersions(
         IReadOnlyList<LoaderVersion> versions,
         bool includeSnapshots) => includeSnapshots
         ? versions
-        : [.. versions.Where(v => v.Stable && MinecraftVersionSemantics.IsOfficialReleaseVersion(v.Version))];
+        : [.. versions.Where(static v => v.Stable && MinecraftVersionSemantics.IsOfficialReleaseVersion(v.Version))];
 
     private bool IsCacheFresh(string cachePath)
     {
@@ -866,8 +866,8 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         }
 
         return [.. set
-            .OrderByDescending(v => VersionValue.TryParse(v, out var val) ? val : VersionValue.Zero)
-            .Select(v => new LoaderVersion(v, Stable: true, MinecraftVersion: v))];
+            .OrderByDescending(static v => VersionValue.TryParse(v, out var val) ? val : VersionValue.Zero)
+            .Select(static v => new LoaderVersion(v, Stable: true, MinecraftVersion: v))];
     }
 
     private async Task<IReadOnlyList<LoaderVersion>> FetchPaperBuildsAsync(

@@ -52,7 +52,7 @@ public sealed class ModDependencyPlannerTests
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", []);
 
         Assert.False(report.Compatible);
-        Assert.Contains(report.HardErrors, e => e.Contains("載入器", StringComparison.Ordinal));
+        Assert.Contains(report.HardErrors, static e => e.Contains("載入器", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -145,8 +145,8 @@ public sealed class ModDependencyPlannerTests
 
         // 應成功解析出 mod-b 與 mod-c，且略過已安裝相容的 mod-installed 與循環的 mod-a
         Assert.Equal(2, result.Count);
-        Assert.Contains(result, v => v.TargetVersion.VersionId == "ver-b" && v.Action == ModInstallAction.Install);
-        Assert.Contains(result, v => v.TargetVersion.VersionId == "ver-c" && v.Action == ModInstallAction.Install);
+        Assert.Contains(result, static v => v.TargetVersion.VersionId == "ver-b" && v.Action == ModInstallAction.Install);
+        Assert.Contains(result, static v => v.TargetVersion.VersionId == "ver-c" && v.Action == ModInstallAction.Install);
     }
 
     [Fact]
@@ -176,8 +176,7 @@ public sealed class ModDependencyPlannerTests
             installedMods: installedMods);
 
         // 應標記為 Update，且關聯既有本地模組
-        Assert.Single(result);
-        var plan = result[0];
+        var plan = Assert.Single(result);
         Assert.Equal(ModInstallAction.Update, plan.Action);
         Assert.Equal("ver-dep-new", plan.TargetVersion.VersionId);
         Assert.NotNull(plan.ExistingLocalMod);
@@ -199,7 +198,7 @@ public sealed class ModDependencyPlannerTests
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "fabric", [], serverSide: "unsupported");
 
         Assert.False(report.Compatible);
-        Assert.Contains(report.HardErrors, e => e.Contains("僅支援用戶端", StringComparison.Ordinal));
+        Assert.Contains(report.HardErrors, static e => e.Contains("僅支援用戶端", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -253,7 +252,7 @@ public sealed class ModDependencyPlannerTests
         var report = planner.EvaluateCompatibility(targetVersion, "1.20.1", "paper", []);
 
         Assert.False(report.Compatible);
-        Assert.Contains(report.HardErrors, e => e.Contains("不支援", StringComparison.Ordinal));
+        Assert.Contains(report.HardErrors, static e => e.Contains("不支援", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -311,8 +310,8 @@ public sealed class ModDependencyPlannerTests
             serverLoader: "fabric",
             installedMods: []);
 
-        Assert.Single(result);
-        Assert.Equal("ver-release", result[0].TargetVersion.VersionId);
+        var plan = Assert.Single(result);
+        Assert.Equal("ver-release", plan.TargetVersion.VersionId);
     }
 
     private sealed class StubModrinthClient : Core.Ports.IModrinthClient

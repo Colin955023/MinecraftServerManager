@@ -445,7 +445,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (target.TryGetProperty("authorList", out var authorListElem) && authorListElem.ValueKind == JsonValueKind.Array)
         {
-            var authors = authorListElem.EnumerateArray().Select(a => a.GetString()).Where(a => !string.IsNullOrWhiteSpace(a));
+            var authors = authorListElem.EnumerateArray().Select(static a => a.GetString()).Where(static a => !string.IsNullOrWhiteSpace(a));
             meta.Author = string.Join(", ", authors);
         }
     }

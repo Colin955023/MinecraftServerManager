@@ -140,7 +140,7 @@ public sealed class SettingsManager
         }
     }
 
-    public void MarkFirstRunCompleted() => Update(settings => settings with { FirstRunCompleted = true });
+    public void MarkFirstRunCompleted() => Update(static settings => settings with { FirstRunCompleted = true });
 
     /// <summary>
     /// 全域 UI 縮放比例（0.5 ~ 3.0，預設 1.0）

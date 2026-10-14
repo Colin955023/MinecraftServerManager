@@ -58,8 +58,7 @@ public sealed class LocalModScannerTests : IDisposable
         var scanner = new LocalModScanner(persistence);
         var mods = await scanner.ScanModsAsync(_modsDir);
 
-        Assert.Single(mods);
-        var mod = mods[0];
+        var mod = Assert.Single(mods);
         Assert.Equal("fabric_example", mod.Id);
         Assert.Equal("Fabric Example Mod", mod.Name);
         Assert.Equal("1.0.0", mod.Version);
@@ -90,8 +89,7 @@ public sealed class LocalModScannerTests : IDisposable
         var scanner = new LocalModScanner(persistence);
         var mods = await scanner.ScanModsAsync(_modsDir);
 
-        Assert.Single(mods);
-        var mod = mods[0];
+        var mod = Assert.Single(mods);
         Assert.Equal("forge_test", mod.Id);
         Assert.Equal("Forge Test Mod", mod.Name);
         Assert.Equal("2.0.0", mod.Version);
@@ -111,8 +109,7 @@ public sealed class LocalModScannerTests : IDisposable
         var scanner = new LocalModScanner(persistence);
         var mods = await scanner.ScanModsAsync(_modsDir);
 
-        Assert.Single(mods);
-        var mod = mods[0];
+        var mod = Assert.Single(mods);
         Assert.Equal("jei", mod.Id);
         Assert.Equal("jei", mod.Name);
         Assert.Equal("1.20.1-forge-15.2.0.27", mod.Version);
