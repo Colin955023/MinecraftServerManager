@@ -1,5 +1,5 @@
+using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
-using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -115,6 +115,8 @@ public sealed partial class PropertyEditItem : ObservableObject
 /// </summary>
 public sealed partial class ServerPropertiesViewModel : ObservableObject
 {
+    private readonly IUiService _ui;
+
     private readonly IServerPropertiesStore _propertiesStore;
     private readonly string _serverName;
     private ServerPropertiesSnapshot? _snapshot;
@@ -126,29 +128,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
     [ObservableProperty]
     public partial string SelectedCategory { get; set; } = "全部";
 
-    [ObservableProperty]
-    public partial string Motd { get; set; } = "A Minecraft Server";
 
-    [ObservableProperty]
-    public partial string ServerPort { get; set; } = "25565";
-
-    [ObservableProperty]
-    public partial string MaxPlayers { get; set; } = "20";
-
-    [ObservableProperty]
-    public partial string SelectedDifficulty { get; set; } = "easy";
-
-    [ObservableProperty]
-    public partial string SelectedGamemode { get; set; } = "survival";
-
-    [ObservableProperty]
-    public partial bool Pvp { get; set; } = true;
-
-    [ObservableProperty]
-    public partial bool OnlineMode { get; set; } = true;
-
-    [ObservableProperty]
-    public partial bool WhiteList { get; set; }
 
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
@@ -174,14 +154,14 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
 
     public string WindowTitle { get; }
 
-    public IReadOnlyList<string> Difficulties { get; } = ["peaceful", "easy", "normal", "hard"];
 
-    public IReadOnlyList<string> Gamemodes { get; } = ["survival", "creative", "adventure", "spectator"];
 
     public event Action<bool>? RequestClose;
 
-    public ServerPropertiesViewModel(IServerPropertiesStore propertiesStore, string serverName)
+    public ServerPropertiesViewModel(IServerPropertiesStore propertiesStore, string serverName,
+        IUiService? uiService = null)
     {
+        _ui = uiService ?? NoOpUiService.Instance;
         _propertiesStore = propertiesStore;
         _serverName = serverName;
         WindowTitle = $"伺服器設定 — {serverName}";
@@ -245,65 +225,11 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
                 _allItems.Add(item);
             }
 
-            // 同步快捷屬性
-            SyncLegacyProperties();
-
             ApplyFilter();
         }
         catch (Exception ex)
         {
             StatusMessage = $"讀取屬性失敗：{ex.Message}";
-        }
-    }
-
-    private void SyncLegacyProperties()
-    {
-        PropertyEditItem? motdItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "motd", StringComparison.OrdinalIgnoreCase));
-        if (motdItem is not null)
-        {
-            Motd = motdItem.Value;
-        }
-
-        PropertyEditItem? portItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "server-port", StringComparison.OrdinalIgnoreCase));
-        if (portItem is not null)
-        {
-            ServerPort = portItem.Value;
-        }
-
-        PropertyEditItem? mpItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "max-players", StringComparison.OrdinalIgnoreCase));
-        if (mpItem is not null)
-        {
-            MaxPlayers = mpItem.Value;
-        }
-
-        PropertyEditItem? diffItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "difficulty", StringComparison.OrdinalIgnoreCase));
-        if (diffItem is not null)
-        {
-            SelectedDifficulty = diffItem.Value;
-        }
-
-        PropertyEditItem? gmItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "gamemode", StringComparison.OrdinalIgnoreCase));
-        if (gmItem is not null)
-        {
-            SelectedGamemode = gmItem.Value;
-        }
-
-        PropertyEditItem? pvpItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "pvp", StringComparison.OrdinalIgnoreCase));
-        if (pvpItem is not null)
-        {
-            Pvp = pvpItem.BoolValue;
-        }
-
-        PropertyEditItem? omItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "online-mode", StringComparison.OrdinalIgnoreCase));
-        if (omItem is not null)
-        {
-            OnlineMode = omItem.BoolValue;
-        }
-
-        PropertyEditItem? wlItem = _allItems.FirstOrDefault(i => string.Equals(i.Key, "white-list", StringComparison.OrdinalIgnoreCase));
-        if (wlItem is not null)
-        {
-            WhiteList = wlItem.BoolValue;
         }
     }
 
@@ -337,7 +263,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
     [RelayCommand]
     public void ResetAllToDefault()
     {
-        if (!Views.DialogHelper.Confirm("確定要將所有伺服器設定屬性還原為預設值嗎？", "確認還原預設", MessageBoxImage.Warning))
+        if (!_ui.Confirm("確定要將所有伺服器設定屬性還原為預設值嗎？", "確認還原預設", UiMessageLevel.Warning))
         {
             return;
         }
@@ -346,7 +272,6 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
         {
             item.ResetToDefault();
         }
-        SyncLegacyProperties();
         StatusMessage = "已將所有屬性還原為官方預設值";
     }
 

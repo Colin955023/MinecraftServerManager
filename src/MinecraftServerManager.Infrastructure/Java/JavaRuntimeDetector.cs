@@ -24,6 +24,8 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         "Semeru"
     ];
 
+    private static readonly string[] VersionArgs = ["-version"];
+
     public async Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
@@ -39,19 +41,30 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             }
         }
 
-        var detected = new List<JavaRuntimeInfo>();
-        foreach (string candidate in EnumerateCandidates())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var runtime = await TryReadRuntimeAsync(candidate, cancellationToken).ConfigureAwait(false);
-            if (runtime is not null && detected.All(item =>
-                    !string.Equals(item.ExecutablePath, runtime.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
-            {
-                detected.Add(runtime);
-            }
-        }
+        var candidates = EnumerateCandidates()
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        var sorted = detected
+        var detectedBag = new System.Collections.Concurrent.ConcurrentBag<JavaRuntimeInfo>();
+        var parallelOptions = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 2, 6)
+        };
+
+        await Parallel.ForEachAsync(candidates, parallelOptions, async (candidate, ct) =>
+        {
+            var runtime = await TryReadRuntimeAsync(candidate, ct).ConfigureAwait(false);
+            if (runtime is not null)
+            {
+                detectedBag.Add(runtime);
+            }
+        }).ConfigureAwait(false);
+
+        var sorted = detectedBag
+            .GroupBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
             .OrderBy(item => item.MajorVersion)
             .ThenByDescending(item => item.Is64Bit)
             .ThenBy(item => item.ExecutablePath, StringComparer.OrdinalIgnoreCase)
@@ -123,7 +136,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             }
 
             var process = await processRunner.StartAsync(
-                new ProcessStartSpec(probeExecutable, ["-version"]),
+                new ProcessStartSpec(probeExecutable, VersionArgs),
                 cancellationToken).ConfigureAwait(false);
 
             var output = new StringBuilder();

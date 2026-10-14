@@ -20,15 +20,6 @@ public sealed record LoaderVersion(
     string? Build = null);
 
 /// <summary>
-/// 載入器安裝器描述
-/// </summary>
-public sealed record LoaderInstallerSpec(
-    string Url,
-    string? ExpectedHash = null,
-    string? HashAlgorithm = null,
-    string Version = "");
-
-/// <summary>
 /// 載入器安裝進度快照
 /// </summary>
 public sealed record LoaderInstallProgress(

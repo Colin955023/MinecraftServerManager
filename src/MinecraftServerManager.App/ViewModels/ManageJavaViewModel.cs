@@ -1,8 +1,8 @@
+using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using Microsoft.Win32;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -35,6 +35,8 @@ public sealed partial class JavaItemViewModel : ObservableObject
 
 public sealed partial class ManageJavaViewModel : ObservableObject
 {
+    private readonly IUiService _ui;
+
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ManageJava");
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
@@ -74,8 +76,10 @@ public sealed partial class ManageJavaViewModel : ObservableObject
         IJavaInstaller? javaInstaller,
         string currentJavaPath,
         string minecraftVersion,
-        string loaderName)
+        string loaderName,
+        IUiService? uiService = null)
     {
+        _ui = uiService ?? NoOpUiService.Instance;
         _javaDetector = javaDetector;
         _javaRequirementService = javaRequirementService;
         _javaInstaller = javaInstaller;
@@ -162,9 +166,30 @@ public sealed partial class ManageJavaViewModel : ObservableObject
 
         int targetMajor = SelectedInstallMajor;
         IsBusy = true;
-        StatusMessage = $"正在透過 winget 安裝 Java {targetMajor}，請在 UAC 提示時允許...";
+        StatusMessage = "正在檢查本機 Java 候選版本...";
         try
         {
+            // 點選之後先觸發重新整理本機候選
+            await LoadInstalledJavasAsync(SelectedJava?.ExecutablePath ?? ResultJavaPath, forceRefresh: true).ConfigureAwait(true);
+
+            // 比對目標 Java 主要版本在本機候選中是否有可用的
+            var javaSnapshot = InstalledJavas.ToList();
+            var existing = await Task.Run(() => javaSnapshot.FirstOrDefault(j =>
+                j.MajorVersion == targetMajor &&
+                !string.IsNullOrWhiteSpace(j.ExecutablePath) &&
+                File.Exists(j.ExecutablePath))).ConfigureAwait(true);
+
+            if (existing is not null)
+            {
+                SelectedJava = existing;
+                StatusMessage = $"本機已有可使用的 Java {targetMajor}，已自動選取：{existing.ExecutablePath}";
+                _ui.ShowInfo(
+                    $"本機已偵測到可使用的 Java {targetMajor}！\n\n路徑：{existing.ExecutablePath}\n廠商：{existing.Vendor}\n\n系統已為您自動選取該版本，無需重複安裝。",
+                    "本機已有可用版本");
+                return;
+            }
+
+            StatusMessage = $"正在透過 winget 安裝 Java {targetMajor}，請在 UAC 提示時允許...";
             await _javaInstaller.InstallWithWingetAsync(targetMajor).ConfigureAwait(true);
             StatusMessage = $"Java {targetMajor} 安裝完成，正在重新整理清單...";
             await LoadInstalledJavasAsync(null, forceRefresh: true).ConfigureAwait(true);
@@ -191,16 +216,9 @@ public sealed partial class ManageJavaViewModel : ObservableObject
     [RelayCommand]
     public void BrowseFile()
     {
-        var dialog = new OpenFileDialog
+        if (_ui.PickFiles("選取 Java 執行檔", "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*") is { Count: > 0 } picked)
         {
-            Title = "選取 Java 執行檔",
-            Filter = "Java 執行檔 (javaw.exe;java.exe)|javaw.exe;java.exe|所有檔案 (*.*)|*.*",
-            CheckFileExists = true
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            string path = dialog.FileName;
+            string path = picked[0];
             var existing = InstalledJavas.FirstOrDefault(j => string.Equals(j.ExecutablePath, path, StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {

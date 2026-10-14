@@ -17,7 +17,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         File.WriteAllText(Path.Combine(_testDir, "server.jar"), "dummy jar");
-        File.WriteAllText(Path.Combine(_testDir, "run.bat"), "@echo off\njava -jar server.jar nogui\n");
+        File.WriteAllText(Path.Combine(_testDir, "run.bat"), "@echo off\n\"C:\\Java\\bin\\java.exe\" -jar server.jar nogui\n");
         return ValueTask.CompletedTask;
     }
 

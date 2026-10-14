@@ -13,6 +13,9 @@ public sealed class SafeScriptValidatorTests
     [InlineData("@echo off ^& calc.exe")]
     [InlineData("pause & shutdown /s")]
     [InlineData("chcp 65001 & notepad")]
+    [InlineData("chcp 65001 > evil.bat")]
+    [InlineData("chcp 65001 >> evil.txt")]
+    [InlineData("chcp 65001 & calc > nul")]
     public void RejectsCommandChainingAndRedirectionEvenWithSafePrefix(string maliciousLine)
     {
         string dir = CreateTempDirectory();
@@ -103,7 +106,7 @@ public sealed class SafeScriptValidatorTests
                 @echo off
                 chcp 65001
                 cd /d "%~dp0"
-                java @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1/win_args.txt %*
+                "C:\Program Files\Java\jdk-21\bin\java.exe" @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1/win_args.txt %*
                 pause
                 """;
             File.WriteAllText(script, validContent);
@@ -111,6 +114,62 @@ public sealed class SafeScriptValidatorTests
             bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
 
             Assert.True(isValid);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("chcp 65001 > nul")]
+    [InlineData("chcp 65001 >nul")]
+    [InlineData("@chcp 65001 > nul")]
+    public void AcceptsChcpNulRedirection(string chcpLine)
+    {
+        string dir = CreateTempDirectory();
+        try
+        {
+            string script = Path.Combine(dir, "start_server.bat");
+            string content = $"""
+                @echo off
+                {chcpLine}
+                cd /d "%~dp0"
+                "C:\Java\bin\java.exe" -Xms1024M -Xmx2048M -jar "server.jar" nogui %*
+                """;
+            File.WriteAllText(script, content);
+
+            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+
+            Assert.True(isValid);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("java -jar server.jar")]
+    [InlineData("\"java\" -jar server.jar")]
+    [InlineData("java.exe -jar server.jar")]
+    [InlineData("\"java.exe\" -jar server.jar")]
+    public void RejectsUnqualifiedJavaCommands(string unqualifiedCommand)
+    {
+        string dir = CreateTempDirectory();
+        try
+        {
+            string script = Path.Combine(dir, "unqualified.bat");
+            string content = $"""
+                @echo off
+                cd /d "%~dp0"
+                {unqualifiedCommand}
+                """;
+            File.WriteAllText(script, content);
+
+            bool isValid = SafeScriptValidator.ValidateScriptContent(script, dir);
+
+            Assert.False(isValid);
         }
         finally
         {

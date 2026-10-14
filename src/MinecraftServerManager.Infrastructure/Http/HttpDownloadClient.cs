@@ -158,7 +158,7 @@ public sealed class HttpDownloadClient(
                     try
                     {
                         ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                            ? segment.AsSpan()
+                            ? segment
                             : bodyStream.ToArray();
 
                         var payload = JsonSerializer.Deserialize<T>(utf8Span, JsonCodecOptions);
@@ -263,7 +263,7 @@ public sealed class HttpDownloadClient(
 
                     using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxTextBytes, attemptCancellation.Token).ConfigureAwait(false);
                     ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                        ? segment.AsSpan()
+                        ? segment
                         : bodyStream.ToArray();
 
                     return Encoding.UTF8.GetString(utf8Span);
@@ -343,7 +343,7 @@ public sealed class HttpDownloadClient(
 
                 using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, cancellationToken).ConfigureAwait(false);
                 ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                    ? segment.AsSpan()
+                    ? segment
                     : bodyStream.ToArray();
 
                 return Encoding.UTF8.GetString(utf8Span);
@@ -635,8 +635,9 @@ public sealed class HttpDownloadClient(
             await output.FlushAsync(cancellationToken).ConfigureAwait(false);
             if (expectedHash is not null)
             {
-                string actual = Convert.ToHexString(hash!.GetHashAndReset()).ToLowerInvariant();
-                if (!CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual), Convert.FromHexString(expectedHash)))
+                byte[] actualBytes = hash!.GetHashAndReset();
+                byte[] expectedBytes = Convert.FromHexString(expectedHash);
+                if (!CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes))
                 {
                     return new HttpDownloadResult(false, "下載檔案雜湊驗證失敗", downloaded);
                 }

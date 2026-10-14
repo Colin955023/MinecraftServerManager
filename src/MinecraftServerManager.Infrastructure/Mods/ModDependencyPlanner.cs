@@ -7,7 +7,7 @@ using MinecraftServerManager.Infrastructure.Logging;
 namespace MinecraftServerManager.Infrastructure.Mods;
 
 /// <summary>
-/// 模組版本相容性與相依性關係分析規劃實作（比照 Prism Launcher 標準）
+/// 模組版本相容性與相依性關係分析規劃實作
 /// </summary>
 public sealed class ModDependencyPlanner : IModDependencyPlanner
 {
@@ -61,7 +61,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         string normalizedServerLoader = ModHelpers.NormalizeIdentifier(serverLoader);
         string normalizedServerMcVer = ModHelpers.NormalizeIdentifier(serverMinecraftVersion);
 
-        // 0. 伺服器端環境相容性檢查 (比照 Prism Launcher：純用戶端模組不可在伺服器運作)
+        // 0. 伺服器端環境相容性檢查 (純用戶端模組不可在伺服器運作)
         if (!string.IsNullOrWhiteSpace(serverSide) && string.Equals(serverSide.Trim(), "unsupported", StringComparison.OrdinalIgnoreCase))
         {
             hardErrors.Add("此模組僅支援用戶端，不相容伺服器環境 (server_side: unsupported)");
@@ -452,7 +452,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
             return true;
         }
 
-        // 比照 Prism Launcher：相容 1.20 與 1.20.0 語意
+        // 相容 1.20 與 1.20.0 等價版本語意
         if (serverMcVer.EndsWith(".0", StringComparison.Ordinal) &&
             targetMcVersions.Contains(serverMcVer[..^2]))
         {

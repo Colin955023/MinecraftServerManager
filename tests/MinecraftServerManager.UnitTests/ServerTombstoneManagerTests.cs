@@ -22,7 +22,7 @@ public sealed class ServerTombstoneManagerTests
             Assert.False(Directory.Exists(source));
             Assert.True(Directory.Exists(dest));
 
-            // 目標已存在時拋出例外
+            // 目標已存在時擲出例外
             Directory.CreateDirectory(source);
             Assert.Throws<SafeFileSystemException>(() =>
                 SafeFileSystem.MoveWithinStrict(tempDir.FullName, source, dest));

@@ -83,7 +83,7 @@ public sealed class ServerMonitorViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ReloadLogs_ClearsExistingAndLoadsFromDiskWithinLimits()
+    public async Task ReloadLogs_ClearsExistingAndLoadsFromDiskWithinLimits()
     {
         string logsDir = Path.Combine(_tempServerDir, "logs");
         Directory.CreateDirectory(logsDir);
@@ -94,11 +94,13 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         File.WriteAllLines(logFile, ["Line 1", "Line 2", "Line 3", "Line 4", "Line 5"], utf8NoBom);
 
         using var vm = new ServerMonitorViewModel(_runtime, "TestServer", _tempServerDir);
+        await vm.HistoryLoadTask;
         Assert.Equal(5, vm.Logs.Count);
 
         // 修改記錄檔內容為 3 行新內容，並執行手動重新載入
         File.WriteAllLines(logFile, ["New A", "New B", "New C"], utf8NoBom);
         vm.ReloadLogs();
+        await vm.HistoryLoadTask;
 
         // 驗證已先清空舊紀錄並重新載入最新 3 行
         Assert.Equal(3, vm.Logs.Count);

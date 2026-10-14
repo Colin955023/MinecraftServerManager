@@ -95,6 +95,7 @@
               Height="34"
               Padding="20,0"
               IsEnabled="False"
+              IsDefault="True"
               Click="CompleteButton_Click" />
     </Grid>
   </Grid>

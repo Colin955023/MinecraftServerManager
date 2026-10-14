@@ -58,7 +58,7 @@ public static partial class DataGridNaturalSortBehavior
             ? ListSortDirection.Ascending
             : ListSortDirection.Descending;
 
-        // 清除其他欄位箭頭，指派當前欄位排序方向
+        // 清除其他欄位箭頭，指派目前欄位排序方向
         foreach (var col in dataGrid.Columns)
         {
             if (!ReferenceEquals(col, column))

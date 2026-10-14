@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Domain.Mods;
 
@@ -48,7 +49,21 @@ public static partial class ModHelpers
         clean = McVersionNoiseRegex().Replace(clean, " ");
         clean = VersionDigitNoiseRegex().Replace(clean, " ");
 
-        return string.Join(" ", clean.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim();
+        var sb = new StringBuilder(clean.Length);
+        foreach (var range in clean.AsSpan().Split(' '))
+        {
+            var word = clean.AsSpan(range);
+            if (!word.IsEmpty)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append(' ');
+                }
+                sb.Append(word);
+            }
+        }
+
+        return sb.ToString().Trim();
     }
 
     public static bool IsAllowedVersionType(string? versionType)

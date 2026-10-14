@@ -23,21 +23,14 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        try
+        if (TryShellExecute(() => new ProcessStartInfo { FileName = folderPath, UseShellExecute = true }) is { } error)
         {
-            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
-            {
-                FileName = folderPath,
-                UseShellExecute = true,
-            });
-            Logger.Information("已開啟資料夾: {Path}", folderPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "開啟資料夾異常: {Path}", folderPath);
+            Logger.Error(error, "開啟資料夾異常: {Path}", folderPath);
             return false;
         }
+
+        Logger.Information("已開啟資料夾: {Path}", folderPath);
+        return true;
     }
 
     public bool ShowInFolder(string filePath)
@@ -48,23 +41,24 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        try
+        string sanitized = Path.GetFullPath(filePath)
+            .Replace("\"", string.Empty)
+            .Replace("\r", string.Empty)
+            .Replace("\n", string.Empty);
+
+        if (TryShellExecute(() => new ProcessStartInfo
         {
-            string sanitized = Path.GetFullPath(filePath).Replace("\"", string.Empty);
-            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = $"/select,\"{sanitized}\"",
-                UseShellExecute = true,
-            });
-            Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
-            return true;
-        }
-        catch (Exception ex)
+            FileName = "explorer.exe",
+            Arguments = $"/select,\"{sanitized}\"",
+            UseShellExecute = true,
+        }) is { } error)
         {
-            Logger.Error(ex, "在資料夾中顯示檔案異常: {Path}", filePath);
+            Logger.Error(error, "在資料夾中顯示檔案異常: {Path}", filePath);
             return false;
         }
+
+        Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
+        return true;
     }
 
     public bool OpenFile(string filePath)
@@ -82,21 +76,14 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        try
+        if (TryShellExecute(() => new ProcessStartInfo { FileName = filePath, UseShellExecute = true }) is { } error)
         {
-            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
-            {
-                FileName = filePath,
-                UseShellExecute = true,
-            });
-            Logger.Information("已開啟檔案: {Path}", filePath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.Error(ex, "開啟檔案異常: {Path}", filePath);
+            Logger.Error(error, "開啟檔案異常: {Path}", filePath);
             return false;
         }
+
+        Logger.Information("已開啟檔案: {Path}", filePath);
+        return true;
     }
 
     public bool OpenUrl(string url)
@@ -113,20 +100,29 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
+        if (TryShellExecute(() => new ProcessStartInfo { FileName = url, UseShellExecute = true }) is { } error)
+        {
+            Logger.Error(error, "開啟網址異常: {Url}", url);
+            return false;
+        }
+
+        Logger.Information("已開啟網址: {Url}", url);
+        return true;
+    }
+
+    /// <summary>
+    /// 以殼層方式啟動目標；成功回傳 null，失敗回傳例外供呼叫端記錄
+    /// </summary>
+    private static Exception? TryShellExecute(Func<ProcessStartInfo> createStartInfo)
+    {
         try
         {
-            using var process = System.Diagnostics.Process.Start(new ProcessStartInfo
-            {
-                FileName = url,
-                UseShellExecute = true,
-            });
-            Logger.Information("已開啟網址: {Url}", url);
-            return true;
+            System.Diagnostics.Process.Start(createStartInfo())?.Dispose();
+            return null;
         }
         catch (Exception ex)
         {
-            Logger.Error(ex, "開啟網址異常: {Url}", url);
-            return false;
+            return ex;
         }
     }
 
@@ -330,10 +326,23 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             add
             {
                 ArgumentNullException.ThrowIfNull(value);
+                List<ProcessOutput>? backlog = null;
                 lock (_outputLock)
                 {
                     _outputReceived += value;
-                    while (_pendingOutput.TryDequeue(out var output))
+                    if (_pendingOutput.Count > 0)
+                    {
+                        backlog = new List<ProcessOutput>(_pendingOutput.Count);
+                        while (_pendingOutput.TryDequeue(out var output))
+                        {
+                            backlog.Add(output);
+                        }
+                    }
+                }
+
+                if (backlog is not null)
+                {
+                    foreach (var output in backlog)
                     {
                         value(output);
                     }
@@ -388,9 +397,8 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    _wasForceStopped = true;
                     Logger.Warning("子行程 (PID: {Pid}) 未在預期時間內結束，執行強制中斷行程樹", _process.Id);
-                    _process.Kill(entireProcessTree: true);
+                    ForceKill();
                 }
             }
 
@@ -407,13 +415,25 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             _disposed = true;
             if (!_process.HasExited)
             {
-                _wasForceStopped = true;
-                _process.Kill(entireProcessTree: true);
+                ForceKill();
             }
 
             await _process.WaitForExitAsync().ConfigureAwait(false);
             await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
             _process.Dispose();
+        }
+
+        private void ForceKill()
+        {
+            _wasForceStopped = true;
+            try
+            {
+                _process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                Logger.Debug("強制終止子行程時行程已結束或權限不足: {Message}", ex.Message);
+            }
         }
 
         private async Task PumpAsync(StreamReader reader, ProcessOutputKind kind)
@@ -435,7 +455,14 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
                     }
                 }
 
-                handler?.Invoke(output);
+                try
+                {
+                    handler?.Invoke(output);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("處理子行程輸出事件時發生例外: {Message}", ex.Message);
+                }
             }
         }
     }

@@ -77,10 +77,10 @@
                 Margin="0,0,0,14">
           <StackPanel>
             <TextBlock Text="• 本專案採用 GNU General Public License v3.0 授權條款" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 部分設計理念參考 PrismLauncher" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock Text="• 部分設計理念參考 Prism Launcher 等開放原始碼專案" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 可依 GPLv3 條款使用、修改與散布" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 請遵守 Minecraft EULA 和相關法令" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="特別感謝 PrismLauncher 開發團隊的開源貢獻！" Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0" />
+            <TextBlock Text="特別感謝 Prism Launcher 開發團隊的開放原始碼貢獻！" Foreground="{DynamicResource TextBrush}" Margin="0,8,0,0" />
           </StackPanel>
         </Border>
 

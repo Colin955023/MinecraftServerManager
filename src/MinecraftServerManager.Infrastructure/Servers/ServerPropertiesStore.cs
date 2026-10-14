@@ -131,7 +131,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                 Success: false,
                 Snapshot: current,
                 ErrorKind: ServerPropertiesUpdateError.Conflict,
-                Message: "伺服器屬性已被其他程序修改，版本發生衝突");
+                Message: "伺服器屬性已被其他程式修改，版本發生衝突");
         }
 
         string? validationError = ValidatePatches(patches);

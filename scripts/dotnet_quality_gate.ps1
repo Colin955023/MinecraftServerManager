@@ -68,7 +68,7 @@ function Test-SecretsAndPrivacy {
         $env:Path = "$machinePath;$userPath"
         $gitleaksCmd = Get-Command gitleaks -ErrorAction SilentlyContinue
         if ($null -eq $gitleaksCmd) {
-            Write-Warning "安裝完成但當前 Session 仍未找到 gitleaks 命令，請確認 Path 設定"
+            Write-Warning "安裝完成但目前工作階段仍未找到 gitleaks 命令，請確認 Path 設定"
             return
         }
     }
@@ -99,6 +99,15 @@ Invoke-DotnetStep "格式檢查" @("format", $solutionPath, "--verify-no-changes
 Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release")
 
 # 5. 單元測試與整合測試
-Invoke-DotnetStep "測試" @("test", $solutionPath, "-c", "Release", "--no-build")
+try {
+    Invoke-DotnetStep "測試" @("test", $solutionPath, "-c", "Release", "--no-build")
+}
+finally {
+    # 6. 清理測試產生的暫存目錄
+    $testResultsDir = Join-Path $solutionDir "TestResults"
+    if (Test-Path $testResultsDir) {
+        Remove-Item -Path $testResultsDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host "=== C# 門禁通過 ==="

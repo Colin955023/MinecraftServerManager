@@ -170,8 +170,26 @@ public static class SafeZipArchive
 
         using var source = entry.Open();
         using var buffer = new MemoryStream();
-        source.CopyTo(buffer, 1024 * 1024);
-        return buffer.Length <= maxBytes ? buffer.ToArray() : null;
+        byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            int read;
+            while ((read = source.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                if (buffer.Length + read > maxBytes)
+                {
+                    return null;
+                }
+
+                buffer.Write(chunk, 0, read);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunk);
+        }
+
+        return buffer.ToArray();
     }
 
     /// <summary>

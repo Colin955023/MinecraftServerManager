@@ -8,20 +8,18 @@ namespace MinecraftServerManager.App.Views;
 
 public sealed class ModUpdateCandidateItem : INotifyPropertyChanged
 {
-    private bool _isSelected = true;
-
     public bool IsSelected
     {
-        get => _isSelected;
+        get;
         set
         {
-            if (_isSelected != value)
+            if (field != value)
             {
-                _isSelected = value;
+                field = value;
                 OnPropertyChanged();
             }
         }
-    }
+    } = true;
 
     public required string ModName { get; init; }
     public required string CurrentVersion { get; init; }
@@ -73,7 +71,7 @@ public partial class ModUpdatesDialog : Window
     {
         if (!CandidateItems.Any(i => i.IsSelected))
         {
-            DialogHelper.ShowWarning("請至少勾選一個要更新的模組！", "未勾選項目");
+            MessageBox.Show(this, "請至少勾選一個要更新的模組！", "未勾選項目", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         DialogResult = true;

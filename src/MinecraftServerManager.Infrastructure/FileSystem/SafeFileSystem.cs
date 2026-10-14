@@ -286,7 +286,7 @@ public static class SafeFileSystem
     }
 
     /// <summary>
-    /// 嚴格在基準目錄內移動直接子項目（失敗時拋出例外）
+    /// 嚴格在基準目錄內移動直接子項目（失敗時擲出例外）
     /// </summary>
     public static void MoveWithinStrict(string baseDirectory, string sourcePath, string destinationPath)
     {

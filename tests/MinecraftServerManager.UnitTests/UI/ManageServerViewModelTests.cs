@@ -67,7 +67,7 @@ public sealed class ManageServerViewModelTests
                 }
             };
 
-            // 執行 OpenBackupFolder，未設定 BackupPath 且 DialogHelper 在測試中預設不會確認開啟
+            // 執行 OpenBackupFolder，未設定 BackupPath 且在測試中預設不會確認開啟
             await vm.OpenBackupFolderCommand.ExecuteAsync(null);
 
             string internalBackupDir = Path.Combine(tempDir, "backups");
