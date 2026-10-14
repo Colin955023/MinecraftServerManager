@@ -35,7 +35,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟資料夾: {Path} (內建/受信任: {IsTrusted})", folderPath, isTrusted);
+        Logger.Information("已開啟資料夾: {Path}", folderPath);
         return true;
     }
 
@@ -63,7 +63,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已在資料夾中顯示檔案: {Path} (內建/受信任: {IsTrusted})", filePath, isTrusted);
+        Logger.Information("已在資料夾中顯示檔案: {Path}", filePath);
         return true;
     }
 
@@ -92,7 +92,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟檔案: {Path} (內建/受信任: {IsTrusted})", filePath, isTrusted);
+        Logger.Information("已開啟檔案: {Path}", filePath);
         return true;
     }
 
@@ -117,7 +117,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        Logger.Information("已開啟網址: {Url} (內建/受信任: {IsTrusted})", url, isTrusted);
+        Logger.Information("已開啟網址: {Url}", url);
         return true;
     }
 
