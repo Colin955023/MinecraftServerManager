@@ -65,12 +65,7 @@ jobs:
       - name: Extract version and release notes
         id: release_info
         shell: pwsh
-        run: |
-          .\scripts\extract_release_notes.ps1 -Strict
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "提取版本資訊與發行說明失敗"
-            exit $LASTEXITCODE
-          }
+        run: .\scripts\extract_release_notes.ps1 -Strict
 
       - name: Run C# Quality Gate
         shell: pwsh
