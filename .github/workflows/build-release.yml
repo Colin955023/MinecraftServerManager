@@ -73,7 +73,7 @@ jobs:
 
       - name: Publish Dual Executables (Self-contained & Framework-dependent)
         shell: pwsh
-        run: .\scripts\dotnet_publish.ps1 -Configuration Release -Runtime win-x64
+        run: .\scripts\dotnet_publish.ps1
 
       - name: Verify Release Artifacts in output
         shell: pwsh
@@ -143,7 +143,7 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/microsoft/sbom-tool/releases/latest/download/sbom-tool-win-x64.exe" -OutFile $sbomToolPath
           $version = "${{ steps.release_info.outputs.version }}"
           Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
-          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -nsb "https://github.com/Colin955023/MinecraftServerManager"
+          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager"
           if ($LASTEXITCODE -ne 0) {
               throw "SBOM 產生失敗"
           }
