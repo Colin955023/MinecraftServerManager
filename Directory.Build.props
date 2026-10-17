@@ -12,10 +12,10 @@
     <AnalysisModeReliability>All</AnalysisModeReliability>
     <AnalysisModePerformance>All</AnalysisModePerformance>
     <AnalysisModeUsage>All</AnalysisModeUsage>
-    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
-    <GenerateDocumentationFile Condition="'$(IsTestProject)' != 'true'">true</GenerateDocumentationFile>
+    <GenerateDocumentationFile Condition="$([System.String]::Copy('$(MSBuildProjectDirectory)').StartsWith('$(RepoRoot)tests')) != 'True'">true</GenerateDocumentationFile>
+    <PublishDocumentationFiles>false</PublishDocumentationFiles>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

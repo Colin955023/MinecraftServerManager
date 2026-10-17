@@ -25,13 +25,32 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     ];
 
     private static readonly string[] VersionArgs = ["-version"];
+    private readonly Lock _detectLock = new();
+    private Task<IReadOnlyList<JavaRuntimeInfo>>? _inFlightDetection;
 
-    public async Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
+    public Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
 
+        lock (_detectLock)
+        {
+            if (!forceRefresh && _inFlightDetection is not null && !_inFlightDetection.IsCompleted)
+            {
+                return _inFlightDetection.WaitAsync(cancellationToken);
+            }
+
+            var task = DetectInternalAsync(forceRefresh, cancellationToken);
+            _inFlightDetection = task;
+            return task;
+        }
+    }
+
+    private async Task<IReadOnlyList<JavaRuntimeInfo>> DetectInternalAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken)
+    {
         if (!forceRefresh)
         {
             var cached = await TryLoadFromCacheAsync(cancellationToken).ConfigureAwait(false);

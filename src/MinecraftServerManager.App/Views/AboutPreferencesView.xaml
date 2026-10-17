@@ -30,7 +30,7 @@
                    Foreground="{DynamicResource MutedTextBrush}"
                    HorizontalAlignment="Center"
                    Margin="0,0,0,4" />
-        <TextBlock Text="版本 2.0.0"
+        <TextBlock Text="{Binding AppVersion, StringFormat='版本 {0}'}"
                    FontSize="13"
                    Foreground="{DynamicResource MutedTextBrush}"
                    HorizontalAlignment="Center"

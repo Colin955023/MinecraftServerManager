@@ -48,9 +48,6 @@
       <SolidColorBrush x:Key="ComboBoxItemHoverBrush" Color="#2E3442" />
       <SolidColorBrush x:Key="ComboBoxItemSelectedBrush" Color="#3B4459" />
 
-      <Style TargetType="Window">
-        <Setter Property="Icon" Value="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico" />
-      </Style>
 
       <Style TargetType="TextBlock">
         <Setter Property="FontFamily" Value="Segoe UI" />

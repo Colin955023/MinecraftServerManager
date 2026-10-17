@@ -202,7 +202,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!IsRunning || _process is null)
+        var proc = _process;
+        if (!IsRunning || proc is null)
         {
             return new ProcessExitResult(ExitCode ?? 0, false);
         }
@@ -217,13 +218,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         try
         {
-            return await _process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+            return await proc.WaitForExitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.Warning("伺服器未在 {Timeout} 內平順關閉，傳送強制終止命令", gracefulTimeout);
             // 逾時，強制樹狀終止
-            return await _process.StopAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
+            return await proc.StopAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -276,6 +277,10 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         finally
         {
             proc.OutputReceived -= OnOutputReceived;
+            if (ReferenceEquals(_process, proc))
+            {
+                _process = null;
+            }
             ActiveServerName = null;
             IsReady = false;
         }

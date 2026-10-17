@@ -1,8 +1,8 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Globalization;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -12,7 +12,7 @@ namespace MinecraftServerManager.App.Behaviors;
 /// <summary>
 /// 提供 DataGrid 欄位標頭點選時套用 Windows 檔案總管自然排序（Natural Sort）之附加行為
 /// </summary>
-public static partial class DataGridNaturalSortBehavior
+public static class DataGridNaturalSortBehavior
 {
     public static readonly DependencyProperty EnableNaturalSortProperty =
         DependencyProperty.RegisterAttached(
@@ -85,13 +85,10 @@ public static partial class DataGridNaturalSortBehavior
 }
 
 /// <summary>
-/// 比照 Windows 檔案總管 (StrCmpLogicalW) 語意之自然排序比較器
+/// 依據 .NET 10 CompareOptions.NumericOrdering 之自然排序比較器
 /// </summary>
-public sealed partial class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
+public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
 {
-    [LibraryImport("shlwapi.dll", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int StrCmpLogicalW(string? psz1, string? psz2);
-
     private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
 
     public int Compare<T>(T? x, T? y) => Compare(x, (object?)y);
@@ -157,14 +154,10 @@ public sealed partial class WindowsNaturalSortComparer(string propertyName, List
 
         if (valX is string strX && valY is string strY)
         {
-            try
-            {
-                return StrCmpLogicalW(strX, strY);
-            }
-            catch
-            {
-                return string.Compare(strX, strY, StringComparison.OrdinalIgnoreCase);
-            }
+            return CultureInfo.CurrentCulture.CompareInfo.Compare(
+                strX,
+                strY,
+                CompareOptions.NumericOrdering | CompareOptions.IgnoreCase);
         }
 
         if (valX is IComparable compX)

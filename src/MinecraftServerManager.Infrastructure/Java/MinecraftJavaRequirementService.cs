@@ -177,11 +177,11 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
 
         // 優先從本地 mc_versions_cache.json 讀取
         string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-        if (File.Exists(versionsCachePath))
+        string? json = await ReadAllTextSharedAsync(versionsCachePath, cancellationToken).ConfigureAwait(false);
+        if (json is not null)
         {
             try
             {
-                string json = await File.ReadAllTextAsync(versionsCachePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
 
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
@@ -555,7 +555,12 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
                 return null;
             }
 
-            string json = File.ReadAllText(versionsCachePath, Encoding.UTF8);
+            string? json = ReadAllTextShared(versionsCachePath);
+            if (json is null)
+            {
+                return null;
+            }
+
             using var doc = JsonDocument.Parse(json);
 
             if (doc.RootElement.ValueKind == JsonValueKind.Array)
@@ -708,5 +713,43 @@ public sealed class MinecraftJavaRequirementService(IHttpPort httpPort, string? 
         }
 
         return null;
+    }
+
+    private static async Task<string?> ReadAllTextSharedAsync(string filePath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadAllTextShared(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return reader.ReadToEnd();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 }

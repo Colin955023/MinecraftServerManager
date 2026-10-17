@@ -7,7 +7,7 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />

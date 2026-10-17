@@ -309,7 +309,10 @@ public sealed class HttpDownloadClient(
         try
         {
             HttpUrlPolicy.ValidateStatic(uri);
-            await HttpUrlPolicy.ValidatePublicHostAsync(uri, _resolver, cancellationToken).ConfigureAwait(false);
+            if (_resolver is not null)
+            {
+                await HttpUrlPolicy.ValidatePublicHostAsync(uri, _resolver, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (HttpSecurityException)
         {
@@ -526,7 +529,10 @@ public sealed class HttpDownloadClient(
         var currentUri = initialUri;
         for (int redirect = 0; ; redirect++)
         {
-            await HttpUrlPolicy.ValidatePublicHostAsync(currentUri, _resolver, cancellationToken).ConfigureAwait(false);
+            if (_resolver is not null)
+            {
+                await HttpUrlPolicy.ValidatePublicHostAsync(currentUri, _resolver, cancellationToken).ConfigureAwait(false);
+            }
             using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
             EnsureUserAgent(request);
             var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);

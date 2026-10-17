@@ -1,5 +1,6 @@
 using System.Windows;
 using Microsoft.Win32;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 
@@ -14,18 +15,21 @@ public partial class ExportModListDialog : Window
     private readonly string _serverName;
     private readonly IModListExporter _exporter;
     private readonly IExternalLauncher? _launcher;
+    private readonly IUiService? _ui;
 
     public ExportModListDialog(
         string serverName,
         IReadOnlyList<ModListExportRow> rows,
         IModListExporter exporter,
-        IExternalLauncher? launcher)
+        IExternalLauncher? launcher,
+        IUiService? ui = null)
     {
         InitializeComponent();
         _serverName = serverName;
         _rows = rows;
         _exporter = exporter;
         _launcher = launcher;
+        _ui = ui;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -54,14 +58,11 @@ public partial class ExportModListDialog : Window
         {
             await _exporter.ExportAsync(_rows, format, saveDialog.FileName).ConfigureAwait(true);
 
-            MessageBoxResult ask = MessageBox.Show(
-                this,
-                $"已儲存：\n{saveDialog.FileName}\n\n是否要立即開啟匯出的檔案？",
-                "匯出成功",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
+            bool open = _ui is not null
+                ? _ui.Confirm($"已儲存：\n{saveDialog.FileName}\n\n是否要立即開啟匯出的檔案？", "匯出成功", UiMessageLevel.Information)
+                : MessageBox.Show(this, $"已儲存：\n{saveDialog.FileName}\n\n是否要立即開啟匯出的檔案？", "匯出成功", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes;
 
-            if (ask == MessageBoxResult.Yes)
+            if (open)
             {
                 // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
                 _launcher?.OpenFile(saveDialog.FileName, isTrusted: true);
@@ -72,7 +73,14 @@ public partial class ExportModListDialog : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"匯出失敗：{ex.Message}", "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (_ui is not null)
+            {
+                _ui.ShowError($"匯出失敗：{ex.Message}", "錯誤");
+            }
+            else
+            {
+                MessageBox.Show(this, $"匯出失敗：{ex.Message}", "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 

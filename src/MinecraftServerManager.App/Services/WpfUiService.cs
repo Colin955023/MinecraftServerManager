@@ -17,7 +17,7 @@ public sealed class WpfUiService : IUiService
 {
     public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question)
     {
-        var owner = Application.Current?.MainWindow;
+        var owner = GetDefaultOwner(title);
         return owner is not null
             ? MessageBox.Show(owner, message, title, MessageBoxButton.YesNo, ToImage(level)) == MessageBoxResult.Yes
             : MessageBox.Show(message, title, MessageBoxButton.YesNo, ToImage(level)) == MessageBoxResult.Yes;
@@ -25,7 +25,30 @@ public sealed class WpfUiService : IUiService
 
     public void ShowInfo(string message, string title)
     {
-        var owner = Application.Current?.MainWindow;
+        var owner = GetDefaultOwner(title);
+        if (owner is not null)
+        {
+            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else
+        {
+            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    public void ShowMonitorInfo(string serverName, string message, string title)
+    {
+        Window? owner = null;
+        if (Application.Current is not null)
+        {
+            owner = Application.Current.Windows.OfType<ServerMonitorWindow>()
+                .FirstOrDefault(w => w.IsLoaded && w.IsVisible &&
+                    w.DataContext is ServerMonitorViewModel vm &&
+                    string.Equals(vm.ServerName, serverName, StringComparison.OrdinalIgnoreCase))
+                ?? Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible)
+                ?? GetDefaultOwner(title);
+        }
+
         if (owner is not null)
         {
             MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
@@ -38,7 +61,7 @@ public sealed class WpfUiService : IUiService
 
     public void ShowWarning(string message, string title)
     {
-        var owner = Application.Current?.MainWindow;
+        var owner = GetDefaultOwner(title);
         if (owner is not null)
         {
             MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -51,7 +74,7 @@ public sealed class WpfUiService : IUiService
 
     public void ShowError(string message, string title)
     {
-        var owner = Application.Current?.MainWindow;
+        var owner = GetDefaultOwner(title);
         if (owner is not null)
         {
             MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
@@ -60,6 +83,32 @@ public sealed class WpfUiService : IUiService
         {
             MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private static Window? GetDefaultOwner(string? title = null)
+    {
+        if (Application.Current is null)
+        {
+            return null;
+        }
+
+        if (title is "伺服器啟動成功" or "伺服器就緒")
+        {
+            var monitor = Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible);
+            if (monitor is not null)
+            {
+                return monitor;
+            }
+        }
+
+        var active = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive && w.IsLoaded);
+        if (active is not null)
+        {
+            return active;
+        }
+
+        var visibleMonitor = Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible);
+        return visibleMonitor ?? Application.Current.MainWindow;
     }
 
     public void ShowNotificationPopup(string title, string message, NotificationLevel level) =>
@@ -167,7 +216,7 @@ public sealed class WpfUiService : IUiService
     }
 
     public void ShowExportModList(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher) =>
-        Attach(new ExportModListDialog(serverName, rows, exporter, launcher)).ShowDialog();
+        Attach(new ExportModListDialog(serverName, rows, exporter, launcher, this)).ShowDialog();
 
     public bool ShowServerInitialization(ServerConfig config, string javaPath, IServerRuntime runtime)
     {

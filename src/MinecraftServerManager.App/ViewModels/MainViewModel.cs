@@ -68,7 +68,8 @@ public sealed partial class MainViewModel : ViewModelBase
         IMinecraftJavaRequirementService? javaRequirementService = null,
         IJavaInstaller? javaInstaller = null,
         IUiService? uiService = null,
-        IAppUpdateService? appUpdateService = null)
+        IAppUpdateService? appUpdateService = null,
+        IBoundedDownloadScheduler? downloadScheduler = null)
     {
         _ui = uiService ?? NoOpUiService.Instance;
         _settingsManager = settingsManager ?? new SettingsManager();
@@ -112,7 +113,8 @@ public sealed partial class MainViewModel : ViewModelBase
             javaRequirementService,
             uiService: _ui);
         var modsVm = new ModsViewModel(serverManager, modManager, modrinthClient, ShowNotification, launcher,
-            uiService: _ui);
+            uiService: _ui,
+            downloadScheduler: downloadScheduler);
         var aboutPrefsVm = new AboutPreferencesViewModel(
             _settingsManager,
             updateChecker,

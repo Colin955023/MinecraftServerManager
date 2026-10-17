@@ -171,7 +171,9 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
-        string stagingDir = Path.Combine(stableModsDir, ".download_staging");
+        string stagingRoot = Path.Combine(stableModsDir, ".download_staging");
+        SafeFileSystem.ResolveStableDirectory(stagingRoot, create: true);
+        string stagingDir = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
         SafeFileSystem.ResolveStableDirectory(stagingDir, create: true);
 
         string tempFilePath = Path.Combine(stagingDir, $"{safeFileName}.{Guid.NewGuid():N}.tmp");
@@ -195,7 +197,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
             if (!downloadResult.Success)
             {
-                Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
                 return ModFileOperationResult.Fail($"下載失敗：{downloadResult.Error}", false);
             }
 
@@ -218,7 +220,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 if (!SafeFileSystem.MoveWithin(stableModsDir, finalTargetPath, backupFilePath))
                 {
                     backupFilePath = null;
-                    Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                    Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
                     return ModFileOperationResult.Fail("無法備份既有模組檔案", false);
                 }
             }
@@ -226,7 +228,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             // 移動新檔案至目標路徑
             if (!SafeFileSystem.MoveWithin(stableModsDir, tempFilePath, finalTargetPath))
             {
-                Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
                 return ModFileOperationResult.Fail("無法移動模組檔案至目標位置", true);
             }
 
@@ -240,12 +242,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
         catch (OperationCanceledException)
         {
-            Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+            Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Cancel("已取消安裝", rollbackPerformed: true);
         }
         catch (Exception ex)
         {
-            Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+            Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}", true);
         }
         finally
@@ -291,18 +293,17 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
     }
 
-    private static void Rollback(string stagingDir, string tempPath, string targetPath, string? backupPath)
+    private static void Rollback(string stableModsDir, string tempPath, string targetPath, string? backupPath)
     {
         try
         {
-            string baseDir = Path.GetDirectoryName(stagingDir) ?? stagingDir;
             if (File.Exists(tempPath))
             {
-                SafeFileSystem.DeleteWithin(baseDir, tempPath);
+                SafeFileSystem.DeleteWithin(stableModsDir, tempPath);
             }
             if (backupPath is not null && File.Exists(backupPath))
             {
-                SafeFileSystem.MoveWithin(baseDir, backupPath, targetPath);
+                SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath);
             }
         }
         catch

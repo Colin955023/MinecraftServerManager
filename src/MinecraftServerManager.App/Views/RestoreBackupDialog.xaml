@@ -8,7 +8,7 @@
         MinHeight="380"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />

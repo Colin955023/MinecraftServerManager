@@ -147,9 +147,11 @@ dotnet_diagnostic.CA2007.severity = none
 
 # Tests 測試專案排除非必要約束
 [tests/**/*.cs]
+dotnet_diagnostic.IDE0005.severity = none
 dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1806.severity = none
 dotnet_diagnostic.CA1849.severity = none
 dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.CA2000.severity = none
 dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.xUnit1051.severity = none

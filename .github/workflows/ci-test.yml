@@ -52,7 +52,7 @@ jobs:
       - name: Setup .NET 10 SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
           cache: true
           cache-dependency-path: |
             Directory.Packages.props
@@ -71,6 +71,6 @@ jobs:
         with:
           name: dotnet-test-results
           path: |
-            tests/**/TestResults/*.trx
+            TestResults/**/*.trx
           if-no-files-found: ignore
           retention-days: 2

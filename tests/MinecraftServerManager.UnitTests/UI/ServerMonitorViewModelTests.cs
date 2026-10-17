@@ -139,15 +139,64 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         Assert.Contains("127.0.0.1", mockUi.LastInfoMessage);
     }
 
+    [Fact]
+    public void LogBurst_UsesBoundedBufferAndTrimsDisplayedLogsAtLowWatermark()
+    {
+        var mockUi = new MockMonitorUiService();
+        using var vm = new ServerMonitorViewModel(
+            _runtime,
+            "TestServer",
+            _tempServerDir,
+            uiService: mockUi);
+
+        for (int i = 0; i < 6000; i++)
+        {
+            _runtime.RaiseOutputLine($"line-{i}");
+        }
+
+        mockUi.TickTimers();
+
+        Assert.Equal(1800, vm.Logs.Count);
+        Assert.Equal("line-4200", vm.Logs[0]);
+        Assert.Equal("line-5999", vm.Logs[^1]);
+    }
+
     private sealed class MockMonitorUiService : App.Services.NoOpUiService
     {
+        private readonly List<ManualUiTimer> _timers = [];
+
         public string? LastInfoMessage { get; private set; }
         public string? LastInfoTitle { get; private set; }
+
+        public override App.Services.IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
+        {
+            _ = interval;
+            var timer = new ManualUiTimer(tick);
+            _timers.Add(timer);
+            return timer;
+        }
+
+        public void TickTimers()
+        {
+            foreach (ManualUiTimer timer in _timers)
+            {
+                timer.Tick();
+            }
+        }
 
         public override void ShowInfo(string message, string title)
         {
             LastInfoMessage = message;
             LastInfoTitle = title;
+        }
+
+        private sealed class ManualUiTimer(Action tick) : App.Services.IUiTimer
+        {
+            public void StartTimer() { }
+
+            public void StopTimer() { }
+
+            public void Tick() => tick();
         }
     }
 

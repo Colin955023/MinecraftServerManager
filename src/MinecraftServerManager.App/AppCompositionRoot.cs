@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Infrastructure.Http;
+using MinecraftServerManager.Infrastructure.Downloads;
 using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Infrastructure.Loaders;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -24,6 +25,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
 
     private readonly SocketsHttpHandler _httpHandler;
     private readonly HttpClient _sharedHttpClient;
+    private readonly BoundedDownloadScheduler _downloadScheduler;
     private readonly ProcessRunner _sharedProcessRunner;
     private readonly ServerRuntime _sharedServerRuntime;
     private readonly SettingsManager _settingsManager;
@@ -37,7 +39,12 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     public SettingsManager Settings => _settingsManager;
     public ServerRuntime ServerRuntime => _sharedServerRuntime;
 
-    public AppCompositionRoot() : this(ResolveInitialServersRoot(new SettingsManager()))
+    public AppCompositionRoot() : this(new SettingsManager())
+    {
+    }
+
+    private AppCompositionRoot(SettingsManager settingsManager)
+        : this(ResolveInitialServersRoot(settingsManager), settingsManager)
     {
     }
 
@@ -50,8 +57,10 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
+            ConnectCallback = HttpUrlPolicy.ConnectAsync,
         };
         _sharedHttpClient = new HttpClient(_httpHandler, disposeHandler: false);
+        _downloadScheduler = new BoundedDownloadScheduler();
         _sharedProcessRunner = new ProcessRunner();
         _sharedServerRuntime = new ServerRuntime(_sharedProcessRunner);
         _settingsManager = settingsManager ?? new SettingsManager();
@@ -92,7 +101,8 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             _javaRequirements,
             javaInstaller,
             uiService: uiService,
-            appUpdateService: appUpdateService);
+            appUpdateService: appUpdateService,
+            downloadScheduler: _downloadScheduler);
     }
 
     private static string ResolveInitialServersRoot(SettingsManager settings)
@@ -148,6 +158,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _downloadScheduler.Dispose();
         _sharedHttpClient.Dispose();
         _httpHandler.Dispose();
         await _sharedServerRuntime.DisposeAsync().ConfigureAwait(false);

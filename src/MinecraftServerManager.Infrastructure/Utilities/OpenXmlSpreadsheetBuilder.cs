@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Security;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
@@ -10,7 +11,7 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 /// 使用 .NET 原生 ZipArchive 與標準 OpenXML 規範建置單工作表 Excel (.xlsx) 檔案。
 /// 零外部相依性、極致輕量且安全過濾 XML 1.0 非法控制字元。
 /// </summary>
-public static class OpenXmlSpreadsheetBuilder
+public static partial class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
 
@@ -174,6 +175,11 @@ public static class OpenXmlSpreadsheetBuilder
             return string.Empty;
         }
 
+        if (text.Contains('\x1B'))
+        {
+            text = AnsiEscapeRegex().Replace(text, string.Empty);
+        }
+
         bool hasInvalid = false;
         foreach (char c in text)
         {
@@ -213,4 +219,7 @@ public static class OpenXmlSpreadsheetBuilder
             _ => false
         };
     }
+
+    [GeneratedRegex(@"\x1B(?:\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\)|[@-Z\\-_])")]
+    private static partial Regex AnsiEscapeRegex();
 }

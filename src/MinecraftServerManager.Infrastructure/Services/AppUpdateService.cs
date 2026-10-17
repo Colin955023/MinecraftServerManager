@@ -31,28 +31,22 @@ public sealed partial class AppUpdateService(
             throw new InvalidOperationException("更新資訊中缺少有效的下載位址。");
         }
 
-        string? expectedSha256 = null;
-        if (!string.IsNullOrWhiteSpace(update.Sha256ChecksumUrl) && Uri.TryCreate(update.Sha256ChecksumUrl, UriKind.Absolute, out var checksumUri))
+        if (string.IsNullOrWhiteSpace(update.Sha256ChecksumUrl)
+            || !Uri.TryCreate(update.Sha256ChecksumUrl, UriKind.Absolute, out var checksumUri))
         {
-            progress?.Report((5, "正在取得安全驗證資訊 (SHA-256)..."));
-            try
-            {
-                string? checksumText = await httpPort.GetTextAsync(checksumUri, cancellationToken).ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(checksumText))
-                {
-                    var match = Sha256Regex().Match(checksumText);
-                    if (match.Success)
-                    {
-                        expectedSha256 = match.Value.ToLowerInvariant();
-                        Logger.Information("成功取得預期 SHA-256 校驗碼: {Hash}", expectedSha256);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warning("取得 SHA-256 校驗檔失敗: {Message}，將改以二進位結構驗證", ex.Message);
-            }
+            throw new InvalidDataException("更新資訊缺少有效的 SHA-256 校驗檔網址，已拒絕自動更新。");
         }
+
+        progress?.Report((5, "正在取得安全驗證資訊 (SHA-256)..."));
+        string? checksumText = await httpPort.GetTextAsync(checksumUri, cancellationToken).ConfigureAwait(false);
+        Match match = string.IsNullOrWhiteSpace(checksumText) ? Match.Empty : Sha256Regex().Match(checksumText);
+        if (!match.Success)
+        {
+            throw new InvalidDataException("無法取得有效的 SHA-256 校驗碼，已拒絕自動更新。");
+        }
+
+        string expectedSha256 = match.Value.ToLowerInvariant();
+        Logger.Information("成功取得預期 SHA-256 校驗碼: {Hash}", expectedSha256);
 
         string targetDir = updatesDirectory ?? Path.Combine(RuntimePaths.GetUserDataDir(), "updates");
         Directory.CreateDirectory(targetDir);
@@ -66,7 +60,7 @@ public sealed partial class AppUpdateService(
         string targetFilePath = Path.Combine(targetDir, rawFileName);
 
         // 若本地已存在且符合 SHA-256 與 PE 結構則直接複用
-        if (File.Exists(targetFilePath) && expectedSha256 is not null)
+        if (File.Exists(targetFilePath))
         {
             string existingHash = HashCalculator.Shared.ComputeFileHash(targetFilePath, "sha256");
             if (string.Equals(existingHash, expectedSha256, StringComparison.OrdinalIgnoreCase) && VerifyPeHeader(targetFilePath))
@@ -128,24 +122,21 @@ public sealed partial class AppUpdateService(
             throw new InvalidDataException("更新檔案未具備合法的 Windows 執行檔 (PE) 標頭，為保護系統安全已拒絕更新。");
         }
 
-        if (expectedSha256 is not null)
+        string finalHash = HashCalculator.Shared.ComputeFileHash(targetFilePath, "sha256");
+        if (!string.Equals(finalHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
         {
-            string finalHash = HashCalculator.Shared.ComputeFileHash(targetFilePath, "sha256");
-            if (!string.Equals(finalHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+            if (File.Exists(targetFilePath))
             {
-                if (File.Exists(targetFilePath))
+                try
                 {
-                    try
-                    {
-                        File.Delete(targetFilePath);
-                    }
-                    catch
-                    {
-                    }
+                    File.Delete(targetFilePath);
                 }
-
-                throw new InvalidDataException($"更新檔案 SHA-256 校驗失敗！預期: {expectedSha256}，實際: {finalHash}。");
+                catch
+                {
+                }
             }
+
+            throw new InvalidDataException($"更新檔案 SHA-256 校驗失敗！預期: {expectedSha256}，實際: {finalHash}。");
         }
 
         progress?.Report((100, "更新檔案驗證通過！"));
@@ -171,6 +162,8 @@ public sealed partial class AppUpdateService(
         int pid = Environment.ProcessId;
         string dir = Path.GetDirectoryName(verifiedInstallerPath) ?? Path.GetTempPath();
         string scriptPath = Path.Combine(dir, "apply_update.cmd");
+        ValidateBatchPath(currentExePath);
+        ValidateBatchPath(verifiedInstallerPath);
 
         string scriptContent = $"""
         @echo off
@@ -196,7 +189,7 @@ public sealed partial class AppUpdateService(
         (goto) 2>nul & del "%~f0" >nul 2>&1
         """;
 
-        File.WriteAllText(scriptPath, scriptContent, System.Text.Encoding.ASCII);
+        File.WriteAllText(scriptPath, scriptContent, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
         var startInfo = new ProcessStartInfo
         {
@@ -209,6 +202,14 @@ public sealed partial class AppUpdateService(
 
         System.Diagnostics.Process.Start(startInfo);
         Logger.Information("已啟動更新替換腳本，準備重啟應用程式: PID={Pid}, Target={Target}", pid, currentExePath);
+    }
+
+    private static void ValidateBatchPath(string path)
+    {
+        if (path.IndexOfAny(['%', '"', '\r', '\n']) >= 0)
+        {
+            throw new InvalidOperationException("更新路徑含有批次指令無法安全處理的字元，已拒絕自動更新。");
+        }
     }
 
     private static bool VerifyPeHeader(string filePath)

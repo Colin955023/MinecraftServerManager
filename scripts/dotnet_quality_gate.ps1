@@ -99,13 +99,21 @@ Invoke-DotnetStep "格式檢查" @("format", $solutionPath, "--verify-no-changes
 Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release")
 
 # 5. 單元測試與整合測試
+$testArguments = @("test", $solutionPath, "-c", "Release", "--no-build")
+if ($isCiEnvironment) {
+    $testArguments += @(
+        "--results-directory", (Join-Path $solutionDir "TestResults"),
+        "--", "--report-trx"
+    )
+}
+
 try {
-    Invoke-DotnetStep "測試" @("test", $solutionPath, "-c", "Release", "--no-build")
+    Invoke-DotnetStep "測試" $testArguments
 }
 finally {
     # 6. 清理測試產生的暫存目錄
     $testResultsDir = Join-Path $solutionDir "TestResults"
-    if (Test-Path $testResultsDir) {
+    if (-not $isCiEnvironment -and (Test-Path $testResultsDir)) {
         Remove-Item -Path $testResultsDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

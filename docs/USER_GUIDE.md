@@ -17,8 +17,8 @@
 
 | 檔案名稱 | 版本類型 | 檔案大小 | 適用情境與說明 |
 |---|---|---|---|
-| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 63 MB | **強烈推薦**，適合所有使用者，內建完整 .NET 10 執行環境與官方單檔壓縮，下載即可直接執行 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 2 MB | 適合進階使用者，電腦必須預先安裝 .NET 10 Desktop Runtime (x64) |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 39 MB | **強烈推薦**，適合所有使用者，內建完整 .NET 10 執行環境與官方單檔壓縮，下載即可直接執行 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.6 MB | 適合進階使用者，電腦必須預先安裝 .NET 10 Desktop Runtime (x64) |
 
 > [!TIP]
 > 若執行 `MinecraftServerManager-framework-dependent.exe` 時系統提示需要安裝 .NET 執行環境，代表您的電腦尚未安裝 .NET 10 Desktop Runtime。此時請至微軟官網下載安裝，或直接改用 **`MinecraftServerManager-self-contained.exe`** 即可順暢運作。

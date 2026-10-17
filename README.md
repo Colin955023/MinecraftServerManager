@@ -5,6 +5,7 @@
 [![WPF](https://img.shields.io/badge/UI-WPF-512BD4)](https://learn.microsoft.com/dotnet/desktop/wpf/)
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 [![CI](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/ci-test.yml)
+[![CodeQL Analysis (C#)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml/badge.svg)](https://github.com/Colin955023/MinecraftServerManager/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Colin955023/MinecraftServerManager/badge)](https://scorecard.dev/viewer/?uri=github.com/Colin955023/MinecraftServerManager)
 
 專為 Windows 10／11（64 位元）打造的 Minecraft 伺服器管理工具，採用 C#、.NET 10 與 WPF 原生技術開發，提供流暢的操作體驗、安全的檔案防護與快速的啟動速度。
@@ -27,8 +28,8 @@
 
 | 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
 | :--- | :--- | :--- | :--- | :--- |
-| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 63 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與所有相依元件，開箱即用，絕不因缺少環境而報錯 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 2 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 39 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與所有相依元件，開箱即用，絕不因缺少環境而報錯 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.6 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
 
 > [!TIP]
 > 如果您不確定電腦是否已安裝 .NET 10，請一律下載 **`MinecraftServerManager-self-contained.exe`** 即可順暢使用。
@@ -49,7 +50,7 @@ pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
 
 #### 發布單一執行檔
 ```bat
-pwsh -NoProfile -File scripts\dotnet_publish.ps1 -Configuration Release
+pwsh -NoProfile -File scripts\dotnet_publish.ps1
 ```
 
 ## 專案結構
@@ -64,7 +65,6 @@ tests/
 ├─ MinecraftServerManager.UnitTests/       全量單元測試套件
 └─ MinecraftServerManager.IntegrationTests/系統整合與流程測試套件
 scripts/                                   自動化建置、發布與品質檢驗腳本
-output/                                    發布建置成品輸出目錄
 ```
 
 ## 說明文件

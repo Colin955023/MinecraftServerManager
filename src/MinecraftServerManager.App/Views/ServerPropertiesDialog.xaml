@@ -9,7 +9,7 @@
         MinHeight="500"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Window.Resources>
 
     <DataTemplate DataType="{x:Type vm:PropertyEditItem}">

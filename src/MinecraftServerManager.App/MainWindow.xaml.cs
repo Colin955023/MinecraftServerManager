@@ -34,19 +34,6 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     private void InitializeWindow()
     {
-        if (Icon == null)
-        {
-            try
-            {
-                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                    new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
-            }
-            catch
-            {
-                // 忽略圖示載入例外
-            }
-        }
-
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;

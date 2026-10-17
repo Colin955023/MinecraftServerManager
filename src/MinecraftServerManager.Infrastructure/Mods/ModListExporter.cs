@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -48,7 +49,11 @@ public sealed class ModListExporter : IModListExporter
         await File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string Clean(string value) => value == EmptyPlaceholder ? string.Empty : value;
+    private static string Clean(string value) =>
+        value == EmptyPlaceholder ? string.Empty : ModHelpers.StripColorAndFormattingCodes(value);
+
+    private static string CleanText(string value) =>
+        ModHelpers.StripColorAndFormattingCodes(value);
 
     private static string Encode(string value) => WebUtility.HtmlEncode(value);
 
@@ -56,17 +61,17 @@ public sealed class ModListExporter : IModListExporter
     {
         List<ModJsonItem> items = [.. rows
             .Select(static m => new ModJsonItem(
-                Name: m.Name,
-                Version: m.Version,
+                Name: CleanText(m.Name),
+                Version: CleanText(m.Version),
                 Enabled: m.IsEnabled,
                 MinecraftVersion: Clean(m.MinecraftVersion),
                 LoaderType: Clean(m.LoaderType),
                 Author: Clean(m.Author),
-                FileName: m.FileName,
-                Id: m.Id,
+                FileName: CleanText(m.FileName),
+                Id: CleanText(m.Id),
                 FileSize: Clean(m.FileSize),
                 ModifiedTime: Clean(m.ModifiedTime),
-                Description: m.Description))];
+                Description: CleanText(m.Description)))];
 
         return JsonSerializer.Serialize(items, JsonOptions);
     }
@@ -87,7 +92,7 @@ public sealed class ModListExporter : IModListExporter
         {
             string statusIcon = m.IsEnabled ? "✅ 啟用" : "❌ 停用";
             sb.AppendLine(CultureInfo.InvariantCulture,
-                $"<tr><td>{statusIcon}</td><td>{Encode(m.Name)}</td><td>{Encode(m.Version)}</td><td>{Encode(Clean(m.MinecraftVersion))}</td><td>{Encode(Clean(m.LoaderType))}</td><td>{Encode(Clean(m.Author))}</td><td>{Encode(m.FileName)}</td><td>{Encode(m.Id)}</td><td>{Encode(Clean(m.FileSize))}</td><td>{Encode(Clean(m.ModifiedTime))}</td><td>{Encode(m.Description)}</td></tr>");
+                $"<tr><td>{statusIcon}</td><td>{Encode(CleanText(m.Name))}</td><td>{Encode(CleanText(m.Version))}</td><td>{Encode(Clean(m.MinecraftVersion))}</td><td>{Encode(Clean(m.LoaderType))}</td><td>{Encode(Clean(m.Author))}</td><td>{Encode(CleanText(m.FileName))}</td><td>{Encode(CleanText(m.Id))}</td><td>{Encode(Clean(m.FileSize))}</td><td>{Encode(Clean(m.ModifiedTime))}</td><td>{Encode(CleanText(m.Description))}</td></tr>");
         }
 
         sb.AppendLine("</table></body></html>");
@@ -101,16 +106,16 @@ public sealed class ModListExporter : IModListExporter
         {
             table.Add([
                 m.IsEnabled ? "是" : "否",
-                m.Name,
-                m.Version,
+                CleanText(m.Name),
+                CleanText(m.Version),
                 Clean(m.MinecraftVersion),
                 Clean(m.LoaderType),
                 Clean(m.Author),
-                m.FileName,
-                m.Id,
+                CleanText(m.FileName),
+                CleanText(m.Id),
                 Clean(m.FileSize),
                 Clean(m.ModifiedTime),
-                m.Description,
+                CleanText(m.Description),
             ]);
         }
 
@@ -128,7 +133,7 @@ public sealed class ModListExporter : IModListExporter
             string statusIcon = m.IsEnabled ? "✅" : "❌";
             string author = Clean(m.Author);
             string authorPart = !string.IsNullOrWhiteSpace(author) ? $" - by {author}" : string.Empty;
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{statusIcon} {m.Name} ({m.Version}){authorPart}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{statusIcon} {CleanText(m.Name)} ({CleanText(m.Version)}){authorPart}");
         }
 
         return sb.ToString();

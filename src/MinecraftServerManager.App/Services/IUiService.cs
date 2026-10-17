@@ -72,6 +72,11 @@ public interface IUiService
 
     public void ShowInfo(string message, string title);
 
+    /// <summary>
+    /// 於指定伺服器的監控視窗中顯示提示訊息，若監控視窗未開啟則回退至活動視窗，避免畫面焦點切換
+    /// </summary>
+    public void ShowMonitorInfo(string serverName, string message, string title);
+
     public void ShowWarning(string message, string title);
 
     public void ShowError(string message, string title);

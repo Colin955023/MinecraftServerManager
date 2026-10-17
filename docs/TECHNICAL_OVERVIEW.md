@@ -116,7 +116,7 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 
 - **原生 Single-File 封裝**：直接使用 .NET 官方提供之 Single-File 封裝技術，產出單一可執行檔
 - **雙版本發布策略**：
-  - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，並啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`），總體積約 63 MB，具備最高穩定性與隨點即開特性
+  - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`）與受控部分修剪（Partial Trimming），總體積約 39 MB，具備最高穩定性與隨點即開特性
   - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積僅約 1.6 MB，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
 
 ### 9. Java 版本需求動態解析與多層快取
@@ -137,9 +137,9 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 - **視覺化待安裝佇列視窗（ModInstallQueueDialog）**：提供專屬對話方塊集中管理待安裝與待更新佇列，直觀顯示新增與更新狀態標記，支援單項移除與快速清空佇列。
 - **官方 CDN 下載來源驗證**：嚴格驗證模組下載來源是否屬於官方 Modrinth CDN（`cdn.modrinth.com`），遇非官方來源即時跳出警示對話方塊；下載先經隔離暫存區校驗 SHA-512/SHA-1 雜湊，失敗時自動清理暫存檔。
 
-### 12. Windows 原生自然排序（Natural Sort）
+### 12. .NET 10 原生自然排序（Natural Sort）
 
-- **原生 API 整合（StrCmpLogicalW）**：利用 `DataGridNaturalSortBehavior` 附加行為攔截 DataGrid 欄位排序事件，呼叫 Windows 原生 `Shlwapi.dll` 之 `StrCmpLogicalW` 演算法，使伺服器與模組清單中的數字命名遵循人類自然直覺（如 1, 2, 10 而非字典序 1, 10, 2）。
+- **純託管自然排序（CompareOptions.NumericOrdering）**：利用 `DataGridNaturalSortBehavior` 附加行為攔截 DataGrid 欄位排序事件，直接調用 .NET 10 高階原生 `CompareOptions.NumericOrdering | CompareOptions.IgnoreCase` 演算法，使伺服器與模組清單中的數字命名遵循人類自然直覺（如 1, 2, 10 而非字典序 1, 10, 2）。100% 為純託管安全程式碼，徹底免除 Win32 P/Invoke 跨界呼叫與 `unsafe` 指標操作，達成全專案記憶體安全。
 
 ### 13. 安全更新機制與發布防呆
 
@@ -147,11 +147,19 @@ Domain （不相依其他任何專案，純粹領域邏輯）
   - 更新檢查服務具備環境探測機制（`IEnvironmentRuntimeInfo`），會自動偵測系統是否具備 .NET 10 Desktop Runtime
   - 預設一律優先挑選自包含版（`self-contained`）；僅當目前本體即為框架相依版且系統存在執行環境時，才選取框架相依版
   - 當遠端 Release 僅提供框架相依版但本機缺乏執行環境時，強制封鎖自動下載並發出警語導引至發布頁面，杜絕下載後因缺少環境當機的問題
-- **執行期功能開關裁切（Feature Switches）**：
+  - 自動更新強制驗證 SHA-256 完整性雜湊，無校驗碼時拒絕自動覆蓋；更新批次腳本一律採用 UTF-8 編碼並對路徑特殊字元進行防護
+- **執行期功能開關裁切（Feature Switches）與修剪**：
+  - `HttpActivityPropagationSupport=false`：停用 HttpClient 內部 OpenTelemetry 分散式追蹤
+  - `MetricsSupport=false`：停用度量指標系統以降低資源負擔
+  - `EnableUnsafeBinaryFormatterSerialization=false`、`EnableUnsafeUTF7Encoding=false`：徹底移除過時且具安全隱患的序列化與編碼邏輯
+  - `StartupHookSupport=false`：停用外部啟動攔截掛鉤檢查，杜絕環境變數注入
+  - `CustomResourceTypesSupport=false`：停用自訂資源型別序列化功能
+  - `XmlResolverIsNetworkingEnabledByDefault=false`：停用 XML 外部網路解析器
   - `DebuggerSupport=false`：停用執行期除錯支援
   - `EventSourceSupport=false`：停用非必要之 EventSource 診斷記錄
   - `MetadataUpdaterSupport=false`：停用熱重載中繼資料更新機制
   - `UseSystemResourceKeys=true`：直接使用系統資源鍵值以精簡字串資源
+  - `PublishTrimmed=true` & `TrimMode=partial`：針對自包含版本啟用受控部分修剪，消除未使用的 BCL 系統庫
 - **防毒相容保證**：嚴禁使用 UPX 等第三方加殼工具，保持二進位格式純正，達到 0 防毒誤報
 
 ## 品質保證與建置自動化
@@ -163,7 +171,7 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 pwsh -NoProfile -File scripts\dotnet_quality_gate.ps1
 
 # 發布單一執行檔
-pwsh -NoProfile -File scripts\dotnet_publish.ps1 -Configuration Release
+pwsh -NoProfile -File scripts\dotnet_publish.ps1
 ```
 
 - **隱私與安全檢查**：整合 Gitleaks 掃描原始程式碼中的金鑰與敏感資訊

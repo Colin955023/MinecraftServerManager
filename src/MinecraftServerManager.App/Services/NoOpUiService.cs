@@ -17,6 +17,7 @@ public class NoOpUiService : IUiService
     public virtual bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) => true;
 
     public virtual void ShowInfo(string message, string title) { }
+    public virtual void ShowMonitorInfo(string serverName, string message, string title) => ShowInfo(message, title);
 
     public virtual void ShowWarning(string message, string title) { }
 
@@ -32,7 +33,7 @@ public class NoOpUiService : IUiService
 
     public void RunOnUi(Action action) => action();
 
-    public IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
+    public virtual IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
 
     public IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false) => null;
 

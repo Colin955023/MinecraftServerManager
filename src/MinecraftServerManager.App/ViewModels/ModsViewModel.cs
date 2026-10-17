@@ -1,6 +1,7 @@
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -10,6 +11,7 @@ using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.Downloads;
 using MinecraftServerManager.Infrastructure.Mods;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -123,6 +125,7 @@ public sealed class ModInstallQueueItem
 public sealed partial class ModsViewModel : PageViewModel
 {
     private readonly IUiService _ui;
+    private readonly IBoundedDownloadScheduler? _downloadScheduler;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("Mods");
 
@@ -231,7 +234,8 @@ public sealed partial class ModsViewModel : PageViewModel
         IExternalLauncher? launcher = null,
         IModDependencyPlanner? dependencyPlanner = null,
         IModListExporter? modListExporter = null,
-        IUiService? uiService = null)
+        IUiService? uiService = null,
+        IBoundedDownloadScheduler? downloadScheduler = null)
         : base("mods", "🧩 模組管理", "現代化高效模組管理流程")
     {
         _ui = uiService ?? NoOpUiService.Instance;
@@ -242,6 +246,7 @@ public sealed partial class ModsViewModel : PageViewModel
         _launcher = launcher;
         _dependencyPlanner = dependencyPlanner ?? new ModDependencyPlanner();
         _modListExporter = modListExporter ?? new ModListExporter();
+        _downloadScheduler = downloadScheduler;
 
         _ = LoadServersInternalAsync();
     }
@@ -1332,7 +1337,7 @@ public sealed partial class ModsViewModel : PageViewModel
     /// 進行相依性評估後統一批次下載安裝。
     /// </summary>
     [RelayCommand]
-    public async Task InstallQueuedModsAsync()
+    public async Task InstallQueuedModsAsync(CancellationToken cancellationToken = default)
     {
         if (InstallQueue.Count == 0)
         {
@@ -1346,7 +1351,7 @@ public sealed partial class ModsViewModel : PageViewModel
             return;
         }
 
-        var server = await _serverManager.GetServerAsync(SelectedServer);
+        var server = await _serverManager.GetServerAsync(SelectedServer, cancellationToken);
         if (server is null)
         {
             return;
@@ -1358,7 +1363,7 @@ public sealed partial class ModsViewModel : PageViewModel
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var installedMods = await _modManager.GetModsAsync(server.Path).ConfigureAwait(true);
+        var installedMods = await _modManager.GetModsAsync(server.Path, cancellationToken: cancellationToken).ConfigureAwait(true);
         var installedIdentifiers = installedMods
             .Where(m => !string.IsNullOrWhiteSpace(m.Id))
             .Select(m => m.Id.Trim())
@@ -1379,6 +1384,9 @@ public sealed partial class ModsViewModel : PageViewModel
         IsInstallingMod = true;
         int success = 0;
         var pending = InstallQueue.ToList();
+        var pendingTargetFileNames = pending
+            .Select(static item => Path.GetFileName(item.FileName))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var unofficial = pending.Where(i => !ModFileInstaller.IsOfficialModrinthSource(i.DownloadUrl)).ToList();
         if (unofficial.Count > 0)
@@ -1397,55 +1405,84 @@ public sealed partial class ModsViewModel : PageViewModel
 
         try
         {
-            for (int i = 0; i < pending.Count; i++)
+            IModManager modManager = _modManager;
+            var tasks = pending.Select((item, index) =>
             {
-                var item = pending[i];
-                string actionText = item.Action == ModInstallAction.Update ? "更新" : "安裝";
-                installProgressDialog?.UpdateProgress(i + 1, pending.Count, $"正在{actionText} ({i + 1}/{pending.Count}): {item.Title} ({item.FileName})...");
-
-                try
-                {
-                    var result = await _modManager.InstallOnlineModAsync(
+                Uri sourceUri = Uri.TryCreate(item.DownloadUrl, UriKind.Absolute, out Uri? parsedUri)
+                    ? parsedUri
+                    : new Uri("https://invalid.invalid/");
+                string resourceKey = Path.GetFileName(item.FileName);
+                return (IDownloadTask<ModFileOperationResult>)new DelegateDownloadTask<ModFileOperationResult>(
+                    string.IsNullOrWhiteSpace(item.ProjectId) ? $"{index}:{item.FileName}" : item.ProjectId,
+                    sourceUri,
+                    resourceKey,
+                    token => modManager.InstallOnlineModAsync(
                         server.Path,
                         item.DownloadUrl,
                         item.FileName,
                         expectedHash: item.ExpectedHash,
-                        hashAlgorithm: item.HashAlgorithm);
+                        hashAlgorithm: item.HashAlgorithm,
+                        cancellationToken: token),
+                    static result => result.Completed
+                        ? DownloadTaskState.Completed
+                        : result.Cancelled ? DownloadTaskState.Cancelled : DownloadTaskState.Failed);
+            }).ToArray();
 
-                    if (result.Completed)
-                    {
-                        if (item.Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(item.OldFileName) &&
-                            !string.Equals(item.OldFileName, item.FileName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try
-                            {
-                                string modsDir = Path.Combine(server.Path, "mods");
-                                string oldPath = Path.Combine(modsDir, item.OldFileName);
-                                string oldDisabled = oldPath + ".disabled";
-                                await Task.Run(() => DeleteModFileIfExists(oldPath)).ConfigureAwait(true);
+            BoundedDownloadScheduler? fallbackScheduler = null;
+            IBoundedDownloadScheduler scheduler = _downloadScheduler ?? (fallbackScheduler = new BoundedDownloadScheduler(1, 1));
+            try
+            {
+                installProgressDialog?.UpdateProgress(0, pending.Count, "已排入下載佇列...");
+                var progress = new ThrottledDownloadProgress(installProgressDialog, pending.Count);
+                IReadOnlyList<DownloadTaskResult<ModFileOperationResult>> results =
+                    await scheduler.ExecuteAsync(tasks, progress, cancellationToken);
 
-                                await Task.Run(() => DeleteModFileIfExists(oldDisabled)).ConfigureAwait(true);
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Warning("刪除舊版本模組檔案「{Old}」失敗: {Message}", item.OldFileName, ex.Message);
-                            }
-                        }
-
-                        success++;
-                        InstallQueue.Remove(item);
-                    }
-                    else
-                    {
-                        Logger.Warning("模組「{Title}」安裝失敗: {Message}", item.Title, result.Message);
-                        _notificationSink?.Invoke($"模組「{item.Title}」安裝失敗：{result.Message}", true);
-                    }
-                }
-                catch (Exception exception)
+                for (int i = 0; i < results.Count; i++)
                 {
-                    Logger.Error(exception, "安裝模組「{Title}」異常: {Message}", item.Title, exception.Message);
-                    _notificationSink?.Invoke($"安裝「{item.Title}」異常：{exception.Message}", true);
+                    ModInstallQueueItem item = pending[i];
+                    DownloadTaskResult<ModFileOperationResult> taskResult = results[i];
+                    ModFileOperationResult? result = taskResult.Value;
+
+                    if (taskResult.Error is not null)
+                    {
+                        Logger.Error(taskResult.Error, "安裝模組「{Title}」異常: {Message}", item.Title, taskResult.Error.Message);
+                        _notificationSink?.Invoke($"安裝「{item.Title}」異常：{taskResult.Error.Message}", true);
+                        continue;
+                    }
+
+                    if (result?.Completed != true)
+                    {
+                        string message = result?.Message ?? (taskResult.IsCancelled ? "已取消安裝" : "下載工作未回傳結果");
+                        Logger.Warning("模組「{Title}」安裝失敗: {Message}", item.Title, message);
+                        _notificationSink?.Invoke($"模組「{item.Title}」安裝失敗：{message}", true);
+                        continue;
+                    }
+
+                    if (item.Action == ModInstallAction.Update && !string.IsNullOrWhiteSpace(item.OldFileName) &&
+                        !string.Equals(item.OldFileName, item.FileName, StringComparison.OrdinalIgnoreCase) &&
+                        !pendingTargetFileNames.Contains(Path.GetFileName(item.OldFileName)))
+                    {
+                        try
+                        {
+                            string modsDir = Path.Combine(server.Path, "mods");
+                            string oldPath = Path.Combine(modsDir, item.OldFileName);
+                            string oldDisabled = oldPath + ".disabled";
+                            await Task.Run(() => DeleteModFileIfExists(oldPath), cancellationToken).ConfigureAwait(true);
+                            await Task.Run(() => DeleteModFileIfExists(oldDisabled), cancellationToken).ConfigureAwait(true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warning("刪除舊版本模組檔案「{Old}」失敗: {Message}", item.OldFileName, ex.Message);
+                        }
+                    }
+
+                    success++;
+                    InstallQueue.Remove(item);
                 }
+            }
+            finally
+            {
+                fallbackScheduler?.Dispose();
             }
 
             Logger.Information("批次安裝完成，成功 {Success} / {Total}", success, pending.Count);
@@ -1561,5 +1598,37 @@ public sealed partial class ModsViewModel : PageViewModel
         }
 
         return null;
+    }
+
+    private sealed class ThrottledDownloadProgress(
+        IModOperationProgress? progress,
+        int totalCount) : IProgress<DownloadTaskProgress>
+    {
+        private long _lastReportedTimestamp;
+
+        public void Report(DownloadTaskProgress value)
+        {
+            if (value.State is not (DownloadTaskState.Completed or DownloadTaskState.Failed or DownloadTaskState.Cancelled))
+            {
+                return;
+            }
+
+            long now = Stopwatch.GetTimestamp();
+            long previous = Interlocked.Read(ref _lastReportedTimestamp);
+            if (value.CompletedCount < totalCount && previous != 0 && Stopwatch.GetElapsedTime(previous, now) < TimeSpan.FromMilliseconds(50))
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _lastReportedTimestamp, now, previous) != previous)
+            {
+                return;
+            }
+
+            progress?.UpdateProgress(
+                value.CompletedCount,
+                totalCount,
+                $"已處理下載工作 {value.CompletedCount}/{totalCount}...");
+        }
     }
 }

@@ -1,10 +1,6 @@
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $projectPath = Join-Path $repoRoot "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
-$iconPath = Join-Path $repoRoot "assets\icon.ico"
-if (-not (Test-Path -LiteralPath $iconPath)) {
-    throw "找不到應用程式圖示資產：$iconPath"
-}
 $outputRoot = Join-Path $repoRoot "output"
 $publishStartedAt = Get-Date
 
@@ -32,8 +28,14 @@ function Publish-App {
         "-r", "win-x64",
         "--self-contained", $SelfContained,
         "-p:PublishSingleFile=true",
-        "-p:IncludeNativeLibrariesForSelfExtract=true",
-        "-p:ApplicationIcon=$iconPath",
+        "-p:PublishReadyToRun=false",
+        "-p:HttpActivityPropagationSupport=false",
+        "-p:MetricsSupport=false",
+        "-p:EnableUnsafeBinaryFormatterSerialization=false",
+        "-p:EnableUnsafeUTF7Encoding=false",
+        "-p:StartupHookSupport=false",
+        "-p:CustomResourceTypesSupport=false",
+        "-p:XmlResolverIsNetworkingEnabledByDefault=false",
         "-p:DebugType=None",
         "-p:DebugSymbols=false",
         "-p:PublishDocumentationFiles=false",
@@ -48,7 +50,14 @@ function Publish-App {
         "-o", $tempOutput
     )
     if ($SelfContained -eq "true") {
-        $arguments += "-p:EnableCompressionInSingleFile=true"
+        $arguments += @(
+            "-p:IncludeNativeLibrariesForSelfExtract=true",
+            "-p:EnableCompressionInSingleFile=true",
+            "-p:PublishTrimmed=true",
+            "-p:TrimMode=partial",
+            "-p:_SuppressWpfTrimError=true",
+            "-p:SuppressTrimAnalysisWarnings=true"
+        )
     }
 
     & dotnet @arguments
@@ -74,8 +83,6 @@ Publish-App -Name "framework-dependent" -SelfContained "false"
 $elapsed = (Get-Date) - $publishStartedAt
 Write-Host "=== 雙版本發布摘要 ==="
 Write-Host ("總耗時：{0}" -f $elapsed.ToString("hh\:mm\:ss\.fff"))
-Write-Host "圖示資產：已綁定 $iconPath"
-Write-Host "發布目錄：$outputRoot"
 
 Get-ChildItem -LiteralPath $outputRoot -Filter "*.exe" -File | Sort-Object Name | ForEach-Object {
     Write-Host "----------------------------------------"

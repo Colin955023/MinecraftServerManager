@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Mods;
@@ -134,8 +135,8 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 return meta;
             }
 
-            // 2. META-INF/mods.toml (Forge / NeoForge)
-            var forgeEntry = archive.GetEntry("META-INF/mods.toml");
+            // 2. META-INF/mods.toml / META-INF/neoforge.mods.toml (Forge / NeoForge)
+            var forgeEntry = archive.GetEntry("META-INF/mods.toml") ?? archive.GetEntry("META-INF/neoforge.mods.toml");
             if (forgeEntry is not null && forgeEntry.Length <= MaxMetadataEntryBytes)
             {
                 using var stream = forgeEntry.Open();
@@ -154,6 +155,12 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 ParseLegacyMcModInfo(doc.RootElement, meta);
                 return meta;
             }
+
+            // 4. 檢查 MANIFEST.MF 與 Jar-in-Jar 內嵌模組 (例如 Sinytra Connector 等)
+            if (TryExtractFromManifestOrJarJar(archive, meta))
+            {
+                return meta;
+            }
         }
         catch
         {
@@ -162,17 +169,140 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         return meta;
     }
 
+    private static bool TryExtractFromManifestOrJarJar(ZipArchive archive, LocalModMetadataBuilder meta)
+    {
+        string? embeddedPath = null;
+        string? manifestTitle = null;
+        string? manifestVendor = null;
+        string? manifestVersion = null;
+
+        var mfEntry = archive.GetEntry("META-INF/MANIFEST.MF");
+        if (mfEntry is not null && mfEntry.Length <= MaxMetadataEntryBytes)
+        {
+            try
+            {
+                using var stream = mfEntry.Open();
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                string? line;
+                while ((line = reader.ReadLine()) is not null)
+                {
+                    int colon = line.IndexOf(':');
+                    if (colon <= 0)
+                    {
+                        continue;
+                    }
+
+                    string key = line[..colon].Trim();
+                    string val = line[(colon + 1)..].Trim();
+
+                    if (key.Equals("Embedded-Dependencies-Mod", StringComparison.OrdinalIgnoreCase))
+                    {
+                        embeddedPath = val;
+                    }
+                    else if (key.Equals("Specification-Title", StringComparison.OrdinalIgnoreCase) ||
+                             key.Equals("Implementation-Title", StringComparison.OrdinalIgnoreCase))
+                    {
+                        manifestTitle ??= val;
+                    }
+                    else if (key.Equals("Specification-Vendor", StringComparison.OrdinalIgnoreCase) ||
+                             key.Equals("Implementation-Vendor", StringComparison.OrdinalIgnoreCase))
+                    {
+                        manifestVendor ??= val;
+                    }
+                    else if (key.Equals("Implementation-Version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        manifestVersion ??= val;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        // 優先從指定或搜尋到的內嵌 JAR 讀取 mods.toml / fabric.mod.json
+        ZipArchiveEntry? innerJarEntry = null;
+        if (!string.IsNullOrWhiteSpace(embeddedPath))
+        {
+            innerJarEntry = archive.GetEntry(embeddedPath.Replace('\\', '/'));
+        }
+
+        innerJarEntry ??= archive.Entries.FirstOrDefault(static e =>
+            (e.FullName.StartsWith("META-INF/jarjar/", StringComparison.OrdinalIgnoreCase) ||
+             e.FullName.StartsWith("META-INF/jars/", StringComparison.OrdinalIgnoreCase)) &&
+            e.FullName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
+            e.Length <= 50 * 1024 * 1024);
+
+        if (innerJarEntry is not null)
+        {
+            try
+            {
+                using var innerStream = innerJarEntry.Open();
+                using var ms = new MemoryStream();
+                innerStream.CopyTo(ms);
+                ms.Position = 0;
+                using var innerZip = new ZipArchive(ms, ZipArchiveMode.Read);
+
+                var innerToml = innerZip.GetEntry("META-INF/mods.toml") ?? innerZip.GetEntry("META-INF/neoforge.mods.toml");
+                if (innerToml is not null && innerToml.Length <= MaxMetadataEntryBytes)
+                {
+                    using var s = innerToml.Open();
+                    using var r = new StreamReader(s);
+                    string tomlContent = r.ReadToEnd();
+                    ParseForgeToml(tomlContent, meta, innerZip);
+                    if ((meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version)) && !string.IsNullOrWhiteSpace(manifestVersion))
+                    {
+                        meta.Version = ModHelpers.StripColorAndFormattingCodes(manifestVersion);
+                    }
+                    return true;
+                }
+
+                var innerFabric = innerZip.GetEntry("fabric.mod.json") ?? innerZip.GetEntry("quilt.mod.json");
+                if (innerFabric is not null && innerFabric.Length <= MaxMetadataEntryBytes)
+                {
+                    using var s = innerFabric.Open();
+                    using var doc = JsonDocument.Parse(s);
+                    ParseFabricJson(doc.RootElement, meta, innerZip);
+                    if ((meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version)) && !string.IsNullOrWhiteSpace(manifestVersion))
+                    {
+                        meta.Version = ModHelpers.StripColorAndFormattingCodes(manifestVersion);
+                    }
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(manifestTitle))
+        {
+            meta.Name = ModHelpers.StripColorAndFormattingCodes(manifestTitle);
+            if (!string.IsNullOrWhiteSpace(manifestVendor))
+            {
+                meta.Author = ModHelpers.StripColorAndFormattingCodes(manifestVendor);
+            }
+            if (!string.IsNullOrWhiteSpace(manifestVersion))
+            {
+                meta.Version = ModHelpers.StripColorAndFormattingCodes(manifestVersion);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
     private static void ParseFabricJson(JsonElement root, LocalModMetadataBuilder meta, ZipArchive archive)
     {
         meta.LoaderType = "fabric";
         if (root.TryGetProperty("id", out var idElem))
         {
-            meta.Id = idElem.GetString() ?? string.Empty;
+            meta.Id = ModHelpers.StripColorAndFormattingCodes(idElem.GetString() ?? string.Empty);
         }
 
         if (root.TryGetProperty("name", out var nameElem))
         {
-            meta.Name = nameElem.GetString() ?? meta.Name;
+            meta.Name = ModHelpers.StripColorAndFormattingCodes(nameElem.GetString() ?? meta.Name);
         }
 
         if (root.TryGetProperty("version", out var verElem))
@@ -182,12 +312,12 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             {
                 v = ReadManifestVersion(archive) ?? v;
             }
-            meta.Version = v;
+            meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
         }
 
         if (root.TryGetProperty("description", out var descElem))
         {
-            meta.Description = descElem.GetString() ?? string.Empty;
+            meta.Description = ModHelpers.StripColorAndFormattingCodes(descElem.GetString() ?? string.Empty);
         }
 
         if (root.TryGetProperty("authors", out var authorsElem))
@@ -195,20 +325,40 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             if (authorsElem.ValueKind == JsonValueKind.Array)
             {
                 var authors = authorsElem.EnumerateArray()
-                    .Select(a => a.ValueKind == JsonValueKind.String ? a.GetString() : a.TryGetProperty("name", out var n) ? n.GetString() : null)
-                    .Where(a => !string.IsNullOrWhiteSpace(a));
+                    .Select(static a => a.ValueKind == JsonValueKind.String ? a.GetString() : a.TryGetProperty("name", out var n) ? n.GetString() : null)
+                    .Where(static a => !string.IsNullOrWhiteSpace(a))
+                    .Select(ModHelpers.StripColorAndFormattingCodes);
                 meta.Author = string.Join(", ", authors);
             }
             else if (authorsElem.ValueKind == JsonValueKind.String)
             {
-                meta.Author = authorsElem.GetString() ?? string.Empty;
+                meta.Author = ModHelpers.StripColorAndFormattingCodes(authorsElem.GetString() ?? string.Empty);
             }
         }
 
         if (root.TryGetProperty("depends", out var dependsElem) &&
             dependsElem.TryGetProperty("minecraft", out var mcElem))
         {
-            string? raw = mcElem.GetString();
+            string? raw = null;
+            if (mcElem.ValueKind == JsonValueKind.String)
+            {
+                raw = mcElem.GetString();
+            }
+            else if (mcElem.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in mcElem.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                    {
+                        raw = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(raw))
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(raw))
             {
                 string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
@@ -224,50 +374,88 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
     {
         meta.LoaderType = "forge";
 
-        string id = ExtractTomlString(content, "modId");
+        int depIdx = content.IndexOf("[[dependencies", StringComparison.OrdinalIgnoreCase);
+        string modSection = depIdx >= 0 ? content[..depIdx] : content;
+
+        string id = ExtractTomlString(modSection, "modId");
         if (!string.IsNullOrWhiteSpace(id))
         {
-            meta.Id = id;
+            meta.Id = ModHelpers.StripColorAndFormattingCodes(id);
         }
 
-        string name = ExtractTomlString(content, "displayName");
+        string name = ExtractTomlString(modSection, "displayName");
         if (!string.IsNullOrWhiteSpace(name))
         {
-            meta.Name = name;
+            meta.Name = ModHelpers.StripColorAndFormattingCodes(name);
         }
 
-        string v = ExtractTomlString(content, "version");
+        string v = ExtractTomlString(modSection, "version");
         if (!string.IsNullOrWhiteSpace(v))
         {
             if (v == "${file.jarVersion}")
             {
                 v = ReadManifestVersion(archive) ?? v;
             }
-            meta.Version = v;
+            meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
         }
 
-        string desc = ExtractTomlString(content, "description");
+        string desc = ExtractTomlString(modSection, "description");
         if (!string.IsNullOrWhiteSpace(desc))
         {
-            meta.Description = desc;
+            meta.Description = ModHelpers.StripColorAndFormattingCodes(desc);
         }
 
-        string author = ExtractTomlString(content, "authors");
+        string author = ExtractTomlString(modSection, "authors");
         if (!string.IsNullOrWhiteSpace(author))
         {
-            meta.Author = author;
+            meta.Author = ModHelpers.StripColorAndFormattingCodes(author);
         }
 
-        var mcVerMatch = ForgeMcDepRegex().Match(content);
-        if (mcVerMatch.Success)
+        string? mcDepRange = ExtractForgeMinecraftDependency(content);
+        if (!string.IsNullOrWhiteSpace(mcDepRange))
         {
-            string raw = CleanTomlValue(mcVerMatch.Groups[1].Value);
-            string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(raw);
+            string normalized = MinecraftVersionSemantics.NormalizeMinecraftVersion(mcDepRange);
             if (!string.IsNullOrWhiteSpace(normalized))
             {
                 meta.MinecraftVersion = normalized;
             }
         }
+    }
+
+    private static string? ExtractForgeMinecraftDependency(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        int idx = 0;
+        while ((idx = content.IndexOf("[[dependencies", idx, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            int nextSection = content.IndexOf("[[", idx + 14, StringComparison.Ordinal);
+            string section = nextSection >= 0 ? content[idx..nextSection] : content[idx..];
+            if (ForgeMinecraftModIdRegex().IsMatch(section))
+            {
+                var match = ForgeVersionRangeRegex().Match(section);
+                if (match.Success)
+                {
+                    return CleanTomlValue(match.Groups[1].Value);
+                }
+            }
+            if (nextSection < 0)
+            {
+                break;
+            }
+            idx = nextSection;
+        }
+
+        var directMatch = ForgeMcDepRegex().Match(content);
+        if (directMatch.Success)
+        {
+            return CleanTomlValue(directMatch.Groups[1].Value);
+        }
+
+        return null;
     }
 
     private static string ExtractTomlString(string content, string key)
@@ -335,13 +523,22 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                         int end = -1;
                         for (int i = pos + 1; i < content.Length; i++)
                         {
-                            if (content[i] == '"' && content[i - 1] != '\\')
+                            if (content[i] == '"')
                             {
-                                end = i;
-                                break;
+                                int backslashes = 0;
+                                for (int j = i - 1; j > pos && content[j] == '\\'; j--)
+                                {
+                                    backslashes++;
+                                }
+                                if (backslashes % 2 == 0)
+                                {
+                                    end = i;
+                                    break;
+                                }
                             }
                         }
-                        return end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
+                        string val = end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
+                        return val.Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\n", "\n").Replace("\\t", "\t");
                     }
 
                     int eol = content.IndexOf('\n', pos);
@@ -417,12 +614,12 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (target.TryGetProperty("name", out var nameElem))
         {
-            meta.Name = nameElem.GetString() ?? meta.Name;
+            meta.Name = ModHelpers.StripColorAndFormattingCodes(nameElem.GetString() ?? meta.Name);
         }
 
         if (target.TryGetProperty("version", out var verElem))
         {
-            meta.Version = verElem.GetString() ?? meta.Version;
+            meta.Version = ModHelpers.StripColorAndFormattingCodes(verElem.GetString() ?? meta.Version);
         }
 
         if (target.TryGetProperty("mcversion", out var mcElem))
@@ -440,12 +637,15 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (target.TryGetProperty("description", out var descElem))
         {
-            meta.Description = descElem.GetString() ?? string.Empty;
+            meta.Description = ModHelpers.StripColorAndFormattingCodes(descElem.GetString() ?? string.Empty);
         }
 
         if (target.TryGetProperty("authorList", out var authorListElem) && authorListElem.ValueKind == JsonValueKind.Array)
         {
-            var authors = authorListElem.EnumerateArray().Select(static a => a.GetString()).Where(static a => !string.IsNullOrWhiteSpace(a));
+            var authors = authorListElem.EnumerateArray()
+                .Select(static a => a.GetString())
+                .Where(static a => !string.IsNullOrWhiteSpace(a))
+                .Select(ModHelpers.StripColorAndFormattingCodes);
             meta.Author = string.Join(", ", authors);
         }
     }
@@ -611,4 +811,10 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
     [GeneratedRegex(@"(?m)^\s*modId\s*=\s*[""']minecraft[""']\s*\n\s*versionRange\s*=\s*(.+)$")]
     private static partial Regex ForgeMcDepRegex();
+
+    [GeneratedRegex(@"modId\s*=\s*[""']minecraft[""']", RegexOptions.IgnoreCase)]
+    private static partial Regex ForgeMinecraftModIdRegex();
+
+    [GeneratedRegex(@"versionRange\s*=\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex ForgeVersionRangeRegex();
 }

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using MinecraftServerManager.Core;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
@@ -38,7 +39,7 @@ public partial class App : Application
 
         // 4. 初始化記錄系統
         AppLogging.Initialize();
-        Logger.Information("Minecraft Server Manager 啟動中 (版本 2.0.0)");
+        Logger.Information("Minecraft Server Manager 啟動中 (版本 {Version})", AppInfo.Version);
 
         base.OnStartup(e);
 

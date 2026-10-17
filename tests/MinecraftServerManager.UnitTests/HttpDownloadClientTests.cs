@@ -18,6 +18,25 @@ public sealed class HttpDownloadClientTests
     }
 
     [Fact]
+    public async Task ConnectCallbackRejectsPrivateDnsResultBeforeConnecting()
+    {
+        int resolveCount = 0;
+
+        var exception = await Assert.ThrowsAsync<HttpSecurityException>(async () =>
+            await HttpUrlPolicy.ConnectAsync(
+                new DnsEndPoint("rebind.example", 443),
+                (_, _) =>
+                {
+                    resolveCount++;
+                    return Task.FromResult(new[] { IPAddress.Loopback });
+                },
+                CancellationToken.None));
+
+        Assert.Contains("非公開", exception.Message);
+        Assert.Equal(1, resolveCount);
+    }
+
+    [Fact]
     public async Task DownloadStreamsToAtomicTargetAndReportsProgress()
     {
         string root = CreateTemporaryDirectory();

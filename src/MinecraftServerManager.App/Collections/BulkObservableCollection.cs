@@ -36,6 +36,31 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         NotifyReset();
     }
 
+    /// <summary>
+    /// 批次移除指定範圍，並以單次 Reset 通知更新檢視。
+    /// </summary>
+    public void RemoveRange(int index, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (index > Count || count > Count - index)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count));
+        }
+
+        if (count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            Items.RemoveAt(index);
+        }
+
+        NotifyReset();
+    }
+
     private void NotifyReset()
     {
         OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));

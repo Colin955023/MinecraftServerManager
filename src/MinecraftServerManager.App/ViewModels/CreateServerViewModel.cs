@@ -388,7 +388,6 @@ public sealed partial class CreateServerViewModel : PageViewModel
         if (_ui.ShowManageJava(vm) == true && !string.IsNullOrWhiteSpace(vm.ResultJavaPath))
         {
             JavaPath = vm.ResultJavaPath;
-            _notificationSink?.Invoke($"已選取 Java：{JavaPath}", false);
         }
     }
 

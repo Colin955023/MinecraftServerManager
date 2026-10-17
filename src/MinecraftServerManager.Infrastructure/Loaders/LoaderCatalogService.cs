@@ -1,5 +1,5 @@
 using System.Text.Json;
-using System.Xml.Linq;
+using System.Xml;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
@@ -593,15 +593,46 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
     private static List<LoaderVersion> ParseMavenMetadataXml(string xmlContent, bool isNeoForge)
     {
-        var doc = XDocument.Parse(xmlContent, LoadOptions.None);
-        var versions = doc.Descendants("version")
-            .Select(static x => x.Value.Trim())
-            .Where(static x => !string.IsNullOrEmpty(x))
-            .Distinct()
-            .ToList();
+        var versions = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        using var stringReader = new StringReader(xmlContent);
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreWhitespace = true,
+            IgnoreComments = true,
+        };
+        using var reader = XmlReader.Create(stringReader, settings);
+        string? currentElement = null;
+        while (reader.Read())
+        {
+            switch (reader.NodeType)
+            {
+                case XmlNodeType.Element:
+                    currentElement = reader.Name;
+                    break;
+                case XmlNodeType.Text or XmlNodeType.CDATA:
+                    if (string.Equals(currentElement, "version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string raw = reader.Value.Trim();
+                        if (!string.IsNullOrEmpty(raw) && seen.Add(raw))
+                        {
+                            versions.Add(raw);
+                        }
+                    }
+                    break;
+                case XmlNodeType.EndElement:
+                    if (string.Equals(reader.Name, "version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentElement = null;
+                    }
+                    break;
+            }
+        }
 
         var list = new List<LoaderVersion>();
-        foreach (string? raw in versions)
+        foreach (string raw in versions)
         {
             if (isNeoForge)
             {

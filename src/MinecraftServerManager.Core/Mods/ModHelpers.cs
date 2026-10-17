@@ -34,6 +34,19 @@ public static partial class ModHelpers
         return norm is "sha512" or "sha256" or "sha1" ? norm : PreferredHashAlgorithm;
     }
 
+    /// <summary>
+    /// 清除字串中的 ANSI 跳脫序列（CSI、OSC、2-char ESC）以及 Minecraft 格式化代碼（§、\u00a7、Hex 格式）
+    /// </summary>
+    public static string StripColorAndFormattingCodes(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        return ColorAndFormattingCodeRegex().Replace(text, string.Empty);
+    }
+
     public static string NormalizeModSearchQuery(string rawQuery)
     {
         if (string.IsNullOrWhiteSpace(rawQuery))
@@ -42,12 +55,14 @@ public static partial class ModHelpers
         }
 
         string clean = ModFilenameStem(rawQuery);
+        clean = StripColorAndFormattingCodes(clean);
         clean = CamelCaseRegex().Replace(clean, " $1");
         clean = CamelCaseAcronymBoundaryRegex().Replace(clean, " ");
-        clean = clean.Replace('_', ' ').Replace('-', ' ');
+        clean = clean.Replace('_', ' ').Replace('-', ' ').Replace('+', ' ');
         clean = LoaderNoiseRegex().Replace(clean, " ");
         clean = McVersionNoiseRegex().Replace(clean, " ");
         clean = VersionDigitNoiseRegex().Replace(clean, " ");
+        clean = VersionQualifierNoiseRegex().Replace(clean, " ");
 
         var sb = new StringBuilder(clean.Length);
         foreach (var range in clean.AsSpan().Split(' '))
@@ -63,7 +78,8 @@ public static partial class ModHelpers
             }
         }
 
-        return sb.ToString().Trim();
+        string result = sb.ToString().Trim();
+        return !string.IsNullOrWhiteSpace(result) ? result : ModFilenameStem(rawQuery);
     }
 
     public static bool IsAllowedVersionType(string? versionType)
@@ -118,4 +134,10 @@ public static partial class ModHelpers
 
     [GeneratedRegex(@"\b\d+(?:\.\d+){1,3}[a-z0-9.-]*\b")]
     private static partial Regex VersionDigitNoiseRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:beta|alpha|rc|pre|snapshot|build|patch)(?:[0-9.-]+)?\b")]
+    private static partial Regex VersionQualifierNoiseRegex();
+
+    [GeneratedRegex(@"(?:\x1B|(?i)\\u001b|(?i)\\x1b)(?:\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\)|[@-Z\\-_])|§x(?:§[0-9a-fA-F]){6}|§[0-9a-fk-orA-FK-ORzZ]|(?i)\\u00a7[0-9a-fk-or]")]
+    private static partial Regex ColorAndFormattingCodeRegex();
 }
