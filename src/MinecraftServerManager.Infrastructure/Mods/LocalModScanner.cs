@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Text;
@@ -17,7 +18,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed partial class LocalModScanner(IModIndexPersistence? indexPersistence = null) : ILocalModScanner
 {
-    private const long MaxMetadataEntryBytes = 2 * 1024 * 1024;
+    private const int MaxMetadataEntryBytes = 256 * 1024;
 
     public async Task<IReadOnlyList<LocalModInfo>> ScanModsAsync(string modsDirectory, CancellationToken cancellationToken = default)
     {
@@ -79,8 +80,23 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         bool isEnabled = !fileName.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase);
         string baseStem = ModHelpers.ModFilenameStem(fileName);
 
-        // 讀取快取
-        var cached = persistence?.GetCachedMetadata(fileName);
+        // 讀取快取（若為 ModIndexPersistence 則一併檢查檔案大小與最後修改時間）
+        IReadOnlyDictionary<string, string>? cached = null;
+        if (persistence is ModIndexPersistence concretePersistence)
+        {
+            var cachedEntry = concretePersistence.GetEntry(fileName);
+            if (cachedEntry is not null &&
+                cachedEntry.FileSizeBytes == fileInfo.Length &&
+                cachedEntry.LastWriteTimeUtcTicks == fileInfo.LastWriteTimeUtc.Ticks)
+            {
+                cached = cachedEntry.Metadata;
+            }
+        }
+        else
+        {
+            cached = persistence?.GetCachedMetadata(fileName);
+        }
+
         LocalModMetadataBuilder metadata;
 
         if (cached is not null && cached.TryGetValue("name", out string? cachedName) && !string.IsNullOrWhiteSpace(cachedName))
@@ -91,7 +107,14 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         {
             metadata = ExtractMetadataFromJar(filePath, baseStem);
             ApplyFallbackLogic(baseStem, metadata);
-            persistence?.CacheMetadata(fileName, metadata.ToDictionary());
+            if (persistence is ModIndexPersistence concreteWriter)
+            {
+                concreteWriter.CacheMetadata(fileName, metadata.ToDictionary(), fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
+            }
+            else
+            {
+                persistence?.CacheMetadata(fileName, metadata.ToDictionary());
+            }
         }
 
         // 計算或取得雜湊
@@ -117,6 +140,89 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         return Task.FromResult<LocalModInfo?>(modInfo);
     }
 
+    private static string? ReadEntryTextBounded(ZipArchiveEntry entry, int maxBytes = MaxMetadataEntryBytes)
+    {
+        if (entry.Length > maxBytes)
+        {
+            return null;
+        }
+
+        int rentSize = (int)Math.Min(entry.Length > 0 ? entry.Length + 1 : 4096, maxBytes + 1);
+        using var stream = entry.Open();
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(rentSize);
+        try
+        {
+            int totalRead = 0;
+            while (totalRead < rentSize)
+            {
+                int read = stream.Read(buffer, totalRead, rentSize - totalRead);
+                if (read == 0)
+                {
+                    break;
+                }
+                totalRead += read;
+            }
+
+            // 若 entry.Length 未知且資料超出初始租用大小，回退至完整讀取
+            if (totalRead == rentSize && rentSize < maxBytes + 1)
+            {
+                int nextByte = stream.ReadByte();
+                if (nextByte != -1)
+                {
+                    byte[] largeBuffer = ArrayPool<byte>.Shared.Rent(maxBytes + 1);
+                    try
+                    {
+                        Buffer.BlockCopy(buffer, 0, largeBuffer, 0, totalRead);
+                        largeBuffer[totalRead++] = (byte)nextByte;
+                        while (totalRead <= maxBytes)
+                        {
+                            int read = stream.Read(largeBuffer, totalRead, maxBytes + 1 - totalRead);
+                            if (read == 0)
+                            {
+                                break;
+                            }
+                            totalRead += read;
+                        }
+
+                        if (totalRead > maxBytes)
+                        {
+                            return null;
+                        }
+
+                        ReadOnlySpan<byte> largeSpan = largeBuffer.AsSpan(0, totalRead);
+                        if (largeSpan.StartsWith(Encoding.UTF8.Preamble))
+                        {
+                            largeSpan = largeSpan[Encoding.UTF8.Preamble.Length..];
+                        }
+
+                        return Encoding.UTF8.GetString(largeSpan);
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(largeBuffer);
+                    }
+                }
+            }
+
+            if (totalRead > maxBytes)
+            {
+                return null;
+            }
+
+            ReadOnlySpan<byte> span = buffer.AsSpan(0, totalRead);
+            if (span.StartsWith(Encoding.UTF8.Preamble))
+            {
+                span = span[Encoding.UTF8.Preamble.Length..];
+            }
+
+            return Encoding.UTF8.GetString(span);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private static LocalModMetadataBuilder ExtractMetadataFromJar(string filePath, string fallbackName)
     {
         var meta = new LocalModMetadataBuilder { Name = fallbackName };
@@ -127,31 +233,26 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
             // 1. fabric.mod.json / quilt.mod.json
             var fabricEntry = archive.GetEntry("fabric.mod.json") ?? archive.GetEntry("quilt.mod.json");
-            if (fabricEntry is not null && fabricEntry.Length <= MaxMetadataEntryBytes)
+            if (fabricEntry is not null && ReadEntryTextBounded(fabricEntry) is { } fabricJson)
             {
-                using var stream = fabricEntry.Open();
-                using var doc = JsonDocument.Parse(stream);
+                using var doc = JsonDocument.Parse(fabricJson);
                 ParseFabricJson(doc.RootElement, meta, archive);
                 return meta;
             }
 
             // 2. META-INF/mods.toml / META-INF/neoforge.mods.toml (Forge / NeoForge)
             var forgeEntry = archive.GetEntry("META-INF/mods.toml") ?? archive.GetEntry("META-INF/neoforge.mods.toml");
-            if (forgeEntry is not null && forgeEntry.Length <= MaxMetadataEntryBytes)
+            if (forgeEntry is not null && ReadEntryTextBounded(forgeEntry) is { } content)
             {
-                using var stream = forgeEntry.Open();
-                using var reader = new StreamReader(stream);
-                string content = reader.ReadToEnd();
                 ParseForgeToml(content, meta, archive);
                 return meta;
             }
 
             // 3. mcmod.info (Legacy Forge)
             var legacyEntry = archive.GetEntry("mcmod.info");
-            if (legacyEntry is not null && legacyEntry.Length <= MaxMetadataEntryBytes)
+            if (legacyEntry is not null && ReadEntryTextBounded(legacyEntry) is { } legacyJson)
             {
-                using var stream = legacyEntry.Open();
-                using var doc = JsonDocument.Parse(stream);
+                using var doc = JsonDocument.Parse(legacyJson);
                 ParseLegacyMcModInfo(doc.RootElement, meta);
                 return meta;
             }
@@ -231,14 +332,15 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             (e.FullName.StartsWith("META-INF/jarjar/", StringComparison.OrdinalIgnoreCase) ||
              e.FullName.StartsWith("META-INF/jars/", StringComparison.OrdinalIgnoreCase)) &&
             e.FullName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
-            e.Length <= 50 * 1024 * 1024);
+            e.Length <= 10 * 1024 * 1024);
 
         if (innerJarEntry is not null)
         {
             try
             {
                 using var innerStream = innerJarEntry.Open();
-                using var ms = new MemoryStream();
+                int initialCapacity = innerJarEntry.Length > 0 ? (int)Math.Min(innerJarEntry.Length, 10 * 1024 * 1024) : 0;
+                using var ms = new MemoryStream(initialCapacity);
                 innerStream.CopyTo(ms);
                 ms.Position = 0;
                 using var innerZip = new ZipArchive(ms, ZipArchiveMode.Read);
@@ -377,19 +479,81 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         int depIdx = content.IndexOf("[[dependencies", StringComparison.OrdinalIgnoreCase);
         string modSection = depIdx >= 0 ? content[..depIdx] : content;
 
-        string id = ExtractTomlString(modSection, "modId");
+        string? id = null;
+        string? name = null;
+        string? v = null;
+        string? desc = null;
+        string? author = null;
+
+        int idx = 0;
+        while (idx < modSection.Length)
+        {
+            int lineStart = idx;
+            int nextNewline = modSection.IndexOf('\n', idx);
+            int lineEnd = nextNewline >= 0 ? nextNewline : modSection.Length;
+
+            int pos = lineStart;
+            while (pos < lineEnd && (modSection[pos] == ' ' || modSection[pos] == '\t'))
+            {
+                pos++;
+            }
+
+            int eqIdx = -1;
+            for (int i = pos; i < lineEnd; i++)
+            {
+                if (modSection[i] == '=')
+                {
+                    eqIdx = i;
+                    break;
+                }
+            }
+
+            if (eqIdx > pos)
+            {
+                ReadOnlySpan<char> keySpan = modSection.AsSpan(pos, eqIdx - pos).Trim();
+                int nextIdx = lineEnd + (nextNewline >= 0 ? 1 : 0);
+                string? parsedValue = ExtractTomlValueAt(modSection, eqIdx + 1, ref nextIdx);
+                if (parsedValue is not null)
+                {
+                    if (keySpan.Equals("modId", StringComparison.OrdinalIgnoreCase))
+                    {
+                        id ??= parsedValue;
+                    }
+                    else if (keySpan.Equals("displayName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        name ??= parsedValue;
+                    }
+                    else if (keySpan.Equals("version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        v ??= parsedValue;
+                    }
+                    else if (keySpan.Equals("description", StringComparison.OrdinalIgnoreCase))
+                    {
+                        desc ??= parsedValue;
+                    }
+                    else if (keySpan.Equals("authors", StringComparison.OrdinalIgnoreCase))
+                    {
+                        author ??= parsedValue;
+                    }
+                }
+
+                idx = nextIdx;
+                continue;
+            }
+
+            idx = lineEnd + (nextNewline >= 0 ? 1 : 0);
+        }
+
         if (!string.IsNullOrWhiteSpace(id))
         {
             meta.Id = ModHelpers.StripColorAndFormattingCodes(id);
         }
 
-        string name = ExtractTomlString(modSection, "displayName");
         if (!string.IsNullOrWhiteSpace(name))
         {
             meta.Name = ModHelpers.StripColorAndFormattingCodes(name);
         }
 
-        string v = ExtractTomlString(modSection, "version");
         if (!string.IsNullOrWhiteSpace(v))
         {
             if (v == "${file.jarVersion}")
@@ -399,13 +563,11 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             meta.Version = ModHelpers.StripColorAndFormattingCodes(v);
         }
 
-        string desc = ExtractTomlString(modSection, "description");
         if (!string.IsNullOrWhiteSpace(desc))
         {
             meta.Description = ModHelpers.StripColorAndFormattingCodes(desc);
         }
 
-        string author = ExtractTomlString(modSection, "authors");
         if (!string.IsNullOrWhiteSpace(author))
         {
             meta.Author = ModHelpers.StripColorAndFormattingCodes(author);
@@ -458,108 +620,113 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
         return null;
     }
 
-    private static string ExtractTomlString(string content, string key)
+    private static string? ExtractTomlValueAt(string content, int pos, ref int nextIndex)
     {
-        if (string.IsNullOrWhiteSpace(content))
+        while (pos < content.Length && (content[pos] == ' ' || content[pos] == '\t' || content[pos] == '\r' || content[pos] == '\n'))
+        {
+            pos++;
+        }
+
+        if (pos >= content.Length)
         {
             return string.Empty;
         }
 
-        int idx = 0;
-        while (idx < content.Length)
+        if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("'''"))
         {
-            int lineStart = idx;
-            int nextNewline = content.IndexOf('\n', idx);
-            int lineEnd = nextNewline >= 0 ? nextNewline : content.Length;
-
-            int pos = lineStart;
-            while (pos < lineEnd && (content[pos] == ' ' || content[pos] == '\t'))
+            int end = content.IndexOf("'''", pos + 3, StringComparison.Ordinal);
+            if (end >= 0)
             {
-                pos++;
+                nextIndex = Math.Max(nextIndex, end + 3);
+                return content[(pos + 3)..end].Trim();
             }
-
-            if (pos + key.Length < lineEnd &&
-                content.AsSpan(pos, key.Length).Equals(key, StringComparison.OrdinalIgnoreCase))
-            {
-                pos += key.Length;
-                while (pos < lineEnd && (content[pos] == ' ' || content[pos] == '\t'))
-                {
-                    pos++;
-                }
-
-                if (pos < lineEnd && content[pos] == '=')
-                {
-                    pos++;
-                    while (pos < content.Length && (content[pos] == ' ' || content[pos] == '\t' || content[pos] == '\r' || content[pos] == '\n'))
-                    {
-                        pos++;
-                    }
-
-                    if (pos >= content.Length)
-                    {
-                        return string.Empty;
-                    }
-
-                    if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("'''"))
-                    {
-                        int end = content.IndexOf("'''", pos + 3, StringComparison.Ordinal);
-                        return end >= 0 ? content[(pos + 3)..end].Trim() : content[(pos + 3)..].Trim();
-                    }
-
-                    if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("\"\"\""))
-                    {
-                        int end = content.IndexOf("\"\"\"", pos + 3, StringComparison.Ordinal);
-                        return end >= 0 ? content[(pos + 3)..end].Trim() : content[(pos + 3)..].Trim();
-                    }
-
-                    if (content[pos] == '\'')
-                    {
-                        int end = content.IndexOf('\'', pos + 1);
-                        return end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
-                    }
-
-                    if (content[pos] == '"')
-                    {
-                        int end = -1;
-                        for (int i = pos + 1; i < content.Length; i++)
-                        {
-                            if (content[i] == '"')
-                            {
-                                int backslashes = 0;
-                                for (int j = i - 1; j > pos && content[j] == '\\'; j--)
-                                {
-                                    backslashes++;
-                                }
-                                if (backslashes % 2 == 0)
-                                {
-                                    end = i;
-                                    break;
-                                }
-                            }
-                        }
-                        string val = end >= 0 ? content[(pos + 1)..end].Trim() : content[(pos + 1)..].Trim();
-                        return val.Replace("\\\"", "\"").Replace("\\\\", "\\").Replace("\\n", "\n").Replace("\\t", "\t");
-                    }
-
-                    int eol = content.IndexOf('\n', pos);
-                    string rawVal = eol >= 0 ? content[pos..eol] : content[pos..];
-                    int hashIdx = rawVal.IndexOf('#');
-                    if (hashIdx >= 0)
-                    {
-                        rawVal = rawVal[..hashIdx];
-                    }
-                    return rawVal.Trim();
-                }
-            }
-
-            if (nextNewline < 0)
-            {
-                break;
-            }
-            idx = nextNewline + 1;
+            nextIndex = content.Length;
+            return content[(pos + 3)..].Trim();
         }
 
-        return string.Empty;
+        if (pos + 3 <= content.Length && content.AsSpan(pos, 3).SequenceEqual("\"\"\""))
+        {
+            int end = content.IndexOf("\"\"\"", pos + 3, StringComparison.Ordinal);
+            if (end >= 0)
+            {
+                nextIndex = Math.Max(nextIndex, end + 3);
+                return content[(pos + 3)..end].Trim();
+            }
+            nextIndex = content.Length;
+            return content[(pos + 3)..].Trim();
+        }
+
+        if (content[pos] == '\'')
+        {
+            int end = content.IndexOf('\'', pos + 1);
+            if (end >= 0)
+            {
+                nextIndex = Math.Max(nextIndex, end + 1);
+                return content[(pos + 1)..end].Trim();
+            }
+            return content[(pos + 1)..].Trim();
+        }
+
+        if (content[pos] == '"')
+        {
+            int end = -1;
+            for (int i = pos + 1; i < content.Length; i++)
+            {
+                if (content[i] == '"')
+                {
+                    int backslashes = 0;
+                    for (int j = i - 1; j > pos && content[j] == '\\'; j--)
+                    {
+                        backslashes++;
+                    }
+                    if (backslashes % 2 == 0)
+                    {
+                        end = i;
+                        break;
+                    }
+                }
+            }
+            if (end >= 0)
+            {
+                nextIndex = Math.Max(nextIndex, end + 1);
+                return UnescapeTomlString(content[(pos + 1)..end].Trim());
+            }
+            return UnescapeTomlString(content[(pos + 1)..].Trim());
+        }
+
+        int eol = content.IndexOf('\n', pos);
+        string rawVal = eol >= 0 ? content[pos..eol] : content[pos..];
+        if (eol >= 0)
+        {
+            nextIndex = Math.Max(nextIndex, eol + 1);
+        }
+        else
+        {
+            nextIndex = content.Length;
+        }
+
+        int hashIdx = rawVal.IndexOf('#');
+        if (hashIdx >= 0)
+        {
+            rawVal = rawVal[..hashIdx];
+        }
+
+        return rawVal.Trim();
+    }
+
+    private static string UnescapeTomlString(string value)
+    {
+        if (string.IsNullOrEmpty(value) || !value.Contains('\\'))
+        {
+            return value;
+        }
+
+        return value
+            .Replace("\\n", "\n", StringComparison.Ordinal)
+            .Replace("\\r", "\r", StringComparison.Ordinal)
+            .Replace("\\t", "\t", StringComparison.Ordinal)
+            .Replace("\\\"", "\"", StringComparison.Ordinal)
+            .Replace("\\\\", "\\", StringComparison.Ordinal);
     }
 
     private static string CleanTomlValue(string raw)
@@ -706,14 +873,24 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
             if (meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version))
             {
-                string[] parts = baseStem.Split('-');
-                for (int i = 1; i < parts.Length; i++)
+                ReadOnlySpan<char> span = baseStem.AsSpan();
+                int currentPos = firstDash + 1;
+                while (currentPos < span.Length)
                 {
-                    if (parts[i].Any(char.IsDigit))
+                    int nextDash = span[currentPos..].IndexOf('-');
+                    ReadOnlySpan<char> part = nextDash >= 0 ? span.Slice(currentPos, nextDash) : span[currentPos..];
+                    if (MemoryExtensions.ContainsAnyInRange(part, '0', '9'))
                     {
-                        meta.Version = string.Join('-', parts[i..]);
+                        meta.Version = baseStem[currentPos..];
                         break;
                     }
+
+                    if (nextDash < 0)
+                    {
+                        break;
+                    }
+
+                    currentPos += nextDash + 1;
                 }
             }
         }
@@ -733,19 +910,42 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         if (meta.LoaderType == "未知")
         {
-            string detected = MinecraftVersionSemantics.DetectLoaderFromText(baseStem);
-            if (detected != "unknown")
+            string? detected = DetectLoaderDisplayNameFromText(baseStem);
+            if (!string.IsNullOrEmpty(detected))
             {
-                meta.LoaderType = detected switch
-                {
-                    "fabric" => "Fabric",
-                    "neoforge" => "NeoForge",
-                    "quilt" => "Quilt",
-                    "forge" => "Forge",
-                    _ => meta.LoaderType,
-                };
+                meta.LoaderType = detected;
             }
         }
+    }
+
+    private static string? DetectLoaderDisplayNameFromText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        if (text.Contains("neoforge", StringComparison.OrdinalIgnoreCase))
+        {
+            return "NeoForge";
+        }
+
+        if (text.Contains("fabric", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Fabric";
+        }
+
+        if (text.Contains("quilt", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Quilt";
+        }
+
+        if (text.Contains("forge", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Forge";
+        }
+
+        return null;
     }
 
     private sealed class LocalModMetadataBuilder

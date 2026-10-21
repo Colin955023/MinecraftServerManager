@@ -25,9 +25,7 @@
       <SolidColorBrush x:Key="NotificationBrush" Color="#283A5A" />
       <SolidColorBrush x:Key="ButtonDefaultHoverBrush" Color="#2E3440" />
       <SolidColorBrush x:Key="NavButtonHoverBrush" Color="#2D323E" />
-      <SolidColorBrush x:Key="SubtleButtonHoverBrush" Color="#2D323E" />
       <SolidColorBrush x:Key="DataGridGridLineBrush" Color="#3F4552" />
-      <SolidColorBrush x:Key="TabItemUnderlineBrush" Color="#4F6FD8" />
 
       <!-- 停用與狀態筆刷 -->
       <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#2B2D35" />
@@ -282,31 +280,6 @@
         </Setter>
       </Style>
 
-      <!-- 微妙按鈕樣式 (Subtle) -->
-      <Style x:Key="SubtleButtonStyle" TargetType="Button">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}" />
-        <Setter Property="Padding" Value="6,4" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Template">
-          <Setter.Value>
-            <ControlTemplate TargetType="Button">
-              <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-              </Border>
-              <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                  <Setter TargetName="border" Property="Background" Value="{DynamicResource SubtleButtonHoverBrush}" />
-                  <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
-                </Trigger>
-              </ControlTemplate.Triggers>
-            </ControlTemplate>
-          </Setter.Value>
-        </Setter>
-      </Style>
-
       <!-- 輸入框 TextBox 樣式 -->
       <Style TargetType="TextBox">
         <Setter Property="FontFamily" Value="Segoe UI" />
@@ -542,8 +515,18 @@
         <Setter Property="AlternatingRowBackground" Value="{DynamicResource SidebarBrush}" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
         <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+        <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+        <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
+        <Setter Property="VirtualizingPanel.IsContainerVirtualizable" Value="True" />
         <Setter Property="behaviors:DataGridHeaderAutoFitBehavior.EnableHeaderDoubleClickAutoFit" Value="True" />
         <Setter Property="behaviors:DataGridNaturalSortBehavior.EnableNaturalSort" Value="True" />
+      </Style>
+
+      <Style TargetType="ListBox">
+        <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+        <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling" />
+        <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel" />
       </Style>
 
       <!-- TabControl 與 TabItem 樣式 (消除深色白底白字，選取底線突顯) -->

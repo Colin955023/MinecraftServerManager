@@ -1,5 +1,5 @@
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
-using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
@@ -64,6 +64,12 @@ public sealed partial class PropertyEditItem : ObservableObject
 
         if (editorType == PropertyEditorType.Boolean)
         {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                value = !string.IsNullOrWhiteSpace(defaultValue) ? defaultValue : "false";
+                Value = value;
+            }
+
             BoolValue = bool.TryParse(value, out bool b) && b;
         }
 
@@ -139,7 +145,7 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
 
     public bool IsNotSaving => !IsSaving;
 
-    public ObservableCollection<PropertyEditItem> DisplayItems { get; } = [];
+    public BulkObservableCollection<PropertyEditItem> DisplayItems { get; } = [];
 
     public IReadOnlyList<string> Categories { get; } =
     [
@@ -235,15 +241,14 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
 
     private void ApplyFilter()
     {
-        DisplayItems.Clear();
         string query = SearchText.Trim();
         bool matchCategory = !string.Equals(SelectedCategory, "全部", StringComparison.OrdinalIgnoreCase);
 
-        foreach (var item in _allItems)
+        var filtered = _allItems.Where(item =>
         {
             if (matchCategory && !string.Equals(item.Category, SelectedCategory, StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                return false;
             }
 
             if (!string.IsNullOrEmpty(query))
@@ -252,12 +257,14 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
                 bool descMatch = item.Description.Contains(query, StringComparison.OrdinalIgnoreCase);
                 if (!keyMatch && !descMatch)
                 {
-                    continue;
+                    return false;
                 }
             }
 
-            DisplayItems.Add(item);
-        }
+            return true;
+        });
+
+        DisplayItems.ReplaceAll(filtered);
     }
 
     [RelayCommand]
@@ -337,6 +344,31 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
         }
     }
 
+    public bool HasUnsavedChanges =>
+        _snapshot is not null &&
+        _allItems.Any(item =>
+        {
+            string currentVal = item.Value.Trim();
+            string? originalVal = _snapshot.Properties.TryGetValue(item.Key, out string? orig) ? orig.Trim() : null;
+            return originalVal is null || !string.Equals(originalVal, currentVal, StringComparison.Ordinal);
+        });
+
+    public bool ConfirmDiscard()
+    {
+        if (!HasUnsavedChanges)
+        {
+            return true;
+        }
+
+        return _ui.Confirm("有尚未儲存的伺服器屬性變更，確定要捨棄變更並關閉嗎？", "捨棄變更", UiMessageLevel.Warning);
+    }
+
     [RelayCommand]
-    public void Cancel() => RequestClose?.Invoke(false);
+    public void Cancel()
+    {
+        if (ConfirmDiscard())
+        {
+            RequestClose?.Invoke(false);
+        }
+    }
 }

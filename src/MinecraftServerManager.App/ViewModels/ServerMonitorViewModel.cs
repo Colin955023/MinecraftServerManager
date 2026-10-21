@@ -1,6 +1,5 @@
 using MinecraftServerManager.App.Services;
 using System.Buffers;
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -29,6 +28,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     private const int MaxBufferedLines = 5000;
     private const int DisplayedLogsHighWatermark = 2200;
     private const int DisplayedLogsLowWatermark = 1800;
+    private readonly List<string> _reusableFlushBatch = [];
     private readonly Channel<string> _logBuffer = Channel.CreateBounded<string>(new BoundedChannelOptions(MaxBufferedLines)
     {
         FullMode = BoundedChannelFullMode.DropOldest,
@@ -39,7 +39,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     private readonly string _serverName;
     private Process? _monitoredProcess;
     private int _monitoredPid;
-    private DateTime? _startTime;
+    private long? _startTimestamp;
     private bool _serverReadyNotified;
     private int _logSessionId;
     private Task _historyLoadTask = Task.CompletedTask;
@@ -98,7 +98,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     public partial bool IsAutoScrollEnabled { get; set; } = true;
     public BulkObservableCollection<string> Logs { get; } = [];
 
-    public ObservableCollection<string> OnlinePlayers { get; } = [];
+    public BulkObservableCollection<string> OnlinePlayers { get; } = [];
 
     /// <summary>
     /// 是否無線上玩家
@@ -130,7 +130,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
         if (IsServerRunning)
         {
-            _startTime = DateTime.Now;
+            _startTimestamp = Stopwatch.GetTimestamp();
             ServerStatusText = _serverRuntime.IsReady ? "執行中 (已就緒)" : "啟動中 (載入世界)...";
             _serverReadyNotified = _serverRuntime.IsReady;
         }
@@ -143,7 +143,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         _serverRuntime.ServerExited += OnServerExited;
         _serverRuntime.ServerReady += OnServerReady;
 
-        _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(50), OnFlushTimerTick);
+        _flushTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), OnFlushTimerTick);
         _flushTimer.StartTimer();
 
         _statsTimer = _ui.CreateUiTimer(TimeSpan.FromSeconds(1), OnStatsTimerTick);
@@ -282,8 +282,8 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         IsServerRunning = _serverRuntime.IsRunning;
         if (IsServerRunning)
         {
-            _startTime ??= DateTime.Now;
-            var elapsed = DateTime.Now - _startTime.Value;
+            _startTimestamp ??= Stopwatch.GetTimestamp();
+            var elapsed = Stopwatch.GetElapsedTime(_startTimestamp.Value);
             UptimeText = $"{elapsed:hh\\:mm\\:ss}";
 
             if (_serverRuntime.Pid > 0)
@@ -515,14 +515,11 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
                 ? listMatch.Groups[2].Value
                 : "20";
             string playersRaw = listMatch.Groups[3].Value.Trim();
-            DispatchIfPossible(() =>
+            _ui.RunOnUi(() =>
             {
                 OnlinePlayersText = $"{current} / {max}";
-                OnlinePlayers.Clear();
-                foreach (string player in playersRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                {
-                    OnlinePlayers.Add(player);
-                }
+                string[] parsedPlayers = playersRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                OnlinePlayers.ReplaceAll(parsedPlayers);
                 OnPropertyChanged(nameof(HasNoOnlinePlayers));
             });
         }
@@ -531,7 +528,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             && PlayerJoinRegex().Match(line) is { Success: true } joinMatch)
         {
             string player = joinMatch.Groups[1].Value;
-            DispatchIfPossible(() =>
+            _ui.RunOnUi(() =>
             {
                 if (!OnlinePlayers.Contains(player))
                 {
@@ -545,7 +542,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             && PlayerLeaveRegex().Match(line) is { Success: true } leaveMatch)
         {
             string player = leaveMatch.Groups[1].Value;
-            DispatchIfPossible(() =>
+            _ui.RunOnUi(() =>
             {
                 OnlinePlayers.Remove(player);
                 OnPropertyChanged(nameof(HasNoOnlinePlayers));
@@ -553,15 +550,13 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         }
     }
 
-    private void DispatchIfPossible(Action action) => _ui.RunOnUi(action);
-
     private void OnServerStarted()
     {
-        DispatchIfPossible(() =>
+        _ui.RunOnUi(() =>
         {
             ClearLogs();
             IsServerRunning = true;
-            _startTime = DateTime.Now;
+            _startTimestamp = Stopwatch.GetTimestamp();
             ServerStatusText = "啟動中 (載入世界)...";
             _serverReadyNotified = false;
             AddLogLine("[系統] 伺服器行程已啟動...");
@@ -571,7 +566,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
     private void OnServerReady()
     {
-        DispatchIfPossible(() =>
+        _ui.RunOnUi(() =>
         {
             if (IsServerRunning)
             {
@@ -599,7 +594,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
                 ? $"伺服器 {_serverName} 啟動完成！\n已在 {serverIp}:{serverPort} 開啟服務"
                 : $"伺服器 {_serverName} 啟動完成！\n已在連接埠 {serverPort} 開啟服務";
 
-            _ui.ShowMonitorInfo(_serverName, msg, "伺服器啟動成功");
+            _ui.ShowToast(msg, $"伺服器啟動成功 — {_serverName}", ToastType.Success);
         }
         catch (Exception ex)
         {
@@ -664,7 +659,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
     private void OnServerExited(int exitCode)
     {
-        DispatchIfPossible(() =>
+        _ui.RunOnUi(() =>
         {
             IsServerRunning = false;
             ServerStatusText = $"已停止 (代碼: {exitCode})";
@@ -672,7 +667,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             OnlinePlayersText = "0 / 20";
             MemoryUsageText = "-";
             UptimeText = "00:00:00";
-            _startTime = null;
+            _startTimestamp = null;
             AddLogLine($"[系統] 伺服器行程已結束，結束代碼：{exitCode}");
             Logger.Information("伺服器監控已捕捉伺服器結束事件，結束代碼: {ExitCode}", exitCode);
         });
@@ -680,23 +675,19 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
     private void OnFlushTimerTick()
     {
-        List<string> batch = [];
-        while (_logBuffer.Reader.TryRead(out string? line))
-        {
-            batch.Add(line);
-        }
-
-        if (batch.Count == 0)
+        if (!_logBuffer.Reader.TryRead(out string? firstLine))
         {
             return;
         }
 
-        foreach (string line in batch)
+        _reusableFlushBatch.Clear();
+        _reusableFlushBatch.Add(firstLine);
+        while (_logBuffer.Reader.TryRead(out string? line))
         {
-            Logs.Add(line);
+            _reusableFlushBatch.Add(line);
         }
 
-        TrimDisplayedLogs();
+        Logs.AppendAndTrim(_reusableFlushBatch, DisplayedLogsHighWatermark, DisplayedLogsLowWatermark);
     }
 
     private void AddLogLine(string line) => _logBuffer.Writer.TryWrite(line);

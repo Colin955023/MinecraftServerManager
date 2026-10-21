@@ -327,7 +327,7 @@ public sealed class ModDependencyPlannerTests
             return Task.FromResult<IReadOnlyList<OnlineModVersion>>([]);
         }
 
-        public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(string query, string? loader = null, string? minecraftVersion = null, int limit = 20, int offset = 0, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(string query, string? loader = null, string? minecraftVersion = null, int limit = 20, int offset = 0, string index = "relevance", CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<OnlineModInfo>>([]);
 
         public Task<ModrinthVersionLookupResult?> LookupVersionByHashAsync(string hash, string algorithm = "sha512", CancellationToken cancellationToken = default) =>

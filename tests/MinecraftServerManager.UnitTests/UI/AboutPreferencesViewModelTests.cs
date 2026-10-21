@@ -34,15 +34,10 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
 
         Assert.Equal("about_preferences", vm.Key);
         Assert.Equal("關於與設定", vm.Title);
-        Assert.Equal("Minecraft Server Manager", AboutPreferencesViewModel.AppName);
         Assert.Equal("2.0.0", AboutPreferencesViewModel.AppVersion);
         Assert.Equal("Minecraft 伺服器管理器", AboutPreferencesViewModel.AppDescription);
-        Assert.Equal("Colin955023", AboutPreferencesViewModel.Developer);
-        Assert.Equal("Colin955023", vm.GithubOwner);
-        Assert.Equal("MinecraftServerManager", vm.GithubRepo);
         Assert.Equal("https://github.com/Colin955023/MinecraftServerManager", AboutPreferencesViewModel.GithubUrl);
-        Assert.Equal(".NET 10 (WPF)", AboutPreferencesViewModel.TargetFramework);
-        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", AboutPreferencesViewModel.License);
+        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", Core.AppInfo.License);
     }
 
     [Fact]
@@ -63,8 +58,10 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
+        string notificationMsg = string.Empty;
         var vm = new AboutPreferencesViewModel(
             settingsManager: settings,
+            notificationSink: (msg, _) => notificationMsg = msg,
             onResetWindowSizeRequested: () => windowSizeResetCalled = true)
         {
             IsAutoUpdateEnabled = false,
@@ -76,6 +73,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
         Assert.True(windowSizeResetCalled);
+        Assert.Empty(notificationMsg);
     }
 
     [Fact]

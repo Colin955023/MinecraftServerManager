@@ -9,8 +9,6 @@ public readonly record struct JavaVersionDetails(
 
 public static partial class JavaVersionParser
 {
-    public static int? ParseMajor(string output) => ParseDetails(output)?.MajorVersion;
-
     public static JavaVersionDetails? ParseDetails(string output)
     {
         ArgumentNullException.ThrowIfNull(output);
@@ -31,10 +29,13 @@ public static partial class JavaVersionParser
             effectiveMajor = legacyMajor;
         }
 
-        bool is64Bit = output.Contains("64-Bit", StringComparison.OrdinalIgnoreCase) ||
-                      output.Contains("x86_64", StringComparison.OrdinalIgnoreCase) ||
-                      output.Contains("amd64", StringComparison.OrdinalIgnoreCase) ||
-                      !output.Contains("32-Bit", StringComparison.OrdinalIgnoreCase);
+        bool is64Bit = !output.Contains("32-Bit", StringComparison.OrdinalIgnoreCase) &&
+                      !output.Contains("x86_32", StringComparison.OrdinalIgnoreCase) &&
+                      (output.Contains("64-Bit", StringComparison.OrdinalIgnoreCase) ||
+                       output.Contains("x86_64", StringComparison.OrdinalIgnoreCase) ||
+                       output.Contains("amd64", StringComparison.OrdinalIgnoreCase) ||
+                       output.Contains("aarch64", StringComparison.OrdinalIgnoreCase) ||
+                       Environment.Is64BitOperatingSystem);
 
         string? vendor = DetectVendor(output);
 

@@ -1,0 +1,84 @@
+<Window x:Class="MinecraftServerManager.App.Views.OperationProgressDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="作業進度"
+        Width="520"
+        Height="250"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBrush}"
+        Foreground="{DynamicResource TextBrush}">
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <TextBlock Grid.Row="0"
+               x:Name="TitleText"
+               Text="處理中..."
+               FontSize="18"
+               FontWeight="Bold"
+               Foreground="{DynamicResource TextBrush}"
+               Margin="0,0,0,6" />
+
+    <TextBlock Grid.Row="1"
+               x:Name="PhaseText"
+               Text="正在準備作業..."
+               FontSize="13"
+               MinHeight="56"
+               TextWrapping="Wrap"
+               Foreground="{DynamicResource MutedTextBrush}"
+               Margin="0,0,0,16" />
+
+    <!-- 現代流光進度條 (內建 Shimmer 動態光澤與平滑插值推進) -->
+    <Grid Grid.Row="2" x:Name="ProgressTrackContainer" Height="22">
+      <Border x:Name="TrackBorder"
+              Background="{DynamicResource CardBrush}"
+              BorderBrush="{DynamicResource BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="6"
+              ClipToBounds="True">
+        <Grid>
+          <!-- 進度填滿條 -->
+          <Border x:Name="ProgressFill"
+                  HorizontalAlignment="Left"
+                  Width="0"
+                  Background="{DynamicResource AccentBrush}"
+                  CornerRadius="5" />
+
+          <!-- 全域動態流光光效層 (Shimmer Wave) -->
+          <Border x:Name="ShimmerWave"
+                  HorizontalAlignment="Left"
+                  Width="140"
+                  Opacity="0.4">
+            <Border.Background>
+              <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Color="#00FFFFFF" Offset="0.0" />
+                <GradientStop Color="#60FFFFFF" Offset="0.4" />
+                <GradientStop Color="#A0FFFFFF" Offset="0.5" />
+                <GradientStop Color="#60FFFFFF" Offset="0.6" />
+                <GradientStop Color="#00FFFFFF" Offset="1.0" />
+              </LinearGradientBrush>
+            </Border.Background>
+            <Border.RenderTransform>
+              <TranslateTransform x:Name="ShimmerTransform" X="-150" />
+            </Border.RenderTransform>
+          </Border>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <TextBlock Grid.Row="3"
+               x:Name="PercentText"
+               Text="0%"
+               FontSize="13"
+               FontWeight="SemiBold"
+               HorizontalAlignment="Right"
+               VerticalAlignment="Top"
+               Foreground="{DynamicResource TextBrush}"
+               Margin="0,8,0,0" />
+  </Grid>
+</Window>

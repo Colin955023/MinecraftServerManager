@@ -135,11 +135,11 @@ public sealed class LoaderCatalogServiceTests : IDisposable
         var fakeHttp = new FakeCatalogHttpPort(neoForgeXml);
         var service = new LoaderCatalogService(fakeHttp, _cacheDir);
 
-        // 使用者查詢 26.3，快取解析為 1.26.3，應能成功比對
+        // 使用者查詢 26.3，統一規則解析為 26.3，應能成功比對
         var versions = await service.GetLoaderVersionsAsync(LoaderKind.NeoForge, "26.3");
         var item = Assert.Single(versions);
         Assert.Equal("26.3.0.10-beta", item.Version);
-        Assert.Equal("1.26.3", item.MinecraftVersion);
+        Assert.Equal("26.3", item.MinecraftVersion);
     }
 
     [Fact]

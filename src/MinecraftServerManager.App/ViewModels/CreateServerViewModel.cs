@@ -1,3 +1,4 @@
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -29,6 +30,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private List<string>? _customJvmArgs;
     private bool _isServerNameManuallyEdited;
     private bool _isProgrammaticServerNameUpdate;
+    private bool _isUserManuallySelectedVersion;
+    private bool _isProgrammaticVersionUpdate;
 
     [ObservableProperty]
     public partial string ServerName { get; set; }
@@ -80,6 +83,14 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [ObservableProperty]
     public partial string JvmArgsSummary { get; set; } = "使用系統建議 JVM 參數 (G1GC)";
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(CreateServerCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ResetFormCommand))]
+    public partial bool IsCreating { get; set; }
+
+    private bool CanCreateServer => !IsCreating;
+    private bool CanResetForm => !IsCreating;
+
     public CreateServerViewModel(
         IJavaRuntimeDetector? javaDetector = null,
         IServerManager? serverManager = null,
@@ -104,7 +115,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         _notificationSink = notificationSink;
         _launcher = launcher;
         _navigateCallback = navigateCallback;
-        _systemMemoryMb = systemMemoryMb ?? GetTotalSystemMemoryMb();
+        _systemMemoryMb = systemMemoryMb ?? Core.Utilities.MemoryUtils.GetTotalSystemMemoryMb();
 
         AvailableLoaders = ["Paper", "Fabric", "Quilt", "Forge", "NeoForge"];
         AvailableMinecraftVersions =
@@ -138,9 +149,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     public ObservableCollection<string> AvailableLoaders { get; }
 
-    public ObservableCollection<string> AvailableMinecraftVersions { get; }
+    public BulkObservableCollection<string> AvailableMinecraftVersions { get; }
 
-    public ObservableCollection<string> LoaderVersions { get; }
+    public BulkObservableCollection<string> LoaderVersions { get; }
 
     public static string EulaNoticeText =>
         "請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)\n點選建立即表示你同意 Minecraft 條款，任何違法行為本軟體不負責任";
@@ -167,11 +178,31 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private async Task HandleLoaderChangedAsync(string loaderName)
     {
-        if (Enum.TryParse<LoaderKind>(loaderName, ignoreCase: true, out var lk))
+        try
         {
-            await UpdateMinecraftVersionsForLoaderAsync(lk).ConfigureAwait(true);
+            if (Enum.TryParse<LoaderKind>(loaderName, ignoreCase: true, out var lk))
+            {
+                await UpdateMinecraftVersionsForLoaderAsync(lk).ConfigureAwait(true);
+            }
+            await RefreshLoaderVersionsAsync().ConfigureAwait(true);
         }
-        await RefreshLoaderVersionsAsync().ConfigureAwait(true);
+        catch (Exception ex)
+        {
+            Logger.Warning("切換載入器 {Loader} 更新版本清單失敗: {Message}", loaderName, ex.Message);
+        }
+    }
+
+    private void SetMinecraftVersionProgrammatically(string version)
+    {
+        _isProgrammaticVersionUpdate = true;
+        try
+        {
+            SelectedMinecraftVersion = version;
+        }
+        finally
+        {
+            _isProgrammaticVersionUpdate = false;
+        }
     }
 
     private async Task UpdateMinecraftVersionsForLoaderAsync(LoaderKind loaderKind)
@@ -186,15 +217,11 @@ public sealed partial class CreateServerViewModel : PageViewModel
             var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(loaderKind).ConfigureAwait(true);
             if (versions.Count > 0)
             {
-                AvailableMinecraftVersions.Clear();
-                foreach (var v in versions)
-                {
-                    AvailableMinecraftVersions.Add(v.Version);
-                }
+                AvailableMinecraftVersions.ReplaceAll(versions.Select(static v => v.Version));
 
-                if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
+                if (!_isUserManuallySelectedVersion || !AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
                 {
-                    SelectedMinecraftVersion = AvailableMinecraftVersions[0];
+                    SetMinecraftVersionProgrammatically(AvailableMinecraftVersions[0]);
                 }
             }
         }
@@ -205,6 +232,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     partial void OnSelectedMinecraftVersionChanged(string value)
     {
+        if (!_isProgrammaticVersionUpdate)
+        {
+            _isUserManuallySelectedVersion = true;
+        }
         UpdateSynchronizedServerName();
         if (_customJvmArgs == null)
         {
@@ -292,15 +323,11 @@ public sealed partial class CreateServerViewModel : PageViewModel
             var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(loaderKind).ConfigureAwait(true);
             if (versions.Count > 0)
             {
-                AvailableMinecraftVersions.Clear();
-                foreach (var v in versions)
-                {
-                    AvailableMinecraftVersions.Add(v.Version);
-                }
+                AvailableMinecraftVersions.ReplaceAll(versions.Select(static v => v.Version));
 
-                if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
+                if (!_isUserManuallySelectedVersion || !AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
                 {
-                    SelectedMinecraftVersion = AvailableMinecraftVersions[0];
+                    SetMinecraftVersionProgrammatically(AvailableMinecraftVersions[0]);
                 }
             }
         }
@@ -318,8 +345,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 {
                     await _javaRequirementService.PreloadAllJavaRequirementsAsync().ConfigureAwait(false);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("背景預載 Java 需求失敗，沿用既有快取: {Message}", ex.Message);
                 }
             });
         }
@@ -338,19 +366,15 @@ public sealed partial class CreateServerViewModel : PageViewModel
         try
         {
             var versions = await _loaderCatalog.GetLoaderVersionsAsync(loaderKind, SelectedMinecraftVersion).ConfigureAwait(true);
-            LoaderVersions.Clear();
             if (versions.Count > 0)
             {
-                foreach (var v in versions)
-                {
-                    LoaderVersions.Add(v.Version);
-                }
+                LoaderVersions.ReplaceAll(versions.Select(static v => v.Version));
                 SelectedLoaderVersion = LoaderVersions[0];
                 IsLoaderVersionEnabled = loaderKind is LoaderKind.Forge or LoaderKind.NeoForge;
             }
             else
             {
-                LoaderVersions.Add("無可用版本");
+                LoaderVersions.ReplaceAll(["無可用版本"]);
                 SelectedLoaderVersion = "無可用版本";
                 IsLoaderVersionEnabled = false;
             }
@@ -363,8 +387,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private void UpdateLoaderStateSync()
     {
-        LoaderVersions.Clear();
-        LoaderVersions.Add($"最新穩定版 ({SelectedLoader})");
+        LoaderVersions.ReplaceAll([$"最新穩定版 ({SelectedLoader})"]);
         SelectedLoaderVersion = LoaderVersions[0];
         IsLoaderVersionEnabled = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var lk) &&
                                  lk is LoaderKind.Forge or LoaderKind.NeoForge;
@@ -524,11 +547,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     var versions = await _loaderCatalog.GetMinecraftVersionsForLoaderAsync(lk, forceReload: true).ConfigureAwait(true);
                     if (versions.Count > 0)
                     {
-                        AvailableMinecraftVersions.Clear();
-                        foreach (var v in versions)
-                        {
-                            AvailableMinecraftVersions.Add(v.Version);
-                        }
+                        AvailableMinecraftVersions.ReplaceAll(versions.Select(static v => v.Version));
                         if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
                         {
                             SelectedMinecraftVersion = AvailableMinecraftVersions[0];
@@ -570,11 +589,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         var versions = await _loaderCatalog.GetPaperMinecraftVersionsAsync(forceReload: true).ConfigureAwait(true);
                         if (versions.Count > 0)
                         {
-                            AvailableMinecraftVersions.Clear();
-                            foreach (var v in versions)
-                            {
-                                AvailableMinecraftVersions.Add(v.Version);
-                            }
+                            AvailableMinecraftVersions.ReplaceAll(versions.Select(static v => v.Version));
                             if (!AvailableMinecraftVersions.Contains(SelectedMinecraftVersion))
                             {
                                 SelectedMinecraftVersion = AvailableMinecraftVersions[0];
@@ -621,7 +636,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanResetForm))]
     public void ResetForm()
     {
         if (!_ui.Confirm("確定要重設建立伺服器表單的所有欄位內容嗎？", "確認重設表單"))
@@ -647,9 +662,14 @@ public sealed partial class CreateServerViewModel : PageViewModel
         Logger.Information("建立伺服器表單已重設為預設值 (Paper {Version})", SelectedMinecraftVersion);
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCreateServer))]
     public async Task CreateServer()
     {
+        if (IsCreating)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(ServerName))
         {
             _notificationSink?.Invoke("伺服器名稱不能為空", true);
@@ -664,6 +684,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
         if (_serverManager is not null)
         {
+            IsCreating = true;
             try
             {
                 var lk = Enum.TryParse<LoaderKind>(SelectedLoader, ignoreCase: true, out var loaderKind) ? loaderKind : LoaderKind.Unknown;
@@ -757,19 +778,16 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     if (initSuccess)
                     {
                         Logger.Information("伺服器建立成功: {Name}，路徑: {Path}", created.Config.Name.Value, created.Config.Path);
-                        if (_serverRuntime is null)
-                        {
-                            _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」已成功建立並完成初始化！", false);
-                        }
+                        _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」已成功建立並完成初始化！", false);
                         _navigateCallback?.Invoke("manage", created.Config.Name.Value);
                     }
                     else
                     {
                         Logger.Warning("伺服器「{Name}」初次初始化未完成或已被中斷", created.Config.Name.Value);
-                        if (_serverRuntime is null)
-                        {
-                            _notificationSink?.Invoke($"伺服器「{created.Config.Name.Value}」初次初始化未完成或已被中斷，伺服器檔案已保留。", true);
-                        }
+                        _ui.ShowWarning(
+                            $"伺服器「{created.Config.Name.Value}」初次啟動初始化已被強制中斷。\n\n伺服器檔案已完整保留，您稍後可於「管理伺服器」頁面手動啟動伺服器繼續完成世界生成與設定。",
+                            "伺服器初始化已中斷");
+                        _navigateCallback?.Invoke("manage", created.Config.Name.Value);
                     }
                 }
                 else
@@ -786,6 +804,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 _notificationSink?.Invoke($"建立伺服器失敗：{ex.Message}", true);
                 _ui.ShowError($"建立伺服器時發生錯誤：\n{ex.Message}", "建立伺服器失敗");
                 return;
+            }
+            finally
+            {
+                IsCreating = false;
             }
         }
 
@@ -836,19 +858,5 @@ public sealed partial class CreateServerViewModel : PageViewModel
         MemoryWarningText = string.Empty;
         IsMemoryError = false;
         IsMemoryWarning = false;
-    }
-
-    private static long GetTotalSystemMemoryMb()
-    {
-        try
-        {
-            var memoryStatus = GC.GetGCMemoryInfo();
-            long totalBytes = memoryStatus.TotalAvailableMemoryBytes;
-            return totalBytes > 0 ? totalBytes / (1024 * 1024) : 16384;
-        }
-        catch
-        {
-            return 16384;
-        }
     }
 }

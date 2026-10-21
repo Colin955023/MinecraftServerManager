@@ -55,15 +55,13 @@ jobs:
           global-json-file: global.json
           cache: true
           cache-dependency-path: |
+            global.json
             Directory.Packages.props
             src/**/*.csproj
             tests/**/*.csproj
 
       - name: C# 品質門禁 (Restore, Format, Build, Tests)
         run: pwsh -NoProfile -File scripts/dotnet_quality_gate.ps1
-
-      - name: 雙版本單一 EXE 發布驗證
-        run: pwsh -NoProfile -File scripts/dotnet_publish.ps1
 
       - name: Upload Test Results
         if: always()

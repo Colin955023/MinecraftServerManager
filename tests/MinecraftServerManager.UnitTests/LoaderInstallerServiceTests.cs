@@ -188,13 +188,51 @@ public sealed class LoaderInstallerServiceTests : IDisposable
         Assert.Contains("安裝失敗", ex.Message);
     }
 
+    [Fact]
+    public async Task InstallLoaderFabricFetchesMavenSha256AndPassesExpectedHash()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_serverDir, "server.jar"), "dummy vanilla");
+        string expectedHexSha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var http = new MockInstallerHttpPort("", "")
+        {
+            CustomGetText = uri => uri.AbsoluteUri.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase)
+                ? expectedHexSha256
+                : null,
+        };
+        var runner = new MockInstallerProcessRunner(0, onRun: () =>
+        {
+            File.WriteAllText(Path.Combine(_serverDir, "fabric-server-launch.jar"), "dummy launch");
+        });
+
+        var service = new LoaderInstallerService(http, runner, _cacheDir);
+
+        string target = await service.InstallLoaderAsync(
+            LoaderKind.Fabric,
+            minecraftVersion: "1.20.4",
+            loaderVersion: "0.15.7",
+            serverDirectory: _serverDir,
+            javaExecutablePath: "java.exe");
+
+        Assert.Equal("fabric-server-launch.jar", target);
+        Assert.Equal(expectedHexSha256, http.LastDownloadExpectedHash);
+        Assert.Equal("sha256", http.LastDownloadExpectedAlgorithm);
+    }
+
     private sealed class MockInstallerHttpPort(
         string manifestJson = "",
         string metaJson = "",
         string paperBuildJson = "") : IHttpPort
     {
+        public Func<Uri, string?>? CustomGetText { get; init; }
+        public string? LastDownloadExpectedHash { get; private set; }
+        public string? LastDownloadExpectedAlgorithm { get; private set; }
+
         public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
         {
+            if (CustomGetText?.Invoke(uri) is string custom)
+            {
+                return Task.FromResult<string?>(custom);
+            }
             if (uri.AbsoluteUri.Contains("papermc.io", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult<string?>(paperBuildJson);
@@ -217,6 +255,8 @@ public sealed class LoaderInstallerServiceTests : IDisposable
             string expectedHashAlgorithm = "sha256",
             CancellationToken cancellationToken = default)
         {
+            LastDownloadExpectedHash = expectedHash;
+            LastDownloadExpectedAlgorithm = expectedHashAlgorithm;
             File.WriteAllText(targetPath, "dummy downloaded content");
             return Task.FromResult(new HttpResult(true));
         }

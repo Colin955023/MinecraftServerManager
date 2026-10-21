@@ -1,0 +1,14 @@
+<Window x:Class="MinecraftServerManager.App.Views.ToastWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        SizeToContent="WidthAndHeight"
+        ResizeMode="NoResize"
+        Focusable="False"
+        ShowActivated="False">
+  <StackPanel x:Name="ToastContainer" Orientation="Vertical" Margin="12" />
+</Window>

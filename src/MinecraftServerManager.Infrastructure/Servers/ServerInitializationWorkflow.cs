@@ -19,7 +19,8 @@ public sealed class ServerInitializationWorkflow : IDisposable
 
     public ServerInitializationWorkflow(IServerRuntime runtime)
     {
-        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        ArgumentNullException.ThrowIfNull(runtime);
+        _runtime = runtime;
         _runtime.ServerReady += OnServerReady;
     }
 
@@ -27,15 +28,6 @@ public sealed class ServerInitializationWorkflow : IDisposable
     /// 是否已偵測到伺服器就緒訊號（初始化已完成）
     /// </summary>
     public bool ReadyDetected => _readyDetected;
-
-    /// <summary>
-    /// 於背景解析伺服器目錄中初次啟動應執行的檔案名稱
-    /// </summary>
-    public static Task<string> ResolveStartupTargetAsync(ServerConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        return Task.Run(() => ServerStartupTargetResolver.Resolve(config.Path));
-    }
 
     /// <summary>
     /// 以指定的啟動檔案啟動伺服器行程

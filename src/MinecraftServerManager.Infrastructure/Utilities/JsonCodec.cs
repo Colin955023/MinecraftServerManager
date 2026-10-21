@@ -1,4 +1,5 @@
 using System.Text.Json;
+using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
@@ -14,6 +15,8 @@ public static class JsonCodec
     private static readonly JsonSerializerOptions CompactOptions = new()
     {
         PropertyNamingPolicy = null,
+        PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
     };
 
     private static readonly JsonSerializerOptions IndentedOptions = new(CompactOptions)
@@ -30,7 +33,7 @@ public static class JsonCodec
 
         try
         {
-            byte[]? bytes = FileSafety.ReadRegularFile(filePath, maxBytes);
+            byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
             return bytes is null
                 ? null
                 : new JsonReadResult(JsonDocument.Parse(bytes), bytes);
@@ -58,7 +61,7 @@ public static class JsonCodec
 
         try
         {
-            byte[]? bytes = FileSafety.ReadRegularFile(filePath, maxBytes);
+            byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
             return bytes is null ? null : JsonDocument.Parse(bytes);
         }
         catch (JsonException)
@@ -75,7 +78,7 @@ public static class JsonCodec
         }
     }
 
-    public static string Serialize(object? value, bool indented = false)
+    public static string Serialize<T>(T? value, bool indented = false)
     {
         try
         {
@@ -91,7 +94,7 @@ public static class JsonCodec
         }
     }
 
-    public static byte[]? SerializeToUtf8Bytes(object? value, bool indented = false)
+    public static byte[]? SerializeToUtf8Bytes<T>(T? value, bool indented = false)
     {
         try
         {
@@ -117,23 +120,6 @@ public static class JsonCodec
         try
         {
             return JsonSerializer.Deserialize<T>(json, CompactOptions);
-        }
-        catch
-        {
-            return default;
-        }
-    }
-
-    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Bytes)
-    {
-        if (utf8Bytes.IsEmpty)
-        {
-            return default;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<T>(utf8Bytes, CompactOptions);
         }
         catch
         {

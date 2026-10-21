@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Domain.ValueObjects;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -204,10 +205,17 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(modsDir, "testmod-1.0.0.jar.disabled")));
 
         // 4. 匯出模組清單
-        string txtExport = await modManager.ExportModListAsync(serverDir, "text");
-        Assert.Contains("Test Mod", txtExport);
-        string jsonExport = await modManager.ExportModListAsync(serverDir, "json");
-        Assert.Contains("Test Mod", jsonExport);
+        var exporter = new ModListExporter();
+        var exportRows = new List<ModListExportRow>
+        {
+            new(mod.Id, mod.Name, mod.Version, mod.Filename, "1 KiB", mod.Author, mod.LoaderType, mod.MinecraftVersion, "2026-01-01", mod.Description, false)
+        };
+        string txtExportPath = Path.Combine(serverDir, "mods.txt");
+        string jsonExportPath = Path.Combine(serverDir, "mods.json");
+        await exporter.ExportAsync(exportRows, ModListExportFormat.Text, txtExportPath);
+        await exporter.ExportAsync(exportRows, ModListExportFormat.Json, jsonExportPath);
+        Assert.Contains("Test Mod", await File.ReadAllTextAsync(txtExportPath));
+        Assert.Contains("Test Mod", await File.ReadAllTextAsync(jsonExportPath));
 
         // 5. 刪除模組
         var deleteResult = await modManager.DeleteModsAsync(serverDir, ["testmod"]);

@@ -10,7 +10,10 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Background="{DynamicResource WindowBrush}"
-        Foreground="{DynamicResource TextBrush}">
+        Foreground="{DynamicResource TextBrush}"
+        MouseEnter="Window_MouseEnter"
+        MouseLeave="Window_MouseLeave"
+        Loaded="Window_Loaded">
   <Border Padding="22" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Margin="12" CornerRadius="8">
     <Grid>
       <Grid.RowDefinitions>
@@ -34,16 +37,32 @@
                  Foreground="{DynamicResource TextBrush}"
                  Margin="0,0,0,20" />
 
-      <!-- 按鈕區 -->
-      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-        <Button x:Name="OkButton"
+      <!-- 按鈕與倒數區域 -->
+      <Grid Grid.Row="2">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <ProgressBar x:Name="CountdownProgress"
+                     Height="4"
+                     VerticalAlignment="Center"
+                     Margin="0,0,16,0"
+                     Maximum="100"
+                     Value="100"
+                     Background="{DynamicResource BorderBrush}"
+                     Foreground="{DynamicResource AccentBrush}"
+                     BorderThickness="0" />
+
+        <Button Grid.Column="1"
+                x:Name="OkButton"
                 Content="確定"
                 Style="{DynamicResource PrimaryButtonStyle}"
-                MinWidth="85"
+                MinWidth="105"
                 Height="32"
                 Click="OkButton_Click"
                 IsDefault="True" />
-      </StackPanel>
+      </Grid>
     </Grid>
   </Border>
 </Window>

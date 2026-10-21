@@ -154,18 +154,16 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void ServerImportBatchResultAggregatesCounters()
+    public void ServerImportResultFactoryMethodsProduceExpectedStates()
     {
-        var batch = new ServerImportBatchResult([
-            ServerImportResult.Success("server1", new ServerConfig(ServerName.Parse("server1"), MinecraftVersion.Parse("1.20.1"), LoaderKind.Vanilla, "", 2048)),
-            ServerImportResult.Skipped("server2", "已存在相同伺服器"),
-            ServerImportResult.Failed("server3", "檔案損毀", diagnosticId: "diag-001"),
-        ]);
+        var success = ServerImportResult.Success("server1", new ServerConfig(ServerName.Parse("server1"), MinecraftVersion.Parse("1.20.1"), LoaderKind.Vanilla, "", 2048));
+        var skipped = ServerImportResult.Skipped("server2", "已存在相同伺服器");
+        var failed = ServerImportResult.Failed("server3", "檔案損毀", diagnosticId: "diag-001");
 
-        Assert.Equal(3, batch.Items.Count);
-        Assert.Equal(1, batch.CompletedCount);
-        Assert.Equal(1, batch.SkippedCount);
-        Assert.Equal(1, batch.FailedCount);
+        Assert.True(success.Completed);
+        Assert.Equal(ImportStatus.Skipped, skipped.Status);
+        Assert.False(failed.Completed);
+        Assert.Equal("diag-001", failed.DiagnosticId);
     }
 
     [Fact]

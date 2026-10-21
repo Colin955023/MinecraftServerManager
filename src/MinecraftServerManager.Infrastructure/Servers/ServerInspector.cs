@@ -1,4 +1,4 @@
-using System.Buffers;
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +15,7 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 public sealed partial class ServerInspector : IServerInspector
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInspector");
+    private static readonly ConcurrentDictionary<string, (long LastWriteTicks, long Size)> s_dirSizeCache = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string[] ServerJarCandidates =
     [
@@ -26,9 +27,10 @@ public sealed partial class ServerInspector : IServerInspector
         "minecraft_server.jar",
     ];
 
-    public Task<ServerInspection> InspectAsync(
+    private static readonly string[] VersionJsonCandidateProperties = ["id", "name", "release_target"];
+
+    public async Task<ServerInspection> InspectAsync(
         string serverDirectory,
-        ServerInspectionIntent? intent = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -38,11 +40,11 @@ public sealed partial class ServerInspector : IServerInspector
             string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
             if (!Directory.Exists(stableDir))
             {
-                return Task.FromResult(new ServerInspection(
+                return new ServerInspection(
                     path: serverDirectory,
                     revision: string.Empty,
                     isCandidate: false,
-                    error: "找不到伺服器目錄"));
+                    error: "找不到伺服器目錄");
             }
 
             var entries = SafeFileSystem.ListBoundedDirectory(stableDir, maxEntries: 512, maxTotalBytes: SafeFileSystem.DefaultMaxTotalBytes, rejectReparse: false);
@@ -53,7 +55,7 @@ public sealed partial class ServerInspector : IServerInspector
             var (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource) =
                 InspectLoaderAndVersion(stableDir, files, launchTarget);
             var (maxMb, minMb) = InspectMemory(stableDir);
-            long totalSizeBytes = CalculateDirectorySize(stableDir);
+            long totalSizeBytes = await Task.Run(() => CalculateDirectorySize(stableDir), cancellationToken).ConfigureAwait(false);
 
             bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains("server.properties");
             bool launchable = launchTarget.Kind != LaunchTargetKind.None && eulaState == EulaState.Accepted;
@@ -88,7 +90,7 @@ public sealed partial class ServerInspector : IServerInspector
                 loaderVersion,
                 loaderVersionSource);
 
-            return Task.FromResult(new ServerInspection(
+            return new ServerInspection(
                 path: stableDir,
                 revision: revision,
                 isCandidate: isCandidate,
@@ -103,22 +105,21 @@ public sealed partial class ServerInspector : IServerInspector
                 eulaState: eulaState,
                 statusReady: statusReady,
                 launchable: launchable,
-                totalSizeBytes: totalSizeBytes));
+                totalSizeBytes: totalSizeBytes);
         }
         catch (Exception ex)
         {
             Logger.Error(ex, "伺服器偵測發生例外: {Path}, 原因: {Message}", serverDirectory, ex.Message);
-            return Task.FromResult(new ServerInspection(
+            return new ServerInspection(
                 path: serverDirectory,
                 revision: string.Empty,
                 isCandidate: false,
-                error: ex.Message));
+                error: ex.Message);
         }
     }
 
     private static long CalculateDirectorySize(string directory)
     {
-        long totalBytes = 0L;
         try
         {
             var dirInfo = new DirectoryInfo(directory);
@@ -127,6 +128,16 @@ public sealed partial class ServerInspector : IServerInspector
                 return 0L;
             }
 
+            long lastWriteTicks = dirInfo.LastWriteTimeUtc.Ticks;
+            if (s_dirSizeCache.TryGetValue(directory, out var cached) && cached.LastWriteTicks == lastWriteTicks)
+            {
+                return cached.Size;
+            }
+
+            long totalBytes = 0L;
+            const int maxScannedFiles = 20000;
+            int count = 0;
+
             foreach (var file in dirInfo.EnumerateFiles("*", new EnumerationOptions
             {
                 RecurseSubdirectories = true,
@@ -134,14 +145,28 @@ public sealed partial class ServerInspector : IServerInspector
                 AttributesToSkip = FileAttributes.ReparsePoint
             }))
             {
+                string relativePath = Path.GetRelativePath(directory, file.FullName);
+                if (relativePath.StartsWith("backups" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                    relativePath.StartsWith("backups" + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 totalBytes += file.Length;
+                if (++count >= maxScannedFiles)
+                {
+                    break;
+                }
             }
+
+            s_dirSizeCache[directory] = (lastWriteTicks, totalBytes);
+            return totalBytes;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Debug("計算目錄大小時發生例外: {Message}", ex.Message);
+            Logger.Warning("計算目錄大小時發生例外: {Message}", ex.Message);
+            return 0L;
         }
-        return totalBytes;
     }
 
     private static EulaState InspectEula(string directory, HashSet<string> files)
@@ -174,7 +199,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Debug("讀取 eula.txt 失敗: {Message}", ex.Message);
+            Logger.Warning("讀取 eula.txt 失敗: {Message}", ex.Message);
             return EulaState.Missing;
         }
     }
@@ -338,7 +363,7 @@ public sealed partial class ServerInspector : IServerInspector
                         string verName = Path.GetFileName(subDirs[0].FullPath);
                         loaderVersion = verName;
                         loaderVersionSource = $"libraries/net/neoforged/neoforge/{verName}";
-                        string? derived = DeriveMinecraftVersionFromNeoForge(verName);
+                        string? derived = MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge(verName);
                         if (!string.IsNullOrEmpty(derived) && mcVersion == "unknown")
                         {
                             mcVersion = derived;
@@ -348,7 +373,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("探測 NeoForge 函式庫目錄失敗: {Message}", ex.Message);
+                    Logger.Warning("探測 NeoForge 函式庫目錄失敗: {Message}", ex.Message);
                 }
             }
 
@@ -384,7 +409,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("探測 Forge 函式庫目錄失敗: {Message}", ex.Message);
+                    Logger.Warning("探測 Forge 函式庫目錄失敗: {Message}", ex.Message);
                 }
             }
 
@@ -408,7 +433,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("探測 Fabric 函式庫目錄失敗: {Message}", ex.Message);
+                    Logger.Warning("探測 Fabric 函式庫目錄失敗: {Message}", ex.Message);
                 }
             }
 
@@ -432,7 +457,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("探測 Quilt 函式庫目錄失敗: {Message}", ex.Message);
+                    Logger.Warning("探測 Quilt 函式庫目錄失敗: {Message}", ex.Message);
                 }
             }
         }
@@ -546,7 +571,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("檢查啟動腳本失敗: {Message}", ex.Message);
+                    Logger.Warning("檢查啟動腳本失敗: {Message}", ex.Message);
                 }
             }
         }
@@ -611,7 +636,7 @@ public sealed partial class ServerInspector : IServerInspector
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Logger.Debug("讀取伺服器記錄檔失敗: {Message}", ex.Message);
+                    Logger.Warning("讀取伺服器記錄檔失敗: {Message}", ex.Message);
                 }
             }
         }
@@ -652,7 +677,7 @@ public sealed partial class ServerInspector : IServerInspector
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Logger.Debug("尋找最新記錄檔失敗: {Message}", ex.Message);
+                Logger.Warning("尋找最新記錄檔失敗: {Message}", ex.Message);
             }
         }
 
@@ -688,7 +713,7 @@ public sealed partial class ServerInspector : IServerInspector
 
             using var doc = JsonDocument.Parse(payload);
             var root = doc.RootElement;
-            foreach (string prop in (ReadOnlySpan<string>)["id", "name", "release_target"])
+            foreach (string prop in VersionJsonCandidateProperties)
             {
                 if (root.TryGetProperty(prop, out var val))
                 {
@@ -706,7 +731,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            Logger.Debug("解析 version.json 失敗: {Message}", ex.Message);
+            Logger.Warning("解析 version.json 失敗: {Message}", ex.Message);
         }
         return null;
     }
@@ -725,7 +750,7 @@ public sealed partial class ServerInspector : IServerInspector
                 {
                     using var doc = JsonDocument.Parse(versionBytes);
                     var root = doc.RootElement;
-                    foreach (string prop in (ReadOnlySpan<string>)["id", "name", "release_target"])
+                    foreach (string prop in VersionJsonCandidateProperties)
                     {
                         if (root.TryGetProperty(prop, out var val))
                         {
@@ -761,7 +786,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
         {
-            Logger.Debug("解析 JAR 清單版本失敗: {Message}", ex.Message);
+            Logger.Warning("解析 JAR 清單版本失敗: {Message}", ex.Message);
         }
         return null;
     }
@@ -769,62 +794,19 @@ public sealed partial class ServerInspector : IServerInspector
     private static byte[]? ReadBoundedBytes(Stream stream, long maxBytes)
     {
         using var memoryStream = new MemoryStream();
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
-        try
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
         {
-            long totalRead = 0;
-            int read;
-            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+            if (memoryStream.Length + read > maxBytes)
             {
-                totalRead += read;
-                if (totalRead > maxBytes)
-                {
-                    return null;
-                }
-
-                memoryStream.Write(buffer, 0, read);
+                return null;
             }
 
-            return memoryStream.ToArray();
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    private static string? DeriveMinecraftVersionFromNeoForge(string rawVersion)
-    {
-        ReadOnlySpan<char> span = rawVersion.AsSpan();
-        int firstDot = span.IndexOf('.');
-        if (firstDot <= 0)
-        {
-            return null;
+            memoryStream.Write(buffer, 0, read);
         }
 
-        ReadOnlySpan<char> majorSpan = span[..firstDot];
-        if (!int.TryParse(majorSpan, provider: null, out int major) || major < 20)
-        {
-            return null;
-        }
-
-        ReadOnlySpan<char> remainder = span[(firstDot + 1)..];
-        int nextDot = remainder.IndexOf('.');
-        ReadOnlySpan<char> secondPart = nextDot >= 0 ? remainder[..nextDot] : remainder;
-        int dashIdx = secondPart.IndexOf('-');
-        ReadOnlySpan<char> minorSpan = dashIdx >= 0 ? secondPart[..dashIdx] : secondPart;
-
-        if (minorSpan.IsEmpty)
-        {
-            return null;
-        }
-
-        if (major >= 26)
-        {
-            return $"{major}.{minorSpan}";
-        }
-
-        return $"1.{major}.{minorSpan}";
+        return memoryStream.ToArray();
     }
 
     private static (int MaxMb, int? MinMb) InspectMemory(string directory)
@@ -860,7 +842,7 @@ public sealed partial class ServerInspector : IServerInspector
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Logger.Debug("讀取 user_jvm_args.txt 記憶體設定失敗: {Message}", ex.Message);
+                Logger.Warning("讀取 user_jvm_args.txt 記憶體設定失敗: {Message}", ex.Message);
             }
         }
 

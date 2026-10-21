@@ -12,6 +12,5 @@ public interface IServerInspector
     /// </summary>
     public Task<ServerInspection> InspectAsync(
         string serverDirectory,
-        ServerInspectionIntent? intent = null,
         CancellationToken cancellationToken = default);
 }

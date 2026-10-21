@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using MinecraftServerManager.App.ViewModels;
@@ -15,90 +17,33 @@ namespace MinecraftServerManager.App.Services;
 /// </summary>
 public sealed class WpfUiService : IUiService
 {
+    private static ImageSource? s_cachedAppIcon;
+
     public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question)
     {
-        var owner = GetDefaultOwner(title);
-        return owner is not null
-            ? MessageBox.Show(owner, message, title, MessageBoxButton.YesNo, ToImage(level)) == MessageBoxResult.Yes
-            : MessageBox.Show(message, title, MessageBoxButton.YesNo, ToImage(level)) == MessageBoxResult.Yes;
+        var owner = GetDefaultOwner();
+        return CustomConfirmDialog.Show(owner, message, title, level);
     }
 
-    public void ShowInfo(string message, string title)
-    {
-        var owner = GetDefaultOwner(title);
-        if (owner is not null)
-        {
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        else
-        {
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-    }
-
-    public void ShowMonitorInfo(string serverName, string message, string title)
-    {
-        Window? owner = null;
-        if (Application.Current is not null)
-        {
-            owner = Application.Current.Windows.OfType<ServerMonitorWindow>()
-                .FirstOrDefault(w => w.IsLoaded && w.IsVisible &&
-                    w.DataContext is ServerMonitorViewModel vm &&
-                    string.Equals(vm.ServerName, serverName, StringComparison.OrdinalIgnoreCase))
-                ?? Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible)
-                ?? GetDefaultOwner(title);
-        }
-
-        if (owner is not null)
-        {
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        else
-        {
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-    }
+    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) => ToastWindow.Instance.ShowToast(message, title, type, durationSeconds);
 
     public void ShowWarning(string message, string title)
     {
-        var owner = GetDefaultOwner(title);
-        if (owner is not null)
-        {
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        else
-        {
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+        var owner = GetDefaultOwner();
+        NotificationDialog.Show(owner, title, message, NotificationLevel.Warning);
     }
 
     public void ShowError(string message, string title)
     {
-        var owner = GetDefaultOwner(title);
-        if (owner is not null)
-        {
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        else
-        {
-            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        var owner = GetDefaultOwner();
+        NotificationDialog.Show(owner, title, message, NotificationLevel.Error);
     }
 
-    private static Window? GetDefaultOwner(string? title = null)
+    private static Window? GetDefaultOwner()
     {
         if (Application.Current is null)
         {
             return null;
-        }
-
-        if (title is "伺服器啟動成功" or "伺服器就緒")
-        {
-            var monitor = Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible);
-            if (monitor is not null)
-            {
-                return monitor;
-            }
         }
 
         var active = Application.Current.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive && w.IsLoaded);
@@ -110,9 +55,6 @@ public sealed class WpfUiService : IUiService
         var visibleMonitor = Application.Current.Windows.OfType<ServerMonitorWindow>().LastOrDefault(w => w.IsLoaded && w.IsVisible);
         return visibleMonitor ?? Application.Current.MainWindow;
     }
-
-    public void ShowNotificationPopup(string title, string message, NotificationLevel level) =>
-        NotificationDialog.Show(null, title, message, level);
 
     public void CopyToClipboard(string text) => Clipboard.SetText(text);
 
@@ -133,6 +75,8 @@ public sealed class WpfUiService : IUiService
             mainWindow.Activate();
             mainWindow.Focus();
         });
+
+    public void ShutdownApplication(int exitCode = 0) => Application.Current?.Shutdown(exitCode);
 
     public IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false)
     {
@@ -193,6 +137,8 @@ public sealed class WpfUiService : IUiService
 
     public bool? ShowServerProperties(ServerPropertiesViewModel viewModel) => Attach(new ServerPropertiesDialog(viewModel)).ShowDialog();
 
+    public bool? ShowPlayerManagement(PlayerManagementViewModel viewModel) => Attach(new PlayerManagementDialog(viewModel)).ShowDialog();
+
     public bool? ShowRestoreBackup(RestoreBackupViewModel viewModel) => Attach(new RestoreBackupDialog(viewModel)).ShowDialog();
 
     public bool? ShowServerMemory(ServerMemoryViewModel viewModel) => Attach(new ServerMemoryDialog(viewModel)).ShowDialog();
@@ -216,12 +162,12 @@ public sealed class WpfUiService : IUiService
     }
 
     public void ShowExportModList(string serverName, IReadOnlyList<ModListExportRow> rows, IModListExporter exporter, IExternalLauncher? launcher) =>
-        Attach(new ExportModListDialog(serverName, rows, exporter, launcher, this)).ShowDialog();
+        Attach(new ExportModListDialog(new ExportModListViewModel(serverName, rows, exporter, launcher, this))).ShowDialog();
 
     public bool ShowServerInitialization(ServerConfig config, string javaPath, IServerRuntime runtime)
     {
         using var dialog = new ServerInitializationDialog(runtime, config, javaPath);
-        SetOwner(dialog);
+        PrepareDialog(dialog, Application.Current?.MainWindow);
         dialog.ShowDialog();
         return dialog.IsSuccess;
     }
@@ -229,6 +175,7 @@ public sealed class WpfUiService : IUiService
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel)
     {
         var window = new ServerMonitorWindow(viewModel);
+        PrepareDialog(window, owner: null);
         var handle = new MonitorWindowHandle(window);
         window.Show();
         return handle;
@@ -236,34 +183,49 @@ public sealed class WpfUiService : IUiService
 
     public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份")
     {
-        var dialog = Attach(new ServerBackupProgressDialog(serverName, actionTitle));
+        var dialog = Attach(new OperationProgressDialog($"{actionTitle}伺服器中", $"正在{actionTitle}伺服器「{serverName}」", actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案..."));
         dialog.Show();
-        return new ProgressSession<ServerBackupProgressReport>(dialog.Progress, dialog, dialog.MarkCompleted);
+        var progress = new Progress<ServerBackupProgressReport>(report =>
+        {
+            int percent = Math.Clamp(report.PercentCompleted, 0, 100);
+            string msg = !string.IsNullOrWhiteSpace(report.CurrentFile)
+                ? $"正在壓縮: {report.CurrentFile}"
+                : (percent >= 100 ? $"{actionTitle}壓縮完成！" : string.Empty);
+            dialog.UpdateProgress(percent, msg);
+        });
+        return new ProgressSession<ServerBackupProgressReport>(progress, dialog, dialog.MarkCompleted);
     }
 
     public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName)
     {
-        var dialog = Attach(new ServerImportProgressDialog(serverName));
+        var dialog = Attach(new OperationProgressDialog("匯入伺服器中", $"正在匯入伺服器「{serverName}」", "正在驗證伺服器目錄..."));
         dialog.Show();
-        return new ProgressSession<ServerImportProgressReport>(dialog.Progress, dialog, dialog.MarkCompleted);
+        var progress = new Progress<ServerImportProgressReport>(report =>
+        {
+            int percent = Math.Clamp(report.Percentage, 0, 100);
+            dialog.UpdateProgress(percent, report.StageText);
+        });
+        return new ProgressSession<ServerImportProgressReport>(progress, dialog, dialog.MarkCompleted);
     }
 
     public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName)
     {
-        var dialog = Attach(new ServerCreationProgressDialog(serverName));
+        var dialog = Attach(new OperationProgressDialog("建立伺服器中", $"正在建立伺服器「{serverName}」", "正在驗證伺服器名稱與目錄..."));
         dialog.Show();
-        return new ProgressSession<ServerCreationProgressReport>(dialog.Progress, dialog, dialog.MarkCompleted);
+        var progress = new Progress<ServerCreationProgressReport>(report =>
+        {
+            int percent = Math.Clamp(report.PercentCompleted, 0, 100);
+            dialog.UpdateProgress(percent, $"[{report.Phase}] {report.Message}");
+        });
+        return new ProgressSession<ServerCreationProgressReport>(progress, dialog, dialog.MarkCompleted);
     }
 
-    public IModOperationProgress ShowModOperationProgress(string title, string initialMessage)
+    public IOperationProgress ShowModOperationProgress(string title, string initialMessage)
     {
-        var dialog = Attach(new ModOperationProgressDialog(title, initialMessage));
+        var dialog = Attach(new OperationProgressDialog(title, title, initialMessage));
         dialog.Show();
         return new ModOperationProgressHandle(dialog);
     }
-
-    public IOperationProgress ShowOperationProgress(string title, string initialMessage) =>
-        ShowModOperationProgress(title, initialMessage);
 
     private sealed class UiTimer : IUiTimer
     {
@@ -280,26 +242,51 @@ public sealed class WpfUiService : IUiService
         public void StopTimer() => _timer.Stop();
     }
 
-    private static MessageBoxImage ToImage(UiMessageLevel level) => level switch
-    {
-        UiMessageLevel.Information => MessageBoxImage.Information,
-        UiMessageLevel.Warning => MessageBoxImage.Warning,
-        UiMessageLevel.Error => MessageBoxImage.Error,
-        _ => MessageBoxImage.Question,
-    };
 
     private static T Attach<T>(T window) where T : Window
     {
-        SetOwner(window);
+        PrepareDialog(window, GetDefaultOwner());
         return window;
     }
 
-    private static void SetOwner(Window window)
+    private static void PrepareDialog(Window dialog, Window? owner)
     {
-        if (Application.Current?.MainWindow is { } owner && !ReferenceEquals(owner, window))
+        if (owner is not null && !ReferenceEquals(owner, dialog))
         {
-            window.Owner = owner;
+            dialog.Owner = owner;
         }
+
+        if (dialog.Icon is null)
+        {
+            dialog.Icon = owner?.Icon ?? GetCachedAppIcon();
+        }
+
+        if (Application.Current?.Resources["UiScaleTransform"] is Transform scaleTransform &&
+            dialog.Content is FrameworkElement rootElement)
+        {
+            rootElement.LayoutTransform = scaleTransform;
+        }
+    }
+
+    private static ImageSource? GetCachedAppIcon()
+    {
+        if (s_cachedAppIcon is not null)
+        {
+            return s_cachedAppIcon;
+        }
+
+        try
+        {
+            var frame = BitmapFrame.Create(
+                new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
+            frame.Freeze();
+            s_cachedAppIcon = frame;
+        }
+        catch
+        {
+        }
+
+        return s_cachedAppIcon;
     }
 
     /// <summary>
@@ -313,7 +300,7 @@ public sealed class WpfUiService : IUiService
         }
         else
         {
-            window.Dispatcher.Invoke(action);
+            window.Dispatcher.BeginInvoke(action);
         }
     }
 
@@ -328,15 +315,16 @@ public sealed class WpfUiService : IUiService
         }
     }
 
-    private sealed class ModOperationProgressHandle(ModOperationProgressDialog dialog) : IModOperationProgress
+    private sealed class ModOperationProgressHandle(OperationProgressDialog dialog) : IOperationProgress
     {
         public void UpdateProgress(int current, int total, string message) =>
-            dialog.Dispatcher.InvokeAsync(() => dialog.UpdateProgress(current, total, message));
+            dialog.UpdateProgress(current, total, message);
 
-        public void UpdateMessage(string message) =>
-            dialog.Dispatcher.InvokeAsync(() => dialog.UpdateMessage(message));
-
-        public void Close() => RunOnUi(dialog, dialog.Close);
+        public void Close()
+        {
+            dialog.MarkCompleted();
+            RunOnUi(dialog, dialog.Close);
+        }
     }
 
     private sealed class MonitorWindowHandle : IMonitorWindow

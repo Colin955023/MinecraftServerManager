@@ -1,5 +1,5 @@
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
-using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -13,7 +13,7 @@ namespace MinecraftServerManager.App.ViewModels;
 public sealed class BackupDisplayItem(string fileName, long sizeBytes, DateTimeOffset createdAt)
 {
     public string FileName { get; } = fileName;
-    public string SizeFormatted { get; } = Core.Utilities.MemoryUtils.FormatBytes(sizeBytes);
+    public string SizeFormatted { get; } = Core.Utilities.UnitFormatter.FormatBytes(sizeBytes);
     public string CreatedAtFormatted { get; } = createdAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 }
 
@@ -58,7 +58,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
 
     public string WindowTitle { get; }
 
-    public ObservableCollection<BackupDisplayItem> Backups { get; }
+    public BulkObservableCollection<BackupDisplayItem> Backups { get; }
 
     public event Action<bool>? RequestClose;
 
@@ -69,12 +69,9 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         StatusMessage = "正在讀取備份清單...";
         try
         {
-            var list = await Task.Run(() => _backupService.ListBackupsAsync(_serverName, _backupDirectory)).ConfigureAwait(true);
-            Backups.Clear();
-            foreach (var b in list)
-            {
-                Backups.Add(new BackupDisplayItem(b.FileName, b.SizeBytes, b.CreatedAt));
-            }
+            var list = await _backupService.ListBackupsAsync(_serverName, _backupDirectory).ConfigureAwait(true);
+            var displayItems = list.Select(static b => new BackupDisplayItem(b.FileName, b.SizeBytes, b.CreatedAt));
+            Backups.ReplaceAll(displayItems);
 
             if (Backups.Count > 0)
             {
@@ -108,7 +105,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         if (_isServerRunningCheck?.Invoke() == true)
         {
             StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
-            _ui.ShowWarning("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原");
+            _ui.ShowToast("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原", ToastType.Warning);
             return;
         }
 
@@ -127,17 +124,17 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
 
         try
         {
-            bool success = await Task.Run(() => _backupService.RestoreBackupAsync(
+            bool success = await _backupService.RestoreBackupAsync(
                 _serverName,
                 SelectedBackup.FileName,
                 _backupDirectory,
-                progressDialog.Progress)).ConfigureAwait(true);
+                progressDialog.Progress).ConfigureAwait(true);
 
             progressDialog.Complete();
 
             if (success)
             {
-                _ui.ShowInfo($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成");
+                _ui.ShowToast($"伺服器「{_serverName}」已成功還原備份「{SelectedBackup.FileName}」！", "還原完成", ToastType.Success);
                 RequestClose?.Invoke(true);
             }
             else
@@ -179,7 +176,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            bool success = await Task.Run(() => _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory)).ConfigureAwait(true);
+            bool success = await _backupService.DeleteBackupAsync(_serverName, toDelete.FileName, _backupDirectory).ConfigureAwait(true);
             if (success)
             {
                 Backups.Remove(toDelete);

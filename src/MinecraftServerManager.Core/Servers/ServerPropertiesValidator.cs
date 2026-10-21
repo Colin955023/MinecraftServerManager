@@ -144,8 +144,8 @@ public static class ServerPropertiesValidator
             return (true, null);
         }
 
-        // 11. 依預設值判斷之布林型別驗證
-        if (bool.TryParse(defaultValue, out _))
+        // 11. 布林型別驗證
+        if (ServerPropertiesMetadata.BooleanKeys.Contains(key) || bool.TryParse(defaultValue, out _))
         {
             if (!bool.TryParse(val, out _))
             {
@@ -156,7 +156,10 @@ public static class ServerPropertiesValidator
         }
 
         // 12. 依預設值判斷之整數型別驗證
-        if (long.TryParse(defaultValue, out _))
+        string effectiveDefault = string.IsNullOrEmpty(defaultValue)
+            ? ServerPropertiesMetadata.GetDefault(key)
+            : defaultValue;
+        if (long.TryParse(effectiveDefault, out _))
         {
             if (!long.TryParse(val, out _))
             {

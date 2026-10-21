@@ -9,10 +9,10 @@ public sealed class JavaVersionParserTests
     [InlineData("java version \"1.8.0_402\"", 8)]
     [InlineData("openjdk version \"21.0.4\" 2024-07-16", 21)]
     [InlineData("openjdk version \"17.0.10\" 2024-01-16 LTS", 17)]
-    public void ParsesLegacyAndModernJavaVersions(string output, int expectedMajor) => Assert.Equal(expectedMajor, JavaVersionParser.ParseMajor(output));
+    public void ParsesLegacyAndModernJavaVersions(string output, int expectedMajor) => Assert.Equal(expectedMajor, JavaVersionParser.ParseDetails(output)?.MajorVersion);
 
     [Fact]
-    public void ReturnsNullWhenVersionIsMissing() => Assert.Null(JavaVersionParser.ParseMajor("不是 Java 版本輸出"));
+    public void ReturnsNullWhenVersionIsMissing() => Assert.Null(JavaVersionParser.ParseDetails("不是 Java 版本輸出"));
 
     [Theory]
     [InlineData("openjdk version \"21.0.4\" 2024-07-16\nOpenJDK 64-Bit Server VM Microsoft-9825471", 21, true, "Microsoft")]

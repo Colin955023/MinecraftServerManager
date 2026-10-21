@@ -70,8 +70,15 @@ public readonly partial record struct VersionValue(
         }
         else
         {
+            ReadOnlySpan<char> patchSpan = rest[(secondDot + 1)..];
+            int thirdDot = patchSpan.IndexOf('.');
+            if (thirdDot >= 0)
+            {
+                patchSpan = patchSpan[..thirdDot];
+            }
+
             if (!int.TryParse(rest[..secondDot], CultureInfo.InvariantCulture, out minor)
-                || !int.TryParse(rest[(secondDot + 1)..], CultureInfo.InvariantCulture, out patch))
+                || !int.TryParse(patchSpan, CultureInfo.InvariantCulture, out patch))
             {
                 result = default;
                 return false;
@@ -107,6 +114,11 @@ public readonly partial record struct VersionValue(
 
         return string.Compare(PreRelease, other.PreRelease, StringComparison.OrdinalIgnoreCase);
     }
+
+    public bool Equals(VersionValue other) => CompareTo(other) == 0;
+
+    public override int GetHashCode() =>
+        HashCode.Combine(Major, Minor, Patch, StringComparer.OrdinalIgnoreCase.GetHashCode(PreRelease ?? string.Empty));
 
     public static bool operator <(VersionValue left, VersionValue right) => left.CompareTo(right) < 0;
 

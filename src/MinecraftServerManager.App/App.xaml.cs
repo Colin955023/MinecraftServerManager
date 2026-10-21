@@ -15,6 +15,12 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+#if SELF_CONTAINED
+        AppContext.SetData("DistributionMode", "self-contained");
+#else
+        AppContext.SetData("DistributionMode", "framework-dependent");
+#endif
+
         // 1. 最先註冊未處理例外事件，確保啟動初期之任何錯誤均被記錄
         DispatcherUnhandledException += App_DispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
@@ -26,7 +32,7 @@ public partial class App : Application
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
             MessageBox.Show(
-                "Minecraft Server Manager 已在執行中，請勿重複啟動。",
+                $"{AppInfo.AppEnglishName} 已在執行中，請勿重複啟動。",
                 "提示",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
@@ -97,15 +103,9 @@ public partial class App : Application
 
         while (true)
         {
-            NotificationDialog.Show(
-                null,
-                "選擇伺服器資料夾",
-                "請選擇要存放所有 Minecraft 伺服器的主資料夾\n(系統會在該資料夾內自動建立 servers 子資料夾)",
-                NotificationLevel.Info);
-
             var dialog = new OpenFolderDialog
             {
-                Title = "選擇存放 Minecraft 伺服器的主資料夾",
+                Title = "請選擇存放所有 Minecraft 伺服器的主資料夾 (系統將自動建立 servers 子資料夾)",
                 Multiselect = false,
             };
 

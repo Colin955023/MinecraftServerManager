@@ -51,12 +51,4 @@ public interface IModManager
         string? hashAlgorithm = null,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// 匯出模組清單為文字、JSON 或 HTML 格式
-    /// </summary>
-    public Task<string> ExportModListAsync(
-        string serverDirectory,
-        string format = "text",
-        CancellationToken cancellationToken = default);
 }

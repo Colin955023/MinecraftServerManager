@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MinecraftServerManager.Core.Ports;
 
 /// <summary>
@@ -45,6 +47,13 @@ public interface IHttpPort
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 安全取得遠端 JSON 文件並以串流解析（調用端負責處置 JsonDocument）
+    /// </summary>
+    public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
+        Uri uri,
+        CancellationToken cancellationToken = default) => GetJsonDocumentFallbackAsync(this, uri, cancellationToken);
+
+    /// <summary>
     /// 安全取得遠端文字內容
     /// </summary>
     public Task<string?> GetTextAsync(
@@ -58,4 +67,27 @@ public interface IHttpPort
         Uri uri,
         string jsonPayload,
         CancellationToken cancellationToken = default);
+
+    private static async Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentFallbackAsync(
+        IHttpPort port,
+        Uri uri,
+        CancellationToken cancellationToken)
+    {
+        string? text = await port.GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new HttpJsonResponse<JsonDocument>(404, default, "not_found");
+        }
+
+        try
+        {
+            var doc = JsonDocument.Parse(text);
+            return new HttpJsonResponse<JsonDocument>(200, doc, string.Empty);
+        }
+        catch (JsonException)
+        {
+            return new HttpJsonResponse<JsonDocument>(200, default, "invalid_response");
+        }
+    }
 }
+

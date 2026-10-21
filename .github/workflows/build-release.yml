@@ -137,28 +137,49 @@ jobs:
 
       - name: Generate SBOM (SPDX 2.2)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 動態取得 Microsoft SBOM Tool 最新發行版；下載檔以 GitHub 回報的 asset digest 校驗，不符即中止
+          $release = gh api repos/microsoft/sbom-tool/releases/latest | ConvertFrom-Json
+          $asset = $release.assets | Where-Object { $_.name -eq "sbom-tool-win-x64.exe" } | Select-Object -First 1
+          if ($null -eq $asset -or [string]::IsNullOrWhiteSpace($asset.digest) -or -not $asset.digest.StartsWith("sha256:")) {
+              throw "無法取得 SBOM Tool 的 SHA-256 digest，為避免執行未驗證的下載檔，已中止發布"
+          }
+          $expectedSha = $asset.digest.Substring(7).ToUpperInvariant()
+
           $sbomToolPath = Join-Path $env:RUNNER_TEMP "sbom-tool-win-x64.exe"
-          Write-Host "正在下載微軟官方 Microsoft SBOM Tool..."
-          Invoke-WebRequest -Uri "https://github.com/microsoft/sbom-tool/releases/latest/download/sbom-tool-win-x64.exe" -OutFile $sbomToolPath
+          Write-Host "正在下載 Microsoft SBOM Tool $($release.tag_name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $sbomToolPath
+          $actualSha = (Get-FileHash -LiteralPath $sbomToolPath -Algorithm SHA256).Hash
+          if ($actualSha -ne $expectedSha) {
+              Remove-Item -LiteralPath $sbomToolPath -Force
+              throw "SBOM Tool SHA-256 不符：預期 $expectedSha，實際 $actualSha"
+          }
+
           $version = "${{ steps.release_info.outputs.version }}"
           Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
-          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager"
+          & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager" -mi "SPDX:2.2"
           if ($LASTEXITCODE -ne 0) {
               throw "SBOM 產生失敗"
           }
 
-          $spdxSrc = "output/_manifest/spdx_2.2/manifest.spdx.json"
-          if (Test-Path $spdxSrc) {
-              $destSbom = "output/MinecraftServerManager.spdx.json"
-              Copy-Item -Path $spdxSrc -Destination $destSbom -Force
-              Remove-Item -Path "output/_manifest" -Recurse -Force
-              $hash = Get-FileHash -LiteralPath $destSbom -Algorithm SHA256
-              Set-Content -LiteralPath "$destSbom.sha256" -Value "$($hash.Hash)  MinecraftServerManager.spdx.json" -Encoding UTF8
-              Write-Host "SBOM 與 SHA-256 產生完成: $destSbom"
-          } else {
-              throw "SPDX 清單檔案未產生: $spdxSrc"
+          # 不假設輸出子目錄名稱（會隨工具版本變動），改以檔名搜尋，並驗證實際的 spdxVersion
+          $spdxFile = Get-ChildItem -Path "output/_manifest" -Recurse -Filter "manifest.spdx.json" -File | Select-Object -First 1
+          if ($null -eq $spdxFile) {
+              throw "SPDX 清單檔案未產生"
           }
+          $spdxVersion = (Get-Content -LiteralPath $spdxFile.FullName -Raw | ConvertFrom-Json).spdxVersion
+          if ($spdxVersion -ne "SPDX-2.2") {
+              throw "SBOM 格式版本不符：預期 SPDX-2.2，實際 $spdxVersion"
+          }
+
+          $destSbom = "output/MinecraftServerManager.spdx.json"
+          Copy-Item -LiteralPath $spdxFile.FullName -Destination $destSbom -Force
+          Remove-Item -Path "output/_manifest" -Recurse -Force
+          $hash = Get-FileHash -LiteralPath $destSbom -Algorithm SHA256
+          Set-Content -LiteralPath "$destSbom.sha256" -Value "$($hash.Hash)  MinecraftServerManager.spdx.json" -Encoding UTF8
+          Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $($release.tag_name))"
 
       - name: Upload release payload
         if: success()
@@ -274,14 +295,14 @@ jobs:
               Write-Error "No release executable was found in output."
               exit 1
           }
-          $args = @('release', 'create', $tag) + $assets + @(
+          $ghArgs = @('release', 'create', $tag) + $assets + @(
               '--title', "Minecraft Server Manager $tag",
               '--notes-file', 'release_notes.md',
               '--verify-tag'
           ) + $prereleaseArgs
 
-          Write-Host "Executing: gh $args"
-          & gh @args
+          Write-Host "Executing: gh $ghArgs"
+          & gh @ghArgs
           if ($LASTEXITCODE -ne 0) {
               Write-Error "GitHub CLI failed with exit code $LASTEXITCODE"
               exit $LASTEXITCODE

@@ -33,8 +33,8 @@ public sealed class FlexVersionFuzzingTests
 
             // 驗證解析與標準化絕不擲出未捕捉例外
             string normalized = FlexVersion.NormalizeModVersionString(input);
-            var version = FlexVersion.Parse(input);
-            var versionFromNorm = FlexVersion.Parse(normalized);
+            var version = new FlexVersion(input);
+            var versionFromNorm = new FlexVersion(normalized);
 
             Assert.NotNull(version);
             Assert.NotNull(versionFromNorm);

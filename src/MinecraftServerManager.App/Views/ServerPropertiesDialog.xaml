@@ -43,7 +43,7 @@
 
           <!-- 編輯器控制項（依屬性型別動態切換） -->
           <Grid Grid.Column="1" VerticalAlignment="Center">
-            <TextBox x:Name="TxtBox" Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center">
+            <TextBox x:Name="TxtBox" Text="{Binding Value, UpdateSourceTrigger=LostFocus}" VerticalAlignment="Center">
               <TextBox.Style>
                 <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
                   <Style.Triggers>
@@ -110,7 +110,7 @@
 
       <!-- 快速搜尋輸入框 -->
       <TextBox Grid.Column="0"
-               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+               Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                Margin="0,0,10,0"
                VerticalContentAlignment="Center"
                Padding="8,4" />
@@ -137,18 +137,30 @@
             BorderThickness="1"
             CornerRadius="6"
             Margin="0,0,0,14">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    CanContentScroll="True">
-        <ItemsControl ItemsSource="{Binding DisplayItems}"
-                      VirtualizingPanel.IsVirtualizing="True"
-                      VirtualizingPanel.VirtualizationMode="Recycling">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <VirtualizingStackPanel />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-        </ItemsControl>
-      </ScrollViewer>
+      <ListBox ItemsSource="{Binding DisplayItems}"
+               Background="Transparent"
+               BorderThickness="0"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+               ScrollViewer.VerticalScrollBarVisibility="Auto"
+               ScrollViewer.CanContentScroll="True"
+               VirtualizingPanel.IsVirtualizing="True"
+               VirtualizingPanel.VirtualizationMode="Recycling"
+               VirtualizingPanel.ScrollUnit="Pixel">
+        <ListBox.ItemContainerStyle>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+              <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                  <ContentPresenter />
+                </ControlTemplate>
+              </Setter.Value>
+            </Setter>
+          </Style>
+        </ListBox.ItemContainerStyle>
+      </ListBox>
     </Border>
 
     <!-- 狀態訊息 -->

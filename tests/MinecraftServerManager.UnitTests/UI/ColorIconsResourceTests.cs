@@ -15,7 +15,6 @@ public sealed class ColorIconsResourceTests
     [InlineData("IconFolder")]
     [InlineData("IconAbout")]
     [InlineData("IconStart")]
-    [InlineData("IconStop")]
     [InlineData("IconConsole")]
     [InlineData("IconServerSettings")]
     [InlineData("IconBackup")]
@@ -26,6 +25,7 @@ public sealed class ColorIconsResourceTests
     [InlineData("IconWarning")]
     [InlineData("IconGlobe")]
     [InlineData("IconCheck")]
+    [InlineData("IconUserGroup")]
     public void ColorIconsShouldContainAllRequiredKeys(string resourceKey)
     {
         // 尋找 ColorIcons.xaml 相對路徑

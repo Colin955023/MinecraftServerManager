@@ -10,7 +10,6 @@
     <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
-    <PackageReference Include="coverlet.collector" />
     <ProjectReference Include="..\..\src\MinecraftServerManager.Domain\MinecraftServerManager.Domain.csproj" />
     <ProjectReference Include="..\..\src\MinecraftServerManager.Core\MinecraftServerManager.Core.csproj" />
     <ProjectReference Include="..\..\src\MinecraftServerManager.Infrastructure\MinecraftServerManager.Infrastructure.csproj" />

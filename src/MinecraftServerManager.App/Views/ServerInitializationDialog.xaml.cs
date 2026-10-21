@@ -16,6 +16,9 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInitialization");
 
+    private static readonly System.Windows.Media.SolidColorBrush SuccessCountdownBrush = CreateFrozenBrush(0x00, 0xFF, 0x66);
+    private static readonly System.Windows.Media.SolidColorBrush WarningCountdownBrush = CreateFrozenBrush(0xF5, 0x9E, 0x0B);
+
     private readonly IServerRuntime _serverRuntime;
     private readonly ServerInitializationWorkflow _workflow;
     private readonly ServerConfig _config;
@@ -30,33 +33,31 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
     private System.Windows.Threading.DispatcherTimer? _countdownTimer;
     private int _countdownSeconds;
     private bool _isClosingExpected;
+    private bool _isStopping;
 
     public bool IsSuccess { get; private set; }
+
+    private static System.Windows.Media.SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
 
     public ServerInitializationDialog(
         IServerRuntime serverRuntime,
         ServerConfig config,
         string javaExecutablePath)
     {
+        ArgumentNullException.ThrowIfNull(serverRuntime);
+        ArgumentNullException.ThrowIfNull(config);
         InitializeComponent();
-        _serverRuntime = serverRuntime ?? throw new ArgumentNullException(nameof(serverRuntime));
-        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _serverRuntime = serverRuntime;
+        _config = config;
         _javaExecutablePath = javaExecutablePath;
         _workflow = new ServerInitializationWorkflow(serverRuntime);
 
         TitleText.Text = $"正在初始化伺服器「{_config.Name.Value}」";
-
-        if (Icon == null)
-        {
-            try
-            {
-                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                    new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
-            }
-            catch
-            {
-            }
-        }
 
         Loaded += ServerInitializationDialog_Loaded;
         Closing += ServerInitializationDialog_Closing;
@@ -68,7 +69,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         _serverRuntime.ServerReady += OnServerReady;
         _serverRuntime.ServerExited += OnServerExited;
 
-        _flushTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _flushTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _flushTimer.Tick += (_, _) => FlushPendingLines();
         _flushTimer.Start();
 
@@ -76,7 +77,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
         try
         {
-            string executableName = await ServerInitializationWorkflow.ResolveStartupTargetAsync(_config).ConfigureAwait(true);
+            string executableName = ServerStartupTargetResolver.Resolve(_config.Path);
             AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
                 ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
                 : $"[系統] 啟動伺服器核心 {executableName}...\n");
@@ -165,12 +166,12 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
     {
         if (isSuccess)
         {
-            CountdownText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0xFF, 0x66));
+            CountdownText.Foreground = SuccessCountdownBrush;
             CountdownText.Text = $"初始化完成！倒數 {_countdownSeconds} 秒後自動進入管理頁面...";
         }
         else
         {
-            CountdownText.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0x9E, 0x0B));
+            CountdownText.Foreground = WarningCountdownBrush;
             CountdownText.Text = $"初始化未完成，倒數 {_countdownSeconds} 秒後自動關閉...";
         }
     }
@@ -180,7 +181,9 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         ConsoleBox.AppendText(text);
         if (ConsoleBox.Text.Length > MaxConsoleChars)
         {
-            ConsoleBox.Text = ConsoleBox.Text[^TrimmedConsoleChars..];
+            int removeLen = ConsoleBox.Text.Length - TrimmedConsoleChars;
+            ConsoleBox.Select(0, removeLen);
+            ConsoleBox.SelectedText = string.Empty;
         }
         ConsoleBox.CaretIndex = ConsoleBox.Text.Length;
         ConsoleBox.ScrollToEnd();
@@ -257,25 +260,40 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
         Close();
     }
 
+    private void CleanupTimersAndSubscriptions()
+    {
+        _countdownTimer?.Stop();
+        _flushTimer?.Stop();
+        _serverRuntime.OutputLineReceived -= OnOutputLineReceived;
+        _serverRuntime.ServerReady -= OnServerReady;
+        _serverRuntime.ServerExited -= OnServerExited;
+    }
+
     private async void ServerInitializationDialog_Closing(object? sender, CancelEventArgs e)
     {
         try
         {
-            _countdownTimer?.Stop();
-            _flushTimer?.Stop();
-            _serverRuntime.OutputLineReceived -= OnOutputLineReceived;
-            _serverRuntime.ServerReady -= OnServerReady;
-            _serverRuntime.ServerExited -= OnServerExited;
+            CleanupTimersAndSubscriptions();
 
             if (_serverRuntime.IsRunning && !_isClosingExpected)
             {
                 e.Cancel = true;
+                if (_isStopping)
+                {
+                    return;
+                }
+
+                _isStopping = true;
                 try
                 {
                     await _workflow.StopAsync(TimeSpan.FromSeconds(5));
                 }
                 catch
                 {
+                }
+                finally
+                {
+                    _isStopping = false;
                 }
                 _isClosingExpected = true;
                 Close();
@@ -290,7 +308,11 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
     /// <summary>
     /// 釋放初次啟動流程資源（取消就緒事件訂閱）
     /// </summary>
-    public void Dispose() => _workflow.Dispose();
+    public void Dispose()
+    {
+        CleanupTimersAndSubscriptions();
+        _workflow.Dispose();
+    }
 
     protected override void OnClosed(EventArgs e)
     {

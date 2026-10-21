@@ -6,8 +6,6 @@ public static class UnitFormatter
 {
     private static readonly string[] Units = ["B", "KiB", "MiB", "GiB"];
 
-    public static double BytesToMiB(long size) => size / (1024d * 1024d);
-
     public static string FormatBytes(long size)
     {
         long value = Math.Max(0, size);
@@ -19,12 +17,12 @@ public static class UnitFormatter
             {
                 return unit == "B"
                     ? $"{(long)scaled} B"
-                    : scaled.ToString("0.0", CultureInfo.InvariantCulture) + $" {unit}";
+                    : string.Create(CultureInfo.InvariantCulture, $"{scaled:0.0} {unit}");
             }
 
             scaled /= 1024;
         }
 
-        return scaled.ToString("0.0", CultureInfo.InvariantCulture) + " TiB";
+        return string.Create(CultureInfo.InvariantCulture, $"{scaled:0.0} TiB");
     }
 }

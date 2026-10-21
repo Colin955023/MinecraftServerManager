@@ -83,11 +83,11 @@ public sealed partial class ImportServerViewModel(IServerManager serverManager,
 
         try
         {
-            var result = await Task.Run(() => _serverManager.ImportServerAsync(
+            var result = await _serverManager.ImportServerAsync(
                 source,
                 targetName,
                 ImportTransferMode.Copy,
-                progress)).ConfigureAwait(true);
+                progress).ConfigureAwait(true);
 
             progressDialog.Complete();
 

@@ -51,11 +51,20 @@ public sealed record MemoryValidationResult
 /// </summary>
 public static partial class MemoryUtils
 {
-    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([mMgG]?)")]
+    [GeneratedRegex(@"-(Xmx|Xms)(\d+)([mMgG]?)", RegexOptions.CultureInvariant)]
     private static partial Regex XmxPattern();
 
     /// <summary>
-    /// 解析 Java 記憶體參數（-Xmx 或 -Xms）
+    /// 取得系統實體記憶體總量（MB）
+    /// </summary>
+    public static int GetTotalSystemMemoryMb()
+    {
+        long memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        return memoryBytes > 0 ? (int)(memoryBytes / (1024L * 1024L)) : 0;
+    }
+
+    /// <summary>
+    /// 解析 Java 記憶體參數（-Xmx 或 -Xms）。若同一段文字出現多次相同參數，依 JVM 規範以最後一個為準。
     /// </summary>
     public static int? ParseMemorySetting(string? text, string settingType = "Xmx")
     {
@@ -64,85 +73,42 @@ public static partial class MemoryUtils
             return null;
         }
 
-        var match = XmxPattern().Match(text);
-        if (!match.Success)
+        int? parsedResult = null;
+        ReadOnlySpan<char> span = text.AsSpan();
+        foreach (var match in XmxPattern().EnumerateMatches(span))
         {
-            return null;
-        }
-
-        string matchedType = match.Groups[1].Value;
-        if (!string.Equals(matchedType, settingType, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        if (!int.TryParse(match.Groups[2].Value, CultureInfo.InvariantCulture, out int value))
-        {
-            return null;
-        }
-
-        string unit = match.Groups[3].Value;
-        if (string.Equals(unit, "g", StringComparison.OrdinalIgnoreCase))
-        {
-            return value * 1024;
-        }
-
-        return value;
-    }
-
-    /// <summary>
-    /// 格式化記憶體大小（MB）
-    /// </summary>
-    public static string FormatMemoryMb(int memoryMb, bool compact = true)
-    {
-        if (compact)
-        {
-            if (memoryMb >= 1024)
+            ReadOnlySpan<char> matched = span.Slice(match.Index, match.Length);
+            if (matched.Length <= 4 || matched[0] != '-')
             {
-                return memoryMb % 1024 == 0
-                    ? $"{memoryMb / 1024}G"
-                    : $"{memoryMb / 1024.0:F1}G";
+                continue;
             }
-            return $"{memoryMb}M";
+
+            ReadOnlySpan<char> matchedType = matched.Slice(1, 3);
+            if (!matchedType.Equals(settingType, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> remainder = matched[4..];
+            if (remainder.IsEmpty)
+            {
+                continue;
+            }
+
+            char last = remainder[^1];
+            bool hasUnit = last is 'g' or 'G' or 'm' or 'M';
+            ReadOnlySpan<char> digits = hasUnit ? remainder[..^1] : remainder;
+            if (!int.TryParse(digits, CultureInfo.InvariantCulture, out int value))
+            {
+                continue;
+            }
+
+            parsedResult = (hasUnit && (last is 'g' or 'G'))
+                ? value * 1024
+                : value;
         }
 
-        if (memoryMb >= 1024)
-        {
-            return $"{memoryMb / 1024.0:F1} GB";
-        }
-        return $"{memoryMb} MB";
-    }
-
-    /// <summary>
-    /// 格式化位元組大小（B/KB/MB/GB/TB，滿 1024 自動使用下一個單位）
-    /// </summary>
-    public static string FormatBytes(long bytes)
-    {
-        if (bytes < 0)
-        {
-            return "-";
-        }
-        if (bytes < 1024)
-        {
-            return $"{bytes} B";
-        }
-        double kb = bytes / 1024.0;
-        if (kb < 1024)
-        {
-            return $"{kb:F1} KB";
-        }
-        double mb = kb / 1024.0;
-        if (mb < 1024)
-        {
-            return $"{mb:F1} MB";
-        }
-        double gb = mb / 1024.0;
-        if (gb < 1024)
-        {
-            return $"{gb:F2} GB";
-        }
-        double tb = gb / 1024.0;
-        return $"{tb:F2} TB";
+        return parsedResult;
     }
 
     /// <summary>

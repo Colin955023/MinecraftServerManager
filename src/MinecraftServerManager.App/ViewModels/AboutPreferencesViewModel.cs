@@ -92,23 +92,11 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         }
     }
 
-    public static string AppName => AppInfo.AppEnglishName;
-
     public static string AppVersion => AppInfo.Version;
 
     public static string AppDescription => AppInfo.AppName;
 
-    public static string Developer => AppInfo.Author;
-
-    public string GithubOwner { get; } = "Colin955023";
-
-    public string GithubRepo { get; } = "MinecraftServerManager";
-
     public static string GithubUrl => AppInfo.RepositoryUrl;
-
-    public static string TargetFramework => AppInfo.TargetFramework;
-
-    public static string License => AppInfo.License;
 
     public static IReadOnlyList<string> ThemeModes { get; } = ["依照系統設定", "淺色", "深色"];
 
@@ -226,7 +214,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             return;
         }
 
-        var progressDialog = _ui.ShowOperationProgress("主程式自動更新", "準備下載更新檔案...");
+        var progressDialog = _ui.ShowModOperationProgress("主程式自動更新", "準備下載更新檔案...");
         try
         {
             var progress = new Progress<(int Percentage, string StatusMessage)>(p =>
@@ -243,7 +231,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
             _appUpdateService.ApplyUpdateAndRestart(installerPath);
             _ui.PostToUi(() =>
             {
-                System.Windows.Application.Current?.Shutdown(0);
+                _ui.ShutdownApplication(0);
             });
         }
         catch (OperationCanceledException)
@@ -336,13 +324,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         SelectedUiScaleIndex = 1;
         CustomUiScaleText = "100";
 
-        _settingsManager?.SetAutoUpdateEnabled(true);
-        _settingsManager?.SetThemeMode("system");
-        _settingsManager?.SetUiScale(1.0);
-        _onUiScaleChanged?.Invoke(1.0);
         _onResetWindowSizeRequested?.Invoke();
-
-        _notificationSink?.Invoke("已還原所有偏好設定為預設值", false);
     }
 
 

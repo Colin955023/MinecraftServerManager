@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
+using LinqExpression = System.Linq.Expressions.Expression;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -89,7 +90,7 @@ public static class DataGridNaturalSortBehavior
 /// </summary>
 public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
 {
-    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> GetterCache = new();
 
     public int Compare<T>(T? x, T? y) => Compare(x, (object?)y);
 
@@ -174,11 +175,26 @@ public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDire
         return string.Compare(valX.ToString(), valY.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static Func<object, object?>? CreateGetter(Type type, string propName)
+    {
+        var prop = type.GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+        if (prop is null || !prop.CanRead)
+        {
+            return null;
+        }
+
+        var param = LinqExpression.Parameter(typeof(object), "obj");
+        var castParam = LinqExpression.Convert(param, type);
+        var propAccess = LinqExpression.Property(castParam, prop);
+        var castResult = LinqExpression.Convert(propAccess, typeof(object));
+        return LinqExpression.Lambda<Func<object, object?>>(castResult, param).Compile();
+    }
+
     private static object? GetPropertyValue(object target, string propName)
     {
         var type = target.GetType();
-        var prop = PropertyCache.GetOrAdd((type, propName), static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
-        return prop?.GetValue(target);
+        var getter = GetterCache.GetOrAdd((type, propName), static key => CreateGetter(key.Item1, key.Item2));
+        return getter?.Invoke(target);
     }
 
     private static T? GetPropertyValue<T>(object target, string propName) where T : struct

@@ -1,5 +1,4 @@
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Utilities;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
@@ -148,39 +147,6 @@ public sealed class ServerTombstoneManagerTests
             Assert.True(cleaned);
             Assert.False(Directory.Exists(tombstonePath));
             Assert.False(File.Exists(journalPath));
-        }
-        finally
-        {
-            tempDir.Delete(true);
-        }
-    }
-
-    [Fact]
-    public void RestoreTransactionRecoveryRestoresMissingServerDirectory()
-    {
-        var tempDir = Directory.CreateTempSubdirectory("msm-restore-recover-");
-        try
-        {
-            string serverPath = Path.Combine(tempDir.FullName, "MyServer");
-            string rollbackDir = Path.Combine(tempDir.FullName, ".MyServer.restore-rollback-12345");
-            string journalFile = Path.Combine(tempDir.FullName, ".MyServer.restore-rollback-12345.json");
-
-            Directory.CreateDirectory(rollbackDir);
-            File.WriteAllText(Path.Combine(rollbackDir, "restored.txt"), "recovered data");
-
-            var record = new RestoreTransactionRecord("MyServer", serverPath, Path.Combine(tempDir.FullName, "prep"));
-            File.WriteAllText(journalFile, JsonCodec.Serialize(record));
-
-            bool recovered = false;
-            RestoreTransactionRecovery.RecoverRestoreTransactions(
-                [("MyServer", serverPath)],
-                onRecovered: name => recovered = true);
-
-            Assert.True(recovered);
-            Assert.True(Directory.Exists(serverPath));
-            Assert.False(Directory.Exists(rollbackDir));
-            Assert.False(File.Exists(journalFile));
-            Assert.Equal("recovered data", File.ReadAllText(Path.Combine(serverPath, "restored.txt")));
         }
         finally
         {

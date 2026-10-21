@@ -14,6 +14,7 @@ public sealed class CoreUtilityTests
     [InlineData("1.7.0-beta.1", "1.7.0-beta.1")]
     [InlineData("  V2.0.1+build7  ", "2.0.1+build7")]
     [InlineData("1", "1.0.0")]
+    [InlineData("1.20.1.4", "1.20.1")]
     public void VersionParserNormalizesSupportedVersions(string input, string expected)
     {
         Assert.True(VersionValue.TryParse(input, out var version));
@@ -62,17 +63,15 @@ public sealed class CoreUtilityTests
     }
 
     [Fact]
-    public void MemoryUtilsParsesAndFormatsCorrectly()
+    public void MemoryUtilsParsesCorrectly()
     {
         Assert.Equal(4096, MemoryUtils.ParseMemorySetting("-Xmx4G"));
         Assert.Equal(2048, MemoryUtils.ParseMemorySetting("-Xms2048M", "Xms"));
+        Assert.Equal(4096, MemoryUtils.ParseMemorySetting("-Xms1024M -Xmx4096M", "Xmx"));
+        Assert.Equal(1024, MemoryUtils.ParseMemorySetting("-Xms1024M -Xmx4096M", "Xms"));
         Assert.Null(MemoryUtils.ParseMemorySetting("invalid"));
         Assert.Null(MemoryUtils.ParseMemorySetting("-Xmx4G", "Xms"));
-
-        Assert.Equal("4G", MemoryUtils.FormatMemoryMb(4096, compact: true));
-        Assert.Equal("1.5G", MemoryUtils.FormatMemoryMb(1536, compact: true));
-        Assert.Equal("512M", MemoryUtils.FormatMemoryMb(512, compact: true));
-        Assert.Equal("4.0 GB", MemoryUtils.FormatMemoryMb(4096, compact: false));
+        Assert.True(MemoryUtils.GetTotalSystemMemoryMb() >= 4096);
     }
 
     [Fact]
@@ -106,20 +105,17 @@ public sealed class CoreUtilityTests
         Assert.True(MinecraftVersionSemantics.IsFabricCompatible("1.14"));
         Assert.False(MinecraftVersionSemantics.IsFabricCompatible("1.12.2"));
 
-        Assert.Equal("fabric", MinecraftVersionSemantics.StandardizeLoaderType("Fabric"));
-        Assert.Equal("vanilla", MinecraftVersionSemantics.StandardizeLoaderType("原版"));
-        Assert.Equal("forge", MinecraftVersionSemantics.StandardizeLoaderType("unknown", "47.2.0"));
-
-        Assert.Equal("0.5.8", MinecraftVersionSemantics.CleanModVersion("0.5.8+mc1.20.4"));
-        Assert.Equal("1.0.0", MinecraftVersionSemantics.CleanModVersion("1.0.0-fabric-beta"));
-
         Assert.Equal("1.20.4", MinecraftVersionSemantics.ExtractMinecraftVersionFromText("fabric-server-mc1.20.4.jar"));
-        Assert.Equal("fabric", MinecraftVersionSemantics.DetectLoaderFromText("Running fabric server"));
 
         Assert.Equal("1.20.1", MinecraftVersionSemantics.NormalizeMinecraftVersion("~1.20.1"));
         Assert.Equal("1.20.1", MinecraftVersionSemantics.NormalizeMinecraftVersion(">=1.20.1"));
         Assert.Equal("1.20.4", MinecraftVersionSemantics.NormalizeMinecraftVersion("1.20.4"));
         Assert.Equal(string.Empty, MinecraftVersionSemantics.NormalizeMinecraftVersion(null));
+
+        Assert.Equal("1.20.1", MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge("47.1.106"));
+        Assert.Equal("1.21.1", MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge("21.1.77"));
+        Assert.Equal("1.21", MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge("21.0.167"));
+        Assert.Equal("26.1", MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge("26.1.0"));
     }
 
     [Fact]

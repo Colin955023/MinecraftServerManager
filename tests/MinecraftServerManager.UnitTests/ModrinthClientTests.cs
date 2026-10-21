@@ -67,9 +67,9 @@ public sealed class ModrinthClientTests
         var results = await client.SearchModsAsync("fabric-api", loader: "fabric", minecraftVersion: "1.20.1");
 
         var mod = Assert.Single(results);
-        Assert.Equal("AANobbMI", mod.Id);
+        Assert.Equal("AANobbMI", mod.ProjectId);
         Assert.Equal("fabric-api", mod.Slug);
-        Assert.Equal("Fabric API", mod.Title);
+        Assert.Equal("Fabric API", mod.Name);
         Assert.Equal(25000000, mod.Downloads);
         Assert.Equal("0.5.8", mod.LatestVersion);
         Assert.Equal("https://cdn.modrinth.com/icon.png", mod.IconUrl);
@@ -193,7 +193,7 @@ public sealed class ModrinthClientTests
         var fakeHttp = new FakeHttpPort(uri => uri.AbsoluteUri.Contains("/version_file/") ? jsonResponse : null);
         var client = new ModrinthClient(fakeHttp);
 
-        var ver = await client.GetVersionByHashAsync("testsha1", "sha1");
+        var ver = await client.LookupVersionByHashAsync("testsha1", "sha1");
 
         Assert.NotNull(ver);
         Assert.Equal("v999", ver.Version.Id);

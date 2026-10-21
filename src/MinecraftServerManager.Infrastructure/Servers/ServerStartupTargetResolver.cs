@@ -31,7 +31,7 @@ public static class ServerStartupTargetResolver
             return DefaultCoreJar;
         }
 
-        string[] jars = Directory.GetFiles(serverDirectory, "*.jar");
-        return jars.Length > 0 ? Path.GetFileName(jars[0]) : DefaultCoreJar;
+        string? firstJar = Directory.EnumerateFiles(serverDirectory, "*.jar").FirstOrDefault();
+        return firstJar is not null ? Path.GetFileName(firstJar) : DefaultCoreJar;
     }
 }

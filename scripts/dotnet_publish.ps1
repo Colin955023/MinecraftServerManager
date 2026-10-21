@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $projectPath = Join-Path $repoRoot "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
 $outputRoot = Join-Path $repoRoot "output"
@@ -7,6 +7,9 @@ $publishStartedAt = Get-Date
 if (-not (Test-Path -LiteralPath $outputRoot)) {
     [System.IO.Directory]::CreateDirectory($outputRoot) | Out-Null
 }
+
+# 動態偵測環境 CPU 核心數並保留 1 核給系統
+$maxCpuCount = [Math]::Max(1, [Environment]::ProcessorCount - 1)
 
 function Publish-App {
     param(
@@ -43,20 +46,15 @@ function Publish-App {
         "-p:DebuggerSupport=false",
         "-p:EventSourceSupport=false",
         "-p:MetadataUpdaterSupport=false",
-        "-p:UseSystemResourceKeys=true",
         "-p:UseSharedCompilation=false",
         "-nodereuse:false",
-        "-m:1",
+        "-m:$maxCpuCount",
         "-o", $tempOutput
     )
     if ($SelfContained -eq "true") {
         $arguments += @(
             "-p:IncludeNativeLibrariesForSelfExtract=true",
-            "-p:EnableCompressionInSingleFile=true",
-            "-p:PublishTrimmed=true",
-            "-p:TrimMode=partial",
-            "-p:_SuppressWpfTrimError=true",
-            "-p:SuppressTrimAnalysisWarnings=true"
+            "-p:EnableCompressionInSingleFile=true"
         )
     }
 
@@ -66,15 +64,36 @@ function Publish-App {
     }
 
     $sourceExe = Join-Path $tempOutput "MinecraftServerManager.App.exe"
-    if (Test-Path -LiteralPath $sourceExe) {
-        $targetExe = Join-Path $outputRoot "MinecraftServerManager-$Name.exe"
-        $targetSha = "$targetExe.sha256"
-        $hash = (Get-FileHash -LiteralPath $sourceExe -Algorithm SHA256).Hash
-        Move-Item -LiteralPath $sourceExe -Destination $targetExe -Force
-        Set-Content -LiteralPath $targetSha -Value "$hash  MinecraftServerManager-$Name.exe" -Encoding UTF8
+
+    if (-not (Test-Path -LiteralPath $sourceExe -PathType Leaf)) {
+        throw "發布成功但找不到預期的 EXE：$sourceExe"
     }
 
+    $targetExe = Join-Path $outputRoot "MinecraftServerManager-$Name.exe"
+
+    if ($SelfContained -eq "true") {
+        Copy-Item -LiteralPath $sourceExe -Destination $targetExe -Force
+    }
+    else {
+        Move-Item -LiteralPath $sourceExe -Destination $targetExe -Force
+    }
+
+    $hash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash
+    $targetSha = "$targetExe.sha256"
+
+    [System.IO.File]::WriteAllText(
+        $targetSha,
+        "$hash  $([System.IO.Path]::GetFileName($targetExe))`n",
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
     Remove-Item -LiteralPath $tempOutput -Recurse -Force
+}
+
+Write-Host "=== 還原發布套件 (win-x64) ==="
+& dotnet restore $projectPath -r win-x64 -m:$maxCpuCount
+if ($LASTEXITCODE -ne 0) {
+    throw "C# 還原套件失敗"
 }
 
 Publish-App -Name "self-contained" -SelfContained "true"

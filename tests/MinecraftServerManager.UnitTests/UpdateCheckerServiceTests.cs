@@ -63,10 +63,10 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://example.com/fd.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://example.com/fd.sha256"),
-            ("MinecraftServerManager-self-contained.exe", "https://example.com/sc.exe"),
-            ("MinecraftServerManager-self-contained.exe.sha256", "https://example.com/sc.sha256"));
+            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
+            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"),
+            ("MinecraftServerManager-self-contained.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe"),
+            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
@@ -75,8 +75,8 @@ public sealed class UpdateCheckerServiceTests
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal("https://example.com/sc.exe", result.DownloadUrl);
-        Assert.Equal("https://example.com/sc.sha256", result.Sha256ChecksumUrl);
+        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe", result.DownloadUrl);
+        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256", result.Sha256ChecksumUrl);
     }
 
     [Fact]
@@ -84,10 +84,10 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://example.com/fd.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://example.com/fd.sha256"),
-            ("MinecraftServerManager-self-contained.exe", "https://example.com/sc.exe"),
-            ("MinecraftServerManager-self-contained.exe.sha256", "https://example.com/sc.sha256"));
+            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
+            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"),
+            ("MinecraftServerManager-self-contained.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe"),
+            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: true);
         var http = new FakeHttpPort(json);
@@ -96,8 +96,8 @@ public sealed class UpdateCheckerServiceTests
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal("https://example.com/fd.exe", result.DownloadUrl);
-        Assert.Equal("https://example.com/fd.sha256", result.Sha256ChecksumUrl);
+        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe", result.DownloadUrl);
+        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256", result.Sha256ChecksumUrl);
     }
 
     [Fact]
@@ -105,8 +105,8 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://example.com/fd.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://example.com/fd.sha256"));
+            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
+            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
@@ -131,5 +131,23 @@ public sealed class UpdateCheckerServiceTests
 
         Assert.False(result.HasUpdate);
         Assert.Null(result.DownloadUrl);
+    }
+
+    [Fact]
+    public async Task IgnoresAssetsOutsideTrustedReleaseDownloadPath()
+    {
+        string json = BuildReleasePayload(
+            "99.0.0",
+            ("MinecraftServerManager-self-contained.exe", "https://evil.example.com/sc.exe"),
+            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Other/Repo/releases/download/99.0.0/sc.sha256"));
+
+        var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: false);
+        var checker = new UpdateCheckerService(new FakeHttpPort(json), runtime);
+
+        var result = await checker.CheckForUpdateAsync();
+
+        Assert.True(result.HasUpdate);
+        Assert.Null(result.DownloadUrl);
+        Assert.Null(result.Sha256ChecksumUrl);
     }
 }

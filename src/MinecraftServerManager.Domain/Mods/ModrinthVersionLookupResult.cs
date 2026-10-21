@@ -19,6 +19,7 @@ public sealed record ModrinthVersionLookupResult
         FileHash = fileHash ?? string.Empty;
         Algorithm = algorithm ?? string.Empty;
         ProjectId = projectId ?? string.Empty;
-        Version = version ?? throw new ArgumentNullException(nameof(version));
+        ArgumentNullException.ThrowIfNull(version);
+        Version = version;
     }
 }

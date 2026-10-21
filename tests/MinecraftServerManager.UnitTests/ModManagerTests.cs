@@ -35,6 +35,98 @@ public sealed class ModManagerTests : IDisposable
     [Fact]
     public async Task ExportModListAsyncTextFormatShouldIncludeModDetails()
     {
+        var exporter = new ModListExporter();
+        string filePath = Path.Combine(_testDir, "mods.txt");
+        var rows = new List<ModListExportRow>
+        {
+            new("testmod", "Test Mod", "1.0.0", "testmod.jar", "10 KiB", "DevTeam", "fabric", "1.20.1", "2026-01-01", "A test mod", true)
+        };
+
+        await exporter.ExportAsync(rows, ModListExportFormat.Text, filePath);
+        string text = await File.ReadAllTextAsync(filePath);
+
+        Assert.Contains("# 模組列表", text, StringComparison.Ordinal);
+        Assert.Contains("Test Mod", text, StringComparison.Ordinal);
+        Assert.Contains("DevTeam", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportModListAsyncXlsxFormatShouldProduceValidWorkbook()
+    {
+        var exporter = new ModListExporter();
+        string filePath = Path.Combine(_testDir, "mods.xlsx");
+        var rows = new List<ModListExportRow>
+        {
+            new("my-mod", "My, Mod", "2.1.0", "my-mod.jar", "20 KiB", "AuthorOne", "forge", "1.20.1", "2026-01-01", "Desc", true)
+        };
+
+        await exporter.ExportAsync(rows, ModListExportFormat.Xlsx, filePath);
+
+        Assert.True(File.Exists(filePath));
+        Assert.True(new FileInfo(filePath).Length > 0);
+    }
+
+    [Fact]
+    public async Task ExportModListAsyncJsonFormatShouldBeValidJson()
+    {
+        var exporter = new ModListExporter();
+        string filePath = Path.Combine(_testDir, "mods.json");
+        var rows = new List<ModListExportRow>
+        {
+            new("mod", "Mod", "1.0", "mod.jar", "10 KiB", "-", "fabric", "1.20.1", "2026-01-01", "", true)
+        };
+
+        await exporter.ExportAsync(rows, ModListExportFormat.Json, filePath);
+        string json = await File.ReadAllTextAsync(filePath);
+
+        Assert.StartsWith("[", json.Trim(), StringComparison.Ordinal);
+        Assert.Contains("\"id\": \"mod\"", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExportModListAsyncJsonFormatShouldNotEscapePlusQuoteAndAmpersand()
+    {
+        var exporter = new ModListExporter();
+        string filePath = Path.Combine(_testDir, "clean_chars.json");
+        var rows = new List<ModListExportRow>
+        {
+            new("mod_plus", "Create Crafts & Additions", "2.5.1+mc1.20.1", "Connector-1.0.0+1.20.1.jar", "10 KiB", "Let's Do", "forge", "1.20.1", "2026-01-01", "you're 30+ easings", true)
+        };
+
+        await exporter.ExportAsync(rows, ModListExportFormat.Json, filePath);
+        string json = await File.ReadAllTextAsync(filePath);
+
+        // 確保加號、單引號、與符號保持原樣，絕不出現 \u002B, \u0027, \u0026
+        Assert.Contains("2.5.1+mc1.20.1", json, StringComparison.Ordinal);
+        Assert.Contains("Connector-1.0.0+1.20.1.jar", json, StringComparison.Ordinal);
+        Assert.Contains("Create Crafts & Additions", json, StringComparison.Ordinal);
+        Assert.Contains("Let's Do", json, StringComparison.Ordinal);
+        Assert.Contains("you're 30+ easings", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u002B", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\\u0027", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\\u0026", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExportModListAsyncHtmlFormatShouldContainTable()
+    {
+        var exporter = new ModListExporter();
+        string filePath = Path.Combine(_testDir, "mods.html");
+        var rows = new List<ModListExportRow>
+        {
+            new("mod", "Mod", "1.0", "mod.jar", "10 KiB", "-", "fabric", "1.20.1", "2026-01-01", "", true)
+        };
+
+        await exporter.ExportAsync(rows, ModListExportFormat.Html, filePath);
+        string html = await File.ReadAllTextAsync(filePath);
+
+        Assert.Contains("<table>", html, StringComparison.Ordinal);
+        Assert.Contains("<th>模組名稱</th>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ModManagerDelegatesToScannerAndInstaller()
+    {
         var sampleMods = new List<LocalModInfo>
         {
             new("testmod", "Test Mod", "testmod.jar", "1.0.0", "1.20.1", "fabric", author: "DevTeam", platform: ModPlatform.Local, status: ModStatus.Enabled)
@@ -44,66 +136,9 @@ public sealed class ModManagerTests : IDisposable
         var fakeInstaller = new FakeInstaller();
         var manager = new ModManager(fakeScanner, fakeInstaller);
 
-        string text = await manager.ExportModListAsync(_testDir, format: "text");
-
-        Assert.Contains("# 模組清單", text, StringComparison.Ordinal);
-        Assert.Contains("Test Mod", text, StringComparison.Ordinal);
-        Assert.Contains("DevTeam", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ExportModListAsyncCsvFormatShouldIncludeHeadersAndValues()
-    {
-        var sampleMods = new List<LocalModInfo>
-        {
-            new("my-mod", "My, Mod", "my-mod.jar", "2.1.0", "1.20.1", "forge", author: "AuthorOne", platform: ModPlatform.Local, status: ModStatus.Enabled)
-        };
-
-        var fakeScanner = new FakeScanner(sampleMods);
-        var fakeInstaller = new FakeInstaller();
-        var manager = new ModManager(fakeScanner, fakeInstaller);
-
-        string csv = await manager.ExportModListAsync(_testDir, format: "csv");
-
-        Assert.Contains("啟用狀態,模組名稱,版本,MC版本,載入器,作者,檔案名稱,模組ID,檔案大小,修改時間,描述", csv, StringComparison.Ordinal);
-        Assert.Contains("\"My, Mod\"", csv, StringComparison.Ordinal);
-        Assert.Contains("\"2.1.0\"", csv, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ExportModListAsyncJsonFormatShouldBeValidJson()
-    {
-        var sampleMods = new List<LocalModInfo>
-        {
-            new("mod", "Mod", "mod.jar", "1.0", "1.20.1", "fabric", platform: ModPlatform.Local, status: ModStatus.Enabled)
-        };
-
-        var fakeScanner = new FakeScanner(sampleMods);
-        var fakeInstaller = new FakeInstaller();
-        var manager = new ModManager(fakeScanner, fakeInstaller);
-
-        string json = await manager.ExportModListAsync(_testDir, format: "json");
-
-        Assert.StartsWith("[", json.Trim(), StringComparison.Ordinal);
-        Assert.Contains("\"Id\": \"mod\"", json, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task ExportModListAsyncHtmlFormatShouldContainTable()
-    {
-        var sampleMods = new List<LocalModInfo>
-        {
-            new("mod", "Mod", "mod.jar", "1.0", "1.20.1", "fabric", platform: ModPlatform.Local, status: ModStatus.Enabled)
-        };
-
-        var fakeScanner = new FakeScanner(sampleMods);
-        var fakeInstaller = new FakeInstaller();
-        var manager = new ModManager(fakeScanner, fakeInstaller);
-
-        string html = await manager.ExportModListAsync(_testDir, format: "html");
-
-        Assert.Contains("<table>", html, StringComparison.Ordinal);
-        Assert.Contains("<th>模組名稱</th>", html, StringComparison.Ordinal);
+        var mods = await manager.GetModsAsync(_testDir);
+        Assert.Single(mods);
+        Assert.Equal("testmod", mods[0].Id);
     }
 
     private sealed class FakeScanner(IReadOnlyList<LocalModInfo> mods) : ILocalModScanner

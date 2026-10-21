@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Ports;
@@ -15,6 +16,7 @@ public sealed partial class AppUpdateService(
     string? updatesDirectory = null) : IAppUpdateService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AppUpdateService");
+    private static readonly SearchValues<char> InvalidBatchPathChars = SearchValues.Create("%\"\r\n");
 
     [GeneratedRegex(@"\b[a-fA-F0-9]{64}\b")]
     private static partial Regex Sha256Regex();
@@ -81,6 +83,7 @@ public sealed partial class AppUpdateService(
             progress.Report((percent, msg));
         });
 
+        // 下載端已於寫入時以 expectedHash 驗證 SHA-256，失敗即視為整體失敗，不再重複計算雜湊
         var downloadResult = await httpPort.DownloadAsync(
             downloadUri,
             targetFilePath,
@@ -91,52 +94,15 @@ public sealed partial class AppUpdateService(
 
         if (!downloadResult.Success)
         {
-            if (File.Exists(targetFilePath))
-            {
-                try
-                {
-                    File.Delete(targetFilePath);
-                }
-                catch
-                {
-                }
-            }
-
+            TryDelete(targetFilePath);
             throw new InvalidOperationException($"下載或校驗更新檔案失敗: {downloadResult.Error}");
         }
 
-        progress?.Report((95, "正在執行執行檔安全性與格式校驗..."));
+        progress?.Report((95, "正在執行執行檔格式校驗..."));
         if (!VerifyPeHeader(targetFilePath))
         {
-            if (File.Exists(targetFilePath))
-            {
-                try
-                {
-                    File.Delete(targetFilePath);
-                }
-                catch
-                {
-                }
-            }
-
-            throw new InvalidDataException("更新檔案未具備合法的 Windows 執行檔 (PE) 標頭，為保護系統安全已拒絕更新。");
-        }
-
-        string finalHash = HashCalculator.Shared.ComputeFileHash(targetFilePath, "sha256");
-        if (!string.Equals(finalHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
-        {
-            if (File.Exists(targetFilePath))
-            {
-                try
-                {
-                    File.Delete(targetFilePath);
-                }
-                catch
-                {
-                }
-            }
-
-            throw new InvalidDataException($"更新檔案 SHA-256 校驗失敗！預期: {expectedSha256}，實際: {finalHash}。");
+            TryDelete(targetFilePath);
+            throw new InvalidDataException("更新檔案不是結構合法的 Windows 執行檔 (PE)，已拒絕更新。");
         }
 
         progress?.Report((100, "更新檔案驗證通過！"));
@@ -165,28 +131,51 @@ public sealed partial class AppUpdateService(
         ValidateBatchPath(currentExePath);
         ValidateBatchPath(verifiedInstallerPath);
 
+        // 替換前先備份舊版：複製失敗時還原並重新啟動舊版，同時留下失敗記錄，避免程式消失而使用者毫無提示
         string scriptContent = $"""
         @echo off
         chcp 65001 >nul
         set "TARGET={currentExePath}"
         set "SOURCE={verifiedInstallerPath}"
+        set "BACKUP=%TARGET%.bak"
+        set "FAILLOG=%~dp0update_failed.txt"
         set "PID={pid}"
+        set /a WAITED=0
 
         :wait_loop
-        tasklist /fi "pid eq %PID%" 2>nul | findstr /i "%PID%" >nul
-        if not errorlevel 1 (
-            timeout /t 1 /nobreak >nul
-            goto wait_loop
-        )
+        tasklist /fi "pid eq %PID%" /nh 2>nul | findstr /r /c:"[ ]%PID%[ ]" >nul
+        if errorlevel 1 goto do_replace
+        set /a WAITED+=1
+        if %WAITED% gtr 60 goto fail_wait
+        timeout /t 1 /nobreak >nul
+        goto wait_loop
 
+        :do_replace
+        if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>&1
+        move /y "%TARGET%" "%BACKUP%" >nul
+        if errorlevel 1 goto fail_backup
         copy /y "%SOURCE%" "%TARGET%" >nul
-        if errorlevel 1 (
-            exit /b 1
-        )
-
+        if errorlevel 1 goto fail_copy
         start "" "%TARGET%"
-        del "%SOURCE%" >nul 2>&1
+        del /f /q "%BACKUP%" >nul 2>&1
+        del /f /q "%SOURCE%" >nul 2>&1
         (goto) 2>nul & del "%~f0" >nul 2>&1
+        exit /b 0
+
+        :fail_copy
+        move /y "%BACKUP%" "%TARGET%" >nul
+        echo 自動更新失敗：無法寫入 %TARGET%，已還原舊版。請確認檔案位置具有寫入權限，或手動下載更新。> "%FAILLOG%"
+        start "" "%TARGET%"
+        exit /b 1
+
+        :fail_backup
+        echo 自動更新失敗：無法備份舊版 %TARGET%。請確認檔案位置具有寫入權限，或手動下載更新。> "%FAILLOG%"
+        start "" "%TARGET%"
+        exit /b 1
+
+        :fail_wait
+        echo 自動更新失敗：等待舊版程式結束逾時。請手動下載更新。> "%FAILLOG%"
+        exit /b 2
         """;
 
         File.WriteAllText(scriptPath, scriptContent, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
@@ -206,12 +195,30 @@ public sealed partial class AppUpdateService(
 
     private static void ValidateBatchPath(string path)
     {
-        if (path.IndexOfAny(['%', '"', '\r', '\n']) >= 0)
+        if (path.AsSpan().IndexOfAny(InvalidBatchPathChars) >= 0)
         {
             throw new InvalidOperationException("更新路徑含有批次指令無法安全處理的字元，已拒絕自動更新。");
         }
     }
 
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning("無法刪除未通過驗證的更新檔案 {Path}: {Message}", path, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// 檢查 DOS 標頭 'MZ' 與 e_lfanew 所指之 'PE\0\0' 簽章；僅為結構健全性檢查，完整性仍由 SHA-256 保證
+    /// </summary>
     private static bool VerifyPeHeader(string filePath)
     {
         try
@@ -222,15 +229,24 @@ public sealed partial class AppUpdateService(
                 return false;
             }
 
-            Span<byte> buffer = stackalloc byte[2];
-            if (fs.Read(buffer) != 2)
+            Span<byte> dos = stackalloc byte[64];
+            if (fs.Read(dos) != dos.Length || dos[0] != 0x4D || dos[1] != 0x5A)
             {
                 return false;
             }
 
-            return buffer[0] == 0x4D && buffer[1] == 0x5A;
+            int peOffset = BitConverter.ToInt32(dos[0x3C..0x40]);
+            long peOffsetLimit = fs.Length - 4;
+            if (peOffset < 64 || peOffset > peOffsetLimit)
+            {
+                return false;
+            }
+
+            fs.Seek(peOffset, SeekOrigin.Begin);
+            Span<byte> signature = stackalloc byte[4];
+            return fs.Read(signature) == 4 && signature[0] == 0x50 && signature[1] == 0x45 && signature[2] == 0 && signature[3] == 0;
         }
-        catch
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return false;
         }

@@ -5,9 +5,9 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 public static class AtomicFileWriter
 {
     private const int StripeCount = 128;
-    private static readonly object[] StripeLocks = [.. Enumerable.Range(0, StripeCount).Select(static _ => new object())];
+    private static readonly Lock[] StripeLocks = [.. Enumerable.Range(0, StripeCount).Select(static _ => new Lock())];
 
-    private static object GetLockForPath(string path)
+    private static Lock GetLockForPath(string path)
     {
         uint hash = (uint)StringComparer.OrdinalIgnoreCase.GetHashCode(path);
         return StripeLocks[hash % StripeCount];
@@ -33,7 +33,7 @@ public static class AtomicFileWriter
         {
             if (skipIfUnchanged && File.Exists(target))
             {
-                byte[]? existing = FileSafety.ReadRegularFile(target, content.Length);
+                byte[]? existing = SafeFileSystem.ReadRegularFile(target);
                 if (existing is not null && existing.SequenceEqual(content))
                 {
                     return true;
@@ -81,7 +81,7 @@ public static class AtomicFileWriter
 
     public static bool WriteText(string filePath, string content, bool skipIfUnchanged = false) => WriteBytes(filePath, System.Text.Encoding.UTF8.GetBytes(content), skipIfUnchanged);
 
-    public static bool WriteJson(string filePath, object? value, bool indented = true, bool skipIfUnchanged = false)
+    public static bool WriteJson<T>(string filePath, T? value, bool indented = true, bool skipIfUnchanged = false)
     {
         byte[]? payload = JsonCodec.SerializeToUtf8Bytes(value, indented);
         return payload is not null && WriteBytes(filePath, payload, skipIfUnchanged);
@@ -130,30 +130,5 @@ public static class AtomicFileWriter
         {
             return false;
         }
-    }
-
-    public static bool ReplaceFileWithin(string baseDirectory, string sourcePath, string targetPath)
-    {
-        string source;
-        string target;
-        try
-        {
-            source = Path.GetFullPath(sourcePath);
-            target = Path.GetFullPath(targetPath);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-
-        if (string.Equals(source, Path.GetFullPath(baseDirectory), StringComparison.OrdinalIgnoreCase)
-            || string.Equals(target, Path.GetFullPath(baseDirectory), StringComparison.OrdinalIgnoreCase)
-            || !SafeFileSystem.IsPathWithin(baseDirectory, source)
-            || !SafeFileSystem.IsPathWithin(baseDirectory, target, strict: false))
-        {
-            return false;
-        }
-
-        return ReplaceFile(source, target);
     }
 }

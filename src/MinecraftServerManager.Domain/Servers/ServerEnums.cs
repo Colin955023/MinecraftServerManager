@@ -11,31 +11,12 @@ public enum CreationStatus
 }
 
 /// <summary>
-/// 伺服器匯入模式
-/// </summary>
-public enum ImportMode
-{
-    Import,
-    Redetect
-}
-
-/// <summary>
 /// 伺服器匯入傳輸模式
 /// </summary>
 public enum ImportTransferMode
 {
     Copy,
     Move
-}
-
-/// <summary>
-/// 匯入來源類型
-/// </summary>
-public enum ImportSourceKind
-{
-    Archive,
-    Directory,
-    InPlace
 }
 
 /// <summary>
@@ -47,28 +28,6 @@ public enum ImportStatus
     Skipped,
     Cancelled,
     Failed
-}
-
-/// <summary>
-/// 衝突類型
-/// </summary>
-public enum ConflictType
-{
-    None,
-    Disk,
-    Config,
-    Both
-}
-
-/// <summary>
-/// 伺服器檢查用途
-/// </summary>
-public enum InspectionPurpose
-{
-    Import,
-    Redetect,
-    Status,
-    Launch
 }
 
 /// <summary>

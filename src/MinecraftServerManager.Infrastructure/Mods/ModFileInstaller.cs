@@ -35,9 +35,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
         if (File.Exists(dstFile) && File.Exists(srcFile))
         {
-            string srcHash = new HashCalculator().ComputeFileHash(srcFile, "sha256");
-            string dstHash = new HashCalculator().ComputeFileHash(dstFile, "sha256");
-            if (!string.IsNullOrEmpty(srcHash) && string.Equals(srcHash, dstHash, StringComparison.OrdinalIgnoreCase))
+            if (new FileInfo(srcFile).Length == new FileInfo(dstFile).Length && HasSameContent(srcFile, dstFile))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, srcFile);
                 return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態並已清理重複檔案", dstFile));
@@ -179,10 +177,11 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string tempFilePath = Path.Combine(stagingDir, $"{safeFileName}.{Guid.NewGuid():N}.tmp");
         string finalTargetPath = Path.Combine(stableModsDir, safeFileName);
         string? backupFilePath = null;
+        string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
 
         try
         {
-            // 下載
+            // 下載並於串流管線中即時增量校驗雜湊（消除下載後二次全檔磁碟讀取 I/O）
             var downloadResult = await httpPort.DownloadAsync(
                 new Uri(downloadUrl),
                 tempFilePath,
@@ -193,24 +192,14 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                         progress.Report((int)((double)p.BytesDownloaded / p.TotalBytes * 100));
                     }
                 }) : null,
+                expectedHash: !string.IsNullOrEmpty(expectedHash) ? expectedHash : null,
+                expectedHashAlgorithm: algo,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             if (!downloadResult.Success)
             {
                 Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
-                return ModFileOperationResult.Fail($"下載失敗：{downloadResult.Error}", false);
-            }
-
-            // 雜湊校驗
-            if (!string.IsNullOrEmpty(expectedHash))
-            {
-                string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
-                string actualHash = new HashCalculator().ComputeFileHash(tempFilePath, algo);
-                if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    SafeFileSystem.DeleteWithin(stagingDir, tempFilePath);
-                    return ModFileOperationResult.Fail($"檔案雜湊校驗失敗 (預期: {expectedHash}, 實際: {actualHash})", false);
-                }
+                return ModFileOperationResult.Fail($"下載或雜湊校驗失敗：{downloadResult.Error}", false);
             }
 
             // 備份舊檔案（若存在）
@@ -394,5 +383,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         return false;
+    }
+
+    private static bool HasSameContent(string firstFile, string secondFile)
+    {
+        string firstHash = HashCalculator.Shared.ComputeFileHash(firstFile, "sha256");
+        return !string.IsNullOrEmpty(firstHash)
+            && string.Equals(firstHash, HashCalculator.Shared.ComputeFileHash(secondFile, "sha256"), StringComparison.OrdinalIgnoreCase);
     }
 }

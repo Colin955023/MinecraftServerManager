@@ -28,6 +28,9 @@ public static partial class ModHelpers
     public static string NormalizeIdentifier(string? value) =>
         (value ?? string.Empty).Trim().ToLowerInvariant();
 
+    /// <summary>
+    /// 正規化雜湊演算法名稱字串（供外部輸入或驗證比對使用）
+    /// </summary>
     public static string NormalizeHashAlgorithm(string? algorithm)
     {
         string norm = NormalizeIdentifier(algorithm);
@@ -59,10 +62,7 @@ public static partial class ModHelpers
         clean = CamelCaseRegex().Replace(clean, " $1");
         clean = CamelCaseAcronymBoundaryRegex().Replace(clean, " ");
         clean = clean.Replace('_', ' ').Replace('-', ' ').Replace('+', ' ');
-        clean = LoaderNoiseRegex().Replace(clean, " ");
-        clean = McVersionNoiseRegex().Replace(clean, " ");
-        clean = VersionDigitNoiseRegex().Replace(clean, " ");
-        clean = VersionQualifierNoiseRegex().Replace(clean, " ");
+        clean = CombinedModNoiseRegex().Replace(clean, " ");
 
         var sb = new StringBuilder(clean.Length);
         foreach (var range in clean.AsSpan().Split(' '))
@@ -78,23 +78,30 @@ public static partial class ModHelpers
             }
         }
 
-        string result = sb.ToString().Trim();
-        return !string.IsNullOrWhiteSpace(result) ? result : ModFilenameStem(rawQuery);
+        return sb.Length > 0 ? sb.ToString() : ModFilenameStem(rawQuery);
     }
 
+    /// <summary>
+    /// 判定版本類型是否為允許範圍
+    /// </summary>
     public static bool IsAllowedVersionType(string? versionType)
     {
         string norm = NormalizeIdentifier(versionType);
-        return norm is "" or "release" or "stable" or "beta" || norm.Contains("beta", StringComparison.OrdinalIgnoreCase);
+        return norm is "" or "release" or "stable" || norm.Contains("beta", StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// 從線上模組版本集合中挑選優先級最高之最佳相容版本（供無相依環境之純獨立選版使用）
+    /// </summary>
     public static OnlineModVersion? SelectBestModVersion(IEnumerable<OnlineModVersion> versions)
     {
         return versions
-            .OrderByDescending(static v => v.PrimaryFile is not null ? 1 : 0)
-            .ThenByDescending(static v => GetVersionTypePriority(v.VersionType))
-            .ThenByDescending(static v => v.DatePublished)
-            .ThenByDescending(static v => v.VersionNumber)
+            .Select(static v => (Version: v, ParsedVersion: new FlexVersion(v.VersionNumber)))
+            .OrderByDescending(static x => x.Version.PrimaryFile is not null ? 1 : 0)
+            .ThenByDescending(static x => GetVersionTypePriority(x.Version.VersionType))
+            .ThenByDescending(static x => x.Version.DatePublished)
+            .ThenByDescending(static x => x.ParsedVersion)
+            .Select(static x => x.Version)
             .FirstOrDefault();
     }
 
@@ -126,17 +133,8 @@ public static partial class ModHelpers
     [GeneratedRegex(@"(?<=[A-Z])(?=[A-Z][a-z])")]
     private static partial Regex CamelCaseAcronymBoundaryRegex();
 
-    [GeneratedRegex(@"(?i)\b(?:fabric|forge|loader|quilt|neoforge)\b")]
-    private static partial Regex LoaderNoiseRegex();
-
-    [GeneratedRegex(@"(?i)\bmc\s*\d+(?:\.\d+){1,2}[a-z0-9.-]*\b")]
-    private static partial Regex McVersionNoiseRegex();
-
-    [GeneratedRegex(@"\b\d+(?:\.\d+){1,3}[a-z0-9.-]*\b")]
-    private static partial Regex VersionDigitNoiseRegex();
-
-    [GeneratedRegex(@"(?i)\b(?:beta|alpha|rc|pre|snapshot|build|patch)(?:[0-9.-]+)?\b")]
-    private static partial Regex VersionQualifierNoiseRegex();
+    [GeneratedRegex(@"(?i)\b(?:fabric|forge|loader|quilt|neoforge|beta|alpha|rc|pre|snapshot|build|patch)(?:[0-9.-]+)?\b|(?i)\bmc\s*\d+(?:\.\d+){1,2}[a-z0-9.-]*\b|\b\d+(?:\.\d+){1,3}[a-z0-9.-]*\b")]
+    private static partial Regex CombinedModNoiseRegex();
 
     [GeneratedRegex(@"(?:\x1B|(?i)\\u001b|(?i)\\x1b)(?:\[[0-?]*[ -/]*[@-~]|\].*?(?:\x07|\x1B\\)|[@-Z\\-_])|§x(?:§[0-9a-fA-F]){6}|§[0-9a-fk-orA-FK-ORzZ]|(?i)\\u00a7[0-9a-fk-or]")]
     private static partial Regex ColorAndFormattingCodeRegex();

@@ -45,6 +45,11 @@ public interface ILoaderCatalogService
     public Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 背景預熱載入器版本快取（僅在快取過期或不存在時自遠端更新）
+    /// </summary>
+    public Task WarmupLoadersAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 重新載入並遞補合併最新 Minecraft 版本清單
     /// </summary>
     public Task<IReadOnlyList<LoaderVersion>> ReloadAndMergeMinecraftVersionsAsync(

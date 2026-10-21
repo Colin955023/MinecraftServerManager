@@ -183,6 +183,17 @@ public static class HttpUrlPolicy
             return IsPublicAddress(ipv4);
         }
 
+        // 6to4（2002::/16）與 NAT64（64:ff9b::/96）內嵌 IPv4，需以內嵌位址判定是否為公開位址
+        if (span[0] == 0x20 && span[1] == 0x02)
+        {
+            return IsPublicAddress(new IPAddress(span.Slice(2, 4)));
+        }
+
+        if (span[0] == 0x00 && span[1] == 0x64 && span[2] == 0xFF && span[3] == 0x9B && span[4..12].IndexOfAnyExcept((byte)0) < 0)
+        {
+            return IsPublicAddress(new IPAddress(span.Slice(12, 4)));
+        }
+
         return !normalized.IsIPv6LinkLocal
             && !normalized.IsIPv6SiteLocal
             && !normalized.IsIPv6Teredo

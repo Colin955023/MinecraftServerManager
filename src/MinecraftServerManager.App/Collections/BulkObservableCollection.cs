@@ -43,10 +43,8 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
     {
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentOutOfRangeException.ThrowIfNegative(count);
-        if (index > Count || count > Count - index)
-        {
-            throw new ArgumentOutOfRangeException(nameof(count));
-        }
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(index, Count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, Count - index);
 
         if (count == 0)
         {
@@ -56,6 +54,29 @@ public sealed class BulkObservableCollection<T> : ObservableCollection<T>
         for (int i = 0; i < count; i++)
         {
             Items.RemoveAt(index);
+        }
+
+        NotifyReset();
+    }
+
+    /// <summary>
+    /// 批次附加多個項目，若總數量超過上限則自動從前端修剪至目標數量，並發出單次 Reset 通知。
+    /// </summary>
+    public void AppendAndTrim(IEnumerable<T> items, int maxCount, int targetCount)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        foreach (T item in items)
+        {
+            Items.Add(item);
+        }
+
+        if (Items.Count > maxCount)
+        {
+            int removeCount = Items.Count - targetCount;
+            for (int i = 0; i < removeCount; i++)
+            {
+                Items.RemoveAt(0);
+            }
         }
 
         NotifyReset();

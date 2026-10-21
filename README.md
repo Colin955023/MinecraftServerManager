@@ -1,4 +1,4 @@
-# Minecraft 伺服器管理器
+﻿# Minecraft 伺服器管理器
 
 [![Platform](https://img.shields.io/badge/Windows-10%2F11-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
@@ -13,8 +13,9 @@
 ## 主要特色
 
 - **核心與載入器**：支援 Paper、Vanilla、Fabric、Quilt、Forge、NeoForge 等官方核心之快速下載與建立
-- **Java 管理與配對**：依照 Minecraft 官方版本需求自動配對，支援 Windows winget 自動安裝 Java（Java 8 到 21+）與自訂路徑
+- **Java 管理與配對**：依照 Minecraft 官方版本需求自動配對，支援 Windows winget 自動安裝 Java（Java 8 到 21+）與自訂路徑，具備跳板轉發器去重機制
 - **即時監控視窗**：獨立主控台、開機就緒 Windows 桌面通知、方向鍵瀏覽歷史指令、線上玩家清單、指令傳送與安全關閉流程
+- **玩家名冊與權限管理**：視覺化管理營運管理員名單（OP 1~4 級權限與略過人數限制）、白名單及封鎖名冊（玩家與 IP），支援離線玩家快取
 - **安全備份與還原**：還原時自動保留現場最新記錄檔與當機報告，具備失敗自動回復機制，自動保留最新 10 份備份
 - **模組管理**：支援 Windows 自然排序、模組啟用與停用、自動下載相依模組、Modrinth 線上搜尋與安裝、官方下載來源驗證，以及匯出試算表（XLSX）、HTML、JSON 與純文字
 - **伺服器設定驗證**：編輯 `server.properties` 時自動檢查連接埠（1～65534）與 IP 等數值正確性，避免設定錯誤
@@ -28,8 +29,8 @@
 
 | 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
 | :--- | :--- | :--- | :--- | :--- |
-| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 39 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與所有相依元件，開箱即用，絕不因缺少環境而報錯 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.6 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 50 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與官方原生單檔壓縮，開箱即用，具備最高相容性與穩定度，絕不因缺少環境而報錯 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.8 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
 
 > [!TIP]
 > 如果您不確定電腦是否已安裝 .NET 10，請一律下載 **`MinecraftServerManager-self-contained.exe`** 即可順暢使用。

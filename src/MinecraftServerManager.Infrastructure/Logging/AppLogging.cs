@@ -45,24 +45,12 @@ public static class AppLogging
     }
 
     /// <summary>
-    /// 取得指定泛型型別之 ILogger
-    /// </summary>
-    public static ILogger<T> CreateLogger<T>()
-    {
-        lock (SyncRoot)
-        {
-            EnsureInitialized();
-            return new Logger<T>((ILoggerFactory)_fileLoggerProvider!.CreateLogger(typeof(T).FullName ?? typeof(T).Name));
-        }
-    }
-
-    /// <summary>
     /// 取得已綁定 component 之 ComponentLogger
     /// </summary>
     public static ComponentLogger CreateComponentLogger(string componentName)
     {
         var logger = CreateLogger(componentName);
-        return new ComponentLogger(logger).Bind("component", componentName);
+        return new ComponentLogger(logger);
     }
 
     /// <summary>
@@ -88,13 +76,7 @@ public static class AppLogging
     {
         if (_fileLoggerProvider is null)
         {
-            lock (SyncRoot)
-            {
-                if (_fileLoggerProvider is null)
-                {
-                    Initialize();
-                }
-            }
+            Initialize();
         }
     }
 }

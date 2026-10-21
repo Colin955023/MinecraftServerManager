@@ -15,7 +15,8 @@ public sealed record LocalModUpdateCandidate
         OnlineModVersion? updateVersion = null,
         OnlineModCompatibilityReport? compatibilityReport = null)
     {
-        LocalMod = localMod ?? throw new ArgumentNullException(nameof(localMod));
+        ArgumentNullException.ThrowIfNull(localMod);
+        LocalMod = localMod;
         UpdateVersion = updateVersion;
         CompatibilityReport = compatibilityReport;
     }

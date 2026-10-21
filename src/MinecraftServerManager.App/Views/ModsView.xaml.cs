@@ -15,10 +15,13 @@ public partial class ModsView : UserControl
     {
         if (DataContext is ModsViewModel vm && sender is DataGrid grid)
         {
-            var selectedSet = grid.SelectedItems.OfType<LocalModRowItem>().ToHashSet();
-            foreach (var item in vm.LocalMods)
+            foreach (var item in e.RemovedItems.OfType<LocalModRowItem>())
             {
-                item.IsSelected = selectedSet.Contains(item);
+                item.IsSelected = false;
+            }
+            foreach (var item in e.AddedItems.OfType<LocalModRowItem>())
+            {
+                item.IsSelected = true;
             }
             vm.UpdateSelectionState(grid.SelectedItems.Count);
         }

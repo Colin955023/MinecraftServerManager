@@ -55,7 +55,7 @@ public partial class ModUpdatesDialog : Window
     {
         if (!CandidateItems.Any(static i => i.IsSelected))
         {
-            NotificationDialog.Show(this, "未勾選項目", "請至少勾選一個要更新的模組！", NotificationLevel.Warning);
+            ToastWindow.Instance.ShowToast("請至少勾選一個要更新的模組！", "未勾選項目", Services.ToastType.Warning);
             return;
         }
         DialogResult = true;

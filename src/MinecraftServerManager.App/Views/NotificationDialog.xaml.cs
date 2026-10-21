@@ -1,73 +1,134 @@
-using System.Media;
 using System.Windows;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
 public enum NotificationLevel
 {
-    Info,
     Warning,
     Error,
 }
 
+/// <summary>
+/// 具備自主平滑淡出與滑鼠懸停暫停功能的系統提示視窗
+/// </summary>
 public partial class NotificationDialog : Window
 {
-    private readonly System.Windows.Threading.DispatcherTimer? _autoCloseTimer;
-    private int _remainingSeconds = 3;
+    private readonly NotificationLevel _level;
+    private readonly DispatcherTimer? _autoCloseTimer;
+    private readonly double _totalSeconds;
+    private double _elapsedSeconds;
+    private bool _isPaused;
+    private bool _isClosing;
 
-    public NotificationDialog(string title, string message, NotificationLevel level = NotificationLevel.Info)
+    public NotificationDialog(string title, string message, NotificationLevel level = NotificationLevel.Warning)
     {
         InitializeComponent();
 
+        _level = level;
         Title = title;
         TitleText.Text = title;
         MessageText.Text = message;
+
+        _totalSeconds = level switch
+        {
+            NotificationLevel.Error => 10.0,
+            _ => 6.0
+        };
 
         switch (level)
         {
             case NotificationLevel.Error:
                 IconText.Text = "❌";
-                SystemSounds.Hand.Play();
+                CountdownProgress.SetResourceReference(ForegroundProperty, "DangerBrush");
                 break;
             case NotificationLevel.Warning:
-                IconText.Text = "⚠️";
-                SystemSounds.Exclamation.Play();
-                break;
-            case NotificationLevel.Info:
             default:
-                IconText.Text = "ℹ️";
-                SystemSounds.Asterisk.Play();
+                IconText.Text = "⚠️";
+                CountdownProgress.SetResourceReference(ForegroundProperty, "WarningBrush");
+                break;
+        }
 
-                _remainingSeconds = 3;
-                OkButton.Content = $"確定 ({_remainingSeconds}s)";
-                _autoCloseTimer = new System.Windows.Threading.DispatcherTimer
-                {
-                    Interval = TimeSpan.FromSeconds(1)
-                };
-                _autoCloseTimer.Tick += (s, e) =>
-                {
-                    _remainingSeconds--;
-                    if (_remainingSeconds <= 0)
-                    {
-                        _autoCloseTimer.Stop();
-                        DialogResult = true;
-                        Close();
-                    }
-                    else
-                    {
-                        OkButton.Content = $"確定 ({_remainingSeconds}s)";
-                    }
-                };
-                _autoCloseTimer.Start();
+        UpdateCountdownUi();
+
+        _autoCloseTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _autoCloseTimer.Tick += AutoCloseTimer_Tick;
+        _autoCloseTimer.Start();
+    }
+
+    private void AutoCloseTimer_Tick(object? sender, EventArgs e)
+    {
+        if (_isPaused || _isClosing)
+        {
+            return;
+        }
+
+        _elapsedSeconds += 0.1;
+        if (_elapsedSeconds >= _totalSeconds)
+        {
+            _autoCloseTimer?.Stop();
+            BeginFadeOutAndClose();
+        }
+        else
+        {
+            UpdateCountdownUi();
+        }
+    }
+
+    private void UpdateCountdownUi()
+    {
+        double remaining = Math.Max(0, _totalSeconds - _elapsedSeconds);
+        int ceilSeconds = (int)Math.Ceiling(remaining);
+
+        if (_isPaused)
+        {
+            OkButton.Content = "確定 (已暫停)";
+        }
+        else
+        {
+            OkButton.Content = $"確定 ({ceilSeconds}s)";
+        }
+
+        double percent = Math.Clamp(remaining / _totalSeconds * 100.0, 0, 100);
+        CountdownProgress.Value = percent;
+    }
+
+    private void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        switch (_level)
+        {
+            case NotificationLevel.Error:
+                AudioFeedback.PlayError();
+                break;
+            case NotificationLevel.Warning:
+            default:
+                AudioFeedback.PlayWarning();
                 break;
         }
     }
 
-    private static readonly object SyncLock = new();
+    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _isPaused = true;
+        UpdateCountdownUi();
+    }
+
+    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _isPaused = false;
+        UpdateCountdownUi();
+    }
+
+    private static readonly Lock SyncLock = new();
     private static string? _lastMessage;
     private static DateTimeOffset _lastShownTime;
 
-    public static void Show(Window? owner, string title, string message, NotificationLevel level = NotificationLevel.Info)
+    public static void Show(Window? owner, string title, string message, NotificationLevel level = NotificationLevel.Warning)
     {
         lock (SyncLock)
         {
@@ -96,7 +157,7 @@ public partial class NotificationDialog : Window
 
         if (Application.Current?.Dispatcher.CheckAccess() == false)
         {
-            Application.Current.Dispatcher.Invoke(Action);
+            Application.Current.Dispatcher.BeginInvoke(new Action(Action));
         }
         else
         {
@@ -107,7 +168,40 @@ public partial class NotificationDialog : Window
     private void OkButton_Click(object sender, RoutedEventArgs e)
     {
         _autoCloseTimer?.Stop();
-        DialogResult = true;
+        SafeClose();
+    }
+
+    private void BeginFadeOutAndClose()
+    {
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
+        _autoCloseTimer?.Stop();
+
+        var anim = new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(280))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        anim.Completed += (_, _) => SafeClose();
+        BeginAnimation(OpacityProperty, anim);
+    }
+
+    private void SafeClose()
+    {
+        try
+        {
+            if (System.Windows.Interop.ComponentDispatcher.IsThreadModal)
+            {
+                DialogResult = true;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
         Close();
     }
 

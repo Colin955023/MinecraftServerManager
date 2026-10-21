@@ -1,7 +1,7 @@
-using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 
@@ -75,7 +75,7 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
 
     public string ProjectTitle { get; }
 
-    public ObservableCollection<ModVersionDisplayItem> Versions { get; }
+    public BulkObservableCollection<ModVersionDisplayItem> Versions { get; }
 
     /// <summary>
     /// 使用者選擇「加入安裝清單」時所挑定的版本。
@@ -99,11 +99,10 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
                 .GetProjectVersionsAsync(_projectId, loader: _loader, minecraftVersion: _minecraftVersion)
                 .ConfigureAwait(true);
 
-            Versions.Clear();
-            foreach (var version in list)
+            var versionItems = list.Select(version =>
             {
                 var file = version.PrimaryFile;
-                Versions.Add(new ModVersionDisplayItem
+                return new ModVersionDisplayItem
                 {
                     VersionId = version.VersionId,
                     VersionNumber = string.IsNullOrWhiteSpace(version.VersionNumber) ? version.DisplayName : version.VersionNumber,
@@ -117,8 +116,10 @@ public sealed partial class ModVersionPickerViewModel : ObservableObject
                     Dependencies = [.. version.Dependencies
                         .Select(static d => d.ProjectId ?? string.Empty)
                         .Where(static id => id.Length > 0)]
-                });
-            }
+                };
+            });
+
+            Versions.ReplaceAll(versionItems);
 
             if (Versions.Count > 0)
             {

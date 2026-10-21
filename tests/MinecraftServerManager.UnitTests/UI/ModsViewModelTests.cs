@@ -54,6 +54,7 @@ public sealed class ModsViewModelTests
             string? minecraftVersion = null,
             int limit = 20,
             int offset = 0,
+            string index = "relevance",
             CancellationToken cancellationToken = default)
         {
             onSearchCalled();

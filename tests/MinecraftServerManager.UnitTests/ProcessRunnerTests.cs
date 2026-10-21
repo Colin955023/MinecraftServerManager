@@ -90,29 +90,6 @@ public sealed class ProcessRunnerTests
         }
     }
 
-    [Theory]
-    [InlineData(".txt")]
-    [InlineData(".json")]
-    [InlineData(".html")]
-    [InlineData(".htm")]
-    [InlineData(".xlsx")]
-    [InlineData(".csv")]
-    [InlineData(".log")]
-    public void IsAllowedOpenFileExtension_AllowsSafeExportAndTextFormats(string ext)
-    {
-        Assert.True(ProcessRunner.IsAllowedOpenFileExtension(ext));
-        Assert.True(ProcessRunner.IsAllowedOpenFileExtension(ext.ToUpperInvariant()));
-    }
-
-    [Theory]
-    [InlineData(".exe")]
-    [InlineData(".bat")]
-    [InlineData(".cmd")]
-    [InlineData(".vbs")]
-    [InlineData(".ps1")]
-    [InlineData(".dll")]
-    public void IsAllowedOpenFileExtension_RejectsExecutableOrDangerousFormats(string ext) => Assert.False(ProcessRunner.IsAllowedOpenFileExtension(ext));
-
     [Fact]
     public void OpenFile_RejectsDangerousExtensionsBeforeShellExecution()
     {
@@ -139,5 +116,27 @@ public sealed class ProcessRunnerTests
         var runner = new ProcessRunner();
         Assert.False(runner.OpenFile(string.Empty, isTrusted: true));
         Assert.False(runner.OpenFile(Path.Combine(Path.GetTempPath(), $"missing-{Guid.NewGuid():N}.html"), isTrusted: true));
+    }
+
+    [Fact]
+    public void SanitizeOutputLine_PreservesPureText_StripsAnsiAndControlChars()
+    {
+        // 1. 純淨字串應直接返回相同參照（0 配置）
+        const string pure = "[Server] Done in 5.2s! For help, type \"help\"";
+        string result = ProcessRunner.SanitizeOutputLine(pure);
+        Assert.Same(pure, result);
+
+        // 2. ANSI 色碼過濾
+        string ansi = "\x1B[32;1m[Server thread/INFO]\x1B[0m: Done (2.1s)!";
+        Assert.Equal("[Server thread/INFO]: Done (2.1s)!", ProcessRunner.SanitizeOutputLine(ansi));
+
+        // 3. 控制字元過濾並保留 Tab
+        string controlChars = "Hello\x00\x07World\t!";
+        Assert.Equal("HelloWorld\t!", ProcessRunner.SanitizeOutputLine(controlChars));
+
+        // 4. 超長字串截斷至 8192
+        string longLine = new('A', 10000);
+        string truncated = ProcessRunner.SanitizeOutputLine(longLine);
+        Assert.Equal(8192, truncated.Length);
     }
 }

@@ -55,11 +55,12 @@ public sealed class JsonAndAtomicWriterTests
         try
         {
             string file = Path.Combine(directory.FullName, "settings.json");
-            Assert.True(AtomicFileWriter.WriteJson(file, new { enabled = true }));
+            var prefs = new Infrastructure.Settings.WindowPreferences { ThemeMode = "dark" };
+            Assert.True(AtomicFileWriter.WriteJson(file, prefs));
             var before = File.GetLastWriteTimeUtc(file);
-            Assert.True(AtomicFileWriter.WriteJson(file, new { enabled = true }, skipIfUnchanged: true));
+            Assert.True(AtomicFileWriter.WriteJson(file, prefs, skipIfUnchanged: true));
             Assert.Equal(before, File.GetLastWriteTimeUtc(file));
-            Assert.True(JsonDocument.Parse(File.ReadAllBytes(file)).RootElement.GetProperty("enabled").GetBoolean());
+            Assert.True(JsonDocument.Parse(File.ReadAllBytes(file)).RootElement.TryGetProperty("theme_mode", out var prop) && prop.GetString() == "dark");
         }
         finally
         {

@@ -29,13 +29,3 @@ public sealed record ServerImportResult(
     public static ServerImportResult Failed(string name, string message, string diagnosticId = "", bool cleanupComplete = true) =>
         new(ImportStatus.Failed, message, name, DiagnosticId: diagnosticId, CleanupComplete: cleanupComplete);
 }
-
-/// <summary>
-/// 批次匯入執行的逐項結果與彙總計數
-/// </summary>
-public sealed record ServerImportBatchResult(IReadOnlyList<ServerImportResult> Items)
-{
-    public int CompletedCount => Items.Count(static i => i.Completed);
-    public int SkippedCount => Items.Count(static i => i.Status == ImportStatus.Skipped);
-    public int FailedCount => Items.Count(static i => i.Status == ImportStatus.Failed);
-}

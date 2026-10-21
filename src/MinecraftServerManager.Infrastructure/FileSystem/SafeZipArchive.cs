@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Buffers;
 using System.IO.Compression;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
@@ -95,14 +97,16 @@ public static class SafeZipArchive
         EnsureSufficientDiskSpace(destination, totalBytes);
         progress?.Invoke(0, totalBytes);
         long extractedBytes = 0;
+        long lastReportTicks = Stopwatch.GetTimestamp();
+        long lastReportBytes = 0;
         byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
 
+        string destinationRoot = Path.GetFullPath(destination + Path.DirectorySeparatorChar);
         try
         {
             foreach (var member in members)
             {
                 string target = Path.Combine(destination, member.RelativePath);
-                string destinationRoot = Path.GetFullPath(destination + Path.DirectorySeparatorChar);
                 string resolvedTarget = Path.GetFullPath(target);
                 if (!resolvedTarget.StartsWith(destinationRoot, StringComparison.OrdinalIgnoreCase))
                 {
@@ -139,7 +143,15 @@ public static class SafeZipArchive
                         }
 
                         output.Write(buffer, 0, read);
-                        progress?.Invoke(extractedBytes, totalBytes);
+
+                        long nowTicks = Stopwatch.GetTimestamp();
+                        if (Stopwatch.GetElapsedTime(lastReportTicks, nowTicks).TotalMilliseconds >= 100 ||
+                            (totalBytes > 0 && (extractedBytes - lastReportBytes) >= (totalBytes / 100)))
+                        {
+                            lastReportTicks = nowTicks;
+                            lastReportBytes = extractedBytes;
+                            progress?.Invoke(extractedBytes, totalBytes);
+                        }
                     }
                 }
                 catch (IOException exception) when (exception is not SafeArchiveException)
@@ -154,42 +166,6 @@ public static class SafeZipArchive
         }
 
         progress?.Invoke(totalBytes > 0 ? totalBytes : extractedBytes, totalBytes);
-    }
-
-    public static byte[]? ReadMetadataBytes(ZipArchive archive, string memberName, long maxBytes = 2L * 1024 * 1024)
-    {
-        ArgumentNullException.ThrowIfNull(archive);
-        ArgumentException.ThrowIfNullOrWhiteSpace(memberName);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
-
-        var entry = archive.GetEntry(memberName);
-        if (entry is null || entry.FullName.EndsWith('/') || entry.Length > maxBytes)
-        {
-            return null;
-        }
-
-        using var source = entry.Open();
-        using var buffer = new MemoryStream();
-        byte[] chunk = ArrayPool<byte>.Shared.Rent(81920);
-        try
-        {
-            int read;
-            while ((read = source.Read(chunk, 0, chunk.Length)) > 0)
-            {
-                if (buffer.Length + read > maxBytes)
-                {
-                    return null;
-                }
-
-                buffer.Write(chunk, 0, read);
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(chunk);
-        }
-
-        return buffer.ToArray();
     }
 
     /// <summary>
@@ -220,7 +196,7 @@ public static class SafeZipArchive
             if (drive.AvailableFreeSpace < requiredBytes + headroom)
             {
                 throw new SafeArchiveException(
-                    $"目標磁碟 {root} 剩餘空間不足：需要約 {FormatBytes(requiredBytes)}，實際可用 {FormatBytes(drive.AvailableFreeSpace)}");
+                    $"目標磁碟 {root} 剩餘空間不足：需要約 {UnitFormatter.FormatBytes(requiredBytes)}，實際可用 {UnitFormatter.FormatBytes(drive.AvailableFreeSpace)}");
             }
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
@@ -228,13 +204,6 @@ public static class SafeZipArchive
             // 無法判定磁碟資訊時不阻斷流程，交由實際寫入階段回報錯誤
         }
     }
-
-    private static string FormatBytes(long bytes) => bytes switch
-    {
-        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):F2} GB",
-        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):F2} MB",
-        _ => $"{bytes} B"
-    };
 
     private static List<PreparedMember> PrepareMembers(
         ZipArchive archive,
@@ -411,13 +380,13 @@ public static class SafeZipArchive
 
         public void SetComment(string comment)
         {
-            ThrowIfDisposed();
+            ObjectDisposedException.ThrowIf(_disposed, this);
             _archive.Comment = comment;
         }
 
         public void WriteBytes(string memberName, ReadOnlySpan<byte> content)
         {
-            ThrowIfDisposed();
+            ObjectDisposedException.ThrowIf(_disposed, this);
             string normalized = PrepareMember(memberName, content.Length);
             var entry = _archive.CreateEntry(normalized, CompressionLevel.Optimal);
             using var target = entry.Open();
@@ -426,7 +395,7 @@ public static class SafeZipArchive
 
         public long WriteFile(string memberName, string sourcePath)
         {
-            ThrowIfDisposed();
+            ObjectDisposedException.ThrowIf(_disposed, this);
             string source = SafeFileSystem.ResolveStablePath(sourcePath);
             var info = new FileInfo(source);
             if (!info.Exists)
@@ -476,7 +445,7 @@ public static class SafeZipArchive
 
         public void Complete()
         {
-            ThrowIfDisposed();
+            ObjectDisposedException.ThrowIf(_disposed, this);
             _archive.Dispose();
             _stream.Flush(true);
             _stream.Dispose();
@@ -539,8 +508,6 @@ public static class SafeZipArchive
             _totalBytes += size;
             return normalized;
         }
-
-        private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
         private void TryDeleteTemporaryFile()
         {

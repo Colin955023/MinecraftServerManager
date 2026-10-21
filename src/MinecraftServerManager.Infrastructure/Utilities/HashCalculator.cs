@@ -42,8 +42,7 @@ public sealed class HashCalculator
         }
 
         string normalizedAlgorithm = algorithm.Trim().ToLowerInvariant();
-        using var hashAlgorithm = CreateAlgorithm(normalizedAlgorithm);
-        if (hashAlgorithm is null)
+        if (normalizedAlgorithm is not ("sha256" or "sha1" or "sha512"))
         {
             return string.Empty;
         }
@@ -74,12 +73,16 @@ public sealed class HashCalculator
                 FileShare.Read,
                 64 * 1024,
                 FileOptions.SequentialScan);
-            string digest = Convert.ToHexStringLower(hashAlgorithm.ComputeHash(stream));
+            string digest = HashStream(stream, normalizedAlgorithm);
             if (useCache)
             {
                 if (cache.Count >= MaxCacheEntries)
                 {
-                    cache.TryRemove(cache.Keys.FirstOrDefault(), out _);
+                    using var enumerator = cache.GetEnumerator();
+                    if (enumerator.MoveNext())
+                    {
+                        cache.TryRemove(enumerator.Current.Key, out _);
+                    }
                 }
 
                 cache[key] = digest;
@@ -101,12 +104,12 @@ public sealed class HashCalculator
         "Security",
         "CA5350",
         Justification = "SHA-1 僅保留給既有檔案雜湊相容性，不作為新的安全簽章或密碼用途")]
-    private static HashAlgorithm? CreateAlgorithm(string algorithm) => algorithm.Trim().ToLowerInvariant() switch
+    private static string HashStream(Stream stream, string algorithm) => algorithm switch
     {
-        "sha1" => SHA1.Create(),
-        "sha256" => SHA256.Create(),
-        "sha512" => SHA512.Create(),
-        _ => null,
+        "sha256" => Convert.ToHexStringLower(SHA256.HashData(stream)),
+        "sha1" => Convert.ToHexStringLower(SHA1.HashData(stream)),
+        "sha512" => Convert.ToHexStringLower(SHA512.HashData(stream)),
+        _ => string.Empty,
     };
 
     private readonly record struct CacheKey(string Path, string Algorithm, long Length, long LastWriteTicks, long MaxBytes);

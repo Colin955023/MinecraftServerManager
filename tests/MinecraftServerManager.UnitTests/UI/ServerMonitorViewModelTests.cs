@@ -1,4 +1,5 @@
 using System.Text;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using Xunit;
@@ -129,14 +130,14 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         // 觸發伺服器就緒事件
         _runtime.RaiseReady();
 
-        for (int i = 0; i < 50 && mockUi.LastInfoMessage is null; i++)
+        for (int i = 0; i < 50 && mockUi.LastToastMessage is null; i++)
         {
             await Task.Delay(20);
         }
 
-        Assert.NotNull(mockUi.LastInfoMessage);
-        Assert.Contains("25577", mockUi.LastInfoMessage);
-        Assert.Contains("127.0.0.1", mockUi.LastInfoMessage);
+        Assert.NotNull(mockUi.LastToastMessage);
+        Assert.Contains("25577", mockUi.LastToastMessage);
+        Assert.Contains("127.0.0.1", mockUi.LastToastMessage);
     }
 
     [Fact]
@@ -161,14 +162,15 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         Assert.Equal("line-5999", vm.Logs[^1]);
     }
 
-    private sealed class MockMonitorUiService : App.Services.NoOpUiService
+    private sealed class MockMonitorUiService : NoOpUiService
     {
         private readonly List<ManualUiTimer> _timers = [];
 
-        public string? LastInfoMessage { get; private set; }
-        public string? LastInfoTitle { get; private set; }
+        public string? LastToastMessage { get; private set; }
+        public string? LastToastTitle { get; private set; }
+        public ToastType? LastToastType { get; private set; }
 
-        public override App.Services.IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
+        public override IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
         {
             _ = interval;
             var timer = new ManualUiTimer(tick);
@@ -184,13 +186,14 @@ public sealed class ServerMonitorViewModelTests : IDisposable
             }
         }
 
-        public override void ShowInfo(string message, string title)
+        public override void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
         {
-            LastInfoMessage = message;
-            LastInfoTitle = title;
+            LastToastMessage = message;
+            LastToastTitle = title;
+            LastToastType = type;
         }
 
-        private sealed class ManualUiTimer(Action tick) : App.Services.IUiTimer
+        private sealed class ManualUiTimer(Action tick) : IUiTimer
         {
             public void StartTimer() { }
 

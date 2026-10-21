@@ -70,8 +70,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         // 1. Loader 相容性檢查
         if (!string.IsNullOrEmpty(normalizedServerLoader) && normalizedServerLoader != "vanilla")
         {
-            var targetLoaders = targetVersion.Loaders.Select(ModHelpers.NormalizeIdentifier).ToHashSet();
-            if (!IsLoaderCompatible(normalizedServerLoader, targetLoaders, normalizedServerMcVer))
+            if (targetVersion.Loaders.Count > 0 && !IsLoaderCompatible(normalizedServerLoader, targetVersion.Loaders, normalizedServerMcVer))
             {
                 hardErrors.Add($"此版本不支援目前的伺服器載入器 {serverLoader}（僅支援: {string.Join(", ", targetVersion.Loaders)}）");
             }
@@ -80,8 +79,7 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         // 2. Minecraft 版本相容性檢查
         if (!string.IsNullOrEmpty(normalizedServerMcVer) && normalizedServerMcVer != "未知")
         {
-            var targetMcVersions = targetVersion.GameVersions.Select(ModHelpers.NormalizeIdentifier).ToHashSet();
-            if (targetMcVersions.Count > 0 && !IsMinecraftVersionCompatible(normalizedServerMcVer, targetMcVersions))
+            if (targetVersion.GameVersions.Count > 0 && !IsMinecraftVersionCompatible(normalizedServerMcVer, targetVersion.GameVersions))
             {
                 hardErrors.Add($"此版本不支援目前的 Minecraft 版本 {serverMinecraftVersion}");
             }
@@ -381,17 +379,17 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         {
             if (normId is not null)
             {
-                if ((!string.IsNullOrWhiteSpace(mod.Id) && string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), normId, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrWhiteSpace(mod.Name) && string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), normId, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrWhiteSpace(mod.PlatformId) && string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformId), normId, StringComparison.OrdinalIgnoreCase)) ||
-                    (!string.IsNullOrWhiteSpace(mod.PlatformSlug) && string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformSlug), normId, StringComparison.OrdinalIgnoreCase)))
+                if ((!string.IsNullOrWhiteSpace(mod.Id) && (string.Equals(mod.Id, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), normId, StringComparison.OrdinalIgnoreCase))) ||
+                    (!string.IsNullOrWhiteSpace(mod.Name) && (string.Equals(mod.Name, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), normId, StringComparison.OrdinalIgnoreCase))) ||
+                    (!string.IsNullOrWhiteSpace(mod.PlatformId) && (string.Equals(mod.PlatformId, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformId), normId, StringComparison.OrdinalIgnoreCase))) ||
+                    (!string.IsNullOrWhiteSpace(mod.PlatformSlug) && (string.Equals(mod.PlatformSlug, normId, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.PlatformSlug), normId, StringComparison.OrdinalIgnoreCase))))
                 {
                     return mod;
                 }
 
                 if (aliasNorm is not null &&
-                    ((!string.IsNullOrWhiteSpace(mod.Id) && string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), aliasNorm, StringComparison.OrdinalIgnoreCase)) ||
-                     (!string.IsNullOrWhiteSpace(mod.Name) && string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), aliasNorm, StringComparison.OrdinalIgnoreCase))))
+                    ((!string.IsNullOrWhiteSpace(mod.Id) && (string.Equals(mod.Id, aliasNorm, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Id), aliasNorm, StringComparison.OrdinalIgnoreCase))) ||
+                     (!string.IsNullOrWhiteSpace(mod.Name) && (string.Equals(mod.Name, aliasNorm, StringComparison.OrdinalIgnoreCase) || string.Equals(ModHelpers.NormalizeIdentifier(mod.Name), aliasNorm, StringComparison.OrdinalIgnoreCase)))))
                 {
                     return mod;
                 }
@@ -399,8 +397,9 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
 
             if (fileStem is not null && !string.IsNullOrWhiteSpace(mod.Filename))
             {
-                string installedStem = ModHelpers.NormalizeIdentifier(ModHelpers.ModFilenameStem(mod.Filename));
-                if (string.Equals(installedStem, fileStem, StringComparison.OrdinalIgnoreCase))
+                string rawStem = ModHelpers.ModFilenameStem(mod.Filename);
+                if (string.Equals(rawStem, fileStem, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(ModHelpers.NormalizeIdentifier(rawStem), fileStem, StringComparison.OrdinalIgnoreCase))
                 {
                     return mod;
                 }
@@ -410,11 +409,36 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return null;
     }
 
-    private static bool IsLoaderCompatible(string serverLoader, HashSet<string> targetLoaders, string minecraftVersion)
+    private static bool IsLoaderCompatible(string serverLoader, IReadOnlyList<string> targetLoaders, string minecraftVersion)
     {
-        if (targetLoaders.Count == 0 || targetLoaders.Contains(serverLoader))
+        if (targetLoaders.Count == 0)
         {
             return true;
+        }
+
+        bool hasFabric = false;
+        bool hasForge = false;
+        bool hasDatapack = false;
+        for (int i = 0; i < targetLoaders.Count; i++)
+        {
+            string l = targetLoaders[i];
+            if (string.Equals(l, serverLoader, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(l, "fabric", StringComparison.OrdinalIgnoreCase))
+            {
+                hasFabric = true;
+            }
+            else if (string.Equals(l, "forge", StringComparison.OrdinalIgnoreCase))
+            {
+                hasForge = true;
+            }
+            else if (string.Equals(l, "datapack", StringComparison.OrdinalIgnoreCase))
+            {
+                hasDatapack = true;
+            }
         }
 
         if (PluginServerLoaders.Contains(serverLoader))
@@ -423,21 +447,21 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         }
 
         // Quilt 伺服器向下相容 Fabric 模組
-        if (string.Equals(serverLoader, "quilt", StringComparison.OrdinalIgnoreCase) && targetLoaders.Contains("fabric"))
+        if (string.Equals(serverLoader, "quilt", StringComparison.OrdinalIgnoreCase) && hasFabric)
         {
             return true;
         }
 
         // NeoForge 伺服器在 1.20.1 早期可向下相容 Forge 模組
         if (string.Equals(serverLoader, "neoforge", StringComparison.OrdinalIgnoreCase) &&
-            targetLoaders.Contains("forge") &&
+            hasForge &&
             minecraftVersion.StartsWith("1.20.1", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
         // 資料包模組相容
-        if (targetLoaders.Contains("datapack"))
+        if (hasDatapack)
         {
             return true;
         }
@@ -445,24 +469,34 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         return false;
     }
 
-    private static bool IsMinecraftVersionCompatible(string serverMcVer, HashSet<string> targetMcVersions)
+    private static bool IsMinecraftVersionCompatible(string serverMcVer, IReadOnlyList<string> targetMcVersions)
     {
-        if (targetMcVersions.Count == 0 || targetMcVersions.Contains(serverMcVer))
+        if (targetMcVersions.Count == 0)
         {
             return true;
         }
 
-        // 相容 1.20 與 1.20.0 等價版本語意
-        if (serverMcVer.EndsWith(".0", StringComparison.Ordinal) &&
-            targetMcVersions.Contains(serverMcVer[..^2]))
-        {
-            return true;
-        }
+        bool serverEndsWithDot0 = serverMcVer.EndsWith(".0", StringComparison.Ordinal);
+        string serverTrimmedDot0 = serverEndsWithDot0 ? serverMcVer[..^2] : string.Empty;
+        string serverWithDot0 = !serverEndsWithDot0 ? serverMcVer + ".0" : string.Empty;
 
-        if (!serverMcVer.EndsWith(".0", StringComparison.Ordinal) &&
-            targetMcVersions.Contains(serverMcVer + ".0"))
+        for (int i = 0; i < targetMcVersions.Count; i++)
         {
-            return true;
+            string v = targetMcVersions[i];
+            if (string.Equals(v, serverMcVer, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (serverEndsWithDot0 && string.Equals(v, serverTrimmedDot0, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!serverEndsWithDot0 && string.Equals(v, serverWithDot0, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
         }
 
         return false;
@@ -481,31 +515,31 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         string normLoader = ModHelpers.NormalizeIdentifier(serverLoader);
         string normMc = ModHelpers.NormalizeIdentifier(serverMinecraftVersion);
 
-        // 1. 優先選取環境相容且為 Release 之版本
-        var releaseCandidate = versions.FirstOrDefault(v =>
-            string.Equals(v.VersionType, "release", StringComparison.OrdinalIgnoreCase) &&
-            v.PrimaryFile is not null &&
-            !string.IsNullOrWhiteSpace(v.PrimaryFile.Url) &&
-            IsVersionMatchingEnvironment(v, normMc, normLoader));
+        OnlineModVersion? anyCompatible = null;
+        OnlineModVersion? fallbackWithFile = null;
 
-        if (releaseCandidate is not null)
+        for (int i = 0; i < versions.Count; i++)
         {
-            return releaseCandidate;
+            var v = versions[i];
+            if (v.PrimaryFile is null || string.IsNullOrWhiteSpace(v.PrimaryFile.Url))
+            {
+                continue;
+            }
+
+            fallbackWithFile ??= v;
+
+            if (IsVersionMatchingEnvironment(v, normMc, normLoader))
+            {
+                if (string.Equals(v.VersionType, "release", StringComparison.OrdinalIgnoreCase))
+                {
+                    return v;
+                }
+
+                anyCompatible ??= v;
+            }
         }
 
-        // 2. 次選任意環境相容且具備有效 PrimaryFile 的版本
-        var anyCompatibleCandidate = versions.FirstOrDefault(v =>
-            v.PrimaryFile is not null &&
-            !string.IsNullOrWhiteSpace(v.PrimaryFile.Url) &&
-            IsVersionMatchingEnvironment(v, normMc, normLoader));
-
-        if (anyCompatibleCandidate is not null)
-        {
-            return anyCompatibleCandidate;
-        }
-
-        // 3. 備援選取具備有效 PrimaryFile 的最新版本
-        return versions.FirstOrDefault(v => v.PrimaryFile is not null && !string.IsNullOrWhiteSpace(v.PrimaryFile.Url));
+        return anyCompatible ?? fallbackWithFile;
     }
 
     private static bool IsVersionMatchingEnvironment(OnlineModVersion v, string normMc, string normLoader)
@@ -513,12 +547,12 @@ public sealed class ModDependencyPlanner : IModDependencyPlanner
         bool loaderOk = string.IsNullOrEmpty(normLoader) ||
                         normLoader == "vanilla" ||
                         v.Loaders.Count == 0 ||
-                        IsLoaderCompatible(normLoader, [.. v.Loaders.Select(ModHelpers.NormalizeIdentifier)], normMc);
+                        IsLoaderCompatible(normLoader, v.Loaders, normMc);
 
         bool mcOk = string.IsNullOrEmpty(normMc) ||
                     normMc == "未知" ||
                     v.GameVersions.Count == 0 ||
-                    IsMinecraftVersionCompatible(normMc, [.. v.GameVersions.Select(ModHelpers.NormalizeIdentifier)]);
+                    IsMinecraftVersionCompatible(normMc, v.GameVersions);
 
         return loaderOk && mcOk;
     }

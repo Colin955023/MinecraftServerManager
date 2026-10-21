@@ -1,5 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using MinecraftServerManager.App.Services;
+using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Domain.Servers;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -10,11 +12,13 @@ namespace MinecraftServerManager.App.ViewModels;
 public sealed partial class ServerMemoryViewModel(
     ServerConfig config,
     Func<int, int?, Task<bool>> saveCallback,
-    long? systemMemoryMb = null) : ObservableObject
+    long? systemMemoryMb = null,
+    IUiService? uiService = null) : ObservableObject
 {
     private readonly ServerConfig _config = config;
     private readonly Func<int, int?, Task<bool>> _saveCallback = saveCallback;
-    private readonly long _systemMemoryMb = systemMemoryMb ?? GetSystemMemoryMb();
+    private readonly long _systemMemoryMb = systemMemoryMb ?? MemoryUtils.GetTotalSystemMemoryMb();
+    private readonly IUiService _ui = uiService ?? NoOpUiService.Instance;
 
     [ObservableProperty]
     public partial string MaxMemoryMb { get; set; } = config.MemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -25,14 +29,6 @@ public sealed partial class ServerMemoryViewModel(
     [ObservableProperty]
     public partial string ErrorMessage { get; set; } = string.Empty;
 
-    [ObservableProperty]
-    public partial bool HasError { get; set; }
-
-    [ObservableProperty]
-    public partial bool IsBusy { get; set; }
-
-    public string ServerName => _config.Name.Value;
-
     public string ServerDetails => $"伺服器：{_config.Name.Value} ({_config.MinecraftVersion.Value} / {_config.LoaderType})";
 
     public string SystemMemoryText => _systemMemoryMb > 0
@@ -41,37 +37,37 @@ public sealed partial class ServerMemoryViewModel(
 
     public event Action<bool>? RequestClose;
 
-    partial void OnMaxMemoryMbChanged(string value) => Validate();
+    partial void OnMaxMemoryMbChanged(string value) => Validate(out _, out _);
 
-    partial void OnMinMemoryMbChanged(string value) => Validate();
+    partial void OnMinMemoryMbChanged(string value) => Validate(out _, out _);
 
-    private bool Validate()
+    private bool Validate(out int max, out int? min)
     {
+        max = 0;
+        min = null;
         ErrorMessage = string.Empty;
-        HasError = false;
 
-        if (!int.TryParse(MaxMemoryMb.Trim(), out int max) || max <= 0)
+        if (!int.TryParse(MaxMemoryMb.Trim(), out max) || max <= 0)
         {
             ErrorMessage = "最大記憶體必須為大於 0 的整數 (MB)";
-            HasError = true;
             return false;
         }
 
         if (!string.IsNullOrWhiteSpace(MinMemoryMb))
         {
-            if (!int.TryParse(MinMemoryMb.Trim(), out int min) || min <= 0)
+            if (!int.TryParse(MinMemoryMb.Trim(), out int parsedMin) || parsedMin <= 0)
             {
                 ErrorMessage = "最小記憶體必須為大於 0 的整數 (MB)";
-                HasError = true;
                 return false;
             }
 
-            if (min > max)
+            if (parsedMin > max)
             {
                 ErrorMessage = "最小記憶體不可大於最大記憶體";
-                HasError = true;
                 return false;
             }
+
+            min = parsedMin;
         }
 
         if (_systemMemoryMb > 0 && max > _systemMemoryMb)
@@ -85,34 +81,11 @@ public sealed partial class ServerMemoryViewModel(
     [RelayCommand]
     public async Task SaveAsync()
     {
-        if (!int.TryParse(MaxMemoryMb.Trim(), out int max) || max <= 0)
+        if (!Validate(out int max, out int? min))
         {
-            ErrorMessage = "最大記憶體必須為大於 0 的整數 (MB)";
-            HasError = true;
             return;
         }
 
-        int? min = null;
-        if (!string.IsNullOrWhiteSpace(MinMemoryMb))
-        {
-            if (!int.TryParse(MinMemoryMb.Trim(), out int parsedMin) || parsedMin <= 0)
-            {
-                ErrorMessage = "最小記憶體必須為大於 0 的整數 (MB)";
-                HasError = true;
-                return;
-            }
-
-            if (parsedMin > max)
-            {
-                ErrorMessage = "最小記憶體不可大於最大記憶體";
-                HasError = true;
-                return;
-            }
-
-            min = parsedMin;
-        }
-
-        IsBusy = true;
         try
         {
             bool ok = await _saveCallback(max, min).ConfigureAwait(true);
@@ -123,34 +96,34 @@ public sealed partial class ServerMemoryViewModel(
             else
             {
                 ErrorMessage = "儲存記憶體設定失敗";
-                HasError = true;
             }
         }
         catch (Exception ex)
         {
             ErrorMessage = $"儲存出錯：{ex.Message}";
-            HasError = true;
-        }
-        finally
-        {
-            IsBusy = false;
         }
     }
 
-    [RelayCommand]
-    public void Cancel() => RequestClose?.Invoke(false);
+    public bool HasUnsavedChanges =>
+        !string.Equals(MaxMemoryMb.Trim(), _config.MemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) ||
+        !string.Equals(MinMemoryMb.Trim(), _config.MemoryMinMb.HasValue ? _config.MemoryMinMb.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty, StringComparison.Ordinal);
 
-    private static long GetSystemMemoryMb()
+    public bool ConfirmDiscard()
     {
-        try
+        if (!HasUnsavedChanges)
         {
-            var memoryStatus = GC.GetGCMemoryInfo();
-            long totalBytes = memoryStatus.TotalAvailableMemoryBytes;
-            return totalBytes > 0 ? totalBytes / (1024 * 1024) : 16384;
+            return true;
         }
-        catch
+
+        return _ui.Confirm("有尚未儲存的記憶體設定變更，確定要捨棄變更並關閉嗎？", "捨棄變更", UiMessageLevel.Warning);
+    }
+
+    [RelayCommand]
+    public void Cancel()
+    {
+        if (ConfirmDiscard())
         {
-            return 16384;
+            RequestClose?.Invoke(false);
         }
     }
 }
