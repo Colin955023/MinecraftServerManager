@@ -5,6 +5,7 @@ using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Java;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
@@ -219,10 +220,10 @@ public sealed partial class LoaderInstallerService(
 
         if (string.IsNullOrEmpty(versionMetaUrl))
         {
-            var manifestResp = await httpPort.GetJsonDocumentAsync(new Uri("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"), cancellationToken).ConfigureAwait(false);
+            var manifestResp = await httpPort.GetJsonDocumentAsync(new Uri(MinecraftJavaRequirementService.ManifestV2Url), cancellationToken).ConfigureAwait(false);
             if (!manifestResp.IsSuccess || manifestResp.Payload is null)
             {
-                manifestResp = await httpPort.GetJsonDocumentAsync(new Uri("https://piston-meta.mojang.com/mc/game/version_manifest.json"), cancellationToken).ConfigureAwait(false);
+                manifestResp = await httpPort.GetJsonDocumentAsync(new Uri(MinecraftJavaRequirementService.ManifestFallbackUrl), cancellationToken).ConfigureAwait(false);
             }
 
             if (!manifestResp.IsSuccess || manifestResp.Payload is null)

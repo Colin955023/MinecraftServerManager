@@ -332,7 +332,7 @@ public sealed partial class HttpDownloadClientTests
 
         Assert.NotNull(handler.LastRequest);
         string userAgent = handler.LastRequest.Headers.UserAgent.ToString();
-        Assert.Contains("MinecraftServerManager/2.0.0", userAgent);
+        Assert.Contains($"MinecraftServerManager/{Core.AppInfo.Version}", userAgent);
     }
 
     [Fact]

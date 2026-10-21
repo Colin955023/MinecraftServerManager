@@ -79,7 +79,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
         try
         {
-            string manifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
+            string manifestUrl = MinecraftJavaRequirementService.ManifestFallbackUrl;
             var response = await httpPort.GetJsonDocumentAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccess || response.Payload is null)
             {
@@ -537,7 +537,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
         try
         {
-            string manifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
+            string manifestUrl = MinecraftJavaRequirementService.ManifestFallbackUrl;
             var response = await httpPort.GetJsonDocumentAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
             if (response.IsSuccess && response.Payload is not null)
             {

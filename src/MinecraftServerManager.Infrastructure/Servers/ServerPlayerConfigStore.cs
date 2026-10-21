@@ -13,11 +13,11 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 /// </summary>
 public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 {
-    private const string OpsFileName = "ops.json";
-    private const string WhitelistFileName = "whitelist.json";
-    private const string BannedPlayersFileName = "banned-players.json";
-    private const string BannedIpsFileName = "banned-ips.json";
-    private const string UserCacheFileName = "usercache.json";
+    private const string OpsFileName = ServerDefaults.OpsFileName;
+    private const string WhitelistFileName = ServerDefaults.WhitelistFileName;
+    private const string BannedPlayersFileName = ServerDefaults.BannedPlayersFileName;
+    private const string BannedIpsFileName = ServerDefaults.BannedIpsFileName;
+    private const string UserCacheFileName = ServerDefaults.UserCacheFileName;
 
     private static readonly JsonSerializerOptions IndentedJsonOptions = new()
     {

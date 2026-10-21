@@ -102,7 +102,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -130,7 +130,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -159,7 +159,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var service = new AppUpdateService(fakeHttp, _testDir);
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -184,7 +184,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var service = new AppUpdateService(fakeHttp, _testDir);
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -213,7 +213,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -246,7 +246,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -280,7 +280,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -315,7 +315,7 @@ public sealed class AppUpdateServiceTests : IDisposable
         var service = new AppUpdateService(fakeHttp, _testDir);
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",

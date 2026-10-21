@@ -63,13 +63,13 @@ public sealed partial class CreateServerViewModel : PageViewModel
     public partial bool IsMinecraftVersionReloadEnabled { get; set; }
 
     [ObservableProperty]
-    public partial string SelectedMinecraftVersion { get; set; } = "1.21.4";
+    public partial string SelectedMinecraftVersion { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial string MinMemoryMb { get; set; } = "1024";
+    public partial string MinMemoryMb { get; set; } = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     [ObservableProperty]
-    public partial string MaxMemoryMb { get; set; } = "2048";
+    public partial string MaxMemoryMb { get; set; } = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     [ObservableProperty]
     public partial string MemoryWarningText { get; set; } = string.Empty;
@@ -118,20 +118,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
         _systemMemoryMb = systemMemoryMb ?? Core.Utilities.MemoryUtils.GetTotalSystemMemoryMb();
 
         AvailableLoaders = ["Paper", "Fabric", "Quilt", "Forge", "NeoForge"];
-        AvailableMinecraftVersions =
-        [
-            "1.21.4",
-            "1.21.3",
-            "1.21.1",
-            "1.20.6",
-            "1.20.4",
-            "1.20.1",
-            "1.19.4",
-            "1.18.2",
-            "1.16.5",
-            "1.12.2"
-        ];
-        ServerName = $"{SelectedLoader} {SelectedMinecraftVersion}";
+        AvailableMinecraftVersions = [];
+        SetServerNameProgrammatically(!string.IsNullOrWhiteSpace(SelectedMinecraftVersion) ? $"{SelectedLoader} {SelectedMinecraftVersion}" : SelectedLoader);
         LoaderVersions = [SelectedLoaderVersion];
 
         int? cachedMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
@@ -165,7 +153,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
             return;
         }
 
-        string expectedDefault = $"{SelectedLoader} {SelectedMinecraftVersion}";
+        string expectedDefault = !string.IsNullOrWhiteSpace(SelectedMinecraftVersion)
+            ? $"{SelectedLoader} {SelectedMinecraftVersion}"
+            : SelectedLoader;
         _isServerNameManuallyEdited = !string.Equals(value.Trim(), expectedDefault, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -288,9 +278,13 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
     private void UpdateSynchronizedServerName()
     {
+        string expectedName = !string.IsNullOrWhiteSpace(SelectedMinecraftVersion)
+            ? $"{SelectedLoader} {SelectedMinecraftVersion}"
+            : SelectedLoader;
+
         if (!_isServerNameManuallyEdited)
         {
-            SetServerNameProgrammatically($"{SelectedLoader} {SelectedMinecraftVersion}");
+            SetServerNameProgrammatically(expectedName);
             return;
         }
 
@@ -298,11 +292,11 @@ public sealed partial class CreateServerViewModel : PageViewModel
         string mcVersion = SelectedMinecraftVersion;
         foreach (string loader in AvailableLoaders)
         {
-            string prefix = $"{loader} {mcVersion}";
+            string prefix = !string.IsNullOrWhiteSpace(mcVersion) ? $"{loader} {mcVersion}" : loader;
             if (currentName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             {
                 string suffix = currentName[prefix.Length..];
-                SetServerNameProgrammatically($"{SelectedLoader} {mcVersion}{suffix}");
+                SetServerNameProgrammatically($"{SelectedLoader}{(string.IsNullOrWhiteSpace(mcVersion) ? "" : " " + mcVersion)}{suffix}");
                 return;
             }
         }
@@ -646,9 +640,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
         SelectedLoader = "Paper";
         IsMinecraftVersionReloadEnabled = false;
-        SelectedMinecraftVersion = AvailableMinecraftVersions.Count > 0 ? AvailableMinecraftVersions[0] : "1.21.4";
+        SelectedMinecraftVersion = AvailableMinecraftVersions.Count > 0 ? AvailableMinecraftVersions[0] : string.Empty;
         SelectedLoaderVersion = $"最新穩定版 ({SelectedLoader})";
-        ServerName = $"Paper {SelectedMinecraftVersion}";
+        ServerName = !string.IsNullOrWhiteSpace(SelectedMinecraftVersion) ? $"{SelectedLoader} {SelectedMinecraftVersion}" : SelectedLoader;
         MinMemoryMb = "1024";
         MaxMemoryMb = "2048";
         JavaPath = string.Empty;

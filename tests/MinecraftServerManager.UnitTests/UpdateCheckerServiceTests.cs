@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Services;
 using Xunit;
@@ -7,6 +8,13 @@ namespace MinecraftServerManager.UnitTests;
 
 public sealed class UpdateCheckerServiceTests
 {
+    private static readonly string RepoUrl = AppInfo.RepositoryUrl;
+    private static readonly string AppId = AppInfo.AppId;
+    private static readonly string FdExeName = $"{AppId}-framework-dependent.exe";
+    private static readonly string FdShaName = $"{AppId}-framework-dependent.exe.sha256";
+    private static readonly string ScExeName = $"{AppId}-self-contained.exe";
+    private static readonly string ScShaName = $"{AppId}-self-contained.exe.sha256";
+
     private sealed class FakeEnvironmentRuntimeInfo(bool hasRuntime, bool isFrameworkDependent) : IEnvironmentRuntimeInfo
     {
         public bool IsNet10DesktopRuntimeInstalled() => hasRuntime;
@@ -41,7 +49,7 @@ public sealed class UpdateCheckerServiceTests
             ["tag_name"] = tagName,
             ["name"] = $"Release {tagName}",
             ["body"] = "更新說明與修復內容",
-            ["html_url"] = $"https://github.com/Colin955023/MinecraftServerManager/releases/tag/{tagName}"
+            ["html_url"] = $"{RepoUrl}/releases/tag/{tagName}"
         };
 
         var assetArray = new JsonArray();
@@ -63,10 +71,10 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"),
-            ("MinecraftServerManager-self-contained.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe"),
-            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256"));
+            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
+            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"),
+            (ScExeName, $"{RepoUrl}/releases/download/v99.0.0/{ScExeName}"),
+            (ScShaName, $"{RepoUrl}/releases/download/v99.0.0/{ScShaName}"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
@@ -75,8 +83,8 @@ public sealed class UpdateCheckerServiceTests
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe", result.DownloadUrl);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256", result.Sha256ChecksumUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{ScExeName}", result.DownloadUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{ScShaName}", result.Sha256ChecksumUrl);
     }
 
     [Fact]
@@ -84,10 +92,10 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"),
-            ("MinecraftServerManager-self-contained.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe"),
-            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-self-contained.exe.sha256"));
+            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
+            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"),
+            (ScExeName, $"{RepoUrl}/releases/download/v99.0.0/{ScExeName}"),
+            (ScShaName, $"{RepoUrl}/releases/download/v99.0.0/{ScShaName}"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: true);
         var http = new FakeHttpPort(json);
@@ -96,8 +104,8 @@ public sealed class UpdateCheckerServiceTests
         var result = await checker.CheckForUpdateAsync();
 
         Assert.True(result.HasUpdate);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe", result.DownloadUrl);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256", result.Sha256ChecksumUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{FdExeName}", result.DownloadUrl);
+        Assert.Equal($"{RepoUrl}/releases/download/v99.0.0/{FdShaName}", result.Sha256ChecksumUrl);
     }
 
     [Fact]
@@ -105,8 +113,8 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-framework-dependent.exe", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe"),
-            ("MinecraftServerManager-framework-dependent.exe.sha256", "https://github.com/Colin955023/MinecraftServerManager/releases/download/v99.0.0/MinecraftServerManager-framework-dependent.exe.sha256"));
+            (FdExeName, $"{RepoUrl}/releases/download/v99.0.0/{FdExeName}"),
+            (FdShaName, $"{RepoUrl}/releases/download/v99.0.0/{FdShaName}"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: false, isFrameworkDependent: false);
         var http = new FakeHttpPort(json);
@@ -138,8 +146,8 @@ public sealed class UpdateCheckerServiceTests
     {
         string json = BuildReleasePayload(
             "99.0.0",
-            ("MinecraftServerManager-self-contained.exe", "https://evil.example.com/sc.exe"),
-            ("MinecraftServerManager-self-contained.exe.sha256", "https://github.com/Other/Repo/releases/download/99.0.0/sc.sha256"));
+            (ScExeName, "https://evil.example.com/sc.exe"),
+            (ScShaName, "https://github.com/Other/Repo/releases/download/99.0.0/sc.sha256"));
 
         var runtime = new FakeEnvironmentRuntimeInfo(hasRuntime: true, isFrameworkDependent: false);
         var checker = new UpdateCheckerService(new FakeHttpPort(json), runtime);

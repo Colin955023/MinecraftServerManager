@@ -28,15 +28,15 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ShouldAlignWithAppInfoVersion2AndGpl3()
+    public void ShouldAlignWithAppInfo()
     {
         var vm = new AboutPreferencesViewModel();
 
         Assert.Equal("about_preferences", vm.Key);
         Assert.Equal("關於與設定", vm.Title);
-        Assert.Equal("2.0.0", AboutPreferencesViewModel.AppVersion);
-        Assert.Equal("Minecraft 伺服器管理器", AboutPreferencesViewModel.AppDescription);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager", AboutPreferencesViewModel.GithubUrl);
+        Assert.Equal(Core.AppInfo.Version, AboutPreferencesViewModel.AppVersion);
+        Assert.Equal(Core.AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
+        Assert.Equal(Core.AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
         Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", Core.AppInfo.License);
     }
 
@@ -99,9 +99,9 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         string notification = string.Empty;
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: false,
-            CurrentVersion: "2.0.0",
-            LatestVersion: "2.0.0",
-            ReleaseTitle: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
+            LatestVersion: Core.AppInfo.Version,
+            ReleaseTitle: Core.AppInfo.Version,
             ReleaseNotes: "無更新",
             DownloadUrl: null,
             Sha256ChecksumUrl: null,
@@ -121,7 +121,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "更新說明",
@@ -148,7 +148,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "更新說明",

@@ -45,8 +45,8 @@
                 Padding="12,10"
                 Margin="0,0,0,14">
           <StackPanel>
-            <TextBlock Text="• 開發者: Colin955023" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
-            <TextBlock Text="• 技術堆疊: .NET 10 (WPF), C# 14" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock Text="{Binding AppAuthor, StringFormat='• 開發者: {0}'}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
+            <TextBlock Text="{Binding AppTargetFramework, StringFormat='• 技術堆疊: {0}, C# 14'}" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• Java 管理: 自動偵測 Java，支援 Windows 註冊表與環境變數" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 架構: 分層模組化設計、MVVM" Foreground="{DynamicResource TextBrush}" Margin="0,2" />
             <TextBlock Text="• 參考專案: PrismLauncher" Foreground="{DynamicResource TextBrush}" Margin="0,2" />

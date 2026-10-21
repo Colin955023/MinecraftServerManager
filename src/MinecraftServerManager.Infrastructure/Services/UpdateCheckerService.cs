@@ -73,9 +73,21 @@ public sealed class UpdateCheckerService(
     IHttpPort httpPort,
     IEnvironmentRuntimeInfo? runtimeInfo = null) : IUpdateCheckerService
 {
-    private static readonly Uri LatestReleaseUri = new("https://api.github.com/repos/Colin955023/MinecraftServerManager/releases/latest");
+    private static readonly Uri LatestReleaseUri = BuildLatestReleaseUri();
     private const string TrustedAssetHost = "github.com";
-    private const string TrustedAssetPathPrefix = "/Colin955023/MinecraftServerManager/releases/download/";
+    private static readonly string TrustedAssetPathPrefix = BuildTrustedAssetPathPrefix();
+
+    private static Uri BuildLatestReleaseUri()
+    {
+        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
+        return new Uri($"https://api.github.com/repos/{repoPath}/releases/latest");
+    }
+
+    private static string BuildTrustedAssetPathPrefix()
+    {
+        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
+        return $"/{repoPath}/releases/download/";
+    }
     private readonly IEnvironmentRuntimeInfo _runtimeInfo = runtimeInfo ?? new DefaultEnvironmentRuntimeInfo();
 
     /// <summary>

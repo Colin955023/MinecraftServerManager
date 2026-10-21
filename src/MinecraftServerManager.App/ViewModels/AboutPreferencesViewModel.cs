@@ -98,6 +98,12 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
 
     public static string GithubUrl => AppInfo.RepositoryUrl;
 
+    public static string AppAuthor => AppInfo.Author;
+
+    public static string AppLicense => AppInfo.License;
+
+    public static string AppTargetFramework => AppInfo.TargetFramework;
+
     public static IReadOnlyList<string> ThemeModes { get; } = ["依照系統設定", "淺色", "深色"];
 
     public static IReadOnlyList<string> UiScaleOptions { get; } = ["75%", "100% (預設)", "125%", "150%", "200%", "自訂"];
