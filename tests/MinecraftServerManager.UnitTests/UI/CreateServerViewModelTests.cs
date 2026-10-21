@@ -46,9 +46,9 @@ public sealed class CreateServerViewModelTests
 
         vm.ResetFormCommand.Execute(null);
 
-        Assert.Equal($"Paper {vm.SelectedMinecraftVersion}", vm.ServerName);
+        Assert.Equal(string.IsNullOrWhiteSpace(vm.SelectedMinecraftVersion) ? "Paper" : $"Paper {vm.SelectedMinecraftVersion}", vm.ServerName);
         Assert.Equal("Paper", vm.SelectedLoader);
-        Assert.Equal("2048", vm.MaxMemoryMb);
+        Assert.Equal(Domain.Servers.ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture), vm.MaxMemoryMb);
     }
 
     [Fact]
@@ -151,6 +151,41 @@ public sealed class CreateServerViewModelTests
         vm.SelectedLoader = "NeoForge";
         Assert.True(vm.IsLoaderVersionEnabled);
     }
+
+    [Fact]
+    public async Task InitializeVersionsShouldAutoSelectFirstLatestVersionWhenNotManuallySelected()
+    {
+        var fakeCatalog = new FakeLoaderCatalog();
+        var vm = new CreateServerViewModel(loaderCatalog: fakeCatalog);
+
+        for (int i = 0; i < 50 && vm.IsLoadingVersions; i++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal("26.3", vm.SelectedMinecraftVersion);
+        Assert.Equal("Paper 26.3", vm.ServerName);
+    }
+
+    private sealed class FakeLoaderCatalog : Core.Ports.ILoaderCatalogService
+    {
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsAsync(bool includeSnapshots = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3"), new("1.21.4"), new("1.20.1")]);
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetMinecraftVersionsForLoaderAsync(Domain.Servers.LoaderKind loader, bool includeSnapshots = false, bool forceReload = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3"), new("1.21.4"), new("1.20.1")]);
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetPaperMinecraftVersionsAsync(bool forceReload = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3"), new("1.21.4")]);
+
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> GetLoaderVersionsAsync(Domain.Servers.LoaderKind loader, string minecraftVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("最新穩定版")]);
+
+        public Task ForceReloadAllLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task WarmupLoadersAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<Core.Loaders.LoaderVersion>> ReloadAndMergeMinecraftVersionsAsync(bool includeSnapshots = false, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<Core.Loaders.LoaderVersion>>([new("26.3")]);
+    }
 }
 
 public sealed class CreateServerSynchronizationTests
@@ -160,10 +195,10 @@ public sealed class CreateServerSynchronizationTests
     {
         var vm = new CreateServerViewModel
         {
-            // 初始切換 loader
+            // 初始切換 loader（版本尚未載入時與 loader 同步）
             SelectedLoader = "Fabric"
         };
-        Assert.Equal("Fabric 1.21.4", vm.ServerName);
+        Assert.Equal("Fabric", vm.ServerName);
 
         // 切換版本
         vm.SelectedMinecraftVersion = "1.20.1";

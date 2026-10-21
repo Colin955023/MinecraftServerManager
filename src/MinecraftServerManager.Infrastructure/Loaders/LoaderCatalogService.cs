@@ -1,5 +1,5 @@
 using System.Text.Json;
-using System.Xml.Linq;
+using System.Xml;
 using MinecraftServerManager.Core.Loaders;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
@@ -37,14 +37,14 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
-                        Logger.Debug("清理舊版 Paper builds 快取檔案失敗: {Path}, 原因: {Message}", file, ex.Message);
+                        Logger.Warning("清理舊版 Paper builds 快取檔案失敗: {Path}, 原因: {Message}", file, ex.Message);
                     }
                 }
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Logger.Debug("列舉快取目錄檔案失敗: {Message}", ex.Message);
+            Logger.Warning("列舉快取目錄檔案失敗: {Message}", ex.Message);
         }
         return dir;
     }
@@ -79,14 +79,18 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
         try
         {
-            string manifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
-            string? json = await httpPort.GetTextAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json))
+            string manifestUrl = MinecraftJavaRequirementService.ManifestFallbackUrl;
+            var response = await httpPort.GetJsonDocumentAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccess || response.Payload is null)
             {
                 return [];
             }
 
-            var parsed = ParseMinecraftManifest(json);
+            List<LoaderVersion> parsed;
+            using (response.Payload)
+            {
+                parsed = ParseMinecraftManifest(response.Payload);
+            }
 
             if (parsed.Count > 0)
             {
@@ -188,10 +192,14 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         try
         {
             string url = "https://fill.papermc.io/v3/projects/paper";
-            string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(json))
+            var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccess && response.Payload is not null)
             {
-                var baseVersions = ParsePaperMinecraftVersions(json);
+                List<LoaderVersion> baseVersions;
+                using (response.Payload)
+                {
+                    baseVersions = ParsePaperMinecraftVersions(response.Payload);
+                }
                 if (baseVersions.Count > 0)
                 {
                     // 載入既有快取以進行差異比對（已具備 JavaMajor 與有效 Build 的版本無須重複呼叫 API）
@@ -478,6 +486,19 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         await Task.WhenAll(ReloadableLoaders.Select(loader => ReloadLoaderAsync(loader, cancellationToken))).ConfigureAwait(false);
     }
 
+    public async Task WarmupLoadersAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var staleLoaders = ReloadableLoaders
+            .Where(loader => !IsCacheFresh(Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json")))
+            .ToList();
+
+        if (staleLoaders.Count > 0)
+        {
+            await Task.WhenAll(staleLoaders.Select(loader => ReloadLoaderAsync(loader, cancellationToken))).ConfigureAwait(false);
+        }
+    }
+
     private async Task ReloadLoaderAsync(LoaderKind loader, CancellationToken cancellationToken)
     {
         string cacheFile = Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
@@ -516,11 +537,15 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
         try
         {
-            string manifestUrl = "https://piston-meta.mojang.com/mc/game/version_manifest.json";
-            string? json = await httpPort.GetTextAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(json))
+            string manifestUrl = MinecraftJavaRequirementService.ManifestFallbackUrl;
+            var response = await httpPort.GetJsonDocumentAsync(new Uri(manifestUrl), cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccess && response.Payload is not null)
             {
-                var fetched = ParseMinecraftManifest(json);
+                List<LoaderVersion> fetched;
+                using (response.Payload)
+                {
+                    fetched = ParseMinecraftManifest(response.Payload);
+                }
                 if (fetched.Count > 0)
                 {
                     var existingMap = new Dictionary<string, LoaderVersion>(StringComparer.OrdinalIgnoreCase);
@@ -593,19 +618,50 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
     private static List<LoaderVersion> ParseMavenMetadataXml(string xmlContent, bool isNeoForge)
     {
-        var doc = XDocument.Parse(xmlContent, LoadOptions.None);
-        var versions = doc.Descendants("version")
-            .Select(static x => x.Value.Trim())
-            .Where(static x => !string.IsNullOrEmpty(x))
-            .Distinct()
-            .ToList();
+        var versions = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        using var stringReader = new StringReader(xmlContent);
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreWhitespace = true,
+            IgnoreComments = true,
+        };
+        using var reader = XmlReader.Create(stringReader, settings);
+        string? currentElement = null;
+        while (reader.Read())
+        {
+            switch (reader.NodeType)
+            {
+                case XmlNodeType.Element:
+                    currentElement = reader.Name;
+                    break;
+                case XmlNodeType.Text or XmlNodeType.CDATA:
+                    if (string.Equals(currentElement, "version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string raw = reader.Value.Trim();
+                        if (!string.IsNullOrEmpty(raw) && seen.Add(raw))
+                        {
+                            versions.Add(raw);
+                        }
+                    }
+                    break;
+                case XmlNodeType.EndElement:
+                    if (string.Equals(reader.Name, "version", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentElement = null;
+                    }
+                    break;
+            }
+        }
 
         var list = new List<LoaderVersion>();
-        foreach (string? raw in versions)
+        foreach (string raw in versions)
         {
             if (isNeoForge)
             {
-                string? mcVer = DeriveMinecraftVersionFromNeoForge(raw);
+                string? mcVer = MinecraftVersionSemantics.DeriveMinecraftVersionFromNeoForge(raw);
                 bool isStable = !raw.Contains("alpha", StringComparison.OrdinalIgnoreCase)
                              && !raw.Contains("beta", StringComparison.OrdinalIgnoreCase);
                 list.Add(new LoaderVersion(raw, Stable: isStable, MinecraftVersion: mcVer));
@@ -626,45 +682,6 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         }
 
         return list;
-    }
-
-    private static string? DeriveMinecraftVersionFromNeoForge(string rawVersion)
-    {
-        ReadOnlySpan<char> span = rawVersion.AsSpan();
-        int firstDot = span.IndexOf('.');
-        if (firstDot <= 0)
-        {
-            return null;
-        }
-
-        ReadOnlySpan<char> majorSpan = span[..firstDot];
-        if (!int.TryParse(majorSpan, provider: null, out int major))
-        {
-            return null;
-        }
-
-        if (major >= 20)
-        {
-            ReadOnlySpan<char> remainder = span[(firstDot + 1)..];
-            int nextDot = remainder.IndexOf('.');
-            ReadOnlySpan<char> secondPart = nextDot >= 0 ? remainder[..nextDot] : remainder;
-            int dashIdx = secondPart.IndexOf('-');
-            ReadOnlySpan<char> minorSpan = dashIdx >= 0 ? secondPart[..dashIdx] : secondPart;
-
-            if (minorSpan.IsEmpty)
-            {
-                return null;
-            }
-
-            return $"1.{major}.{minorSpan}";
-        }
-
-        if (major == 47)
-        {
-            return "1.20.1";
-        }
-
-        return null;
     }
 
     private static readonly string[] PreReleaseKeywords = ["alpha", "beta", "snapshot", "rc", "pre", "prerelease"];
@@ -757,9 +774,14 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         return false;
     }
 
-    private static List<LoaderVersion> ParseMinecraftManifest(string json)
+    internal static List<LoaderVersion> ParseMinecraftManifest(string json)
     {
         using var doc = JsonDocument.Parse(json);
+        return ParseMinecraftManifest(doc);
+    }
+
+    private static List<LoaderVersion> ParseMinecraftManifest(JsonDocument doc)
+    {
         if (!doc.RootElement.TryGetProperty("versions", out var versionsElem))
         {
             return [];
@@ -826,8 +848,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         try
         {
-            string json = JsonCodec.Serialize(versions, indented: true);
-            AtomicFileWriter.WriteText(cachePath, json);
+            AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
         }
         catch (Exception ex)
         {
@@ -835,9 +856,14 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         }
     }
 
-    private static List<LoaderVersion> ParsePaperMinecraftVersions(string json)
+    internal static List<LoaderVersion> ParsePaperMinecraftVersions(string json)
     {
         using var doc = JsonDocument.Parse(json);
+        return ParsePaperMinecraftVersions(doc);
+    }
+
+    private static List<LoaderVersion> ParsePaperMinecraftVersions(JsonDocument doc)
+    {
         if (!doc.RootElement.TryGetProperty("versions", out var versionsProp) ||
             versionsProp.ValueKind != JsonValueKind.Object)
         {
@@ -876,13 +902,13 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         bool updateCache = true)
     {
         string buildsUrl = $"https://fill.papermc.io/v3/projects/paper/versions/{minecraftVersion}/builds";
-        string? json = await httpPort.GetTextAsync(new Uri(buildsUrl), cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(json))
+        var response = await httpPort.GetJsonDocumentAsync(new Uri(buildsUrl), cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccess || response.Payload is null)
         {
             return [];
         }
 
-        using var doc = JsonDocument.Parse(json);
+        using var doc = response.Payload;
         if (doc.RootElement.ValueKind != JsonValueKind.Array)
         {
             return [];
@@ -971,7 +997,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         }
         catch (Exception ex)
         {
-            Logger.Debug("剔除無 STABLE 建置之 Paper 版本失敗: {Message}", ex.Message);
+            Logger.Warning("剔除無 STABLE 建置之 Paper 版本失敗: {Message}", ex.Message);
         }
     }
 
@@ -1023,13 +1049,16 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         try
         {
-            string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(json))
+            var response = await httpPort.GetJsonDocumentAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccess || response.Payload is null)
             {
                 return null;
             }
 
-            return MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson(json);
+            using (response.Payload)
+            {
+                return MinecraftJavaRequirementService.ParseJavaMajorFromVersionJson(response.Payload.RootElement);
+            }
         }
         catch
         {

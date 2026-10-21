@@ -36,6 +36,8 @@ public sealed partial class ServerManager : IServerManager
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
     private readonly Lock _lock = new();
+    private Dictionary<string, ServerConfigPayload>? _cachedRegistry;
+    private DateTime _lastRegistryWriteTimeUtc;
 
     public ServerManager(
         string serversRoot,
@@ -93,11 +95,37 @@ public sealed partial class ServerManager : IServerManager
         }
     }
 
-    public async Task<ServerConfig?> GetServerAsync(string name, CancellationToken cancellationToken = default)
+    public Task<ServerConfig?> GetServerAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        var servers = await GetAllServersAsync(cancellationToken).ConfigureAwait(false);
-        return servers.FirstOrDefault(s => s.Name.Value.Equals(name, StringComparison.OrdinalIgnoreCase));
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_lock)
+        {
+            var registry = LoadRegistry();
+            if (registry.TryGetValue(name, out var payload))
+            {
+                bool validName = ServerName.TryParse(payload.Name, out var serverName);
+                bool validMc = MinecraftVersion.TryParse(payload.MinecraftVersion, out var mcVer);
+                bool validLoader = Enum.TryParse<LoaderKind>(payload.LoaderType, ignoreCase: true, out var loader);
+
+                if (validName && validMc && validLoader)
+                {
+                    var config = new ServerConfig(
+                        name: serverName,
+                        minecraftVersion: mcVer,
+                        loaderType: loader,
+                        loaderVersion: payload.LoaderVersion ?? string.Empty,
+                        memoryMaxMb: payload.MemoryMaxMb > 0 ? payload.MemoryMaxMb : 2048,
+                        memoryMinMb: payload.MemoryMinMb,
+                        path: payload.Path ?? Path.Combine(_serversRoot, payload.Name),
+                        jvmArgs: payload.JvmArgs,
+                        backupPath: payload.BackupPath ?? string.Empty);
+                    return Task.FromResult<ServerConfig?>(config);
+                }
+            }
+
+            return Task.FromResult<ServerConfig?>(null);
+        }
     }
 
     public async Task<ServerCreationResult> CreateServerAsync(
@@ -759,17 +787,20 @@ public sealed partial class ServerManager : IServerManager
             if (isZip)
             {
                 progress?.Report(new ServerImportProgressReport(10, "正在解壓縮伺服器封存檔..."));
-                SafeZipArchive.Extract(sourceDirectory, stagingDir, (extracted, total) =>
+                await Task.Run(() =>
                 {
-                    int pct = total > 0 ? (int)(10 + (extracted * 45 / total)) : 35;
-                    progress?.Report(new ServerImportProgressReport(Math.Clamp(pct, 10, 55), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 55)}%)..."));
-                });
+                    SafeZipArchive.Extract(sourceDirectory, stagingDir, (extracted, total) =>
+                    {
+                        int pct = total > 0 ? (int)(10 + (extracted * 45 / total)) : 35;
+                        progress?.Report(new ServerImportProgressReport(Math.Clamp(pct, 10, 55), $"正在解壓縮檔案 ({Math.Clamp(pct, 10, 55)}%)..."));
+                    });
+                }, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 progress?.Report(new ServerImportProgressReport(20, "正在複製伺服器檔案..."));
                 string stableSource = SafeFileSystem.ResolveStableDirectory(sourceDirectory);
-                CopyDirectoryTreeSafe(stableSource, stagingDir);
+                await Task.Run(() => SafeFileSystem.CopyDirectoryTreeSafe(stableSource, stagingDir), cancellationToken).ConfigureAwait(false);
             }
 
             string stableStaging = SafeFileSystem.ResolveStableDirectory(stagingDir);
@@ -1020,14 +1051,24 @@ public sealed partial class ServerManager : IServerManager
     {
         if (!File.Exists(_registryFilePath))
         {
-            return new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+            _cachedRegistry = new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
         }
 
         try
         {
+            DateTime lastWrite = File.GetLastWriteTimeUtc(_registryFilePath);
+            if (_cachedRegistry is not null && lastWrite == _lastRegistryWriteTimeUtc)
+            {
+                return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
+            }
+
             string json = File.ReadAllText(_registryFilePath, Encoding.UTF8);
-            return JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json)
+            var loaded = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json)
                    ?? new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
+            _cachedRegistry = new Dictionary<string, ServerConfigPayload>(loaded, StringComparer.OrdinalIgnoreCase);
+            _lastRegistryWriteTimeUtc = lastWrite;
+            return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
         }
         catch
         {
@@ -1039,31 +1080,13 @@ public sealed partial class ServerManager : IServerManager
     {
         string json = JsonCodec.Serialize(registry, indented: true);
         AtomicFileWriter.WriteText(_registryFilePath, json);
-    }
-
-    private static void CopyDirectoryTreeSafe(string source, string destination)
-    {
-        var entries = SafeFileSystem.WalkBoundedTree(source, rejectReparse: true);
-        foreach (var entry in entries)
+        _cachedRegistry = new Dictionary<string, ServerConfigPayload>(registry, StringComparer.OrdinalIgnoreCase);
+        if (File.Exists(_registryFilePath))
         {
-            string rel = Path.GetRelativePath(source, entry.FullPath);
-            string target = Path.Combine(destination, rel);
-
-            if (entry.IsDirectory)
-            {
-                Directory.CreateDirectory(target);
-            }
-            else
-            {
-                string? dir = Path.GetDirectoryName(target);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                File.Copy(entry.FullPath, target, overwrite: true);
-            }
+            _lastRegistryWriteTimeUtc = File.GetLastWriteTimeUtc(_registryFilePath);
         }
     }
+
 
     private static void FlattenSingleWrapper(string stagingDir)
     {
@@ -1100,27 +1123,27 @@ public sealed partial class ServerManager : IServerManager
             }
         }
     }
+}
 
-    internal sealed record ServerConfigPayload(
-        [property: JsonPropertyName("name")] string Name,
-        [property: JsonPropertyName("minecraftVersion")] string MinecraftVersion,
-        [property: JsonPropertyName("loaderType")] string LoaderType,
-        [property: JsonPropertyName("loaderVersion")] string LoaderVersion,
-        [property: JsonPropertyName("memoryMaxMb")] int MemoryMaxMb,
-        [property: JsonPropertyName("memoryMinMb")] int? MemoryMinMb,
-        [property: JsonPropertyName("path")] string Path,
-        [property: JsonPropertyName("jvmArgs")] IReadOnlyList<string> JvmArgs,
-        [property: JsonPropertyName("backupPath")] string BackupPath)
-    {
-        public static ServerConfigPayload FromDomain(ServerConfig config) => new(
-            Name: config.Name.Value,
-            MinecraftVersion: config.MinecraftVersion.Value,
-            LoaderType: config.LoaderType.ToString(),
-            LoaderVersion: config.LoaderVersion,
-            MemoryMaxMb: config.MemoryMaxMb,
-            MemoryMinMb: config.MemoryMinMb,
-            Path: config.Path,
-            JvmArgs: config.JvmArgs,
-            BackupPath: config.BackupPath);
-    }
+internal sealed record ServerConfigPayload(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("minecraftVersion")] string MinecraftVersion,
+    [property: JsonPropertyName("loaderType")] string LoaderType,
+    [property: JsonPropertyName("loaderVersion")] string LoaderVersion,
+    [property: JsonPropertyName("memoryMaxMb")] int MemoryMaxMb,
+    [property: JsonPropertyName("memoryMinMb")] int? MemoryMinMb,
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("jvmArgs")] IReadOnlyList<string> JvmArgs,
+    [property: JsonPropertyName("backupPath")] string BackupPath)
+{
+    public static ServerConfigPayload FromDomain(ServerConfig config) => new(
+        Name: config.Name.Value,
+        MinecraftVersion: config.MinecraftVersion.Value,
+        LoaderType: config.LoaderType.ToString(),
+        LoaderVersion: config.LoaderVersion,
+        MemoryMaxMb: config.MemoryMaxMb,
+        MemoryMinMb: config.MemoryMinMb,
+        Path: config.Path,
+        JvmArgs: config.JvmArgs,
+        BackupPath: config.BackupPath);
 }

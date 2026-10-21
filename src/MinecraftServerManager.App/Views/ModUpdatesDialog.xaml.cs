@@ -1,25 +1,14 @@
 using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
 
-public sealed class ModUpdateCandidateItem : INotifyPropertyChanged
+public sealed partial class ModUpdateCandidateItem : ObservableObject
 {
-    public bool IsSelected
-    {
-        get;
-        set
-        {
-            if (field != value)
-            {
-                field = value;
-                OnPropertyChanged();
-            }
-        }
-    } = true;
+    [ObservableProperty]
+    public partial bool IsSelected { get; set; } = true;
 
     public required string ModName { get; init; }
     public required string CurrentVersion { get; init; }
@@ -30,11 +19,6 @@ public sealed class ModUpdateCandidateItem : INotifyPropertyChanged
     public string? ExpectedHash { get; init; }
     public string? HashAlgorithm { get; init; }
     public required LocalModRowItem LocalMod { get; init; }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }
 
 public partial class ModUpdatesDialog : Window
@@ -71,7 +55,7 @@ public partial class ModUpdatesDialog : Window
     {
         if (!CandidateItems.Any(static i => i.IsSelected))
         {
-            MessageBox.Show(this, "請至少勾選一個要更新的模組！", "未勾選項目", MessageBoxButton.OK, MessageBoxImage.Warning);
+            ToastWindow.Instance.ShowToast("請至少勾選一個要更新的模組！", "未勾選項目", Services.ToastType.Warning);
             return;
         }
         DialogResult = true;

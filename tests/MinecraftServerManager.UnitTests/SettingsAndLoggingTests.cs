@@ -2,10 +2,12 @@ using Microsoft.Extensions.Logging;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
+using MinecraftServerManager.Infrastructure.Utilities;
 using Xunit;
 
 namespace MinecraftServerManager.UnitTests;
 
+[Collection("EnvironmentVariableCollection")]
 public sealed class SettingsAndLoggingTests
 {
     [Fact]
@@ -91,6 +93,41 @@ public sealed class SettingsAndLoggingTests
         Assert.Equal("已載入 3 筆設定", logger.Message);
         Assert.Equal("SettingsManager", Assert.IsType<string>(logger.Scope!["component"]));
         Assert.Equal(3, logger.Arguments![0]);
+    }
+
+    [Fact]
+    public void IsDevelopmentEnvironmentAccuratelyDetectsSingleFileOrDev()
+    {
+        string? originalEnv = Environment.GetEnvironmentVariable("MSM_DEBUG_LOG");
+        object? originalAppContext = AppContext.GetData("APP_CONTEXT_PUBLISH_SINGLE_FILE");
+
+        try
+        {
+            // 1. 一般測試執行階段（非 single file bundle），無環境變數覆寫
+            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", null);
+            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", null);
+
+            // 單元測試時 EntryAssembly 非空，無 single-file 旗標，應為開發環境
+            bool isDev = RuntimePaths.IsDevelopmentEnvironment();
+            Assert.True(isDev);
+
+            // 2. 當環境變數設定 MSM_DEBUG_LOG=1 時，一律為 true
+            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", "1");
+            Assert.True(RuntimePaths.IsDevelopmentEnvironment());
+
+            // 3. 模擬發布之 Single-File EXE（微軟 Host 注入旗標，測試布林值與字串型態）
+            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", null);
+            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", true);
+            Assert.False(RuntimePaths.IsDevelopmentEnvironment());
+
+            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", "true");
+            Assert.False(RuntimePaths.IsDevelopmentEnvironment());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MSM_DEBUG_LOG", originalEnv);
+            AppContext.SetData("APP_CONTEXT_PUBLISH_SINGLE_FILE", originalAppContext);
+        }
     }
 
     private static string CreateTemporaryDirectory()

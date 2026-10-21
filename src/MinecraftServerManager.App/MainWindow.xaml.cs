@@ -34,19 +34,6 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     private void InitializeWindow()
     {
-        if (Icon == null)
-        {
-            try
-            {
-                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                    new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
-            }
-            catch
-            {
-                // 忽略圖示載入例外
-            }
-        }
-
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         _viewModel.NotificationRequested += ViewModel_NotificationRequested;
         _viewModel.ResetWindowSizeRequested += OnResetWindowSizeRequested;
@@ -60,11 +47,14 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
 
     private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        int sw = (int)SystemParameters.PrimaryScreenWidth;
-        int sh = (int)SystemParameters.PrimaryScreenHeight;
-        int ww = (int)ActualWidth;
-        int wh = (int)ActualHeight;
-        _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
+        if (_viewModel.CurrentPage is AboutPreferencesViewModel aboutVm)
+        {
+            int sw = (int)SystemParameters.PrimaryScreenWidth;
+            int sh = (int)SystemParameters.PrimaryScreenHeight;
+            int ww = (int)ActualWidth;
+            int wh = (int)ActualHeight;
+            aboutVm.UpdateDisplayInfo(sw, sh, ww, wh);
+        }
     }
 
     /// <summary>
@@ -137,6 +127,22 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             return;
         }
 
+        // 若無伺服器執行中，直接儲存狀態並允許視窗即時關閉
+        if (_compositionRoot?.IsServerRunning != true)
+        {
+            Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
+            if (_viewModel is not null)
+            {
+                SaveWindowPosition();
+                UnregisterWindowEvents();
+            }
+
+            _shutdownCompleted = true;
+            _ = DisposeSafelyAsync();
+            return;
+        }
+
+        // 有伺服器正在執行，取消立即關閉並在背景停止伺服器後再關閉
         e.Cancel = true;
         if (_shutdownInProgress)
         {
@@ -144,14 +150,26 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
 
         _shutdownInProgress = true;
-        Logger.Information("主視窗正在關閉，儲存視窗位置與大小");
+        Logger.Information("主視窗正在關閉（等候執行中伺服器停止），儲存視窗位置與大小");
         if (_viewModel is not null)
         {
             SaveWindowPosition();
-            _viewModel.UnregisterEvents();
+            UnregisterWindowEvents();
         }
 
         _ = ShutdownAndCloseAsync();
+    }
+
+    private void UnregisterWindowEvents()
+    {
+        if (_viewModel is not null)
+        {
+            _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModel.NotificationRequested -= ViewModel_NotificationRequested;
+            _viewModel.ResetWindowSizeRequested -= OnResetWindowSizeRequested;
+            _viewModel.UiScaleChanged -= ApplyUiScale;
+            _viewModel.UnregisterEvents();
+        }
     }
 
     /// <summary>
@@ -170,7 +188,19 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         finally
         {
             _shutdownCompleted = true;
-            Close();
+            await Dispatcher.InvokeAsync(Close);
+        }
+    }
+
+    private async Task DisposeSafelyAsync()
+    {
+        try
+        {
+            await DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning("非同步釋放視窗資源時發生例外: {Message}", ex.Message);
         }
     }
 
@@ -214,79 +244,78 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         }
     }
 
-    private static void ApplyTheme(bool isLight)
+    private static readonly KeyValuePair<string, SolidColorBrush>[] LightBrushes = CreateBrushes([
+        ("WindowBrush", "#F5F6FA"),
+        ("SidebarBrush", "#FFFFFF"),
+        ("CardBrush", "#FFFFFF"),
+        ("BorderBrush", "#D9DEE8"),
+        ("TextBrush", "#1A1D24"),
+        ("MutedTextBrush", "#5E6675"),
+        ("AccentBrush", "#4F6FD8"),
+        ("AccentHoverBrush", "#3D5CC4"),
+        ("DangerBrush", "#DC2626"),
+        ("DangerHoverBrush", "#B91C1C"),
+        ("SuccessBrush", "#1A7F37"),
+        ("SuccessHoverBrush", "#1F883D"),
+        ("NotificationBrush", "#E7EEFF"),
+        ("ButtonDefaultHoverBrush", "#E2E8F0"),
+        ("NavButtonHoverBrush", "#E5E7EB"),
+        ("DataGridGridLineBrush", "#D1D5DB"),
+        ("WarningBrush", "#B45309"),
+        ("ButtonDisabledBackgroundBrush", "#E2E8F0"),
+        ("ButtonDisabledForegroundBrush", "#1A1D24"),
+        ("ButtonDisabledBorderBrush", "#CBD5E1"),
+        ("ComboBoxPopupBackgroundBrush", "#FFFFFF"),
+        ("ComboBoxItemHoverBrush", "#EBF0FF"),
+        ("ComboBoxItemSelectedBrush", "#D6E4FF")
+    ]);
+
+    private static readonly KeyValuePair<string, SolidColorBrush>[] DarkBrushes = CreateBrushes([
+        ("WindowBrush", "#101114"),
+        ("SidebarBrush", "#17191E"),
+        ("CardBrush", "#1F2229"),
+        ("BorderBrush", "#353A45"),
+        ("TextBrush", "#F3F4F6"),
+        ("MutedTextBrush", "#A5ACB9"),
+        ("AccentBrush", "#4F6FD8"),
+        ("AccentHoverBrush", "#3D5CC4"),
+        ("DangerBrush", "#B91C1C"),
+        ("DangerHoverBrush", "#991B1B"),
+        ("SuccessBrush", "#238636"),
+        ("SuccessHoverBrush", "#2EA043"),
+        ("NotificationBrush", "#283A5A"),
+        ("ButtonDefaultHoverBrush", "#2E3440"),
+        ("NavButtonHoverBrush", "#2D323E"),
+        ("DataGridGridLineBrush", "#3F4552"),
+        ("WarningBrush", "#F59E0B"),
+        ("ButtonDisabledBackgroundBrush", "#2B2D35"),
+        ("ButtonDisabledForegroundBrush", "#94A3B8"),
+        ("ButtonDisabledBorderBrush", "#383C46"),
+        ("ComboBoxPopupBackgroundBrush", "#1F2229"),
+        ("ComboBoxItemHoverBrush", "#2E3442"),
+        ("ComboBoxItemSelectedBrush", "#3B4459")
+    ]);
+
+    private static KeyValuePair<string, SolidColorBrush>[] CreateBrushes((string Key, string Hex)[] items)
     {
-        if (isLight)
+        var result = new KeyValuePair<string, SolidColorBrush>[items.Length];
+        for (int i = 0; i < items.Length; i++)
         {
-            SetBrushColor("WindowBrush", "#F5F6FA");
-            SetBrushColor("SidebarBrush", "#FFFFFF");
-            SetBrushColor("CardBrush", "#FFFFFF");
-            SetBrushColor("BorderBrush", "#D9DEE8");
-            SetBrushColor("TextBrush", "#1A1D24");
-            SetBrushColor("MutedTextBrush", "#5E6675");
-            SetBrushColor("AccentBrush", "#4F6FD8");
-            SetBrushColor("AccentHoverBrush", "#3D5CC4");
-            SetBrushColor("DangerBrush", "#DC2626");
-            SetBrushColor("DangerHoverBrush", "#B91C1C");
-            SetBrushColor("SuccessBrush", "#1A7F37");
-            SetBrushColor("SuccessHoverBrush", "#1F883D");
-            SetBrushColor("NotificationBrush", "#E7EEFF");
-            SetBrushColor("ButtonDefaultHoverBrush", "#E2E8F0");
-            SetBrushColor("NavButtonHoverBrush", "#E5E7EB");
-            SetBrushColor("SubtleButtonHoverBrush", "#E5E7EB");
-            SetBrushColor("DataGridGridLineBrush", "#D1D5DB");
-            SetBrushColor("TabItemUnderlineBrush", "#4F6FD8");
-            SetBrushColor("WarningBrush", "#B45309");
-
-            SetBrushColor("ButtonDisabledBackgroundBrush", "#E2E8F0");
-            SetBrushColor("ButtonDisabledForegroundBrush", "#1A1D24");
-            SetBrushColor("ButtonDisabledBorderBrush", "#CBD5E1");
-
-            SetBrushColor("ComboBoxPopupBackgroundBrush", "#FFFFFF");
-            SetBrushColor("ComboBoxItemHoverBrush", "#EBF0FF");
-            SetBrushColor("ComboBoxItemSelectedBrush", "#D6E4FF");
+            var color = (Color)ColorConverter.ConvertFromString(items[i].Hex);
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            result[i] = new KeyValuePair<string, SolidColorBrush>(items[i].Key, brush);
         }
-        else
-        {
-            SetBrushColor("WindowBrush", "#101114");
-            SetBrushColor("SidebarBrush", "#17191E");
-            SetBrushColor("CardBrush", "#1F2229");
-            SetBrushColor("BorderBrush", "#353A45");
-            SetBrushColor("TextBrush", "#F3F4F6");
-            SetBrushColor("MutedTextBrush", "#A5ACB9");
-            SetBrushColor("AccentBrush", "#4F6FD8");
-            SetBrushColor("AccentHoverBrush", "#3D5CC4");
-            SetBrushColor("DangerBrush", "#B91C1C");
-            SetBrushColor("DangerHoverBrush", "#991B1B");
-            SetBrushColor("SuccessBrush", "#238636");
-            SetBrushColor("SuccessHoverBrush", "#2EA043");
-            SetBrushColor("NotificationBrush", "#283A5A");
-            SetBrushColor("ButtonDefaultHoverBrush", "#2E3440");
-            SetBrushColor("NavButtonHoverBrush", "#2D323E");
-            SetBrushColor("SubtleButtonHoverBrush", "#2D323E");
-            SetBrushColor("DataGridGridLineBrush", "#3F4552");
-            SetBrushColor("TabItemUnderlineBrush", "#4F6FD8");
-            SetBrushColor("WarningBrush", "#F59E0B");
-
-            SetBrushColor("ButtonDisabledBackgroundBrush", "#2B2D35");
-            SetBrushColor("ButtonDisabledForegroundBrush", "#94A3B8");
-            SetBrushColor("ButtonDisabledBorderBrush", "#383C46");
-
-            SetBrushColor("ComboBoxPopupBackgroundBrush", "#1F2229");
-            SetBrushColor("ComboBoxItemHoverBrush", "#2E3442");
-            SetBrushColor("ComboBoxItemSelectedBrush", "#3B4459");
-        }
+        return result;
     }
 
-    private static void SetBrushColor(string resourceKey, string colorText)
+    private static void ApplyTheme(bool isLight)
     {
-        if (ColorConverter.ConvertFromString(colorText) is not Color color)
+        var brushes = isLight ? LightBrushes : DarkBrushes;
+        var resources = Application.Current.Resources;
+        foreach (var pair in brushes)
         {
-            return;
+            resources[pair.Key] = pair.Value;
         }
-
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-        Application.Current.Resources[resourceKey] = brush;
     }
 }

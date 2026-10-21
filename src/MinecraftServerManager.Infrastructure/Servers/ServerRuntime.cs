@@ -1,3 +1,4 @@
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -85,17 +86,10 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(executableName);
 
-        if (IsRunning)
-        {
-            Logger.Warning("嘗試啟動伺服器但已有行程在執行中 (PID: {Pid})", Pid);
-            throw new InvalidOperationException("伺服器行程已在執行中");
-        }
-
-        IsReady = false;
         string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
         bool isScript = executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
 
-        ProcessStartSpec spec;
+        ServerLaunchPlan plan;
         if (isScript)
         {
             string scriptPath = Path.IsPathRooted(executableName)
@@ -103,42 +97,25 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
                 : Path.Combine(stableDir, executableName);
             string fullScriptPath = Path.GetFullPath(scriptPath);
 
-            if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
-            {
-                throw new SafeFileSystemException($"偵測到非法的啟動腳本路徑越界：{executableName}");
-            }
-
-            if (!SafeScriptValidator.ValidateScriptContent(fullScriptPath, stableDir))
-            {
-                throw new InvalidOperationException($"啟動腳本「{executableName}」未通過安全性檢驗");
-            }
-
-            Logger.Information("啟動批次檔腳本伺服器 (路徑: {Script})", fullScriptPath);
-
             IReadOnlyDictionary<string, string?>? env = null;
             if (!string.IsNullOrWhiteSpace(javaExecutablePath) && !string.Equals(javaExecutablePath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
             {
                 env = ServerLaunchPlanner.BuildJavaEnvironment(javaExecutablePath.Trim());
             }
 
-            spec = new ProcessStartSpec(
-                FileName: fullScriptPath,
-                Arguments: [],
+            plan = new ServerLaunchPlan(
+                JavaExecutable: fullScriptPath,
                 WorkingDirectory: stableDir,
+                Arguments: [],
+                Loader: LoaderKind.Unknown,
+                MinMemoryMb: memoryMinMb ?? 1024,
+                MaxMemoryMb: memoryMaxMb,
+                IsScript: true,
+                ServerName: Path.GetFileName(stableDir),
                 Environment: env);
         }
         else
         {
-            string targetPath = Path.IsPathRooted(executableName)
-                ? executableName
-                : Path.Combine(stableDir, executableName);
-            string fullTargetPath = Path.GetFullPath(targetPath);
-
-            if (!SafeFileSystem.IsPathWithin(stableDir, fullTargetPath, strict: false))
-            {
-                throw new SafeFileSystemException($"偵測到非法的啟動目標路徑越界：{executableName}");
-            }
-
             var args = new List<string>();
             int min = memoryMinMb ?? (memoryMaxMb > 1024 ? 1024 : memoryMaxMb);
             args.Add($"-Xms{min}M");
@@ -153,25 +130,18 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             args.Add(executableName);
             args.Add("nogui");
 
-            if (!SafeScriptValidator.ValidateCommandInputs(stableDir, args))
-            {
-                throw new InvalidOperationException("伺服器啟動指令引用的檔案未通過安全性邊界檢驗");
-            }
-
-            Logger.Information("啟動 Java 伺服器 (目錄: {Directory}, Jar: {Jar}, 記憶體: {Min}M-{Max}M)", stableDir, executableName, min, memoryMaxMb);
-            spec = new ProcessStartSpec(
-                FileName: javaExecutablePath,
+            plan = new ServerLaunchPlan(
+                JavaExecutable: javaExecutablePath,
+                WorkingDirectory: stableDir,
                 Arguments: args,
-                WorkingDirectory: stableDir);
+                Loader: LoaderKind.Unknown,
+                MinMemoryMb: min,
+                MaxMemoryMb: memoryMaxMb,
+                IsScript: false,
+                ServerName: Path.GetFileName(stableDir));
         }
 
-        _process = await processRunner.StartAsync(spec, cancellationToken).ConfigureAwait(false);
-        ActiveServerName = Path.GetFileName(stableDir);
-        Logger.Information("伺服器行程已成功啟動，PID: {Pid}", _process.Pid);
-        _process.OutputReceived += OnOutputReceived;
-        ServerStarted?.Invoke();
-
-        _ = MonitorExitAsync(_process);
+        await StartAsync(plan, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<bool> SendCommandAsync(string command, CancellationToken cancellationToken = default)
@@ -202,7 +172,8 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!IsRunning || _process is null)
+        var proc = _process;
+        if (!IsRunning || proc is null)
         {
             return new ProcessExitResult(ExitCode ?? 0, false);
         }
@@ -217,13 +188,13 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         try
         {
-            return await _process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+            return await proc.WaitForExitAsync(linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.Warning("伺服器未在 {Timeout} 內平順關閉，傳送強制終止命令", gracefulTimeout);
             // 逾時，強制樹狀終止
-            return await _process.StopAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
+            return await proc.StopAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -276,6 +247,10 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         finally
         {
             proc.OutputReceived -= OnOutputReceived;
+            if (ReferenceEquals(_process, proc))
+            {
+                _process = null;
+            }
             ActiveServerName = null;
             IsReady = false;
         }

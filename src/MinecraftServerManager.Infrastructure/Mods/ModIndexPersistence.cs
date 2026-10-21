@@ -1,5 +1,7 @@
+using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Serialization;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -37,6 +39,14 @@ public sealed class ModIndexPersistence : IModIndexPersistence
         LoadIndex();
     }
 
+    internal ModCacheEntry? GetEntry(string fileName)
+    {
+        lock (_lock)
+        {
+            return _index.TryGetValue(fileName, out var entry) ? entry : null;
+        }
+    }
+
     public IReadOnlyDictionary<string, string>? GetCachedMetadata(string fileName)
     {
         lock (_lock)
@@ -45,7 +55,10 @@ public sealed class ModIndexPersistence : IModIndexPersistence
         }
     }
 
-    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata)
+    public void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata) =>
+        CacheMetadata(fileName, metadata, 0, 0);
+
+    internal void CacheMetadata(string fileName, IReadOnlyDictionary<string, string> metadata, long fileSizeBytes, long lastWriteTimeUtcTicks)
     {
         lock (_lock)
         {
@@ -54,7 +67,23 @@ public sealed class ModIndexPersistence : IModIndexPersistence
                 entry = new ModCacheEntry();
                 _index[fileName] = entry;
             }
-            entry.Metadata = new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+            else if ((fileSizeBytes > 0 || lastWriteTimeUtcTicks > 0) &&
+                     (entry.FileSizeBytes != fileSizeBytes || entry.LastWriteTimeUtcTicks != lastWriteTimeUtcTicks))
+            {
+                entry.Hashes = null;
+            }
+
+            entry.Metadata = metadata is Dictionary<string, string> dict && dict.Comparer == StringComparer.OrdinalIgnoreCase
+                ? dict
+                : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase);
+            if (fileSizeBytes > 0)
+            {
+                entry.FileSizeBytes = fileSizeBytes;
+            }
+            if (lastWriteTimeUtcTicks > 0)
+            {
+                entry.LastWriteTimeUtcTicks = lastWriteTimeUtcTicks;
+            }
             _dirty = true;
         }
     }
@@ -138,8 +167,8 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
             try
             {
-                string json = JsonCodec.Serialize(_index, indented: true);
-                AtomicFileWriter.WriteText(_indexFilePath, json);
+                byte[] utf8Bytes = JsonSerializer.SerializeToUtf8Bytes(_index, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry);
+                AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
                 _dirty = false;
             }
             catch
@@ -160,8 +189,10 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
             try
             {
-                string json = File.ReadAllText(_indexFilePath);
-                var loaded = JsonCodec.Deserialize<Dictionary<string, ModCacheEntry>>(json);
+                byte[]? bytes = SafeFileSystem.ReadRegularFile(_indexFilePath, JsonCodec.DefaultMaxBytes);
+                var loaded = bytes is not null
+                    ? JsonSerializer.Deserialize(bytes, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry)
+                    : null;
                 _index = loaded is not null
                     ? new Dictionary<string, ModCacheEntry>(loaded, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
@@ -172,11 +203,13 @@ public sealed class ModIndexPersistence : IModIndexPersistence
             }
         }
     }
+}
 
-    private sealed class ModCacheEntry
-    {
-        public Dictionary<string, string>? Metadata { get; set; }
-        public Dictionary<string, string>? Hashes { get; set; }
-        public string? Issue { get; set; }
-    }
+internal sealed class ModCacheEntry
+{
+    public Dictionary<string, string>? Metadata { get; set; }
+    public Dictionary<string, string>? Hashes { get; set; }
+    public string? Issue { get; set; }
+    public long FileSizeBytes { get; set; }
+    public long LastWriteTimeUtcTicks { get; set; }
 }

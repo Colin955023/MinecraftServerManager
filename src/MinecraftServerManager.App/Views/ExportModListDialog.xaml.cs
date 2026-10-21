@@ -1,31 +1,21 @@
 using System.Windows;
-using Microsoft.Win32;
-using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Domain.Mods;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 模組列表匯出對話方塊（僅負責選擇格式與檔案路徑，實際匯出交由 <see cref="IModListExporter"/>）
+/// 模組列表匯出對話方塊（Code-behind 僅負責讀取所選格式與視窗生命週期，匯出流程位於 <see cref="ExportModListViewModel"/>）
 /// </summary>
 public partial class ExportModListDialog : Window
 {
-    private readonly IReadOnlyList<ModListExportRow> _rows;
-    private readonly string _serverName;
-    private readonly IModListExporter _exporter;
-    private readonly IExternalLauncher? _launcher;
+    private readonly ExportModListViewModel _viewModel;
+    private bool _isExporting;
 
-    public ExportModListDialog(
-        string serverName,
-        IReadOnlyList<ModListExportRow> rows,
-        IModListExporter exporter,
-        IExternalLauncher? launcher)
+    public ExportModListDialog(ExportModListViewModel viewModel)
     {
         InitializeComponent();
-        _serverName = serverName;
-        _rows = rows;
-        _exporter = exporter;
-        _launcher = launcher;
+        _viewModel = viewModel;
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -36,63 +26,41 @@ public partial class ExportModListDialog : Window
 
     private async void Export_Click(object sender, RoutedEventArgs e)
     {
-        (ModListExportFormat format, string extension, string filter) = GetSelectedFormat();
-
-        var saveDialog = new SaveFileDialog
-        {
-            Title = "儲存模組列表",
-            FileName = $"{_serverName}_模組列表{extension}",
-            Filter = filter
-        };
-
-        if (saveDialog.ShowDialog(this) != true)
+        if (_isExporting)
         {
             return;
         }
 
+        _isExporting = true;
         try
         {
-            await _exporter.ExportAsync(_rows, format, saveDialog.FileName).ConfigureAwait(true);
-
-            MessageBoxResult ask = MessageBox.Show(
-                this,
-                $"已儲存：\n{saveDialog.FileName}\n\n是否要立即開啟匯出的檔案？",
-                "匯出成功",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Information);
-
-            if (ask == MessageBoxResult.Yes)
+            if (await _viewModel.ExportAsync(GetSelectedFormat()).ConfigureAwait(true) && IsLoaded)
             {
-                // 匯出檔案為程式內建產出內容，不需判斷是否拒絕開啟
-                _launcher?.OpenFile(saveDialog.FileName, isTrusted: true);
+                DialogResult = true;
+                Close();
             }
-
-            DialogResult = true;
-            Close();
         }
-        catch (Exception ex)
+        catch
         {
-            MessageBox.Show(this, $"匯出失敗：{ex.Message}", "錯誤", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _isExporting = false;
         }
     }
 
-    private (ModListExportFormat Format, string Extension, string Filter) GetSelectedFormat()
+    private ModListExportFormat GetSelectedFormat()
     {
         if (JsonRadio.IsChecked == true)
         {
-            return (ModListExportFormat.Json, ".json", "JSON 檔案 (*.json)|*.json");
+            return ModListExportFormat.Json;
         }
 
         if (HtmlRadio.IsChecked == true)
         {
-            return (ModListExportFormat.Html, ".html", "HTML 網頁 (*.html)|*.html");
+            return ModListExportFormat.Html;
         }
 
-        if (XlsxRadio.IsChecked == true)
-        {
-            return (ModListExportFormat.Xlsx, ".xlsx", "Excel 工作表 (*.xlsx)|*.xlsx");
-        }
-
-        return (ModListExportFormat.Text, ".txt", "純文字檔案 (*.txt)|*.txt");
+        return XlsxRadio.IsChecked == true ? ModListExportFormat.Xlsx : ModListExportFormat.Text;
     }
 }

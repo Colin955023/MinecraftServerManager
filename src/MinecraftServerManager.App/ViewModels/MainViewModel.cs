@@ -21,6 +21,7 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly SettingsManager _settingsManager;
     private readonly IServerManager? _serverManager;
     private readonly Dictionary<string, PageViewModel> _pages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Func<PageViewModel>> _pageFactories = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
     public partial PageViewModel CurrentPage { get; set; }
@@ -68,7 +69,9 @@ public sealed partial class MainViewModel : ViewModelBase
         IMinecraftJavaRequirementService? javaRequirementService = null,
         IJavaInstaller? javaInstaller = null,
         IUiService? uiService = null,
-        IAppUpdateService? appUpdateService = null)
+        IAppUpdateService? appUpdateService = null,
+        IModDependencyPlanner? dependencyPlanner = null,
+        IModListExporter? modListExporter = null)
     {
         _ui = uiService ?? NoOpUiService.Instance;
         _settingsManager = settingsManager ?? new SettingsManager();
@@ -85,10 +88,9 @@ public sealed partial class MainViewModel : ViewModelBase
             launcher: launcher,
             navigateCallback: (pageKey, serverName) =>
             {
-                NavigateToPage(pageKey);
+                Navigate(pageKey);
                 if (!string.IsNullOrWhiteSpace(serverName)
-                    && _pages.TryGetValue("manage", out var page)
-                    && page is ManageServerViewModel manageVm)
+                    && GetOrCreatePage("manage") is ManageServerViewModel manageVm)
                 {
                     _ = manageVm.RefreshAndSelectServerAsync(serverName);
                 }
@@ -97,7 +99,9 @@ public sealed partial class MainViewModel : ViewModelBase
             javaInstaller: javaInstaller,
             serverRuntime: serverRuntime,
             uiService: _ui);
-        var manageVm = new ManageServerViewModel(
+
+        _pages["create"] = createVm;
+        _pageFactories["manage"] = () => new ManageServerViewModel(
             _settingsManager,
             serverManager,
             backupService,
@@ -105,15 +109,22 @@ public sealed partial class MainViewModel : ViewModelBase
             null,
             null,
             null,
-            NavigateToPage,
+            Navigate,
             ShowNotification,
             launcher,
             javaDetector,
             javaRequirementService,
             uiService: _ui);
-        var modsVm = new ModsViewModel(serverManager, modManager, modrinthClient, ShowNotification, launcher,
+        _pageFactories["mods"] = () => new ModsViewModel(
+            serverManager,
+            modManager,
+            modrinthClient,
+            ShowNotification,
+            launcher,
+            dependencyPlanner: dependencyPlanner,
+            modListExporter: modListExporter,
             uiService: _ui);
-        var aboutPrefsVm = new AboutPreferencesViewModel(
+        _pageFactories["about_preferences"] = () => new AboutPreferencesViewModel(
             _settingsManager,
             updateChecker,
             SetThemeMode,
@@ -124,16 +135,11 @@ public sealed partial class MainViewModel : ViewModelBase
             uiService: _ui,
             appUpdateService: _appUpdateService);
 
-        _pages["create"] = createVm;
-        _pages["manage"] = manageVm;
-        _pages["mods"] = modsVm;
-        _pages["about_preferences"] = aboutPrefsVm;
         CurrentPage = createVm;
 
         ApplyInitialTheme();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
-
 
     public string PageTitle => CurrentPage.Title;
 
@@ -145,7 +151,31 @@ public sealed partial class MainViewModel : ViewModelBase
 
     public IExternalLauncher? Launcher => _launcher;
 
-    public AboutPreferencesViewModel? AboutPreferences => _pages.TryGetValue("about_preferences", out var p) ? p as AboutPreferencesViewModel : null;
+    public ManageServerViewModel ManageServerPage => (ManageServerViewModel)GetOrCreatePage("manage")!;
+
+    public AboutPreferencesViewModel? AboutPreferences => GetOrCreatePage("about_preferences") as AboutPreferencesViewModel;
+
+    private PageViewModel? GetOrCreatePage(string pageKey)
+    {
+        if (string.IsNullOrWhiteSpace(pageKey))
+        {
+            return null;
+        }
+
+        if (_pages.TryGetValue(pageKey, out var existing))
+        {
+            return existing;
+        }
+
+        if (_pageFactories.TryGetValue(pageKey, out var factory))
+        {
+            var created = factory();
+            _pages[pageKey] = created;
+            return created;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// 啟動時依設定檢查更新，有新版本時觸發 <see cref="UpdateAvailable"/>
@@ -192,7 +222,37 @@ public sealed partial class MainViewModel : ViewModelBase
     public void OpenReleasePage(string url) => _launcher?.OpenUrl(url, isTrusted: true);
 
     [RelayCommand]
-    public void Navigate(string pageKey) => NavigateToPage(pageKey);
+    public void Navigate(string pageKey)
+    {
+        if (string.IsNullOrWhiteSpace(pageKey))
+        {
+            return;
+        }
+
+        _ui.ActivateMainWindow();
+
+        var targetPage = GetOrCreatePage(pageKey);
+        if (targetPage is not null)
+        {
+            CurrentPage = targetPage;
+            OnPropertyChanged(nameof(PageTitle));
+            OnPropertyChanged(nameof(PageSubtitle));
+
+            switch (targetPage)
+            {
+                case ManageServerViewModel manageVm:
+                    _ = manageVm.RefreshServers();
+                    break;
+                case ModsViewModel modsVm:
+                    _ = modsVm.RefreshServersAsync();
+                    break;
+            }
+        }
+        else
+        {
+            ShowNotification($"找不到頁面：{pageKey}", isError: true);
+        }
+    }
 
     [RelayCommand]
     public void ImportServer()
@@ -204,7 +264,7 @@ public sealed partial class MainViewModel : ViewModelBase
             if (_ui.ShowImportServer(vm) == true)
             {
                 ShowNotification("伺服器匯入成功！已更新至伺服器管理清單", false);
-                NavigateToPage("manage");
+                Navigate("manage");
                 if (_pages.TryGetValue("manage", out var page) && page is ManageServerViewModel manageVm)
                 {
                     if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
@@ -224,21 +284,23 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    public async Task OpenServersFolder()
+    public Task OpenServersFolder()
     {
         string path = _settingsManager.GetServersRoot();
         if (string.IsNullOrWhiteSpace(path))
         {
             ShowNotification("尚未設定伺服器資料夾", true);
-            return;
+            return Task.CompletedTask;
         }
 
-        await Task.Run(() => Directory.CreateDirectory(path)).ConfigureAwait(true);
+        Directory.CreateDirectory(path);
 
         if (_launcher is not null && !_launcher.OpenFolder(path, isTrusted: true))
         {
             ShowNotification($"無法開啟資料夾：{path}", true);
         }
+
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -263,7 +325,14 @@ public sealed partial class MainViewModel : ViewModelBase
         NotificationMessage = message;
         IsNotificationError = isError;
         IsNotificationVisible = true;
-        NotificationRequested?.Invoke(isError ? "錯誤" : "提示", message, isError ? NotificationLevel.Error : NotificationLevel.Info);
+        if (isError)
+        {
+            NotificationRequested?.Invoke("錯誤", message, NotificationLevel.Error);
+        }
+        else
+        {
+            _ui.ShowToast(message, "提示", ToastType.Info);
+        }
     }
 
     public void SetThemeMode(string mode) =>
@@ -285,42 +354,26 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    private void NavigateToPage(string pageKey)
-    {
-        if (string.IsNullOrWhiteSpace(pageKey))
-        {
-            return;
-        }
-
-        _ui.ActivateMainWindow();
-
-        if (_pages.TryGetValue(pageKey, out var targetPage))
-        {
-            CurrentPage = targetPage;
-            OnPropertyChanged(nameof(PageTitle));
-            OnPropertyChanged(nameof(PageSubtitle));
-
-            switch (targetPage)
-            {
-                case ManageServerViewModel manageVm:
-                    _ = manageVm.RefreshServers();
-                    break;
-                case ModsViewModel modsVm:
-                    _ = modsVm.RefreshServersAsync();
-                    break;
-            }
-        }
-        else
-        {
-            ShowNotification($"找不到頁面：{pageKey}", isError: true);
-        }
-    }
-
     private void ApplyInitialTheme()
     {
         string themeMode = _settingsManager.GetThemeMode();
         SetThemeMode(themeMode);
     }
 
-    public void UnregisterEvents() => SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+    public void UnregisterEvents()
+    {
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        DisposePages();
+    }
+
+    public void DisposePages()
+    {
+        foreach (var page in _pages.Values)
+        {
+            if (page is IDisposable d)
+            {
+                d.Dispose();
+            }
+        }
+    }
 }

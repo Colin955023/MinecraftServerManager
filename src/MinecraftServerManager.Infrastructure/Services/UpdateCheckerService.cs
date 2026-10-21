@@ -46,10 +46,23 @@ public sealed class DefaultEnvironmentRuntimeInfo : IEnvironmentRuntimeInfo
         }
     }
 
+    private static bool? s_isFrameworkDependent;
+
+    /// <summary>
+    /// 發布時由 App.csproj 寫入 <c>DistributionMode</c> 組件中繼資料；不依賴執行檔檔名，使用者重新命名檔案亦不影響判斷。
+    /// 未標記（如本機開發建置）一律視為框架相依。
+    /// </summary>
     public bool IsCurrentProcessFrameworkDependent()
     {
-        string? processPath = Environment.ProcessPath;
-        return !string.IsNullOrEmpty(processPath) && processPath.Contains("framework-dependent", StringComparison.OrdinalIgnoreCase);
+        if (s_isFrameworkDependent.HasValue)
+        {
+            return s_isFrameworkDependent.Value;
+        }
+
+        string? mode = AppContext.GetData("DistributionMode") as string;
+        bool result = !string.Equals(mode, "self-contained", StringComparison.OrdinalIgnoreCase);
+        s_isFrameworkDependent = result;
+        return result;
     }
 }
 
@@ -60,8 +73,31 @@ public sealed class UpdateCheckerService(
     IHttpPort httpPort,
     IEnvironmentRuntimeInfo? runtimeInfo = null) : IUpdateCheckerService
 {
-    private static readonly Uri LatestReleaseUri = new("https://api.github.com/repos/Colin955023/MinecraftServerManager/releases/latest");
+    private static readonly Uri LatestReleaseUri = BuildLatestReleaseUri();
+    private const string TrustedAssetHost = "github.com";
+    private static readonly string TrustedAssetPathPrefix = BuildTrustedAssetPathPrefix();
+
+    private static Uri BuildLatestReleaseUri()
+    {
+        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
+        return new Uri($"https://api.github.com/repos/{repoPath}/releases/latest");
+    }
+
+    private static string BuildTrustedAssetPathPrefix()
+    {
+        string repoPath = new Uri(AppInfo.RepositoryUrl).AbsolutePath.Trim('/');
+        return $"/{repoPath}/releases/download/";
+    }
     private readonly IEnvironmentRuntimeInfo _runtimeInfo = runtimeInfo ?? new DefaultEnvironmentRuntimeInfo();
+
+    /// <summary>
+    /// 更新資產僅接受本專案 GitHub Release 的 HTTPS 下載位址，避免遭竄改的 API 回應導向其他來源
+    /// </summary>
+    private static bool IsTrustedAssetUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && string.Equals(uri.Host, TrustedAssetHost, StringComparison.OrdinalIgnoreCase)
+        && uri.AbsolutePath.StartsWith(TrustedAssetPathPrefix, StringComparison.Ordinal);
 
     public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {
@@ -109,7 +145,7 @@ public sealed class UpdateCheckerService(
                     string assetName = asset.TryGetProperty("name", out var aName) ? aName.GetString() ?? "" : "";
                     string? assetDownload = asset.TryGetProperty("browser_download_url", out var aUrl) ? aUrl.GetString() : null;
 
-                    if (string.IsNullOrWhiteSpace(assetName) || string.IsNullOrWhiteSpace(assetDownload))
+                    if (string.IsNullOrWhiteSpace(assetName) || string.IsNullOrWhiteSpace(assetDownload) || !IsTrustedAssetUrl(assetDownload))
                     {
                         continue;
                     }

@@ -116,6 +116,88 @@ public sealed class LocalModScannerTests : IDisposable
         Assert.Equal(ModStatus.Enabled, mod.Status);
     }
 
+    [Fact]
+    public async Task ScanModsWithForgeTomlDependenciesShouldExtractMinecraftVersionCorrectly()
+    {
+        string jarPath = Path.Combine(_modsDir, "complex-forge-mod.jar");
+        CreateZipWithEntry(jarPath, "META-INF/mods.toml", $"""
+        modLoader="javafml"
+        loaderVersion="[47,)"
+        [[mods]]
+        modId="complex_mod"
+        version="1.5.0"
+        displayName="§aComplex §eMod"
+        description="A mod with \u001b[31mcolor\u001b[0m"
+
+        [[dependencies.complex_mod]]
+        modId="forge"
+        mandatory=true
+        versionRange="[47.1.0,)"
+
+        [[dependencies.complex_mod]]
+        modId="minecraft"
+        mandatory=true
+        versionRange="[1.20.1, 1.21)"
+        ordering="NONE"
+        side="BOTH"
+        """);
+
+        var persistence = new ModIndexPersistence(_testDir);
+        var scanner = new LocalModScanner(persistence);
+        var mods = await scanner.ScanModsAsync(_modsDir);
+
+        var mod = Assert.Single(mods);
+        Assert.Equal("complex_mod", mod.Id);
+        Assert.Equal("Complex Mod", mod.Name);
+        Assert.Equal("A mod with color", mod.Description);
+        Assert.Equal("1.20.1", mod.MinecraftVersion);
+    }
+
+    [Fact]
+    public async Task ScanModsWithJarInJarShouldExtractNestedMetadata()
+    {
+        string jarPath = Path.Combine(_modsDir, "connector-root.jar");
+        using (var fileStream = new FileStream(jarPath, FileMode.Create))
+        using (var archive = new ZipArchive(fileStream, ZipArchiveMode.Create))
+        {
+            var manifestEntry = archive.CreateEntry("META-INF/MANIFEST.MF");
+            using (var writer = new StreamWriter(manifestEntry.Open(), Encoding.UTF8))
+            {
+                writer.WriteLine("Manifest-Version: 1.0");
+                writer.WriteLine("Jar-In-Jar: META-INF/jarjar/nested-mod.jar");
+            }
+
+            var nestedEntry = archive.CreateEntry("META-INF/jarjar/nested-mod.jar");
+            using (var nestedStream = nestedEntry.Open())
+            using (var nestedArchive = new ZipArchive(nestedStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var fabricEntry = nestedArchive.CreateEntry("fabric.mod.json");
+                using var fabricWriter = new StreamWriter(fabricEntry.Open(), Encoding.UTF8);
+                fabricWriter.Write("""
+                {
+                    "schemaVersion": 1,
+                    "id": "nested_mod",
+                    "version": "1.0.0-beta.1",
+                    "name": "Nested Fabric Mod",
+                    "depends": {
+                        "minecraft": "1.20.1"
+                    }
+                }
+                """);
+            }
+        }
+
+        var persistence = new ModIndexPersistence(_testDir);
+        var scanner = new LocalModScanner(persistence);
+        var mods = await scanner.ScanModsAsync(_modsDir);
+
+        var mod = Assert.Single(mods);
+        Assert.Equal("nested_mod", mod.Id);
+        Assert.Equal("Nested Fabric Mod", mod.Name);
+        Assert.Equal("1.0.0-beta.1", mod.Version);
+        Assert.Equal("1.20.1", mod.MinecraftVersion);
+    }
+
     private static void CreateZipWithEntry(string zipPath, string entryName, string content)
     {
         using var fileStream = new FileStream(zipPath, FileMode.Create);

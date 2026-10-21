@@ -23,18 +23,6 @@ public partial class ServerDeleteConfirmationDialog : Window
     {
         InitializeComponent();
 
-        if (Icon == null)
-        {
-            try
-            {
-                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                    new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
-            }
-            catch
-            {
-            }
-        }
-
         if (backupCount > 0)
         {
             MessageText.Text = $"確定要刪除伺服器「{serverName}」嗎？\n\n⚠️ 這將永久刪除伺服器檔案，無法復原！\n\n偵測到此伺服器有 {backupCount} 個外部備份檔案，是否一併刪除？\n（是：連同備份一併刪除 / 否：只刪除伺服器）";

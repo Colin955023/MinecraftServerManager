@@ -1,8 +1,9 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Globalization;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using LinqExpression = System.Linq.Expressions.Expression;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -12,7 +13,7 @@ namespace MinecraftServerManager.App.Behaviors;
 /// <summary>
 /// 提供 DataGrid 欄位標頭點選時套用 Windows 檔案總管自然排序（Natural Sort）之附加行為
 /// </summary>
-public static partial class DataGridNaturalSortBehavior
+public static class DataGridNaturalSortBehavior
 {
     public static readonly DependencyProperty EnableNaturalSortProperty =
         DependencyProperty.RegisterAttached(
@@ -85,14 +86,11 @@ public static partial class DataGridNaturalSortBehavior
 }
 
 /// <summary>
-/// 比照 Windows 檔案總管 (StrCmpLogicalW) 語意之自然排序比較器
+/// 依據 .NET 10 CompareOptions.NumericOrdering 之自然排序比較器
 /// </summary>
-public sealed partial class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
+public sealed class WindowsNaturalSortComparer(string propertyName, ListSortDirection direction) : IComparer
 {
-    [LibraryImport("shlwapi.dll", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int StrCmpLogicalW(string? psz1, string? psz2);
-
-    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> GetterCache = new();
 
     public int Compare<T>(T? x, T? y) => Compare(x, (object?)y);
 
@@ -157,14 +155,10 @@ public sealed partial class WindowsNaturalSortComparer(string propertyName, List
 
         if (valX is string strX && valY is string strY)
         {
-            try
-            {
-                return StrCmpLogicalW(strX, strY);
-            }
-            catch
-            {
-                return string.Compare(strX, strY, StringComparison.OrdinalIgnoreCase);
-            }
+            return CultureInfo.CurrentCulture.CompareInfo.Compare(
+                strX,
+                strY,
+                CompareOptions.NumericOrdering | CompareOptions.IgnoreCase);
         }
 
         if (valX is IComparable compX)
@@ -181,11 +175,26 @@ public sealed partial class WindowsNaturalSortComparer(string propertyName, List
         return string.Compare(valX.ToString(), valY.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    private static Func<object, object?>? CreateGetter(Type type, string propName)
+    {
+        var prop = type.GetProperty(propName, BindingFlags.Public | BindingFlags.Instance);
+        if (prop is null || !prop.CanRead)
+        {
+            return null;
+        }
+
+        var param = LinqExpression.Parameter(typeof(object), "obj");
+        var castParam = LinqExpression.Convert(param, type);
+        var propAccess = LinqExpression.Property(castParam, prop);
+        var castResult = LinqExpression.Convert(propAccess, typeof(object));
+        return LinqExpression.Lambda<Func<object, object?>>(castResult, param).Compile();
+    }
+
     private static object? GetPropertyValue(object target, string propName)
     {
         var type = target.GetType();
-        var prop = PropertyCache.GetOrAdd((type, propName), static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
-        return prop?.GetValue(target);
+        var getter = GetterCache.GetOrAdd((type, propName), static key => CreateGetter(key.Item1, key.Item2));
+        return getter?.Invoke(target);
     }
 
     private static T? GetPropertyValue<T>(object target, string propName) where T : struct

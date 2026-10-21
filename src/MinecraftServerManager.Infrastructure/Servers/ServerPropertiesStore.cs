@@ -20,10 +20,8 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
             throw new InvalidOperationException("伺服器根目錄尚未設定");
         }
         string stableRoot = SafeFileSystem.ResolveStableDirectory(_serversRoot);
-        string serverDir = Path.Combine(stableRoot, serverName);
-        string stableDir = SafeFileSystem.ResolveStableDirectory(serverDir);
-        string propertiesPath = Path.Combine(stableDir, "server.properties");
-        return SafeFileSystem.ResolveStablePath(propertiesPath);
+        string serverDir = SafeFileSystem.ResolveStableDirectory(Path.Combine(stableRoot, serverName));
+        return SafeFileSystem.ResolveStablePath(Path.Combine(serverDir, "server.properties"));
     }
 
     public async Task<ServerPropertiesSnapshot> ReadAsync(
@@ -66,7 +64,17 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                     Message: "server.properties 檔案過大超過安全上限");
             }
 
-            byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            byte[] bytes;
+            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096, useAsync: true);
+            await using (stream.ConfigureAwait(false))
+            {
+                bytes = new byte[stream.Length];
+                int totalRead = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+                if (totalRead != bytes.Length)
+                {
+                    bytes = bytes[..totalRead];
+                }
+            }
             string revision = HashCalculator.DigestBytes(bytes);
             string text = Encoding.UTF8.GetString(bytes);
             var properties = PropertiesDocumentCodec.Parse(text);

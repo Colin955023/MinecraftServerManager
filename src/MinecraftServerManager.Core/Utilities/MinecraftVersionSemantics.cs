@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace MinecraftServerManager.Core.Utilities;
@@ -28,18 +29,6 @@ public static partial class MinecraftVersionSemantics
     [GeneratedRegex(@"\b([0-9]+\.[0-9]+(?:\.[0-9]+)?)\b", RegexOptions.IgnoreCase)]
     private static partial Regex MinecraftPattern7();
 
-    [GeneratedRegex(@"[+]|-mc|-fabric|-forge|-kotlin|-api|-universal|-common|-b[0-9]*|-beta|-alpha|-snapshot", RegexOptions.IgnoreCase)]
-    private static partial Regex ModVersionCleanPattern();
-
-    [GeneratedRegex(@"\d+")]
-    private static partial Regex DigitsPattern();
-
-    [GeneratedRegex(@"\b(vanilla|official|minecraft server)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex VanillaLoaderPattern();
-
-    [GeneratedRegex(@"\b(fabric|neoforge|forge|quilt)\b", RegexOptions.IgnoreCase)]
-    private static partial Regex KnownLoaderPattern();
-
     [GeneratedRegex(@"^\d+\.\d+(?:\.\d+)*$")]
     private static partial Regex OfficialReleasePattern();
 
@@ -53,8 +42,7 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        string trimmed = version.Trim();
-        return OfficialReleasePattern().IsMatch(trimmed);
+        return OfficialReleasePattern().IsMatch(version.AsSpan().Trim());
     }
 
     private static readonly Regex[] MinecraftVersionPatterns =
@@ -68,8 +56,6 @@ public static partial class MinecraftVersionSemantics
         MinecraftPattern7()
     ];
 
-    private static readonly string[] SubstringLoaders = ["fabric", "quilt", "neoforge"];
-
     /// <summary>
     /// 判斷 Minecraft 版本是否支援 Fabric / Quilt（1.14 以上或快照）
     /// </summary>
@@ -80,10 +66,8 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        string trimmed = minecraftVersion.Trim();
-
         // 明確為舊版 1.0 ~ 1.13.x 則不支援
-        if (VersionValue.TryParse(trimmed, out var parsed))
+        if (VersionValue.TryParse(minecraftVersion, out var parsed))
         {
             if (parsed.Major == 1 && parsed.Minor < 14)
             {
@@ -93,16 +77,6 @@ public static partial class MinecraftVersionSemantics
             {
                 return true;
             }
-        }
-
-        var matches = DigitsPattern().Matches(trimmed);
-        if (matches.Count >= 2 && int.TryParse(matches[0].Value, out int major) && int.TryParse(matches[1].Value, out int minor))
-        {
-            if (major == 1 && minor < 14)
-            {
-                return false;
-            }
-            return true;
         }
 
         // 快照版本或非標準版本格式（如 24w..., 26.3...），預設相容
@@ -119,8 +93,7 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        string trimmed = minecraftVersion.Trim();
-        if (VersionValue.TryParse(trimmed, out var parsed))
+        if (VersionValue.TryParse(minecraftVersion, out var parsed))
         {
             if (parsed.Major > 1)
             {
@@ -129,103 +102,66 @@ public static partial class MinecraftVersionSemantics
 
             if (parsed.Major == 1)
             {
-                if (parsed.Minor > 20)
-                {
-                    return true;
-                }
-
-                if (parsed.Minor == 20 && parsed.Patch >= 1)
-                {
-                    return true;
-                }
+                return parsed.Minor > 20 || (parsed.Minor == 20 && parsed.Patch >= 1);
             }
             return false;
-        }
-
-        var matches = DigitsPattern().Matches(trimmed);
-        if (matches.Count >= 2 && int.TryParse(matches[0].Value, out int major) && int.TryParse(matches[1].Value, out int minor))
-        {
-            if (major > 1)
-            {
-                return true;
-            }
-
-            if (major == 1 && minor > 20)
-            {
-                return true;
-            }
-
-            if (major == 1 && minor == 20 && matches.Count >= 3 && int.TryParse(matches[2].Value, out int patch) && patch >= 1)
-            {
-                return true;
-            }
         }
 
         return false;
     }
 
     /// <summary>
-    /// 將載入器名稱正規化為標準領域值
+    /// 從 NeoForge 座標或版本字串推導對應之 Minecraft 版本（支援 47.x -> 1.20.1、20.x/21.x -> 1.20.x/1.21.x 以及 >= 26.x 新版規範）
     /// </summary>
-    public static string StandardizeLoaderType(string? loaderType, string? loaderVersion = "")
+    public static string? DeriveMinecraftVersionFromNeoForge(string? neoForgeVersion)
     {
-        string normalized = loaderType?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (normalized is "fabric" or "forge" or "quilt" or "neoforge")
+        if (string.IsNullOrWhiteSpace(neoForgeVersion))
         {
-            return normalized;
+            return null;
         }
 
-        if (normalized is "vanilla" or "原版")
+        ReadOnlySpan<char> span = neoForgeVersion.AsSpan().Trim();
+        int dashOrPlus = span.IndexOfAny('-', '+');
+        ReadOnlySpan<char> numericPart = dashOrPlus >= 0 ? span[..dashOrPlus] : span;
+
+        int firstDot = numericPart.IndexOf('.');
+        if (firstDot <= 0)
         {
-            return "vanilla";
+            return null;
         }
 
-        if (normalized is "unknown" or "未知" or "")
+        ReadOnlySpan<char> majorSpan = numericPart[..firstDot];
+        ReadOnlySpan<char> remainder = numericPart[(firstDot + 1)..];
+        int secondDot = remainder.IndexOf('.');
+        if (secondDot < 0)
         {
-            string version = loaderVersion?.Trim().ToLowerInvariant() ?? string.Empty;
-            if (version.Length > 0 && version.Replace(".", string.Empty).All(char.IsAsciiDigit))
-            {
-                return "forge";
-            }
-
-            foreach (string candidate in SubstringLoaders)
-            {
-                if (version.Contains(candidate, StringComparison.OrdinalIgnoreCase))
-                {
-                    return candidate;
-                }
-            }
-
-            return "unknown";
+            return null;
         }
 
-        if (normalized.Contains("vanilla", StringComparison.OrdinalIgnoreCase)
-            || normalized.Contains("official", StringComparison.OrdinalIgnoreCase))
+        ReadOnlySpan<char> minorSpan = remainder[..secondDot];
+        if (!int.TryParse(majorSpan, NumberStyles.None, CultureInfo.InvariantCulture, out int major) ||
+            !int.TryParse(minorSpan, NumberStyles.None, CultureInfo.InvariantCulture, out int minor))
         {
-            return "vanilla";
+            return null;
         }
 
-        return "unknown";
+        if (major == 47)
+        {
+            return "1.20.1";
+        }
+
+        if (major >= 26)
+        {
+            return minor == 0 ? $"{major}.0" : $"{major}.{minor}";
+        }
+
+        if (major >= 20)
+        {
+            return minor == 0 ? $"1.{major}" : $"1.{major}.{minor}";
+        }
+
+        return null;
     }
-
-    /// <summary>
-    /// 清除模組版本字串中的載入器與發行階段字尾
-    /// </summary>
-    public static string CleanModVersion(string? version)
-    {
-        if (string.IsNullOrWhiteSpace(version) || version == "未知")
-        {
-            return version ?? string.Empty;
-        }
-
-        var match = ModVersionCleanPattern().Match(version);
-        string cleaned = match.Success ? version[..match.Index] : version;
-        cleaned = TrailingJunkPattern().Replace(cleaned, string.Empty);
-        return cleaned.Trim();
-    }
-
-    [GeneratedRegex(@"[^\w.]+$")]
-    private static partial Regex TrailingJunkPattern();
 
     /// <summary>
     /// 正規化 Minecraft 版本字串，清除範圍修飾字元或提取有效版本號碼
@@ -267,25 +203,5 @@ public static partial class MinecraftVersionSemantics
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// 從文字辨認受支援的伺服器載入器
-    /// </summary>
-    public static string DetectLoaderFromText(string? text)
-    {
-        string normalized = text?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (VanillaLoaderPattern().IsMatch(normalized))
-        {
-            return "vanilla";
-        }
-
-        var match = KnownLoaderPattern().Match(normalized);
-        if (match.Success)
-        {
-            return match.Groups[1].Value.ToLowerInvariant();
-        }
-
-        return "unknown";
     }
 }

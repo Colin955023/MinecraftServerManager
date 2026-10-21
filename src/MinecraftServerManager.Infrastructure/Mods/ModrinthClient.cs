@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -18,6 +19,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         string? minecraftVersion = null,
         int limit = 20,
         int offset = 0,
+        string index = "relevance",
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -38,7 +40,8 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
         string facetsParam = Uri.EscapeDataString($"[{string.Join(",", facets)}]");
         string queryParam = Uri.EscapeDataString(query ?? string.Empty);
-        string url = $"{BaseUrl}/search?query={queryParam}&facets={facetsParam}&limit={Math.Max(1, Math.Min(100, limit))}&offset={Math.Max(0, offset)}";
+        string indexParam = Uri.EscapeDataString(string.IsNullOrWhiteSpace(index) ? "relevance" : index.Trim());
+        string url = $"{BaseUrl}/search?query={queryParam}&facets={facetsParam}&index={indexParam}&limit={Math.Max(1, Math.Min(100, limit))}&offset={Math.Max(0, offset)}";
 
         string? json = await httpPort.GetTextAsync(new Uri(url), cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(json))
@@ -177,12 +180,6 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         }
     }
 
-    public Task<ModrinthVersionLookupResult?> GetVersionByHashAsync(
-        string hash,
-        string algorithm = "sha512",
-        CancellationToken cancellationToken = default) =>
-        LookupVersionByHashAsync(hash, algorithm, cancellationToken);
-
     public async Task<IReadOnlyDictionary<string, ModrinthVersionLookupResult>> LookupVersionsByHashesAsync(
         IReadOnlyList<string> hashes,
         string algorithm = "sha512",
@@ -201,7 +198,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         foreach (string[] chunk in cleanHashes.Chunk(50))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var payload = new { hashes = chunk, algorithm };
+            var payload = new ModrinthVersionFilesRequest(chunk, algorithm);
             string postJson = JsonCodec.Serialize(payload);
 
             string? responseJson = await httpPort.PostJsonAsync(new Uri($"{BaseUrl}/version_files"), postJson, cancellationToken).ConfigureAwait(false);
@@ -375,3 +372,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         return new OnlineModVersion(id, versionNumber, name, gameVersions, loaders, versionType, datePublished, changelog, files, dependencies, projectId: projectId);
     }
 }
+
+internal sealed record ModrinthVersionFilesRequest(
+    [property: JsonPropertyName("hashes")] IReadOnlyList<string> Hashes,
+    [property: JsonPropertyName("algorithm")] string Algorithm);

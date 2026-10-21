@@ -10,7 +10,7 @@
         MinHeight="700"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Window.Resources>
 
     <DataTemplate DataType="{x:Type vm:CreateServerViewModel}">
@@ -63,23 +63,23 @@
         <!-- 主要導覽項目與操作按鈕 -->
         <StackPanel Grid.Row="1">
           <!-- 主要分頁 -->
-          <Button Command="{Binding NavigateCommand}" CommandParameter="create" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding NavigateCommand}" CommandParameter="create" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconCreateServer}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconCreateServer}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="建立伺服器" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>
 
-          <Button Command="{Binding NavigateCommand}" CommandParameter="manage" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding NavigateCommand}" CommandParameter="manage" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconManageServer}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconManageServer}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="管理伺服器" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>
 
-          <Button Command="{Binding NavigateCommand}" CommandParameter="mods" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding NavigateCommand}" CommandParameter="mods" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconMods}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconMods}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="模組管理" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>
@@ -88,16 +88,16 @@
           <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="8,12,8,12" />
 
           <!-- 操作按鈕 -->
-          <Button Command="{Binding ImportServerCommand}" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding ImportServerCommand}" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconImport}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconImport}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="匯入伺服器" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>
 
-          <Button Command="{Binding OpenServersFolderCommand}" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding OpenServersFolderCommand}" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconFolder}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconFolder}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="開啟資料夾" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>
@@ -106,9 +106,9 @@
         <!-- 底部固定設定項目 -->
         <StackPanel Grid.Row="2">
           <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="8,8,8,12" />
-          <Button Command="{Binding NavigateCommand}" CommandParameter="about_preferences" Style="{DynamicResource NavButtonStyle}">
+          <Button Command="{Binding NavigateCommand}" CommandParameter="about_preferences" Style="{StaticResource NavButtonStyle}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Image Source="{DynamicResource IconAbout}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
+              <Image Source="{StaticResource IconAbout}" Width="18" Height="18" Margin="0,0,12,0" VerticalAlignment="Center" />
               <TextBlock Text="關於與設定" FontSize="14" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
             </StackPanel>
           </Button>

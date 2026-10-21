@@ -1,4 +1,5 @@
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Mods;
 using Xunit;
 
@@ -125,6 +126,21 @@ public sealed class ModFileInstallerTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_modsDir, "fail.jar")));
     }
 
+    [Fact]
+    public async Task InstallRemoteModAsyncConcurrentDownloadsUseIsolatedStagingDirectories()
+    {
+        var installer = new ModFileInstaller(new FakeHttpPort { DelayMilliseconds = 25 });
+
+        ModFileOperationResult[] results = await Task.WhenAll(
+            installer.InstallRemoteModAsync(_modsDir, "https://example.invalid/first.jar", "first.jar"),
+            installer.InstallRemoteModAsync(_modsDir, "https://example.invalid/second.jar", "second.jar"));
+
+        Assert.All(results, static result => Assert.True(result.Completed));
+        Assert.True(File.Exists(Path.Combine(_modsDir, "first.jar")));
+        Assert.True(File.Exists(Path.Combine(_modsDir, "second.jar")));
+        Assert.Empty(Directory.GetDirectories(Path.Combine(_modsDir, ".download_staging")));
+    }
+
     [Theory]
     [InlineData("https://cdn.modrinth.com/data/ABC/versions/1.0.jar", true)]
     [InlineData("https://modrinth.com/mod/sodium", true)]
@@ -144,8 +160,9 @@ public sealed class ModFileInstallerTests : IDisposable
     private sealed class FakeHttpPort : IHttpPort
     {
         public bool ShouldFailDownload { get; set; }
+        public int DelayMilliseconds { get; set; }
 
-        public Task<HttpResult> DownloadAsync(
+        public async Task<HttpResult> DownloadAsync(
             Uri uri,
             string targetPath,
             IProgress<HttpProgress>? progress = null,
@@ -153,13 +170,18 @@ public sealed class ModFileInstallerTests : IDisposable
             string expectedHashAlgorithm = "sha256",
             CancellationToken cancellationToken = default)
         {
+            if (DelayMilliseconds > 0)
+            {
+                await Task.Delay(DelayMilliseconds, cancellationToken);
+            }
+
             if (ShouldFailDownload)
             {
-                return Task.FromResult(new HttpResult(false, "網路連線失敗"));
+                return new HttpResult(false, "網路連線失敗");
             }
 
             File.WriteAllText(targetPath, "downloaded content");
-            return Task.FromResult(new HttpResult(true, null, 18));
+            return new HttpResult(true, null, 18);
         }
 
         public Task<HttpJsonResponse<T>> GetJsonAsync<T>(Uri uri, CancellationToken cancellationToken = default) =>

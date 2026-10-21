@@ -10,6 +10,7 @@ namespace MinecraftServerManager.UnitTests;
 [SuppressMessage("Performance", "CA1848", Justification = "單元測試需驗證 ILogger 擴充方法行為")]
 [SuppressMessage("Performance", "CA1873", Justification = "單元測試需驗證 ILogger 擴充方法行為")]
 [SuppressMessage("Usage", "CA2254", Justification = "單元測試動態提供訊息範本")]
+[Collection("EnvironmentVariableCollection")]
 public sealed class RotatingFileLoggerTests
 {
     [Fact]

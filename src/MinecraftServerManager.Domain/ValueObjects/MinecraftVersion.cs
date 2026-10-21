@@ -22,7 +22,7 @@ public readonly record struct MinecraftVersion
     public static bool TryParse(string? value, out MinecraftVersion version)
     {
         string normalized = value?.Trim() ?? string.Empty;
-        if (normalized.Length == 0)
+        if (normalized.Length == 0 || string.Equals(normalized, "unknown", StringComparison.OrdinalIgnoreCase))
         {
             version = default;
             return false;

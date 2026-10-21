@@ -86,8 +86,6 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
         _sections = ParseSections(OriginalString);
     }
 
-    public static FlexVersion Parse(string? raw) => new(raw);
-
     /// <summary>
     /// 比較兩個模組版本字串之新舊先後關係。
     /// 若 a > b 回傳正數；若 a &lt; b 回傳負數；若相同回傳 0。
@@ -199,18 +197,11 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
             ReadOnlySpan<char> secSpan = span[start..i];
             if (!secSpan.IsEmpty)
             {
-                string val = secSpan.ToString();
                 if (type == SectionType.Numeric)
                 {
-                    // 去除前導零
-                    int firstNonZero = 0;
-                    while (firstNonZero < val.Length && val[firstNonZero] == '0')
-                    {
-                        firstNonZero++;
-                    }
-                    val = val[firstNonZero..];
+                    secSpan = secSpan.TrimStart('0');
                 }
-                sections.Add(new Section(type, val));
+                sections.Add(new Section(type, secSpan.ToString()));
             }
         }
 
@@ -257,6 +248,7 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
         {
             if (section.Type != SectionType.Null)
             {
+                hash.Add(section.Type);
                 hash.Add(section.Value, StringComparer.Ordinal);
             }
         }

@@ -8,24 +8,13 @@ namespace MinecraftServerManager.App.Views;
 public partial class ServerMonitorWindow : Window
 {
     private readonly ServerMonitorViewModel _viewModel;
+    private bool _scrollQueued;
 
     public ServerMonitorWindow(ServerMonitorViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = _viewModel;
-
-        if (Icon == null)
-        {
-            try
-            {
-                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(
-                    new Uri("pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico", UriKind.RelativeOrAbsolute));
-            }
-            catch
-            {
-            }
-        }
 
         if (_viewModel.Logs is INotifyCollectionChanged notify)
         {
@@ -54,10 +43,20 @@ public partial class ServerMonitorWindow : Window
 
     private void OnLogsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (_viewModel.IsAutoScrollEnabled && e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset && LogListBox.Items.Count > 0)
+        if (_viewModel.IsAutoScrollEnabled &&
+            e.Action is NotifyCollectionChangedAction.Add or NotifyCollectionChangedAction.Reset &&
+            LogListBox.Items.Count > 0 &&
+            !_scrollQueued)
         {
+            _scrollQueued = true;
             Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
             {
+                _scrollQueued = false;
+                if (!_viewModel.IsAutoScrollEnabled || LogListBox.Items.Count == 0)
+                {
+                    return;
+                }
+
                 var sv = GetLogScrollViewer();
                 if (sv != null)
                 {

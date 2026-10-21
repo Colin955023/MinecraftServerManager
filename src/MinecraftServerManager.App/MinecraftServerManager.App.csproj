@@ -2,21 +2,27 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
-    <AssemblyName>MinecraftServerManager.App</AssemblyName>
-    <RootNamespace>MinecraftServerManager.App</RootNamespace>
-    <RepoRootDir Condition="'$(RepoRootDir)' == '' and Exists('$(MSBuildProjectDirectory)\..\..\..\assets\icon.ico')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..'))</RepoRootDir>
-    <RepoRootDir Condition="'$(RepoRootDir)' == '' and Exists('$(MSBuildProjectDirectory)\..\..\assets\icon.ico')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..'))</RepoRootDir>
-    <ApplicationIcon>$(RepoRootDir)\assets\icon.ico</ApplicationIcon>
-    <Version>2.0.0</Version>
-    <AssemblyVersion>2.0.0.0</AssemblyVersion>
-    <FileVersion>2.0.0.0</FileVersion>
+    <ApplicationIcon>$(RepoRoot)assets\icon.ico</ApplicationIcon>
+    <Version>2.1.0</Version>
+    <AssemblyVersion>2.1.0.0</AssemblyVersion>
+    <FileVersion>2.1.0.0</FileVersion>
     <Product>Minecraft Server Manager</Product>
     <Company>Colin955023</Company>
     <Copyright>GPL-3.0 License</Copyright>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SatelliteResourceLanguages>zh-Hant;en</SatelliteResourceLanguages>
   </PropertyGroup>
   <ItemGroup>
-    <Resource Include="$(RepoRootDir)\assets\icon.ico" Link="assets\icon.ico" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>DistributionMode</_Parameter1>
+      <_Parameter2 Condition="'$(SelfContained)' == 'true'">self-contained</_Parameter2>
+      <_Parameter2 Condition="'$(SelfContained)' != 'true'">framework-dependent</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <PropertyGroup Condition="'$(SelfContained)' == 'true'">
+    <DefineConstants>$(DefineConstants);SELF_CONTAINED</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="$(RepoRoot)assets\icon.ico" Link="assets\icon.ico" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" />

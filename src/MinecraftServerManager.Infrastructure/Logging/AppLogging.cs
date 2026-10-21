@@ -8,7 +8,6 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 public static class AppLogging
 {
     private static readonly Lock SyncRoot = new();
-    private static ILoggerFactory? _loggerFactory;
     private static RotatingFileLoggerProvider? _fileLoggerProvider;
     private static LoggerExternalScopeProvider? _scopeProvider;
 
@@ -19,7 +18,7 @@ public static class AppLogging
     {
         lock (SyncRoot)
         {
-            if (_loggerFactory is not null)
+            if (_fileLoggerProvider is not null)
             {
                 return;
             }
@@ -29,12 +28,6 @@ public static class AppLogging
             _scopeProvider = new LoggerExternalScopeProvider();
             _fileLoggerProvider = new RotatingFileLoggerProvider(options);
             _fileLoggerProvider.SetScopeProvider(_scopeProvider);
-
-            _loggerFactory = LoggerFactory.Create(builder =>
-            {
-                builder.SetMinimumLevel(options.MinimumLevel);
-                builder.AddProvider(_fileLoggerProvider);
-            });
         }
     }
 
@@ -47,19 +40,7 @@ public static class AppLogging
         lock (SyncRoot)
         {
             EnsureInitialized();
-            return _loggerFactory!.CreateLogger(categoryName);
-        }
-    }
-
-    /// <summary>
-    /// 取得指定泛型型別之 ILogger
-    /// </summary>
-    public static ILogger<T> CreateLogger<T>()
-    {
-        lock (SyncRoot)
-        {
-            EnsureInitialized();
-            return _loggerFactory!.CreateLogger<T>();
+            return _fileLoggerProvider!.CreateLogger(categoryName);
         }
     }
 
@@ -69,7 +50,7 @@ public static class AppLogging
     public static ComponentLogger CreateComponentLogger(string componentName)
     {
         var logger = CreateLogger(componentName);
-        return new ComponentLogger(logger).Bind("component", componentName);
+        return new ComponentLogger(logger);
     }
 
     /// <summary>
@@ -81,12 +62,10 @@ public static class AppLogging
         {
             try
             {
-                _loggerFactory?.Dispose();
                 _fileLoggerProvider?.Dispose();
             }
             finally
             {
-                _loggerFactory = null;
                 _fileLoggerProvider = null;
                 _scopeProvider = null;
             }
@@ -95,15 +74,9 @@ public static class AppLogging
 
     private static void EnsureInitialized()
     {
-        if (_loggerFactory is null)
+        if (_fileLoggerProvider is null)
         {
-            lock (SyncRoot)
-            {
-                if (_loggerFactory is null)
-                {
-                    Initialize();
-                }
-            }
+            Initialize();
         }
     }
 }

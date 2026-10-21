@@ -38,16 +38,7 @@ public interface IOperationProgress
 {
     public void UpdateProgress(int current, int total, string message);
 
-    public void UpdateMessage(string message);
-
     public void Close();
-}
-
-/// <summary>
-/// 模組作業進度視窗控制點
-/// </summary>
-public interface IModOperationProgress : IOperationProgress
-{
 }
 
 /// <summary>
@@ -70,13 +61,14 @@ public interface IUiService
 {
     public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question);
 
-    public void ShowInfo(string message, string title);
+    /// <summary>
+    /// 於螢幕右下角顯示非阻塞式浮動提示（Toast），自動淡出
+    /// </summary>
+    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3);
 
     public void ShowWarning(string message, string title);
 
     public void ShowError(string message, string title);
-
-    public void ShowNotificationPopup(string title, string message, NotificationLevel level);
 
     public void CopyToClipboard(string text);
 
@@ -84,6 +76,11 @@ public interface IUiService
     /// 將主視窗還原並帶到前景
     /// </summary>
     public void ActivateMainWindow();
+
+    /// <summary>
+    /// 關閉應用程式並指定結束代碼
+    /// </summary>
+    public void ShutdownApplication(int exitCode = 0);
 
     /// <summary>
     /// 以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行
@@ -114,6 +111,8 @@ public interface IUiService
     public bool? ShowJvmArgs(JvmArgsViewModel viewModel);
 
     public bool? ShowServerProperties(ServerPropertiesViewModel viewModel);
+
+    public bool? ShowPlayerManagement(PlayerManagementViewModel viewModel);
 
     public bool? ShowRestoreBackup(RestoreBackupViewModel viewModel);
 
@@ -147,6 +146,5 @@ public interface IUiService
 
     public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName);
 
-    public IModOperationProgress ShowModOperationProgress(string title, string initialMessage);
-    public IOperationProgress ShowOperationProgress(string title, string initialMessage);
+    public IOperationProgress ShowModOperationProgress(string title, string initialMessage);
 }

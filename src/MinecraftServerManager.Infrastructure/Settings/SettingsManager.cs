@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Infrastructure.FileSystem;
@@ -7,11 +8,11 @@ namespace MinecraftServerManager.Infrastructure.Settings;
 
 public sealed class SettingsManager
 {
-    private const string UserDataEnvironmentVariable = "MSM_USER_DATA_DIR";
-    private static readonly string[] ValidThemeModes = ["system", "light", "dark"];
+    private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.ToFrozenSet(["system", "light", "dark"], StringComparer.Ordinal);
     private static readonly JsonSerializerOptions ReadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
+        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
     };
 
     private readonly Lock _syncRoot = new();
@@ -212,7 +213,10 @@ public sealed class SettingsManager
         {
             var loaded = result.Document.RootElement.Deserialize<UserSettings>(ReadOptions);
             var normalized = NormalizeSettings(loaded ?? new UserSettings());
-            Save(normalized);
+            if (loaded != normalized)
+            {
+                Save(normalized);
+            }
             return normalized;
         }
         catch (JsonException)
@@ -255,20 +259,16 @@ public sealed class SettingsManager
     private static string NormalizeThemeMode(string? mode)
     {
         string normalized = (mode ?? "system").Trim().ToLowerInvariant();
-        return ValidThemeModes.Contains(normalized, StringComparer.Ordinal) ? normalized : "system";
+        return ValidThemeModes.Contains(normalized) ? normalized : "system";
     }
 
     private static string ResolveUserDataDirectory(string? userDataDirectory)
     {
-        string? configured = string.IsNullOrWhiteSpace(userDataDirectory)
-            ? Environment.GetEnvironmentVariable(UserDataEnvironmentVariable)
-            : userDataDirectory;
-        if (!string.IsNullOrWhiteSpace(configured))
+        if (!string.IsNullOrWhiteSpace(userDataDirectory))
         {
-            return Path.GetFullPath(configured);
+            return Path.GetFullPath(userDataDirectory);
         }
 
-        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(localAppData, "Programs", "MinecraftServerManager");
+        return RuntimePaths.GetUserDataDir();
     }
 }

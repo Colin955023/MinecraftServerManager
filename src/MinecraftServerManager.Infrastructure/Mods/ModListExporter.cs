@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -16,7 +18,12 @@ public sealed class ModListExporter : IModListExporter
 {
     private const string EmptyPlaceholder = "-";
     private const string SheetName = "模組列表";
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
+    };
     private static readonly string[] XlsxHeaders =
         ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
 
@@ -48,25 +55,24 @@ public sealed class ModListExporter : IModListExporter
         await File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
     }
 
-    private static string Clean(string value) => value == EmptyPlaceholder ? string.Empty : value;
-
-    private static string Encode(string value) => WebUtility.HtmlEncode(value);
+    private static string Clean(string value) =>
+        value == EmptyPlaceholder ? string.Empty : ModHelpers.StripColorAndFormattingCodes(value);
 
     private static string BuildJson(IReadOnlyList<ModListExportRow> rows)
     {
         List<ModJsonItem> items = [.. rows
             .Select(static m => new ModJsonItem(
-                Name: m.Name,
-                Version: m.Version,
+                Name: ModHelpers.StripColorAndFormattingCodes(m.Name),
+                Version: ModHelpers.StripColorAndFormattingCodes(m.Version),
                 Enabled: m.IsEnabled,
                 MinecraftVersion: Clean(m.MinecraftVersion),
                 LoaderType: Clean(m.LoaderType),
                 Author: Clean(m.Author),
-                FileName: m.FileName,
-                Id: m.Id,
+                FileName: ModHelpers.StripColorAndFormattingCodes(m.FileName),
+                Id: ModHelpers.StripColorAndFormattingCodes(m.Id),
                 FileSize: Clean(m.FileSize),
                 ModifiedTime: Clean(m.ModifiedTime),
-                Description: m.Description))];
+                Description: ModHelpers.StripColorAndFormattingCodes(m.Description)))];
 
         return JsonSerializer.Serialize(items, JsonOptions);
     }
@@ -87,7 +93,7 @@ public sealed class ModListExporter : IModListExporter
         {
             string statusIcon = m.IsEnabled ? "✅ 啟用" : "❌ 停用";
             sb.AppendLine(CultureInfo.InvariantCulture,
-                $"<tr><td>{statusIcon}</td><td>{Encode(m.Name)}</td><td>{Encode(m.Version)}</td><td>{Encode(Clean(m.MinecraftVersion))}</td><td>{Encode(Clean(m.LoaderType))}</td><td>{Encode(Clean(m.Author))}</td><td>{Encode(m.FileName)}</td><td>{Encode(m.Id)}</td><td>{Encode(Clean(m.FileSize))}</td><td>{Encode(Clean(m.ModifiedTime))}</td><td>{Encode(m.Description)}</td></tr>");
+                $"<tr><td>{statusIcon}</td><td>{WebUtility.HtmlEncode(ModHelpers.StripColorAndFormattingCodes(m.Name))}</td><td>{WebUtility.HtmlEncode(ModHelpers.StripColorAndFormattingCodes(m.Version))}</td><td>{WebUtility.HtmlEncode(Clean(m.MinecraftVersion))}</td><td>{WebUtility.HtmlEncode(Clean(m.LoaderType))}</td><td>{WebUtility.HtmlEncode(Clean(m.Author))}</td><td>{WebUtility.HtmlEncode(ModHelpers.StripColorAndFormattingCodes(m.FileName))}</td><td>{WebUtility.HtmlEncode(ModHelpers.StripColorAndFormattingCodes(m.Id))}</td><td>{WebUtility.HtmlEncode(Clean(m.FileSize))}</td><td>{WebUtility.HtmlEncode(Clean(m.ModifiedTime))}</td><td>{WebUtility.HtmlEncode(ModHelpers.StripColorAndFormattingCodes(m.Description))}</td></tr>");
         }
 
         sb.AppendLine("</table></body></html>");
@@ -101,20 +107,36 @@ public sealed class ModListExporter : IModListExporter
         {
             table.Add([
                 m.IsEnabled ? "是" : "否",
-                m.Name,
-                m.Version,
-                Clean(m.MinecraftVersion),
-                Clean(m.LoaderType),
-                Clean(m.Author),
-                m.FileName,
-                m.Id,
+                SanitizeSpreadsheetFormula(ModHelpers.StripColorAndFormattingCodes(m.Name)),
+                SanitizeSpreadsheetFormula(ModHelpers.StripColorAndFormattingCodes(m.Version)),
+                SanitizeSpreadsheetFormula(Clean(m.MinecraftVersion)),
+                SanitizeSpreadsheetFormula(Clean(m.LoaderType)),
+                SanitizeSpreadsheetFormula(Clean(m.Author)),
+                SanitizeSpreadsheetFormula(ModHelpers.StripColorAndFormattingCodes(m.FileName)),
+                SanitizeSpreadsheetFormula(ModHelpers.StripColorAndFormattingCodes(m.Id)),
                 Clean(m.FileSize),
                 Clean(m.ModifiedTime),
-                m.Description,
+                SanitizeSpreadsheetFormula(ModHelpers.StripColorAndFormattingCodes(m.Description)),
             ]);
         }
 
         return OpenXmlSpreadsheetBuilder.BuildWorkbook(SheetName, table);
+    }
+
+    private static string SanitizeSpreadsheetFormula(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        char first = value[0];
+        if (first is '=' or '+' or '-' or '@' or '\t' or '\r')
+        {
+            return "'" + value;
+        }
+
+        return value;
     }
 
     private static string BuildText(IReadOnlyList<ModListExportRow> rows)
@@ -128,22 +150,22 @@ public sealed class ModListExporter : IModListExporter
             string statusIcon = m.IsEnabled ? "✅" : "❌";
             string author = Clean(m.Author);
             string authorPart = !string.IsNullOrWhiteSpace(author) ? $" - by {author}" : string.Empty;
-            sb.AppendLine(CultureInfo.InvariantCulture, $"{statusIcon} {m.Name} ({m.Version}){authorPart}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{statusIcon} {ModHelpers.StripColorAndFormattingCodes(m.Name)} ({ModHelpers.StripColorAndFormattingCodes(m.Version)}){authorPart}");
         }
 
         return sb.ToString();
     }
-
-    private sealed record ModJsonItem(
-        [property: JsonPropertyName("name")] string Name,
-        [property: JsonPropertyName("version")] string Version,
-        [property: JsonPropertyName("enabled")] bool Enabled,
-        [property: JsonPropertyName("minecraftVersion")] string MinecraftVersion,
-        [property: JsonPropertyName("loaderType")] string LoaderType,
-        [property: JsonPropertyName("author")] string Author,
-        [property: JsonPropertyName("filename")] string FileName,
-        [property: JsonPropertyName("id")] string Id,
-        [property: JsonPropertyName("fileSize")] string FileSize,
-        [property: JsonPropertyName("modifiedTime")] string ModifiedTime,
-        [property: JsonPropertyName("description")] string Description);
 }
+
+internal sealed record ModJsonItem(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("version")] string Version,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("minecraftVersion")] string MinecraftVersion,
+    [property: JsonPropertyName("loaderType")] string LoaderType,
+    [property: JsonPropertyName("author")] string Author,
+    [property: JsonPropertyName("filename")] string FileName,
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("fileSize")] string FileSize,
+    [property: JsonPropertyName("modifiedTime")] string ModifiedTime,
+    [property: JsonPropertyName("description")] string Description);

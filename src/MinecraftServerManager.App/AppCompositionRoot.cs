@@ -1,4 +1,3 @@
-using System.IO;
 using System.Net;
 using System.Net.Http;
 using MinecraftServerManager.App.ViewModels;
@@ -28,18 +27,12 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     private readonly ServerRuntime _sharedServerRuntime;
     private readonly SettingsManager _settingsManager;
     private readonly JavaRuntimeDetector _javaDetector;
-    private readonly MinecraftJavaRequirementService _javaRequirements;
     private readonly LoaderCatalogService _loaderCatalog;
-    private readonly UpdateCheckerService? _updateCheckerService;
     private readonly MainViewModel _mainViewModel;
 
     public MainViewModel MainViewModel => _mainViewModel;
     public SettingsManager Settings => _settingsManager;
-    public ServerRuntime ServerRuntime => _sharedServerRuntime;
-
-    public AppCompositionRoot() : this(ResolveInitialServersRoot(new SettingsManager()))
-    {
-    }
+    public bool IsServerRunning => _sharedServerRuntime.IsRunning;
 
     public AppCompositionRoot(string serversRoot, SettingsManager? settingsManager = null)
     {
@@ -50,6 +43,7 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = DecompressionMethods.All,
             AllowAutoRedirect = false,
+            ConnectCallback = HttpUrlPolicy.ConnectAsync,
         };
         _sharedHttpClient = new HttpClient(_httpHandler, disposeHandler: false);
         _sharedProcessRunner = new ProcessRunner();
@@ -59,21 +53,23 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         _javaDetector = new JavaRuntimeDetector(_sharedProcessRunner);
         var javaInstaller = new JavaWingetInstaller(_sharedProcessRunner);
         var httpPort = new HttpDownloadClient(_sharedHttpClient);
-        _javaRequirements = new MinecraftJavaRequirementService(httpPort, RuntimePaths.GetVersionCacheDir());
+        var javaRequirements = new MinecraftJavaRequirementService(httpPort, RuntimePaths.GetVersionCacheDir());
         _loaderCatalog = new LoaderCatalogService(httpPort, RuntimePaths.GetVersionCacheDir());
         var loaderInstaller = new LoaderInstallerService(httpPort, _sharedProcessRunner, RuntimePaths.GetInstallerCacheDir());
         var serverManager = new ServerManager(
             serversRoot,
             loaderInstaller: loaderInstaller,
             javaDetector: _javaDetector,
-            javaRequirementService: _javaRequirements);
+            javaRequirementService: javaRequirements);
         var backupService = new ServerBackupService(serversRoot);
 
         var modScanner = new LocalModScanner();
         var modInstaller = new ModFileInstaller(httpPort);
         var modManager = new ModManager(modScanner, modInstaller);
         var modrinthClient = new ModrinthClient(httpPort);
-        _updateCheckerService = new UpdateCheckerService(httpPort);
+        var dependencyPlanner = new ModDependencyPlanner();
+        var modListExporter = new ModListExporter();
+        var updateCheckerService = new UpdateCheckerService(httpPort);
         var appUpdateService = new AppUpdateService(httpPort);
 
         var uiService = new Services.WpfUiService();
@@ -87,34 +83,18 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             _loaderCatalog,
             modManager,
             modrinthClient,
-            _updateCheckerService,
+            updateCheckerService,
             _sharedProcessRunner,
-            _javaRequirements,
+            javaRequirements,
             javaInstaller,
             uiService: uiService,
-            appUpdateService: appUpdateService);
-    }
-
-    private static string ResolveInitialServersRoot(SettingsManager settings)
-    {
-        string configured = settings.GetServersRoot();
-        if (string.IsNullOrWhiteSpace(configured))
-        {
-            return Path.Combine(RuntimePaths.GetUserDataDir(), "servers");
-        }
-
-        try
-        {
-            return settings.GetValidatedServersRootPath(create: true);
-        }
-        catch
-        {
-            return Path.Combine(RuntimePaths.GetUserDataDir(), "servers");
-        }
+            appUpdateService: appUpdateService,
+            dependencyPlanner: dependencyPlanner,
+            modListExporter: modListExporter);
     }
 
     /// <summary>
-    /// 啟動背景非同步預熱任務（Java 探測、版本需求、載入器目錄與 Paper 版本清單）
+    /// 啟動背景非同步預熱任務（Java 探測與載入器目錄清單）
     /// </summary>
     public void StartBackgroundWarmup()
     {
@@ -137,17 +117,15 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     public async Task WarmupAsync()
     {
         var detectTask = _javaDetector.DetectAsync();
-        var reqTask = _javaRequirements.PreloadAllJavaRequirementsAsync();
-        var mcTask = _loaderCatalog.GetMinecraftVersionsAsync();
-        var paperTask = _loaderCatalog.GetPaperMinecraftVersionsAsync();
-        var loadersTask = _loaderCatalog.ForceReloadAllLoadersAsync();
+        var loadersTask = _loaderCatalog.WarmupLoadersAsync();
 
-        await Task.WhenAll(detectTask, reqTask, mcTask, paperTask, loadersTask).ConfigureAwait(false);
-        Logger.Information("啟動背景預熱完成 (Java 候選、官方與 Paper Java 需求、Minecraft 版本與各載入器清單)");
+        await Task.WhenAll(detectTask, loadersTask).ConfigureAwait(false);
+        Logger.Information("啟動背景預熱完成 (Java 候選與各載入器清單)");
     }
 
     public async ValueTask DisposeAsync()
     {
+        _mainViewModel.DisposePages();
         _sharedHttpClient.Dispose();
         _httpHandler.Dispose();
         await _sharedServerRuntime.DisposeAsync().ConfigureAwait(false);

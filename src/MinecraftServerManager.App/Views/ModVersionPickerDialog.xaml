@@ -8,7 +8,7 @@
         MinHeight="420"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -38,11 +38,11 @@
                 HeadersVisibility="Column"
                 RowHeaderWidth="0">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="版本號碼" Binding="{Binding VersionNumber}" Width="180" />
-          <DataGridTextColumn Header="支援 MC" Binding="{Binding GameVersions}" Width="160" />
-          <DataGridTextColumn Header="載入器" Binding="{Binding Loaders}" Width="120" />
-          <DataGridTextColumn Header="發布時間" Binding="{Binding DatePublished}" Width="140" />
-          <DataGridTextColumn Header="檔案" Binding="{Binding FileName}" Width="*" />
+          <DataGridTextColumn Header="版本號碼" Binding="{Binding VersionNumber, Mode=OneTime}" Width="180" />
+          <DataGridTextColumn Header="支援 MC" Binding="{Binding GameVersions, Mode=OneTime}" Width="160" />
+          <DataGridTextColumn Header="載入器" Binding="{Binding Loaders, Mode=OneTime}" Width="120" />
+          <DataGridTextColumn Header="發布時間" Binding="{Binding DatePublished, Mode=OneTime}" Width="140" />
+          <DataGridTextColumn Header="檔案" Binding="{Binding FileName, Mode=OneTime}" Width="*" />
         </DataGrid.Columns>
       </DataGrid>
     </Border>

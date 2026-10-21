@@ -125,7 +125,7 @@
             <StackPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Top">
               <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                 <TextBox Width="150"
-                         Text="{Binding LocalSearchText, UpdateSourceTrigger=PropertyChanged}"
+                         Text="{Binding LocalSearchText, UpdateSourceTrigger=PropertyChanged, Delay=200}"
                          Height="30"
                          VerticalContentAlignment="Center"
                          Margin="0,0,8,0" />
@@ -159,6 +159,8 @@
                       SelectedIndex="-1"
                       SelectionMode="Extended"
                       AutoGenerateColumns="False"
+                      EnableRowVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
                       HeadersVisibility="Column"
                       CanUserResizeColumns="True"
                       SelectionChanged="LocalModsGrid_SelectionChanged">
@@ -187,14 +189,14 @@
                     </DataTemplate>
                   </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="模組名稱" Binding="{Binding Name}" Width="200" IsReadOnly="True" />
-                <DataGridTextColumn Header="版本" Binding="{Binding Version}" Width="110" IsReadOnly="True" />
-                <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="120" IsReadOnly="True" />
-                <DataGridTextColumn Header="載入器" Binding="{Binding LoaderType}" Width="90" IsReadOnly="True" />
-                <DataGridTextColumn Header="來源平台" Binding="{Binding SourcePlatform}" Width="95" IsReadOnly="True" />
-                <DataGridTextColumn Header="檔案大小" Binding="{Binding FileSize}" Width="100" IsReadOnly="True" />
-                <DataGridTextColumn Header="修改時間" Binding="{Binding ModifiedTime}" Width="140" IsReadOnly="True" />
-                <DataGridTextColumn Header="描述" Binding="{Binding Description}" Width="*" IsReadOnly="True" />
+                <DataGridTextColumn Header="模組名稱" Binding="{Binding Name, Mode=OneTime}" Width="200" IsReadOnly="True" />
+                <DataGridTextColumn Header="版本" Binding="{Binding Version, Mode=OneTime}" Width="110" IsReadOnly="True" />
+                <DataGridTextColumn Header="作者" Binding="{Binding Author, Mode=OneTime}" Width="120" IsReadOnly="True" />
+                <DataGridTextColumn Header="載入器" Binding="{Binding LoaderType, Mode=OneTime}" Width="90" IsReadOnly="True" />
+                <DataGridTextColumn Header="來源平台" Binding="{Binding SourcePlatform, Mode=OneTime}" Width="95" IsReadOnly="True" />
+                <DataGridTextColumn Header="檔案大小" Binding="{Binding FileSize, Mode=OneTime}" Width="100" IsReadOnly="True" />
+                <DataGridTextColumn Header="修改時間" Binding="{Binding ModifiedTime, Mode=OneTime}" Width="140" IsReadOnly="True" />
+                <DataGridTextColumn Header="描述" Binding="{Binding Description, Mode=OneTime}" Width="*" IsReadOnly="True" />
               </DataGrid.Columns>
             </DataGrid>
           </Border>
@@ -246,7 +248,7 @@
               <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TextBox Grid.Column="0"
-                     Text="{Binding OnlineSearchText, UpdateSourceTrigger=PropertyChanged}"
+                     Text="{Binding OnlineSearchText, UpdateSourceTrigger=PropertyChanged, Delay=250}"
                      Height="32"
                      VerticalContentAlignment="Center"
                      Margin="0,0,10,0">
@@ -327,14 +329,16 @@
                       HeadersVisibility="Column"
                       CanUserResizeColumns="True"
                       IsReadOnly="True"
+                      EnableRowVirtualization="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
                       SelectionMode="Single"
                       MouseDoubleClick="OnlineModsGrid_MouseDoubleClick">
               <DataGrid.Columns>
-                <DataGridTextColumn Header="模組名稱" Binding="{Binding Title}" Width="220" />
-                <DataGridTextColumn Header="作者" Binding="{Binding Author}" Width="120" />
-                <DataGridTextColumn Header="下載量" Binding="{Binding Downloads}" Width="100" />
-                <DataGridTextColumn Header="最新版本" Binding="{Binding LatestVersion}" Width="120" />
-                <DataGridTextColumn Header="簡介" Binding="{Binding Description}" Width="*" />
+                <DataGridTextColumn Header="模組名稱" Binding="{Binding Title, Mode=OneTime}" Width="220" />
+                <DataGridTextColumn Header="作者" Binding="{Binding Author, Mode=OneTime}" Width="120" />
+                <DataGridTextColumn Header="下載量" Binding="{Binding Downloads, Mode=OneTime}" Width="100" />
+                <DataGridTextColumn Header="最新版本" Binding="{Binding LatestVersion, Mode=OneTime}" Width="120" />
+                <DataGridTextColumn Header="簡介" Binding="{Binding Description, Mode=OneTime}" Width="*" />
               </DataGrid.Columns>
             </DataGrid>
           </Border>

@@ -5,6 +5,77 @@ namespace MinecraftServerManager.Infrastructure.Http;
 
 public static class HttpUrlPolicy
 {
+    public static async ValueTask<Stream> ConnectAsync(
+        SocketsHttpConnectionContext context,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return await ConnectAsync(context.DnsEndPoint, resolver: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async ValueTask<Stream> ConnectAsync(
+        DnsEndPoint endpoint,
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolver,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        string host = endpoint.Host.TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(host)
+            || host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Port is < 1 or > 65535)
+        {
+            throw new HttpSecurityException("連線目標無效或不安全");
+        }
+
+        IPAddress[] addresses;
+        if (IPAddress.TryParse(host, out var literal))
+        {
+            addresses = [literal];
+        }
+        else
+        {
+            Func<string, CancellationToken, Task<IPAddress[]>> resolve = resolver
+                ?? (static (name, token) => Dns.GetHostAddressesAsync(name, token));
+            try
+            {
+                addresses = await resolve(host, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SocketException exception)
+            {
+                throw new HttpSecurityException("URL hostname 無法解析", exception);
+            }
+        }
+
+        if (addresses.Length == 0 || addresses.Any(static address => !IsPublicAddress(address)))
+        {
+            throw new HttpSecurityException("URL hostname 解析至非公開位址");
+        }
+
+        SocketException? lastException = null;
+        foreach (IPAddress address in addresses)
+        {
+            var socket = (Socket?)new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                await socket!.ConnectAsync(new IPEndPoint(address, endpoint.Port), cancellationToken).ConfigureAwait(false);
+                var stream = new NetworkStream(socket, ownsSocket: true);
+                socket = null;
+                return stream;
+            }
+            catch (SocketException exception)
+            {
+                lastException = exception;
+            }
+            finally
+            {
+                socket?.Dispose();
+            }
+        }
+
+        throw new HttpRequestException("無法連線至已驗證的公開主機", lastException);
+    }
+
     public static void ValidateStatic(Uri uri)
     {
         ArgumentNullException.ThrowIfNull(uri);
@@ -110,6 +181,17 @@ public static class HttpUrlPolicy
         {
             var ipv4 = new IPAddress(span.Slice(12, 4));
             return IsPublicAddress(ipv4);
+        }
+
+        // 6to4（2002::/16）與 NAT64（64:ff9b::/96）內嵌 IPv4，需以內嵌位址判定是否為公開位址
+        if (span[0] == 0x20 && span[1] == 0x02)
+        {
+            return IsPublicAddress(new IPAddress(span.Slice(2, 4)));
+        }
+
+        if (span[0] == 0x00 && span[1] == 0x64 && span[2] == 0xFF && span[3] == 0x9B && span[4..12].IndexOfAnyExcept((byte)0) < 0)
+        {
+            return IsPublicAddress(new IPAddress(span.Slice(12, 4)));
         }
 
         return !normalized.IsIPv6LinkLocal

@@ -1,5 +1,5 @@
+using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.App.Services;
-using System.Collections.ObjectModel;
 using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -63,8 +63,8 @@ public sealed partial class ManageJavaViewModel : ObservableObject
     [ObservableProperty]
     public partial string StatusMessage { get; set; } = string.Empty;
 
-    public ObservableCollection<JavaItemViewModel> InstalledJavas { get; } = [];
-    public ObservableCollection<int> AvailableInstallMajors { get; } = [];
+    public BulkObservableCollection<JavaItemViewModel> InstalledJavas { get; } = [];
+    public BulkObservableCollection<int> AvailableInstallMajors { get; } = [];
 
     public string? ResultJavaPath { get; private set; }
 
@@ -93,10 +93,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
             : "未限定 (依需求選擇)";
 
         var majors = _javaRequirementService?.GetCachedAvailableJavaMajors() ?? [];
-        foreach (int m in majors)
-        {
-            AvailableInstallMajors.Add(m);
-        }
+        AvailableInstallMajors.ReplaceAll(majors);
 
         SelectedInstallMajor = RequiredMajor.HasValue && AvailableInstallMajors.Contains(RequiredMajor.Value)
             ? RequiredMajor.Value
@@ -183,9 +180,10 @@ public sealed partial class ManageJavaViewModel : ObservableObject
             {
                 SelectedJava = existing;
                 StatusMessage = $"本機已有可使用的 Java {targetMajor}，已自動選取：{existing.ExecutablePath}";
-                _ui.ShowInfo(
+                _ui.ShowToast(
                     $"本機已偵測到可使用的 Java {targetMajor}！\n\n路徑：{existing.ExecutablePath}\n廠商：{existing.Vendor}\n\n系統已為您自動選取該版本，無需重複安裝。",
-                    "本機已有可用版本");
+                    "本機已有可用版本",
+                    ToastType.Info);
                 return;
             }
 
@@ -267,8 +265,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
         try
         {
             var detected = await _javaDetector.DetectAsync(forceRefresh).ConfigureAwait(true);
-            InstalledJavas.Clear();
-
+            var items = new List<JavaItemViewModel>();
             JavaItemViewModel? toSelect = null;
             foreach (var j in detected)
             {
@@ -295,7 +292,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
                     StatusText = status
                 };
 
-                InstalledJavas.Add(item);
+                items.Add(item);
 
                 if (!string.IsNullOrWhiteSpace(preferredPath) &&
                     string.Equals(j.ExecutablePath, preferredPath, StringComparison.OrdinalIgnoreCase))
@@ -308,6 +305,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
                 }
             }
 
+            InstalledJavas.ReplaceAll(items);
             SelectedJava = toSelect ?? InstalledJavas.FirstOrDefault();
         }
         catch (Exception ex)

@@ -100,4 +100,16 @@ public sealed class ServerPropertiesValidatorTests
         var (isValid, _) = ServerPropertiesValidator.ValidateProperty("view-distance", dist, "10");
         Assert.Equal(expectedValid, isValid);
     }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("false", true)]
+    [InlineData("invalid", false)]
+    public void ValidateEnableCodeOfConduct(string val, bool expectedValid)
+    {
+        string def = ServerPropertiesMetadata.GetDefault("enable-code-of-conduct");
+        Assert.Equal("false", def);
+        var (isValid, _) = ServerPropertiesValidator.ValidateProperty("enable-code-of-conduct", val, def);
+        Assert.Equal(expectedValid, isValid);
+    }
 }

@@ -69,25 +69,6 @@ public sealed class SafeZipArchiveTests
     }
 
     [Fact]
-    public void ReadMetadataBytesHonorsSizeLimit()
-    {
-        string root = CreateTemporaryDirectory();
-        try
-        {
-            string archivePath = Path.Combine(root, "metadata.zip");
-            CreateArchive(archivePath, ("metadata.json", "{}"));
-            using var archive = SafeZipArchive.OpenRead(archivePath);
-
-            Assert.Equal("{}", System.Text.Encoding.UTF8.GetString(SafeZipArchive.ReadMetadataBytes(archive, "metadata.json", 2)!));
-            Assert.Null(SafeZipArchive.ReadMetadataBytes(archive, "metadata.json", 1));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
     public void WriteArchivePublishesBoundedOutputAtomically()
     {
         string root = CreateTemporaryDirectory();

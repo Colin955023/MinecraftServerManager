@@ -8,11 +8,24 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $appInfoPath = Join-Path $repoRoot "src\MinecraftServerManager.Core\AppInfo.cs"
+$appProjectPath = Join-Path $repoRoot "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
 $content = Get-Content -Raw -Encoding UTF8 $appInfoPath
 if ($content -match 'public\s+const\s+string\s+Version\s*=\s*"([^"]+)";') {
     $version = $matches[1]
 } else {
     throw "無法從 AppInfo.cs 解析 Version"
+}
+
+[xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
+$projectVersion = $appProject.SelectSingleNode("//Version").InnerText
+if ($projectVersion -ne $version) {
+    throw "AppInfo.cs 與 App.csproj 版本不一致：$version != $projectVersion"
+}
+
+$assemblyVersion = $appProject.SelectSingleNode("//AssemblyVersion").InnerText
+$fileVersion = $appProject.SelectSingleNode("//FileVersion").InnerText
+if ($assemblyVersion -ne "$version.0" -or $fileVersion -ne "$version.0") {
+    throw "App.csproj 的 AssemblyVersion／FileVersion 必須與 AppInfo 版本 $version 一致"
 }
 
 $tag = "v$version"

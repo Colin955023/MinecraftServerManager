@@ -8,6 +8,11 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $solutionPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\MinecraftServerManager.sln"))
 $solutionDir = Split-Path -Parent $solutionPath
 
+$isCiEnvironment = ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
+
+# 動態偵測環境 CPU 核心數並保留 1 核給系統
+$maxCpuCount = [Math]::Max(1, [Environment]::ProcessorCount - 1)
+
 function Invoke-DotnetStep {
     param(
         [Parameter(Mandatory = $true)]
@@ -19,7 +24,7 @@ function Invoke-DotnetStep {
     Write-Host "=== $Name ==="
     $extraArgs = @()
     if ($Arguments.Count -gt 0 -and $Arguments[0] -in @("restore", "build")) {
-        $extraArgs += @("-m:1", "-p:UseSharedCompilation=false", "-nodereuse:false")
+        $extraArgs += @("-m:$maxCpuCount", "-p:UseSharedCompilation=false", "-nodereuse:false")
     }
     & dotnet @Arguments @extraArgs
     if ($LASTEXITCODE -ne 0) {
@@ -31,8 +36,7 @@ function Test-SecretsAndPrivacy {
     Write-Host "=== 隱私與機密資訊檢查 (Gitleaks) ==="
 
     # CI 環境由 gitleaks/gitleaks-action 負責機密掃描，腳本不重複執行
-    $isCi = ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
-    if ($isCi) {
+    if ($isCiEnvironment) {
         Write-Host "CI 環境偵測到，Gitleaks 檢查已由 GitHub Action 步驟負責，腳本跳過"
         return
     }
@@ -81,31 +85,88 @@ function Test-SecretsAndPrivacy {
     }
 }
 
-# 1. 隱私與機密安全檢查（Gitleaks）
+function Test-VersionConsistency {
+    Write-Host "=== 版本定義一致性檢查 ==="
+    $appInfoPath = Join-Path $solutionDir "src\MinecraftServerManager.Core\AppInfo.cs"
+    $appProjectPath = Join-Path $solutionDir "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
+
+    if (-not (Test-Path -LiteralPath $appInfoPath) -or -not (Test-Path -LiteralPath $appProjectPath)) {
+        throw "C# 門禁失敗：找不到版本定義檔案 ($appInfoPath 或 $appProjectPath)"
+    }
+
+    $content = Get-Content -Raw -Encoding UTF8 $appInfoPath
+    if ($content -match 'public\s+const\s+string\s+Version\s*=\s*"([^"]+)";') {
+        $version = $matches[1]
+    } else {
+        throw "C# 門禁失敗：無法從 AppInfo.cs 解析 Version"
+    }
+
+    [xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
+    $versionNode = $appProject.SelectSingleNode("//Version")
+    $projectVersion = if ($null -ne $versionNode) { $versionNode.InnerText } else { $null }
+    if ($projectVersion -ne $version) {
+        throw "C# 門禁失敗：AppInfo.cs 與 App.csproj 版本不一致 ($version != $projectVersion)"
+    }
+
+    $assemblyVersionNode = $appProject.SelectSingleNode("//AssemblyVersion")
+    $assemblyVersion = if ($null -ne $assemblyVersionNode) { $assemblyVersionNode.InnerText } else { $null }
+    $fileVersionNode = $appProject.SelectSingleNode("//FileVersion")
+    $fileVersion = if ($null -ne $fileVersionNode) { $fileVersionNode.InnerText } else { $null }
+    if ($assemblyVersion -ne "$version.0" -or $fileVersion -ne "$version.0") {
+        throw "C# 門禁失敗：App.csproj 的 AssemblyVersion ($assemblyVersion) 與 FileVersion ($fileVersion) 必須與 AppInfo 版本 ($version.0) 一致"
+    }
+}
+
+function Test-ScriptEncoding {
+    Write-Host "=== 腳本編碼檢查 (UTF-8 with BOM) ==="
+    $scriptsDir = Join-Path $solutionDir "scripts"
+    $ps1Files = Get-ChildItem -LiteralPath $scriptsDir -Filter "*.ps1" -File
+    foreach ($file in $ps1Files) {
+        $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+        if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+            throw "C# 門禁失敗：腳本 $($file.Name) 未以 UTF-8 with BOM (0xEF, 0xBB, 0xBF) 格式儲存"
+        }
+    }
+}
+
+# 0. 腳本編碼檢查（UTF-8 with BOM）
+Test-ScriptEncoding
+
+# 1. 版本定義一致性檢查（AppInfo.cs vs App.csproj）
+Test-VersionConsistency
+
+# 2. 隱私與機密安全檢查（Gitleaks）
 Test-SecretsAndPrivacy
 
-# 2. 還原套件
+# 3. 還原套件
 Invoke-DotnetStep "還原套件" @("restore", $solutionPath)
 
-# 3. 程式碼排版與格式檢查（原生 dotnet format，本機自動修復，CI 強制無變更驗證）
-$isCiEnvironment = ($env:CI -eq 'true' -or $env:GITHUB_ACTIONS -eq 'true')
-if (-not $isCiEnvironment) {
-    Write-Host "本機環境：自動修復程式碼風格、空白字元與可修正之分析器規則..."
-    & dotnet format $solutionPath --no-restore
+# 4. 程式碼排版與格式檢查（本機單次自動修復並檢驗，CI 強制無變更檢驗）
+if ($isCiEnvironment) {
+    Invoke-DotnetStep "格式檢查" @("format", $solutionPath, "--verify-no-changes", "--no-restore")
+} else {
+    Invoke-DotnetStep "格式檢查與自動修復" @("format", $solutionPath, "--no-restore")
 }
-Invoke-DotnetStep "格式檢查" @("format", $solutionPath, "--verify-no-changes", "--no-restore")
 
-# 4. Release 建置（包含 Roslyn Analyzers、未使用定義檢驗、程式碼品質強制檢查）
-Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release")
+# 5. Release 建置（包含 Roslyn Analyzers、未使用定義檢驗、程式碼品質強制檢查，前置已完整還原故免重複評估套件）
+Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release", "--no-restore")
 
-# 5. 單元測試與整合測試
+# 6. 單元測試與整合測試
+$testArguments = @("test", $solutionPath, "-c", "Release", "--no-build")
+if ($isCiEnvironment) {
+    $testArguments += @(
+        "--results-directory", (Join-Path $solutionDir "TestResults"),
+        "--", "--report-trx"
+    )
+}
+
 try {
-    Invoke-DotnetStep "測試" @("test", $solutionPath, "-c", "Release", "--no-build")
+    Invoke-DotnetStep "測試" $testArguments
 }
 finally {
-    # 6. 清理測試產生的暫存目錄
+    # 7. 清理測試產生的暫存目錄
     $testResultsDir = Join-Path $solutionDir "TestResults"
-    if (Test-Path $testResultsDir) {
+    if (-not $isCiEnvironment -and (Test-Path $testResultsDir)) {
         Remove-Item -Path $testResultsDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

@@ -415,6 +415,33 @@ public static class SafeFileSystem
         }
     }
 
+    /// <summary>
+    /// 安全遞迴複製目錄樹，強制具備符號連結防護與受限走訪
+    /// </summary>
+    public static void CopyDirectoryTreeSafe(string source, string destination)
+    {
+        var entries = WalkBoundedTree(source, rejectReparse: true);
+        foreach (var entry in entries)
+        {
+            string rel = Path.GetRelativePath(source, entry.FullPath);
+            string target = Path.Combine(destination, rel);
+
+            if (entry.IsDirectory)
+            {
+                Directory.CreateDirectory(target);
+            }
+            else
+            {
+                string? dir = Path.GetDirectoryName(target);
+                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                File.Copy(entry.FullPath, target, overwrite: true);
+            }
+        }
+    }
+
     private static void EnsureNoReparseAlongPath(string path, string? stopBoundary = null)
     {
         string? boundary = string.IsNullOrEmpty(stopBoundary) ? null : GetFullPath(stopBoundary);
@@ -465,6 +492,55 @@ public static class SafeFileSystem
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         return Path.GetFullPath(path);
+    }
+
+    public static byte[]? ReadRegularFile(string filePath, long maxBytes = 16 * 1024 * 1024)
+    {
+        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath) || IsReparsePoint(filePath))
+        {
+            return null;
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length > maxBytes)
+        {
+            throw new IOException($"檔案大小超過安全上限 ({fileInfo.Length} > {maxBytes})： {filePath}");
+        }
+
+        return File.ReadAllBytes(filePath);
+    }
+
+    public static void RemoveReadOnlyAttributesRecursive(string directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath) || IsReparsePoint(directoryPath))
+        {
+            return;
+        }
+
+        RemoveReadOnlyAttributesRecursive(new DirectoryInfo(directoryPath));
+    }
+
+    public static void ClearReadOnlyAttribute(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(path) || Directory.Exists(path))
+            {
+                FileAttributes attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static void RemoveReadOnlyAttributesRecursive(DirectoryInfo directory)

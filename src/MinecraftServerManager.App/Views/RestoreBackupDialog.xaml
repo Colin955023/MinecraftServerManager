@@ -8,7 +8,7 @@
         MinHeight="380"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -40,9 +40,9 @@
                 HeadersVisibility="Column"
                 RowHeaderWidth="0">
         <DataGrid.Columns>
-          <DataGridTextColumn Header="備份檔案名稱" Binding="{Binding FileName}" Width="*" />
-          <DataGridTextColumn Header="檔案大小" Binding="{Binding SizeFormatted}" Width="100" />
-          <DataGridTextColumn Header="建立時間" Binding="{Binding CreatedAtFormatted}" Width="160" />
+          <DataGridTextColumn Header="備份檔案名稱" Binding="{Binding FileName, Mode=OneTime}" Width="*" />
+          <DataGridTextColumn Header="檔案大小" Binding="{Binding SizeFormatted, Mode=OneTime}" Width="100" />
+          <DataGridTextColumn Header="建立時間" Binding="{Binding CreatedAtFormatted, Mode=OneTime}" Width="160" />
         </DataGrid.Columns>
       </DataGrid>
     </Border>

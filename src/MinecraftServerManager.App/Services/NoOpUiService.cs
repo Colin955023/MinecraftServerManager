@@ -16,23 +16,23 @@ public class NoOpUiService : IUiService
 
     public virtual bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question) => true;
 
-    public virtual void ShowInfo(string message, string title) { }
+    public virtual void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) { }
 
     public virtual void ShowWarning(string message, string title) { }
 
     public virtual void ShowError(string message, string title) { }
 
-    public void ShowNotificationPopup(string title, string message, NotificationLevel level) { }
-
     public void CopyToClipboard(string text) { }
 
     public void ActivateMainWindow() { }
+
+    public void ShutdownApplication(int exitCode = 0) { }
 
     public void PostToUi(Action action) { }
 
     public void RunOnUi(Action action) => action();
 
-    public IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
+    public virtual IUiTimer CreateUiTimer(TimeSpan interval, Action tick) => new NoOpUiTimer();
 
     public IReadOnlyList<string>? PickFiles(string title, string filter, bool multiselect = false) => null;
 
@@ -45,6 +45,7 @@ public class NoOpUiService : IUiService
     public bool? ShowJvmArgs(JvmArgsViewModel viewModel) => null;
 
     public bool? ShowServerProperties(ServerPropertiesViewModel viewModel) => null;
+    public bool? ShowPlayerManagement(PlayerManagementViewModel viewModel) => null;
 
     public bool? ShowRestoreBackup(RestoreBackupViewModel viewModel) => null;
 
@@ -78,9 +79,7 @@ public class NoOpUiService : IUiService
     public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName) =>
         new NoOpProgressSession<ServerCreationProgressReport>();
 
-    public IModOperationProgress ShowModOperationProgress(string title, string initialMessage) => new NoOpModOperationProgress();
-
-    public IOperationProgress ShowOperationProgress(string title, string initialMessage) => ShowModOperationProgress(title, initialMessage);
+    public IOperationProgress ShowModOperationProgress(string title, string initialMessage) => new NoOpModOperationProgress();
 
     private sealed class NoOpProgressSession<TReport> : IProgressSession<TReport>
     {
@@ -89,11 +88,9 @@ public class NoOpUiService : IUiService
         public void Complete() { }
     }
 
-    private sealed class NoOpModOperationProgress : IModOperationProgress
+    private sealed class NoOpModOperationProgress : IOperationProgress
     {
         public void UpdateProgress(int current, int total, string message) { }
-
-        public void UpdateMessage(string message) { }
 
         public void Close() { }
     }

@@ -1,4 +1,5 @@
 using System.Text;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using MinecraftServerManager.Core.Ports;
 using Xunit;
@@ -129,25 +130,76 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         // 觸發伺服器就緒事件
         _runtime.RaiseReady();
 
-        for (int i = 0; i < 50 && mockUi.LastInfoMessage is null; i++)
+        for (int i = 0; i < 50 && mockUi.LastToastMessage is null; i++)
         {
             await Task.Delay(20);
         }
 
-        Assert.NotNull(mockUi.LastInfoMessage);
-        Assert.Contains("25577", mockUi.LastInfoMessage);
-        Assert.Contains("127.0.0.1", mockUi.LastInfoMessage);
+        Assert.NotNull(mockUi.LastToastMessage);
+        Assert.Contains("25577", mockUi.LastToastMessage);
+        Assert.Contains("127.0.0.1", mockUi.LastToastMessage);
     }
 
-    private sealed class MockMonitorUiService : App.Services.NoOpUiService
+    [Fact]
+    public void LogBurst_UsesBoundedBufferAndTrimsDisplayedLogsAtLowWatermark()
     {
-        public string? LastInfoMessage { get; private set; }
-        public string? LastInfoTitle { get; private set; }
+        var mockUi = new MockMonitorUiService();
+        using var vm = new ServerMonitorViewModel(
+            _runtime,
+            "TestServer",
+            _tempServerDir,
+            uiService: mockUi);
 
-        public override void ShowInfo(string message, string title)
+        for (int i = 0; i < 6000; i++)
         {
-            LastInfoMessage = message;
-            LastInfoTitle = title;
+            _runtime.RaiseOutputLine($"line-{i}");
+        }
+
+        mockUi.TickTimers();
+
+        Assert.Equal(1800, vm.Logs.Count);
+        Assert.Equal("line-4200", vm.Logs[0]);
+        Assert.Equal("line-5999", vm.Logs[^1]);
+    }
+
+    private sealed class MockMonitorUiService : NoOpUiService
+    {
+        private readonly List<ManualUiTimer> _timers = [];
+
+        public string? LastToastMessage { get; private set; }
+        public string? LastToastTitle { get; private set; }
+        public ToastType? LastToastType { get; private set; }
+
+        public override IUiTimer CreateUiTimer(TimeSpan interval, Action tick)
+        {
+            _ = interval;
+            var timer = new ManualUiTimer(tick);
+            _timers.Add(timer);
+            return timer;
+        }
+
+        public void TickTimers()
+        {
+            foreach (ManualUiTimer timer in _timers)
+            {
+                timer.Tick();
+            }
+        }
+
+        public override void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
+        {
+            LastToastMessage = message;
+            LastToastTitle = title;
+            LastToastType = type;
+        }
+
+        private sealed class ManualUiTimer(Action tick) : IUiTimer
+        {
+            public void StartTimer() { }
+
+            public void StopTimer() { }
+
+            public void Tick() => tick();
         }
     }
 

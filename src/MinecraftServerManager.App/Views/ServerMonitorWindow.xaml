@@ -8,7 +8,7 @@
         MinHeight="520"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
-        Icon="pack://application:,,,/MinecraftServerManager.App;component/assets/icon.ico">
+       >
   <Grid Margin="16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -80,6 +80,12 @@
                   Margin="0,0,8,0"
                   Padding="12,4">
             <TextBlock Text="⏹️ 停止" VerticalAlignment="Center" Foreground="#FFFFFF" />
+          </Button>
+          <Button Command="{Binding ClearLogsCommand}"
+                  Height="32"
+                  Margin="0,0,8,0"
+                  Padding="12,4">
+            <TextBlock Text="🧹 清理輸出" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
           </Button>
           <Button Command="{Binding RefreshStateCommand}"
                   Height="32"

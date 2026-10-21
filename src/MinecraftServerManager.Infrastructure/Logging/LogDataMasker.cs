@@ -8,6 +8,8 @@ namespace MinecraftServerManager.Infrastructure.Logging;
 public static partial class LogDataMasker
 {
     private const string MaskReplacement = "***";
+    private static readonly string CachedUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly string CachedUserProfileSlash = CachedUserProfile.Replace('\\', '/');
 
     [GeneratedRegex(@"(?i)(password|passwd|pwd|secret|token|api[_-]?key)\s*([=:]|\s+)\s*([^\s,;""'&]+)")]
     private static partial Regex SensitiveKeyValueRegex();
@@ -25,7 +27,25 @@ public static partial class LogDataMasker
             return string.Empty;
         }
 
-        string masked = SensitiveKeyValueRegex().Replace(message, static match =>
+        string masked = message;
+        if (!string.IsNullOrEmpty(CachedUserProfile))
+        {
+            if (masked.Contains(CachedUserProfile, StringComparison.OrdinalIgnoreCase))
+            {
+                masked = masked.Replace(CachedUserProfile, "~", StringComparison.OrdinalIgnoreCase);
+            }
+            if (masked.Contains(CachedUserProfileSlash, StringComparison.OrdinalIgnoreCase))
+            {
+                masked = masked.Replace(CachedUserProfileSlash, "~", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        if (!MayContainSensitiveData(masked))
+        {
+            return masked;
+        }
+
+        masked = SensitiveKeyValueRegex().Replace(masked, static match =>
         {
             string key = match.Groups[1].Value;
             string delimiter = match.Groups[2].Value;
@@ -40,4 +60,12 @@ public static partial class LogDataMasker
 
         return masked;
     }
+
+    private static bool MayContainSensitiveData(string text) =>
+        text.Contains("pass", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("pwd", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("secret", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("key", StringComparison.OrdinalIgnoreCase) ||
+        text.Contains("bearer", StringComparison.OrdinalIgnoreCase);
 }

@@ -15,7 +15,8 @@ public sealed class ComponentLogger
 
     private ComponentLogger(ILogger logger, IReadOnlyDictionary<string, object?> context)
     {
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
         _context = context;
     }
 

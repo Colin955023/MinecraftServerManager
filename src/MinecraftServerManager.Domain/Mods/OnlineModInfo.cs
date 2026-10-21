@@ -11,21 +11,16 @@ public sealed record OnlineModInfo
     public string Author { get; init; }
     public string Description { get; init; }
     public string LatestVersion { get; init; }
-    public int DownloadCount { get; init; }
+    public int Downloads { get; init; }
     public string HomepageUrl { get; init; }
     public string Url { get; init; }
-    public IReadOnlyList<string> Categories { get; init; }
+    public IReadOnlyList<string> Loaders { get; init; }
     public IReadOnlyList<string> Versions { get; init; }
     public string ServerSide { get; init; }
     public string ClientSide { get; init; }
     public string Source { get; init; }
     public bool Available { get; init; }
-
-    public string Id => ProjectId;
-    public string Title => Name;
-    public int Downloads => DownloadCount;
     public string IconUrl { get; init; }
-    public IReadOnlyList<string> Loaders => Categories;
 
     public OnlineModInfo(
         string projectId,
@@ -51,11 +46,11 @@ public sealed record OnlineModInfo
         Author = author ?? string.Empty;
         Description = description ?? string.Empty;
         LatestVersion = latestVersion ?? string.Empty;
-        DownloadCount = downloadCount;
+        Downloads = downloadCount;
         HomepageUrl = homepageUrl ?? string.Empty;
         Url = url ?? string.Empty;
-        IconUrl = !string.IsNullOrWhiteSpace(iconUrl) ? iconUrl : Url;
-        Categories = [.. categories ?? []];
+        IconUrl = !string.IsNullOrWhiteSpace(iconUrl) ? iconUrl : string.Empty;
+        Loaders = [.. categories ?? []];
         Versions = [.. versions ?? []];
         ServerSide = serverSide ?? string.Empty;
         ClientSide = clientSide ?? string.Empty;

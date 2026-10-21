@@ -3,6 +3,8 @@ using System.Globalization;
 using System.IO.Compression;
 using System.Security;
 using System.Text;
+using System.Xml;
+using MinecraftServerManager.Core.Mods;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
@@ -13,6 +15,13 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 public static class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
+    private static readonly string[] CachedColumnNames = Enumerable.Range(1, 100).Select(ComputeExcelColumnName).ToArray();
+    private static readonly XmlWriterSettings SheetXmlWriterSettings = new()
+    {
+        Encoding = new UTF8Encoding(false),
+        OmitXmlDeclaration = false,
+        CheckCharacters = false,
+    };
 
     /// <summary>
     /// 將字串表格建立為標準 OpenXML SpreadsheetML (.xlsx) 二進位位元組陣列。
@@ -25,33 +34,6 @@ public static class OpenXmlSpreadsheetBuilder
         ArgumentNullException.ThrowIfNull(rows);
 
         string safeSheetName = NormalizeSheetName(sheetName);
-
-        // 建置 sheet1.xml
-        var sheetRows = new StringBuilder();
-        for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
-        {
-            var row = rows[rowIndex];
-            int excelRowNum = rowIndex + 1;
-
-            sheetRows.Append(CultureInfo.InvariantCulture, $"<row r=\"{excelRowNum}\">");
-            for (int colIndex = 0; colIndex < row.Count; colIndex++)
-            {
-                string colName = GetExcelColumnName(colIndex + 1);
-                string cellRef = $"{colName}{excelRowNum}";
-                string cellValue = SanitizeXmlText(row[colIndex]);
-                string escapedText = SecurityElement.Escape(cellValue) ?? string.Empty;
-
-                sheetRows.Append(CultureInfo.InvariantCulture,
-                    $"<c r=\"{cellRef}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{escapedText}</t></is></c>");
-            }
-            sheetRows.Append("</row>");
-        }
-
-        string sheetXml =
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
-            "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" +
-            $"<sheetData>{sheetRows}</sheetData></worksheet>";
-
         string escapedSheetName = SecurityElement.Escape(safeSheetName) ?? "Sheet1";
         string workbookXml =
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
@@ -93,7 +75,47 @@ public static class OpenXmlSpreadsheetBuilder
             WriteEntry(archive, "_rels/.rels", rootRelsXml);
             WriteEntry(archive, "xl/workbook.xml", workbookXml);
             WriteEntry(archive, "xl/_rels/workbook.xml.rels", workbookRelsXml);
-            WriteEntry(archive, "xl/worksheets/sheet1.xml", sheetXml);
+
+            // 以 XmlWriter 直寫 xl/worksheets/sheet1.xml 串流，避免巨量字串與位元組陣列配置
+            var sheetEntry = archive.CreateEntry("xl/worksheets/sheet1.xml", CompressionLevel.Optimal);
+            using var sheetStream = sheetEntry.Open();
+            using var writer = XmlWriter.Create(sheetStream, SheetXmlWriterSettings);
+
+            writer.WriteStartDocument(standalone: true);
+            writer.WriteStartElement("worksheet", "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
+            writer.WriteStartElement("sheetData");
+
+            for (int rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var row = rows[rowIndex];
+                int excelRowNum = rowIndex + 1;
+                writer.WriteStartElement("row");
+                writer.WriteAttributeString("r", excelRowNum.ToString(CultureInfo.InvariantCulture));
+
+                for (int colIndex = 0; colIndex < row.Count; colIndex++)
+                {
+                    string colName = GetExcelColumnName(colIndex + 1);
+                    string cellRef = $"{colName}{excelRowNum}";
+                    string cellValue = SanitizeXmlText(row[colIndex]);
+
+                    writer.WriteStartElement("c");
+                    writer.WriteAttributeString("r", cellRef);
+                    writer.WriteAttributeString("t", "inlineStr");
+                    writer.WriteStartElement("is");
+                    writer.WriteStartElement("t");
+                    writer.WriteAttributeString("xml", "space", null, "preserve");
+                    writer.WriteString(cellValue);
+                    writer.WriteEndElement(); // </t>
+                    writer.WriteEndElement(); // </is>
+                    writer.WriteEndElement(); // </c>
+                }
+
+                writer.WriteEndElement(); // </row>
+            }
+
+            writer.WriteEndElement(); // </sheetData>
+            writer.WriteEndElement(); // </worksheet>
+            writer.WriteEndDocument();
         }
 
         return memoryStream.ToArray();
@@ -103,8 +125,8 @@ public static class OpenXmlSpreadsheetBuilder
     {
         var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        byte[] bytes = Encoding.UTF8.GetBytes(content);
-        stream.Write(bytes, 0, bytes.Length);
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+        writer.Write(content);
     }
 
     /// <summary>
@@ -113,7 +135,16 @@ public static class OpenXmlSpreadsheetBuilder
     public static string GetExcelColumnName(int columnNumber)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(columnNumber);
+        if (columnNumber <= CachedColumnNames.Length)
+        {
+            return CachedColumnNames[columnNumber - 1];
+        }
 
+        return ComputeExcelColumnName(columnNumber);
+    }
+
+    private static string ComputeExcelColumnName(int columnNumber)
+    {
         string result = string.Empty;
         int current = columnNumber;
 
@@ -173,6 +204,8 @@ public static class OpenXmlSpreadsheetBuilder
         {
             return string.Empty;
         }
+
+        text = ModHelpers.StripColorAndFormattingCodes(text);
 
         bool hasInvalid = false;
         foreach (char c in text)

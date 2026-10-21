@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 
 namespace MinecraftServerManager.Core.Servers;
@@ -7,63 +8,63 @@ namespace MinecraftServerManager.Core.Servers;
 /// </summary>
 public static class PropertiesDocumentCodec
 {
+    private static readonly SearchValues<char> KeyEscapeChars = SearchValues.Create("\\=: ");
+    private static readonly SearchValues<char> ValueEscapeChars = SearchValues.Create("\\\t\r\n");
+
     public static Dictionary<string, string> Parse(string content)
     {
         ArgumentNullException.ThrowIfNull(content);
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        using var reader = new StringReader(content);
-        string? line;
         var logicalLine = new StringBuilder();
         var keyBuilder = new StringBuilder();
         var valueBuilder = new StringBuilder();
 
-        while ((line = reader.ReadLine()) is not null)
+        foreach (ReadOnlySpan<char> rawLine in content.AsSpan().EnumerateLines())
         {
-            string trimmed = line.TrimStart();
-            if (trimmed.Length == 0 || trimmed.StartsWith('#') || trimmed.StartsWith('!'))
+            ReadOnlySpan<char> trimmed = rawLine.TrimStart();
+            if (trimmed.IsEmpty || trimmed[0] == '#' || trimmed[0] == '!')
             {
                 continue;
             }
 
             // 處理跨行延續（行末有奇數個反斜線）
-            if (HasOddTrailingBackslashes(line))
+            if (HasOddTrailingBackslashes(rawLine))
             {
-                logicalLine.Append(line.AsSpan(0, line.Length - 1));
+                logicalLine.Append(rawLine[..^1]);
                 continue;
             }
 
-            logicalLine.Append(line);
-            string fullLine = logicalLine.ToString().Trim();
-            logicalLine.Clear();
-
-            if (fullLine.Length == 0 || fullLine.StartsWith('#') || fullLine.StartsWith('!'))
-            {
-                continue;
-            }
-
-            var (key, value) = ParseKeyValue(fullLine, keyBuilder, valueBuilder);
-            if (!string.IsNullOrEmpty(key))
-            {
-                result[key] = value;
-            }
+            logicalLine.Append(rawLine);
+            FlushLogicalLine(logicalLine, keyBuilder, valueBuilder, result);
         }
 
         if (logicalLine.Length > 0)
         {
-            string fullLine = logicalLine.ToString().Trim();
-            logicalLine.Clear();
-            if (fullLine.Length > 0 && !fullLine.StartsWith('#') && !fullLine.StartsWith('!'))
-            {
-                var (key, value) = ParseKeyValue(fullLine, keyBuilder, valueBuilder);
-                if (!string.IsNullOrEmpty(key))
-                {
-                    result[key] = value;
-                }
-            }
+            FlushLogicalLine(logicalLine, keyBuilder, valueBuilder, result);
         }
 
         return result;
+    }
+
+    private static void FlushLogicalLine(
+        StringBuilder logicalLine,
+        StringBuilder keyBuilder,
+        StringBuilder valueBuilder,
+        Dictionary<string, string> result)
+    {
+        string fullLine = logicalLine.ToString().Trim();
+        logicalLine.Clear();
+        if (fullLine.Length == 0 || fullLine.StartsWith('#') || fullLine.StartsWith('!'))
+        {
+            return;
+        }
+
+        var (key, value) = ParseKeyValue(fullLine, keyBuilder, valueBuilder);
+        if (!string.IsNullOrEmpty(key))
+        {
+            result[key] = value;
+        }
     }
 
     public static string Serialize(
@@ -166,7 +167,7 @@ public static class PropertiesDocumentCodec
         return (keyBuilder.ToString().Trim(), valueBuilder.ToString());
     }
 
-    private static bool HasOddTrailingBackslashes(string line)
+    private static bool HasOddTrailingBackslashes(ReadOnlySpan<char> line)
     {
         int count = 0;
         for (int i = line.Length - 1; i >= 0 && line[i] == '\\'; i--)
@@ -179,7 +180,12 @@ public static class PropertiesDocumentCodec
 
     private static string EscapeKey(string key)
     {
-        var sb = new StringBuilder();
+        if (key.AsSpan().IndexOfAny(KeyEscapeChars) < 0)
+        {
+            return key;
+        }
+
+        var sb = new StringBuilder(key.Length + 4);
         foreach (char c in key)
         {
             switch (c)
@@ -207,7 +213,12 @@ public static class PropertiesDocumentCodec
 
     private static string EscapeValue(string value)
     {
-        var sb = new StringBuilder();
+        if (value.AsSpan().IndexOfAny(ValueEscapeChars) < 0)
+        {
+            return value;
+        }
+
+        var sb = new StringBuilder(value.Length + 4);
         foreach (char c in value)
         {
             switch (c)

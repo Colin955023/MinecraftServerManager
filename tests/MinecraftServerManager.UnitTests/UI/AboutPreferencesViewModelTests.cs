@@ -28,21 +28,16 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     }
 
     [Fact]
-    public void ShouldAlignWithAppInfoVersion2AndGpl3()
+    public void ShouldAlignWithAppInfo()
     {
         var vm = new AboutPreferencesViewModel();
 
         Assert.Equal("about_preferences", vm.Key);
         Assert.Equal("關於與設定", vm.Title);
-        Assert.Equal("Minecraft Server Manager", AboutPreferencesViewModel.AppName);
-        Assert.Equal("2.0.0", AboutPreferencesViewModel.AppVersion);
-        Assert.Equal("Minecraft 伺服器管理器", AboutPreferencesViewModel.AppDescription);
-        Assert.Equal("Colin955023", AboutPreferencesViewModel.Developer);
-        Assert.Equal("Colin955023", vm.GithubOwner);
-        Assert.Equal("MinecraftServerManager", vm.GithubRepo);
-        Assert.Equal("https://github.com/Colin955023/MinecraftServerManager", AboutPreferencesViewModel.GithubUrl);
-        Assert.Equal(".NET 10 (WPF)", AboutPreferencesViewModel.TargetFramework);
-        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", AboutPreferencesViewModel.License);
+        Assert.Equal(Core.AppInfo.Version, AboutPreferencesViewModel.AppVersion);
+        Assert.Equal(Core.AppInfo.AppName, AboutPreferencesViewModel.AppDescription);
+        Assert.Equal(Core.AppInfo.RepositoryUrl, AboutPreferencesViewModel.GithubUrl);
+        Assert.Equal("GNU General Public License v3.0 (GPL-3.0)", Core.AppInfo.License);
     }
 
     [Fact]
@@ -63,8 +58,10 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         bool windowSizeResetCalled = false;
+        string notificationMsg = string.Empty;
         var vm = new AboutPreferencesViewModel(
             settingsManager: settings,
+            notificationSink: (msg, _) => notificationMsg = msg,
             onResetWindowSizeRequested: () => windowSizeResetCalled = true)
         {
             IsAutoUpdateEnabled = false,
@@ -76,6 +73,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         Assert.True(vm.IsAutoUpdateEnabled);
         Assert.Equal(0, vm.SelectedThemeModeIndex);
         Assert.True(windowSizeResetCalled);
+        Assert.Empty(notificationMsg);
     }
 
     [Fact]
@@ -101,9 +99,9 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
         string notification = string.Empty;
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: false,
-            CurrentVersion: "2.0.0",
-            LatestVersion: "2.0.0",
-            ReleaseTitle: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
+            LatestVersion: Core.AppInfo.Version,
+            ReleaseTitle: Core.AppInfo.Version,
             ReleaseNotes: "無更新",
             DownloadUrl: null,
             Sha256ChecksumUrl: null,
@@ -123,7 +121,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "更新說明",
@@ -150,7 +148,7 @@ public sealed class AboutPreferencesViewModelTests : IDisposable
     {
         var mockChecker = new MockUpdateChecker(new Core.Ports.UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "更新說明",

@@ -32,7 +32,7 @@ public static class SafeScriptValidator
     /// <summary>
     /// 檢查 Java 執行檔路徑是否安全合規。
     /// </summary>
-    public static bool IsSafeJavaExecutable(string javaPath)
+    internal static bool IsSafeJavaExecutable(string javaPath)
     {
         if (string.IsNullOrWhiteSpace(javaPath))
         {

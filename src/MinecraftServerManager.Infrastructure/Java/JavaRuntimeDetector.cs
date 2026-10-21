@@ -25,13 +25,32 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     ];
 
     private static readonly string[] VersionArgs = ["-version"];
+    private readonly Lock _detectLock = new();
+    private Task<IReadOnlyList<JavaRuntimeInfo>>? _inFlightDetection;
 
-    public async Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
+    public Task<IReadOnlyList<JavaRuntimeInfo>> DetectAsync(
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(processRunner);
 
+        lock (_detectLock)
+        {
+            if (!forceRefresh && _inFlightDetection is not null && !_inFlightDetection.IsCompleted)
+            {
+                return _inFlightDetection.WaitAsync(cancellationToken);
+            }
+
+            var task = DetectInternalAsync(forceRefresh, cancellationToken);
+            _inFlightDetection = task;
+            return task;
+        }
+    }
+
+    private async Task<IReadOnlyList<JavaRuntimeInfo>> DetectInternalAsync(
+        bool forceRefresh,
+        CancellationToken cancellationToken)
+    {
         if (!forceRefresh)
         {
             var cached = await TryLoadFromCacheAsync(cancellationToken).ConfigureAwait(false);
@@ -179,7 +198,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         if (!string.IsNullOrWhiteSpace(javaHome))
         {
             AddCandidate(candidates, Path.Combine(javaHome, "bin", "java.exe"));
-            AddCandidate(candidates, Path.Combine(javaHome, "bin", "javaw.exe"));
         }
 
         string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
@@ -197,7 +215,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
             string segmentStr = segment.ToString();
             AddCandidate(candidates, Path.Combine(segmentStr, "java.exe"));
-            AddCandidate(candidates, Path.Combine(segmentStr, "javaw.exe"));
         }
 
         foreach (string root in GetJavaRoots())
@@ -221,7 +238,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 foreach (var entry in entries.Where(static item => item.IsDirectory))
                 {
                     AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
-                    AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "javaw.exe"));
                 }
             }
         }
@@ -239,7 +255,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     foreach (var entry in entries.Where(static e => e.IsDirectory))
                     {
                         AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
-                        AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "javaw.exe"));
                     }
                 }
                 catch (IOException)
@@ -262,9 +277,109 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
     private static void AddCandidate(HashSet<string> candidates, string path)
     {
-        if (Path.IsPathRooted(path) && File.Exists(path) && !SafeFileSystem.IsReparsePoint(path))
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path))
         {
-            candidates.Add(Path.GetFullPath(path));
+            return;
+        }
+
+        if (IsIgnoredJavaPath(path) || IsReparseOrJunctionPath(path) || IsShimLauncher(path))
+        {
+            return;
+        }
+
+        string resolved = ResolveActualExecutablePath(path);
+        if (File.Exists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
+        {
+            candidates.Add(resolved);
+        }
+    }
+
+    private static bool IsIgnoredJavaPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return true;
+        }
+
+        if (path.Contains(@"\Oracle\Java\javapath", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains(@"\Oracle\Java\java8path", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains(@"\Common Files\Oracle\Java\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsReparseOrJunctionPath(string path)
+    {
+        try
+        {
+            if (SafeFileSystem.IsReparsePoint(path))
+            {
+                return true;
+            }
+
+            string? dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && SafeFileSystem.IsReparsePoint(dir))
+            {
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool IsShimLauncher(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return false;
+            }
+
+            var vi = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+            if (string.Equals(vi.OriginalFilename, "shimconsole.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(vi.OriginalFilename, "shim.exe", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(vi.InternalName, "Shim Console Launcher", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
+
+    private static string ResolveActualExecutablePath(string path)
+    {
+        try
+        {
+            string full = Path.GetFullPath(path);
+            if (!File.Exists(full))
+            {
+                return full;
+            }
+
+            var fileInfo = new FileInfo(full);
+            var target = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
+            if (target is not null && File.Exists(target.FullName))
+            {
+                return target.FullName;
+            }
+
+            return full;
+        }
+        catch
+        {
+            return path;
         }
     }
 
@@ -294,6 +409,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             }
 
             var validRuntimes = new List<JavaRuntimeInfo>();
+            bool hadInvalidEntries = false;
             foreach (var item in cacheData.Candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -301,8 +417,31 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     Path.IsPathRooted(item.Path) &&
                     !string.Equals(Path.GetFileName(item.Path), item.Path, StringComparison.OrdinalIgnoreCase) &&
                     File.Exists(item.Path) &&
-                    !SafeFileSystem.IsReparsePoint(item.Path))
+                    !IsIgnoredJavaPath(item.Path) &&
+                    !IsReparseOrJunctionPath(item.Path) &&
+                    !IsShimLauncher(item.Path))
                 {
+                    try
+                    {
+                        var fileInfo = new FileInfo(item.Path);
+                        if (item.LastWriteTimeUtcTicks > 0 &&
+                            fileInfo.LastWriteTimeUtc.Ticks == item.LastWriteTimeUtcTicks &&
+                            fileInfo.Length == item.FileSizeBytes &&
+                            item.MajorVersion > 0)
+                        {
+                            validRuntimes.Add(new JavaRuntimeInfo(
+                                item.Path,
+                                item.MajorVersion,
+                                item.Is64Bit,
+                                item.JavawPath,
+                                item.Vendor ?? string.Empty));
+                            continue;
+                        }
+                    }
+                    catch
+                    {
+                    }
+
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     timeoutCts.CancelAfter(TimeSpan.FromSeconds(3));
 
@@ -313,21 +452,42 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         {
                             validRuntimes.Add(runtime);
                         }
+                        else
+                        {
+                            hadInvalidEntries = true;
+                        }
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
+                        hadInvalidEntries = true;
                     }
                     catch
                     {
+                        hadInvalidEntries = true;
                     }
                 }
                 else
                 {
-                    return null;
+                    hadInvalidEntries = true;
                 }
             }
 
-            return validRuntimes;
+            if (validRuntimes.Count == 0)
+            {
+                return null;
+            }
+
+            var deduped = validRuntimes
+                .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+                .Select(static g => g.First())
+                .ToList();
+
+            if (hadInvalidEntries || deduped.Count != validRuntimes.Count)
+            {
+                SaveToCache(deduped);
+            }
+
+            return deduped;
         }
         catch (Exception)
         {
@@ -343,7 +503,6 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             Directory.CreateDirectory(cacheDir);
             string cachePath = Path.Combine(cacheDir, CacheFileName);
 
-            // 規範化：驗證檔案存在、排除重複路徑、排除非絕對路徑、依 major 由小到大排序並使同 major 集中存放
             var entries = runtimes
                 .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
                             Path.IsPathRooted(r.ExecutablePath) &&
@@ -353,7 +512,28 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 .Select(static g => g.First())
                 .OrderBy(static r => r.MajorVersion)
                 .ThenBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
-                .Select(static r => new JavaCacheEntry(r.ExecutablePath, r.MajorVersion))
+                .Select(static r =>
+                {
+                    long lastWriteTicks = 0;
+                    long fileSize = 0;
+                    try
+                    {
+                        var fi = new FileInfo(r.ExecutablePath);
+                        lastWriteTicks = fi.LastWriteTimeUtc.Ticks;
+                        fileSize = fi.Length;
+                    }
+                    catch
+                    {
+                    }
+                    return new JavaCacheEntry(
+                        r.ExecutablePath,
+                        r.MajorVersion,
+                        r.Is64Bit,
+                        r.JavawPath,
+                        r.Vendor,
+                        lastWriteTicks,
+                        fileSize);
+                })
                 .ToList();
 
             var payload = new JavaCachePayload(Candidates: entries);
@@ -366,11 +546,16 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             // 快取寫入失敗不影響主要功能
         }
     }
-
-    internal sealed record JavaCacheEntry(
-        [property: JsonPropertyName("path")] string Path,
-        [property: JsonPropertyName("major")] int MajorVersion);
-
-    internal sealed record JavaCachePayload(
-        [property: JsonPropertyName("candidates")] IReadOnlyList<JavaCacheEntry> Candidates);
 }
+
+internal sealed record JavaCacheEntry(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("major")] int MajorVersion,
+    [property: JsonPropertyName("is64Bit")] bool Is64Bit = true,
+    [property: JsonPropertyName("javawPath")] string? JavawPath = null,
+    [property: JsonPropertyName("vendor")] string? Vendor = null,
+    [property: JsonPropertyName("lastWriteTicks")] long LastWriteTimeUtcTicks = 0,
+    [property: JsonPropertyName("fileSize")] long FileSizeBytes = 0);
+
+internal sealed record JavaCachePayload(
+    [property: JsonPropertyName("candidates")] IReadOnlyList<JavaCacheEntry> Candidates);

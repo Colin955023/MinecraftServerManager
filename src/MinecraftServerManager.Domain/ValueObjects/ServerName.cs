@@ -1,7 +1,11 @@
+using System.Buffers;
+
 namespace MinecraftServerManager.Domain.ValueObjects;
 
 public readonly record struct ServerName
 {
+    private static readonly SearchValues<char> InvalidWindowsChars = SearchValues.Create("<>:\"/\\|?*");
+
     public const int DefaultMaxLength = 100;
 
     public string Value { get; }
@@ -55,7 +59,7 @@ public readonly record struct ServerName
         if (normalized is "." or ".."
             || normalized.EndsWith('.')
             || normalized.EndsWith(' ')
-            || normalized.Any(IsInvalidWindowsNameCharacter))
+            || ContainsInvalidCharacter(normalized.AsSpan()))
         {
             error = "伺服器名稱不可包含路徑片段或不合法字元";
             return false;
@@ -80,8 +84,23 @@ public readonly record struct ServerName
         return true;
     }
 
-    private static bool IsInvalidWindowsNameCharacter(char character) =>
-        char.IsControl(character) || character is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*';
+    private static bool ContainsInvalidCharacter(ReadOnlySpan<char> span)
+    {
+        if (span.IndexOfAny(InvalidWindowsChars) >= 0)
+        {
+            return true;
+        }
+
+        for (int i = 0; i < span.Length; i++)
+        {
+            if (char.IsControl(span[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool IsWindowsDeviceName(string baseName)
     {

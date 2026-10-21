@@ -32,11 +32,19 @@ public sealed class AppUpdateServiceTests : IDisposable
     private sealed class FakeDownloadHttpPort : IHttpPort
     {
         public string? ChecksumResponse { get; set; }
+        public Exception? ChecksumException { get; set; }
         public byte[]? FileBytesToDownload { get; set; }
         public bool DownloadInvoked { get; private set; }
 
-        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default) =>
-            Task.FromResult(ChecksumResponse);
+        public Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken = default)
+        {
+            if (ChecksumException is not null)
+            {
+                return Task.FromException<string?>(ChecksumException);
+            }
+
+            return Task.FromResult(ChecksumResponse);
+        }
 
         public Task<HttpResult> DownloadAsync(
             Uri uri,
@@ -77,9 +85,12 @@ public sealed class AppUpdateServiceTests : IDisposable
 
     private static byte[] CreateValidPeBytes(int length = 256)
     {
-        byte[] bytes = new byte[Math.Max(length, 64)];
+        byte[] bytes = new byte[Math.Max(length, 128)];
         bytes[0] = 0x4D; // 'M'
         bytes[1] = 0x5A; // 'Z'
+        bytes[0x3C] = 0x40; // e_lfanew
+        bytes[0x40] = 0x50; // 'P'
+        bytes[0x41] = 0x45; // 'E'
         return bytes;
     }
 
@@ -91,7 +102,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -119,7 +130,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -131,6 +142,59 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         Assert.True(File.Exists(resultPath));
         Assert.True(fakeHttp.DownloadInvoked);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("https://example.com/update.exe.sha256", "not-a-hash")]
+    public async Task DownloadAndVerifyUpdateAsync_WhenChecksumIsMissingOrInvalid_RejectsDownload(
+        string? checksumUrl,
+        string? checksumResponse)
+    {
+        var fakeHttp = new FakeDownloadHttpPort
+        {
+            ChecksumResponse = checksumResponse,
+            FileBytesToDownload = CreateValidPeBytes(),
+        };
+        var service = new AppUpdateService(fakeHttp, _testDir);
+        var update = new UpdateCheckResult(
+            HasUpdate: true,
+            CurrentVersion: Core.AppInfo.Version,
+            LatestVersion: "2.0.1",
+            ReleaseTitle: "2.0.1",
+            ReleaseNotes: "測試",
+            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
+            Sha256ChecksumUrl: checksumUrl,
+            ReleasePageUrl: "https://example.com");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update));
+
+        Assert.False(fakeHttp.DownloadInvoked);
+        Assert.False(File.Exists(Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe")));
+    }
+
+    [Fact]
+    public async Task DownloadAndVerifyUpdateAsync_WhenChecksumRequestFails_RejectsDownload()
+    {
+        var fakeHttp = new FakeDownloadHttpPort
+        {
+            ChecksumException = new IOException("checksum unavailable"),
+            FileBytesToDownload = CreateValidPeBytes(),
+        };
+        var service = new AppUpdateService(fakeHttp, _testDir);
+        var update = new UpdateCheckResult(
+            HasUpdate: true,
+            CurrentVersion: Core.AppInfo.Version,
+            LatestVersion: "2.0.1",
+            ReleaseTitle: "2.0.1",
+            ReleaseNotes: "測試",
+            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
+            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
+            ReleasePageUrl: "https://example.com");
+
+        await Assert.ThrowsAsync<IOException>(() => service.DownloadAndVerifyUpdateAsync(update));
+
+        Assert.False(fakeHttp.DownloadInvoked);
     }
 
     [Fact]
@@ -149,7 +213,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -182,7 +246,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -216,7 +280,7 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         var update = new UpdateCheckResult(
             HasUpdate: true,
-            CurrentVersion: "2.0.0",
+            CurrentVersion: Core.AppInfo.Version,
             LatestVersion: "2.0.1",
             ReleaseTitle: "2.0.1",
             ReleaseNotes: "測試",
@@ -238,5 +302,29 @@ public sealed class AppUpdateServiceTests : IDisposable
 
         Assert.Throws<FileNotFoundException>(() =>
             service.ApplyUpdateAndRestart(Path.Combine(_testDir, "non_existent.exe")));
+    }
+
+    [Fact]
+    public async Task DownloadAndVerifyUpdateAsync_WhenOnlyDosHeaderPresent_RejectsFile()
+    {
+        byte[] dosOnly = new byte[256];
+        dosOnly[0] = 0x4D;
+        dosOnly[1] = 0x5A;
+        string sha256 = Convert.ToHexStringLower(SHA256.HashData(dosOnly));
+        var fakeHttp = new FakeDownloadHttpPort { ChecksumResponse = sha256, FileBytesToDownload = dosOnly };
+        var service = new AppUpdateService(fakeHttp, _testDir);
+        var update = new UpdateCheckResult(
+            HasUpdate: true,
+            CurrentVersion: Core.AppInfo.Version,
+            LatestVersion: "2.0.1",
+            ReleaseTitle: "2.0.1",
+            ReleaseNotes: "測試",
+            DownloadUrl: "https://example.com/MinecraftServerManager-2.0.1.exe",
+            Sha256ChecksumUrl: "https://example.com/MinecraftServerManager-2.0.1.exe.sha256",
+            ReleasePageUrl: "https://example.com");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.DownloadAndVerifyUpdateAsync(update));
+
+        Assert.False(File.Exists(Path.Combine(_testDir, "MinecraftServerManager-2.0.1.exe")));
     }
 }

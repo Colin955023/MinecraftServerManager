@@ -180,13 +180,18 @@ public static class JvmOptionPolicy
         string loaderType = "",
         IEnumerable<string>? existingArgs = null)
     {
-        string[] existing = existingArgs?.ToArray() ?? [];
-        if (HasGcOption(existing))
+        if (existingArgs is not null && HasGcOption(existingArgs))
         {
             return [];
         }
 
         var details = GetRecommendedJvmArgsDetails(javaMajor, memoryMaxMb, loaderType);
-        return [.. details.Select(static d => d.Option)];
+        string[] result = new string[details.Count];
+        for (int i = 0; i < details.Count; i++)
+        {
+            result[i] = details[i].Option;
+        }
+
+        return result;
     }
 }

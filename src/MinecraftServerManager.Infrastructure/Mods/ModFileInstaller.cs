@@ -35,9 +35,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
 
         if (File.Exists(dstFile) && File.Exists(srcFile))
         {
-            string srcHash = new HashCalculator().ComputeFileHash(srcFile, "sha256");
-            string dstHash = new HashCalculator().ComputeFileHash(dstFile, "sha256");
-            if (!string.IsNullOrEmpty(srcHash) && string.Equals(srcHash, dstHash, StringComparison.OrdinalIgnoreCase))
+            if (new FileInfo(srcFile).Length == new FileInfo(dstFile).Length && HasSameContent(srcFile, dstFile))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, srcFile);
                 return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態並已清理重複檔案", dstFile));
@@ -171,16 +169,19 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory, create: true);
-        string stagingDir = Path.Combine(stableModsDir, ".download_staging");
+        string stagingRoot = Path.Combine(stableModsDir, ".download_staging");
+        SafeFileSystem.ResolveStableDirectory(stagingRoot, create: true);
+        string stagingDir = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
         SafeFileSystem.ResolveStableDirectory(stagingDir, create: true);
 
         string tempFilePath = Path.Combine(stagingDir, $"{safeFileName}.{Guid.NewGuid():N}.tmp");
         string finalTargetPath = Path.Combine(stableModsDir, safeFileName);
         string? backupFilePath = null;
+        string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
 
         try
         {
-            // 下載
+            // 下載並於串流管線中即時增量校驗雜湊（消除下載後二次全檔磁碟讀取 I/O）
             var downloadResult = await httpPort.DownloadAsync(
                 new Uri(downloadUrl),
                 tempFilePath,
@@ -191,24 +192,14 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                         progress.Report((int)((double)p.BytesDownloaded / p.TotalBytes * 100));
                     }
                 }) : null,
+                expectedHash: !string.IsNullOrEmpty(expectedHash) ? expectedHash : null,
+                expectedHashAlgorithm: algo,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
 
             if (!downloadResult.Success)
             {
-                Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
-                return ModFileOperationResult.Fail($"下載失敗：{downloadResult.Error}", false);
-            }
-
-            // 雜湊校驗
-            if (!string.IsNullOrEmpty(expectedHash))
-            {
-                string algo = !string.IsNullOrEmpty(hashAlgorithm) ? hashAlgorithm : "sha512";
-                string actualHash = new HashCalculator().ComputeFileHash(tempFilePath, algo);
-                if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    SafeFileSystem.DeleteWithin(stagingDir, tempFilePath);
-                    return ModFileOperationResult.Fail($"檔案雜湊校驗失敗 (預期: {expectedHash}, 實際: {actualHash})", false);
-                }
+                Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
+                return ModFileOperationResult.Fail($"下載或雜湊校驗失敗：{downloadResult.Error}", false);
             }
 
             // 備份舊檔案（若存在）
@@ -218,7 +209,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
                 if (!SafeFileSystem.MoveWithin(stableModsDir, finalTargetPath, backupFilePath))
                 {
                     backupFilePath = null;
-                    Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                    Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
                     return ModFileOperationResult.Fail("無法備份既有模組檔案", false);
                 }
             }
@@ -226,7 +217,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             // 移動新檔案至目標路徑
             if (!SafeFileSystem.MoveWithin(stableModsDir, tempFilePath, finalTargetPath))
             {
-                Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+                Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
                 return ModFileOperationResult.Fail("無法移動模組檔案至目標位置", true);
             }
 
@@ -240,12 +231,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
         catch (OperationCanceledException)
         {
-            Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+            Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Cancel("已取消安裝", rollbackPerformed: true);
         }
         catch (Exception ex)
         {
-            Rollback(stagingDir, tempFilePath, finalTargetPath, backupFilePath);
+            Rollback(stableModsDir, tempFilePath, finalTargetPath, backupFilePath);
             return ModFileOperationResult.Fail($"安裝失敗：{ex.Message}", true);
         }
         finally
@@ -291,18 +282,17 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
     }
 
-    private static void Rollback(string stagingDir, string tempPath, string targetPath, string? backupPath)
+    private static void Rollback(string stableModsDir, string tempPath, string targetPath, string? backupPath)
     {
         try
         {
-            string baseDir = Path.GetDirectoryName(stagingDir) ?? stagingDir;
             if (File.Exists(tempPath))
             {
-                SafeFileSystem.DeleteWithin(baseDir, tempPath);
+                SafeFileSystem.DeleteWithin(stableModsDir, tempPath);
             }
             if (backupPath is not null && File.Exists(backupPath))
             {
-                SafeFileSystem.MoveWithin(baseDir, backupPath, targetPath);
+                SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath);
             }
         }
         catch
@@ -393,5 +383,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         }
 
         return false;
+    }
+
+    private static bool HasSameContent(string firstFile, string secondFile)
+    {
+        string firstHash = HashCalculator.Shared.ComputeFileHash(firstFile, "sha256");
+        return !string.IsNullOrEmpty(firstHash)
+            && string.Equals(firstHash, HashCalculator.Shared.ComputeFileHash(secondFile, "sha256"), StringComparison.OrdinalIgnoreCase);
     }
 }

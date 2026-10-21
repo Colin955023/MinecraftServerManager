@@ -1,25 +1,22 @@
+using System.Buffers;
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Channels;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.Infrastructure.Process;
 
-public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
+public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ProcessRunner");
 
     private static readonly FrozenSet<string> AllowedOpenFileExtensions =
         new[] { ".txt", ".log", ".json", ".toml", ".properties", ".yml", ".yaml", ".ini", ".cfg", ".md", ".csv", ".html", ".htm", ".xlsx", ".xml" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 檢查指定的檔案副檔名是否包含於允許直接開啟的安全白名單中
-    /// </summary>
-    public static bool IsAllowedOpenFileExtension(string extension) =>
-        !string.IsNullOrWhiteSpace(extension) && AllowedOpenFileExtensions.Contains(extension);
 
     public bool OpenFolder(string folderPath, bool isTrusted = false)
     {
@@ -307,10 +304,18 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         private const int MaxPendingOutputLines = 256;
 
         private readonly System.Diagnostics.Process _process;
+        private readonly Channel<ProcessOutput> _outputChannel = Channel.CreateBounded<ProcessOutput>(new BoundedChannelOptions(MaxPendingOutputLines)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest,
+            SingleReader = true,
+            SingleWriter = false,
+        });
         private readonly Task _standardOutputTask;
         private readonly Task _standardErrorTask;
+        private readonly Task _outputDispatchTask;
         private readonly Lock _outputLock = new();
         private readonly Queue<ProcessOutput> _pendingOutput = new();
+        private int _exitLogged;
         private bool _wasForceStopped;
         private bool _disposed;
         private Action<ProcessOutput>? _outputReceived;
@@ -318,6 +323,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         public ManagedProcess(System.Diagnostics.Process process)
         {
             _process = process;
+            _outputDispatchTask = DispatchOutputAsync();
             _standardOutputTask = process.StartInfo.RedirectStandardOutput
                 ? PumpAsync(_process.StandardOutput, ProcessOutputKind.StandardOutput)
                 : Task.CompletedTask;
@@ -355,7 +361,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
                 {
                     foreach (var output in backlog)
                     {
-                        value(output);
+                        NotifyOutputReceived(value, output);
                     }
                 }
             }
@@ -377,7 +383,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             {
                 return;
             }
-            await _process.StandardInput.WriteLineAsync(line).WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _process.StandardInput.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -386,7 +392,12 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             ObjectDisposedException.ThrowIf(_disposed, this);
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
-            Logger.Information("子行程 (PID: {Pid}) 結束，結束代碼: {ExitCode}, 強制終止: {WasForceStopped}", _process.Id, _process.ExitCode, _wasForceStopped);
+            _outputChannel.Writer.TryComplete();
+            await _outputDispatchTask.ConfigureAwait(false);
+            if (Interlocked.Exchange(ref _exitLogged, 1) == 0)
+            {
+                Logger.Information("子行程 (PID: {Pid}) 結束，結束代碼: {ExitCode}, 強制終止: {WasForceStopped}", _process.Id, _process.ExitCode, _wasForceStopped);
+            }
             return new(_process.ExitCode, _wasForceStopped);
         }
 
@@ -431,6 +442,8 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
 
             await _process.WaitForExitAsync().ConfigureAwait(false);
             await Task.WhenAll(_standardOutputTask, _standardErrorTask).ConfigureAwait(false);
+            _outputChannel.Writer.TryComplete();
+            await _outputDispatchTask.ConfigureAwait(false);
             _process.Dispose();
         }
 
@@ -443,7 +456,7 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                Logger.Debug("強制終止子行程時行程已結束或權限不足: {Message}", ex.Message);
+                Logger.Warning("強制終止子行程時行程已結束或權限不足: {Message}", ex.Message);
             }
         }
 
@@ -451,7 +464,14 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
         {
             while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
             {
-                var output = new ProcessOutput(kind, line);
+                _outputChannel.Writer.TryWrite(new ProcessOutput(kind, SanitizeOutputLine(line)));
+            }
+        }
+
+        private async Task DispatchOutputAsync()
+        {
+            await foreach (ProcessOutput output in _outputChannel.Reader.ReadAllAsync().ConfigureAwait(false))
+            {
                 Action<ProcessOutput>? handler;
                 lock (_outputLock)
                 {
@@ -466,15 +486,73 @@ public sealed class ProcessRunner : IProcessRunner, IExternalLauncher
                     }
                 }
 
-                try
+                if (handler is not null)
                 {
-                    handler?.Invoke(output);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warning("處理子行程輸出事件時發生例外: {Message}", ex.Message);
+                    NotifyOutputReceived(handler, output);
                 }
             }
         }
+
+        private static void NotifyOutputReceived(Action<ProcessOutput> handler, ProcessOutput output)
+        {
+            try
+            {
+                handler(output);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning("處理子行程輸出事件時發生例外: {Message}", ex.Message);
+            }
+        }
     }
+
+    private const int MaxOutputLineLength = 8192;
+    private static readonly SearchValues<char> InvalidControlOrEscapeChars = SearchValues.Create(
+        "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0A\x0B\x0C\x0D\x0E\x0F" +
+        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F\x7F");
+
+    /// <summary>
+    /// 清洗行程輸出單行文字，過濾 ANSI 轉義序列與非列印控制字元並限制單行上限
+    /// </summary>
+    public static string SanitizeOutputLine(string line)
+    {
+        if (string.IsNullOrEmpty(line))
+        {
+            return string.Empty;
+        }
+
+        if (line.Length > MaxOutputLineLength)
+        {
+            line = line[..MaxOutputLineLength];
+        }
+
+        if (!line.AsSpan().ContainsAny(InvalidControlOrEscapeChars))
+        {
+            return line;
+        }
+
+        string withoutAnsi = line.Contains('\x1B') ? AnsiEscapeRegex().Replace(line, string.Empty) : line;
+
+        if (!withoutAnsi.AsSpan().ContainsAny(InvalidControlOrEscapeChars))
+        {
+            return withoutAnsi;
+        }
+
+        Span<char> buffer = withoutAnsi.Length <= 512
+            ? stackalloc char[withoutAnsi.Length]
+            : new char[withoutAnsi.Length];
+        int written = 0;
+        foreach (char ch in withoutAnsi)
+        {
+            if (ch is '\t' or (>= (char)0x20 and not (char)0x7F))
+            {
+                buffer[written++] = ch;
+            }
+        }
+
+        return new string(buffer[..written]);
+    }
+
+    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]")]
+    private static partial Regex AnsiEscapeRegex();
 }

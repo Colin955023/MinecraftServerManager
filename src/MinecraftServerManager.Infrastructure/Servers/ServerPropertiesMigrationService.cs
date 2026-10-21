@@ -160,6 +160,8 @@ public static class ServerPropertiesMigrationService
         return success;
     }
 
+    private static readonly VersionValue Min119Version = new(1, 19, 0);
+
     private static bool IsVersionAtLeast119(string? version)
     {
         if (string.IsNullOrWhiteSpace(version))
@@ -167,9 +169,9 @@ public static class ServerPropertiesMigrationService
             return false;
         }
 
-        if (VersionValue.TryParse(version.Trim(), out var parsed))
+        if (VersionValue.TryParse(version, out var parsed))
         {
-            return parsed >= new VersionValue(1, 19, 0);
+            return parsed >= Min119Version;
         }
 
         return false;

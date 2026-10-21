@@ -118,8 +118,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 }
 
                 _writer.WriteLine(logLine);
-
-                _currentFileBytes += Encoding.UTF8.GetByteCount(logLine) + Environment.NewLine.Length;
+                _currentFileBytes = _writer.BaseStream.Position;
 
                 if (_currentFileBytes >= _options.MaxFileBytes)
                 {
@@ -200,7 +199,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
             _writer?.Dispose();
             _writer = null;
 
-            string logDir = _options.LogDirectory;
+            string logDir = Path.GetDirectoryName(_currentFilePath) ?? _options.LogDirectory;
             int maxBackup = Math.Max(0, _options.MaxArchiveFiles - 1);
 
             if (maxBackup > 0)
