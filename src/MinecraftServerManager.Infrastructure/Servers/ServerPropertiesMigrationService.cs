@@ -131,7 +131,7 @@ public static class ServerPropertiesMigrationService
 
         string stableDir = SafeFileSystem.ResolveStableDirectory(directoryPath);
         string propsPath = Path.Combine(stableDir, "server.properties");
-        if (!File.Exists(propsPath))
+        if (!SafeFileSystem.FileExists(propsPath))
         {
             return false;
         }
@@ -141,7 +141,7 @@ public static class ServerPropertiesMigrationService
             string backupPath = Path.Combine(stableDir, "server.properties.backup");
             try
             {
-                File.Copy(propsPath, backupPath, overwrite: true);
+                SafeFileSystem.CopyFile(propsPath, backupPath, overwrite: true);
                 Logger.Information("已建立 server.properties 備份：{BackupPath}", backupPath);
             }
             catch (Exception ex)

@@ -29,8 +29,10 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     private readonly JavaRuntimeDetector _javaDetector;
     private readonly LoaderCatalogService _loaderCatalog;
     private readonly MainViewModel _mainViewModel;
+    private readonly Services.WpfUiService _uiService;
 
     public MainViewModel MainViewModel => _mainViewModel;
+    public Services.IUiService UiService => _uiService;
     public SettingsManager Settings => _settingsManager;
     public bool IsServerRunning => _sharedServerRuntime.IsRunning;
 
@@ -62,6 +64,8 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             javaDetector: _javaDetector,
             javaRequirementService: javaRequirements);
         var backupService = new ServerBackupService(serversRoot);
+        var directorySizeService = new ServerDirectorySizeService();
+        var integrityService = new ServerIntegrityService();
 
         var modScanner = new LocalModScanner();
         var modInstaller = new ModFileInstaller(httpPort);
@@ -70,9 +74,9 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var dependencyPlanner = new ModDependencyPlanner();
         var modListExporter = new ModListExporter();
         var updateCheckerService = new UpdateCheckerService(httpPort);
-        var appUpdateService = new AppUpdateService(httpPort);
+        var appUpdateService = new AppUpdateService(httpPort, processRunner: _sharedProcessRunner);
 
-        var uiService = new Services.WpfUiService();
+        _uiService = new Services.WpfUiService();
 
         _mainViewModel = new MainViewModel(
             _settingsManager,
@@ -87,10 +91,12 @@ public sealed class AppCompositionRoot : IAsyncDisposable
             _sharedProcessRunner,
             javaRequirements,
             javaInstaller,
-            uiService: uiService,
+            uiService: _uiService,
             appUpdateService: appUpdateService,
             dependencyPlanner: dependencyPlanner,
-            modListExporter: modListExporter);
+            modListExporter: modListExporter,
+            directorySizeService: directorySizeService,
+            integrityService: integrityService);
     }
 
     /// <summary>

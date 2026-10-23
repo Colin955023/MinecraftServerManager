@@ -26,7 +26,7 @@
 
     <!-- 表單 -->
     <StackPanel Grid.Row="1">
-      <TextBlock Text="來源路徑 (目錄或 .zip 檔)" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+      <TextBlock Text="來源路徑（目錄或 .zip 檔）" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
       <Grid Margin="0,0,0,14">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />

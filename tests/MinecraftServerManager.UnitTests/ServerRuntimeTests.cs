@@ -271,5 +271,7 @@ public sealed class ServerRuntimeTests : IAsyncLifetime
             HasExited = true;
             return ValueTask.CompletedTask;
         }
+
+        public long? GetWorkingSet64() => throw new NotImplementedException();
     }
 }

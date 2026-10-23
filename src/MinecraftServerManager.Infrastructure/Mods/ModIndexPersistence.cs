@@ -1,7 +1,5 @@
-using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Serialization;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -25,11 +23,7 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
         try
         {
-            var dirInfo = new DirectoryInfo(cacheDir);
-            if ((dirInfo.Attributes & FileAttributes.Hidden) == 0)
-            {
-                dirInfo.Attributes |= FileAttributes.Hidden;
-            }
+            SafeFileSystem.SetDirectoryHidden(cacheDir, hidden: true);
         }
         catch
         {
@@ -167,7 +161,11 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
             try
             {
-                byte[] utf8Bytes = JsonSerializer.SerializeToUtf8Bytes(_index, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry);
+                byte[]? utf8Bytes = JsonCodec.SerializeToUtf8Bytes(_index, indented: true);
+                if (utf8Bytes is null)
+                {
+                    return;
+                }
                 AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
                 _dirty = false;
             }
@@ -181,7 +179,7 @@ public sealed class ModIndexPersistence : IModIndexPersistence
     {
         lock (_lock)
         {
-            if (!File.Exists(_indexFilePath))
+            if (!SafeFileSystem.FileExists(_indexFilePath))
             {
                 _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
                 return;
@@ -191,7 +189,7 @@ public sealed class ModIndexPersistence : IModIndexPersistence
             {
                 byte[]? bytes = SafeFileSystem.ReadRegularFile(_indexFilePath, JsonCodec.DefaultMaxBytes);
                 var loaded = bytes is not null
-                    ? JsonSerializer.Deserialize(bytes, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry)
+                    ? JsonCodec.Deserialize<Dictionary<string, ModCacheEntry>>(bytes)
                     : null;
                 _index = loaded is not null
                     ? new Dictionary<string, ModCacheEntry>(loaded, StringComparer.OrdinalIgnoreCase)

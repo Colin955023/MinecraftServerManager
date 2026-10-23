@@ -70,12 +70,12 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!File.Exists(filePath))
+        if (!SafeFileSystem.FileExists(filePath))
         {
             return Task.FromResult<LocalModInfo?>(null);
         }
 
-        var fileInfo = new FileInfo(filePath);
+        FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(filePath);
         string fileName = fileInfo.Name;
         bool isEnabled = !fileName.EndsWith(".jar.disabled", StringComparison.OrdinalIgnoreCase);
         string baseStem = ModHelpers.ModFilenameStem(fileName);
@@ -229,13 +229,13 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
 
         try
         {
-            using var archive = ZipFile.OpenRead(filePath);
+            using var archive = SafeZipArchive.OpenRead(filePath);
 
             // 1. fabric.mod.json / quilt.mod.json
             var fabricEntry = archive.GetEntry("fabric.mod.json") ?? archive.GetEntry("quilt.mod.json");
             if (fabricEntry is not null && ReadEntryTextBounded(fabricEntry) is { } fabricJson)
             {
-                using var doc = JsonDocument.Parse(fabricJson);
+                using var doc = JsonCodec.ParseDocument(fabricJson);
                 ParseFabricJson(doc.RootElement, meta, archive);
                 return meta;
             }
@@ -252,7 +252,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             var legacyEntry = archive.GetEntry("mcmod.info");
             if (legacyEntry is not null && ReadEntryTextBounded(legacyEntry) is { } legacyJson)
             {
-                using var doc = JsonDocument.Parse(legacyJson);
+                using var doc = JsonCodec.ParseDocument(legacyJson);
                 ParseLegacyMcModInfo(doc.RootElement, meta);
                 return meta;
             }
@@ -334,7 +334,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
             e.FullName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase) &&
             e.Length <= 10 * 1024 * 1024);
 
-        if (innerJarEntry is not null)
+        if (innerJarEntry is { Length: <= 10 * 1024 * 1024 })
         {
             try
             {
@@ -343,7 +343,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 using var ms = new MemoryStream(initialCapacity);
                 innerStream.CopyTo(ms);
                 ms.Position = 0;
-                using var innerZip = new ZipArchive(ms, ZipArchiveMode.Read);
+                using var innerZip = SafeZipArchive.OpenRead(ms, leaveOpen: true, maxArchiveBytes: 10 * 1024 * 1024);
 
                 var innerToml = innerZip.GetEntry("META-INF/mods.toml") ?? innerZip.GetEntry("META-INF/neoforge.mods.toml");
                 if (innerToml is not null && innerToml.Length <= MaxMetadataEntryBytes)
@@ -363,7 +363,7 @@ public sealed partial class LocalModScanner(IModIndexPersistence? indexPersisten
                 if (innerFabric is not null && innerFabric.Length <= MaxMetadataEntryBytes)
                 {
                     using var s = innerFabric.Open();
-                    using var doc = JsonDocument.Parse(s);
+                    using var doc = JsonCodec.ParseDocument(s);
                     ParseFabricJson(doc.RootElement, meta, innerZip);
                     if ((meta.Version == "未知" || string.IsNullOrWhiteSpace(meta.Version)) && !string.IsNullOrWhiteSpace(manifestVersion))
                     {

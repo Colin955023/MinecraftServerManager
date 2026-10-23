@@ -18,6 +18,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
     public bool IsReady { get; private set; }
     public int? ExitCode => _process?.ExitCode;
     public string? ActiveServerName { get; private set; }
+    public long? GetWorkingSet64() => _process?.GetWorkingSet64();
 
     public event Action<string>? OutputLineReceived;
     public event Action? ServerStarted;

@@ -105,7 +105,7 @@ public sealed partial class RestoreBackupViewModel : ObservableObject
         if (_isServerRunningCheck?.Invoke() == true)
         {
             StatusMessage = "伺服器正在執行中，無法還原備份！請先停止伺服器。";
-            _ui.ShowToast("伺服器正在執行中，請先停止伺服器後再進行備份還原。", "無法還原", ToastType.Warning);
+            _ui.ShowToast("伺服器正在執行中，請先停止伺服器後再還原備份。", "無法還原", ToastType.Warning);
             return;
         }
 

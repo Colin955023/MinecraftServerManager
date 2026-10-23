@@ -88,7 +88,17 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         Top = (SystemParameters.PrimaryScreenHeight - Height) / 2;
     }
 
-    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level) => NotificationDialog.Show(this, title, message, level);
+    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level)
+    {
+        if (level == NotificationLevel.Error)
+        {
+            _compositionRoot?.UiService.ShowError(message, title);
+        }
+        else
+        {
+            _compositionRoot?.UiService.ShowWarning(message, title);
+        }
+    }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -188,7 +198,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         finally
         {
             _shutdownCompleted = true;
-            await Dispatcher.InvokeAsync(Close);
+            _compositionRoot?.UiService.RunOnUi(Close);
         }
     }
 

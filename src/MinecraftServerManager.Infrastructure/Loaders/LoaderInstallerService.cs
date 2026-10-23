@@ -50,7 +50,7 @@ public sealed partial class LoaderInstallerService(
         {
             SafeReport("vanilla_prepare", "正在準備原版伺服器檔案...", 5);
             string serverJarPath = Path.Combine(stableServerDir, "server.jar");
-            if (!File.Exists(serverJarPath))
+            if (!SafeFileSystem.FileExists(serverJarPath))
             {
                 var vanillaProgress = progress is null ? null : new Progress<LoaderInstallProgress>(vp =>
                 {
@@ -151,7 +151,7 @@ public sealed partial class LoaderInstallerService(
 
     private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(string json)
     {
-        using var doc = JsonDocument.Parse(json);
+        using var doc = JsonCodec.ParseDocument(json);
         if (!doc.RootElement.TryGetProperty("downloads", out var downloadsProp) || downloadsProp.ValueKind != JsonValueKind.Object)
         {
             return (null, null, null);
@@ -193,12 +193,12 @@ public sealed partial class LoaderInstallerService(
 
         string? versionMetaUrl = null;
         string versionsCachePath = Path.Combine(RuntimePaths.GetVersionCacheDir(), "mc_versions_cache.json");
-        if (File.Exists(versionsCachePath))
+        if (SafeFileSystem.FileExists(versionsCachePath))
         {
             try
             {
-                using var stream = new FileStream(versionsCachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using var stream = SafeFileSystem.OpenRead(versionsCachePath, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
@@ -303,7 +303,7 @@ public sealed partial class LoaderInstallerService(
         string fileName = Path.GetFileName(uri.AbsolutePath);
         string destination = Path.Combine(_cacheDir, fileName);
 
-        if (!File.Exists(destination))
+        if (!SafeFileSystem.FileExists(destination))
         {
             string? expectedHash = null;
             string expectedAlgorithm = "sha256";
@@ -432,11 +432,11 @@ public sealed partial class LoaderInstallerService(
     {
         // 優先從 Forge / NeoForge 的 run.bat 提取 @...win_args.txt
         string runBat = Path.Combine(serverDirectory, "run.bat");
-        if (File.Exists(runBat))
+        if (SafeFileSystem.FileExists(runBat))
         {
             try
             {
-                string runBatContent = File.ReadAllText(runBat);
+                string runBatContent = SafeFileSystem.ReadAllText(runBat);
                 var match = WinArgsRegex().Match(runBatContent);
                 if (match.Success)
                 {
@@ -451,12 +451,12 @@ public sealed partial class LoaderInstallerService(
 
         // 檢查 Forge / NeoForge libraries 中的 win_args.txt
         string forgeLib = Path.Combine(serverDirectory, "libraries", "net", "minecraftforge", "forge");
-        if (Directory.Exists(forgeLib))
+        if (SafeFileSystem.DirectoryExists(forgeLib))
         {
-            foreach (string sub in Directory.GetDirectories(forgeLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
                 }
@@ -464,12 +464,12 @@ public sealed partial class LoaderInstallerService(
         }
 
         string neoLib = Path.Combine(serverDirectory, "libraries", "net", "neoforged", "neoforge");
-        if (Directory.Exists(neoLib))
+        if (SafeFileSystem.DirectoryExists(neoLib))
         {
-            foreach (string sub in Directory.GetDirectories(neoLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
                 }
@@ -496,7 +496,7 @@ public sealed partial class LoaderInstallerService(
             return preferred;
         }
 
-        if (File.Exists(runBat))
+        if (SafeFileSystem.FileExists(runBat))
         {
             return "run.bat";
         }
@@ -509,7 +509,7 @@ public sealed partial class LoaderInstallerService(
 
     internal static string? ExtractVersionMetaUrl(string manifestJson, string targetVersion)
     {
-        using var doc = JsonDocument.Parse(manifestJson);
+        using var doc = JsonCodec.ParseDocument(manifestJson);
         return ExtractVersionMetaUrl(doc, targetVersion);
     }
 
@@ -531,7 +531,7 @@ public sealed partial class LoaderInstallerService(
 
     internal static (string? Url, string? Sha1) ExtractServerDownloadInfo(string metaJson)
     {
-        using var doc = JsonDocument.Parse(metaJson);
+        using var doc = JsonCodec.ParseDocument(metaJson);
         return ExtractServerDownloadInfo(doc);
     }
 

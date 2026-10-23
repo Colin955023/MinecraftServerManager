@@ -1,6 +1,5 @@
 using System.Windows;
 using System.Windows.Media.Animation;
-using System.Windows.Threading;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
@@ -17,16 +16,19 @@ public enum NotificationLevel
 public partial class NotificationDialog : Window
 {
     private readonly NotificationLevel _level;
-    private readonly DispatcherTimer? _autoCloseTimer;
+    private readonly IUiService _ui;
+    private readonly IUiTimer _autoCloseTimer;
     private readonly double _totalSeconds;
     private double _elapsedSeconds;
     private bool _isPaused;
     private bool _isClosing;
 
-    public NotificationDialog(string title, string message, NotificationLevel level = NotificationLevel.Warning)
+    public NotificationDialog(IUiService ui, string title, string message, NotificationLevel level = NotificationLevel.Warning)
     {
+        ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
 
+        _ui = ui;
         _level = level;
         Title = title;
         TitleText.Text = title;
@@ -53,15 +55,11 @@ public partial class NotificationDialog : Window
 
         UpdateCountdownUi();
 
-        _autoCloseTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(100)
-        };
-        _autoCloseTimer.Tick += AutoCloseTimer_Tick;
-        _autoCloseTimer.Start();
+        _autoCloseTimer = _ui.CreateUiTimer(TimeSpan.FromMilliseconds(100), AutoCloseTimer_Tick);
+        _autoCloseTimer.StartTimer();
     }
 
-    private void AutoCloseTimer_Tick(object? sender, EventArgs e)
+    private void AutoCloseTimer_Tick()
     {
         if (_isPaused || _isClosing)
         {
@@ -71,7 +69,7 @@ public partial class NotificationDialog : Window
         _elapsedSeconds += 0.1;
         if (_elapsedSeconds >= _totalSeconds)
         {
-            _autoCloseTimer?.Stop();
+            _autoCloseTimer.StopTimer();
             BeginFadeOutAndClose();
         }
         else
@@ -128,7 +126,7 @@ public partial class NotificationDialog : Window
     private static string? _lastMessage;
     private static DateTimeOffset _lastShownTime;
 
-    public static void Show(Window? owner, string title, string message, NotificationLevel level = NotificationLevel.Warning)
+    public static void Show(IUiService ui, Window? owner, string title, string message, NotificationLevel level = NotificationLevel.Warning)
     {
         lock (SyncLock)
         {
@@ -144,7 +142,7 @@ public partial class NotificationDialog : Window
 
         void Action()
         {
-            var dialog = new NotificationDialog(title, message, level);
+            var dialog = new NotificationDialog(ui, title, message, level);
             Window? effectiveOwner = owner ?? Application.Current?.MainWindow;
             if (effectiveOwner is { IsVisible: true })
             {
@@ -155,19 +153,12 @@ public partial class NotificationDialog : Window
             dialog.ShowDialog();
         }
 
-        if (Application.Current?.Dispatcher.CheckAccess() == false)
-        {
-            Application.Current.Dispatcher.BeginInvoke(new Action(Action));
-        }
-        else
-        {
-            Action();
-        }
+        ui.RunOnUi(Action);
     }
 
     private void OkButton_Click(object sender, RoutedEventArgs e)
     {
-        _autoCloseTimer?.Stop();
+        _autoCloseTimer.StopTimer();
         SafeClose();
     }
 
@@ -179,7 +170,7 @@ public partial class NotificationDialog : Window
         }
 
         _isClosing = true;
-        _autoCloseTimer?.Stop();
+        _autoCloseTimer.StopTimer();
 
         var anim = new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(280))
         {
@@ -207,7 +198,7 @@ public partial class NotificationDialog : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _autoCloseTimer?.Stop();
+        _autoCloseTimer.StopTimer();
         base.OnClosed(e);
         try
         {

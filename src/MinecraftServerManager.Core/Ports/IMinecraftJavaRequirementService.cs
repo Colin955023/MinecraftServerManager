@@ -1,9 +1,9 @@
 namespace MinecraftServerManager.Core.Ports;
 
 /// <summary>
-/// Minecraft 版本的 Java 主要版本 (majorVersion) 需求服務。
+/// Minecraft 版本的 Java 主要版本（majorVersion）需求服務。
 /// 核心依據 Mojang 官方 version package 中的 javaVersion.majorVersion 動態取得並快取，
-/// 嚴禁以 Minecraft 版本號進行任何硬編碼推算。
+/// 嚴禁以 Minecraft 版本號做任何硬編碼推算。
 /// </summary>
 public interface IMinecraftJavaRequirementService
 {

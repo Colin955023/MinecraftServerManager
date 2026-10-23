@@ -126,6 +126,8 @@
                 Background="Transparent"
                 BorderThickness="0"
                 RowHeaderWidth="0"
+                EnableRowVirtualization="True"
+                VirtualizingPanel.VirtualizationMode="Recycling"
                 MouseDoubleClick="DataGrid_MouseDoubleClick">
         <DataGrid.Columns>
           <DataGridTextColumn Header="主要版本" Binding="{Binding DisplayName}" Width="100" />

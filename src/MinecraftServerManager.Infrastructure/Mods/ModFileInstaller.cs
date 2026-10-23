@@ -28,21 +28,21 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string dstFile = enable ? enabledFile : disabledFile;
         string action = enable ? "啟用" : "停用";
 
-        if (File.Exists(dstFile) && !File.Exists(srcFile))
+        if (SafeFileSystem.FileExists(dstFile) && !SafeFileSystem.FileExists(srcFile))
         {
             return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態", dstFile));
         }
 
-        if (File.Exists(dstFile) && File.Exists(srcFile))
+        if (SafeFileSystem.FileExists(dstFile) && SafeFileSystem.FileExists(srcFile))
         {
-            if (new FileInfo(srcFile).Length == new FileInfo(dstFile).Length && HasSameContent(srcFile, dstFile))
+            if (SafeFileSystem.GetFileLength(srcFile) == SafeFileSystem.GetFileLength(dstFile) && HasSameContent(srcFile, dstFile))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, srcFile);
                 return Task.FromResult(LocalModMutationResult.Success($"模組已處於{action}狀態並已清理重複檔案", dstFile));
             }
 
             string bakFile = Path.Combine(stableModsDir, $"{cleanModId}.conflict.bak");
-            if (File.Exists(bakFile))
+            if (SafeFileSystem.FileExists(bakFile))
             {
                 bakFile = Path.Combine(stableModsDir, $"{cleanModId}.conflict.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}.bak");
             }
@@ -50,7 +50,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             return Task.FromResult(LocalModMutationResult.Success($"偵測到衝突檔案，已改名保留備份：{Path.GetFileName(bakFile)}", bakFile));
         }
 
-        if (File.Exists(srcFile))
+        if (SafeFileSystem.FileExists(srcFile))
         {
             SafeFileSystem.MoveWithin(stableModsDir, srcFile, dstFile);
             return Task.FromResult(LocalModMutationResult.Success($"已成功{action}模組：{Path.GetFileName(dstFile)}", dstFile));
@@ -83,12 +83,12 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             string cleanModId = Path.GetFileNameWithoutExtension(enabledPath);
 
             bool deleted = false;
-            if (File.Exists(enabledPath))
+            if (SafeFileSystem.FileExists(enabledPath))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, enabledPath);
                 deleted = true;
             }
-            else if (File.Exists(disabledPath))
+            else if (SafeFileSystem.FileExists(disabledPath))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, disabledPath);
                 deleted = true;
@@ -126,7 +126,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceFilePath);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (!File.Exists(sourceFilePath))
+        if (!SafeFileSystem.FileExists(sourceFilePath))
         {
             return Task.FromResult(LocalModMutationResult.Failure("匯入失敗", $"來源檔案不存在：{sourceFilePath}"));
         }
@@ -144,7 +144,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             return Task.FromResult(LocalModMutationResult.Failure("匯入失敗", "目標路徑超出模組資料夾邊界"));
         }
 
-        File.Copy(sourceFilePath, targetPath, overwrite: true);
+        SafeFileSystem.CopyFile(sourceFilePath, targetPath, overwrite: true);
         return Task.FromResult(LocalModMutationResult.Success($"模組「{fileName}」已成功匯入", targetPath));
     }
 
@@ -203,7 +203,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             }
 
             // 備份舊檔案（若存在）
-            if (File.Exists(finalTargetPath))
+            if (SafeFileSystem.FileExists(finalTargetPath))
             {
                 backupFilePath = Path.Combine(stagingDir, $"{safeFileName}.bak");
                 if (!SafeFileSystem.MoveWithin(stableModsDir, finalTargetPath, backupFilePath))
@@ -222,7 +222,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
             }
 
             // 清理備份
-            if (backupFilePath is not null && File.Exists(backupFilePath))
+            if (backupFilePath is not null && SafeFileSystem.FileExists(backupFilePath))
             {
                 SafeFileSystem.DeleteWithin(stagingDir, backupFilePath);
             }
@@ -254,7 +254,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         {
             string stableModsDir = SafeFileSystem.ResolveStableDirectory(modsDirectory);
             string stagingDir = Path.Combine(stableModsDir, ".download_staging");
-            if (Directory.Exists(stagingDir))
+            if (SafeFileSystem.DirectoryExists(stagingDir))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, stagingDir);
             }
@@ -268,7 +268,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
     {
         try
         {
-            if (Directory.Exists(stagingDir))
+            if (SafeFileSystem.DirectoryExists(stagingDir))
             {
                 var entries = SafeFileSystem.ListBoundedDirectory(stagingDir, maxEntries: 10, rejectReparse: false);
                 if (entries.Count == 0)
@@ -286,11 +286,11 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
     {
         try
         {
-            if (File.Exists(tempPath))
+            if (SafeFileSystem.FileExists(tempPath))
             {
                 SafeFileSystem.DeleteWithin(stableModsDir, tempPath);
             }
-            if (backupPath is not null && File.Exists(backupPath))
+            if (backupPath is not null && SafeFileSystem.FileExists(backupPath))
             {
                 SafeFileSystem.MoveWithin(stableModsDir, backupPath, targetPath);
             }
@@ -321,7 +321,7 @@ public sealed class ModFileInstaller(IHttpPort httpPort) : IModFileInstaller
         string enabledPath = Path.Combine(stableModsDir, $"{cleanModId}.jar");
         string disabledPath = Path.Combine(stableModsDir, $"{cleanModId}.jar.disabled");
 
-        if (File.Exists(enabledPath) || File.Exists(disabledPath))
+        if (SafeFileSystem.FileExists(enabledPath) || SafeFileSystem.FileExists(disabledPath))
         {
             return (enabledPath, disabledPath);
         }

@@ -2,6 +2,8 @@ using System.Text.Json;
 using MinecraftServerManager.Core;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.FileSystem;
+using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Services;
 
@@ -30,14 +32,14 @@ public sealed class DefaultEnvironmentRuntimeInfo : IEnvironmentRuntimeInfo
 
         static bool CheckRuntimeDirectory(string path)
         {
-            if (!Directory.Exists(path))
+            if (!SafeFileSystem.DirectoryExists(path))
             {
                 return false;
             }
 
             try
             {
-                return Directory.EnumerateDirectories(path, "10.*").Any();
+                return SafeFileSystem.EnumerateDirectories(path, "10.*").Any();
             }
             catch
             {
@@ -49,7 +51,7 @@ public sealed class DefaultEnvironmentRuntimeInfo : IEnvironmentRuntimeInfo
     private static bool? s_isFrameworkDependent;
 
     /// <summary>
-    /// 發布時由 App.csproj 寫入 <c>DistributionMode</c> 組件中繼資料；不依賴執行檔檔名，使用者重新命名檔案亦不影響判斷。
+    /// 發布時由 App.csproj 寫入 <c>DistributionMode</c> 組件中繼資料；不仰賴執行檔檔名，使用者重新命名檔案亦不影響判斷。
     /// 未標記（如本機開發建置）一律視為框架相依。
     /// </summary>
     public bool IsCurrentProcessFrameworkDependent()
@@ -120,7 +122,7 @@ public sealed class UpdateCheckerService(
                     ReleasePageUrl: defaultPageUrl);
             }
 
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             var root = doc.RootElement;
 
             string tagName = root.TryGetProperty("tag_name", out var tagElem) ? tagElem.GetString() ?? "" : "";

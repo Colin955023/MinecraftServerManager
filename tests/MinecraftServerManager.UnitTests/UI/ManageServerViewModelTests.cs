@@ -101,6 +101,38 @@ public sealed class ManageServerViewModelTests
         Assert.Contains("win_args.txt", server.Status);
     }
 
+    [Fact]
+    public void SelectedServerMemory_WhenMinMemoryNotSet_ShouldOnlyDisplayMaxMemory()
+    {
+        var vm = new ManageServerViewModel();
+        var server = new ServerRowItem
+        {
+            Name = "ServerNoMin",
+            MemoryMaxMb = 4096,
+            MemoryMinMb = null,
+        };
+        vm.SelectedServer = server;
+
+        Assert.Equal("4096 MB", vm.SelectedServerMemory);
+        Assert.Contains("記憶體配置：4096 MB", vm.SelectedServerInfo);
+    }
+
+    [Fact]
+    public void SelectedServerMemory_WhenMinMemorySet_ShouldDisplayRange()
+    {
+        var vm = new ManageServerViewModel();
+        var server = new ServerRowItem
+        {
+            Name = "ServerWithMin",
+            MemoryMaxMb = 4096,
+            MemoryMinMb = 2048,
+        };
+        vm.SelectedServer = server;
+
+        Assert.Equal("2048 MB ~ 4096 MB", vm.SelectedServerMemory);
+        Assert.Contains("記憶體配置：2048 MB ~ 4096 MB", vm.SelectedServerInfo);
+    }
+
     private sealed class FakeExternalLauncher : Core.Ports.IExternalLauncher
     {
         public List<string> OpenedFolders { get; } = [];

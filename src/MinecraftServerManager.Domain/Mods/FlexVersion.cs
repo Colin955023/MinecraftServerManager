@@ -2,7 +2,7 @@ namespace MinecraftServerManager.Domain.Mods;
 
 /// <summary>
 /// 彈性語意版本比較引擎（FlexVersion）。
-/// 規格參照 Prism Launcher 之版本解析標準，以原生 C# / .NET 10 進行乾淨室獨立實作（Clean-room implementation）。
+/// 規格參照 Prism Launcher 之版本解析標準，以原生 C# / .NET 10 落實乾淨室獨立實作（Clean-room implementation）。
 /// 能精準解析 Minecraft 自由格式之模組版本字串，支援多區段比對、前導零正規化、忽略 '+' 建置中繼資料與預發布版降級，提供與人類直覺完全相符之版本排序與比較。
 /// </summary>
 public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersion>, IComparable
@@ -106,7 +106,7 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
     }
 
     /// <summary>
-    /// 正規化 Minecraft 模組常見的版本字串前綴與元資料。
+    /// 正規化 Minecraft 模組常見的版本字串前綴與中繼資料。
     /// 例如：v1.2.3 -> 1.2.3, mc1.21.1-0.15.2-fabric -> 0.15.2-fabric
     /// </summary>
     public static string NormalizeModVersionString(string? raw)
@@ -161,7 +161,7 @@ public sealed class FlexVersion : IComparable<FlexVersion>, IEquatable<FlexVersi
             char c = span[i];
             if (c == '+')
             {
-                // 依照 FlexVer 規範：忽略 '+' 之後的建置元資料 (Build Metadata)
+                // 依照 FlexVer 規範：忽略 '+' 之後的建置中繼資料 (Build Metadata)
                 break;
             }
 

@@ -1,3 +1,5 @@
+using MinecraftServerManager.Infrastructure.FileSystem;
+
 namespace MinecraftServerManager.Infrastructure.Servers;
 
 /// <summary>
@@ -16,22 +18,22 @@ public static class ServerStartupTargetResolver
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverDirectory);
 
-        if (File.Exists(Path.Combine(serverDirectory, UnifiedScript)))
+        if (SafeFileSystem.FileExists(Path.Combine(serverDirectory, UnifiedScript)))
         {
             return UnifiedScript;
         }
 
-        if (File.Exists(Path.Combine(serverDirectory, FallbackScript)))
+        if (SafeFileSystem.FileExists(Path.Combine(serverDirectory, FallbackScript)))
         {
             return FallbackScript;
         }
 
-        if (File.Exists(Path.Combine(serverDirectory, DefaultCoreJar)))
+        if (SafeFileSystem.FileExists(Path.Combine(serverDirectory, DefaultCoreJar)))
         {
             return DefaultCoreJar;
         }
 
-        string? firstJar = Directory.EnumerateFiles(serverDirectory, "*.jar").FirstOrDefault();
-        return firstJar is not null ? Path.GetFileName(firstJar) : DefaultCoreJar;
+        IReadOnlyList<string> jars = SafeFileSystem.EnumerateFiles(serverDirectory, "*.jar");
+        return jars.Count > 0 ? Path.GetFileName(jars[0]) : DefaultCoreJar;
     }
 }

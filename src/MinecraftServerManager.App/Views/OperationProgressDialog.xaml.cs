@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
 
@@ -12,12 +13,15 @@ public partial class OperationProgressDialog : Window
 {
     private static readonly QuadraticEase ProgressEase = new() { EasingMode = EasingMode.EaseOut };
     private readonly Storyboard _shimmerStoryboard = new();
+    private readonly IUiService _ui;
     private bool _completed;
     private double _currentPercent;
 
-    public OperationProgressDialog(string windowTitle, string heading, string initialMessage)
+    public OperationProgressDialog(IUiService ui, string windowTitle, string heading, string initialMessage)
     {
+        ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
+        _ui = ui;
         Title = windowTitle;
         TitleText.Text = heading;
         PhaseText.Text = initialMessage;
@@ -73,7 +77,7 @@ public partial class OperationProgressDialog : Window
     public void UpdateProgress(int percent, string message)
     {
         int pct = Math.Clamp(percent, 0, 100);
-        RunOnUi(() =>
+        _ui.RunOnUi(() =>
         {
             _currentPercent = pct;
             PercentText.Text = $"{pct}%";
@@ -92,7 +96,7 @@ public partial class OperationProgressDialog : Window
     public void UpdateProgress(int current, int total, string message)
     {
         int pct = total > 0 ? (int)Math.Clamp(current * 100.0 / total, 0, 100) : 0;
-        RunOnUi(() =>
+        _ui.RunOnUi(() =>
         {
             _currentPercent = pct;
             PercentText.Text = $"{pct}% ({current}/{total})";
@@ -125,18 +129,6 @@ public partial class OperationProgressDialog : Window
         };
 
         ProgressFill.BeginAnimation(WidthProperty, widthAnimation, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private void RunOnUi(Action action)
-    {
-        if (Dispatcher.CheckAccess())
-        {
-            action();
-        }
-        else
-        {
-            _ = Dispatcher.BeginInvoke(action);
-        }
     }
 
     private void OnDialogClosing(object? sender, CancelEventArgs e) =>

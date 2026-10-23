@@ -96,10 +96,12 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         string dataFile = Path.Combine(serverDir, "world.txt");
         File.WriteAllText(dataFile, "original world data");
 
+        string externalBackupsDir = Path.Combine(_testRoot, "ExternalBackups");
+        SafeFileSystem.ResolveStableDirectory(externalBackupsDir, create: true);
         var backupService = new ServerBackupService(_serversRoot, maxRetentionCount: 2);
 
         // 1. 建立備份
-        var backup1 = await backupService.CreateBackupAsync("BackupServer", comment: "第一個測試備份");
+        var backup1 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir, comment: "第一個測試備份");
         Assert.NotNull(backup1);
         Assert.True(File.Exists(backup1.FullPath));
 
@@ -109,7 +111,7 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         File.WriteAllText(extraFile, "unexpected content");
 
         // 3. 交易式安全還原
-        bool restoreSuccess = await backupService.RestoreBackupAsync("BackupServer", backup1.FileName);
+        bool restoreSuccess = await backupService.RestoreBackupAsync("BackupServer", backup1.FileName, externalBackupsDir);
         Assert.True(restoreSuccess);
 
         // 驗證原本資料已完全復原
@@ -117,10 +119,10 @@ public sealed class ServerWorkflowIntegrationTests : IDisposable
         Assert.False(File.Exists(extraFile));
 
         // 4. 驗證 Retention 清理政策 (maxRetentionCount = 2)
-        var backup2 = await backupService.CreateBackupAsync("BackupServer");
-        var backup3 = await backupService.CreateBackupAsync("BackupServer");
+        var backup2 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir);
+        var backup3 = await backupService.CreateBackupAsync("BackupServer", destinationPath: externalBackupsDir);
 
-        var list = await backupService.ListBackupsAsync("BackupServer");
+        var list = await backupService.ListBackupsAsync("BackupServer", externalBackupsDir);
         Assert.Equal(2, list.Count);
         Assert.Contains(list, b => b.FileName == backup3.FileName);
         Assert.Contains(list, b => b.FileName == backup2.FileName);

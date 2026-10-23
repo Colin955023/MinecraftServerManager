@@ -93,7 +93,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     continue;
                 }
 
-                using var doc = JsonDocument.Parse(json);
+                using var doc = JsonCodec.ParseDocument(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
@@ -169,7 +169,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             var version = ParseSingleVersion(doc.RootElement);
             string projectId = doc.RootElement.TryGetProperty("project_id", out var pElem) ? pElem.GetString() ?? string.Empty : string.Empty;
             return new ModrinthVersionLookupResult(cleanHash, algorithm, projectId, version);
@@ -209,7 +209,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
             try
             {
-                using var doc = JsonDocument.Parse(responseJson);
+                using var doc = JsonCodec.ParseDocument(responseJson);
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     string fileHash = prop.Name;
@@ -231,7 +231,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var list = new List<OnlineModInfo>();
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             if (!doc.RootElement.TryGetProperty("hits", out var hitsElem))
             {
                 return list;
@@ -292,7 +292,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var list = new List<OnlineModVersion>();
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
                 return list;

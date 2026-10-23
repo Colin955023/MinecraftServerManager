@@ -1,4 +1,4 @@
-﻿<Window x:Class="MinecraftServerManager.App.Views.PlayerManagementDialog"
+<Window x:Class="MinecraftServerManager.App.Views.PlayerManagementDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:MinecraftServerManager.App.ViewModels"
@@ -118,11 +118,11 @@
             <!-- 說明指南區 -->
             <Border Grid.Row="0" Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,12">
               <StackPanel>
-                <TextBlock Text="【管理員權限等級 (Level) 指南】" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,4" />
-                <TextBlock Text="• Level 4: 完整控制權限，可使用 /stop、/save-all、/save-off 等伺服器維護指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
-                <TextBlock Text="• Level 3: 玩家管理權限，可使用 /op、/deop、/kick、/ban、/pardon 等名單管理指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
-                <TextBlock Text="• Level 2: 基礎管理員與指令方塊，可使用 /gamemode、/tp、/give、/gamerule 等指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
-                <TextBlock Text="• Level 1: 僅略過出生點方塊保護，無任何作弊指令權限。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
+                <TextBlock Text="【管理員權限等級（Level）指南】" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,4" />
+                <TextBlock Text="• Level 4：完整控制權限，可使用 /stop、/save-all、/save-off 等伺服器維護指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
+                <TextBlock Text="• Level 3：玩家管理權限，可使用 /op、/deop、/kick、/ban、/pardon 等名單管理指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
+                <TextBlock Text="• Level 2：基礎管理員與指令方塊，可使用 /gamemode、/tp、/give、/gamerule 等指令。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
+                <TextBlock Text="• Level 1：僅略過出生點方塊保護，無任何作弊指令權限。" Foreground="{DynamicResource MutedTextBrush}" FontSize="11" />
               </StackPanel>
             </Border>
 

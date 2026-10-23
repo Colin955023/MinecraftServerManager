@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -174,7 +175,7 @@ public sealed partial class ManageJavaViewModel : ObservableObject
             var existing = await Task.Run(() => javaSnapshot.FirstOrDefault(j =>
                 j.MajorVersion == targetMajor &&
                 !string.IsNullOrWhiteSpace(j.ExecutablePath) &&
-                File.Exists(j.ExecutablePath))).ConfigureAwait(true);
+                SafeFileSystem.FileExists(j.ExecutablePath))).ConfigureAwait(true);
 
             if (existing is not null)
             {

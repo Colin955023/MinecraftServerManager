@@ -17,6 +17,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private readonly IUiService _ui;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("CreateServer");
+    private static readonly string[] NoAvailableVersions = ["無可用版本"];
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
     private readonly IJavaInstaller? _javaInstaller;
@@ -368,7 +369,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             }
             else
             {
-                LoaderVersions.ReplaceAll(["無可用版本"]);
+                LoaderVersions.ReplaceAll(NoAvailableVersions);
                 SelectedLoaderVersion = "無可用版本";
                 IsLoaderVersionEnabled = false;
             }
@@ -710,7 +711,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         {
                             Logger.Warning("建立伺服器已終止：本機未安裝符合 Minecraft {Version} 所需之 Java {Major}", SelectedMinecraftVersion, targetMajor.Value);
                             _ui.ShowError(
-                                $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再進行建立。",
+                                $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再建立伺服器。",
                                 "Java 版本不相符");
                             return;
                         }

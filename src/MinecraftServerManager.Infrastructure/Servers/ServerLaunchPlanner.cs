@@ -36,7 +36,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 throw new InvalidOperationException($"啟動腳本「{targetFile}」未通過安全性檢驗（可能包含未受信任的指令或批次注入字元）");
             }
 
-            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || File.Exists(Path.Combine(stableDir, "user_jvm_args.txt")))
+            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || SafeFileSystem.FileExists(Path.Combine(stableDir, "user_jvm_args.txt")))
             {
                 ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
             }

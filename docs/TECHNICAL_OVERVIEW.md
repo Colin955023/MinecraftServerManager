@@ -1,4 +1,4 @@
-﻿# Minecraft 伺服器管理器技術手冊
+# Minecraft 伺服器管理器技術手冊
 
 本手冊說明 Minecraft 伺服器管理器程式所採用的技術堆疊、分層架構、核心演算法與安全機制。
 
@@ -85,7 +85,7 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 
 - **平行化本地掃描與防抖動機制**：透過 `Parallel.ForEachAsync` 平行讀取伺服器 `mods` 目錄，快速擷取模組中繼資料並計算雜湊；模組重新整理內建 300ms 智慧防抖（Debounce），防範介面頻繁觸發時的重度磁碟 I/O 開銷
 - **原生 FlexVersion 彈性語意版本比較引擎**：
-  - 規格參照開放原始碼專案 Prism Launcher 之版本解析與偏序比較原則，由本專案採用 C# / .NET 10 原生機制（`ReadOnlySpan<char>`、自訂 `Section` 值型別）進行乾淨室獨立實作（Clean-room Implementation），支援多區段語意化版本、前導零正規化、忽略 `+` 建置中繼資料與預發布版降級比較，確保版本新舊判定的數學自反性、反對稱性與傳遞性。
+  - 規格參照開放原始碼專案 Prism Launcher 之版本解析與偏序比較原則，由本專案採用 C# / .NET 10 原生機制（`ReadOnlySpan<char>`、自訂 `Section` 值型別）落實乾淨室獨立實作（Clean-room Implementation），支援多區段語意化版本、前導零正規化、忽略 `+` 建置中繼資料與預發布版降級比較，確保版本新舊判定的數學自反性、反對稱性與傳遞性。
   - 模組更新檢查演算法利用 FlexVersion 全序關係由相容候選集合中判定最大版本（最高相容版本），確保版本決策之單調性與確定性。
 - **模組智慧啟閉**：透過標準化副檔名切換（`.jar` 與 `.jar.disabled`）實現無損啟用與停用，並自動處理檔名衝突備份
 - **邊下載邊串流增量雜湊校驗（Single-Pass Streaming Hash Verification）**：下載 Modrinth 線上模組與更新資產時，於 HTTP 回應串流寫入本機磁碟的同時透過增量雜湊轉換器同步計算 SHA-512／SHA-256／SHA-1，寫入完成立即驗證，徹底消除下載完成後二次重讀全檔磁碟 I/O 的效能開銷；雜湊不符即主動清理暫存檔。
@@ -95,18 +95,18 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 
 - **前台焦點維持（Focus Preservation）**：子對話方塊（如 `ServerInitializationDialog`）關閉或檢視頁面跳轉時，主動透過擁有者視窗啟動機制（`Owner?.Activate()`）維持 WPF 主視窗之前台狀態，防止 Windows 桌面視窗管理員（DWM）因前台暫態失去焦點而將焦點轉移至其他第三方應用程式。
 - **淘汰原生 MessageBox 與全 WPF 客製化視窗**：系統淘汰舊式原生 `MessageBox`，全面改由 WPF 原生自訂對話方塊（`CustomConfirmDialog` 與 `NotificationDialog`）負責確認與警示，100% 契合深淺色動態主題。
-- **視窗渲染就緒音效回饋（AudioFeedback）**：將 Windows 系統音效呼叫移至對話視窗的 `Loaded` 事件中觸發，並透過安全標準 Windows 音效機制精準發聲（Warning / Error / Info / Question），防範未渲染視窗在建構時期被 Windows 靜音的問題。
+- **視窗算繪就緒音效回饋（AudioFeedback）**：將 Windows 系統音效呼叫移至對話視窗的 `Loaded` 事件中觸發，並透過安全標準 Windows 音效機制精準發聲（Warning / Error / Info / Question），防範未算繪視窗在建構時期被 Windows 靜音的問題。
 
 ### 6. 名單管理系統架構（Player Management System）
 
-- **核心名冊整合（ServerPlayerConfigStore）**：封裝伺服器四大名單持久化檔案：管理員名單（`ops.json`，含 1~4 級權限與略過人數上限標記）、白名單（`whitelist.json`）、玩家封鎖名冊（`banned-players.json`）與 IP 封鎖名冊（`banned-ips.json`）。
+- **核心名冊整合（ServerPlayerConfigStore）**：封裝伺服器四大名單持久化檔案：管理員名單（`ops.json`，含 1～4 級權限與略過人數上限標記）、白名單（`whitelist.json`）、玩家封鎖名冊（`banned-players.json`）與 IP 封鎖名冊（`banned-ips.json`）。
 - **離線玩家索引快取（usercache.json）**：主動讀取伺服器內部之 `usercache.json`，在離線或無公網環境下自動解析關聯玩家名稱與 UUID，提供名稱快速自動補完。
-- **原子不可分割寫入保證**：名單儲存時一律透過 `AtomicFileWriter` 進行原子置換，防止名冊並行編輯損毀。
-- **高效單擊 UI 互動與虛擬化回收**：表格採用 `DataGridTemplateColumn` 內嵌 `<CheckBox>`，實現單擊立即切換核取狀態；長列表與表格全面開啟 `EnableRowVirtualization="True"` 與 `VirtualizingPanel.VirtualizationMode="Recycling"`，確保記憶體低駐留與捲動高流暢度。
+- **原子不可分割寫入保證**：名單儲存時一律透過 `AtomicFileWriter` 進行不可分割置換，防止名冊並行編輯損毀。
+- **高效單次點選 UI 互動與虛擬化回收**：表格採用 `DataGridTemplateColumn` 內嵌 `<CheckBox>`，實現按一下立即切換核取狀態；長列表與表格全面開啟 `EnableRowVirtualization="True"` 與 `VirtualizingPanel.VirtualizationMode="Recycling"`，確保記憶體低駐留與捲動高流暢度。
 
 ### 7. Java 探測去重與安全邊界防護
 
-- **Oracle Shim 跳板轉發器與 Junction 排除**：在環境變數 `PATH` 與候選目錄掃描中，精準過濾包含 `\Oracle\Java\javapath`、`\Oracle\Java\java8path` 與 `\Common Files\Oracle\Java\` 之目錄，並檢查執行檔 PE 元資料之 `shimconsole.exe` / `shim.exe`，徹底杜絕 Java 8 重複項。
+- **Oracle Shim 跳板轉發器與 Junction 排除**：在環境變數 `PATH` 與候選目錄掃描中，精準過濾包含 `\Oracle\Java\javapath`、`\Oracle\Java\java8path` 與 `\Common Files\Oracle\Java\` 之目錄，並檢查執行檔 PE 中繼資料之 `shimconsole.exe` / `shim.exe`，徹底杜絕 Java 8 重複項。
 - **原生符號連結解析（ResolveLinkTarget）**：利用 .NET 原生 `FileSystemInfo.ResolveLinkTarget(returnFinalTarget: true)` 精準解析實體 JRE 目錄，確保候選路徑之唯一性與真實性。
 
 ### 8. 雙版本原生單一檔案發布

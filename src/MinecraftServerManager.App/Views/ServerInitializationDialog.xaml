@@ -32,7 +32,7 @@
                      Margin="0,0,8,0"
                      VerticalAlignment="Center" />
         <TextBlock x:Name="StatusText"
-                   Text="狀態: 正在準備啟動伺服器進行初次世界生成與設定..."
+                   Text="狀態：正在準備啟動伺服器執行初次世界生成與設定..."
                    FontSize="13"
                    Foreground="{DynamicResource MutedTextBrush}"
                    VerticalAlignment="Center" />

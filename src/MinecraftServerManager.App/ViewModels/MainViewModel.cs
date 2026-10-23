@@ -1,11 +1,11 @@
 using MinecraftServerManager.App.Services;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -71,7 +71,9 @@ public sealed partial class MainViewModel : ViewModelBase
         IUiService? uiService = null,
         IAppUpdateService? appUpdateService = null,
         IModDependencyPlanner? dependencyPlanner = null,
-        IModListExporter? modListExporter = null)
+        IModListExporter? modListExporter = null,
+        IServerDirectorySizeService? directorySizeService = null,
+        IServerIntegrityService? integrityService = null)
     {
         _ui = uiService ?? NoOpUiService.Instance;
         _settingsManager = settingsManager ?? new SettingsManager();
@@ -114,7 +116,9 @@ public sealed partial class MainViewModel : ViewModelBase
             launcher,
             javaDetector,
             javaRequirementService,
-            uiService: _ui);
+            uiService: _ui,
+            directorySizeService: directorySizeService,
+            integrityService: integrityService);
         _pageFactories["mods"] = () => new ModsViewModel(
             serverManager,
             modManager,
@@ -293,7 +297,7 @@ public sealed partial class MainViewModel : ViewModelBase
             return Task.CompletedTask;
         }
 
-        Directory.CreateDirectory(path);
+        SafeFileSystem.CreateDirectory(path);
 
         if (_launcher is not null && !_launcher.OpenFolder(path, isTrusted: true))
         {

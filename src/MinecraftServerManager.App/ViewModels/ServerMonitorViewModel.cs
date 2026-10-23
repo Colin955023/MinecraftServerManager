@@ -1,6 +1,6 @@
 using MinecraftServerManager.App.Services;
-using System.Buffers;
 using System.Diagnostics;
+using System.Buffers;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -11,6 +11,7 @@ using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.App.ViewModels;
 
@@ -37,8 +38,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     });
     private readonly string _serverPath;
     private readonly string _serverName;
-    private Process? _monitoredProcess;
-    private int _monitoredPid;
     private long? _startTimestamp;
     private bool _serverReadyNotified;
     private int _logSessionId;
@@ -71,11 +70,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
 
     [ObservableProperty]
     public partial bool IsServerRunning { get; set; }
-
-    partial void OnIsServerRunningChanged(bool value)
-    {
-        OnPropertyChanged(nameof(CanStartServer));
-    }
 
     public bool CanStartServer => !IsServerRunning;
 
@@ -197,7 +191,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
     private static List<string>? ReadLatestLogTail(string serverPath)
     {
         string logFile = Path.Combine(serverPath, "logs", "latest.log");
-        if (!File.Exists(logFile))
+        if (!SafeFileSystem.FileExists(logFile))
         {
             return null;
         }
@@ -207,7 +201,7 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             const int maxBytesToRead = 2 * 1024 * 1024;
             const int maxLines = 2500;
 
-            using var fs = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var fs = SafeFileSystem.OpenRead(logFile, FileShare.ReadWrite);
             long length = fs.Length;
             if (length == 0)
             {
@@ -286,32 +280,11 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
             var elapsed = Stopwatch.GetElapsedTime(_startTimestamp.Value);
             UptimeText = $"{elapsed:hh\\:mm\\:ss}";
 
-            if (_serverRuntime.Pid > 0)
-            {
-                int pid = _serverRuntime.Pid;
-                try
-                {
-                    if (_monitoredPid != pid || _monitoredProcess is null)
-                    {
-                        DisposeMonitoredProcess();
-                        _monitoredProcess = Process.GetProcessById(pid);
-                        _monitoredPid = pid;
-                    }
-
-                    _monitoredProcess.Refresh();
-                    long memMb = _monitoredProcess.WorkingSet64 / (1024 * 1024);
-                    MemoryUsageText = $"{memMb} MB";
-                }
-                catch
-                {
-                    DisposeMonitoredProcess();
-                    MemoryUsageText = "-";
-                }
-            }
+            long? workingSet = _serverRuntime.GetWorkingSet64();
+            MemoryUsageText = workingSet.HasValue ? $"{workingSet.Value / (1024 * 1024)} MB" : "-";
         }
         else
         {
-            DisposeMonitoredProcess();
             MemoryUsageText = "-";
             ServerStatusText = "已停止";
         }
@@ -613,11 +586,11 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         if (!string.IsNullOrWhiteSpace(serverPath))
         {
             string propsPath = Path.Combine(serverPath, "server.properties");
-            if (File.Exists(propsPath))
+            if (SafeFileSystem.FileExists(propsPath))
             {
                 try
                 {
-                    using var stream = new FileStream(propsPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    using var stream = SafeFileSystem.OpenRead(propsPath, FileShare.ReadWrite | FileShare.Delete);
                     using var reader = new StreamReader(stream, Encoding.UTF8);
                     string? line;
                     while ((line = reader.ReadLine()) is not null)
@@ -703,12 +676,6 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         }
     }
 
-    private void DisposeMonitoredProcess()
-    {
-        _monitoredProcess?.Dispose();
-        _monitoredProcess = null;
-        _monitoredPid = 0;
-    }
 
     public void Dispose()
     {
@@ -718,6 +685,5 @@ public sealed partial class ServerMonitorViewModel : ObservableObject, IDisposab
         _serverRuntime.ServerStarted -= OnServerStarted;
         _serverRuntime.ServerExited -= OnServerExited;
         _serverRuntime.ServerReady -= OnServerReady;
-        DisposeMonitoredProcess();
     }
 }

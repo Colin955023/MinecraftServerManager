@@ -146,7 +146,7 @@ public sealed partial class ServerManager : IServerManager
         }
 
         string serverDir = Path.Combine(_serversRoot, plan.Name.Value);
-        if (Directory.Exists(serverDir) && Directory.EnumerateFileSystemEntries(serverDir).Any())
+        if (SafeFileSystem.DirectoryExists(serverDir) && SafeFileSystem.EnumerateFileSystemEntries(serverDir).Any())
         {
             return ServerCreationResult.Failed($"目標目錄已存在且非空：{serverDir}");
         }
@@ -246,11 +246,11 @@ public sealed partial class ServerManager : IServerManager
             progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.LaunchScript, 95, "啟動腳本已生成並通過完整性驗證"));
 
             // ── Phase 5: Commit (95% ~ 100%) ──
-            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 95, "正在寫入伺服器註冊表..."));
+            progress?.Report(new ServerCreationProgressReport(ServerCreationPhase.Commit, 95, "正在登錄伺服器設定..."));
 
-            if (Directory.Exists(serverDir))
+            if (SafeFileSystem.DirectoryExists(serverDir))
             {
-                Directory.Delete(serverDir, recursive: false);
+                SafeFileSystem.DeleteDirectory(serverDir, recursive: false);
             }
 
             if (!SafeFileSystem.MoveWithin(_serversRoot, stableStaging, serverDir))
@@ -260,8 +260,8 @@ public sealed partial class ServerManager : IServerManager
 
             var config = plan.BuildConfig(serverDir);
             if (plan.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
-                File.Exists(Path.Combine(serverDir, "user_jvm_args.txt")) ||
-                File.Exists(Path.Combine(serverDir, "run.bat")))
+                SafeFileSystem.FileExists(Path.Combine(serverDir, "user_jvm_args.txt")) ||
+                SafeFileSystem.FileExists(Path.Combine(serverDir, "run.bat")))
             {
                 UpdateForgeUserJvmArgs(serverDir, config);
             }
@@ -287,7 +287,7 @@ public sealed partial class ServerManager : IServerManager
                 {
                     try
                     {
-                        if (Directory.Exists(cleanupTarget))
+                        if (SafeFileSystem.DirectoryExists(cleanupTarget))
                         {
                             SafeFileSystem.DeleteWithin(_serversRoot, cleanupTarget);
                         }
@@ -304,7 +304,7 @@ public sealed partial class ServerManager : IServerManager
             // 清理殘留暫存目錄
             try
             {
-                if (createdDir && Directory.Exists(stagingDir))
+                if (createdDir && SafeFileSystem.DirectoryExists(stagingDir))
                 {
                     SafeFileSystem.DeleteWithin(_serversRoot, stagingDir);
                 }
@@ -320,22 +320,11 @@ public sealed partial class ServerManager : IServerManager
     /// </summary>
     private static string? CheckFreeSpace(string directory, long requiredBytes)
     {
-        try
+        long? freeSpace = SafeFileSystem.GetAvailableFreeSpace(directory);
+        if (freeSpace.HasValue && freeSpace.Value < requiredBytes)
         {
             string? root = Path.GetPathRoot(Path.GetFullPath(directory));
-            if (string.IsNullOrWhiteSpace(root))
-            {
-                return null;
-            }
-
-            var drive = new DriveInfo(root);
-            if (drive.IsReady && drive.AvailableFreeSpace < requiredBytes)
-            {
-                return $"磁碟 {root} 可用空間不足（需要至少 {requiredBytes / (1024 * 1024)} MB）";
-            }
-        }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
-        {
+            return $"磁碟 {root} 可用空間不足（需要至少 {requiredBytes / (1024 * 1024)} MB）";
         }
 
         return null;
@@ -348,11 +337,11 @@ public sealed partial class ServerManager : IServerManager
     {
         // 優先從 Forge / NeoForge 的 run.bat 提取 win_args.txt
         string runBat = Path.Combine(directory, "run.bat");
-        if (File.Exists(runBat))
+        if (SafeFileSystem.FileExists(runBat))
         {
             try
             {
-                string runBatContent = File.ReadAllText(runBat);
+                string runBatContent = SafeFileSystem.ReadAllText(runBat);
                 var match = WinArgsRegex().Match(runBatContent);
                 if (match.Success)
                 {
@@ -367,12 +356,12 @@ public sealed partial class ServerManager : IServerManager
 
         // 檢查 Forge / NeoForge libraries 中的 win_args.txt
         string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
-        if (Directory.Exists(forgeLib))
+        if (SafeFileSystem.DirectoryExists(forgeLib))
         {
-            foreach (string sub in Directory.GetDirectories(forgeLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     return "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
                 }
@@ -380,19 +369,19 @@ public sealed partial class ServerManager : IServerManager
         }
 
         string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
-        if (Directory.Exists(neoLib))
+        if (SafeFileSystem.DirectoryExists(neoLib))
         {
-            foreach (string sub in Directory.GetDirectories(neoLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     return "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
                 }
             }
         }
 
-        string? paperJar = Directory.GetFiles(directory, "paper*.jar")
+        string? paperJar = SafeFileSystem.EnumerateFiles(directory, "paper*.jar")
             .Select(Path.GetFileName)
             .FirstOrDefault();
         if (paperJar is not null)
@@ -402,13 +391,13 @@ public sealed partial class ServerManager : IServerManager
 
         foreach (string candidate in PreferredLaunchJars)
         {
-            if (File.Exists(Path.Combine(directory, candidate)))
+            if (SafeFileSystem.FileExists(Path.Combine(directory, candidate)))
             {
                 return candidate;
             }
         }
 
-        string? anyJar = Directory.EnumerateFiles(directory, "*.jar", SearchOption.TopDirectoryOnly)
+        string? anyJar = SafeFileSystem.EnumerateFiles(directory, "*.jar", SearchOption.TopDirectoryOnly)
             .Select(Path.GetFileName)
             .FirstOrDefault(static name => name is not null && !name.Contains("installer", StringComparison.OrdinalIgnoreCase));
 
@@ -417,7 +406,7 @@ public sealed partial class ServerManager : IServerManager
             return anyJar;
         }
 
-        if (File.Exists(runBat))
+        if (SafeFileSystem.FileExists(runBat))
         {
             return "run.bat";
         }
@@ -514,7 +503,7 @@ public sealed partial class ServerManager : IServerManager
         if (!string.IsNullOrWhiteSpace(configuredJava) && !string.Equals(configuredJava.Trim(), "java", StringComparison.OrdinalIgnoreCase))
         {
             string trimmed = configuredJava.Trim();
-            if (File.Exists(trimmed))
+            if (SafeFileSystem.FileExists(trimmed))
             {
                 return trimmed;
             }
@@ -527,7 +516,7 @@ public sealed partial class ServerManager : IServerManager
             {
                 int targetMajor = await _javaRequirementService.GetRequiredJavaMajorAsync(minecraftVersion, loader, cancellationToken).ConfigureAwait(false);
                 var match = await _javaDetector.FindBestMatchAsync(targetMajor, cancellationToken).ConfigureAwait(false);
-                if (match is not null && File.Exists(match.ExecutablePath))
+                if (match is not null && SafeFileSystem.FileExists(match.ExecutablePath))
                 {
                     return match.ExecutablePath;
                 }
@@ -545,7 +534,7 @@ public sealed partial class ServerManager : IServerManager
                 var list = await _javaDetector.DetectAsync(forceRefresh: false, cancellationToken: cancellationToken).ConfigureAwait(false);
                 var best = list.Where(static j => j.Is64Bit).OrderByDescending(static j => j.MajorVersion).FirstOrDefault()
                            ?? list.OrderByDescending(static j => j.MajorVersion).FirstOrDefault();
-                if (best is not null && File.Exists(best.ExecutablePath))
+                if (best is not null && SafeFileSystem.FileExists(best.ExecutablePath))
                 {
                     return best.ExecutablePath;
                 }
@@ -557,7 +546,7 @@ public sealed partial class ServerManager : IServerManager
 
         // 搜尋系統 PATH 中的 java.exe 完整絕對路徑
         string? sysJava = FindSystemJavaExecutable();
-        if (!string.IsNullOrWhiteSpace(sysJava) && File.Exists(sysJava))
+        if (!string.IsNullOrWhiteSpace(sysJava) && SafeFileSystem.FileExists(sysJava))
         {
             return sysJava;
         }
@@ -588,7 +577,7 @@ public sealed partial class ServerManager : IServerManager
             try
             {
                 string candidate = Path.Combine(folderSpan.ToString(), "java.exe");
-                if (File.Exists(candidate))
+                if (SafeFileSystem.FileExists(candidate))
                 {
                     return candidate;
                 }
@@ -611,7 +600,7 @@ public sealed partial class ServerManager : IServerManager
     /// </summary>
     private static void CleanupRedundantStartupScripts(string directory)
     {
-        if (!Directory.Exists(directory))
+        if (!SafeFileSystem.DirectoryExists(directory))
         {
             return;
         }
@@ -682,7 +671,7 @@ public sealed partial class ServerManager : IServerManager
         try
         {
             // 兩階段安全刪除
-            if (Directory.Exists(serverDir))
+            if (SafeFileSystem.DirectoryExists(serverDir))
             {
                 var (tombstonePath, journalPath) = ServerTombstoneManager.PrepareDeleteTombstone(_serversRoot, name, serverDir);
                 lock (_lock)
@@ -732,11 +721,11 @@ public sealed partial class ServerManager : IServerManager
             SaveRegistry(registry);
         }
 
-        if (Directory.Exists(config.Path))
+        if (SafeFileSystem.DirectoryExists(config.Path))
         {
             if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge ||
-                File.Exists(Path.Combine(config.Path, "user_jvm_args.txt")) ||
-                File.Exists(Path.Combine(config.Path, "run.bat")))
+                SafeFileSystem.FileExists(Path.Combine(config.Path, "user_jvm_args.txt")) ||
+                SafeFileSystem.FileExists(Path.Combine(config.Path, "run.bat")))
             {
                 UpdateForgeUserJvmArgs(config.Path, config);
             }
@@ -773,7 +762,7 @@ public sealed partial class ServerManager : IServerManager
             return ServerImportResult.Failed(targetName, $"已存在同名的伺服器：{targetName}");
         }
 
-        bool isZip = File.Exists(sourceDirectory) && sourceDirectory.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+        bool isZip = SafeFileSystem.FileExists(sourceDirectory) && sourceDirectory.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
         string targetDir = Path.Combine(_serversRoot, targetName);
         string stagingDir = Path.Combine(_serversRoot, $".import-staging-{Guid.NewGuid():N}");
         bool completedSuccessfully = false;
@@ -782,7 +771,7 @@ public sealed partial class ServerManager : IServerManager
 
         try
         {
-            Directory.CreateDirectory(stagingDir);
+            SafeFileSystem.CreateDirectory(stagingDir);
 
             if (isZip)
             {
@@ -820,18 +809,18 @@ public sealed partial class ServerManager : IServerManager
 
             // 確保 eula.txt 存在
             string eulaFile = Path.Combine(stableStaging, "eula.txt");
-            if (!File.Exists(eulaFile))
+            if (!SafeFileSystem.FileExists(eulaFile))
             {
                 AtomicFileWriter.WriteText(eulaFile, "eula=true\n");
             }
 
             // 自動遷移舊版 server.properties 屬性
             string propsPath = Path.Combine(stableStaging, "server.properties");
-            if (File.Exists(propsPath))
+            if (SafeFileSystem.FileExists(propsPath))
             {
                 try
                 {
-                    string propsContent = await File.ReadAllTextAsync(propsPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+                    string propsContent = await SafeFileSystem.ReadAllTextAsync(propsPath, Encoding.UTF8, cancellationToken: cancellationToken).ConfigureAwait(false);
                     var rawProps = PropertiesDocumentCodec.Parse(propsContent);
                     var migrationPlan = ServerPropertiesMigrationService.PlanMigration(rawProps, inspection.MinecraftVersion);
                     if (migrationPlan.NeedsMigration)
@@ -852,12 +841,12 @@ public sealed partial class ServerManager : IServerManager
                 : (DetectLaunchJar(stableStaging) ?? "server.jar");
 
             string existingBat = Path.Combine(stableStaging, "start_server.bat");
-            if (File.Exists(existingBat))
+            if (SafeFileSystem.FileExists(existingBat))
             {
                 try
                 {
                     string backupBat = Path.Combine(stableStaging, "start_server.bat.bak");
-                    File.Copy(existingBat, backupBat, overwrite: true);
+                    SafeFileSystem.CopyFile(existingBat, backupBat, overwrite: true);
                 }
                 catch
                 {
@@ -881,11 +870,11 @@ public sealed partial class ServerManager : IServerManager
                 string dest = Path.Combine(targetDir, Path.GetFileName(entry.FullPath));
                 if (entry.IsDirectory)
                 {
-                    Directory.Move(entry.FullPath, dest);
+                    SafeFileSystem.MovePath(entry.FullPath, dest);
                 }
                 else
                 {
-                    File.Move(entry.FullPath, dest);
+                    SafeFileSystem.MovePath(entry.FullPath, dest);
                 }
             }
 
@@ -916,7 +905,7 @@ public sealed partial class ServerManager : IServerManager
         catch (Exception ex)
         {
             Logger.Error(ex, "匯入伺服器「{Name}」失敗: {Message}", targetName, ex.Message);
-            if (!completedSuccessfully && Directory.Exists(targetDir))
+            if (!completedSuccessfully && SafeFileSystem.DirectoryExists(targetDir))
             {
                 try
                 {
@@ -930,7 +919,7 @@ public sealed partial class ServerManager : IServerManager
         }
         finally
         {
-            if (Directory.Exists(stagingDir))
+            if (SafeFileSystem.DirectoryExists(stagingDir))
             {
                 try
                 {
@@ -968,7 +957,7 @@ public sealed partial class ServerManager : IServerManager
             .Select(static p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (string directory in Directory.EnumerateDirectories(_serversRoot))
+        foreach (string directory in SafeFileSystem.EnumerateDirectories(_serversRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -1049,7 +1038,7 @@ public sealed partial class ServerManager : IServerManager
 
     private Dictionary<string, ServerConfigPayload> LoadRegistry()
     {
-        if (!File.Exists(_registryFilePath))
+        if (!SafeFileSystem.FileExists(_registryFilePath))
         {
             _cachedRegistry = new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
             return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
@@ -1057,13 +1046,13 @@ public sealed partial class ServerManager : IServerManager
 
         try
         {
-            DateTime lastWrite = File.GetLastWriteTimeUtc(_registryFilePath);
+            DateTime lastWrite = SafeFileSystem.GetFileLastWriteTimeUtc(_registryFilePath);
             if (_cachedRegistry is not null && lastWrite == _lastRegistryWriteTimeUtc)
             {
                 return new Dictionary<string, ServerConfigPayload>(_cachedRegistry, StringComparer.OrdinalIgnoreCase);
             }
 
-            string json = File.ReadAllText(_registryFilePath, Encoding.UTF8);
+            string json = SafeFileSystem.ReadAllText(_registryFilePath, Encoding.UTF8);
             var loaded = JsonCodec.Deserialize<Dictionary<string, ServerConfigPayload>>(json)
                    ?? new Dictionary<string, ServerConfigPayload>(StringComparer.OrdinalIgnoreCase);
             _cachedRegistry = new Dictionary<string, ServerConfigPayload>(loaded, StringComparer.OrdinalIgnoreCase);
@@ -1081,9 +1070,9 @@ public sealed partial class ServerManager : IServerManager
         string json = JsonCodec.Serialize(registry, indented: true);
         AtomicFileWriter.WriteText(_registryFilePath, json);
         _cachedRegistry = new Dictionary<string, ServerConfigPayload>(registry, StringComparer.OrdinalIgnoreCase);
-        if (File.Exists(_registryFilePath))
+        if (SafeFileSystem.FileExists(_registryFilePath))
         {
-            _lastRegistryWriteTimeUtc = File.GetLastWriteTimeUtc(_registryFilePath);
+            _lastRegistryWriteTimeUtc = SafeFileSystem.GetFileLastWriteTimeUtc(_registryFilePath);
         }
     }
 
@@ -1107,15 +1096,15 @@ public sealed partial class ServerManager : IServerManager
                     string destination = Path.Combine(stagingDir, Path.GetFileName(child.FullPath));
                     if (child.IsDirectory)
                     {
-                        Directory.Move(child.FullPath, destination);
+                        SafeFileSystem.MovePath(child.FullPath, destination);
                     }
                     else
                     {
-                        File.Move(child.FullPath, destination);
+                        SafeFileSystem.MovePath(child.FullPath, destination);
                     }
                 }
 
-                Directory.Delete(wrapperPath, recursive: true);
+                SafeFileSystem.DeleteDirectory(wrapperPath, recursive: true);
             }
             else
             {

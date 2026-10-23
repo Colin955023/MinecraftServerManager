@@ -48,10 +48,10 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
     public bool IsCustomScaleVisible => SelectedUiScaleIndex == UiScaleOptions.Count - 1;
 
     [ObservableProperty]
-    public partial string ScreenResolutionInfo { get; set; } = "目前螢幕解析度: 1920 × 1080";
+    public partial string ScreenResolutionInfo { get; set; } = "目前螢幕解析度：1920 × 1080";
 
     [ObservableProperty]
-    public partial string CurrentWindowSizeInfo { get; set; } = "目前主視窗大小: 1350 × 820";
+    public partial string CurrentWindowSizeInfo { get; set; } = "目前主視窗大小：1350 × 820";
 
     public AboutPreferencesViewModel(
         SettingsManager? settingsManager = null,
@@ -129,6 +129,7 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         return 1.0;
     }
 
+    [RelayCommand]
     partial void OnIsAutoUpdateEnabledChanged(bool value) => _settingsManager?.SetAutoUpdateEnabled(value);
 
     partial void OnSelectedThemeModeIndexChanged(int value)
@@ -330,13 +331,18 @@ public sealed partial class AboutPreferencesViewModel : PageViewModel
         SelectedUiScaleIndex = 1;
         CustomUiScaleText = "100";
 
+        _settingsManager?.SetAutoUpdateEnabled(true);
+        _settingsManager?.SetThemeMode("system");
+        _settingsManager?.SetUiScale(1.0);
+        _onThemeModeChanged?.Invoke("system");
+        _onUiScaleChanged?.Invoke(1.0);
         _onResetWindowSizeRequested?.Invoke();
-    }
 
+    }
 
     public void UpdateDisplayInfo(int screenWidth, int screenHeight, int windowWidth, int windowHeight)
     {
-        ScreenResolutionInfo = $"目前螢幕解析度: {screenWidth} × {screenHeight}";
-        CurrentWindowSizeInfo = $"目前主視窗大小: {windowWidth} × {windowHeight}";
+        ScreenResolutionInfo = $"目前螢幕解析度：{screenWidth} × {screenHeight}";
+        CurrentWindowSizeInfo = $"目前主視窗大小：{windowWidth} × {windowHeight}";
     }
 }

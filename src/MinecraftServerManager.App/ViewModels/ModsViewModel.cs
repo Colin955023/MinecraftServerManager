@@ -751,7 +751,7 @@ public sealed partial class ModsViewModel : PageViewModel
                 }
             }
 
-            // 階段 2：平行查詢相容版本並進行相容性與語意版本比對（MaxDegreeOfParallelism = 4）
+            // 階段 2：平行查詢相容版本並執行相容性與語意版本比對（MaxDegreeOfParallelism = 4）
             var candidates = new ConcurrentBag<ModUpdateCandidateItem>();
             int completedCount = 0;
             int totalCount = targets.Count;
@@ -799,7 +799,7 @@ public sealed partial class ModsViewModel : PageViewModel
                                 continue;
                             }
 
-                            // 標準相容性評估：進行相容性與相依性評估，排除硬性不相容與衝突版本
+                            // 標準相容性評估：執行相容性與相依性評估，排除硬性不相容與衝突版本
                             var report = _dependencyPlanner.EvaluateCompatibility(ver, mcVer, loader, installedMods);
                             if (!report.HasHardErrors && report.IncompatibleInstalled.Count == 0)
                             {
@@ -993,7 +993,7 @@ public sealed partial class ModsViewModel : PageViewModel
         }
 
         string modsDir = Path.Combine(server.Path, "mods");
-        Directory.CreateDirectory(modsDir);
+        SafeFileSystem.CreateDirectory(modsDir);
 
         Logger.Information("開啟模組資料夾: {Path}", modsDir);
         if (_launcher is not null && !_launcher.OpenFolder(modsDir, isTrusted: true))
@@ -1046,18 +1046,18 @@ public sealed partial class ModsViewModel : PageViewModel
     private static string ResolveModFilePath(string serverPath, string fileName)
     {
         string filePath = Path.Combine(serverPath, "mods", fileName);
-        if (File.Exists(filePath))
+        if (SafeFileSystem.FileExists(filePath))
         {
             return filePath;
         }
 
         string disabledPath = filePath + ".disabled";
-        return File.Exists(disabledPath) ? disabledPath : Path.Combine(serverPath, "mods");
+        return SafeFileSystem.FileExists(disabledPath) ? disabledPath : Path.Combine(serverPath, "mods");
     }
 
     private static void DeleteModFileIfExists(string serverPath, string path)
     {
-        if (File.Exists(path))
+        if (SafeFileSystem.FileExists(path))
         {
             SafeFileSystem.DeleteWithin(serverPath, path);
         }
@@ -1437,7 +1437,7 @@ public sealed partial class ModsViewModel : PageViewModel
     }
 
     /// <summary>
-    /// 進行相依性評估後統一批次下載安裝。
+    /// 完成相依性評估後統一批次下載安裝。
     /// </summary>
     [RelayCommand]
     public async Task InstallQueuedModsAsync(CancellationToken cancellationToken = default)

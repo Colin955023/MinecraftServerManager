@@ -28,7 +28,7 @@ public class NoOpUiService : IUiService
 
     public void ShutdownApplication(int exitCode = 0) { }
 
-    public void PostToUi(Action action) { }
+    public void PostToUi(Action action, bool afterLayout = false) { }
 
     public void RunOnUi(Action action) => action();
 

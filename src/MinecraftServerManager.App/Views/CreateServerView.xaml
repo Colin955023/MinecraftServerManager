@@ -54,7 +54,7 @@
           <StackPanel Grid.Column="1">
             <TextBlock FontSize="13" TextWrapping="Wrap" LineHeight="20">
               <Hyperlink Command="{Binding OpenEulaCommand}" Foreground="{DynamicResource AccentBrush}">
-                <Run Text="請務必閱讀並同意 Minecraft EULA 條款 (點我閱讀)" />
+                <Run Text="請務必閱讀並同意 Minecraft EULA 條款（點我閱讀）" />
                 <LineBreak />
                 <Run Text="點選建立即表示你同意Minecraft條款，任何違法行為本軟體不負責任" />
               </Hyperlink>
@@ -82,13 +82,13 @@
         </Grid.RowDefinitions>
 
         <!-- 伺服器名稱 -->
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="伺服器名稱:" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="伺服器名稱：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3"
                  Text="{Binding ServerName, UpdateSourceTrigger=PropertyChanged}"
                  Margin="0,6,0,6" />
 
         <!-- Java 執行檔路徑 -->
-        <TextBlock Grid.Row="1" Grid.Column="0" Text="Java 執行檔路徑 (可選):" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Java 執行檔路徑（選填）：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
                  Text="{Binding JavaPath, UpdateSourceTrigger=PropertyChanged}"
                  Margin="0,6,8,6" />
@@ -99,14 +99,14 @@
                 Margin="0,6,0,6" />
 
         <!-- 模組載入器 -->
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="模組載入器:" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="模組載入器：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <ComboBox Grid.Row="2" Grid.Column="1"
                   ItemsSource="{Binding AvailableLoaders}"
                   SelectedItem="{Binding SelectedLoader}"
                   Margin="0,6,8,6" />
 
         <!-- 載入器版本 -->
-        <TextBlock Grid.Row="3" Grid.Column="0" Text="載入器版本:" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="3" Grid.Column="0" Text="載入器版本：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <ComboBox Grid.Row="3" Grid.Column="1"
                   ItemsSource="{Binding LoaderVersions}"
                   SelectedItem="{Binding SelectedLoaderVersion}"
@@ -121,7 +121,7 @@
         </Button>
 
         <!-- Minecraft 版本 -->
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Minecraft 版本:" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Minecraft 版本：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <ComboBox Grid.Row="4" Grid.Column="1"
                   ItemsSource="{Binding AvailableMinecraftVersions}"
                   SelectedItem="{Binding SelectedMinecraftVersion}"
@@ -136,7 +136,7 @@
         </Button>
 
         <!-- 記憶體設定 (MB) -->
-        <TextBlock Grid.Row="5" Grid.Column="0" Text="記憶體設定 (MB):" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Grid.Row="5" Grid.Column="0" Text="記憶體設定（MB）：" VerticalAlignment="Center" Margin="0,8" Foreground="{DynamicResource TextBrush}" />
         <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,6">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -144,11 +144,11 @@
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
-            <TextBlock Text="最小記憶體:" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,4" />
+            <TextBlock Text="最小記憶體：" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,4" />
             <TextBox Text="{Binding MinMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
           </StackPanel>
           <StackPanel Grid.Column="2">
-            <TextBlock Text="最大記憶體:" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,4" />
+            <TextBlock Text="最大記憶體：" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,4" />
             <TextBox Text="{Binding MaxMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
           </StackPanel>
         </Grid>
@@ -156,7 +156,7 @@
         <!-- 記憶體說明與警告標籤 -->
         <StackPanel Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,6">
           <TextBlock Text="最小記憶體選填，若留空由 Java 決定" FontSize="11" Foreground="{DynamicResource MutedTextBrush}" />
-          <TextBlock Text="最大記憶體(必要)建議：2048MB (預設) | 4096MB (一般) | 8192MB (多人遊戲)"
+          <TextBlock Text="最大記憶體（必要）建議：2048MB（預設）| 4096MB（一般）| 8192MB（多人遊戲）"
                      FontSize="11"
                      Foreground="{DynamicResource MutedTextBrush}"
                      Margin="0,2,0,0" />
@@ -180,7 +180,7 @@
 
       <!-- JVM 啟動參數設定 -->
       <StackPanel Orientation="Horizontal" Margin="0,0,0,28" VerticalAlignment="Center">
-        <TextBlock Text="JVM 啟動參數:" Width="170" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+        <TextBlock Text="JVM 啟動參數：" Width="170" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
         <Button Content="JVM 參數設定..."
                 Command="{Binding ConfigureJvmArgsCommand}"
                 Padding="12,6"

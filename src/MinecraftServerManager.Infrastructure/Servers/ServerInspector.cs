@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,7 +13,13 @@ namespace MinecraftServerManager.Infrastructure.Servers;
 public sealed partial class ServerInspector : IServerInspector
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ServerInspector");
-    private static readonly ConcurrentDictionary<string, (long LastWriteTicks, long Size)> s_dirSizeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly IServerDirectorySizeService s_defaultDirectorySizeService = new ServerDirectorySizeService();
+    private readonly IServerDirectorySizeService _directorySizeService;
+
+    public ServerInspector(IServerDirectorySizeService? directorySizeService = null)
+    {
+        _directorySizeService = directorySizeService ?? s_defaultDirectorySizeService;
+    }
 
     private static readonly string[] ServerJarCandidates =
     [
@@ -38,7 +42,7 @@ public sealed partial class ServerInspector : IServerInspector
         try
         {
             string stableDir = SafeFileSystem.ResolveStableDirectory(serverDirectory);
-            if (!Directory.Exists(stableDir))
+            if (!SafeFileSystem.DirectoryExists(stableDir))
             {
                 return new ServerInspection(
                     path: serverDirectory,
@@ -55,7 +59,7 @@ public sealed partial class ServerInspector : IServerInspector
             var (loaderType, loaderVersion, mcVersion, loaderTypeSource, loaderVersionSource, mcVersionSource) =
                 InspectLoaderAndVersion(stableDir, files, launchTarget);
             var (maxMb, minMb) = InspectMemory(stableDir);
-            long totalSizeBytes = await Task.Run(() => CalculateDirectorySize(stableDir), cancellationToken).ConfigureAwait(false);
+            long totalSizeBytes = await _directorySizeService.CalculateServerSizeAsync(stableDir, cancellationToken).ConfigureAwait(false);
 
             bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains("server.properties");
             bool launchable = launchTarget.Kind != LaunchTargetKind.None && eulaState == EulaState.Accepted;
@@ -118,57 +122,6 @@ public sealed partial class ServerInspector : IServerInspector
         }
     }
 
-    private static long CalculateDirectorySize(string directory)
-    {
-        try
-        {
-            var dirInfo = new DirectoryInfo(directory);
-            if (!dirInfo.Exists)
-            {
-                return 0L;
-            }
-
-            long lastWriteTicks = dirInfo.LastWriteTimeUtc.Ticks;
-            if (s_dirSizeCache.TryGetValue(directory, out var cached) && cached.LastWriteTicks == lastWriteTicks)
-            {
-                return cached.Size;
-            }
-
-            long totalBytes = 0L;
-            const int maxScannedFiles = 20000;
-            int count = 0;
-
-            foreach (var file in dirInfo.EnumerateFiles("*", new EnumerationOptions
-            {
-                RecurseSubdirectories = true,
-                IgnoreInaccessible = true,
-                AttributesToSkip = FileAttributes.ReparsePoint
-            }))
-            {
-                string relativePath = Path.GetRelativePath(directory, file.FullName);
-                if (relativePath.StartsWith("backups" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-                    relativePath.StartsWith("backups" + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                totalBytes += file.Length;
-                if (++count >= maxScannedFiles)
-                {
-                    break;
-                }
-            }
-
-            s_dirSizeCache[directory] = (lastWriteTicks, totalBytes);
-            return totalBytes;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Logger.Warning("計算目錄大小時發生例外: {Message}", ex.Message);
-            return 0L;
-        }
-    }
-
     private static EulaState InspectEula(string directory, HashSet<string> files)
     {
         if (!files.Contains("eula.txt"))
@@ -179,12 +132,12 @@ public sealed partial class ServerInspector : IServerInspector
         try
         {
             string path = Path.Combine(directory, "eula.txt");
-            if (new FileInfo(path).Length > MaxMetadataBytes)
+            if (SafeFileSystem.GetFileLength(path) > MaxMetadataBytes)
             {
                 return EulaState.Missing;
             }
 
-            string content = File.ReadAllText(path, Encoding.UTF8);
+            string content = SafeFileSystem.ReadAllText(path, Encoding.UTF8);
             if (content.Contains("eula=true", StringComparison.OrdinalIgnoreCase))
             {
                 return EulaState.Accepted;
@@ -219,12 +172,12 @@ public sealed partial class ServerInspector : IServerInspector
 
         // 檢查 Forge / NeoForge libraries 中的 win_args.txt
         string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
-        if (Directory.Exists(forgeLib))
+        if (SafeFileSystem.DirectoryExists(forgeLib))
         {
-            foreach (string sub in Directory.GetDirectories(forgeLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
                     if (!candidates.Contains(target))
@@ -236,12 +189,12 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
-        if (Directory.Exists(neoLib))
+        if (SafeFileSystem.DirectoryExists(neoLib))
         {
-            foreach (string sub in Directory.GetDirectories(neoLib))
+            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
             {
                 string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
+                if (SafeFileSystem.FileExists(winArgs))
                 {
                     string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
                     if (!candidates.Contains(target))
@@ -310,7 +263,7 @@ public sealed partial class ServerInspector : IServerInspector
         string mcVersionSource = "未偵測到";
 
         string librariesDir = Path.Combine(directory, "libraries");
-        bool hasLibraries = Directory.Exists(librariesDir);
+        bool hasLibraries = SafeFileSystem.DirectoryExists(librariesDir);
 
         // 1. 檢查伺服器根目錄下的 version.json
         string? rootJsonMc = TryExtractMinecraftVersionFromRootJson(directory);
@@ -333,7 +286,7 @@ public sealed partial class ServerInspector : IServerInspector
                 primaryJarPath = Path.Combine(directory, target.Value);
             }
 
-            if (primaryJarPath is not null && File.Exists(primaryJarPath))
+            if (primaryJarPath is not null && SafeFileSystem.FileExists(primaryJarPath))
             {
                 string? jarMc = TryExtractMinecraftVersionFromJar(primaryJarPath);
                 if (!string.IsNullOrEmpty(jarMc))
@@ -349,7 +302,7 @@ public sealed partial class ServerInspector : IServerInspector
         {
             // NeoForge
             string neoLib = Path.Combine(librariesDir, "net", "neoforged", "neoforge");
-            if (Directory.Exists(neoLib))
+            if (SafeFileSystem.DirectoryExists(neoLib))
             {
                 loaderType = "neoforge";
                 loaderTypeSource = "libraries/net/neoforged/neoforge";
@@ -379,7 +332,7 @@ public sealed partial class ServerInspector : IServerInspector
 
             // Forge
             string forgeLib = Path.Combine(librariesDir, "net", "minecraftforge", "forge");
-            if (Directory.Exists(forgeLib))
+            if (SafeFileSystem.DirectoryExists(forgeLib))
             {
                 loaderType = "forge";
                 loaderTypeSource = "libraries/net/minecraftforge/forge";
@@ -415,7 +368,7 @@ public sealed partial class ServerInspector : IServerInspector
 
             // Fabric
             string fabricLib = Path.Combine(librariesDir, "net", "fabricmc", "fabric-loader");
-            if (Directory.Exists(fabricLib))
+            if (SafeFileSystem.DirectoryExists(fabricLib))
             {
                 loaderType = "fabric";
                 loaderTypeSource = "libraries/net/fabricmc/fabric-loader";
@@ -439,7 +392,7 @@ public sealed partial class ServerInspector : IServerInspector
 
             // Quilt
             string quiltLib = Path.Combine(librariesDir, "org", "quiltmc", "quilt-loader");
-            if (Directory.Exists(quiltLib))
+            if (SafeFileSystem.DirectoryExists(quiltLib))
             {
                 loaderType = "quilt";
                 loaderTypeSource = "libraries/org/quiltmc/quilt-loader";
@@ -543,12 +496,12 @@ public sealed partial class ServerInspector : IServerInspector
         {
             string runBat = Path.Combine(directory, "run.bat");
             string winArgs = Path.Combine(directory, "win_args.txt");
-            string toCheck = File.Exists(runBat) ? runBat : (File.Exists(winArgs) ? winArgs : string.Empty);
-            if (!string.IsNullOrEmpty(toCheck) && new FileInfo(toCheck).Length <= MaxMetadataBytes)
+            string toCheck = SafeFileSystem.FileExists(runBat) ? runBat : (SafeFileSystem.FileExists(winArgs) ? winArgs : string.Empty);
+            if (!string.IsNullOrEmpty(toCheck) && SafeFileSystem.GetFileLength(toCheck) <= MaxMetadataBytes)
             {
                 try
                 {
-                    string content = File.ReadAllText(toCheck);
+                    string content = SafeFileSystem.ReadAllText(toCheck);
                     var m = ForgeJarRegex().Match(content);
                     if (m.Success)
                     {
@@ -580,11 +533,11 @@ public sealed partial class ServerInspector : IServerInspector
         if (mcVersion == "unknown" || loaderVersion == "unknown")
         {
             string? logFile = FindLatestLogFile(directory);
-            if (logFile is not null && File.Exists(logFile))
+            if (logFile is not null && SafeFileSystem.FileExists(logFile))
             {
                 try
                 {
-                    using var sr = new StreamReader(logFile, Encoding.UTF8);
+                    using var sr = new StreamReader(SafeFileSystem.OpenRead(logFile), Encoding.UTF8);
                     int lineCount = 0;
                     string? line;
                     while ((line = sr.ReadLine()) is not null && lineCount++ < 2000)
@@ -656,23 +609,22 @@ public sealed partial class ServerInspector : IServerInspector
     private static string? FindLatestLogFile(string serverDirectory)
     {
         string logsDir = Path.Combine(serverDirectory, "logs");
-        if (Directory.Exists(logsDir))
+        if (SafeFileSystem.DirectoryExists(logsDir))
         {
             string latestLog = Path.Combine(logsDir, "latest.log");
-            if (File.Exists(latestLog))
+            if (SafeFileSystem.FileExists(latestLog))
             {
                 return latestLog;
             }
 
             try
             {
-                var dirInfo = new DirectoryInfo(logsDir);
-                var newest = dirInfo.EnumerateFiles("*.log")
-                    .OrderByDescending(static f => f.LastWriteTimeUtc)
+                string? newest = SafeFileSystem.EnumerateFiles(logsDir, "*.log")
+                    .OrderByDescending(SafeFileSystem.GetFileLastWriteTimeUtc)
                     .FirstOrDefault();
                 if (newest is not null)
                 {
-                    return newest.FullName;
+                    return newest;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -682,7 +634,7 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         string rootLog = Path.Combine(serverDirectory, "server.log");
-        return File.Exists(rootLog) ? rootLog : null;
+        return SafeFileSystem.FileExists(rootLog) ? rootLog : null;
     }
 
     private const long MaxMetadataBytes = 2L * 1024 * 1024;
@@ -690,28 +642,28 @@ public sealed partial class ServerInspector : IServerInspector
     private static string? TryExtractMinecraftVersionFromRootJson(string directory)
     {
         string jsonPath = Path.Combine(directory, "version.json");
-        if (!File.Exists(jsonPath))
+        if (!SafeFileSystem.FileExists(jsonPath))
         {
             return null;
         }
 
         try
         {
-            var fileInfo = new FileInfo(jsonPath);
-            if (fileInfo.Length > MaxMetadataBytes)
+            long fileLength = SafeFileSystem.GetFileLength(jsonPath);
+            if (fileLength > MaxMetadataBytes)
             {
-                Logger.Warning("version.json 檔案超過安全大小上限 ({Size} bytes)，略過解析", fileInfo.Length);
+                Logger.Warning("version.json 檔案超過安全大小上限 ({Size} bytes)，略過解析", fileLength);
                 return null;
             }
 
-            using var stream = File.OpenRead(jsonPath);
+            using var stream = SafeFileSystem.OpenRead(jsonPath);
             byte[]? payload = ReadBoundedBytes(stream, MaxMetadataBytes);
             if (payload is null)
             {
                 return null;
             }
 
-            using var doc = JsonDocument.Parse(payload);
+            using var doc = JsonCodec.ParseDocument(payload);
             var root = doc.RootElement;
             foreach (string prop in VersionJsonCandidateProperties)
             {
@@ -740,7 +692,7 @@ public sealed partial class ServerInspector : IServerInspector
     {
         try
         {
-            using var zip = ZipFile.OpenRead(jarPath);
+            using var zip = SafeZipArchive.OpenRead(jarPath);
             var versionEntry = zip.GetEntry("version.json");
             if (versionEntry is not null && versionEntry.Length <= MaxMetadataBytes)
             {
@@ -748,7 +700,7 @@ public sealed partial class ServerInspector : IServerInspector
                 byte[]? versionBytes = ReadBoundedBytes(stream, MaxMetadataBytes);
                 if (versionBytes is not null)
                 {
-                    using var doc = JsonDocument.Parse(versionBytes);
+                    using var doc = JsonCodec.ParseDocument(versionBytes);
                     var root = doc.RootElement;
                     foreach (string prop in VersionJsonCandidateProperties)
                     {
@@ -815,11 +767,11 @@ public sealed partial class ServerInspector : IServerInspector
         int? minMb = null;
 
         string argsFile = Path.Combine(directory, "user_jvm_args.txt");
-        if (File.Exists(argsFile))
+        if (SafeFileSystem.FileExists(argsFile))
         {
             try
             {
-                foreach (string line in File.ReadAllLines(argsFile))
+                foreach (string line in SafeFileSystem.ReadAllLines(argsFile))
                 {
                     string trimmed = line.Trim();
                     if (trimmed.StartsWith('#'))

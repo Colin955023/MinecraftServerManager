@@ -94,5 +94,6 @@ public sealed class JavaWingetInstallerTests
             Task.FromResult(new ProcessExitResult(exitCode, false));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public long? GetWorkingSet64() => throw new NotImplementedException();
     }
 }

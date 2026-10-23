@@ -37,10 +37,6 @@ public sealed partial class ServerMemoryViewModel(
 
     public event Action<bool>? RequestClose;
 
-    partial void OnMaxMemoryMbChanged(string value) => Validate(out _, out _);
-
-    partial void OnMinMemoryMbChanged(string value) => Validate(out _, out _);
-
     private bool Validate(out int max, out int? min)
     {
         max = 0;

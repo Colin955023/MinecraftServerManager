@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
@@ -12,6 +13,21 @@ public static class JsonCodec
 {
     public const long DefaultMaxBytes = 2L * 1024 * 1024;
 
+    public static JsonDocument ParseDocument(string json, JsonDocumentOptions options = default) =>
+        JsonDocument.Parse(json, options);
+
+    public static JsonDocument ParseDocument(ReadOnlyMemory<byte> utf8Json, JsonDocumentOptions options = default) =>
+        JsonDocument.Parse(utf8Json, options);
+
+    public static JsonDocument ParseDocument(Stream utf8Json, JsonDocumentOptions options = default) =>
+        JsonDocument.Parse(utf8Json, options);
+
+    public static Task<JsonDocument> ParseDocumentAsync(
+        Stream utf8Json,
+        JsonDocumentOptions options = default,
+        CancellationToken cancellationToken = default) =>
+        JsonDocument.ParseAsync(utf8Json, options, cancellationToken);
+
     private static readonly JsonSerializerOptions CompactOptions = new()
     {
         PropertyNamingPolicy = null,
@@ -22,6 +38,11 @@ public static class JsonCodec
     private static readonly JsonSerializerOptions IndentedOptions = new(CompactOptions)
     {
         WriteIndented = true,
+    };
+
+    private static readonly JsonSerializerOptions RelaxedIndentedOptions = new(IndentedOptions)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     public static JsonReadResult? ReadJsonWithBytes(string filePath, long maxBytes = DefaultMaxBytes)
@@ -36,7 +57,7 @@ public static class JsonCodec
             byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
             return bytes is null
                 ? null
-                : new JsonReadResult(JsonDocument.Parse(bytes), bytes);
+                : new JsonReadResult(ParseDocument(bytes), bytes);
         }
         catch (JsonException)
         {
@@ -62,7 +83,7 @@ public static class JsonCodec
         try
         {
             byte[]? bytes = SafeFileSystem.ReadRegularFile(filePath, maxBytes);
-            return bytes is null ? null : JsonDocument.Parse(bytes);
+            return bytes is null ? null : ParseDocument(bytes);
         }
         catch (JsonException)
         {
@@ -94,6 +115,22 @@ public static class JsonCodec
         }
     }
 
+    public static string SerializeRelaxed<T>(T? value)
+    {
+        try
+        {
+            return JsonSerializer.Serialize(value, RelaxedIndentedOptions);
+        }
+        catch (JsonException)
+        {
+            return string.Empty;
+        }
+        catch (NotSupportedException)
+        {
+            return string.Empty;
+        }
+    }
+
     public static byte[]? SerializeToUtf8Bytes<T>(T? value, bool indented = false)
     {
         try
@@ -108,6 +145,28 @@ public static class JsonCodec
         {
             return null;
         }
+    }
+
+    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Json, JsonSerializerOptions? options = null)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(utf8Json, options ?? CompactOptions);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+        catch (NotSupportedException)
+        {
+            return default;
+        }
+    }
+
+    public static T? Deserialize<T>(byte[] utf8Json, JsonSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Json);
+        return Deserialize<T>(utf8Json.AsSpan(), options);
     }
 
     public static T? Deserialize<T>(string? json)

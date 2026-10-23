@@ -47,8 +47,8 @@ public sealed class PlayerManagementViewModelTests
 
         vm.AddOperatorCommand.Execute(null);
 
-        Assert.Single(vm.Operators);
-        Assert.Equal("Alex", vm.Operators[0].Name);
+        var item = Assert.Single(vm.Operators);
+        Assert.Equal("Alex", item.Name);
         Assert.Equal(3, vm.Operators[0].Level);
         Assert.True(vm.Operators[0].BypassesPlayerLimit);
         Assert.True(vm.HasUnsavedChanges);
@@ -154,8 +154,8 @@ public sealed class PlayerManagementViewModelTests
         Assert.True(closeResult);
         Assert.False(vm.HasUnsavedChanges);
         Assert.NotNull(fakeStore.SavedBundle);
-        Assert.Single(fakeStore.SavedBundle.BannedIps);
-        Assert.Equal("192.168.1.50", fakeStore.SavedBundle.BannedIps[0].Ip);
+        var item = Assert.Single(fakeStore.SavedBundle.BannedIps);
+        Assert.Equal("192.168.1.50", item.Ip);
     }
 
     [Theory]
@@ -214,8 +214,8 @@ public sealed class PlayerManagementViewModelTests
         await vm.SaveCommand.ExecuteAsync(null);
 
         Assert.NotNull(fakeStore.SavedBundle);
-        Assert.Single(fakeStore.SavedBundle.Operators);
-        Assert.Equal("uuid-b", fakeStore.SavedBundle.Operators[0].Uuid);
+        var item = Assert.Single(fakeStore.SavedBundle.Operators);
+        Assert.Equal("uuid-b", item.Uuid);
         Assert.Equal(3, fakeStore.SavedBundle.Operators[0].Level);
         Assert.True(fakeStore.SavedBundle.Operators[0].BypassesPlayerLimit);
     }
@@ -238,8 +238,8 @@ public sealed class PlayerManagementViewModelTests
 
         // 搜尋玩家名稱
         vm.PlayerSearchText = "Ste";
-        Assert.Single(vm.FilteredUserCache);
-        Assert.Equal("Steve", vm.FilteredUserCache[0].Name);
+        var item = Assert.Single(vm.FilteredUserCache);
+        Assert.Equal("Steve", item.Name);
 
         // 搜尋 UUID（以前會匹配，現在僅搜尋 Name，故不匹配）
         vm.PlayerSearchText = "1111";

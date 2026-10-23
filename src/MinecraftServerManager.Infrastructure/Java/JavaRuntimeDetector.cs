@@ -136,7 +136,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrEmpty(directory))
                 {
                     string consoleExe = Path.Combine(directory, "java.exe");
-                    if (File.Exists(consoleExe))
+                    if (SafeFileSystem.FileExists(consoleExe))
                     {
                         probeExecutable = consoleExe;
                     }
@@ -147,7 +147,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrEmpty(directory))
                 {
                     string wExe = Path.Combine(directory, "javaw.exe");
-                    if (File.Exists(wExe))
+                    if (SafeFileSystem.FileExists(wExe))
                     {
                         javawPath = wExe;
                     }
@@ -247,7 +247,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         if (!string.IsNullOrWhiteSpace(userProfile))
         {
             string jdksDir = Path.Combine(userProfile, ".jdks");
-            if (Directory.Exists(jdksDir))
+            if (SafeFileSystem.DirectoryExists(jdksDir))
             {
                 try
                 {
@@ -288,7 +288,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
 
         string resolved = ResolveActualExecutablePath(path);
-        if (File.Exists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
+        if (SafeFileSystem.FileExists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
         {
             candidates.Add(resolved);
         }
@@ -338,7 +338,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     {
         try
         {
-            if (!File.Exists(path))
+            if (!SafeFileSystem.FileExists(path))
             {
                 return false;
             }
@@ -363,16 +363,15 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string full = Path.GetFullPath(path);
-            if (!File.Exists(full))
+            if (!SafeFileSystem.FileExists(full))
             {
                 return full;
             }
 
-            var fileInfo = new FileInfo(full);
-            var target = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
-            if (target is not null && File.Exists(target.FullName))
+            string? targetPath = SafeFileSystem.ResolveFileLinkTarget(full);
+            if (targetPath is not null && SafeFileSystem.FileExists(targetPath))
             {
-                return target.FullName;
+                return targetPath;
             }
 
             return full;
@@ -385,7 +384,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
     private static void AddRoot(HashSet<string> roots, string? path)
     {
-        if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+        if (!string.IsNullOrWhiteSpace(path) && SafeFileSystem.DirectoryExists(path))
         {
             roots.Add(path);
         }
@@ -396,12 +395,12 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string cachePath = Path.Combine(RuntimePaths.GetVersionCacheDir(), CacheFileName);
-            if (!File.Exists(cachePath))
+            if (!SafeFileSystem.FileExists(cachePath))
             {
                 return null;
             }
 
-            string content = await File.ReadAllTextAsync(cachePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+            string content = await SafeFileSystem.ReadAllTextAsync(cachePath, Encoding.UTF8, cancellationToken: cancellationToken).ConfigureAwait(false);
             var cacheData = JsonCodec.Deserialize<JavaCachePayload>(content);
             if (cacheData?.Candidates is null or { Count: 0 })
             {
@@ -416,14 +415,14 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrWhiteSpace(item.Path) &&
                     Path.IsPathRooted(item.Path) &&
                     !string.Equals(Path.GetFileName(item.Path), item.Path, StringComparison.OrdinalIgnoreCase) &&
-                    File.Exists(item.Path) &&
+                    SafeFileSystem.FileExists(item.Path) &&
                     !IsIgnoredJavaPath(item.Path) &&
                     !IsReparseOrJunctionPath(item.Path) &&
                     !IsShimLauncher(item.Path))
                 {
                     try
                     {
-                        var fileInfo = new FileInfo(item.Path);
+                        FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(item.Path);
                         if (item.LastWriteTimeUtcTicks > 0 &&
                             fileInfo.LastWriteTimeUtc.Ticks == item.LastWriteTimeUtcTicks &&
                             fileInfo.Length == item.FileSizeBytes &&
@@ -500,14 +499,14 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string cacheDir = RuntimePaths.GetVersionCacheDir();
-            Directory.CreateDirectory(cacheDir);
+            SafeFileSystem.CreateDirectory(cacheDir);
             string cachePath = Path.Combine(cacheDir, CacheFileName);
 
             var entries = runtimes
                 .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
                             Path.IsPathRooted(r.ExecutablePath) &&
                             !string.Equals(Path.GetFileName(r.ExecutablePath), r.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&
-                            File.Exists(r.ExecutablePath))
+                            SafeFileSystem.FileExists(r.ExecutablePath))
                 .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .Select(static g => g.First())
                 .OrderBy(static r => r.MajorVersion)
@@ -518,7 +517,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     long fileSize = 0;
                     try
                     {
-                        var fi = new FileInfo(r.ExecutablePath);
+                        FileSystemMetadata fi = SafeFileSystem.GetFileMetadata(r.ExecutablePath);
                         lastWriteTicks = fi.LastWriteTimeUtc.Ticks;
                         fileSize = fi.Length;
                     }

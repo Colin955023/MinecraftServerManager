@@ -83,27 +83,6 @@ public sealed partial class PropertyEditItem : ObservableObject
         return isValid;
     }
 
-    partial void OnBoolValueChanged(bool value)
-    {
-        if (IsBoolean)
-        {
-            Value = value.ToString().ToLowerInvariant();
-        }
-    }
-
-    partial void OnValueChanged(string value)
-    {
-        if (IsBoolean && bool.TryParse(value, out bool b))
-        {
-            if (BoolValue != b)
-            {
-                BoolValue = b;
-            }
-        }
-
-        Validate();
-    }
-
     [RelayCommand]
     public void ResetToDefault()
     {
@@ -174,10 +153,6 @@ public sealed partial class ServerPropertiesViewModel : ObservableObject
 
         _ = LoadPropertiesAsync();
     }
-
-    partial void OnSearchTextChanged(string value) => ApplyFilter();
-
-    partial void OnSelectedCategoryChanged(string value) => ApplyFilter();
 
     public async Task LoadPropertiesAsync()
     {

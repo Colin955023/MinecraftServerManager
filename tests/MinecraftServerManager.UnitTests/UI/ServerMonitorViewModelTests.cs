@@ -262,5 +262,6 @@ public sealed class ServerMonitorViewModelTests : IDisposable
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public long? GetWorkingSet64() => throw new NotImplementedException();
     }
 }

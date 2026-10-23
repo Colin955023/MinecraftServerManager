@@ -14,7 +14,7 @@ public sealed class FlexVersionTests
     [InlineData("7.0.0", "7.0.0-fabric", 1)]
     // 實務案例 4：Lithium 當前 0.13.1 vs 線上新版 mc1.21.1-0.15.2-fabric
     [InlineData("mc1.21.1-0.15.2-fabric", "0.13.1", 1)]
-    // 忽略建置元資料 (+ 號後忽略)
+    // 忽略建置中繼資料 (+ 號後忽略)
     [InlineData("1.0.0+fabric", "1.0.0+forge", 0)]
     // 標準語意版本
     [InlineData("1.10.0", "1.9.0", 1)]

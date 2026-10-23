@@ -32,7 +32,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
         try
         {
             string path = GetPropertiesFilePath(serverName);
-            if (!File.Exists(path))
+            if (!SafeFileSystem.FileExists(path))
             {
                 return new ServerPropertiesSnapshot(
                     ServerName: serverName,
@@ -42,8 +42,8 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                     Message: "找不到 server.properties，已套用預設值");
             }
 
-            var fileInfo = new FileInfo(path);
-            if (fileInfo.Length == 0)
+            long fileLength = SafeFileSystem.GetFileLength(path);
+            if (fileLength == 0)
             {
                 string emptyHash = HashCalculator.DigestBytes([]);
                 return new ServerPropertiesSnapshot(
@@ -54,7 +54,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
                     Message: "server.properties 為空檔案，已套用預設值");
             }
 
-            if (fileInfo.Length > MaxPropertiesFileBytes)
+            if (fileLength > MaxPropertiesFileBytes)
             {
                 return new ServerPropertiesSnapshot(
                     ServerName: serverName,
@@ -65,7 +65,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
             }
 
             byte[] bytes;
-            var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, bufferSize: 4096, useAsync: true);
+            var stream = SafeFileSystem.OpenRead(path, FileShare.ReadWrite, FileOptions.Asynchronous | FileOptions.SequentialScan);
             await using (stream.ConfigureAwait(false))
             {
                 bytes = new byte[stream.Length];

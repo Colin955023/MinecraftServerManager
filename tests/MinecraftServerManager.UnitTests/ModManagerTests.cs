@@ -137,8 +137,8 @@ public sealed class ModManagerTests : IDisposable
         var manager = new ModManager(fakeScanner, fakeInstaller);
 
         var mods = await manager.GetModsAsync(_testDir);
-        Assert.Single(mods);
-        Assert.Equal("testmod", mods[0].Id);
+        var item = Assert.Single(mods);
+        Assert.Equal("testmod", item.Id);
     }
 
     private sealed class FakeScanner(IReadOnlyList<LocalModInfo> mods) : ILocalModScanner

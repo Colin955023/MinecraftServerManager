@@ -30,6 +30,17 @@ public sealed record HttpDownloadProgress(long BytesDownloaded, long TotalBytes)
 
 public sealed record HttpDownloadResult(bool Success, string? Error = null, long BytesDownloaded = 0);
 
+public sealed record HttpRequestRetryOptions
+{
+    public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    public int MaxAttempts { get; init; } = 3;
+
+    public TimeSpan RetryDelay { get; init; } = TimeSpan.FromMilliseconds(100);
+
+    public int MaxRedirects { get; init; } = 10;
+}
+
 public sealed class HttpDownloadClient : IHttpPort
 {
     public const long MaxJsonBytes = 16L * 1024 * 1024;
@@ -50,15 +61,9 @@ public sealed class HttpDownloadClient : IHttpPort
 
     private static readonly FrozenSet<HttpStatusCode> RetryableStatuses = RetryableStatusesSource.ToFrozenSet();
 
-    private static readonly JsonSerializerOptions DefaultJsonCodecOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
-    };
-
     private readonly HttpClient _client;
     private readonly Func<string, CancellationToken, Task<IPAddress[]>>? _resolver;
-    private readonly JsonSerializerOptions _jsonCodecOptions;
+    private readonly JsonSerializerOptions? _jsonCodecOptions;
 
     public HttpDownloadClient(
         HttpClient client,
@@ -68,7 +73,7 @@ public sealed class HttpDownloadClient : IHttpPort
         ArgumentNullException.ThrowIfNull(client);
         _client = client;
         _resolver = resolver;
-        _jsonCodecOptions = jsonSerializerOptions ?? DefaultJsonCodecOptions;
+        _jsonCodecOptions = jsonSerializerOptions;
     }
 
     /// <summary>
@@ -99,11 +104,14 @@ public sealed class HttpDownloadClient : IHttpPort
     }
 
     /// <summary>
-    /// IHttpPort 介面實作：安全取得 JSON 資料並反序列化
+    /// 執行具備重試、重定向與逾時控制的 HTTP 請求
     /// </summary>
-    public async Task<HttpJsonResponse<T>> GetJsonAsync<T>(
+    private async Task<TResult> ExecuteRequestWithRetryAsync<TResult>(
         Uri uri,
-        CancellationToken cancellationToken = default)
+        HttpRequestRetryOptions options,
+        Func<HttpResponseMessage, CancellationToken, Task<(bool Handled, TResult Result)>> responseHandler,
+        Func<string, int?, TResult> failureFactory,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -111,303 +119,225 @@ public sealed class HttpDownloadClient : IHttpPort
         }
         catch (HttpSecurityException)
         {
-            return new HttpJsonResponse<T>(null, default, "invalid_request");
+            return failureFactory("invalid_request", null);
         }
 
-        const int maxAttempts = DefaultMaxAttempts;
-        var timeout = TimeSpan.FromSeconds(10);
-        var retryDelay = TimeSpan.FromMilliseconds(100);
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        for (int attempt = 1; attempt <= options.MaxAttempts; attempt++)
         {
             using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCancellation.CancelAfter(timeout);
+            attemptCancellation.CancelAfter(options.Timeout);
 
             try
             {
-                var response = await SendWithRedirectsAsync(uri, DefaultMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
+                var response = await SendWithRedirectsAsync(uri, options.MaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
                 using (response)
                 {
-                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < maxAttempts)
+                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < options.MaxAttempts)
                     {
-                        await DelayBeforeRetryAsync(response, retryDelay, attempt, cancellationToken).ConfigureAwait(false);
+                        await DelayBeforeRetryAsync(response, options.RetryDelay, attempt, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
 
-                    int statusCode = (int)response.StatusCode;
-                    if (response.StatusCode == HttpStatusCode.NotFound)
+                    var (handled, result) = await responseHandler(response, attemptCancellation.Token).ConfigureAwait(false);
+                    if (handled)
                     {
-                        return new HttpJsonResponse<T>(statusCode, default, "not_found");
-                    }
-
-                    if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                    {
-                        return new HttpJsonResponse<T>(statusCode, default, "rate_limited");
-                    }
-
-                    if ((int)response.StatusCode >= 500)
-                    {
-                        return new HttpJsonResponse<T>(statusCode, default, "transient");
-                    }
-
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return new HttpJsonResponse<T>(statusCode, default, "invalid_request");
-                    }
-
-                    long contentLength = response.Content.Headers.ContentLength ?? 0;
-                    if (contentLength > MaxJsonBytes)
-                    {
-                        return new HttpJsonResponse<T>(statusCode, default, "invalid_response");
-                    }
-
-                    using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, attemptCancellation.Token).ConfigureAwait(false);
-                    try
-                    {
-                        ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                            ? segment
-                            : bodyStream.ToArray();
-
-                        var payload = JsonSerializer.Deserialize<T>(utf8Span, _jsonCodecOptions);
-                        if (payload is null)
-                        {
-                            return new HttpJsonResponse<T>(statusCode, default, "invalid_response");
-                        }
-
-                        return new HttpJsonResponse<T>(statusCode, payload, string.Empty);
-                    }
-                    catch (JsonException)
-                    {
-                        return new HttpJsonResponse<T>(statusCode, default, "invalid_response");
+                        return result;
                     }
                 }
             }
             catch (HttpSecurityException)
             {
-                return new HttpJsonResponse<T>(null, default, "invalid_request");
+                return failureFactory("invalid_request", null);
             }
-            catch (HttpRequestException) when (attempt < maxAttempts)
+            catch (HttpRequestException) when (attempt < options.MaxAttempts)
             {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (HttpRequestException)
             {
-                return new HttpJsonResponse<T>(null, default, "transient");
+                return failureFactory("transient", null);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < maxAttempts)
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < options.MaxAttempts)
             {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return new HttpJsonResponse<T>(null, default, "timeout");
+                await Task.Delay(ScaleDelay(options.RetryDelay, attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                return new HttpJsonResponse<T>(null, default, "timeout");
+                return failureFactory("timeout", null);
             }
             catch (IOException)
             {
-                return new HttpJsonResponse<T>(null, default, "transient");
+                return failureFactory("transient", null);
             }
         }
 
-        return new HttpJsonResponse<T>(null, default, "transient");
+        return failureFactory("transient", null);
     }
 
     /// <summary>
-    /// IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（調用端負責處置 JsonDocument）
+    /// 執行通用 JSON 請求解析
     /// </summary>
-    public async Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
+    private Task<HttpJsonResponse<T>> ExecuteJsonRequestAsync<T>(
         Uri uri,
+        HttpRequestRetryOptions options,
+        Func<MemoryStream, CancellationToken, ValueTask<(bool Success, T? Value)>> parser,
+        CancellationToken cancellationToken)
+    {
+        return ExecuteRequestWithRetryAsync(
+            uri,
+            options,
+            async (response, token) =>
+            {
+                int statusCode = (int)response.StatusCode;
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "not_found"));
+                }
+
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "rate_limited"));
+                }
+
+                if ((int)response.StatusCode >= 500)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "transient"));
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "invalid_request"));
+                }
+
+                long contentLength = response.Content.Headers.ContentLength ?? 0;
+                if (contentLength > MaxJsonBytes)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "invalid_response"));
+                }
+
+                using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, token).ConfigureAwait(false);
+                try
+                {
+                    var (success, value) = await parser(bodyStream, token).ConfigureAwait(false);
+                    if (!success || value is null)
+                    {
+                        return (true, new HttpJsonResponse<T>(statusCode, default, "invalid_response"));
+                    }
+
+                    return (true, new HttpJsonResponse<T>(statusCode, value, string.Empty));
+                }
+                catch (JsonException)
+                {
+                    return (true, new HttpJsonResponse<T>(statusCode, default, "invalid_response"));
+                }
+            },
+            failureFactory: (error, status) => new HttpJsonResponse<T>(status, default, error),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// IHttpPort 介面實作：安全取得 JSON 資料並反序列化
+    /// </summary>
+    public Task<HttpJsonResponse<T>> GetJsonAsync<T>(
+        Uri uri,
+        CancellationToken cancellationToken = default) =>
+        GetJsonAsync<T>(uri, options: null, cancellationToken);
+
+    /// <summary>
+    /// 安全取得 JSON 資料並反序列化（支援自訂重試選項）
+    /// </summary>
+    public Task<HttpJsonResponse<T>> GetJsonAsync<T>(
+        Uri uri,
+        HttpRequestRetryOptions? options,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            HttpUrlPolicy.ValidateStatic(uri);
-        }
-        catch (HttpSecurityException)
-        {
-            return new HttpJsonResponse<JsonDocument>(null, default, "invalid_request");
-        }
-
-        const int maxAttempts = DefaultMaxAttempts;
-        var timeout = TimeSpan.FromSeconds(30);
-        var retryDelay = TimeSpan.FromMilliseconds(100);
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCancellation.CancelAfter(timeout);
-
-            try
+        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(10) };
+        return ExecuteJsonRequestAsync(
+            uri,
+            retryOptions,
+            (stream, _) =>
             {
-                var response = await SendWithRedirectsAsync(uri, DefaultMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
-                using (response)
-                {
-                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < maxAttempts)
-                    {
-                        await DelayBeforeRetryAsync(response, retryDelay, attempt, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
+                ReadOnlySpan<byte> utf8Span = stream.TryGetBuffer(out ArraySegment<byte> segment)
+                    ? segment
+                    : stream.ToArray();
+                var payload = JsonCodec.Deserialize<T>(utf8Span, _jsonCodecOptions);
+                return ValueTask.FromResult((payload is not null, payload));
+            },
+            cancellationToken);
+    }
 
-                    int statusCode = (int)response.StatusCode;
-                    if (response.StatusCode == HttpStatusCode.NotFound)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "not_found");
-                    }
+    /// <summary>
+    /// IHttpPort 介面實作：安全取得 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）
+    /// </summary>
+    public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
+        Uri uri,
+        CancellationToken cancellationToken = default) =>
+        GetJsonDocumentAsync(uri, options: null, cancellationToken);
 
-                    if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "rate_limited");
-                    }
-
-                    if ((int)response.StatusCode >= 500)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "transient");
-                    }
-
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "invalid_request");
-                    }
-
-                    long contentLength = response.Content.Headers.ContentLength ?? 0;
-                    if (contentLength > MaxJsonBytes)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "invalid_response");
-                    }
-
-                    using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxJsonBytes, attemptCancellation.Token).ConfigureAwait(false);
-                    try
-                    {
-                        bodyStream.Position = 0;
-                        var doc = await JsonDocument.ParseAsync(bodyStream, cancellationToken: attemptCancellation.Token).ConfigureAwait(false);
-                        return new HttpJsonResponse<JsonDocument>(statusCode, doc, string.Empty);
-                    }
-                    catch (JsonException)
-                    {
-                        return new HttpJsonResponse<JsonDocument>(statusCode, default, "invalid_response");
-                    }
-                }
-            }
-            catch (HttpSecurityException)
+    /// <summary>
+    /// 安全取得 JSON 文件並以串流解析（支援自訂重試選項）
+    /// </summary>
+    public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
+        Uri uri,
+        HttpRequestRetryOptions? options,
+        CancellationToken cancellationToken = default)
+    {
+        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(30) };
+        return ExecuteJsonRequestAsync(
+            uri,
+            retryOptions,
+            async (stream, token) =>
             {
-                return new HttpJsonResponse<JsonDocument>(null, default, "invalid_request");
-            }
-            catch (HttpRequestException) when (attempt < maxAttempts)
-            {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            }
-            catch (HttpRequestException)
-            {
-                return new HttpJsonResponse<JsonDocument>(null, default, "transient");
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < maxAttempts)
-            {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                return new HttpJsonResponse<JsonDocument>(null, default, "timeout");
-            }
-            catch (OperationCanceledException)
-            {
-                return new HttpJsonResponse<JsonDocument>(null, default, "timeout");
-            }
-            catch (IOException)
-            {
-                return new HttpJsonResponse<JsonDocument>(null, default, "transient");
-            }
-        }
-
-        return new HttpJsonResponse<JsonDocument>(null, default, "transient");
+                stream.Position = 0;
+                var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: token).ConfigureAwait(false);
+                return (doc is not null, doc);
+            },
+            cancellationToken);
     }
 
     /// <summary>
     /// IHttpPort 介面實作：安全取得文字內容
     /// </summary>
-    public async Task<string?> GetTextAsync(
+    public Task<string?> GetTextAsync(
         Uri uri,
+        CancellationToken cancellationToken = default) =>
+        GetTextAsync(uri, options: null, cancellationToken);
+
+    /// <summary>
+    /// 安全取得文字內容（支援自訂重試選項）
+    /// </summary>
+    public Task<string?> GetTextAsync(
+        Uri uri,
+        HttpRequestRetryOptions? options,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            HttpUrlPolicy.ValidateStatic(uri);
-        }
-        catch (HttpSecurityException)
-        {
-            return null;
-        }
-
-        const int maxAttempts = DefaultMaxAttempts;
-        var timeout = TimeSpan.FromSeconds(30);
-        var retryDelay = TimeSpan.FromMilliseconds(100);
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            using var attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCancellation.CancelAfter(timeout);
-
-            try
+        var retryOptions = options ?? new HttpRequestRetryOptions { Timeout = TimeSpan.FromSeconds(30) };
+        return ExecuteRequestWithRetryAsync<string?>(
+            uri,
+            retryOptions,
+            async (response, token) =>
             {
-                var response = await SendWithRedirectsAsync(uri, DefaultMaxRedirects, attemptCancellation.Token).ConfigureAwait(false);
-                using (response)
+                if (!response.IsSuccessStatusCode)
                 {
-                    if (RetryableStatuses.Contains(response.StatusCode) && attempt < maxAttempts)
-                    {
-                        await DelayBeforeRetryAsync(response, retryDelay, attempt, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        return null;
-                    }
-
-                    long contentLength = response.Content.Headers.ContentLength ?? 0;
-                    if (contentLength > MaxTextBytes)
-                    {
-                        return null;
-                    }
-
-                    using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxTextBytes, attemptCancellation.Token).ConfigureAwait(false);
-                    ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
-                        ? segment
-                        : bodyStream.ToArray();
-
-                    return Encoding.UTF8.GetString(utf8Span);
+                    return (true, null);
                 }
-            }
-            catch (HttpSecurityException)
-            {
-                return null;
-            }
-            catch (HttpRequestException) when (attempt < maxAttempts)
-            {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            }
-            catch (HttpRequestException)
-            {
-                return null;
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < maxAttempts)
-            {
-                await Task.Delay(ScaleDelay(retryDelay, attempt), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return null;
-            }
-            catch (IOException)
-            {
-                return null;
-            }
-        }
 
-        return null;
+                long contentLength = response.Content.Headers.ContentLength ?? 0;
+                if (contentLength > MaxTextBytes)
+                {
+                    return (true, null);
+                }
+
+                using var bodyStream = await ReadLimitedMemoryStreamAsync(response, MaxTextBytes, token).ConfigureAwait(false);
+                ReadOnlySpan<byte> utf8Span = bodyStream.TryGetBuffer(out ArraySegment<byte> segment)
+                    ? segment
+                    : bodyStream.ToArray();
+
+                return (true, Encoding.UTF8.GetString(utf8Span));
+            },
+            failureFactory: (_, _) => null,
+            cancellationToken);
     }
-
     /// <summary>
     /// IHttpPort 介面實作：安全傳送 POST JSON 請求並取得文字回應
     /// </summary>
@@ -480,19 +410,19 @@ public sealed class HttpDownloadClient : IHttpPort
         HttpUrlPolicy.ValidateStatic(uri);
         string target = SafeFileSystem.ResolveStablePath(targetPath, createParent: true);
         string? normalizedHash = NormalizeExpectedHash(expectedHash, expectedHashAlgorithm);
-        if (normalizedHash is not null && File.Exists(target))
+        if (normalizedHash is not null && SafeFileSystem.FileExists(target))
         {
             string existing = HashCalculator.Shared.ComputeFileHash(target, expectedHashAlgorithm, maxBytes: options.MaxBytes);
             if (string.Equals(existing, normalizedHash, StringComparison.OrdinalIgnoreCase))
             {
-                return new HttpDownloadResult(true, BytesDownloaded: new FileInfo(target).Length);
+                return new HttpDownloadResult(true, BytesDownloaded: SafeFileSystem.GetFileLength(target));
             }
         }
 
         string temporary = SafeFileSystem.ResolveStablePath(
             target + ".part",
             createParent: true);
-        if (!options.EnableRangeResumption && File.Exists(temporary))
+        if (!options.EnableRangeResumption && SafeFileSystem.FileExists(temporary))
         {
             TryDeleteTemporaryFile(temporary);
         }
@@ -549,11 +479,11 @@ public sealed class HttpDownloadClient : IHttpPort
         attemptCancellation.CancelAfter(options.Timeout);
 
         long existingBytes = 0;
-        if (options.EnableRangeResumption && File.Exists(temporary))
+        if (options.EnableRangeResumption && SafeFileSystem.FileExists(temporary))
         {
             try
             {
-                existingBytes = new FileInfo(temporary).Length;
+                existingBytes = SafeFileSystem.GetFileLength(temporary);
                 if (existingBytes >= options.MaxBytes)
                 {
                     TryDeleteTemporaryFile(temporary);
@@ -643,7 +573,7 @@ public sealed class HttpDownloadClient : IHttpPort
                     return (false, new HttpDownloadResult(false, "無法原子提交下載檔案"), responseETag ?? knownETag);
                 }
 
-                return (false, new HttpDownloadResult(true, BytesDownloaded: new FileInfo(target).Length), responseETag ?? knownETag);
+                return (false, new HttpDownloadResult(true, BytesDownloaded: SafeFileSystem.GetFileLength(target)), responseETag ?? knownETag);
             }
         }
         catch (HttpSecurityException exception)
@@ -942,9 +872,9 @@ public sealed class HttpDownloadClient : IHttpPort
 
         try
         {
-            if (File.Exists(path))
+            if (SafeFileSystem.FileExists(path))
             {
-                File.Delete(path);
+                SafeFileSystem.DeleteFile(path);
             }
         }
         catch (IOException)
