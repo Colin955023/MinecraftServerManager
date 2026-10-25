@@ -326,4 +326,24 @@ public sealed partial class SharedEntryArchitectureTests
 
     [GeneratedRegex(@"(?<![\w\.])_\s*=\s*(?!(?:ViewModelBase\.)?RunSafeAsync\b)([a-zA-Z_]\w*\.)*([a-zA-Z_]\w*Async)\(")]
     private static partial Regex A13Regex();
+
+    [Fact]
+    public void A14_SoundDirectAccess_ShouldOnlyBeUsedInAudioFeedback()
+    {
+        // 規則 A14：系統提示音效一律經由 AudioFeedback 工具
+        // 禁止直接呼叫 SystemSounds 或 new SoundPlayer
+        var files = SourceScanner.GetSourceFiles("src");
+        var violations = SourceScanner.ScanViolations(
+            files,
+            A14Regex(),
+            "A14",
+            "系統提示音效必須統一由 AudioFeedback 提供",
+            path =>
+                string.Equals(path, "src/MinecraftServerManager.App/Services/AudioFeedback.cs", StringComparison.OrdinalIgnoreCase));
+
+        AssertNoViolations(violations, "A14");
+    }
+
+    [GeneratedRegex(@"(?<![\w\.])((System\.Media\.)?(SystemSounds\b|SoundPlayer\b))")]
+    private static partial Regex A14Regex();
 }

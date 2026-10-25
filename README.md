@@ -29,7 +29,7 @@
 
 | 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
 | :--- | :--- | :--- | :--- | :--- |
-| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 50 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與官方原生單檔壓縮，開箱即用，具備最高相容性與穩定度，絕不因缺少環境而報錯 |
+| **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 60 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與官方原生單檔壓縮，開箱即用，具備最高相容性與穩定度，絕不因缺少環境而報錯 |
 | **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.8 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
 
 > [!TIP]

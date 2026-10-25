@@ -25,17 +25,13 @@ public sealed partial class ServerInspector : IServerInspector
     private static readonly string[] ServerJarCandidates =
     [
         "run.bat",
-        "paper.jar",
-        "fabric-server-launch.jar",
-        "quilt-server-launch.jar",
-        "server.jar",
-        "minecraft_server.jar",
+        .. ServerLaunchTargetResolver.PreferredLaunchJars,
     ];
 
     private static readonly string[] MemoryCandidateScriptNames =
     [
-        "user_jvm_args.txt",
-        "start_server.bat",
+        ServerDefaults.UserJvmArgsFileName,
+        ServerDefaults.StartServerBatFileName,
         "start.bat",
         "run.bat",
         "launch.bat",
@@ -76,7 +72,7 @@ public sealed partial class ServerInspector : IServerInspector
             var (maxMb, minMb) = InspectMemory(stableDir);
             long totalSizeBytes = await _directorySizeService.CalculateServerSizeAsync(stableDir, cancellationToken).ConfigureAwait(false);
 
-            bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains("server.properties");
+            bool isCandidate = launchTarget.Kind != LaunchTargetKind.None || files.Contains(ServerDefaults.ServerPropertiesFileName);
             bool launchable = launchTarget.Kind != LaunchTargetKind.None && eulaState == EulaState.Accepted;
             bool statusReady = launchable && MinecraftVersion.TryParse(mcVersion, out _);
 
@@ -139,14 +135,14 @@ public sealed partial class ServerInspector : IServerInspector
 
     private static EulaState InspectEula(string directory, HashSet<string> files)
     {
-        if (!files.Contains("eula.txt"))
+        if (!files.Contains(ServerDefaults.EulaFileName))
         {
             return EulaState.Missing;
         }
 
         try
         {
-            string path = Path.Combine(directory, "eula.txt");
+            string path = Path.Combine(directory, ServerDefaults.EulaFileName);
             if (SafeFileSystem.GetFileLength(path) > MaxMetadataBytes)
             {
                 return EulaState.Missing;
@@ -186,38 +182,10 @@ public sealed partial class ServerInspector : IServerInspector
         }
 
         // 檢查 Forge / NeoForge libraries 中的 win_args.txt
-        string forgeLib = Path.Combine(directory, "libraries", "net", "minecraftforge", "forge");
-        if (SafeFileSystem.DirectoryExists(forgeLib))
+        string? libWinArgs = ServerLaunchTargetResolver.FindLibraryWinArgs(directory);
+        if (libWinArgs is not null && !candidates.Contains(libWinArgs))
         {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
-                    if (!candidates.Contains(target))
-                    {
-                        candidates.Insert(0, target);
-                    }
-                }
-            }
-        }
-
-        string neoLib = Path.Combine(directory, "libraries", "net", "neoforged", "neoforge");
-        if (SafeFileSystem.DirectoryExists(neoLib))
-        {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    string target = "@" + Path.GetRelativePath(directory, winArgs).Replace('\\', '/');
-                    if (!candidates.Contains(target))
-                    {
-                        candidates.Insert(0, target);
-                    }
-                }
-            }
+            candidates.Insert(0, libWinArgs);
         }
 
         // 搜尋其他 jar 檔案（paper*.jar 優先置前）
@@ -820,7 +788,7 @@ public sealed partial class ServerInspector : IServerInspector
 
     private static (int MaxMb, int? MinMb) InspectMemory(string directory)
     {
-        int maxMb = 2048;
+        int maxMb = ServerDefaults.DefaultMemoryMaxMb;
         int? minMb = null;
         bool found = false;
 

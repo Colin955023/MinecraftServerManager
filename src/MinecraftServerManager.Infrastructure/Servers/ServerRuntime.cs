@@ -41,10 +41,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
 
         if (plan.IsScript)
         {
-            string scriptPath = Path.IsPathRooted(plan.JavaExecutable)
-                ? plan.JavaExecutable
-                : Path.Combine(stableDir, plan.JavaExecutable);
-            string fullScriptPath = Path.GetFullPath(scriptPath);
+            string fullScriptPath = ResolveScriptPath(stableDir, plan.JavaExecutable);
 
             if (!SafeFileSystem.IsPathWithin(stableDir, fullScriptPath, strict: false))
             {
@@ -93,10 +90,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         ServerLaunchPlan plan;
         if (isScript)
         {
-            string scriptPath = Path.IsPathRooted(executableName)
-                ? executableName
-                : Path.Combine(stableDir, executableName);
-            string fullScriptPath = Path.GetFullPath(scriptPath);
+            string fullScriptPath = ResolveScriptPath(stableDir, executableName);
 
             IReadOnlyDictionary<string, string?>? env = null;
             if (!string.IsNullOrWhiteSpace(javaExecutablePath) && !string.Equals(javaExecutablePath.Trim(), "java", StringComparison.OrdinalIgnoreCase))
@@ -109,7 +103,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
                 WorkingDirectory: stableDir,
                 Arguments: [],
                 Loader: LoaderKind.Unknown,
-                MinMemoryMb: memoryMinMb ?? 1024,
+                MinMemoryMb: memoryMinMb ?? ServerDefaults.DefaultMemoryMinMb,
                 MaxMemoryMb: memoryMaxMb,
                 IsScript: true,
                 ServerName: Path.GetFileName(stableDir),
@@ -118,7 +112,7 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
         else
         {
             var args = new List<string>();
-            int min = memoryMinMb ?? (memoryMaxMb > 1024 ? 1024 : memoryMaxMb);
+            int min = memoryMinMb ?? (memoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : memoryMaxMb);
             args.Add($"-Xms{min}M");
             args.Add($"-Xmx{memoryMaxMb}M");
 
@@ -255,5 +249,12 @@ public sealed class ServerRuntime(IProcessRunner processRunner) : IServerRuntime
             ActiveServerName = null;
             IsReady = false;
         }
+    }
+    private static string ResolveScriptPath(string stableDir, string scriptExecutable)
+    {
+        string scriptPath = Path.IsPathRooted(scriptExecutable)
+            ? scriptExecutable
+            : Path.Combine(stableDir, scriptExecutable);
+        return Path.GetFullPath(scriptPath);
     }
 }

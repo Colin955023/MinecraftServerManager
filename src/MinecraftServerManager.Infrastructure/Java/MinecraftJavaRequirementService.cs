@@ -463,7 +463,14 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
                 if (SafeFileSystem.FileExists(legacyCachePath))
                 {
-                    try { SafeFileSystem.DeleteFile(legacyCachePath); } catch { }
+                    try
+                    {
+                        SafeFileSystem.DeleteFile(legacyCachePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning("清理舊版 Java requirements 快取失敗 ({Path}): {Error}", legacyCachePath, ex.Message);
+                    }
                 }
 
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json

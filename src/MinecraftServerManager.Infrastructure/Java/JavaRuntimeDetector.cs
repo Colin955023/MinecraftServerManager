@@ -120,6 +120,58 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         return null;
     }
 
+    /// <summary>
+    /// 解析系統 PATH 環境變數中的所有有效目錄路徑
+    /// </summary>
+    private static List<string> EnumeratePathDirectories()
+    {
+        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathEnv))
+        {
+            return [];
+        }
+
+        var list = new List<string>();
+        ReadOnlySpan<char> span = pathEnv.AsSpan();
+        while (!span.IsEmpty)
+        {
+            int sepIndex = span.IndexOf(Path.PathSeparator);
+            ReadOnlySpan<char> folderSpan = (sepIndex >= 0 ? span[..sepIndex] : span).Trim();
+            span = sepIndex >= 0 ? span[(sepIndex + 1)..] : [];
+
+            if (!folderSpan.IsEmpty)
+            {
+                list.Add(folderSpan.ToString());
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// 搜尋系統 PATH 環境變數中的第一個有效 java.exe 絕對路徑
+    /// </summary>
+    public static string? FindSystemJavaExecutable()
+    {
+        foreach (string folder in EnumeratePathDirectories())
+        {
+            try
+            {
+                string candidate = Path.Combine(folder, "java.exe");
+                if (SafeFileSystem.FileExists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning("檢查 PATH 中的 Java 候選路徑異常: {Message}", ex.Message);
+            }
+        }
+
+        return null;
+    }
+
     private async Task<JavaRuntimeInfo?> TryReadRuntimeAsync(
         string executablePath,
         CancellationToken cancellationToken)
@@ -202,21 +254,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             AddCandidate(candidates, Path.Combine(javaHome, "bin", "java.exe"));
         }
 
-        string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        ReadOnlySpan<char> pathSpan = pathEnv.AsSpan();
-        while (!pathSpan.IsEmpty)
+        foreach (string folder in EnumeratePathDirectories())
         {
-            int sepIndex = pathSpan.IndexOf(Path.PathSeparator);
-            ReadOnlySpan<char> segment = (sepIndex >= 0 ? pathSpan[..sepIndex] : pathSpan).Trim();
-            pathSpan = sepIndex >= 0 ? pathSpan[(sepIndex + 1)..] : [];
-
-            if (segment.IsEmpty)
-            {
-                continue;
-            }
-
-            string segmentStr = segment.ToString();
-            AddCandidate(candidates, Path.Combine(segmentStr, "java.exe"));
+            AddCandidate(candidates, Path.Combine(folder, "java.exe"));
         }
 
         foreach (string root in GetJavaRoots())

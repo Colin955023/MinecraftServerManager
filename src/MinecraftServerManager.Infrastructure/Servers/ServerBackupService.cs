@@ -413,7 +413,6 @@ public sealed class ServerBackupService(string serversRoot, int maxRetentionCoun
         {
             if (SafeFileSystem.DirectoryExists(dirPath))
             {
-                SafeFileSystem.RemoveReadOnlyAttributesRecursive(dirPath);
                 SafeFileSystem.DeleteDirectory(dirPath, recursive: true);
             }
         }

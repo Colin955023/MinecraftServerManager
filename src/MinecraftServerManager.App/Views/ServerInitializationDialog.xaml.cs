@@ -82,7 +82,7 @@ public sealed partial class ServerInitializationDialog : Window, IDisposable
 
             AppendLog($"[系統] 準備啟動伺服器「{_config.Name.Value}」執行初次世界與設定初始化...\n");
 
-            string executableName = SafeFileSystem.FileExists(System.IO.Path.Combine(_config.Path, "start_server.bat")) ? "start_server.bat" : "server.jar";
+            string executableName = SafeFileSystem.FileExists(System.IO.Path.Combine(_config.Path, ServerDefaults.StartServerBatFileName)) ? ServerDefaults.StartServerBatFileName : "server.jar";
             AppendLog(executableName.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
                 ? $"[系統] 偵測到啟動腳本 {executableName}，即將執行...\n"
                 : $"[系統] 啟動伺服器核心 {executableName}...\n");

@@ -1,6 +1,7 @@
 using System.Text;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -21,7 +22,7 @@ public sealed class ServerPropertiesStore(string serversRoot) : IServerPropertie
         }
         string stableRoot = SafeFileSystem.ResolveStableDirectory(_serversRoot);
         string serverDir = SafeFileSystem.ResolveStableDirectory(Path.Combine(stableRoot, serverName));
-        return SafeFileSystem.ResolveStablePath(Path.Combine(serverDir, "server.properties"));
+        return SafeFileSystem.ResolveStablePath(Path.Combine(serverDir, ServerDefaults.ServerPropertiesFileName));
     }
 
     public async Task<ServerPropertiesSnapshot> ReadAsync(

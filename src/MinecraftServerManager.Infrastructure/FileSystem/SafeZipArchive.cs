@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.Buffers;
 using System.IO.Compression;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
 public static class SafeZipArchive
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeZipArchive");
     public const int DefaultMaxMembers = 100_000;
     public const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
     public const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
@@ -356,7 +358,6 @@ public static class SafeZipArchive
         Dictionary<string, bool> paths,
         HashSet<string> parentPaths)
     {
-        string[] parts = relativePath.Split(Path.DirectorySeparatorChar);
         string key = relativePath;
         bool isDirectory = entry.FullName.EndsWith('/');
         if (paths.TryGetValue(key, out bool existingIsDirectory))
@@ -372,9 +373,9 @@ public static class SafeZipArchive
             throw new SafeArchiveException($"壓縮檔包含重複或路徑衝突： {entry.FullName}");
         }
 
-        for (int index = 1; index < parts.Length; index++)
+        for (int separatorIndex = relativePath.IndexOf(Path.DirectorySeparatorChar); separatorIndex >= 0; separatorIndex = relativePath.IndexOf(Path.DirectorySeparatorChar, separatorIndex + 1))
         {
-            string parentKey = string.Join(Path.DirectorySeparatorChar, parts[..index]);
+            string parentKey = relativePath[..separatorIndex];
             if (paths.TryGetValue(parentKey, out bool parentIsDirectory) && !parentIsDirectory)
             {
                 throw new SafeArchiveException($"壓縮檔包含檔案／目錄路徑衝突： {entry.FullName}");
@@ -547,16 +548,15 @@ public static class SafeZipArchive
             }
 
             string normalized = SanitizeMemberName(memberName);
-            string[] parts = normalized.Split(Path.DirectorySeparatorChar);
             string key = normalized;
             if (_paths.Contains(key) || _parentPaths.Contains(key))
             {
                 throw new SafeArchiveException($"壓縮檔包含重複或路徑衝突： {memberName}");
             }
 
-            for (int index = 1; index < parts.Length; index++)
+            for (int separatorIndex = normalized.IndexOf(Path.DirectorySeparatorChar); separatorIndex >= 0; separatorIndex = normalized.IndexOf(Path.DirectorySeparatorChar, separatorIndex + 1))
             {
-                string parentKey = string.Join(Path.DirectorySeparatorChar, parts[..index]);
+                string parentKey = normalized[..separatorIndex];
                 if (_paths.Contains(parentKey))
                 {
                     throw new SafeArchiveException($"壓縮檔包含檔案／目錄路徑衝突： {memberName}");
@@ -578,6 +578,7 @@ public static class SafeZipArchive
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                Logger.Warning(ex, "清理暫存壓縮檔案失敗: {0}", _temporaryPath);
             }
         }
     }

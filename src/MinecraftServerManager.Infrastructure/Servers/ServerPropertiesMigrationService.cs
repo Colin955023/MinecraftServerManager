@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Core.Utilities;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
@@ -130,7 +131,7 @@ public static class ServerPropertiesMigrationService
         }
 
         string stableDir = SafeFileSystem.ResolveStableDirectory(directoryPath);
-        string propsPath = Path.Combine(stableDir, "server.properties");
+        string propsPath = Path.Combine(stableDir, ServerDefaults.ServerPropertiesFileName);
         if (!SafeFileSystem.FileExists(propsPath))
         {
             return false;
@@ -138,7 +139,7 @@ public static class ServerPropertiesMigrationService
 
         if (createBackup)
         {
-            string backupPath = Path.Combine(stableDir, "server.properties.backup");
+            string backupPath = Path.Combine(stableDir, ServerDefaults.ServerPropertiesFileName + ".backup");
             try
             {
                 SafeFileSystem.CopyFile(propsPath, backupPath, overwrite: true);

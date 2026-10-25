@@ -18,7 +18,7 @@
     <AnalysisModeUsage>All</AnalysisModeUsage>
     <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
     <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
-        <GenerateDocumentationFile Condition="$([System.String]::Copy('$(MSBuildProjectDirectory)').StartsWith('$(RepoRoot)tests')) != 'True'">true</GenerateDocumentationFile>
+    <GenerateDocumentationFile Condition="$([System.String]::Copy('$(MSBuildProjectDirectory)').StartsWith('$(RepoRoot)tests')) != 'True'">true</GenerateDocumentationFile>
     <PublishDocumentationFiles>false</PublishDocumentationFiles>
     <NoWarn>$(NoWarn);1591</NoWarn>
     <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900</WarningsNotAsErrors>

@@ -51,15 +51,15 @@ public sealed partial class ToastWindow : Window
         switch (type)
         {
             case ToastType.Warning:
-                System.Media.SystemSounds.Exclamation.Play();
+                AudioFeedback.PlayWarning();
                 break;
             case ToastType.Error:
-                System.Media.SystemSounds.Hand.Play();
+                AudioFeedback.PlayError();
                 break;
             case ToastType.Info:
             case ToastType.Success:
             default:
-                System.Media.SystemSounds.Asterisk.Play();
+                AudioFeedback.PlayInfo();
                 break;
         }
 

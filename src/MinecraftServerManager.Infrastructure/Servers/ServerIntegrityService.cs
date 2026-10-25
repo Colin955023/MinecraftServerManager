@@ -63,9 +63,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
 
                 case LoaderKind.NeoForge:
                     {
-                        bool hasRunScript = SafeFileSystem.FileExists(Path.Combine(serverPath, "start_server.bat")) ||
-                                            SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
-                                            SafeFileSystem.FileExists(Path.Combine(serverPath, "run.sh"));
+                        bool hasRunScript = HasRunScript(serverPath);
                         string neoLib = Path.Combine(serverPath, "libraries", "net", "neoforged", "neoforge");
                         bool hasWinArgs = SafeFileSystem.DirectoryExists(neoLib) && SafeFileSystem.EnumerateFiles(neoLib, "*args.txt", SearchOption.AllDirectories).Count > 0;
 
@@ -92,9 +90,7 @@ public sealed class ServerIntegrityService : IServerIntegrityService
                             return new ServerIntegrityResult(false, EmptyList);
                         }
 
-                        bool hasRunScript = SafeFileSystem.FileExists(Path.Combine(serverPath, "start_server.bat")) ||
-                                            SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
-                                            SafeFileSystem.FileExists(Path.Combine(serverPath, "run.sh"));
+                        bool hasRunScript = HasRunScript(serverPath);
                         string forgeLib = Path.Combine(serverPath, "libraries", "net", "minecraftforge", "forge");
                         bool hasForgeArgs = SafeFileSystem.DirectoryExists(forgeLib) && SafeFileSystem.EnumerateFiles(forgeLib, "*args.txt", SearchOption.AllDirectories).Count > 0;
 
@@ -129,4 +125,9 @@ public sealed class ServerIntegrityService : IServerIntegrityService
             return new ServerIntegrityResult(true, UnexpectedErrorMissingList);
         }
     }
+
+    private static bool HasRunScript(string serverPath) =>
+        SafeFileSystem.FileExists(Path.Combine(serverPath, ServerDefaults.StartServerBatFileName)) ||
+        SafeFileSystem.FileExists(Path.Combine(serverPath, "run.bat")) ||
+        SafeFileSystem.FileExists(Path.Combine(serverPath, "run.sh"));
 }

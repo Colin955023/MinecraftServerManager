@@ -45,7 +45,7 @@ public sealed partial class ServerRowItem : ObservableObject
     public partial string RelativePath { get; set; } = string.Empty;
 
     [ObservableProperty]
-    public partial int MemoryMaxMb { get; set; } = 2048;
+    public partial int MemoryMaxMb { get; set; } = ServerDefaults.DefaultMemoryMaxMb;
 
     [ObservableProperty]
     public partial int? MemoryMinMb { get; set; }

@@ -10,6 +10,8 @@ using CommunityToolkit.Mvvm.Input;
 using MinecraftServerManager.App.Collections;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
+using MinecraftServerManager.Core.Servers;
+using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.FileSystem;
 
@@ -588,39 +590,23 @@ public sealed partial class ServerMonitorViewModel : ViewModelBase, IDisposable
 
         if (!string.IsNullOrWhiteSpace(serverPath))
         {
-            string propsPath = Path.Combine(serverPath, "server.properties");
+            string propsPath = Path.Combine(serverPath, ServerDefaults.ServerPropertiesFileName);
             if (SafeFileSystem.FileExists(propsPath))
             {
                 try
                 {
                     using var stream = SafeFileSystem.OpenRead(propsPath, FileShare.ReadWrite | FileShare.Delete);
                     using var reader = new StreamReader(stream, Encoding.UTF8);
-                    string? line;
-                    while ((line = reader.ReadLine()) is not null)
+                    string content = reader.ReadToEnd();
+                    var properties = PropertiesDocumentCodec.Parse(content);
+                    if (properties.TryGetValue("server-port", out string? port) && !string.IsNullOrWhiteSpace(port))
                     {
-                        ReadOnlySpan<char> span = line.AsSpan().Trim();
-                        if (span.IsEmpty || span.StartsWith("#") || span.StartsWith("!"))
-                        {
-                            continue;
-                        }
+                        serverPort = port.Trim();
+                    }
 
-                        int eq = span.IndexOf('=');
-                        if (eq <= 0)
-                        {
-                            continue;
-                        }
-
-                        ReadOnlySpan<char> key = span[..eq].Trim();
-                        ReadOnlySpan<char> val = span[(eq + 1)..].Trim();
-
-                        if (key.Equals("server-port", StringComparison.OrdinalIgnoreCase) && !val.IsEmpty)
-                        {
-                            serverPort = val.ToString();
-                        }
-                        else if (key.Equals("server-ip", StringComparison.OrdinalIgnoreCase) && !val.IsEmpty)
-                        {
-                            serverIp = val.ToString();
-                        }
+                    if (properties.TryGetValue("server-ip", out string? ip) && !string.IsNullOrWhiteSpace(ip))
+                    {
+                        serverIp = ip.Trim();
                     }
                 }
                 catch (Exception ex)

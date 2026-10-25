@@ -618,7 +618,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [RelayCommand]
     public void ConfigureJvmArgs()
     {
-        int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : 2048;
+        int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : ServerDefaults.DefaultMemoryMaxMb;
         int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
         var vm = new JvmArgsViewModel(javaMajor, maxMem, SelectedLoader, _customJvmArgs);
         if (_ui.ShowJvmArgs(vm) == true)
@@ -645,8 +645,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
         SelectedMinecraftVersion = AvailableMinecraftVersions.Count > 0 ? AvailableMinecraftVersions[0] : string.Empty;
         SelectedLoaderVersion = $"最新穩定版 ({SelectedLoader})";
         ServerName = !string.IsNullOrWhiteSpace(SelectedMinecraftVersion) ? $"{SelectedLoader} {SelectedMinecraftVersion}" : SelectedLoader;
-        MinMemoryMb = "1024";
-        MaxMemoryMb = "2048";
+        MinMemoryMb = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        MaxMemoryMb = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
         JavaPath = string.Empty;
         _customJvmArgs = null;
         int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
@@ -725,8 +725,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     return;
                 }
 
-                int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : 1024;
-                int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : 2048;
+                int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : ServerDefaults.DefaultMemoryMinMb;
+                int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : ServerDefaults.DefaultMemoryMaxMb;
 
                 string loaderVer = SelectedLoaderVersion;
                 if (loaderVer is "無" or "無可用版本")

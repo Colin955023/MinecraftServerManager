@@ -17,6 +17,10 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LoaderCatalogService");
     private static readonly LoaderKind[] ReloadableLoaders = [LoaderKind.Fabric, LoaderKind.Quilt, LoaderKind.Forge, LoaderKind.NeoForge];
     private readonly string _cacheDir = InitializeCacheDirectory(cacheDirectory);
+
+    private string GetMinecraftCacheFilePath() => Path.Combine(_cacheDir, "mc_versions_cache.json");
+    private string GetPaperCacheFilePath() => Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
+    private string GetLoaderCacheFilePath(LoaderKind loader) => Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
     private readonly TimeSpan _cacheTtl = TimeSpan.FromHours(12);
     private readonly ConcurrentDictionary<(LoaderKind, string), IReadOnlyList<LoaderVersion>> _memoryLoaderCache = new();
     private IReadOnlyList<LoaderVersion>? _memoryMinecraftVersions;
@@ -59,7 +63,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
             return _memoryMinecraftVersions;
         }
 
-        string cacheFile = Path.Combine(_cacheDir, "mc_versions_cache.json");
+        string cacheFile = GetMinecraftCacheFilePath();
 
         if (!includeSnapshots && IsCacheFresh(cacheFile))
         {
@@ -172,7 +176,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
             return _memoryPaperMinecraftVersions;
         }
 
-        string cacheFile = Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
+        string cacheFile = GetPaperCacheFilePath();
 
         if (!forceReload && IsCacheFresh(cacheFile))
         {
@@ -338,7 +342,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
             return memCached;
         }
 
-        string cacheFile = Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
+        string cacheFile = GetLoaderCacheFilePath(loader);
 
         if (IsCacheFresh(cacheFile))
         {
@@ -492,7 +496,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         cancellationToken.ThrowIfCancellationRequested();
         var staleLoaders = ReloadableLoaders
-            .Where(loader => !IsCacheFresh(Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json")))
+            .Where(loader => !IsCacheFresh(GetLoaderCacheFilePath(loader)))
             .ToList();
 
         if (staleLoaders.Count > 0)
@@ -503,7 +507,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
 
     private async Task ReloadLoaderAsync(LoaderKind loader, CancellationToken cancellationToken)
     {
-        string cacheFile = Path.Combine(_cacheDir, $"{loader.ToString().ToLowerInvariant()}_versions_cache.json");
+        string cacheFile = GetLoaderCacheFilePath(loader);
         try
         {
             IReadOnlyList<LoaderVersion> fetched = loader switch
@@ -534,7 +538,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        string cacheFile = Path.Combine(_cacheDir, "mc_versions_cache.json");
+        string cacheFile = GetMinecraftCacheFilePath();
         var existing = SafeFileSystem.FileExists(cacheFile) ? LoadCachedVersions(cacheFile) : [];
 
         try
@@ -983,7 +987,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         try
         {
-            string cacheFile = Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
+            string cacheFile = GetPaperCacheFilePath();
             var versions = _memoryPaperMinecraftVersions ?? (SafeFileSystem.FileExists(cacheFile) ? LoadCachedVersions(cacheFile) : null);
             if (versions is null || versions.Count == 0)
             {
@@ -1008,7 +1012,7 @@ public sealed class LoaderCatalogService(IHttpPort httpPort, string cacheDirecto
     {
         try
         {
-            string cacheFile = Path.Combine(_cacheDir, "paper_mc_versions_cache.json");
+            string cacheFile = GetPaperCacheFilePath();
             var versions = _memoryPaperMinecraftVersions ?? (SafeFileSystem.FileExists(cacheFile) ? LoadCachedVersions(cacheFile) : null);
             if (versions is null || versions.Count == 0)
             {

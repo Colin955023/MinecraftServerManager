@@ -17,8 +17,6 @@ jobs:
   validate-renovate-config:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    container:
-      image: ghcr.io/renovatebot/renovate:44.181.1@sha256:823dc5036b911696c27faacf7664219b28e6e15826405720df29aad208d19f25
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,4 +25,4 @@ jobs:
 
       - name: Validate renovate.json
         run: |
-          renovate-config-validator ./.github/renovate.json --strict
+          npx --yes --package renovate@44.181.1 -- renovate-config-validator ./.github/renovate.json --strict

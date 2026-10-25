@@ -7,6 +7,8 @@ using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Java;
+using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
@@ -94,7 +96,7 @@ public sealed partial class LoaderInstallerService(
 
         // 探索主要啟動檔案
         SafeReport("finalizing", "正在確認伺服器啟動檔案...", 96);
-        string launchTarget = ResolveLaunchTarget(stableServerDir, loader);
+        string launchTarget = ServerLaunchTargetResolver.ResolveLaunchTarget(stableServerDir, loader);
 
         SafeReport("completed", "安裝完成", 100);
         return launchTarget;
@@ -136,7 +138,7 @@ public sealed partial class LoaderInstallerService(
             new Progress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(20 + ((double)p.BytesDownloaded / p.TotalBytes * 75)) : 20;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
             }),
             expectedHash: sha256,
             expectedHashAlgorithm: "sha256",
@@ -272,7 +274,7 @@ public sealed partial class LoaderInstallerService(
             new Progress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(30 + ((double)p.BytesDownloaded / p.TotalBytes * 65)) : 30;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
             }),
             expectedHash: expectedSha1,
             expectedHashAlgorithm: "sha1",
@@ -430,86 +432,6 @@ public sealed partial class LoaderInstallerService(
             Arguments: args,
             WorkingDirectory: serverDirectory);
     }
-
-    private static string ResolveLaunchTarget(string serverDirectory, LoaderKind loader)
-    {
-        // 優先從 Forge / NeoForge 的 run.bat 提取 @...win_args.txt
-        string runBat = Path.Combine(serverDirectory, "run.bat");
-        if (SafeFileSystem.FileExists(runBat))
-        {
-            try
-            {
-                string runBatContent = SafeFileSystem.ReadAllText(runBat);
-                var match = WinArgsRegex().Match(runBatContent);
-                if (match.Success)
-                {
-                    string matchedArgs = match.Groups[1].Value.Trim().Trim('"').Replace('\\', '/');
-                    return "@" + matchedArgs;
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Logger.Warning("解析 run.bat 啟動參數異常: {0}", ex.Message);
-            }
-        }
-
-        // 檢查 Forge / NeoForge libraries 中的 win_args.txt
-        string forgeLib = Path.Combine(serverDirectory, "libraries", "net", "minecraftforge", "forge");
-        if (SafeFileSystem.DirectoryExists(forgeLib))
-        {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(forgeLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
-                }
-            }
-        }
-
-        string neoLib = Path.Combine(serverDirectory, "libraries", "net", "neoforged", "neoforge");
-        if (SafeFileSystem.DirectoryExists(neoLib))
-        {
-            foreach (string sub in SafeFileSystem.EnumerateDirectories(neoLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (SafeFileSystem.FileExists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
-                }
-            }
-        }
-
-        var files = SafeFileSystem.ListBoundedDirectory(serverDirectory, rejectReparse: false)
-            .Where(static e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-            .Select(static e => Path.GetFileName(e.FullPath))
-            .ToList();
-
-        string? preferred = loader switch
-        {
-            LoaderKind.Paper => files.FirstOrDefault(static f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Fabric => files.FirstOrDefault(static f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Quilt => files.FirstOrDefault(static f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Forge => files.FirstOrDefault(static f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
-            LoaderKind.NeoForge => files.FirstOrDefault(static f => f.StartsWith("neoforge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
-            _ => null
-        };
-
-        if (preferred is not null)
-        {
-            return preferred;
-        }
-
-        if (SafeFileSystem.FileExists(runBat))
-        {
-            return "run.bat";
-        }
-
-        return files.FirstOrDefault(static f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
-    }
-
-    [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
-    private static partial Regex WinArgsRegex();
 
     internal static string? ExtractVersionMetaUrl(string manifestJson, string targetVersion)
     {
