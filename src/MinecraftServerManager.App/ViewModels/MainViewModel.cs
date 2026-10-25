@@ -1,11 +1,11 @@
 using MinecraftServerManager.App.Services;
-using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.Logging;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Settings;
 
 namespace MinecraftServerManager.App.ViewModels;
@@ -37,7 +37,6 @@ public sealed partial class MainViewModel : ViewModelBase
 
     private readonly IExternalLauncher? _launcher;
     private readonly IUpdateCheckerService? _updateChecker;
-    private readonly IAppUpdateService? _appUpdateService;
 
     [ObservableProperty]
     public partial bool IsLightTheme { get; set; }
@@ -55,85 +54,76 @@ public sealed partial class MainViewModel : ViewModelBase
     /// </summary>
     public event Action<double>? UiScaleChanged;
 
-    public MainViewModel(
-        SettingsManager? settingsManager = null,
-        IJavaRuntimeDetector? javaDetector = null,
-        IServerManager? serverManager = null,
-        IServerBackupService? backupService = null,
-        IServerRuntime? serverRuntime = null,
-        ILoaderCatalogService? loaderCatalog = null,
-        IModManager? modManager = null,
-        IModrinthClient? modrinthClient = null,
-        IUpdateCheckerService? updateChecker = null,
-        IExternalLauncher? launcher = null,
-        IMinecraftJavaRequirementService? javaRequirementService = null,
-        IJavaInstaller? javaInstaller = null,
-        IUiService? uiService = null,
-        IAppUpdateService? appUpdateService = null,
-        IModDependencyPlanner? dependencyPlanner = null,
-        IModListExporter? modListExporter = null)
+    public MainViewModel(MainViewModelDependencies dependencies)
     {
-        _ui = uiService ?? NoOpUiService.Instance;
-        _settingsManager = settingsManager ?? new SettingsManager();
-        _serverManager = serverManager;
-        _launcher = launcher;
-        _updateChecker = updateChecker;
-        _appUpdateService = appUpdateService;
+        ArgumentNullException.ThrowIfNull(dependencies);
+
+        _ui = dependencies.UiService ?? NoOpUiService.Instance;
+        _settingsManager = dependencies.SettingsManager;
+        _serverManager = dependencies.ServerManager;
+        _launcher = dependencies.Launcher;
+        _updateChecker = dependencies.UpdateChecker;
+
 
         var createVm = new CreateServerViewModel(
-            javaDetector,
-            serverManager,
-            loaderCatalog,
+            dependencies.JavaDetector,
+            dependencies.ServerManager,
+            dependencies.LoaderCatalog,
             ShowNotification,
-            launcher: launcher,
+            launcher: dependencies.Launcher,
             navigateCallback: (pageKey, serverName) =>
             {
                 Navigate(pageKey);
                 if (!string.IsNullOrWhiteSpace(serverName)
                     && GetOrCreatePage("manage") is ManageServerViewModel manageVm)
                 {
-                    _ = manageVm.RefreshAndSelectServerAsync(serverName);
+                    _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(serverName), "重新整理並選取伺服器", Logger);
                 }
             },
-            javaRequirementService: javaRequirementService,
-            javaInstaller: javaInstaller,
-            serverRuntime: serverRuntime,
+            javaRequirementService: dependencies.JavaRequirementService,
+            javaInstaller: dependencies.JavaInstaller,
+            serverRuntime: dependencies.ServerRuntime,
             uiService: _ui);
 
         _pages["create"] = createVm;
         _pageFactories["manage"] = () => new ManageServerViewModel(
-            _settingsManager,
-            serverManager,
-            backupService,
-            serverRuntime,
-            null,
-            null,
-            null,
+            dependencies.SettingsManager,
+            dependencies.ServerManager,
+            dependencies.BackupService,
+            dependencies.ServerRuntime,
+            dependencies.ServerInspector,
+            dependencies.LaunchPlanner,
+            dependencies.PropertiesStore,
+            dependencies.PlayerConfigStore,
+            dependencies.DirectorySizeService,
+            dependencies.IntegrityService,
             Navigate,
             ShowNotification,
-            launcher,
-            javaDetector,
-            javaRequirementService,
+            dependencies.Launcher,
+            dependencies.JavaDetector,
+            dependencies.JavaRequirementService,
             uiService: _ui);
+
         _pageFactories["mods"] = () => new ModsViewModel(
-            serverManager,
-            modManager,
-            modrinthClient,
+            dependencies.ServerManager,
+            dependencies.ModManager,
+            dependencies.ModrinthClient,
             ShowNotification,
-            launcher,
-            dependencyPlanner: dependencyPlanner,
-            modListExporter: modListExporter,
+            dependencies.Launcher,
+            dependencyPlanner: dependencies.DependencyPlanner,
+            modListExporter: dependencies.ModListExporter,
             uiService: _ui);
+
         _pageFactories["about_preferences"] = () => new AboutPreferencesViewModel(
-            _settingsManager,
-            updateChecker,
+            dependencies.SettingsManager,
+            dependencies.UpdateChecker,
             SetThemeMode,
             () => ResetWindowSizeRequested?.Invoke(),
             ShowNotification,
-            launcher,
+            dependencies.Launcher,
             scale => UiScaleChanged?.Invoke(scale),
             uiService: _ui,
-            appUpdateService: _appUpdateService);
+            appUpdateService: dependencies.AppUpdateService);
 
         CurrentPage = createVm;
 
@@ -241,10 +231,10 @@ public sealed partial class MainViewModel : ViewModelBase
             switch (targetPage)
             {
                 case ManageServerViewModel manageVm:
-                    _ = manageVm.RefreshServers();
+                    _ = RunSafeAsync(manageVm.RefreshServers, "重新整理伺服器清單", Logger);
                     break;
                 case ModsViewModel modsVm:
-                    _ = modsVm.RefreshServersAsync();
+                    _ = RunSafeAsync(modsVm.RefreshServersAsync, "重新整理模組頁面伺服器清單", Logger);
                     break;
             }
         }
@@ -269,11 +259,11 @@ public sealed partial class MainViewModel : ViewModelBase
                 {
                     if (!string.IsNullOrWhiteSpace(vm.ImportedServerName))
                     {
-                        _ = manageVm.RefreshAndSelectServerAsync(vm.ImportedServerName);
+                        _ = RunSafeAsync(() => manageVm.RefreshAndSelectServerAsync(vm.ImportedServerName), "重新整理並選取匯入伺服器", Logger);
                     }
                     else
                     {
-                        _ = manageVm.RefreshServers();
+                        _ = RunSafeAsync(manageVm.RefreshServers, "重新整理伺服器清單", Logger);
                     }
                 }
             }
@@ -293,7 +283,7 @@ public sealed partial class MainViewModel : ViewModelBase
             return Task.CompletedTask;
         }
 
-        Directory.CreateDirectory(path);
+        SafeFileSystem.CreateDirectory(path);
 
         if (_launcher is not null && !_launcher.OpenFolder(path, isTrusted: true))
         {

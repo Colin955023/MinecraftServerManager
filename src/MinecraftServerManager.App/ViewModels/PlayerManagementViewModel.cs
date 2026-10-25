@@ -23,6 +23,8 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
     [ObservableProperty]
     public partial string PlayerSearchText { get; set; } = string.Empty;
 
+    partial void OnPlayerSearchTextChanged(string value) => ApplyUserCacheFilter();
+
     [ObservableProperty]
     public partial ServerUserCacheEntry? SelectedUserCacheEntry { get; set; }
 
@@ -166,8 +168,6 @@ public sealed partial class PlayerManagementViewModel : ObservableObject
             IsLoading = false;
         }
     }
-
-    partial void OnPlayerSearchTextChanged(string value) => ApplyUserCacheFilter();
 
     private void ApplyUserCacheFilter()
     {
@@ -506,6 +506,10 @@ public sealed partial class OperatorRowItem : ObservableObject
     [ObservableProperty]
     public partial bool BypassesPlayerLimit { get; set; }
 
+    partial void OnIsOpChanged(bool value) => _onChanged?.Invoke();
+    partial void OnLevelChanged(int value) => _onChanged?.Invoke();
+    partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged?.Invoke();
+
     public static IReadOnlyList<int> AvailableLevels { get; } = [1, 2, 3, 4];
 
     public OperatorRowItem(string name, string uuid, bool isOp, int level, bool bypassesPlayerLimit, Action? onChanged = null)
@@ -517,8 +521,4 @@ public sealed partial class OperatorRowItem : ObservableObject
         BypassesPlayerLimit = bypassesPlayerLimit;
         _onChanged = onChanged;
     }
-
-    partial void OnIsOpChanged(bool value) => _onChanged?.Invoke();
-    partial void OnLevelChanged(int value) => _onChanged?.Invoke();
-    partial void OnBypassesPlayerLimitChanged(bool value) => _onChanged?.Invoke();
 }

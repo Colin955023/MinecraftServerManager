@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using Microsoft.Win32;
 
 namespace MinecraftServerManager.Infrastructure.Settings;
@@ -23,8 +24,9 @@ public static class SystemThemeService
                 return value != 0;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            AppLogging.CreateComponentLogger("SystemThemeService").Warning("偵測系統淺色主題機碼失敗: {0}", ex.Message);
         }
 
         return false;

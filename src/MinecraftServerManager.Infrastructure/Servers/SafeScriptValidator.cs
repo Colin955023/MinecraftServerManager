@@ -42,7 +42,7 @@ public static class SafeScriptValidator
         try
         {
             string fullPath = Path.GetFullPath(javaPath);
-            if (!File.Exists(fullPath))
+            if (!SafeFileSystem.FileExists(fullPath))
             {
                 Logger.Warning("Java 執行檔不存在：{Path}", fullPath);
                 return false;
@@ -110,7 +110,7 @@ public static class SafeScriptValidator
                 return false;
             }
 
-            if (!File.Exists(targetFullPath))
+            if (!SafeFileSystem.FileExists(targetFullPath))
             {
                 Logger.Warning("啟動參數引用之檔案不存在：{Target}", targetFullPath);
                 return false;
@@ -137,7 +137,7 @@ public static class SafeScriptValidator
             return false;
         }
 
-        if (SafeFileSystem.IsReparsePoint(fullScriptPath) || !File.Exists(fullScriptPath))
+        if (SafeFileSystem.IsReparsePoint(fullScriptPath) || !SafeFileSystem.FileExists(fullScriptPath))
         {
             Logger.Warning("啟動腳本不存在或為 Reparse Point：{ScriptPath}", fullScriptPath);
             return false;
@@ -145,7 +145,7 @@ public static class SafeScriptValidator
 
         try
         {
-            string[] lines = File.ReadAllLines(fullScriptPath, Encoding.UTF8);
+            string[] lines = SafeFileSystem.ReadAllLines(fullScriptPath, Encoding.UTF8);
             foreach (string rawLine in lines)
             {
                 string line = rawLine.Trim();

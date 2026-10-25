@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.Buffers;
 using System.IO.Compression;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.FileSystem;
 
 public static class SafeZipArchive
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("SafeZipArchive");
     public const int DefaultMaxMembers = 100_000;
     public const long DefaultMaxMemberBytes = 2L * 1024 * 1024 * 1024; // 2 GB
     public const long DefaultMaxTotalBytes = 32L * 1024 * 1024 * 1024; // 32 GB
@@ -41,13 +43,12 @@ public static class SafeZipArchive
         ArgumentOutOfRangeException.ThrowIfNegative(maxArchiveBytes);
 
         string path = SafeFileSystem.ResolveStablePath(archivePath);
-        var fileInfo = new FileInfo(path);
-        if (!fileInfo.Exists)
+        if (!SafeFileSystem.FileExists(path))
         {
             throw new FileNotFoundException("找不到 ZIP 檔案", path);
         }
 
-        if (fileInfo.Length > maxArchiveBytes)
+        if (SafeFileSystem.GetFileLength(path) > maxArchiveBytes)
         {
             throw new SafeArchiveException("壓縮檔大小超過安全上限");
         }
@@ -55,17 +56,79 @@ public static class SafeZipArchive
         try
         {
             var archive = ZipFile.OpenRead(path);
-            if (archive.Entries.Count > maxMembers)
+            try
+            {
+                ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
+                return archive;
+            }
+            catch
             {
                 archive.Dispose();
-                throw new SafeArchiveException("壓縮檔成員數量超過安全上限");
+                throw;
             }
-
-            return archive;
         }
         catch (InvalidDataException exception)
         {
             throw new SafeArchiveException("ZIP 檔案格式無效", exception);
+        }
+    }
+
+    public static ZipArchive OpenRead(
+        Stream stream,
+        bool leaveOpen = false,
+        int maxMembers = DefaultMaxMembers,
+        long maxArchiveBytes = DefaultMaxArchiveBytes)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxMembers);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxArchiveBytes);
+        if (!stream.CanRead || !stream.CanSeek || stream.Length > maxArchiveBytes)
+        {
+            throw new SafeArchiveException("壓縮檔串流無法讀取或超過安全大小上限");
+        }
+
+        ZipArchive archive;
+        try
+        {
+            archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new SafeArchiveException("ZIP 檔案格式無效", exception);
+        }
+
+        try
+        {
+            ValidateArchive(archive, maxMembers, DefaultMaxTotalBytes);
+            return archive;
+        }
+        catch
+        {
+            archive.Dispose();
+            throw;
+        }
+    }
+
+    private static void ValidateArchive(ZipArchive archive, int maxMembers, long maxTotalBytes)
+    {
+        if (archive.Entries.Count > maxMembers)
+        {
+            throw new SafeArchiveException("壓縮檔成員數量超過安全上限");
+        }
+
+        long totalBytes = 0;
+        var paths = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var parentPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            ValidateEntry(entry, DefaultMaxMemberBytes, DefaultMaxCompressionRatio);
+            string relativePath = SanitizeMemberName(entry.FullName);
+            ValidatePathCollision(entry, relativePath, paths, parentPaths);
+            totalBytes = checked(totalBytes + entry.Length);
+            if (totalBytes > maxTotalBytes)
+            {
+                throw new SafeArchiveException("壓縮檔解壓縮後大小超過安全上限");
+            }
         }
     }
 
@@ -186,17 +249,17 @@ public static class SafeZipArchive
                 return;
             }
 
-            var drive = new DriveInfo(root);
-            if (!drive.IsReady)
+            long? availableFreeSpace = SafeFileSystem.GetAvailableFreeSpace(destination);
+            if (!availableFreeSpace.HasValue)
             {
                 return;
             }
 
             long headroom = Math.Min(512L * 1024 * 1024, requiredBytes / 20);
-            if (drive.AvailableFreeSpace < requiredBytes + headroom)
+            if (availableFreeSpace.Value < requiredBytes + headroom)
             {
                 throw new SafeArchiveException(
-                    $"目標磁碟 {root} 剩餘空間不足：需要約 {UnitFormatter.FormatBytes(requiredBytes)}，實際可用 {UnitFormatter.FormatBytes(drive.AvailableFreeSpace)}");
+                    $"目標磁碟 {root} 剩餘空間不足：需要約 {UnitFormatter.FormatBytes(requiredBytes)}，實際可用 {UnitFormatter.FormatBytes(availableFreeSpace.Value)}");
             }
         }
         catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
@@ -295,7 +358,6 @@ public static class SafeZipArchive
         Dictionary<string, bool> paths,
         HashSet<string> parentPaths)
     {
-        string[] parts = relativePath.Split(Path.DirectorySeparatorChar);
         string key = relativePath;
         bool isDirectory = entry.FullName.EndsWith('/');
         if (paths.TryGetValue(key, out bool existingIsDirectory))
@@ -311,9 +373,9 @@ public static class SafeZipArchive
             throw new SafeArchiveException($"壓縮檔包含重複或路徑衝突： {entry.FullName}");
         }
 
-        for (int index = 1; index < parts.Length; index++)
+        for (int separatorIndex = relativePath.IndexOf(Path.DirectorySeparatorChar); separatorIndex >= 0; separatorIndex = relativePath.IndexOf(Path.DirectorySeparatorChar, separatorIndex + 1))
         {
-            string parentKey = string.Join(Path.DirectorySeparatorChar, parts[..index]);
+            string parentKey = relativePath[..separatorIndex];
             if (paths.TryGetValue(parentKey, out bool parentIsDirectory) && !parentIsDirectory)
             {
                 throw new SafeArchiveException($"壓縮檔包含檔案／目錄路徑衝突： {entry.FullName}");
@@ -397,23 +459,23 @@ public static class SafeZipArchive
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             string source = SafeFileSystem.ResolveStablePath(sourcePath);
-            var info = new FileInfo(source);
-            if (!info.Exists)
+            if (!SafeFileSystem.FileExists(source))
             {
                 throw new FileNotFoundException("找不到要壓縮的檔案", source);
             }
 
-            string normalized = PrepareMember(memberName, info.Length);
+            long fileLength = SafeFileSystem.GetFileLength(source);
+            string normalized = PrepareMember(memberName, fileLength);
             var entry = _archive.CreateEntry(normalized, CompressionLevel.Optimal);
-            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan);
+            using var input = SafeFileSystem.OpenRead(source, FileShare.Read);
             using var output = entry.Open();
             byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
             long copied = 0L;
             try
             {
-                while (copied < info.Length)
+                while (copied < fileLength)
                 {
-                    long remaining = info.Length - copied;
+                    long remaining = fileLength - copied;
                     int requested = (int)Math.Min(buffer.Length, remaining + 1);
                     int read = input.Read(buffer, 0, requested);
                     if (read == 0)
@@ -422,7 +484,7 @@ public static class SafeZipArchive
                     }
 
                     copied += read;
-                    if (copied > info.Length)
+                    if (copied > fileLength)
                     {
                         throw new SafeArchiveException($"壓縮來源檔案在讀取期間成長： {source}");
                     }
@@ -430,7 +492,7 @@ public static class SafeZipArchive
                     output.Write(buffer, 0, read);
                 }
 
-                if (copied != info.Length)
+                if (copied != fileLength)
                 {
                     throw new SafeArchiveException($"壓縮來源檔案在讀取期間縮短： {source}");
                 }
@@ -486,16 +548,15 @@ public static class SafeZipArchive
             }
 
             string normalized = SanitizeMemberName(memberName);
-            string[] parts = normalized.Split(Path.DirectorySeparatorChar);
             string key = normalized;
             if (_paths.Contains(key) || _parentPaths.Contains(key))
             {
                 throw new SafeArchiveException($"壓縮檔包含重複或路徑衝突： {memberName}");
             }
 
-            for (int index = 1; index < parts.Length; index++)
+            for (int separatorIndex = normalized.IndexOf(Path.DirectorySeparatorChar); separatorIndex >= 0; separatorIndex = normalized.IndexOf(Path.DirectorySeparatorChar, separatorIndex + 1))
             {
-                string parentKey = string.Join(Path.DirectorySeparatorChar, parts[..index]);
+                string parentKey = normalized[..separatorIndex];
                 if (_paths.Contains(parentKey))
                 {
                     throw new SafeArchiveException($"壓縮檔包含檔案／目錄路徑衝突： {memberName}");
@@ -513,16 +574,11 @@ public static class SafeZipArchive
         {
             try
             {
-                if (File.Exists(_temporaryPath))
-                {
-                    File.Delete(_temporaryPath);
-                }
+                SafeFileSystem.DeleteFile(_temporaryPath);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-            }
-            catch (UnauthorizedAccessException)
-            {
+                Logger.Warning(ex, "清理暫存壓縮檔案失敗: {0}", _temporaryPath);
             }
         }
     }

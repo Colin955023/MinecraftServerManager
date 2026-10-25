@@ -36,7 +36,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 throw new InvalidOperationException($"啟動腳本「{targetFile}」未通過安全性檢驗（可能包含未受信任的指令或批次注入字元）");
             }
 
-            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || File.Exists(Path.Combine(stableDir, "user_jvm_args.txt")))
+            if (config.LoaderType is LoaderKind.Forge or LoaderKind.NeoForge || SafeFileSystem.FileExists(Path.Combine(stableDir, ServerDefaults.UserJvmArgsFileName)))
             {
                 ServerManager.UpdateForgeUserJvmArgs(stableDir, config);
             }
@@ -52,7 +52,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
                 WorkingDirectory: stableDir,
                 Arguments: [],
                 Loader: config.LoaderType,
-                MinMemoryMb: config.MemoryMinMb ?? 1024,
+                MinMemoryMb: config.MemoryMinMb ?? ServerDefaults.DefaultMemoryMinMb,
                 MaxMemoryMb: config.MemoryMaxMb,
                 IsScript: true,
                 ServerName: config.Name.Value,
@@ -63,7 +63,7 @@ public sealed class ServerLaunchPlanner : IServerLaunchPlanner
             ? javaPath
             : "java";
 
-        int min = config.MemoryMinMb ?? (config.MemoryMaxMb > 1024 ? 1024 : config.MemoryMaxMb);
+        int min = config.MemoryMinMb ?? (config.MemoryMaxMb > ServerDefaults.DefaultMemoryMinMb ? ServerDefaults.DefaultMemoryMinMb : config.MemoryMaxMb);
         var args = new List<string>
         {
             $"-Xms{min}M",

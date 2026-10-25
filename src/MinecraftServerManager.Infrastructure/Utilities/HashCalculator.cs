@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
+using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Utilities;
 
@@ -49,29 +50,26 @@ public sealed class HashCalculator
 
         try
         {
-            var fileInfo = new FileInfo(filePath);
-            if (!fileInfo.Exists || fileInfo.Length > maxBytes)
+            FileSystemMetadata metadata = SafeFileSystem.GetFileMetadata(filePath);
+            if (metadata.Length > maxBytes)
             {
                 return string.Empty;
             }
 
             var key = new CacheKey(
-                fileInfo.FullName,
+                metadata.FullPath,
                 normalizedAlgorithm,
-                fileInfo.Length,
-                fileInfo.LastWriteTimeUtc.Ticks,
+                metadata.Length,
+                metadata.LastWriteTimeUtc.Ticks,
                 maxBytes);
             if (useCache && cache.TryGetValue(key, out string? cached))
             {
                 return cached;
             }
 
-            using var stream = new FileStream(
-                fileInfo.FullName,
-                FileMode.Open,
-                FileAccess.Read,
+            using var stream = SafeFileSystem.OpenRead(
+                metadata.FullPath,
                 FileShare.Read,
-                64 * 1024,
                 FileOptions.SequentialScan);
             string digest = HashStream(stream, normalizedAlgorithm);
             if (useCache)

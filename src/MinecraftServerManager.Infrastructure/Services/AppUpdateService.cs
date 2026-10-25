@@ -1,8 +1,7 @@
-using System.Buffers;
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Utilities;
 
@@ -11,15 +10,28 @@ namespace MinecraftServerManager.Infrastructure.Services;
 /// <summary>
 /// 應用程式自動更新下載、安全性驗證與重啟安裝服務實作
 /// </summary>
-public sealed partial class AppUpdateService(
-    IHttpPort httpPort,
-    string? updatesDirectory = null) : IAppUpdateService
+public sealed partial class AppUpdateService : IAppUpdateService
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("AppUpdateService");
-    private static readonly SearchValues<char> InvalidBatchPathChars = SearchValues.Create("%\"\r\n");
 
     [GeneratedRegex(@"\b[a-fA-F0-9]{64}\b")]
     private static partial Regex Sha256Regex();
+
+    private readonly IHttpPort _httpPort;
+    private readonly string? _updatesDirectory;
+    private readonly IProcessRunner? _processRunner;
+
+    public AppUpdateService(
+        IHttpPort httpPort,
+        string? updatesDirectory = null,
+        IProcessRunner? processRunner = null)
+    {
+        _httpPort = httpPort ?? throw new ArgumentNullException(nameof(httpPort));
+        _updatesDirectory = updatesDirectory;
+        _processRunner = processRunner;
+
+        TryCleanupPreviousUpdateBackup();
+    }
 
     public async Task<string> DownloadAndVerifyUpdateAsync(
         UpdateCheckResult update,
@@ -40,7 +52,7 @@ public sealed partial class AppUpdateService(
         }
 
         progress?.Report((5, "正在取得安全驗證資訊 (SHA-256)..."));
-        string? checksumText = await httpPort.GetTextAsync(checksumUri, cancellationToken).ConfigureAwait(false);
+        string? checksumText = await _httpPort.GetTextAsync(checksumUri, cancellationToken).ConfigureAwait(false);
         Match match = string.IsNullOrWhiteSpace(checksumText) ? Match.Empty : Sha256Regex().Match(checksumText);
         if (!match.Success)
         {
@@ -50,8 +62,8 @@ public sealed partial class AppUpdateService(
         string expectedSha256 = match.Value.ToLowerInvariant();
         Logger.Information("成功取得預期 SHA-256 校驗碼: {Hash}", expectedSha256);
 
-        string targetDir = updatesDirectory ?? Path.Combine(RuntimePaths.GetUserDataDir(), "updates");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = _updatesDirectory ?? Path.Combine(RuntimePaths.GetUserDataDir(), "updates");
+        SafeFileSystem.CreateDirectory(targetDir);
 
         string rawFileName = Path.GetFileName(downloadUri.LocalPath);
         if (string.IsNullOrWhiteSpace(rawFileName) || !rawFileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
@@ -62,7 +74,7 @@ public sealed partial class AppUpdateService(
         string targetFilePath = Path.Combine(targetDir, rawFileName);
 
         // 若本地已存在且符合 SHA-256 與 PE 結構則直接複用
-        if (File.Exists(targetFilePath))
+        if (SafeFileSystem.FileExists(targetFilePath))
         {
             string existingHash = HashCalculator.Shared.ComputeFileHash(targetFilePath, "sha256");
             if (string.Equals(existingHash, expectedSha256, StringComparison.OrdinalIgnoreCase) && VerifyPeHeader(targetFilePath))
@@ -84,7 +96,7 @@ public sealed partial class AppUpdateService(
         });
 
         // 下載端已於寫入時以 expectedHash 驗證 SHA-256，失敗即視為整體失敗，不再重複計算雜湊
-        var downloadResult = await httpPort.DownloadAsync(
+        var downloadResult = await _httpPort.DownloadAsync(
             downloadUri,
             targetFilePath,
             httpProgress,
@@ -114,90 +126,97 @@ public sealed partial class AppUpdateService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(verifiedInstallerPath);
 
-        if (!File.Exists(verifiedInstallerPath))
+        if (!SafeFileSystem.FileExists(verifiedInstallerPath))
         {
             throw new FileNotFoundException("找不到已驗證的更新檔案。", verifiedInstallerPath);
         }
 
         string? currentExePath = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(currentExePath) || !File.Exists(currentExePath))
+        if (string.IsNullOrWhiteSpace(currentExePath) || !SafeFileSystem.FileExists(currentExePath))
         {
             throw new InvalidOperationException("無法判斷目前應用程式的執行檔路徑，無法套用自動更新。");
         }
 
-        int pid = Environment.ProcessId;
-        string dir = Path.GetDirectoryName(verifiedInstallerPath) ?? Path.GetTempPath();
-        string scriptPath = Path.Combine(dir, "apply_update.cmd");
-        ValidateBatchPath(currentExePath);
-        ValidateBatchPath(verifiedInstallerPath);
-
-        // 替換前先備份舊版：複製失敗時還原並重新啟動舊版，同時留下失敗記錄，避免程式消失而使用者毫無提示
-        string scriptContent = $"""
-        @echo off
-        chcp 65001 >nul
-        set "TARGET={currentExePath}"
-        set "SOURCE={verifiedInstallerPath}"
-        set "BACKUP=%TARGET%.bak"
-        set "FAILLOG=%~dp0update_failed.txt"
-        set "PID={pid}"
-        set /a WAITED=0
-
-        :wait_loop
-        tasklist /fi "pid eq %PID%" /nh 2>nul | findstr /r /c:"[ ]%PID%[ ]" >nul
-        if errorlevel 1 goto do_replace
-        set /a WAITED+=1
-        if %WAITED% gtr 60 goto fail_wait
-        timeout /t 1 /nobreak >nul
-        goto wait_loop
-
-        :do_replace
-        if exist "%BACKUP%" del /f /q "%BACKUP%" >nul 2>&1
-        move /y "%TARGET%" "%BACKUP%" >nul
-        if errorlevel 1 goto fail_backup
-        copy /y "%SOURCE%" "%TARGET%" >nul
-        if errorlevel 1 goto fail_copy
-        start "" "%TARGET%"
-        del /f /q "%BACKUP%" >nul 2>&1
-        del /f /q "%SOURCE%" >nul 2>&1
-        (goto) 2>nul & del "%~f0" >nul 2>&1
-        exit /b 0
-
-        :fail_copy
-        move /y "%BACKUP%" "%TARGET%" >nul
-        echo 自動更新失敗：無法寫入 %TARGET%，已還原舊版。請確認檔案位置具有寫入權限，或手動下載更新。> "%FAILLOG%"
-        start "" "%TARGET%"
-        exit /b 1
-
-        :fail_backup
-        echo 自動更新失敗：無法備份舊版 %TARGET%。請確認檔案位置具有寫入權限，或手動下載更新。> "%FAILLOG%"
-        start "" "%TARGET%"
-        exit /b 1
-
-        :fail_wait
-        echo 自動更新失敗：等待舊版程式結束逾時。請手動下載更新。> "%FAILLOG%"
-        exit /b 2
-        """;
-
-        File.WriteAllText(scriptPath, scriptContent, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-
-        var startInfo = new ProcessStartInfo
+        if (_processRunner is null)
         {
-            FileName = "cmd.exe",
-            Arguments = $"/c \"\"{scriptPath}\"\"",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
-        };
+            throw new InvalidOperationException("未設定共用行程管理服務，無法啟動新版應用程式。");
+        }
 
-        System.Diagnostics.Process.Start(startInfo);
-        Logger.Information("已啟動更新替換腳本，準備重啟應用程式: PID={Pid}, Target={Target}", pid, currentExePath);
+        string oldExePath = currentExePath + ".old";
+
+        try
+        {
+            if (SafeFileSystem.FileExists(oldExePath))
+            {
+                SafeFileSystem.DeleteFile(oldExePath);
+            }
+
+            // Windows 支援將執行中的檔案重新命名（原檔移至 .old）
+            SafeFileSystem.MovePath(currentExePath, oldExePath, overwrite: true);
+
+            try
+            {
+                // 將已驗證的更新檔複製為正式執行檔
+                SafeFileSystem.CopyFile(verifiedInstallerPath, currentExePath, overwrite: true);
+            }
+            catch (Exception copyEx)
+            {
+                // 若複製失敗，立即復原舊版執行檔
+                try
+                {
+                    if (SafeFileSystem.FileExists(oldExePath) && !SafeFileSystem.FileExists(currentExePath))
+                    {
+                        SafeFileSystem.MovePath(oldExePath, currentExePath, overwrite: true);
+                    }
+                }
+                catch (Exception rollbackEx)
+                {
+                    Logger.Error("復原舊版執行檔失敗: {Message}", rollbackEx.Message);
+                }
+
+                throw new InvalidOperationException($"替換新版執行檔失敗，已嘗試復原: {copyEx.Message}", copyEx);
+            }
+
+            // 啟動新版執行檔
+            _processRunner.StartDetached(new ProcessStartSpec(
+                currentExePath,
+                [],
+                WorkingDirectory: AppDomain.CurrentDomain.BaseDirectory,
+                CreateNoWindow: false));
+
+            Logger.Information("新版主程式已成功替換並啟動: Target={Target}, OldBackup={Backup}", currentExePath, oldExePath);
+
+            // 嘗試清理已複製的下載更新暫存檔
+            TryDelete(verifiedInstallerPath);
+        }
+        catch (Exception ex) when (ex is not InvalidOperationException and not FileNotFoundException)
+        {
+            Logger.Error("套用自動更新失敗: {Message}", ex.Message);
+            throw new InvalidOperationException($"套用自動更新發生錯誤: {ex.Message}", ex);
+        }
     }
 
-    private static void ValidateBatchPath(string path)
+    /// <summary>
+    /// 清理前次更新時留下的 .old 備份檔案
+    /// </summary>
+    public static void TryCleanupPreviousUpdateBackup()
     {
-        if (path.AsSpan().IndexOfAny(InvalidBatchPathChars) >= 0)
+        try
         {
-            throw new InvalidOperationException("更新路徑含有批次指令無法安全處理的字元，已拒絕自動更新。");
+            string? currentExePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(currentExePath))
+            {
+                string oldExePath = currentExePath + ".old";
+                if (SafeFileSystem.FileExists(oldExePath))
+                {
+                    SafeFileSystem.DeleteFile(oldExePath);
+                    Logger.Information("已清理前次更新備份檔: {Path}", oldExePath);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Logger.Warning("暫時無法清理前次更新備份檔: {Message}", ex.Message);
         }
     }
 
@@ -205,9 +224,9 @@ public sealed partial class AppUpdateService(
     {
         try
         {
-            if (File.Exists(path))
+            if (SafeFileSystem.FileExists(path))
             {
-                File.Delete(path);
+                SafeFileSystem.DeleteFile(path);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -223,7 +242,7 @@ public sealed partial class AppUpdateService(
     {
         try
         {
-            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var fs = SafeFileSystem.OpenRead(filePath, FileShare.Read);
             if (fs.Length < 64)
             {
                 return false;

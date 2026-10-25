@@ -33,14 +33,14 @@ public sealed record OnlineModCompatibilityReport
         IEnumerable<string>? embeddedDependencies = null,
         IEnumerable<string>? alreadyInstalled = null)
     {
-        HardErrors = Common.CollectionUtilities.ToReadOnlyList(hardErrors);
-        Warnings = Common.CollectionUtilities.ToReadOnlyList(warnings);
-        Notes = Common.CollectionUtilities.ToReadOnlyList(notes);
-        MissingRequiredDependencies = Common.CollectionUtilities.ToReadOnlyList(missingRequiredDependencies);
-        OptionalDependencies = Common.CollectionUtilities.ToReadOnlyList(optionalDependencies);
-        IncompatibleInstalled = Common.CollectionUtilities.ToReadOnlyList(incompatibleInstalled);
-        InstalledVersionMismatches = Common.CollectionUtilities.ToReadOnlyList(installedVersionMismatches);
-        EmbeddedDependencies = Common.CollectionUtilities.ToReadOnlyList(embeddedDependencies);
-        AlreadyInstalled = Common.CollectionUtilities.ToReadOnlyList(alreadyInstalled);
+        HardErrors = [.. hardErrors ?? []];
+        Warnings = [.. warnings ?? []];
+        Notes = [.. notes ?? []];
+        MissingRequiredDependencies = [.. missingRequiredDependencies ?? []];
+        OptionalDependencies = [.. optionalDependencies ?? []];
+        IncompatibleInstalled = [.. incompatibleInstalled ?? []];
+        InstalledVersionMismatches = [.. installedVersionMismatches ?? []];
+        EmbeddedDependencies = [.. embeddedDependencies ?? []];
+        AlreadyInstalled = [.. alreadyInstalled ?? []];
     }
 }

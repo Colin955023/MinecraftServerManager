@@ -29,10 +29,13 @@ public sealed class AppCompositionRoot : IAsyncDisposable
     private readonly JavaRuntimeDetector _javaDetector;
     private readonly LoaderCatalogService _loaderCatalog;
     private readonly MainViewModel _mainViewModel;
+    private readonly Services.WpfUiService _uiService;
 
     public MainViewModel MainViewModel => _mainViewModel;
+    public Services.IUiService UiService => _uiService;
     public SettingsManager Settings => _settingsManager;
     public bool IsServerRunning => _sharedServerRuntime.IsRunning;
+    public MainViewModelDependencies Dependencies { get; }
 
     public AppCompositionRoot(string serversRoot, SettingsManager? settingsManager = null)
     {
@@ -56,12 +59,19 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var javaRequirements = new MinecraftJavaRequirementService(httpPort, RuntimePaths.GetVersionCacheDir());
         _loaderCatalog = new LoaderCatalogService(httpPort, RuntimePaths.GetVersionCacheDir());
         var loaderInstaller = new LoaderInstallerService(httpPort, _sharedProcessRunner, RuntimePaths.GetInstallerCacheDir());
+        var directorySizeService = new ServerDirectorySizeService();
+        var serverInspector = new ServerInspector(directorySizeService);
         var serverManager = new ServerManager(
             serversRoot,
+            inspector: serverInspector,
             loaderInstaller: loaderInstaller,
             javaDetector: _javaDetector,
             javaRequirementService: javaRequirements);
         var backupService = new ServerBackupService(serversRoot);
+        var integrityService = new ServerIntegrityService();
+        var launchPlanner = new ServerLaunchPlanner();
+        var playerConfigStore = new ServerPlayerConfigStore();
+        var propertiesStore = new ServerPropertiesStore(serversRoot);
 
         var modScanner = new LocalModScanner();
         var modInstaller = new ModFileInstaller(httpPort);
@@ -70,27 +80,36 @@ public sealed class AppCompositionRoot : IAsyncDisposable
         var dependencyPlanner = new ModDependencyPlanner();
         var modListExporter = new ModListExporter();
         var updateCheckerService = new UpdateCheckerService(httpPort);
-        var appUpdateService = new AppUpdateService(httpPort);
+        var appUpdateService = new AppUpdateService(httpPort, processRunner: _sharedProcessRunner);
 
-        var uiService = new Services.WpfUiService();
+        _uiService = new Services.WpfUiService();
 
-        _mainViewModel = new MainViewModel(
-            _settingsManager,
-            _javaDetector,
-            serverManager,
-            backupService,
-            _sharedServerRuntime,
-            _loaderCatalog,
-            modManager,
-            modrinthClient,
-            updateCheckerService,
-            _sharedProcessRunner,
-            javaRequirements,
-            javaInstaller,
-            uiService: uiService,
-            appUpdateService: appUpdateService,
-            dependencyPlanner: dependencyPlanner,
-            modListExporter: modListExporter);
+        var dependencies = new MainViewModelDependencies(
+            SettingsManager: _settingsManager,
+            JavaDetector: _javaDetector,
+            ServerManager: serverManager,
+            BackupService: backupService,
+            ServerRuntime: _sharedServerRuntime,
+            LoaderCatalog: _loaderCatalog,
+            ModManager: modManager,
+            ModrinthClient: modrinthClient,
+            UpdateChecker: updateCheckerService,
+            Launcher: _sharedProcessRunner,
+            JavaRequirementService: javaRequirements,
+            JavaInstaller: javaInstaller,
+            UiService: _uiService,
+            AppUpdateService: appUpdateService,
+            DependencyPlanner: dependencyPlanner,
+            ModListExporter: modListExporter,
+            DirectorySizeService: directorySizeService,
+            IntegrityService: integrityService,
+            ServerInspector: serverInspector,
+            LaunchPlanner: launchPlanner,
+            PlayerConfigStore: playerConfigStore,
+            PropertiesStore: propertiesStore);
+
+        _mainViewModel = new MainViewModel(dependencies);
+        Dependencies = dependencies;
     }
 
     /// <summary>

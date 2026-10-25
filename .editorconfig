@@ -84,10 +84,6 @@ dotnet_diagnostic.IDE0150.severity = warning
 dotnet_diagnostic.CS0168.severity = error
 dotnet_diagnostic.CS0219.severity = error
 dotnet_diagnostic.CS0414.severity = error
-dotnet_diagnostic.CS8019.severity = error
-
-# 啟用 IDE analyzer
-dotnet_diagnostic.IDE0000.severity = warning
 
 # 命名 / 可維護性
 dotnet_diagnostic.IDE0001.severity = warning

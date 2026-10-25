@@ -85,42 +85,31 @@ function Test-SecretsAndPrivacy {
     }
 }
 
+$commonScript = Join-Path $PSScriptRoot "lib\Common.ps1"
+if (-not (Test-Path -LiteralPath $commonScript)) {
+    throw "C# 門禁失敗：找不到共用函式庫 $commonScript"
+}
+. $commonScript
+
 function Test-VersionConsistency {
-    Write-Host "=== 版本定義一致性檢查 ==="
-    $appInfoPath = Join-Path $solutionDir "src\MinecraftServerManager.Core\AppInfo.cs"
+    Write-Host "=== 版本定義單一事實來源檢查 (Directory.Build.props) ==="
+    $version = Get-ProjectVersion -RepoRoot $solutionDir
+    Write-Host "專案版本 (Directory.Build.props): $version"
+
     $appProjectPath = Join-Path $solutionDir "src\MinecraftServerManager.App\MinecraftServerManager.App.csproj"
-
-    if (-not (Test-Path -LiteralPath $appInfoPath) -or -not (Test-Path -LiteralPath $appProjectPath)) {
-        throw "C# 門禁失敗：找不到版本定義檔案 ($appInfoPath 或 $appProjectPath)"
-    }
-
-    $content = Get-Content -Raw -Encoding UTF8 $appInfoPath
-    if ($content -match 'public\s+const\s+string\s+Version\s*=\s*"([^"]+)";') {
-        $version = $matches[1]
-    } else {
-        throw "C# 門禁失敗：無法從 AppInfo.cs 解析 Version"
-    }
-
-    [xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
-    $versionNode = $appProject.SelectSingleNode("//Version")
-    $projectVersion = if ($null -ne $versionNode) { $versionNode.InnerText } else { $null }
-    if ($projectVersion -ne $version) {
-        throw "C# 門禁失敗：AppInfo.cs 與 App.csproj 版本不一致 ($version != $projectVersion)"
-    }
-
-    $assemblyVersionNode = $appProject.SelectSingleNode("//AssemblyVersion")
-    $assemblyVersion = if ($null -ne $assemblyVersionNode) { $assemblyVersionNode.InnerText } else { $null }
-    $fileVersionNode = $appProject.SelectSingleNode("//FileVersion")
-    $fileVersion = if ($null -ne $fileVersionNode) { $fileVersionNode.InnerText } else { $null }
-    if ($assemblyVersion -ne "$version.0" -or $fileVersion -ne "$version.0") {
-        throw "C# 門禁失敗：App.csproj 的 AssemblyVersion ($assemblyVersion) 與 FileVersion ($fileVersion) 必須與 AppInfo 版本 ($version.0) 一致"
+    if (Test-Path -LiteralPath $appProjectPath) {
+        [xml]$appProject = Get-Content -Raw -Encoding UTF8 $appProjectPath
+        $versionNode = $appProject.SelectSingleNode("//Version")
+        if ($null -ne $versionNode) {
+            throw "C# 門禁失敗：App.csproj 不得硬編碼重複定義 <Version>，版本應統一由 Directory.Build.props 管理"
+        }
     }
 }
 
 function Test-ScriptEncoding {
     Write-Host "=== 腳本編碼檢查 (UTF-8 with BOM) ==="
     $scriptsDir = Join-Path $solutionDir "scripts"
-    $ps1Files = Get-ChildItem -LiteralPath $scriptsDir -Filter "*.ps1" -File
+    $ps1Files = Get-ChildItem -LiteralPath $scriptsDir -Filter "*.ps1" -Recurse -File
     foreach ($file in $ps1Files) {
         $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
         if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
@@ -152,7 +141,11 @@ if ($isCiEnvironment) {
 Invoke-DotnetStep "Release 建置（品質與未使用定義檢驗）" @("build", $solutionPath, "-c", "Release", "--no-restore")
 
 # 6. 單元測試與整合測試
-$testArguments = @("test", $solutionPath, "-c", "Release", "--no-build")
+$minimumExpectedTests = 515
+$testArguments = @(
+    "test", $solutionPath, "-c", "Release", "--no-build",
+    "--minimum-expected-tests", $minimumExpectedTests
+)
 if ($isCiEnvironment) {
     $testArguments += @(
         "--results-directory", (Join-Path $solutionDir "TestResults"),

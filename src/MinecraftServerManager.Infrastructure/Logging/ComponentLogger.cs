@@ -30,11 +30,13 @@ public sealed class ComponentLogger
         return new ComponentLogger(_logger, context);
     }
 
-    public void Debug(string message, params object?[] args) => Log(LogLevel.Debug, null, message, args);
-
     public void Information(string message, params object?[] args) => Log(LogLevel.Information, null, message, args);
 
+    public void Information(Exception? exception, string message, params object?[] args) => Log(LogLevel.Information, exception, message, args);
+
     public void Warning(string message, params object?[] args) => Log(LogLevel.Warning, null, message, args);
+
+    public void Warning(Exception? exception, string message, params object?[] args) => Log(LogLevel.Warning, exception, message, args);
 
     public void Error(string message, params object?[] args) => Log(LogLevel.Error, null, message, args);
 

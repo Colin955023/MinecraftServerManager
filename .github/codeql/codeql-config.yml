@@ -1,6 +1,8 @@
 name: "Minecraft Server Manager CodeQL Config"
 paths-ignore:
-  - 'docs/**'
-  - 'assets/**'
-  - 'output/**'
-  - 'tests/**'
+  - "docs/**"
+  - "assets/**"
+  - "output/**"
+  - "tests/**"
+queries:
+  - uses: security-extended

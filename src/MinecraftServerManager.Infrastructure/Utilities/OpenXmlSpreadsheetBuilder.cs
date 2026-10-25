@@ -15,7 +15,7 @@ namespace MinecraftServerManager.Infrastructure.Utilities;
 public static class OpenXmlSpreadsheetBuilder
 {
     private static readonly SearchValues<char> InvalidSheetNameChars = SearchValues.Create("[]:*?/\\");
-    private static readonly string[] CachedColumnNames = Enumerable.Range(1, 100).Select(ComputeExcelColumnName).ToArray();
+    private static readonly string[] CachedColumnNames = [.. Enumerable.Range(1, 100).Select(ComputeExcelColumnName)];
     private static readonly XmlWriterSettings SheetXmlWriterSettings = new()
     {
         Encoding = new UTF8Encoding(false),

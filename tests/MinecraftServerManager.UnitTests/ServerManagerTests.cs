@@ -14,7 +14,7 @@ public sealed class ServerManagerTests : IDisposable
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "msm-servermgr-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
-        _manager = new ServerManager(_testRoot);
+        _manager = new ServerManager(_testRoot, new ServerInspector(new ServerDirectorySizeService()));
     }
 
     public void Dispose()
@@ -103,6 +103,59 @@ public sealed class ServerManagerTests : IDisposable
         Assert.Equal(8192, fetched.MemoryMaxMb);
         Assert.Equal(4096, fetched.MemoryMinMb);
         Assert.Contains("-XX:+UseG1GC", fetched.JvmArgs);
+
+        string scriptPath = Path.Combine(creation.Config.Path, "start_server.bat");
+        Assert.True(File.Exists(scriptPath));
+        string script = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("-Xms4096M", script);
+        Assert.Contains("-Xmx8192M", script);
+    }
+
+    [Fact]
+    public void UpdateStartScriptMemory_UpdatesExistingScriptCorrectly()
+    {
+        string dir = Path.Combine(_testRoot, "ScriptTest");
+        Directory.CreateDirectory(dir);
+        string batPath = Path.Combine(dir, "start_server.bat");
+        File.WriteAllText(batPath, "@echo off\r\n\"java.exe\" -Xms1024M -Xmx2048M -jar server.jar nogui %*");
+
+        var config = new ServerConfig(
+            name: ServerName.Parse("ScriptTest"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            loaderVersion: "",
+            memoryMaxMb: 16384,
+            memoryMinMb: 8192,
+            path: dir);
+
+        ServerManager.UpdateStartScriptMemory(dir, config);
+
+        string updated = File.ReadAllText(batPath);
+        Assert.Contains("-Xms8192M", updated);
+        Assert.Contains("-Xmx16384M", updated);
+    }
+
+    [Fact]
+    public void UpdateStartScriptMemory_WhenNoXms_InsertsXmsBeforeXmx()
+    {
+        string dir = Path.Combine(_testRoot, "ScriptTestNoXms");
+        Directory.CreateDirectory(dir);
+        string batPath = Path.Combine(dir, "start_server.bat");
+        File.WriteAllText(batPath, "@echo off\r\n\"java.exe\" -Xmx2G -jar server.jar nogui %*");
+
+        var config = new ServerConfig(
+            name: ServerName.Parse("ScriptTestNoXms"),
+            minecraftVersion: MinecraftVersion.Parse("1.20.4"),
+            loaderType: LoaderKind.Vanilla,
+            loaderVersion: "",
+            memoryMaxMb: 8192,
+            memoryMinMb: 4096,
+            path: dir);
+
+        ServerManager.UpdateStartScriptMemory(dir, config);
+
+        string updated = File.ReadAllText(batPath);
+        Assert.Contains("-Xms4096M -Xmx8192M", updated);
     }
 
     [Fact]

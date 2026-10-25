@@ -4,9 +4,5 @@
   },
   "files.watcherExclude": {
     "**/*_wpftmp.*": true
-  },
-  "dotnet.projects": [
-    "!**/*_wpftmp.csproj"
-  ],
-  "dotnet.defaultSolution": "MinecraftServerManager.sln"
+  }
 }

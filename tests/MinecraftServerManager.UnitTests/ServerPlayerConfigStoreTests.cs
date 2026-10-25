@@ -25,9 +25,7 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -72,21 +70,21 @@ public sealed class ServerPlayerConfigStoreTests : IDisposable
 
         var loaded = await _store.LoadBundleAsync(_testDir);
 
-        Assert.Single(loaded.Operators);
-        Assert.Equal("PlayerA", loaded.Operators[0].Name);
+        var item = Assert.Single(loaded.Operators);
+        Assert.Equal("PlayerA", item.Name);
         Assert.Equal("11111111-2222-3333-4444-555555555555", loaded.Operators[0].Uuid);
         Assert.Equal(4, loaded.Operators[0].Level);
         Assert.False(loaded.Operators[0].BypassesPlayerLimit);
 
-        Assert.Single(loaded.Whitelist);
-        Assert.Equal("PlayerA", loaded.Whitelist[0].Name);
+        var item_2 = Assert.Single(loaded.Whitelist);
+        Assert.Equal("PlayerA", item_2.Name);
 
-        Assert.Single(loaded.BannedPlayers);
-        Assert.Equal("GrieferB", loaded.BannedPlayers[0].Name);
+        var item_3 = Assert.Single(loaded.BannedPlayers);
+        Assert.Equal("GrieferB", item_3.Name);
         Assert.Equal("Cheat", loaded.BannedPlayers[0].Reason);
 
-        Assert.Single(loaded.BannedIps);
-        Assert.Equal("192.168.1.100", loaded.BannedIps[0].Ip);
+        var item_4 = Assert.Single(loaded.BannedIps);
+        Assert.Equal("192.168.1.100", item_4.Ip);
         Assert.Equal("Spam", loaded.BannedIps[0].Reason);
 
         // 驗證 ops.json 檔案存在且為合法 JSON 陣列

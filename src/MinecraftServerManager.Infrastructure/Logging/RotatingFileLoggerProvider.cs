@@ -147,7 +147,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 {
                     Console.Error.WriteLine($"[RotatingFileLoggerProvider] 無法於預設目錄建立記錄檔 ({ex.Message})，嘗試切換至暫存目錄備援");
                     string fallbackDir = Path.Combine(Path.GetTempPath(), "MinecraftServerManager", "Logs");
-                    Directory.CreateDirectory(fallbackDir);
+                    SafeFileSystem.CreateDirectory(fallbackDir);
                     logDir = fallbackDir;
                 }
 
@@ -180,7 +180,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         {
             AutoFlush = true,
         };
-        _currentFileBytes = new FileInfo(_currentFilePath).Length;
+        _currentFileBytes = SafeFileSystem.GetFileLength(_currentFilePath);
     }
 
     private void EnsureWriter()
@@ -208,14 +208,14 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
                 {
                     string source = $"{_currentFilePath}.{i}";
                     string target = $"{_currentFilePath}.{i + 1}";
-                    if (File.Exists(source))
+                    if (SafeFileSystem.FileExists(source))
                     {
                         SafeFileSystem.MoveWithin(logDir, source, target);
                     }
                 }
 
                 string rolloverTarget = $"{_currentFilePath}.1";
-                if (File.Exists(_currentFilePath))
+                if (SafeFileSystem.FileExists(_currentFilePath))
                 {
                     SafeFileSystem.MoveWithin(logDir, _currentFilePath, rolloverTarget);
                 }
@@ -233,7 +233,7 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
 
     public static void PruneLogs(string logDir, int keep)
     {
-        if (!Directory.Exists(logDir))
+        if (!SafeFileSystem.DirectoryExists(logDir))
         {
             return;
         }
@@ -241,16 +241,15 @@ public sealed class RotatingFileLoggerProvider : ILoggerProvider, ISupportExtern
         try
         {
             var files = SafeFileSystem.ListBoundedDirectory(logDir)
-                .Where(static entry => !entry.IsDirectory && File.Exists(entry.FullPath) &&
+                .Where(static entry => !entry.IsDirectory &&
                     (entry.FullPath.EndsWith(".log", StringComparison.OrdinalIgnoreCase) || entry.FullPath.Contains(".log.", StringComparison.OrdinalIgnoreCase)))
-                .Select(static entry => new FileInfo(entry.FullPath))
-                .OrderBy(static f => f.LastWriteTimeUtc)
+                .OrderBy(static entry => entry.LastWriteTimeUtc)
                 .ToList();
 
             int removeCount = Math.Max(0, files.Count - Math.Max(0, keep));
             for (int i = 0; i < removeCount; i++)
             {
-                SafeFileSystem.DeleteWithin(logDir, files[i].FullName);
+                SafeFileSystem.DeleteWithin(logDir, files[i].FullPath);
             }
         }
         catch

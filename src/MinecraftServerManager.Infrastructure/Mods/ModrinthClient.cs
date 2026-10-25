@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Ports;
@@ -11,6 +12,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModrinthClient");
     private const string BaseUrl = "https://api.modrinth.com/v2";
 
     public async Task<IReadOnlyList<OnlineModInfo>> SearchModsAsync(
@@ -93,7 +95,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     continue;
                 }
 
-                using var doc = JsonDocument.Parse(json);
+                using var doc = JsonCodec.ParseDocument(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
@@ -111,8 +113,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "批次取得專案最新版本失敗");
             }
         }
 
@@ -169,13 +172,14 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             var version = ParseSingleVersion(doc.RootElement);
             string projectId = doc.RootElement.TryGetProperty("project_id", out var pElem) ? pElem.GetString() ?? string.Empty : string.Empty;
             return new ModrinthVersionLookupResult(cleanHash, algorithm, projectId, version);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "解析雜湊對應之 Modrinth 版本失敗");
             return null;
         }
     }
@@ -209,7 +213,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
 
             try
             {
-                using var doc = JsonDocument.Parse(responseJson);
+                using var doc = JsonCodec.ParseDocument(responseJson);
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     string fileHash = prop.Name;
@@ -218,8 +222,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     result[fileHash] = new ModrinthVersionLookupResult(fileHash, algorithm, projectId, version);
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "批次取得專案最新版本失敗");
             }
         }
 
@@ -231,7 +236,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var list = new List<OnlineModInfo>();
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             if (!doc.RootElement.TryGetProperty("hits", out var hitsElem))
             {
                 return list;
@@ -281,8 +286,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                     clientSide: clientSide));
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "解析 Modrinth 搜尋結果 JSON 失敗");
         }
         return list;
     }
@@ -292,7 +298,7 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
         var list = new List<OnlineModVersion>();
         try
         {
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
             if (doc.RootElement.ValueKind != JsonValueKind.Array)
             {
                 return list;
@@ -303,8 +309,9 @@ public sealed class ModrinthClient(IHttpPort httpPort) : IModrinthClient
                 list.Add(ParseSingleVersion(elem));
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "解析 Modrinth 版本列表 JSON 失敗");
         }
         return list;
     }

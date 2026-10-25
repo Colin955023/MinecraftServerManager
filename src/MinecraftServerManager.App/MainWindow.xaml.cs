@@ -88,7 +88,17 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         Top = (SystemParameters.PrimaryScreenHeight - Height) / 2;
     }
 
-    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level) => NotificationDialog.Show(this, title, message, level);
+    private void ViewModel_NotificationRequested(string title, string message, NotificationLevel level)
+    {
+        if (level == NotificationLevel.Error)
+        {
+            _compositionRoot?.UiService.ShowError(message, title);
+        }
+        else
+        {
+            _compositionRoot?.UiService.ShowWarning(message, title);
+        }
+    }
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
@@ -104,7 +114,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         _viewModel.AboutPreferences?.UpdateDisplayInfo(sw, sh, ww, wh);
 
         // 啟動時自動檢查更新（判斷邏輯位於 ViewModel，此處僅負責提示）
-        _ = _viewModel.CheckForUpdateOnStartupAsync();
+        _ = ViewModelBase.RunSafeAsync(() => _viewModel.CheckForUpdateOnStartupAsync(), "啟動檢查更新", Logger);
     }
 
 
@@ -138,7 +148,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             }
 
             _shutdownCompleted = true;
-            _ = DisposeSafelyAsync();
+            _ = ViewModelBase.RunSafeAsync(DisposeSafelyAsync, "非同步釋放視窗資源", Logger);
             return;
         }
 
@@ -157,7 +167,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
             UnregisterWindowEvents();
         }
 
-        _ = ShutdownAndCloseAsync();
+        _ = ViewModelBase.RunSafeAsync(ShutdownAndCloseAsync, "關閉應用程式與伺服器資源", Logger);
     }
 
     private void UnregisterWindowEvents()
@@ -188,7 +198,7 @@ public sealed partial class MainWindow : Window, IAsyncDisposable
         finally
         {
             _shutdownCompleted = true;
-            await Dispatcher.InvokeAsync(Close);
+            _compositionRoot?.UiService.RunOnUi(Close);
         }
     }
 

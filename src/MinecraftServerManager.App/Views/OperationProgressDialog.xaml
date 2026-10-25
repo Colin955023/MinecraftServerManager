@@ -33,7 +33,7 @@
                Foreground="{DynamicResource MutedTextBrush}"
                Margin="0,0,0,16" />
 
-    <!-- 現代流光進度條 (內建 Shimmer 動態光澤與平滑插值推進) -->
+    <!-- 現代流光進度條 (原生 ProgressBar 百分比同步 + 外部流光層) -->
     <Grid Grid.Row="2" x:Name="ProgressTrackContainer" Height="22">
       <Border x:Name="TrackBorder"
               Background="{DynamicResource CardBrush}"
@@ -42,18 +42,32 @@
               CornerRadius="6"
               ClipToBounds="True">
         <Grid>
-          <!-- 進度填滿條 -->
-          <Border x:Name="ProgressFill"
-                  HorizontalAlignment="Left"
-                  Width="0"
-                  Background="{DynamicResource AccentBrush}"
-                  CornerRadius="5" />
+          <ProgressBar x:Name="OperationProgressBar"
+                       Minimum="0"
+                       Maximum="100"
+                       Value="0"
+                       Height="22"
+                       BorderThickness="0"
+                       Background="Transparent"
+                       Foreground="{DynamicResource AccentBrush}">
+            <ProgressBar.Template>
+              <ControlTemplate TargetType="ProgressBar">
+                <Grid x:Name="PART_Track">
+                  <Border x:Name="PART_Indicator"
+                          HorizontalAlignment="Left"
+                          Background="{TemplateBinding Foreground}"
+                          CornerRadius="5" />
+                </Grid>
+              </ControlTemplate>
+            </ProgressBar.Template>
+          </ProgressBar>
 
           <!-- 全域動態流光光效層 (Shimmer Wave) -->
           <Border x:Name="ShimmerWave"
                   HorizontalAlignment="Left"
                   Width="140"
-                  Opacity="0.4">
+                  Opacity="0.4"
+                  IsHitTestVisible="False">
             <Border.Background>
               <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
                 <GradientStop Color="#00FFFFFF" Offset="0.0" />

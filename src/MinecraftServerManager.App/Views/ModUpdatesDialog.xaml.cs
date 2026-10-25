@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 
 namespace MinecraftServerManager.App.Views;
@@ -23,11 +24,15 @@ public sealed partial class ModUpdateCandidateItem : ObservableObject
 
 public partial class ModUpdatesDialog : Window
 {
+    private readonly IUiService _ui;
+
     public ObservableCollection<ModUpdateCandidateItem> CandidateItems { get; }
 
-    public ModUpdatesDialog(IEnumerable<ModUpdateCandidateItem> items)
+    public ModUpdatesDialog(IEnumerable<ModUpdateCandidateItem> items, IUiService ui)
     {
+        ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
+        _ui = ui;
         CandidateItems = new ObservableCollection<ModUpdateCandidateItem>(items);
         UpdatesGrid.ItemsSource = CandidateItems;
     }
@@ -55,7 +60,7 @@ public partial class ModUpdatesDialog : Window
     {
         if (!CandidateItems.Any(static i => i.IsSelected))
         {
-            ToastWindow.Instance.ShowToast("請至少勾選一個要更新的模組！", "未勾選項目", Services.ToastType.Warning);
+            _ui.ShowToast("請至少勾選一個要更新的模組！", "未勾選項目", ToastType.Warning);
             return;
         }
         DialogResult = true;

@@ -33,10 +33,10 @@
             Padding="16"
             Margin="0,0,0,14">
       <StackPanel VerticalAlignment="Center">
-        <TextBlock Text="最大記憶體 (-Xmx, 單位 MB):" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+        <TextBlock Text="最大記憶體（-Xmx，單位 MB）：" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
         <TextBox Text="{Binding MaxMemoryMb, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,14" />
 
-        <TextBlock Text="最小初始記憶體 (-Xms, 單位 MB，可留空):" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+        <TextBlock Text="最小初始記憶體（-Xms，單位 MB，可留空）：" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
         <TextBox Text="{Binding MinMemoryMb, UpdateSourceTrigger=PropertyChanged}" />
       </StackPanel>
     </Border>

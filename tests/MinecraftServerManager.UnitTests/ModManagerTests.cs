@@ -27,9 +27,7 @@ public sealed class ModManagerTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -137,8 +135,8 @@ public sealed class ModManagerTests : IDisposable
         var manager = new ModManager(fakeScanner, fakeInstaller);
 
         var mods = await manager.GetModsAsync(_testDir);
-        Assert.Single(mods);
-        Assert.Equal("testmod", mods[0].Id);
+        var item = Assert.Single(mods);
+        Assert.Equal("testmod", item.Id);
     }
 
     private sealed class FakeScanner(IReadOnlyList<LocalModInfo> mods) : ILocalModScanner

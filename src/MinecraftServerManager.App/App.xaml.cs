@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using MinecraftServerManager.Core;
-using MinecraftServerManager.App.Views;
 using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Infrastructure.Settings;
 
@@ -12,6 +11,11 @@ public partial class App : Application
 {
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("App");
     private static Mutex? _singleInstanceMutex;
+
+    private static int s_unhandledExceptionCount;
+    private static long s_lastUnhandledExceptionTicks;
+    private const int MaxConsecutiveExceptions = 3;
+    private static readonly TimeSpan ExceptionThrottleWindow = TimeSpan.FromSeconds(5);
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -24,6 +28,7 @@ public partial class App : Application
         // 1. 最先註冊未處理例外事件，確保啟動初期之任何錯誤均被記錄
         DispatcherUnhandledException += App_DispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+        TaskScheduler.UnobservedTaskException += TaskScheduler_UnobservedTaskException;
 
         // 2. 單一實體檢查
         _singleInstanceMutex = new Mutex(true, "MinecraftServerManagerMutex", out bool createdNew);
@@ -121,18 +126,18 @@ public partial class App : Application
                 catch (Exception ex)
                 {
                     Logger.Error(ex, "寫入伺服器目錄設定失敗: {Message}", ex.Message);
-                    NotificationDialog.Show(null, "設定錯誤", $"無法寫入設定或建立資料夾：{ex.Message}", NotificationLevel.Error);
+                    new Services.WpfUiService().ShowError($"無法寫入設定或建立資料夾：{ex.Message}", "設定錯誤");
                 }
             }
             else
             {
-                var res = MessageBox.Show(
-                    "未選擇資料夾，是否要結束程式？",
-                    "結束程式",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
+                bool exitApp = Views.CustomConfirmDialog.Show(
+                    owner: null,
+                    message: "未選擇資料夾，是否要結束程式？",
+                    title: "結束程式",
+                    level: Services.UiMessageLevel.Question);
 
-                if (res == MessageBoxResult.Yes)
+                if (exitApp)
                 {
                     return string.Empty;
                 }
@@ -144,25 +149,26 @@ public partial class App : Application
     {
         try
         {
-            Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
-            AppLogging.Shutdown();
-        }
-        finally
-        {
             if (_singleInstanceMutex is not null)
             {
                 try
                 {
                     _singleInstanceMutex.ReleaseMutex();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warning("釋放 SingleInstanceMutex 異常: {0}", ex.Message);
                 }
 
                 _singleInstanceMutex.Dispose();
                 _singleInstanceMutex = null;
             }
 
+            Logger.Information("Minecraft Server Manager 正在結束 (結束代碼: {ExitCode})", e.ApplicationExitCode);
+            AppLogging.Shutdown();
+        }
+        finally
+        {
             base.OnExit(e);
         }
     }
@@ -171,13 +177,34 @@ public partial class App : Application
     {
         Logger.Error(e.Exception, "Dispatcher 攔截到未處理例外: {Message}", e.Exception.Message);
 
+        string logsDir = Infrastructure.Utilities.RuntimePaths.GetLogDir();
+        bool shouldTerminate = RecordAndCheckThrottling();
+
+        if (shouldTerminate)
+        {
+            MessageBox.Show(
+                $"應用程式發生頻繁且嚴重的未處理例外：\n\n{e.Exception.Message}\n\n為避免資料損毀，應用程式即將結束。\n詳細堆疊與錯誤資訊已儲存於記錄檔目錄：\n{logsDir}",
+                "Minecraft Server Manager 致命錯誤",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+
+            Environment.Exit(1);
+            return;
+        }
+
         MessageBox.Show(
-            $"應用程式發生未預期的例外：\n\n{e.Exception.Message}\n\n堆疊追蹤：\n{e.Exception.StackTrace}",
+            $"應用程式發生未預期的例外：\n\n{e.Exception.Message}\n\n詳細堆疊與錯誤資訊已記錄於記錄檔目錄：\n{logsDir}",
             "Minecraft Server Manager 錯誤",
             MessageBoxButton.OK,
             MessageBoxImage.Error);
 
         e.Handled = true;
+    }
+
+    private static void TaskScheduler_UnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Logger.Error(e.Exception, "TaskScheduler 攔截到未觀察任務例外: {Message}", e.Exception.Message);
+        e.SetObserved();
     }
 
     private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -186,11 +213,26 @@ public partial class App : Application
         {
             Logger.Error(ex, "AppDomain 攔截到致命未處理例外: {Message}", ex.Message);
 
+            string logsDir = Infrastructure.Utilities.RuntimePaths.GetLogDir();
             MessageBox.Show(
-                $"應用程式發生致命錯誤：\n\n{ex.Message}\n\n堆疊追蹤：\n{ex.StackTrace}",
+                $"應用程式發生致命錯誤：\n\n{ex.Message}\n\n詳細堆疊與錯誤資訊已記錄於記錄檔目錄：\n{logsDir}",
                 "Minecraft Server Manager 致命錯誤",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+    }
+
+    private static bool RecordAndCheckThrottling()
+    {
+        long nowTicks = DateTime.UtcNow.Ticks;
+        long lastTicks = Interlocked.Exchange(ref s_lastUnhandledExceptionTicks, nowTicks);
+        if (nowTicks - lastTicks <= ExceptionThrottleWindow.Ticks)
+        {
+            int count = Interlocked.Increment(ref s_unhandledExceptionCount);
+            return count >= MaxConsecutiveExceptions;
+        }
+
+        Interlocked.Exchange(ref s_unhandledExceptionCount, 1);
+        return false;
     }
 }

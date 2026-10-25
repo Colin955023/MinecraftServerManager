@@ -1,7 +1,6 @@
-using System.Text.Json;
+using MinecraftServerManager.Infrastructure.Logging;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Serialization;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
@@ -11,6 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Mods;
 /// </summary>
 public sealed class ModIndexPersistence : IModIndexPersistence
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("ModIndexPersistence");
     private readonly string _indexFilePath;
     private readonly Lock _lock = new();
     private Dictionary<string, ModCacheEntry> _index = new(StringComparer.OrdinalIgnoreCase);
@@ -25,14 +25,11 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
         try
         {
-            var dirInfo = new DirectoryInfo(cacheDir);
-            if ((dirInfo.Attributes & FileAttributes.Hidden) == 0)
-            {
-                dirInfo.Attributes |= FileAttributes.Hidden;
-            }
+            SafeFileSystem.SetDirectoryHidden(cacheDir, hidden: true);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("設定快取目錄隱藏屬性失敗: {0}", ex.Message);
         }
 
         _indexFilePath = Path.Combine(cacheDir, "mod_index.json");
@@ -167,12 +164,17 @@ public sealed class ModIndexPersistence : IModIndexPersistence
 
             try
             {
-                byte[] utf8Bytes = JsonSerializer.SerializeToUtf8Bytes(_index, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry);
+                byte[]? utf8Bytes = JsonCodec.SerializeToUtf8Bytes(_index, indented: true);
+                if (utf8Bytes is null)
+                {
+                    return;
+                }
                 AtomicFileWriter.WriteBytes(_indexFilePath, utf8Bytes);
                 _dirty = false;
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "寫入模組索引檔案失敗: {0}", _indexFilePath);
             }
         }
     }
@@ -181,7 +183,7 @@ public sealed class ModIndexPersistence : IModIndexPersistence
     {
         lock (_lock)
         {
-            if (!File.Exists(_indexFilePath))
+            if (!SafeFileSystem.FileExists(_indexFilePath))
             {
                 _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
                 return;
@@ -191,14 +193,15 @@ public sealed class ModIndexPersistence : IModIndexPersistence
             {
                 byte[]? bytes = SafeFileSystem.ReadRegularFile(_indexFilePath, JsonCodec.DefaultMaxBytes);
                 var loaded = bytes is not null
-                    ? JsonSerializer.Deserialize(bytes, AppJsonSerializerContext.Default.DictionaryStringModCacheEntry)
+                    ? JsonCodec.Deserialize<Dictionary<string, ModCacheEntry>>(bytes)
                     : null;
                 _index = loaded is not null
                     ? new Dictionary<string, ModCacheEntry>(loaded, StringComparer.OrdinalIgnoreCase)
                     : new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning(ex, "讀取模組索引檔案失敗，重設為空索引: {0}", _indexFilePath);
                 _index = new Dictionary<string, ModCacheEntry>(StringComparer.OrdinalIgnoreCase);
             }
         }

@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Text.Json;
 using MinecraftServerManager.Core.Errors;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Utilities;
@@ -9,12 +8,6 @@ namespace MinecraftServerManager.Infrastructure.Settings;
 public sealed class SettingsManager
 {
     private static readonly FrozenSet<string> ValidThemeModes = FrozenSet.ToFrozenSet(["system", "light", "dark"], StringComparer.Ordinal);
-    private static readonly JsonSerializerOptions ReadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
-    };
-
     private readonly Lock _syncRoot = new();
     private readonly string _settingsPath;
     private UserSettings _settings;
@@ -95,12 +88,12 @@ public sealed class SettingsManager
         }
 
         serversRoot = NormalizeServersRootPath(serversRoot);
-        if (File.Exists(serversRoot))
+        if (SafeFileSystem.FileExists(serversRoot))
         {
             throw new ConfigurationException($"伺服器資料夾路徑無效： {serversRoot}");
         }
 
-        if (!Directory.Exists(serversRoot) && !create)
+        if (!SafeFileSystem.DirectoryExists(serversRoot) && !create)
         {
             throw new ConfigurationException($"找不到伺服器資料夾： {serversRoot}");
         }
@@ -144,7 +137,7 @@ public sealed class SettingsManager
     public void MarkFirstRunCompleted() => Update(static settings => settings with { FirstRunCompleted = true });
 
     /// <summary>
-    /// 全域 UI 縮放比例（0.5 ~ 3.0，預設 1.0）
+    /// 全域 UI 縮放比例（0.5～3.0，預設 1.0）
     /// </summary>
     public double GetUiScale()
     {
@@ -209,22 +202,13 @@ public sealed class SettingsManager
             return defaults;
         }
 
-        try
+        UserSettings? loaded = JsonCodec.Deserialize<UserSettings>(result.RawBytes);
+        var normalized = NormalizeSettings(loaded ?? new UserSettings());
+        if (loaded != normalized)
         {
-            var loaded = result.Document.RootElement.Deserialize<UserSettings>(ReadOptions);
-            var normalized = NormalizeSettings(loaded ?? new UserSettings());
-            if (loaded != normalized)
-            {
-                Save(normalized);
-            }
-            return normalized;
+            Save(normalized);
         }
-        catch (JsonException)
-        {
-            var fallback = new UserSettings();
-            Save(fallback);
-            return fallback;
-        }
+        return normalized;
     }
 
     private void Update(Func<UserSettings, UserSettings> update)

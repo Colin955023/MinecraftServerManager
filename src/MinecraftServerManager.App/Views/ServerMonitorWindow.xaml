@@ -45,16 +45,16 @@
         <!-- 系統資源卡片：記憶體、版本、人數、運作時間 -->
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding MemoryUsageText, StringFormat='記憶體: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="{Binding MemoryUsageText, StringFormat='記憶體：{0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding MinecraftVersionText, StringFormat='MC: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="{Binding MinecraftVersionText, StringFormat='MC：{0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding OnlinePlayersText, StringFormat='線上: {0}'}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
+            <TextBlock Text="{Binding OnlinePlayersText, StringFormat='線上：{0}'}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}" />
           </Border>
           <Border Background="{DynamicResource WindowBrush}" CornerRadius="4" Padding="8,4" Margin="4,0">
-            <TextBlock Text="{Binding UptimeText, StringFormat='運作時間: {0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Text="{Binding UptimeText, StringFormat='運作時間：{0}'}" FontSize="12" Foreground="{DynamicResource TextBrush}" />
           </Border>
         </StackPanel>
 

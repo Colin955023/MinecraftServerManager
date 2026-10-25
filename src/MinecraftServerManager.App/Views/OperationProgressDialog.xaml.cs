@@ -2,22 +2,27 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using MinecraftServerManager.App.Services;
+using MinecraftServerManager.Infrastructure.Logging;
 
 namespace MinecraftServerManager.App.Views;
 
 /// <summary>
-/// 通用作業進度視窗（具備 Shimmer 動態流光光效與平滑數值推進動畫）
+/// 通用作業進度視窗（具備 Shimmer 動態流光光效與原生百分比推進）
 /// </summary>
 public partial class OperationProgressDialog : Window
 {
-    private static readonly QuadraticEase ProgressEase = new() { EasingMode = EasingMode.EaseOut };
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("OperationProgressDialog");
     private readonly Storyboard _shimmerStoryboard = new();
+    private readonly IUiService _ui;
     private bool _completed;
     private double _currentPercent;
 
-    public OperationProgressDialog(string windowTitle, string heading, string initialMessage)
+    public OperationProgressDialog(IUiService ui, string windowTitle, string heading, string initialMessage)
     {
+        ArgumentNullException.ThrowIfNull(ui);
         InitializeComponent();
+        _ui = ui;
         Title = windowTitle;
         TitleText.Text = heading;
         PhaseText.Text = initialMessage;
@@ -31,7 +36,7 @@ public partial class OperationProgressDialog : Window
     private void OnDialogLoaded(object sender, RoutedEventArgs e)
     {
         SetupShimmerAnimation();
-        UpdateFillWidthAnimated(_currentPercent, animate: false);
+        OperationProgressBar.Value = _currentPercent;
     }
 
     private void SetupShimmerAnimation()
@@ -58,7 +63,6 @@ public partial class OperationProgressDialog : Window
         if (IsLoaded)
         {
             SetupShimmerAnimation();
-            UpdateFillWidthAnimated(_currentPercent, animate: false);
         }
     }
 
@@ -68,12 +72,12 @@ public partial class OperationProgressDialog : Window
     public void MarkCompleted() => _completed = true;
 
     /// <summary>
-    /// 更新百分比與階段訊息（具備 250ms 平滑過渡插值動畫）
+    /// 更新百分比與階段訊息
     /// </summary>
     public void UpdateProgress(int percent, string message)
     {
         int pct = Math.Clamp(percent, 0, 100);
-        RunOnUi(() =>
+        _ui.RunOnUi(() =>
         {
             _currentPercent = pct;
             PercentText.Text = $"{pct}%";
@@ -82,7 +86,7 @@ public partial class OperationProgressDialog : Window
                 PhaseText.Text = message;
             }
 
-            UpdateFillWidthAnimated(pct, animate: true);
+            OperationProgressBar.Value = pct;
         });
     }
 
@@ -92,7 +96,7 @@ public partial class OperationProgressDialog : Window
     public void UpdateProgress(int current, int total, string message)
     {
         int pct = total > 0 ? (int)Math.Clamp(current * 100.0 / total, 0, 100) : 0;
-        RunOnUi(() =>
+        _ui.RunOnUi(() =>
         {
             _currentPercent = pct;
             PercentText.Text = $"{pct}% ({current}/{total})";
@@ -101,42 +105,8 @@ public partial class OperationProgressDialog : Window
                 PhaseText.Text = message;
             }
 
-            UpdateFillWidthAnimated(pct, animate: true);
+            OperationProgressBar.Value = pct;
         });
-    }
-
-    private void UpdateFillWidthAnimated(double percent, bool animate)
-    {
-        double trackWidth = ProgressTrackContainer.ActualWidth > 0 ? ProgressTrackContainer.ActualWidth : 472;
-        double targetWidth = Math.Clamp(percent / 100.0 * trackWidth, 0, trackWidth);
-
-        if (!animate || !IsLoaded)
-        {
-            ProgressFill.BeginAnimation(WidthProperty, null);
-            ProgressFill.Width = targetWidth;
-            return;
-        }
-
-        var widthAnimation = new DoubleAnimation
-        {
-            To = targetWidth,
-            Duration = TimeSpan.FromMilliseconds(250),
-            EasingFunction = ProgressEase,
-        };
-
-        ProgressFill.BeginAnimation(WidthProperty, widthAnimation, HandoffBehavior.SnapshotAndReplace);
-    }
-
-    private void RunOnUi(Action action)
-    {
-        if (Dispatcher.CheckAccess())
-        {
-            action();
-        }
-        else
-        {
-            _ = Dispatcher.BeginInvoke(action);
-        }
     }
 
     private void OnDialogClosing(object? sender, CancelEventArgs e) =>
@@ -149,8 +119,9 @@ public partial class OperationProgressDialog : Window
             _shimmerStoryboard.Stop();
             _shimmerStoryboard.Children.Clear();
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning("停止進度對話方塊動畫異常: {0}", ex.Message);
         }
     }
 }

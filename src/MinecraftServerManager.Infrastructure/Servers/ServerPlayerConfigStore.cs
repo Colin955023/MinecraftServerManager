@@ -1,9 +1,6 @@
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
-using MinecraftServerManager.Infrastructure.Serialization;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Servers;
@@ -19,13 +16,6 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
     private const string BannedIpsFileName = ServerDefaults.BannedIpsFileName;
     private const string UserCacheFileName = ServerDefaults.UserCacheFileName;
 
-    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
-    {
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        TypeInfoResolver = AppJsonSerializerContext.Default,
-    };
-
     /// <inheritdoc />
     public async Task<ServerPlayerConfigBundle> LoadBundleAsync(string serverPath, CancellationToken cancellationToken = default)
     {
@@ -34,11 +24,11 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
 
         return await Task.Run(() =>
         {
-            var userCache = ReadJsonFile(serverPath, UserCacheFileName, AppJsonSerializerContext.Default.ListServerUserCacheEntry);
-            var ops = ReadJsonFile(serverPath, OpsFileName, AppJsonSerializerContext.Default.ListServerOperatorEntry);
-            var whitelist = ReadJsonFile(serverPath, WhitelistFileName, AppJsonSerializerContext.Default.ListServerWhitelistEntry);
-            var bannedPlayers = ReadJsonFile(serverPath, BannedPlayersFileName, AppJsonSerializerContext.Default.ListServerBannedPlayerEntry);
-            var bannedIps = ReadJsonFile(serverPath, BannedIpsFileName, AppJsonSerializerContext.Default.ListServerBannedIpEntry);
+            var userCache = ReadJsonFile<ServerUserCacheEntry>(serverPath, UserCacheFileName);
+            var ops = ReadJsonFile<ServerOperatorEntry>(serverPath, OpsFileName);
+            var whitelist = ReadJsonFile<ServerWhitelistEntry>(serverPath, WhitelistFileName);
+            var bannedPlayers = ReadJsonFile<ServerBannedPlayerEntry>(serverPath, BannedPlayersFileName);
+            var bannedIps = ReadJsonFile<ServerBannedIpEntry>(serverPath, BannedIpsFileName);
 
             return new ServerPlayerConfigBundle(
                 UserCache: userCache ?? [],
@@ -65,12 +55,12 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
-    private static List<T>? ReadJsonFile<T>(string serverPath, string fileName, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> typeInfo)
+    private static List<T>? ReadJsonFile<T>(string serverPath, string fileName)
     {
         try
         {
             string targetPath = Path.Combine(serverPath, fileName);
-            if (!File.Exists(targetPath))
+            if (!SafeFileSystem.FileExists(targetPath))
             {
                 return null;
             }
@@ -81,7 +71,7 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
                 return null;
             }
 
-            return JsonSerializer.Deserialize(bytes, typeInfo);
+            return JsonCodec.Deserialize<List<T>>(bytes);
         }
         catch
         {
@@ -93,8 +83,8 @@ public sealed class ServerPlayerConfigStore : IServerPlayerConfigStore
     {
         string targetPath = Path.Combine(serverPath, fileName);
         var list = items is List<T> concreteList ? concreteList : [.. items];
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(list, IndentedJsonOptions);
-        if (!AtomicFileWriter.WriteBytes(targetPath, bytes))
+        byte[]? bytes = JsonCodec.SerializeToUtf8Bytes(list, indented: true);
+        if (bytes is null || !AtomicFileWriter.WriteBytes(targetPath, bytes))
         {
             throw new IOException($"無法以不可分割方式寫入伺服器玩家設定檔：{fileName}");
         }

@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -9,6 +10,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 
 public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRuntimeDetector
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("JavaRuntimeDetector");
     private const int MaxJavaDirectoryEntries = 128;
     private const string CacheFileName = "java_candidates_cache.json";
     private static readonly string[] CommonVendors =
@@ -118,6 +120,58 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         return null;
     }
 
+    /// <summary>
+    /// 解析系統 PATH 環境變數中的所有有效目錄路徑
+    /// </summary>
+    private static List<string> EnumeratePathDirectories()
+    {
+        string? pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathEnv))
+        {
+            return [];
+        }
+
+        var list = new List<string>();
+        ReadOnlySpan<char> span = pathEnv.AsSpan();
+        while (!span.IsEmpty)
+        {
+            int sepIndex = span.IndexOf(Path.PathSeparator);
+            ReadOnlySpan<char> folderSpan = (sepIndex >= 0 ? span[..sepIndex] : span).Trim();
+            span = sepIndex >= 0 ? span[(sepIndex + 1)..] : [];
+
+            if (!folderSpan.IsEmpty)
+            {
+                list.Add(folderSpan.ToString());
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// 搜尋系統 PATH 環境變數中的第一個有效 java.exe 絕對路徑
+    /// </summary>
+    public static string? FindSystemJavaExecutable()
+    {
+        foreach (string folder in EnumeratePathDirectories())
+        {
+            try
+            {
+                string candidate = Path.Combine(folder, "java.exe");
+                if (SafeFileSystem.FileExists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Logger.Warning("檢查 PATH 中的 Java 候選路徑異常: {Message}", ex.Message);
+            }
+        }
+
+        return null;
+    }
+
     private async Task<JavaRuntimeInfo?> TryReadRuntimeAsync(
         string executablePath,
         CancellationToken cancellationToken)
@@ -136,7 +190,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrEmpty(directory))
                 {
                     string consoleExe = Path.Combine(directory, "java.exe");
-                    if (File.Exists(consoleExe))
+                    if (SafeFileSystem.FileExists(consoleExe))
                     {
                         probeExecutable = consoleExe;
                     }
@@ -147,7 +201,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrEmpty(directory))
                 {
                     string wExe = Path.Combine(directory, "javaw.exe");
-                    if (File.Exists(wExe))
+                    if (SafeFileSystem.FileExists(wExe))
                     {
                         javawPath = wExe;
                     }
@@ -200,21 +254,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
             AddCandidate(candidates, Path.Combine(javaHome, "bin", "java.exe"));
         }
 
-        string pathEnv = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        ReadOnlySpan<char> pathSpan = pathEnv.AsSpan();
-        while (!pathSpan.IsEmpty)
+        foreach (string folder in EnumeratePathDirectories())
         {
-            int sepIndex = pathSpan.IndexOf(Path.PathSeparator);
-            ReadOnlySpan<char> segment = (sepIndex >= 0 ? pathSpan[..sepIndex] : pathSpan).Trim();
-            pathSpan = sepIndex >= 0 ? pathSpan[(sepIndex + 1)..] : [];
-
-            if (segment.IsEmpty)
-            {
-                continue;
-            }
-
-            string segmentStr = segment.ToString();
-            AddCandidate(candidates, Path.Combine(segmentStr, "java.exe"));
+            AddCandidate(candidates, Path.Combine(folder, "java.exe"));
         }
 
         foreach (string root in GetJavaRoots())
@@ -247,7 +289,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         if (!string.IsNullOrWhiteSpace(userProfile))
         {
             string jdksDir = Path.Combine(userProfile, ".jdks");
-            if (Directory.Exists(jdksDir))
+            if (SafeFileSystem.DirectoryExists(jdksDir))
             {
                 try
                 {
@@ -257,8 +299,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                         AddCandidate(candidates, Path.Combine(entry.FullPath, "bin", "java.exe"));
                     }
                 }
-                catch (IOException)
+                catch (IOException ex)
                 {
+                    Logger.Warning("列舉 JDK 目錄失敗: {0}", ex.Message);
                 }
             }
         }
@@ -288,7 +331,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         }
 
         string resolved = ResolveActualExecutablePath(path);
-        if (File.Exists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
+        if (SafeFileSystem.FileExists(resolved) && !IsIgnoredJavaPath(resolved) && !IsReparseOrJunctionPath(resolved) && !IsShimLauncher(resolved))
         {
             candidates.Add(resolved);
         }
@@ -338,7 +381,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
     {
         try
         {
-            if (!File.Exists(path))
+            if (!SafeFileSystem.FileExists(path))
             {
                 return false;
             }
@@ -351,8 +394,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 return true;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("檢查 Shim 可執行檔資訊失敗: {0}", ex.Message);
         }
 
         return false;
@@ -363,16 +407,15 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string full = Path.GetFullPath(path);
-            if (!File.Exists(full))
+            if (!SafeFileSystem.FileExists(full))
             {
                 return full;
             }
 
-            var fileInfo = new FileInfo(full);
-            var target = fileInfo.ResolveLinkTarget(returnFinalTarget: true);
-            if (target is not null && File.Exists(target.FullName))
+            string? targetPath = SafeFileSystem.ResolveFileLinkTarget(full);
+            if (targetPath is not null && SafeFileSystem.FileExists(targetPath))
             {
-                return target.FullName;
+                return targetPath;
             }
 
             return full;
@@ -385,7 +428,7 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
 
     private static void AddRoot(HashSet<string> roots, string? path)
     {
-        if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
+        if (!string.IsNullOrWhiteSpace(path) && SafeFileSystem.DirectoryExists(path))
         {
             roots.Add(path);
         }
@@ -396,12 +439,12 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string cachePath = Path.Combine(RuntimePaths.GetVersionCacheDir(), CacheFileName);
-            if (!File.Exists(cachePath))
+            if (!SafeFileSystem.FileExists(cachePath))
             {
                 return null;
             }
 
-            string content = await File.ReadAllTextAsync(cachePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+            string content = await SafeFileSystem.ReadAllTextAsync(cachePath, Encoding.UTF8, cancellationToken: cancellationToken).ConfigureAwait(false);
             var cacheData = JsonCodec.Deserialize<JavaCachePayload>(content);
             if (cacheData?.Candidates is null or { Count: 0 })
             {
@@ -416,14 +459,14 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                 if (!string.IsNullOrWhiteSpace(item.Path) &&
                     Path.IsPathRooted(item.Path) &&
                     !string.Equals(Path.GetFileName(item.Path), item.Path, StringComparison.OrdinalIgnoreCase) &&
-                    File.Exists(item.Path) &&
+                    SafeFileSystem.FileExists(item.Path) &&
                     !IsIgnoredJavaPath(item.Path) &&
                     !IsReparseOrJunctionPath(item.Path) &&
                     !IsShimLauncher(item.Path))
                 {
                     try
                     {
-                        var fileInfo = new FileInfo(item.Path);
+                        FileSystemMetadata fileInfo = SafeFileSystem.GetFileMetadata(item.Path);
                         if (item.LastWriteTimeUtcTicks > 0 &&
                             fileInfo.LastWriteTimeUtc.Ticks == item.LastWriteTimeUtcTicks &&
                             fileInfo.Length == item.FileSizeBytes &&
@@ -438,8 +481,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                             continue;
                         }
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("讀取 Java 快取檔案中繼資料失敗: {0}", ex.Message);
                     }
 
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -461,8 +505,9 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     {
                         hadInvalidEntries = true;
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("讀取 Java 執行期資訊失敗: {0}", ex.Message);
                         hadInvalidEntries = true;
                     }
                 }
@@ -500,14 +545,14 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
         try
         {
             string cacheDir = RuntimePaths.GetVersionCacheDir();
-            Directory.CreateDirectory(cacheDir);
+            SafeFileSystem.CreateDirectory(cacheDir);
             string cachePath = Path.Combine(cacheDir, CacheFileName);
 
             var entries = runtimes
                 .Where(static r => !string.IsNullOrWhiteSpace(r.ExecutablePath) &&
                             Path.IsPathRooted(r.ExecutablePath) &&
                             !string.Equals(Path.GetFileName(r.ExecutablePath), r.ExecutablePath, StringComparison.OrdinalIgnoreCase) &&
-                            File.Exists(r.ExecutablePath))
+                            SafeFileSystem.FileExists(r.ExecutablePath))
                 .GroupBy(static r => r.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .Select(static g => g.First())
                 .OrderBy(static r => r.MajorVersion)
@@ -518,12 +563,13 @@ public sealed class JavaRuntimeDetector(IProcessRunner processRunner) : IJavaRun
                     long fileSize = 0;
                     try
                     {
-                        var fi = new FileInfo(r.ExecutablePath);
+                        FileSystemMetadata fi = SafeFileSystem.GetFileMetadata(r.ExecutablePath);
                         lastWriteTicks = fi.LastWriteTimeUtc.Ticks;
                         fileSize = fi.Length;
                     }
-                    catch
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        Logger.Warning("取得 Java 檔案中繼資料失敗: {0}", ex.Message);
                     }
                     return new JavaCacheEntry(
                         r.ExecutablePath,

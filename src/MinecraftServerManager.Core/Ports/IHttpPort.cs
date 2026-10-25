@@ -47,7 +47,7 @@ public interface IHttpPort
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 安全取得遠端 JSON 文件並以串流解析（調用端負責處置 JsonDocument）
+    /// 安全取得遠端 JSON 文件並以串流解析（呼叫端負責處置 JsonDocument）
     /// </summary>
     public Task<HttpJsonResponse<JsonDocument>> GetJsonDocumentAsync(
         Uri uri,

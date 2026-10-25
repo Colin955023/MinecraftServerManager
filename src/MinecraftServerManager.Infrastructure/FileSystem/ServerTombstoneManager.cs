@@ -31,7 +31,7 @@ public static class ServerTombstoneManager
         string root = SafeFileSystem.ResolveStableDirectory(serversRoot);
         string original = Path.GetFullPath(originalPath);
 
-        if (!Directory.Exists(original))
+        if (!SafeFileSystem.DirectoryExists(original))
         {
             throw new DirectoryNotFoundException($"找不到伺服器目錄： {original}");
         }
@@ -67,7 +67,7 @@ public static class ServerTombstoneManager
         Action<string>? onRecovered = null,
         Action<string>? onCleaned = null)
     {
-        if (!Directory.Exists(serversRoot))
+        if (!SafeFileSystem.DirectoryExists(serversRoot))
         {
             return;
         }
@@ -92,11 +92,11 @@ public static class ServerTombstoneManager
             string journalPath = Path.Combine(root, $"{dirName}.json");
 
             DeleteTombstoneRecord? record = null;
-            if (File.Exists(markerPath))
+            if (SafeFileSystem.FileExists(markerPath))
             {
                 try
                 {
-                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(File.ReadAllText(markerPath));
+                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(markerPath));
                 }
                 catch
                 {
@@ -104,11 +104,11 @@ public static class ServerTombstoneManager
                 }
             }
 
-            if (record == null && File.Exists(journalPath))
+            if (record == null && SafeFileSystem.FileExists(journalPath))
             {
                 try
                 {
-                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(File.ReadAllText(journalPath));
+                    record = JsonCodec.Deserialize<DeleteTombstoneRecord>(SafeFileSystem.ReadAllText(journalPath));
                 }
                 catch
                 {
@@ -132,9 +132,9 @@ public static class ServerTombstoneManager
                 continue;
             }
 
-            // 伺服器仍在登記中，代表在提交前異常終止，進行 fail-safe 還原
+            // 伺服器仍在登記中，代表在提交前異常終止，執行 fail-safe 還原
             string targetOriginal = Path.GetFullPath(registeredPath);
-            if (Directory.Exists(targetOriginal))
+            if (SafeFileSystem.DirectoryExists(targetOriginal))
             {
                 // 原目錄已存在，保留暫存目錄以避免覆蓋
                 continue;

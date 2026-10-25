@@ -10,25 +10,70 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: 發布前置輕量預檢 (Preflight)
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag_name: ${{ steps.extract_notes.outputs.tag_name }}
+      version: ${{ steps.extract_notes.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Extract version and verify CHANGELOG
+        id: extract_notes
+        shell: pwsh
+        run: ./scripts/extract_release_notes.ps1 -Strict
+
+      - name: Verify Tag Availability
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.extract_notes.outputs.tag_name }}
+        run: |
+          git fetch --tags --force
+          $tag = $env:RELEASE_TAG
+          $headCommit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or -not $headCommit) {
+              Write-Error "Preflight 失敗：無法取得當前 HEAD commit"
+              exit 1
+          }
+
+          $existingTagCommit = git rev-parse -q --verify "refs/tags/$tag^{commit}"
+          if ($LASTEXITCODE -eq 0) {
+              if ($existingTagCommit.Trim() -ne $headCommit) {
+                  Write-Error "Preflight 失敗：Tag $tag 已存在且指向不同 commit ($($existingTagCommit.Trim()))，請更新版本號！"
+                  exit 1
+              }
+              Write-Host "Tag $tag 已存在且指向當前 HEAD，允許發布覆蓋/更新。"
+          } else {
+              Write-Host "Tag $tag 尚未建立，可安全建立新標籤發布。"
+          }
+
   gitleaks:
     name: 隱私與機密資訊檢查 (Gitleaks)
+    needs: preflight
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: 隱私與機密資訊檢查 (Gitleaks)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
     name: Publish and Attest (.NET 10)
-    needs: gitleaks
+    needs: [preflight, gitleaks]
     if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
     timeout-minutes: 30
@@ -36,8 +81,8 @@ jobs:
       tag_name: ${{ steps.release_info.outputs.tag_name }}
       version: ${{ steps.release_info.outputs.version }}
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      DOTNET_CLI_FORCE_UTF8_ENCODING: '1'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
 
     permissions:
       contents: read
@@ -47,13 +92,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
           cache: true
@@ -89,7 +134,7 @@ jobs:
       - name: Attest release executable provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-path: 'output/*.exe'
+          subject-path: "output/*.exe"
 
       - name: Verify generated attestation
         env:
@@ -138,26 +183,25 @@ jobs:
       - name: Generate SBOM (SPDX 2.2)
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.release_info.outputs.version }}
+          SBOM_TOOL_VERSION: v4.1.5
+          SBOM_TOOL_SHA256: 625767b371b7fdd58f40f618b8a86da0247a33c89e419039c86b4edba1dad4b5
         run: |
-          # 動態取得 Microsoft SBOM Tool 最新發行版；下載檔以 GitHub 回報的 asset digest 校驗，不符即中止
-          $release = gh api repos/microsoft/sbom-tool/releases/latest | ConvertFrom-Json
-          $asset = $release.assets | Where-Object { $_.name -eq "sbom-tool-win-x64.exe" } | Select-Object -First 1
-          if ($null -eq $asset -or [string]::IsNullOrWhiteSpace($asset.digest) -or -not $asset.digest.StartsWith("sha256:")) {
-              throw "無法取得 SBOM Tool 的 SHA-256 digest，為避免執行未驗證的下載檔，已中止發布"
-          }
-          $expectedSha = $asset.digest.Substring(7).ToUpperInvariant()
+          # 釘選 Microsoft SBOM Tool 固定發行版本與 SHA-256 雜湊，確保建置可重現性與防篡改
+          $versionTag = $env:SBOM_TOOL_VERSION
+          $expectedSha = $env:SBOM_TOOL_SHA256.ToUpperInvariant()
+          $downloadUrl = "https://github.com/microsoft/sbom-tool/releases/download/$versionTag/sbom-tool-win-x64.exe"
 
           $sbomToolPath = Join-Path $env:RUNNER_TEMP "sbom-tool-win-x64.exe"
-          Write-Host "正在下載 Microsoft SBOM Tool $($release.tag_name)..."
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $sbomToolPath
+          Write-Host "正在下載 Microsoft SBOM Tool $versionTag..."
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $sbomToolPath
           $actualSha = (Get-FileHash -LiteralPath $sbomToolPath -Algorithm SHA256).Hash
           if ($actualSha -ne $expectedSha) {
               Remove-Item -LiteralPath $sbomToolPath -Force
               throw "SBOM Tool SHA-256 不符：預期 $expectedSha，實際 $actualSha"
           }
 
-          $version = "${{ steps.release_info.outputs.version }}"
+          $version = $env:RELEASE_VERSION
           Write-Host "正在為版本 $version 產生 SPDX 2.2 SBOM..."
           & $sbomToolPath generate -b "output" -bc "src" -pn "MinecraftServerManager" -pv $version -ps "Colin955023" -nsb "https://github.com/Colin955023/MinecraftServerManager" -mi "SPDX:2.2"
           if ($LASTEXITCODE -ne 0) {
@@ -179,11 +223,11 @@ jobs:
           Remove-Item -Path "output/_manifest" -Recurse -Force
           $hash = Get-FileHash -LiteralPath $destSbom -Algorithm SHA256
           Set-Content -LiteralPath "$destSbom.sha256" -Value "$($hash.Hash)  MinecraftServerManager.spdx.json" -Encoding UTF8
-          Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $($release.tag_name))"
+          Write-Host "SBOM 與 SHA-256 產生完成: $destSbom (SBOM Tool $versionTag)"
 
       - name: Upload release payload
         if: success()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release_payload
           path: |
@@ -201,12 +245,13 @@ jobs:
     permissions:
       contents: write
       actions: read
+      attestations: read
     env:
       RELEASE_TAG: ${{ needs.build.outputs.tag_name }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -306,4 +351,100 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
               Write-Error "GitHub CLI failed with exit code $LASTEXITCODE"
               exit $LASTEXITCODE
+          }
+
+      - name: Verify Published Release Assets End-to-End
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_TAG
+          Write-Host "=== 開始對已發布 Release $tag 進行端對端資產驗證 ==="
+          $verifyDir = Join-Path $env:RUNNER_TEMP "release-verify"
+          if (Test-Path -LiteralPath $verifyDir) {
+              Remove-Item -LiteralPath $verifyDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $verifyDir -Force | Out-Null
+
+          try {
+              Write-Host "正在自 GitHub Release 下載資產至驗證目錄..."
+              $downloadSuccess = $false
+              for ($attempt = 1; $attempt -le 3; $attempt++) {
+                  gh release download $tag --dir $verifyDir --repo $env:GITHUB_REPOSITORY
+                  if ($LASTEXITCODE -eq 0) {
+                      $downloadSuccess = $true
+                      break
+                  }
+                  Write-Warning "下載 Release $tag 資產失敗 (第 $attempt 次嘗試)，等候重試..."
+                  Start-Sleep -Seconds ($attempt * 2)
+              }
+              if (-not $downloadSuccess) {
+                  throw "下載 Release $tag 資產失敗"
+              }
+
+              $downloadedFiles = Get-ChildItem -LiteralPath $verifyDir -File
+              Write-Host "成功下載 $($downloadedFiles.Count) 個發布資產："
+              $downloadedFiles | Select-Object Name, Length | Format-Table -AutoSize
+
+              $exeFiles = @(Get-ChildItem -LiteralPath $verifyDir -Filter '*.exe' -File)
+              if ($exeFiles.Count -eq 0) {
+                  throw "驗證失敗：Release 中未找到任何 .exe 執行檔"
+              }
+
+              $shaFiles = @(Get-ChildItem -LiteralPath $verifyDir -Filter '*.sha256' -File)
+              if ($shaFiles.Count -eq 0) {
+                  throw "驗證失敗：Release 中未找到任何 .sha256 雜湊檔"
+              }
+
+              Write-Host "--- 步驟 1：比對 SHA-256 雜湊值 ---"
+              foreach ($shaFile in $shaFiles) {
+                  $shaContent = (Get-Content -LiteralPath $shaFile.FullName -Raw).Trim()
+                  if ($shaContent -match '^([0-9a-fA-F]{64})\s+[\*]?(.*)$') {
+                      $expectedHash = $Matches[1].ToUpperInvariant()
+                      $targetFileName = $Matches[2].Trim()
+                      $targetFile = Join-Path $verifyDir $targetFileName
+
+                      if (-not (Test-Path -LiteralPath $targetFile -PathType Leaf)) {
+                          throw "雜湊校驗失敗：$($shaFile.Name) 指定的檔案不存在 ($targetFileName)"
+                      }
+
+                      $actualHash = (Get-FileHash -LiteralPath $targetFile -Algorithm SHA256).Hash.ToUpperInvariant()
+                      if ($actualHash -ne $expectedHash) {
+                          throw "雜湊校驗不符：$targetFileName 預期 $expectedHash，實際 $actualHash"
+                      }
+                      Write-Host " [SHA256 驗證通過] $targetFileName ($actualHash)"
+                  } else {
+                      throw "無法解析雜湊檔格式: $($shaFile.Name) 內容為: $shaContent"
+                  }
+              }
+
+              Write-Host "--- 步驟 2：驗證 .exe 的 GitHub SLSA Attestation ---"
+              foreach ($exe in $exeFiles) {
+                  Write-Host "正在驗證 $($exe.Name) 的簽章證明..."
+                  gh attestation verify $exe.FullName --repo $env:GITHUB_REPOSITORY
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Release 資產 Attestation 驗證失敗: $($exe.Name)"
+                  }
+                  Write-Host " [Attestation 驗證通過] $($exe.Name)"
+              }
+
+              Write-Host "--- 步驟 3：比對建置產物一致性（本地 output/ vs 遠端 Release） ---"
+              if (Test-Path -LiteralPath 'output') {
+                  foreach ($exe in $exeFiles) {
+                      $localExe = Join-Path 'output' $exe.Name
+                      if (Test-Path -LiteralPath $localExe -PathType Leaf) {
+                          $localHash = (Get-FileHash -LiteralPath $localExe -Algorithm SHA256).Hash.ToUpperInvariant()
+                          $remoteHash = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash.ToUpperInvariant()
+                          if ($localHash -ne $remoteHash) {
+                              throw "一致性校驗失敗：$($exe.Name) 本地建置雜湊 ($localHash) 與 Release 遠端雜湊 ($remoteHash) 不符！"
+                          }
+                          Write-Host " [工作區一致性驗證通過] $($exe.Name)"
+                      }
+                  }
+              }
+
+              Write-Host "=== 發布後端對端資產驗證全數通過！==="
+          }
+          finally {
+              Remove-Item -LiteralPath $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
           }

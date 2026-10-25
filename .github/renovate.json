@@ -1,38 +1,57 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "helpers:pinGitHubActionDigests"
   ],
   "prHourlyLimit": 10,
   "prConcurrentLimit": 5,
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
-      "matchCurrentVersion": "!/^0/",
-      "automerge": true,
-      "labels": ["dependencies", "automerge"]
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "labels": [
+        "dependencies"
+      ]
     },
     {
-      "matchUpdateTypes": ["major"],
-      "automerge": false,
-      "labels": ["dependencies", "breaking-change"]
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "labels": [
+        "dependencies",
+        "breaking-change"
+      ]
     },
     {
       "groupName": ".NET ecosystem",
-      "matchManagers": ["nuget"],
-      "matchFileNames": ["Directory.Packages.props", "src/**", "tests/**"]
+      "matchManagers": [
+        "nuget"
+      ],
+      "matchFileNames": [
+        "Directory.Packages.props",
+        "src/**",
+        "tests/**"
+      ]
     },
     {
       "groupName": "GitHub Actions",
-      "matchManagers": ["github-actions"]
+      "matchManagers": [
+        "github-actions"
+      ]
     }
   ],
+  "vulnerabilityAlerts": {
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "prConcurrentLimit": 3,
+    "vulnerabilityFixStrategy": "lowest"
+  },
   "dependencyDashboard": true,
   "prCreation": "not-pending",
-  "timezone": "Asia/Taipei",
-  "lockFileMaintenance": {
-    "enabled": true,
-    "automerge": true,
-    "schedule": ["before 4am on monday"]
-  }
+  "timezone": "Asia/Taipei"
 }

@@ -46,9 +46,7 @@ TestResults/
 *.sln.docstates
 .artifacts/
 publish/
-coverage/
 output/
-.codebase-memory/
 *_wpftmp.csproj
 *_wpftmp.*
-
+.gitleaks.toml

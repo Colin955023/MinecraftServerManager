@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Media;
@@ -17,6 +18,7 @@ namespace MinecraftServerManager.App.Services;
 /// </summary>
 public sealed class WpfUiService : IUiService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("WpfUiService");
     private static ImageSource? s_cachedAppIcon;
 
     public bool Confirm(string message, string title, UiMessageLevel level = UiMessageLevel.Question)
@@ -25,18 +27,19 @@ public sealed class WpfUiService : IUiService
         return CustomConfirmDialog.Show(owner, message, title, level);
     }
 
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) => ToastWindow.Instance.ShowToast(message, title, type, durationSeconds);
+    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3) =>
+        RunOnUi(() => ToastWindow.Instance.ShowToast(message, title, type, durationSeconds, this));
 
     public void ShowWarning(string message, string title)
     {
         var owner = GetDefaultOwner();
-        NotificationDialog.Show(owner, title, message, NotificationLevel.Warning);
+        NotificationDialog.Show(this, owner, title, message, NotificationLevel.Warning);
     }
 
     public void ShowError(string message, string title)
     {
         var owner = GetDefaultOwner();
-        NotificationDialog.Show(owner, title, message, NotificationLevel.Error);
+        NotificationDialog.Show(this, owner, title, message, NotificationLevel.Error);
     }
 
     private static Window? GetDefaultOwner()
@@ -114,7 +117,8 @@ public sealed class WpfUiService : IUiService
         return dialog.ShowDialog() == true ? dialog.FolderName : null;
     }
 
-    public void PostToUi(Action action) => Application.Current?.Dispatcher.InvokeAsync(action);
+    public void PostToUi(Action action, bool afterLayout = false) =>
+        Application.Current?.Dispatcher.InvokeAsync(action, afterLayout ? DispatcherPriority.Loaded : DispatcherPriority.Normal);
 
     public void RunOnUi(Action action)
     {
@@ -151,7 +155,7 @@ public sealed class WpfUiService : IUiService
 
     public IReadOnlyList<ModUpdateCandidateItem>? ShowModUpdates(IEnumerable<ModUpdateCandidateItem> items)
     {
-        var dialog = Attach(new ModUpdatesDialog(items));
+        var dialog = Attach(new ModUpdatesDialog(items, this));
         return dialog.ShowDialog() == true ? dialog.GetSelectedItems() : null;
     }
 
@@ -166,7 +170,7 @@ public sealed class WpfUiService : IUiService
 
     public bool ShowServerInitialization(ServerConfig config, string javaPath, IServerRuntime runtime)
     {
-        using var dialog = new ServerInitializationDialog(runtime, config, javaPath);
+        using var dialog = new ServerInitializationDialog(this, runtime, config, javaPath);
         PrepareDialog(dialog, Application.Current?.MainWindow);
         dialog.ShowDialog();
         return dialog.IsSuccess;
@@ -174,7 +178,7 @@ public sealed class WpfUiService : IUiService
 
     public IMonitorWindow OpenServerMonitor(ServerMonitorViewModel viewModel)
     {
-        var window = new ServerMonitorWindow(viewModel);
+        var window = new ServerMonitorWindow(viewModel, this);
         PrepareDialog(window, owner: null);
         var handle = new MonitorWindowHandle(window);
         window.Show();
@@ -183,13 +187,13 @@ public sealed class WpfUiService : IUiService
 
     public IProgressSession<ServerBackupProgressReport> ShowServerBackupProgress(string serverName, string actionTitle = "備份")
     {
-        var dialog = Attach(new OperationProgressDialog($"{actionTitle}伺服器中", $"正在{actionTitle}伺服器「{serverName}」", actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案..."));
+        var dialog = Attach(new OperationProgressDialog(this, $"{actionTitle}伺服器中", $"正在{actionTitle}伺服器「{serverName}」", actionTitle == "還原" ? "正在準備還原環境與解壓縮備份..." : "正在收集伺服器檔案..."));
         dialog.Show();
         var progress = new Progress<ServerBackupProgressReport>(report =>
         {
             int percent = Math.Clamp(report.PercentCompleted, 0, 100);
             string msg = !string.IsNullOrWhiteSpace(report.CurrentFile)
-                ? $"正在壓縮: {report.CurrentFile}"
+                ? $"正在壓縮：{report.CurrentFile}"
                 : (percent >= 100 ? $"{actionTitle}壓縮完成！" : string.Empty);
             dialog.UpdateProgress(percent, msg);
         });
@@ -198,7 +202,7 @@ public sealed class WpfUiService : IUiService
 
     public IProgressSession<ServerImportProgressReport> ShowServerImportProgress(string serverName)
     {
-        var dialog = Attach(new OperationProgressDialog("匯入伺服器中", $"正在匯入伺服器「{serverName}」", "正在驗證伺服器目錄..."));
+        var dialog = Attach(new OperationProgressDialog(this, "匯入伺服器中", $"正在匯入伺服器「{serverName}」", "正在驗證伺服器目錄..."));
         dialog.Show();
         var progress = new Progress<ServerImportProgressReport>(report =>
         {
@@ -210,7 +214,7 @@ public sealed class WpfUiService : IUiService
 
     public IProgressSession<ServerCreationProgressReport> ShowServerCreationProgress(string serverName)
     {
-        var dialog = Attach(new OperationProgressDialog("建立伺服器中", $"正在建立伺服器「{serverName}」", "正在驗證伺服器名稱與目錄..."));
+        var dialog = Attach(new OperationProgressDialog(this, "建立伺服器中", $"正在建立伺服器「{serverName}」", "正在驗證伺服器名稱與目錄..."));
         dialog.Show();
         var progress = new Progress<ServerCreationProgressReport>(report =>
         {
@@ -222,7 +226,7 @@ public sealed class WpfUiService : IUiService
 
     public IOperationProgress ShowModOperationProgress(string title, string initialMessage)
     {
-        var dialog = Attach(new OperationProgressDialog(title, title, initialMessage));
+        var dialog = Attach(new OperationProgressDialog(this, title, title, initialMessage));
         dialog.Show();
         return new ModOperationProgressHandle(dialog);
     }
@@ -282,8 +286,9 @@ public sealed class WpfUiService : IUiService
             frame.Freeze();
             s_cachedAppIcon = frame;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warning(ex, "載入應用程式圖示失敗");
         }
 
         return s_cachedAppIcon;
@@ -311,7 +316,10 @@ public sealed class WpfUiService : IUiService
         public void Complete()
         {
             markCompleted();
-            RunOnUi(window, window.Close);
+            RunOnUi(window, () =>
+            {
+                window.Dispatcher.InvokeAsync(window.Close, DispatcherPriority.Background);
+            });
         }
     }
 

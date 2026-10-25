@@ -33,11 +33,19 @@ public interface IManagedProcess : IAsyncDisposable
     public Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default);
 
     public Task<ProcessExitResult> StopAsync(TimeSpan gracefulTimeout, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 取得目前行程之工作集（實體記憶體用量，位元組），若行程已結束或查詢失敗則傳回 null。
+    /// </summary>
+    public long? GetWorkingSet64();
 }
 
 public interface IProcessRunner
 {
     public Task<IManagedProcess> StartAsync(ProcessStartSpec specification, CancellationToken cancellationToken = default);
+
+    public void StartDetached(ProcessStartSpec specification) =>
+        throw new NotSupportedException("此行程執行器不支援啟動脫離管理的行程");
 }
 
 public interface IExternalLauncher

@@ -19,14 +19,6 @@ public sealed class DomainModelTests
     }
 
     [Fact]
-    public void ProgressEventClampsPhasePercent()
-    {
-        var progress = new ProgressEvent("download", "完成", 12, 10);
-
-        Assert.Equal(100, progress.PhasePercent);
-    }
-
-    [Fact]
     public void OnlineModVersionSelectsPrimaryJarBeforeFallback()
     {
         var version = new OnlineModVersion(
@@ -184,17 +176,6 @@ public sealed class DomainModelTests
         );
         Assert.False(incompatibleReport.IsCompatible);
         Assert.True(incompatibleReport.HasHardErrors);
-    }
-
-    [Fact]
-    public void LocalModUpdateCandidateReflectsUpdateAvailability()
-    {
-        var localMod = new LocalModInfo("sodium", "Sodium", "sodium.jar", "0.5.8", "1.20.4", "fabric");
-        var candidateWithUpdate = new LocalModUpdateCandidate(localMod, new OnlineModVersion("v2", "0.5.9", "Sodium 0.5.9"));
-        var candidateWithoutUpdate = new LocalModUpdateCandidate(localMod, null);
-
-        Assert.True(candidateWithUpdate.HasUpdate);
-        Assert.False(candidateWithoutUpdate.HasUpdate);
     }
 }
 

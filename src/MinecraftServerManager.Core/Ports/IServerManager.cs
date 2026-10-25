@@ -46,7 +46,7 @@ public interface IServerManager
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 掃描 servers 根目錄之一級子目錄，將符合伺服器結構但尚未註冊者自動加入註冊表
+    /// 掃描 servers 根目錄之一級子目錄，將符合伺服器結構但尚未註冊者自動註冊加入伺服器清單
     /// </summary>
     public Task<ServerScanReport> ScanAndRegisterAsync(CancellationToken cancellationToken = default);
 }

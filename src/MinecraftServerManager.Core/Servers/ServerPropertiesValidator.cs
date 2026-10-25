@@ -52,7 +52,7 @@ public static class ServerPropertiesValidator
             return (false, "請填入有效的主機名稱或 IP 位址");
         }
 
-        // 3. 連接埠範圍驗證 (1 ~ 65534)
+        // 3. 連接埠範圍驗證（1～65534）
         if (string.Equals(key, "server-port", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, "query.port", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, "rcon.port", StringComparison.OrdinalIgnoreCase))
@@ -65,7 +65,7 @@ public static class ServerPropertiesValidator
             return (true, null);
         }
 
-        // 4. 管理端協定連接埠 (0 ~ 65535)
+        // 4. 管理端協定連接埠（0～65535）
         if (string.Equals(key, "management-server-port", StringComparison.OrdinalIgnoreCase))
         {
             if (!int.TryParse(val, out int port) || port < 0 || port > 65535)
@@ -87,7 +87,7 @@ public static class ServerPropertiesValidator
             return (true, null);
         }
 
-        // 6. 視野與模擬距離驗證 (2 ~ 32)
+        // 6. 視野與模擬距離驗證（2～32）
         if (string.Equals(key, "view-distance", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, "simulation-distance", StringComparison.OrdinalIgnoreCase))
         {
@@ -99,7 +99,7 @@ public static class ServerPropertiesValidator
             return (true, null);
         }
 
-        // 7. 實體廣播範圍百分比 (10 ~ 1000)
+        // 7. 實體廣播範圍百分比（10～1000）
         if (string.Equals(key, "entity-broadcast-range-percentage", StringComparison.OrdinalIgnoreCase))
         {
             if (!int.TryParse(val, out int pct) || pct < 10 || pct > 1000)
@@ -132,7 +132,7 @@ public static class ServerPropertiesValidator
             return (true, null);
         }
 
-        // 10. 權限等級驗證 (0 ~ 4)
+        // 10. 權限等級驗證（0～4）
         if (string.Equals(key, "function-permission-level", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, "op-permission-level", StringComparison.OrdinalIgnoreCase))
         {

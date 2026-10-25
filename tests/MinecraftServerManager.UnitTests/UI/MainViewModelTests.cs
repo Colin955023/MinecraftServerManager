@@ -1,3 +1,4 @@
+using MinecraftServerManager.App.Services;
 using MinecraftServerManager.App.ViewModels;
 using Xunit;
 
@@ -21,16 +22,42 @@ public sealed class MainViewModelTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
-    private MainViewModel CreateIsolatedViewModel(string themeMode = "dark")
+    private MainViewModel CreateIsolatedViewModel(string themeMode = "dark", IUiService? uiService = null)
     {
         var settings = new Infrastructure.Settings.SettingsManager(_testDir);
         settings.SetThemeMode(themeMode);
-        return new MainViewModel(settingsManager: settings);
+        var dirSize = new Infrastructure.Servers.ServerDirectorySizeService();
+        var inspector = new Infrastructure.Servers.ServerInspector(dirSize);
+        var manager = new Infrastructure.Servers.ServerManager(_testDir, inspector);
+        var backup = new Infrastructure.Servers.ServerBackupService(_testDir);
+        var runner = new Infrastructure.Process.ProcessRunner();
+        var runtime = new Infrastructure.Servers.ServerRuntime(runner);
+        var launchPlanner = new Infrastructure.Servers.ServerLaunchPlanner();
+        var propsStore = new Infrastructure.Servers.ServerPropertiesStore(_testDir);
+        var playerConfig = new Infrastructure.Servers.ServerPlayerConfigStore();
+        var integrity = new Infrastructure.Servers.ServerIntegrityService();
+        var depPlanner = new Infrastructure.Mods.ModDependencyPlanner();
+        var exporter = new Infrastructure.Mods.ModListExporter();
+
+        var deps = new MainViewModelDependencies(
+            SettingsManager: settings,
+            ServerManager: manager,
+            BackupService: backup,
+            ServerRuntime: runtime,
+            ServerInspector: inspector,
+            LaunchPlanner: launchPlanner,
+            PropertiesStore: propsStore,
+            PlayerConfigStore: playerConfig,
+            DirectorySizeService: dirSize,
+            IntegrityService: integrity,
+            DependencyPlanner: depPlanner,
+            ModListExporter: exporter,
+            UiService: uiService);
+
+        return new MainViewModel(deps);
     }
 
     [Fact]
@@ -80,7 +107,7 @@ public sealed class MainViewModelTests : IDisposable
     [Fact]
     public void ActionCommandsShouldTriggerNotifications()
     {
-        var vm = CreateIsolatedViewModel();
+        var vm = CreateIsolatedViewModel(uiService: new ConfirmingImportUiService());
 
         vm.ImportServerCommand.Execute(null);
         Assert.True(vm.IsNotificationVisible);
@@ -129,5 +156,10 @@ public sealed class MainViewModelTests : IDisposable
 
         vm.ToggleThemeCommand.Execute(null);
         Assert.True(vm.IsLightTheme);
+    }
+
+    private sealed class ConfirmingImportUiService : NoOpUiService
+    {
+        public override bool? ShowImportServer(ImportServerViewModel viewModel) => true;
     }
 }

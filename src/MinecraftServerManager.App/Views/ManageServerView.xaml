@@ -20,7 +20,7 @@
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
-        <TextBlock Grid.Column="0" Text="偵測路徑:" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="0" Text="偵測路徑：" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" Margin="0,0,10,0" />
         <TextBox Grid.Column="1" Text="{Binding DetectPath, Mode=OneWay}" IsReadOnly="True" />
       </Grid>
 
@@ -95,6 +95,8 @@
                   CanUserResizeColumns="True"
                   HeadersVisibility="Column"
                   HorizontalAlignment="Stretch"
+                  EnableRowVirtualization="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
                   MouseDoubleClick="OnDataGridMouseDoubleClick"
                   MinHeight="180">
           <DataGrid.ContextMenu>
@@ -146,19 +148,139 @@
 
     <!-- 底部操作區 -->
     <StackPanel Grid.Row="3">
-      <TextBlock Text="操作" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,4" />
-      <TextBlock Text="{Binding SelectedServerInfo}" Foreground="{DynamicResource MutedTextBrush}" Margin="0,0,0,10" />
+      <TextBlock Text="操作" FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,6" />
+
+      <!-- 未選取伺服器時的提示 -->
+      <TextBlock Text="請於上方列表中選取伺服器以檢視詳細資訊與執行操作"
+                 Foreground="{DynamicResource MutedTextBrush}"
+                 Margin="0,0,0,10">
+        <TextBlock.Style>
+          <Style TargetType="TextBlock">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding HasSelectedServer}" Value="False">
+                <Setter Property="Visibility" Value="Visible" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </TextBlock.Style>
+      </TextBlock>
+
+      <!-- 選取伺服器時之橫向平均分配詳細資訊區 -->
+      <Grid Margin="0,0,0,10">
+        <Grid.Style>
+          <Style TargetType="Grid">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding HasSelectedServer}" Value="False">
+                <Setter Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Grid.Style>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- 第 1 列：基本識別資訊 (4 欄平均分配) -->
+        <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="伺服器名稱：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Name, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="0" Grid.Column="1" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="Minecraft 版本：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Version, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="0" Grid.Column="2" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="載入器類型：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Loader, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="0" Grid.Column="3" Margin="0,0,0,4" TextTrimming="CharacterEllipsis">
+          <Run Text="目前狀態：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Status, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" />
+        </TextBlock>
+
+        <!-- 第 2 列：資源與備份資訊 (4 欄平均分配) -->
+        <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="目錄容量：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Size, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="記憶體配置：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServerMemory, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="1" Grid.Column="2" Margin="0,0,8,4" TextTrimming="CharacterEllipsis">
+          <Run Text="備份狀況：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.BackupStatus, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" />
+        </TextBlock>
+
+        <TextBlock Grid.Row="1" Grid.Column="3" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedServerBackupPath, Mode=OneWay}">
+          <Run Text="外部備份路徑：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServerBackupPath, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" />
+        </TextBlock>
+
+        <!-- 第 3 列：實體路徑 (橫跨 4 欄) -->
+        <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,0,0,4" TextTrimming="CharacterEllipsis" ToolTip="{Binding SelectedServer.Path, Mode=OneWay}">
+          <Run Text="實體路徑：" Foreground="{DynamicResource MutedTextBrush}" />
+          <Run Text="{Binding SelectedServer.Path, Mode=OneWay}" Foreground="{DynamicResource TextBrush}" />
+        </TextBlock>
+      </Grid>
 
       <WrapPanel>
+        <!-- 啟動按鈕 (未執行時顯示) -->
         <Button Command="{Binding StartServerCommand}"
                 IsEnabled="{Binding CanStartOrMonitorServer}"
-                Style="{DynamicResource PrimaryButtonStyle}"
                 Width="120"
                 Height="32"
                 Margin="0,0,8,8">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
+              <Setter Property="Visibility" Value="Visible" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelectedServerRunning}" Value="True">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
           <StackPanel Orientation="Horizontal">
             <Image Source="{DynamicResource IconStart}" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" />
             <TextBlock Text="啟動" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+
+        <!-- 停止按鈕 (執行中時顯示，避免誤導) -->
+        <Button Command="{Binding StopServerCommand}"
+                IsEnabled="{Binding HasSelectedServer}"
+                Width="120"
+                Height="32"
+                Margin="0,0,8,8">
+          <Button.Style>
+            <Style TargetType="Button" BasedOn="{StaticResource DangerButtonStyle}">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelectedServerRunning}" Value="True">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Button.Style>
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="⏹️" FontSize="11" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="#FFFFFF" />
+            <TextBlock Text="停止" VerticalAlignment="Center" Foreground="#FFFFFF" />
           </StackPanel>
         </Button>
         <Button Command="{Binding MonitorServerCommand}"

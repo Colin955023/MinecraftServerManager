@@ -36,7 +36,9 @@
                 SelectionMode="Single"
                 GridLinesVisibility="None"
                 HeadersVisibility="Column"
-                RowHeaderWidth="0">
+                RowHeaderWidth="0"
+                EnableRowVirtualization="True"
+                VirtualizingPanel.VirtualizationMode="Recycling">
         <DataGrid.Columns>
           <DataGridTextColumn Header="版本號碼" Binding="{Binding VersionNumber, Mode=OneTime}" Width="180" />
           <DataGridTextColumn Header="支援 MC" Binding="{Binding GameVersions, Mode=OneTime}" Width="160" />

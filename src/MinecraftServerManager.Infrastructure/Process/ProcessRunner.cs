@@ -20,7 +20,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
     public bool OpenFolder(string folderPath, bool isTrusted = false)
     {
-        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
+        if (string.IsNullOrWhiteSpace(folderPath) || !SafeFileSystem.DirectoryExists(folderPath))
         {
             Logger.Warning("開啟資料夾失敗，路徑不存在或為空: {Path}", folderPath);
             return false;
@@ -38,7 +38,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
     public bool ShowInFolder(string filePath, bool isTrusted = false)
     {
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        if (string.IsNullOrWhiteSpace(filePath) || !SafeFileSystem.FileExists(filePath))
         {
             Logger.Warning("在資料夾中顯示失敗，檔案不存在或為空: {Path}", filePath);
             return false;
@@ -66,7 +66,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
     public bool OpenFile(string filePath, bool isTrusted = false)
     {
-        if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+        if (string.IsNullOrWhiteSpace(filePath) || !SafeFileSystem.FileExists(filePath))
         {
             Logger.Warning("開啟檔案失敗，檔案不存在或為空: {Path}", filePath);
             return false;
@@ -101,7 +101,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             return false;
         }
 
-        // 若為程式內建或受信任的連結，不需進行協定拒絕判斷
+        // 若為程式內建或受信任的連結，不需協定拒絕判斷
         if (!isTrusted && uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
         {
             Logger.Warning("開啟網址被拒絕，非 HTTP/HTTPS 協定: {Url}", url);
@@ -164,7 +164,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         {
             string comSpec = Environment.GetEnvironmentVariable("ComSpec") ??
                              Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-            if (!File.Exists(comSpec))
+            if (!SafeFileSystem.FileExists(comSpec))
             {
                 throw new FileNotFoundException("找不到系統命令解譯器 (cmd.exe)", comSpec);
             }
@@ -227,6 +227,53 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         }
     }
 
+    public void StartDetached(ProcessStartSpec specification)
+    {
+        ArgumentNullException.ThrowIfNull(specification);
+        if (specification.UseShellExecute)
+        {
+            throw new ArgumentException("脫離管理啟動不支援殼層執行", nameof(specification));
+        }
+
+        string executable = ResolveAndValidateExecutable(specification);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = executable,
+            WorkingDirectory = specification.WorkingDirectory ?? Environment.CurrentDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = specification.CreateNoWindow,
+        };
+        foreach (string argument in specification.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        if (specification.Environment is not null)
+        {
+            foreach (var (key, value) in specification.Environment)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    throw new ArgumentException("環境變數名稱不得為空", nameof(specification));
+                }
+
+                if (value is null)
+                {
+                    startInfo.Environment.Remove(key);
+                }
+                else
+                {
+                    startInfo.Environment[key] = value;
+                }
+            }
+        }
+
+        using var process = System.Diagnostics.Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"無法啟動脫離管理的行程：{executable}");
+
+        Logger.Information("已啟動脫離管理的子行程，PID: {Pid} ({FileName})", process.Id, executable);
+    }
+
     private static string ResolveAndValidateExecutable(ProcessStartSpec specification)
     {
         if (string.IsNullOrWhiteSpace(specification.FileName))
@@ -236,7 +283,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
 
         string fileName = specification.FileName;
 
-        if (specification.WorkingDirectory is not null && !Directory.Exists(specification.WorkingDirectory))
+        if (specification.WorkingDirectory is not null && !SafeFileSystem.DirectoryExists(specification.WorkingDirectory))
         {
             throw new DirectoryNotFoundException($"找不到工作目錄：{specification.WorkingDirectory}");
         }
@@ -247,9 +294,9 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
         if (Path.IsPathRooted(fileName) ||
             fileName.Contains(Path.DirectorySeparatorChar) ||
             fileName.Contains(Path.AltDirectorySeparatorChar) ||
-            File.Exists(candidatePath))
+            SafeFileSystem.FileExists(candidatePath))
         {
-            if (!File.Exists(candidatePath))
+            if (!SafeFileSystem.FileExists(candidatePath))
             {
                 throw new FileNotFoundException("找不到指定的執行檔", fileName);
             }
@@ -270,7 +317,7 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             if (!string.IsNullOrEmpty(localAppData))
             {
                 string wingetDefault = Path.Combine(localAppData, "Microsoft", "WindowsApps", "winget.exe");
-                if (File.Exists(wingetDefault))
+                if (SafeFileSystem.FileExists(wingetDefault))
                 {
                     return wingetDefault;
                 }
@@ -385,6 +432,24 @@ public sealed partial class ProcessRunner : IProcessRunner, IExternalLauncher
             }
             await _process.StandardInput.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
             await _process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        public long? GetWorkingSet64()
+        {
+            try
+            {
+                if (_disposed || _process.HasExited)
+                {
+                    return null;
+                }
+
+                _process.Refresh();
+                return _process.WorkingSet64;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return null;
+            }
         }
 
         public async Task<ProcessExitResult> WaitForExitAsync(CancellationToken cancellationToken = default)

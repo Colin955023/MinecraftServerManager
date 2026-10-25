@@ -58,6 +58,6 @@ public sealed record LocalModInfo
         FileMtime = fileMtime;
         CurrentHash = currentHash ?? string.Empty;
         HashAlgorithm = hashAlgorithm ?? string.Empty;
-        Dependencies = Common.CollectionUtilities.ToReadOnlyList(dependencies);
+        Dependencies = [.. dependencies ?? []];
     }
 }

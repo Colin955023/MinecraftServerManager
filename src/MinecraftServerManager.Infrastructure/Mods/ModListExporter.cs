@@ -1,13 +1,12 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using MinecraftServerManager.Core.Mods;
 using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Mods;
 using MinecraftServerManager.Infrastructure.Utilities;
+using MinecraftServerManager.Infrastructure.FileSystem;
 
 namespace MinecraftServerManager.Infrastructure.Mods;
 
@@ -18,12 +17,6 @@ public sealed class ModListExporter : IModListExporter
 {
     private const string EmptyPlaceholder = "-";
     private const string SheetName = "模組列表";
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        TypeInfoResolver = Serialization.AppJsonSerializerContext.Default,
-    };
     private static readonly string[] XlsxHeaders =
         ["啟用狀態", "模組名稱", "版本", "Minecraft版本", "載入器", "作者", "檔案名稱", "模組ID", "檔案大小", "修改時間", "描述"];
 
@@ -41,7 +34,7 @@ public sealed class ModListExporter : IModListExporter
         if (format == ModListExportFormat.Xlsx)
         {
             byte[] workbook = await Task.Run(() => BuildXlsx(rows), cancellationToken).ConfigureAwait(false);
-            await File.WriteAllBytesAsync(filePath, workbook, cancellationToken).ConfigureAwait(false);
+            await SafeFileSystem.WriteAllBytesAsync(filePath, workbook, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -52,7 +45,7 @@ public sealed class ModListExporter : IModListExporter
             _ => BuildText(rows),
         }, cancellationToken).ConfigureAwait(false);
 
-        await File.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+        await SafeFileSystem.WriteAllTextAsync(filePath, content, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
     }
 
     private static string Clean(string value) =>
@@ -74,7 +67,7 @@ public sealed class ModListExporter : IModListExporter
                 ModifiedTime: Clean(m.ModifiedTime),
                 Description: ModHelpers.StripColorAndFormattingCodes(m.Description)))];
 
-        return JsonSerializer.Serialize(items, JsonOptions);
+        return JsonCodec.SerializeRelaxed(items);
     }
 
     private static string BuildHtml(IReadOnlyList<ModListExportRow> rows)

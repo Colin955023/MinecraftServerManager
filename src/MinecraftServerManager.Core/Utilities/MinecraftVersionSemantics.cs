@@ -66,7 +66,7 @@ public static partial class MinecraftVersionSemantics
             return false;
         }
 
-        // 明確為舊版 1.0 ~ 1.13.x 則不支援
+        // 明確為舊版 1.0～1.13.x 則不支援
         if (VersionValue.TryParse(minecraftVersion, out var parsed))
         {
             if (parsed.Major == 1 && parsed.Minor < 14)

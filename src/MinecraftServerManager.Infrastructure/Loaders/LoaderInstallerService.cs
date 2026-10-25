@@ -1,3 +1,4 @@
+using MinecraftServerManager.Infrastructure.Logging;
 using System.Buffers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -6,6 +7,8 @@ using MinecraftServerManager.Core.Ports;
 using MinecraftServerManager.Domain.Servers;
 using MinecraftServerManager.Infrastructure.FileSystem;
 using MinecraftServerManager.Infrastructure.Java;
+using MinecraftServerManager.Core.Utilities;
+using MinecraftServerManager.Infrastructure.Servers;
 using MinecraftServerManager.Infrastructure.Utilities;
 
 namespace MinecraftServerManager.Infrastructure.Loaders;
@@ -15,6 +18,7 @@ public sealed partial class LoaderInstallerService(
     IProcessRunner processRunner,
     string installerCacheDirectory) : ILoaderInstallerService
 {
+    private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("LoaderInstallerService");
     private static readonly SearchValues<char> HashSeparators = SearchValues.Create(" \t\r\n");
     private readonly string _cacheDir = SafeFileSystem.ResolveStableDirectory(installerCacheDirectory, create: true);
 
@@ -50,7 +54,7 @@ public sealed partial class LoaderInstallerService(
         {
             SafeReport("vanilla_prepare", "正在準備原版伺服器檔案...", 5);
             string serverJarPath = Path.Combine(stableServerDir, "server.jar");
-            if (!File.Exists(serverJarPath))
+            if (!SafeFileSystem.FileExists(serverJarPath))
             {
                 var vanillaProgress = progress is null ? null : new Progress<LoaderInstallProgress>(vp =>
                 {
@@ -92,7 +96,7 @@ public sealed partial class LoaderInstallerService(
 
         // 探索主要啟動檔案
         SafeReport("finalizing", "正在確認伺服器啟動檔案...", 96);
-        string launchTarget = ResolveLaunchTarget(stableServerDir, loader);
+        string launchTarget = ServerLaunchTargetResolver.ResolveLaunchTarget(stableServerDir, loader);
 
         SafeReport("completed", "安裝完成", 100);
         return launchTarget;
@@ -134,7 +138,7 @@ public sealed partial class LoaderInstallerService(
             new Progress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(20 + ((double)p.BytesDownloaded / p.TotalBytes * 75)) : 20;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載 {targetJarName} ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
             }),
             expectedHash: sha256,
             expectedHashAlgorithm: "sha256",
@@ -151,7 +155,7 @@ public sealed partial class LoaderInstallerService(
 
     private static (string? DownloadUrl, string? FileName, string? Sha256) ExtractPaperDownloadInfo(string json)
     {
-        using var doc = JsonDocument.Parse(json);
+        using var doc = JsonCodec.ParseDocument(json);
         if (!doc.RootElement.TryGetProperty("downloads", out var downloadsProp) || downloadsProp.ValueKind != JsonValueKind.Object)
         {
             return (null, null, null);
@@ -193,12 +197,12 @@ public sealed partial class LoaderInstallerService(
 
         string? versionMetaUrl = null;
         string versionsCachePath = Path.Combine(RuntimePaths.GetVersionCacheDir(), "mc_versions_cache.json");
-        if (File.Exists(versionsCachePath))
+        if (SafeFileSystem.FileExists(versionsCachePath))
         {
             try
             {
-                using var stream = new FileStream(versionsCachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using var stream = SafeFileSystem.OpenRead(versionsCachePath, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
@@ -213,8 +217,9 @@ public sealed partial class LoaderInstallerService(
                     }
                 }
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("解析官方版本 Manifest 異常: {0}", ex.Message);
             }
         }
 
@@ -269,7 +274,7 @@ public sealed partial class LoaderInstallerService(
             new Progress<HttpProgress>(p =>
             {
                 int pct = p.TotalBytes > 0 ? (int)(30 + ((double)p.BytesDownloaded / p.TotalBytes * 65)) : 30;
-                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({p.BytesDownloaded / 1024 / 1024} MB)...", pct));
+                progress?.Report(new LoaderInstallProgress("downloading", $"正在下載原版 server.jar ({UnitFormatter.FormatBytes(p.BytesDownloaded)})...", pct));
             }),
             expectedHash: expectedSha1,
             expectedHashAlgorithm: "sha1",
@@ -303,7 +308,7 @@ public sealed partial class LoaderInstallerService(
         string fileName = Path.GetFileName(uri.AbsolutePath);
         string destination = Path.Combine(_cacheDir, fileName);
 
-        if (!File.Exists(destination))
+        if (!SafeFileSystem.FileExists(destination))
         {
             string? expectedHash = null;
             string expectedAlgorithm = "sha256";
@@ -428,88 +433,9 @@ public sealed partial class LoaderInstallerService(
             WorkingDirectory: serverDirectory);
     }
 
-    private static string ResolveLaunchTarget(string serverDirectory, LoaderKind loader)
-    {
-        // 優先從 Forge / NeoForge 的 run.bat 提取 @...win_args.txt
-        string runBat = Path.Combine(serverDirectory, "run.bat");
-        if (File.Exists(runBat))
-        {
-            try
-            {
-                string runBatContent = File.ReadAllText(runBat);
-                var match = WinArgsRegex().Match(runBatContent);
-                if (match.Success)
-                {
-                    string matchedArgs = match.Groups[1].Value.Trim().Trim('"').Replace('\\', '/');
-                    return "@" + matchedArgs;
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        // 檢查 Forge / NeoForge libraries 中的 win_args.txt
-        string forgeLib = Path.Combine(serverDirectory, "libraries", "net", "minecraftforge", "forge");
-        if (Directory.Exists(forgeLib))
-        {
-            foreach (string sub in Directory.GetDirectories(forgeLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
-                }
-            }
-        }
-
-        string neoLib = Path.Combine(serverDirectory, "libraries", "net", "neoforged", "neoforge");
-        if (Directory.Exists(neoLib))
-        {
-            foreach (string sub in Directory.GetDirectories(neoLib))
-            {
-                string winArgs = Path.Combine(sub, "win_args.txt");
-                if (File.Exists(winArgs))
-                {
-                    return "@" + Path.GetRelativePath(serverDirectory, winArgs).Replace('\\', '/');
-                }
-            }
-        }
-
-        var files = SafeFileSystem.ListBoundedDirectory(serverDirectory, rejectReparse: false)
-            .Where(static e => !e.IsDirectory && e.FullPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
-            .Select(static e => Path.GetFileName(e.FullPath))
-            .ToList();
-
-        string? preferred = loader switch
-        {
-            LoaderKind.Paper => files.FirstOrDefault(static f => f.StartsWith("paper", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Fabric => files.FirstOrDefault(static f => f.StartsWith("fabric-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Quilt => files.FirstOrDefault(static f => f.StartsWith("quilt-server-launch", StringComparison.OrdinalIgnoreCase)),
-            LoaderKind.Forge => files.FirstOrDefault(static f => f.StartsWith("forge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
-            LoaderKind.NeoForge => files.FirstOrDefault(static f => f.StartsWith("neoforge", StringComparison.OrdinalIgnoreCase) && !f.Contains("installer")),
-            _ => null
-        };
-
-        if (preferred is not null)
-        {
-            return preferred;
-        }
-
-        if (File.Exists(runBat))
-        {
-            return "run.bat";
-        }
-
-        return files.FirstOrDefault(static f => f.Equals("server.jar", StringComparison.OrdinalIgnoreCase)) ?? "server.jar";
-    }
-
-    [GeneratedRegex(@"(?i)@([^\s""]+win_args\.txt)")]
-    private static partial Regex WinArgsRegex();
-
     internal static string? ExtractVersionMetaUrl(string manifestJson, string targetVersion)
     {
-        using var doc = JsonDocument.Parse(manifestJson);
+        using var doc = JsonCodec.ParseDocument(manifestJson);
         return ExtractVersionMetaUrl(doc, targetVersion);
     }
 
@@ -531,7 +457,7 @@ public sealed partial class LoaderInstallerService(
 
     internal static (string? Url, string? Sha1) ExtractServerDownloadInfo(string metaJson)
     {
-        using var doc = JsonDocument.Parse(metaJson);
+        using var doc = JsonCodec.ParseDocument(metaJson);
         return ExtractServerDownloadInfo(doc);
     }
 

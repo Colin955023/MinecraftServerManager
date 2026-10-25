@@ -17,6 +17,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     private readonly IUiService _ui;
 
     private static readonly ComponentLogger Logger = AppLogging.CreateComponentLogger("CreateServer");
+    private static readonly string[] NoAvailableVersions = ["無可用版本"];
     private readonly IJavaRuntimeDetector? _javaDetector;
     private readonly IMinecraftJavaRequirementService? _javaRequirementService;
     private readonly IJavaInstaller? _javaInstaller;
@@ -131,7 +132,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
 
         if (_loaderCatalog is not null)
         {
-            _ = InitializeVersionsAsync();
+            _ = RunSafeAsync(InitializeVersionsAsync, "初始化 Minecraft 版本清單", Logger);
         }
     }
 
@@ -163,7 +164,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     {
         IsMinecraftVersionReloadEnabled = !string.Equals(value, "Paper", StringComparison.OrdinalIgnoreCase);
         UpdateSynchronizedServerName();
-        _ = HandleLoaderChangedAsync(value);
+        _ = RunSafeAsync(() => HandleLoaderChangedAsync(value), "切換模組載入器", Logger);
     }
 
     private async Task HandleLoaderChangedAsync(string loaderName)
@@ -215,8 +216,9 @@ public sealed partial class CreateServerViewModel : PageViewModel
                 }
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning(ex, "載入可用 Minecraft 版本失敗");
         }
     }
 
@@ -231,10 +233,10 @@ public sealed partial class CreateServerViewModel : PageViewModel
         {
             if (_javaRequirementService is not null)
             {
-                _ = UpdateJvmArgsSummaryAsync(value);
+                _ = RunSafeAsync(() => UpdateJvmArgsSummaryAsync(value), "更新 JVM 參數摘要", Logger);
             }
         }
-        _ = RefreshLoaderVersionsAsync();
+        _ = RunSafeAsync(RefreshLoaderVersionsAsync, "重新整理載入器版本", Logger);
     }
 
     private async Task UpdateJvmArgsSummaryAsync(string version)
@@ -368,7 +370,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
             }
             else
             {
-                LoaderVersions.ReplaceAll(["無可用版本"]);
+                LoaderVersions.ReplaceAll(NoAvailableVersions);
                 SelectedLoaderVersion = "無可用版本";
                 IsLoaderVersionEnabled = false;
             }
@@ -616,7 +618,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
     [RelayCommand]
     public void ConfigureJvmArgs()
     {
-        int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : 2048;
+        int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int m) ? m : ServerDefaults.DefaultMemoryMaxMb;
         int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
         var vm = new JvmArgsViewModel(javaMajor, maxMem, SelectedLoader, _customJvmArgs);
         if (_ui.ShowJvmArgs(vm) == true)
@@ -643,8 +645,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
         SelectedMinecraftVersion = AvailableMinecraftVersions.Count > 0 ? AvailableMinecraftVersions[0] : string.Empty;
         SelectedLoaderVersion = $"最新穩定版 ({SelectedLoader})";
         ServerName = !string.IsNullOrWhiteSpace(SelectedMinecraftVersion) ? $"{SelectedLoader} {SelectedMinecraftVersion}" : SelectedLoader;
-        MinMemoryMb = "1024";
-        MaxMemoryMb = "2048";
+        MinMemoryMb = ServerDefaults.DefaultMemoryMinMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        MaxMemoryMb = ServerDefaults.DefaultMemoryMaxMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
         JavaPath = string.Empty;
         _customJvmArgs = null;
         int? javaMajor = _javaRequirementService?.GetCachedJavaMajor(SelectedMinecraftVersion);
@@ -710,7 +712,7 @@ public sealed partial class CreateServerViewModel : PageViewModel
                         {
                             Logger.Warning("建立伺服器已終止：本機未安裝符合 Minecraft {Version} 所需之 Java {Major}", SelectedMinecraftVersion, targetMajor.Value);
                             _ui.ShowError(
-                                $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再進行建立。",
+                                $"建立伺服器已終止！\n\nMinecraft {SelectedMinecraftVersion} 強制需要 Java {targetMajor.Value}，但系統偵測不到相容的 Java 執行檔。\n請點選「管理 Java」安裝或設定 Java {targetMajor.Value} 後再建立伺服器。",
                                 "Java 版本不相符");
                             return;
                         }
@@ -723,8 +725,8 @@ public sealed partial class CreateServerViewModel : PageViewModel
                     return;
                 }
 
-                int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : 1024;
-                int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : 2048;
+                int minMem = int.TryParse(MinMemoryMb.Trim(), out int min) ? min : ServerDefaults.DefaultMemoryMinMb;
+                int maxMem = int.TryParse(MaxMemoryMb.Trim(), out int max) ? max : ServerDefaults.DefaultMemoryMaxMb;
 
                 string loaderVer = SelectedLoaderVersion;
                 if (loaderVer is "無" or "無可用版本")

@@ -35,7 +35,7 @@ public sealed record ServerInspection
         IEnumerable<KeyValuePair<string, string>>? evidence = null,
         IEnumerable<string>? conflicts = null,
         ServerLaunchTarget? launchTarget = null,
-        int memoryMaxMb = 2048,
+        int memoryMaxMb = ServerDefaults.DefaultMemoryMaxMb,
         int? memoryMinMb = null,
         EulaState eulaState = EulaState.Missing,
         IEnumerable<string>? missingFiles = null,

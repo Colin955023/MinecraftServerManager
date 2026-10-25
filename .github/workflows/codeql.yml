@@ -2,18 +2,16 @@ name: "CodeQL Analysis (C#)"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   push:
-    branches: [ "master" ]
-  merge_group:
-    types: [checks_requested]
+    branches: ["master"]
   pull_request:
-    branches: [ "master" ]
+    branches: ["master"]
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: "0 0 * * 1"
 
 permissions:
   contents: read
@@ -23,8 +21,8 @@ jobs:
     name: CodeQL (C# / .NET 10)
     runs-on: windows-latest
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-      DOTNET_CLI_FORCE_UTF8_ENCODING: '1'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      DOTNET_CLI_FORCE_UTF8_ENCODING: "1"
     permissions:
       security-events: write
       contents: read
@@ -32,13 +30,13 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
           cache: true
@@ -49,7 +47,7 @@ jobs:
             tests/**/*.csproj
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           languages: csharp
           build-mode: manual
@@ -57,12 +55,12 @@ jobs:
 
       - name: Build Solution for CodeQL
         env:
-          MSBUILDDISABLENODEREUSE: '1'
-          DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: '1'
+          MSBUILDDISABLENODEREUSE: "1"
+          DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER: "1"
         run: dotnet build src/MinecraftServerManager.App/MinecraftServerManager.App.csproj -c Release
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: "/language:csharp"
           upload: true

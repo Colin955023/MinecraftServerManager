@@ -29,9 +29,7 @@ public sealed class LoaderInstallerServiceTests : IDisposable
                 Directory.Delete(_testRoot, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -301,5 +299,6 @@ public sealed class LoaderInstallerServiceTests : IDisposable
             Task.FromResult(new ProcessExitResult(exitCode, false));
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public long? GetWorkingSet64() => throw new NotImplementedException();
     }
 }

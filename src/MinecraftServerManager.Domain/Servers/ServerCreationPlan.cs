@@ -77,7 +77,7 @@ public sealed record ServerCreationPlan
         MinecraftVersion minecraftVersion,
         LoaderKind loaderType,
         string loaderVersion = "",
-        int memoryMaxMb = 2048,
+        int memoryMaxMb = ServerDefaults.DefaultMemoryMaxMb,
         int? memoryMinMb = null,
         IEnumerable<string>? jvmArgs = null,
         IEnumerable<KeyValuePair<string, string>>? properties = null,

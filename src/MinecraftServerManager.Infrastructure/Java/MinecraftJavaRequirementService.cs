@@ -13,7 +13,7 @@ namespace MinecraftServerManager.Infrastructure.Java;
 /// <summary>
 /// Minecraft 版本 Java major 需求服務實作。
 /// 完全依據 Mojang 官方 version package JSON 的 javaVersion.majorVersion 動態取得並快取，
-/// 嚴格禁止依據版本號進行硬編碼推算。
+/// 嚴格禁止依據版本號做硬編碼推算。
 /// </summary>
 public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementService
 {
@@ -184,12 +184,12 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
         // 優先從本地 mc_versions_cache.json 讀取
         string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-        if (File.Exists(versionsCachePath))
+        if (SafeFileSystem.FileExists(versionsCachePath))
         {
             try
             {
-                using var stream = new FileStream(versionsCachePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using var stream = SafeFileSystem.OpenRead(versionsCachePath, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var doc = await JsonCodec.ParseDocumentAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
 
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
@@ -248,8 +248,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             {
                 manifestResp = await _httpPort.GetJsonDocumentAsync(new Uri(ManifestV2Url), cancellationToken).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                Logger.Warning("抓取 Mojang Manifest V2 失敗，將嘗試後備網址: {Error}", ex.Message);
             }
 
             if (manifestResp is null || !manifestResp.IsSuccess || manifestResp.Payload is null)
@@ -356,12 +357,12 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             }
 
             string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
-            if (File.Exists(legacyCachePath))
+            if (SafeFileSystem.FileExists(legacyCachePath))
             {
                 try
                 {
-                    string json = File.ReadAllText(legacyCachePath, Encoding.UTF8);
-                    using var doc = JsonDocument.Parse(json);
+                    string json = SafeFileSystem.ReadAllText(legacyCachePath, Encoding.UTF8);
+                    using var doc = JsonCodec.ParseDocument(json);
                     if (doc.RootElement.ValueKind == JsonValueKind.Object)
                     {
                         foreach (var prop in doc.RootElement.EnumerateObject())
@@ -374,7 +375,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                     }
 
                     // 舊檔案已完成記憶體載入遷移，安全清理刪除
-                    File.Delete(legacyCachePath);
+                    SafeFileSystem.DeleteFile(legacyCachePath);
                 }
                 catch (Exception ex)
                 {
@@ -383,12 +384,12 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             }
 
             string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
-            if (File.Exists(paperCachePath))
+            if (SafeFileSystem.FileExists(paperCachePath))
             {
                 try
                 {
-                    string pJson = File.ReadAllText(paperCachePath, Encoding.UTF8);
-                    using var pDoc = JsonDocument.Parse(pJson);
+                    string pJson = SafeFileSystem.ReadAllText(paperCachePath, Encoding.UTF8);
+                    using var pDoc = JsonCodec.ParseDocument(pJson);
                     if (pDoc.RootElement.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var elem in pDoc.RootElement.EnumerateArray())
@@ -411,12 +412,12 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             }
 
             string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-            if (File.Exists(mcCachePath))
+            if (SafeFileSystem.FileExists(mcCachePath))
             {
                 try
                 {
-                    string mJson = File.ReadAllText(mcCachePath, Encoding.UTF8);
-                    using var mDoc = JsonDocument.Parse(mJson);
+                    string mJson = SafeFileSystem.ReadAllText(mcCachePath, Encoding.UTF8);
+                    using var mDoc = JsonCodec.ParseDocument(mJson);
                     if (mDoc.RootElement.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var elem in mDoc.RootElement.EnumerateArray())
@@ -460,14 +461,21 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             {
                 // 刪除已廢棄之獨立快取檔案
                 string legacyCachePath = Path.Combine(_cacheDirectory, RequirementsCacheFileName);
-                if (File.Exists(legacyCachePath))
+                if (SafeFileSystem.FileExists(legacyCachePath))
                 {
-                    try { File.Delete(legacyCachePath); } catch { }
+                    try
+                    {
+                        SafeFileSystem.DeleteFile(legacyCachePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warning("清理舊版 Java requirements 快取失敗 ({Path}): {Error}", legacyCachePath, ex.Message);
+                    }
                 }
 
                 // 1. 同步更新官方 MC 快取 mc_versions_cache.json
                 string mcCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-                var mcVersions = File.Exists(mcCachePath) ? LoadCachedVersions(mcCachePath) : [];
+                var mcVersions = SafeFileSystem.FileExists(mcCachePath) ? LoadCachedVersions(mcCachePath) : [];
                 bool mcChanged = false;
                 var updatedMc = new List<LoaderVersion>(mcVersions.Count + _memoryCache.Count);
                 var seenMc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -502,7 +510,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
 
                 // 2. 同步更新 Paper 快取 paper_mc_versions_cache.json
                 string paperCachePath = Path.Combine(_cacheDirectory, "paper_mc_versions_cache.json");
-                if (File.Exists(paperCachePath))
+                if (SafeFileSystem.FileExists(paperCachePath))
                 {
                     var paperVersions = LoadCachedVersions(paperCachePath);
                     bool paperChanged = false;
@@ -561,18 +569,18 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         try
         {
             string versionsCachePath = Path.Combine(_cacheDirectory, VersionsCacheFileName);
-            if (!File.Exists(versionsCachePath))
+            if (!SafeFileSystem.FileExists(versionsCachePath))
             {
                 return null;
             }
 
-            string? json = ReadAllTextShared(versionsCachePath);
+            string json = SafeFileSystem.ReadAllText(versionsCachePath);
             if (json is null)
             {
                 return null;
             }
 
-            using var doc = JsonDocument.Parse(json);
+            using var doc = JsonCodec.ParseDocument(json);
 
             if (doc.RootElement.ValueKind == JsonValueKind.Array)
             {
@@ -674,7 +682,7 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
             return null;
         }
 
-        using var doc = JsonDocument.Parse(json);
+        using var doc = JsonCodec.ParseDocument(json);
         return ParseJavaMajorFromVersionJson(doc.RootElement);
     }
 
@@ -682,11 +690,11 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
     {
         try
         {
-            if (!File.Exists(cachePath))
+            if (!SafeFileSystem.FileExists(cachePath))
             {
                 return [];
             }
-            string json = File.ReadAllText(cachePath, Encoding.UTF8);
+            string json = SafeFileSystem.ReadAllText(cachePath, Encoding.UTF8);
             return JsonCodec.Deserialize<List<LoaderVersion>>(json) ?? [];
         }
         catch
@@ -701,8 +709,9 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
         {
             AtomicFileWriter.WriteJson(cachePath, versions, indented: true);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("儲存版本快取失敗: {Error}", ex.Message);
         }
     }
 
@@ -727,29 +736,12 @@ public sealed class MinecraftJavaRequirementService : IMinecraftJavaRequirementS
                 return minimum;
             }
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            Logger.Warning("從 Paper 取得 Java 需求版本失敗: {Error}", ex.Message);
         }
 
         return null;
     }
 
-    private static string? ReadAllTextShared(string filePath)
-    {
-        if (!File.Exists(filePath))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.SequentialScan);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            return reader.ReadToEnd();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
 }

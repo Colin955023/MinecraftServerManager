@@ -13,6 +13,11 @@ public interface IServerRuntime : IAsyncDisposable
     public int? ExitCode { get; }
     public string? ActiveServerName { get; }
 
+    /// <summary>
+    /// 取得伺服器行程目前之工作集（實體記憶體用量，位元組），若未執行或查詢失敗則傳回 null。
+    /// </summary>
+    public long? GetWorkingSet64();
+
     public event Action<string>? OutputLineReceived;
     public event Action? ServerStarted;
     public event Action<int>? ServerExited;

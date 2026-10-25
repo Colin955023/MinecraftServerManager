@@ -3,9 +3,6 @@
     <OutputType>WinExe</OutputType>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>$(RepoRoot)assets\icon.ico</ApplicationIcon>
-    <Version>2.1.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
     <Product>Minecraft Server Manager</Product>
     <Company>Colin955023</Company>
     <Copyright>GPL-3.0 License</Copyright>
@@ -18,6 +15,26 @@
       <_Parameter2 Condition="'$(SelfContained)' != 'true'">framework-dependent</_Parameter2>
     </AssemblyAttribute>
   </ItemGroup>
+  <PropertyGroup>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <PublishDocumentationFiles>false</PublishDocumentationFiles>
+    <AllowedReferenceRelatedFileExtensions>none</AllowedReferenceRelatedFileExtensions>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
+    <MetricsSupport>false</MetricsSupport>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <EnableUnsafeUTF7Encoding>false</EnableUnsafeUTF7Encoding>
+    <StartupHookSupport>false</StartupHookSupport>
+    <CustomResourceTypesSupport>false</CustomResourceTypesSupport>
+    <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
+    <DebuggerSupport>false</DebuggerSupport>
+    <EventSourceSupport>false</EventSourceSupport>
+    <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(SelfContained)' == 'true'">
     <DefineConstants>$(DefineConstants);SELF_CONTAINED</DefineConstants>
   </PropertyGroup>

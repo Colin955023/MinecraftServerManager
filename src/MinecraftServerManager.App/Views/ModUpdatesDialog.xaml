@@ -43,9 +43,19 @@
                 CanUserResizeColumns="True"
                 HeadersVisibility="Column"
                 IsReadOnly="False"
-                SelectionMode="Single">
+                SelectionMode="Single"
+                EnableRowVirtualization="True"
+                VirtualizingPanel.VirtualizationMode="Recycling">
         <DataGrid.Columns>
-          <DataGridCheckBoxColumn Header="更新" Binding="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" Width="50" />
+          <DataGridTemplateColumn Header="更新" Width="50">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center" />
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
           <DataGridTextColumn Header="模組名稱" Binding="{Binding ModName}" IsReadOnly="True" Width="170" />
           <DataGridTextColumn Header="目前版本" Binding="{Binding CurrentVersion}" IsReadOnly="True" Width="100" />
           <DataGridTextColumn Header="最新版本" Binding="{Binding NewVersion}" IsReadOnly="True" Width="100" />

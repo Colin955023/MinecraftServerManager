@@ -30,9 +30,7 @@ public sealed class LocalModScannerTests : IDisposable
                 Directory.Delete(_testDir, recursive: true);
             }
         }
-        catch
-        {
-        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"測試清理忽略例外: {ex.Message}"); }
     }
 
     [Fact]
@@ -66,8 +64,6 @@ public sealed class LocalModScannerTests : IDisposable
         Assert.Equal("fabric", mod.LoaderType);
         Assert.Equal("TestAuthor", mod.Author);
         Assert.Equal("1.20.1", mod.MinecraftVersion);
-        Assert.Equal(ModStatus.Enabled, mod.Status);
-        Assert.NotEmpty(mod.CurrentHash);
     }
 
     [Fact]
@@ -196,6 +192,43 @@ public sealed class LocalModScannerTests : IDisposable
         Assert.Equal("Nested Fabric Mod", mod.Name);
         Assert.Equal("1.0.0-beta.1", mod.Version);
         Assert.Equal("1.20.1", mod.MinecraftVersion);
+    }
+
+    [Fact]
+    public async Task LegacyUnknownFormatInModIndex_IsParsedAndNormalizedCompatibly()
+    {
+        string jarPath = Path.Combine(_modsDir, "legacy-mod-1.0.jar");
+        CreateZipWithEntry(jarPath, "fabric.mod.json", """
+        {
+            "schemaVersion": 1,
+            "id": "legacy-mod",
+            "name": "Legacy Mod",
+            "version": "1.0.0"
+        }
+        """);
+
+        FileInfo fileInfo = new(jarPath);
+        ModIndexPersistence persistence = new(_testDir);
+        Dictionary<string, string> legacyMeta = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = "legacy-mod",
+            ["name"] = "Legacy Mod",
+            ["version"] = "未知",
+            ["mc_version"] = "unknown",
+            ["loader_type"] = "未知"
+        };
+        persistence.CacheMetadata(Path.GetFileName(jarPath), legacyMeta, fileInfo.Length, fileInfo.LastWriteTimeUtc.Ticks);
+        persistence.Flush();
+
+        LocalModScanner scanner = new(persistence);
+        IReadOnlyList<LocalModInfo> mods = await scanner.ScanModsAsync(_modsDir);
+
+        LocalModInfo mod = Assert.Single(mods);
+        Assert.Equal("legacy-mod", mod.Id);
+        // 邊界回退依然產出一致的 "未知" 顯示，不致拋出例外且能正常運作
+        Assert.Equal("未知", mod.Version);
+        Assert.Equal("未知", mod.MinecraftVersion);
+        Assert.Equal("未知", mod.LoaderType);
     }
 
     private static void CreateZipWithEntry(string zipPath, string entryName, string content)

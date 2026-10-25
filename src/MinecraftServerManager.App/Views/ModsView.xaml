@@ -37,7 +37,7 @@
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
           <Image Source="{DynamicResource IconFolder}" Width="16" Height="16" Margin="0,0,6,0" VerticalAlignment="Center" />
-          <TextBlock Text="伺服器:" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
+          <TextBlock Text="伺服器：" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" />
         </StackPanel>
         <ComboBox Grid.Column="1"
                   ItemsSource="{Binding Servers}"
@@ -257,14 +257,14 @@
                 <KeyBinding Key="Enter" Command="{Binding SearchOnlineModsCommand}" />
               </TextBox.InputBindings>
             </TextBox>
-            <TextBlock Grid.Column="1" Text="平台:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Grid.Column="1" Text="平台：" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextBrush}" />
             <ComboBox Grid.Column="2"
                       ItemsSource="{x:Static vm:ModsViewModel.PlatformOptions}"
                       SelectedItem="{Binding SelectedPlatform}"
                       Width="120"
                       Height="32"
                       Margin="0,0,10,0" />
-            <TextBlock Grid.Column="3" Text="排序:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextBrush}" />
+            <TextBlock Grid.Column="3" Text="排序：" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextBrush}" />
             <ComboBox Grid.Column="4"
                       ItemsSource="{x:Static vm:ModsViewModel.OnlineSortOptions}"
                       SelectedItem="{Binding SelectedOnlineSort}"

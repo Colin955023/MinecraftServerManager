@@ -55,7 +55,7 @@ public interface IMonitorWindow
 
 /// <summary>
 /// 所有使用者介面互動（訊息框、檔案選取、對話方塊、進度與視窗）的抽象。
-/// ViewModel 僅依賴此介面，具體 WPF 實作位於 <see cref="WpfUiService"/>。
+/// ViewModel 僅相依此介面，具體 WPF 實作位於 <see cref="WpfUiService"/>。
 /// </summary>
 public interface IUiService
 {
@@ -85,7 +85,7 @@ public interface IUiService
     /// <summary>
     /// 以非阻塞方式於 UI 執行緒執行動作；非 UI 環境時不執行
     /// </summary>
-    public void PostToUi(Action action);
+    public void PostToUi(Action action, bool afterLayout = false);
 
     /// <summary>
     /// 已在 UI 執行緒則直接執行，否則派送至 UI 執行緒；非 UI 環境時直接執行

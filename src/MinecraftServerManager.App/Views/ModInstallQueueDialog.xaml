@@ -43,7 +43,9 @@
                 CanUserResizeColumns="True"
                 HeadersVisibility="Column"
                 IsReadOnly="True"
-                SelectionMode="Single">
+                SelectionMode="Single"
+                EnableRowVirtualization="True"
+                VirtualizingPanel.VirtualizationMode="Recycling">
         <DataGrid.Columns>
           <DataGridTextColumn Header="動作" Binding="{Binding ActionText}" Width="70" />
           <DataGridTextColumn Header="模組名稱" Binding="{Binding Title}" Width="180" />

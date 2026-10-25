@@ -2,7 +2,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Threading;
 using MinecraftServerManager.App.Services;
 
 namespace MinecraftServerManager.App.Views;
@@ -47,26 +46,20 @@ public sealed partial class ToastWindow : Window
     /// <summary>
     /// 顯示一筆 Toast 提示
     /// </summary>
-    public void ShowToast(string message, string? title = null, ToastType type = ToastType.Info, int durationSeconds = 3)
+    public void ShowToast(string message, string? title, ToastType type, int durationSeconds, IUiService ui)
     {
-        if (!Dispatcher.CheckAccess())
-        {
-            Dispatcher.InvokeAsync(() => ShowToast(message, title, type, durationSeconds));
-            return;
-        }
-
         switch (type)
         {
             case ToastType.Warning:
-                System.Media.SystemSounds.Exclamation.Play();
+                AudioFeedback.PlayWarning();
                 break;
             case ToastType.Error:
-                System.Media.SystemSounds.Hand.Play();
+                AudioFeedback.PlayError();
                 break;
             case ToastType.Info:
             case ToastType.Success:
             default:
-                System.Media.SystemSounds.Asterisk.Play();
+                AudioFeedback.PlayInfo();
                 break;
         }
 
@@ -163,14 +156,11 @@ public sealed partial class ToastWindow : Window
         border.Child = grid;
 
         // 計時器與動畫
-        var timer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(Math.Max(1, durationSeconds))
-        };
+        IUiTimer? timer = null;
 
         void Dismiss()
         {
-            timer.Stop();
+            timer?.StopTimer();
             var fadeOut = new DoubleAnimation(0.0, TimeSpan.FromMilliseconds(200));
             var slideOut = new DoubleAnimation(-15, TimeSpan.FromMilliseconds(200));
 
@@ -187,13 +177,16 @@ public sealed partial class ToastWindow : Window
             border.RenderTransform.BeginAnimation(TranslateTransform.YProperty, slideOut);
         }
 
-        timer.Tick += (_, _) => Dismiss();
+        timer = ui.CreateUiTimer(TimeSpan.FromSeconds(Math.Max(1, durationSeconds)), Dismiss);
+
         closeButton.Click += (_, _) => Dismiss();
 
-        border.MouseEnter += (_, _) => timer.Stop();
-        border.MouseLeave += (_, _) => timer.Start();
+        border.MouseEnter += (_, _) => timer.StopTimer();
+        border.MouseLeave += (_, _) => timer.StartTimer();
 
         ToastContainer.Children.Add(border);
+
+        timer.StartTimer();
 
         if (!IsVisible)
         {
@@ -212,6 +205,5 @@ public sealed partial class ToastWindow : Window
         border.BeginAnimation(OpacityProperty, fadeIn);
         border.RenderTransform.BeginAnimation(TranslateTransform.XProperty, slideIn);
 
-        timer.Start();
     }
 }

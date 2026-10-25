@@ -44,7 +44,7 @@ public sealed record ServerConfig
         MemoryMaxMb = memoryMaxMb;
         MemoryMinMb = memoryMinMb;
         Path = path ?? string.Empty;
-        JvmArgs = Common.CollectionUtilities.ToReadOnlyList(jvmArgs);
+        JvmArgs = [.. jvmArgs ?? []];
         BackupPath = backupPath ?? string.Empty;
     }
 }

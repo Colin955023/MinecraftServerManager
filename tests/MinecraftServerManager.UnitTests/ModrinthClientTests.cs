@@ -200,6 +200,27 @@ public sealed class ModrinthClientTests
         Assert.Equal("mod.jar", ver.Version.Files[0].Filename);
     }
 
+
+    [Fact]
+    public async Task MalformedJsonResponse_ShouldNotThrowAndReturnSafeFallbacks()
+    {
+        string malformedJson = "{ invalid json content: true,,, ";
+        var fakeHttp = new FakeHttpPort(_ => malformedJson);
+        var client = new ModrinthClient(fakeHttp);
+
+        // 1. 搜尋在遭遇畸形 JSON 時，安全記錄並回傳空清單，不拋出未捕捉例外
+        var searchResults = await client.SearchModsAsync("test");
+        Assert.Empty(searchResults);
+
+        // 2. 單一雜湊查詢在遭遇畸形 JSON 時，安全回傳 null
+        var singleHashResult = await client.LookupVersionByHashAsync("abcdef123456");
+        Assert.Null(singleHashResult);
+
+        // 3. 批次雜湊查詢在遭遇畸形 JSON 時，安全回傳空字典
+        var batchHashResult = await client.LookupVersionsByHashesAsync(["hash1", "hash2"]);
+        Assert.Empty(batchHashResult);
+    }
+
     private sealed class FakeHttpPort(Func<Uri, string?> handler) : IHttpPort
     {
         public Task<HttpResult> DownloadAsync(
