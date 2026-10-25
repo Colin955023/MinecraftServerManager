@@ -15,6 +15,7 @@ jobs:
   analysis:
     name: Scorecard analyze
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       security-events: write
       id-token: write
@@ -25,7 +26,6 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
 
       - name: "執行 Scorecard 分析"
         uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0 (Scorecard v5.5.0)
@@ -39,10 +39,3 @@ jobs:
         with:
           sarif_file: openossf_scorecard_report.sarif
           category: "OpenSSF Scorecard"
-
-      - name: "上傳 Scorecard 結果檔案"
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: openossf_scorecard_report
-          path: openossf_scorecard_report.sarif
-          retention-days: 2
