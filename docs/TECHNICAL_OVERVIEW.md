@@ -66,7 +66,12 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 - **失敗自動回復**：若解壓縮或檔案複製過程遭遇任何例外，立即自動回復至還原前的快照狀態，確保伺服器永不處於毀損中間態
 - **備份上限維護**：內建自動清理原則，維持最新 10 份備份，自動清除過期備份以節省磁碟空間
 
-### 3. 高效能獨立主控台與記錄管線
+### 3. 伺服器完整性與容量檢查
+
+- **啟動檔案檢查（ServerIntegrityService）**：依載入器檢查核心 JAR、啟動腳本及參數檔；缺少必要檔案時在管理清單標示警告並停用啟動操作。
+- **目錄容量計算（ServerDirectorySizeService）**：透過 `SafeFileSystem.WalkBoundedTree` 在背景計算伺服器檔案容量，排除 `backups/`，並以短期快取減少重複走訪。
+
+### 4. 高效能獨立主控台與記錄管線
 
 - **獨立視窗架構**：伺服器啟動後於專屬視窗獨立運作，避免高頻記錄阻礙主介面操作
 - **伺服器就緒即時偵測（Server Ready Detection）**：非同步記錄管線持續精確比對伺服器就緒特徵（`"Done ("` / `"Done in "`），於完成啟動時觸發 `ServerReady` 事件並即時解鎖介面操作與狀態卡片
@@ -81,7 +86,7 @@ Domain （不相依其他任何專案，純粹領域邏輯）
   - 啟動腳本產生與驗證嚴格落實反向白名單機制，全面拒絕未限定之純 `java` 或 `java.exe` 命令，強制替換為已解析之根目錄化絕對路徑，防範環境變數與 PATH 混淆攻擊。
   - 腳本安全驗證器內建針對合規字碼頁切換輸出重新導向（如 `chcp 65001 > nul` / `chcp 950 >nul`）之安全剝離驗證，既維持對惡意管線與檔案重導向的攔截，又支援批次檔標準語法。
 
-### 4. 平行化模組管理、Modrinth 整合與 FlexVersion 引擎
+### 5. 平行化模組管理、Modrinth 整合與 FlexVersion 引擎
 
 - **平行化本地掃描與防抖動機制**：透過 `Parallel.ForEachAsync` 平行讀取伺服器 `mods` 目錄，快速擷取模組中繼資料並計算雜湊；模組重新整理內建 300ms 智慧防抖（Debounce），防範介面頻繁觸發時的重度磁碟 I/O 開銷
 - **原生 FlexVersion 彈性語意版本比較引擎**：
@@ -91,32 +96,32 @@ Domain （不相依其他任何專案，純粹領域邏輯）
 - **邊下載邊串流增量雜湊校驗（Single-Pass Streaming Hash Verification）**：下載 Modrinth 線上模組與更新資產時，於 HTTP 回應串流寫入本機磁碟的同時透過增量雜湊轉換器同步計算 SHA-512／SHA-256／SHA-1，寫入完成立即驗證，徹底消除下載完成後二次重讀全檔磁碟 I/O 的效能開銷；雜湊不符即主動清理暫存檔。
 - **多元清單匯出與原生 XLSX 產生器（ModListExporter & ExportModListViewModel）**：具備專屬互動對話方塊，支援依狀態（包含或排除已停用模組）及相依關係自訂篩選，並將模組清單匯出為純文字（.txt）、JSON（.json）、HTML（.html）與 Excel（.xlsx）格式。其中 XLSX 格式由原生輕量級 `OpenXmlSpreadsheetBuilder` 直接透過 `System.IO.Compression.ZipArchive` 產生，零第三方套件相依性，且檔案完全合規相容 Microsoft Excel 與 LibreOffice。
 
-### 5. 視窗生命週期、前台焦點與全客製化通知架構
+### 6. 視窗生命週期、前台焦點與全客製化通知架構
 
 - **前台焦點維持（Focus Preservation）**：子對話方塊（如 `ServerInitializationDialog`）關閉或檢視頁面跳轉時，主動透過擁有者視窗啟動機制（`Owner?.Activate()`）維持 WPF 主視窗之前台狀態，防止 Windows 桌面視窗管理員（DWM）因前台暫態失去焦點而將焦點轉移至其他第三方應用程式。
 - **淘汰原生 MessageBox 與全 WPF 客製化視窗**：系統淘汰舊式原生 `MessageBox`，全面改由 WPF 原生自訂對話方塊（`CustomConfirmDialog` 與 `NotificationDialog`）負責確認與警示，100% 契合深淺色動態主題。
 - **視窗算繪就緒音效回饋（AudioFeedback）**：將 Windows 系統音效呼叫移至對話視窗的 `Loaded` 事件中觸發，並透過安全標準 Windows 音效機制精準發聲（Warning / Error / Info / Question），防範未算繪視窗在建構時期被 Windows 靜音的問題。
 
-### 6. 名單管理系統架構（Player Management System）
+### 7. 名單管理系統架構（Player Management System）
 
 - **核心名冊整合（ServerPlayerConfigStore）**：封裝伺服器四大名單持久化檔案：管理員名單（`ops.json`，含 1～4 級權限與略過人數上限標記）、白名單（`whitelist.json`）、玩家封鎖名冊（`banned-players.json`）與 IP 封鎖名冊（`banned-ips.json`）。
 - **離線玩家索引快取（usercache.json）**：主動讀取伺服器內部之 `usercache.json`，在離線或無公網環境下自動解析關聯玩家名稱與 UUID，提供名稱快速自動補完。
 - **原子不可分割寫入保證**：名單儲存時一律透過 `AtomicFileWriter` 進行不可分割置換，防止名冊並行編輯損毀。
 - **高效單次點選 UI 互動與虛擬化回收**：表格採用 `DataGridTemplateColumn` 內嵌 `<CheckBox>`，實現按一下立即切換核取狀態；長列表與表格全面開啟 `EnableRowVirtualization="True"` 與 `VirtualizingPanel.VirtualizationMode="Recycling"`，確保記憶體低駐留與捲動高流暢度。
 
-### 7. Java 探測去重與安全邊界防護
+### 8. Java 探測去重與安全邊界防護
 
 - **Oracle Shim 跳板轉發器與 Junction 排除**：在環境變數 `PATH` 與候選目錄掃描中，精準過濾包含 `\Oracle\Java\javapath`、`\Oracle\Java\java8path` 與 `\Common Files\Oracle\Java\` 之目錄，並檢查執行檔 PE 中繼資料之 `shimconsole.exe` / `shim.exe`，徹底杜絕 Java 8 重複項。
 - **原生符號連結解析（ResolveLinkTarget）**：利用 .NET 原生 `FileSystemInfo.ResolveLinkTarget(returnFinalTarget: true)` 精準解析實體 JRE 目錄，確保候選路徑之唯一性與真實性。
 
-### 8. 雙版本原生單一檔案發布
+### 9. 雙版本原生單一檔案發布
 
 - **原生 Single-File 封裝**：直接於 `MinecraftServerManager.App.csproj` 設定 `<PublishSingleFile>true</PublishSingleFile>`，確保無論透過發布腳本或於 IDE 中直接發布，皆產出標準原生單一可執行檔
 - **雙版本發布策略**：
   - **`MinecraftServerManager-self-contained.exe`（獨立自包含版）**：包含完整 .NET 10 Runtime 與所有必要原生函式庫，啟用微軟官方原生單檔壓縮（`EnableCompressionInSingleFile=true`）並僅保留繁體中文與英文之衛星資源組件（`SatelliteResourceLanguages`），具備最高穩定性與隨點即開特性
   - **`MinecraftServerManager-framework-dependent.exe`（框架相依版）**：僅包含應用程式編譯中繼資料，體積極小，仰賴目標電腦安裝之 .NET 10 Desktop Runtime (x64)
 
-### 9. 執行期功能開關裁切（Feature Switches）
+### 10. 執行期功能開關裁切（Feature Switches）
 
 以下安全防護與功能開關全量集中宣告於 `MinecraftServerManager.App.csproj`（單一事實來源），確保所有途徑之發布產出皆維持一致：
 

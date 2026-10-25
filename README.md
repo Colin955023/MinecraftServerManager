@@ -17,6 +17,7 @@
 - **即時監控視窗**：獨立主控台、開機就緒 Windows 桌面通知、方向鍵瀏覽歷史指令、線上玩家清單、指令傳送與安全關閉流程
 - **玩家名冊與權限管理**：視覺化管理營運管理員名單（OP 1～4 級權限與略過人數限制）、白名單及封鎖名冊（玩家與 IP），支援離線玩家快取
 - **安全備份與還原**：還原時自動保留現場最新記錄檔與當機報告，具備失敗自動回復機制，自動保留最新 10 份備份
+- **伺服器狀態檢查**：檢查各核心必要啟動檔案，缺漏時標示警告並停用啟動操作；伺服器清單同時顯示資料容量
 - **模組管理**：支援 Windows 自然排序、模組啟用與停用、自動下載相依模組、Modrinth 線上搜尋與安裝、官方下載來源驗證，以及匯出試算表（XLSX）、HTML、JSON 與純文字
 - **伺服器設定驗證**：編輯 `server.properties` 時自動檢查連接埠（1～65534）與 IP 等數值正確性，避免設定錯誤
 - **單一執行檔發行**：產出原生單一執行檔（EXE），不使用加殼工具，避免防毒軟體誤判
@@ -30,7 +31,7 @@
 | 檔案名稱 | 版本類型 | 檔案大小 | 系統需求 | 特色與適用對象 |
 | :--- | :--- | :--- | :--- | :--- |
 | **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 約 60 MB | **無額外需求**（隨點即開） | **強烈推薦**，內建完整 .NET 10 執行環境與官方原生單檔壓縮，開箱即用，具備最高相容性與穩定度，絕不因缺少環境而報錯 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.8 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者 |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 約 1.8 MB | 需預先安裝 [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/) | 體積極致精簡，適合系統已安裝 .NET 10 的進階使用者或偏好極小檔案下載者（可透過命令列快速安裝：`winget install Microsoft.DotNet.DesktopRuntime.10`） |
 
 > [!TIP]
 > 如果您不確定電腦是否已安裝 .NET 10，請一律下載 **`MinecraftServerManager-self-contained.exe`** 即可順暢使用。

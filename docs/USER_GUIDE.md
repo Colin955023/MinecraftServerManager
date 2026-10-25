@@ -18,10 +18,10 @@
 | 檔案名稱 | 版本類型 | 檔案大小 | 適用情境與說明 |
 |---|---|---|---|
 | **`MinecraftServerManager-self-contained.exe`** | 獨立自包含版 | 較大 | **強烈推薦**，適合所有使用者，內建完整 .NET 10 執行環境與官方單檔壓縮，下載即可直接執行 |
-| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 極小 | 適合進階使用者，電腦必須預先安裝 .NET 10 Desktop Runtime (x64) |
+| **`MinecraftServerManager-framework-dependent.exe`** | 框架相依版 | 極小 | 適合進階使用者，電腦必須預先安裝 .NET 10 Desktop Runtime (x64)（可在終端機執行 `winget install Microsoft.DotNet.DesktopRuntime.10` 快速安裝） |
 
 > [!TIP]
-> 若執行 `MinecraftServerManager-framework-dependent.exe` 時系統提示需要安裝 .NET 執行環境，代表您的電腦尚未安裝 .NET 10 Desktop Runtime。此時請至微軟官網下載安裝，或直接改用 **`MinecraftServerManager-self-contained.exe`** 即可順暢運作。
+> 若執行 `MinecraftServerManager-framework-dependent.exe` 時系統提示需要安裝 .NET 執行環境，代表您的電腦尚未安裝 .NET 10 Desktop Runtime。此時可透過終端機執行 `winget install Microsoft.DotNet.DesktopRuntime.10` 安裝、至微軟官網下載安裝，或直接改用 **`MinecraftServerManager-self-contained.exe`** 即可順暢運作。
 
 按兩下對應的可執行檔即可啟動主程式。
 
@@ -49,7 +49,8 @@
 
 在左側「管理伺服器」頁面，可檢視所有已建立的伺服器卡片與目前運作狀態：
 
-- **啟動伺服器**：點選卡片上的「啟動」按鈕，系統會先自動預檢伺服器關鍵啟動檔案（如核心 JAR 或啟動腳本），確認齊全後於獨立監控視窗中啟動。
+- **伺服器狀態與容量**：卡片顯示伺服器資料容量；缺少核心必要啟動檔案時，狀態欄會以警示色標示缺漏項目。
+- **啟動伺服器**：點選卡片上的「啟動」按鈕，系統會先檢查伺服器核心必要檔案（如核心 JAR、啟動腳本或參數檔）；檔案缺漏時會停用啟動操作，補齊檔案後即可重新檢查。
 - **開啟資料夾**：點選「開啟資料夾」，直接在檔案總管中開啟該伺服器的根目錄。
 - **名單管理**：點選「名單管理」開啟伺服器玩家名單與權限設定對話方塊，集中控管四大關鍵設定：
   - **管理員名冊 (`ops.json`)**：設定玩家 OP 權限層級（Level 1～4）與是否略過人數限制；核取方塊支援按一下即時切換。
