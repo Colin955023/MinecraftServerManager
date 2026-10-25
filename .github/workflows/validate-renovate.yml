@@ -1,13 +1,8 @@
 name: Validate Renovate config
 
 on:
-  push:
-    paths:
-      - "renovate.json"
-      - ".github/renovate.json"
   pull_request:
     paths:
-      - "renovate.json"
       - ".github/renovate.json"
 
 permissions:
